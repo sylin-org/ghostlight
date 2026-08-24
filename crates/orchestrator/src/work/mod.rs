@@ -2316,7 +2316,7 @@ mod tests {
     }
 
     #[test]
-    fn listing_tabs_answers_with_no_browser_connected_and_shows_the_ones_there_are() {
+    fn listing_tabs_reads_live_state_and_refuses_without_a_browser() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.connect(vec![]);
 
@@ -2328,12 +2328,60 @@ mod tests {
             &CancellationToken::default(),
         );
 
-        // A read about this workspace's own tabs never needs a browser to answer truthfully.
-        assert_eq!(listed.status, Status::Succeeded);
-        assert_eq!(listed.facts["tabs"], json!([]));
-        assert_eq!(listed.facts["browsers"], json!([]));
+        // Listing is a current read of real state. With no browser connected there is nothing
+        // to read, so it refuses rather than answering from remembered state.
+        assert_eq!(listed.status, Status::Failed);
+        assert_eq!(listed.facts["reason"], "browser_startup_manual");
+        assert!(listed.summary.contains("No browser is connected"));
 
+        // A connected browser answers from its live tab query. With no bindings in this
+        // workspace yet, the person's unbound tabs stay unnamed.
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        browser.push(Ok(BrowserOutcome::Tabs {
+            tabs: vec![tab(7, "https://example.com/")],
+        }));
+        let listed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(listed.facts["tabs"], json!([]));
+        assert_eq!(
+            listed.facts["browsers"],
+            json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
+        );
+    }
+
+    #[test]
+    fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        let handle = opened.facts["tab"].as_str().unwrap();
+
+        // The live browser says the bound tab moved and was retitled: the list shows the
+        // current truth, not the remembered landing facts.
+        browser.push(Ok(BrowserOutcome::Tabs {
+            tabs: vec![PhysicalTab {
+                tab_id: 7,
+                title: "Example Domain moved".into(),
+                url: "https://example.com/moved".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            }],
+        }));
         let listed = executor.execute(
             &workspace,
             "browser_tabs",
@@ -2342,9 +2390,27 @@ mod tests {
             &CancellationToken::default(),
         );
         assert_eq!(
-            listed.facts["browsers"],
-            json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
+            listed.facts["tabs"],
+            json!([{
+                "tab":handle,
+                "title":"Example Domain moved",
+                "url":"https://example.com/moved",
+                "active":true,
+                "readiness":"complete"
+            }])
         );
+
+        // The live browser says the tab is gone; remembered state would keep showing it.
+        browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
+        let gone = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(gone.status, Status::Succeeded);
+        assert_eq!(gone.facts["tabs"], json!([]));
     }
 
     #[test]

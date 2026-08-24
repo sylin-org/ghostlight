@@ -40,7 +40,7 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "browser_tabs",
         Some("list"),
         CapabilitySet::READ,
-        "List controlled tabs.",
+        "List this workspace's bound tabs, read live from the browser.",
     ),
     variant(
         "browser_tabs",

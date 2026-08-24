@@ -89,7 +89,9 @@ unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
 List, focus, or close controlled tabs. Actions are:
 
-- `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`.
+- `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. The list is read live
+  from the connected browser on every call and names only this workspace's bound tabs, so it
+  requires a connected browser and refuses without one.
 - `focus`: required `tab`; no RAWX capability.
 - `close`: required exact `tab`; capability `action` and the tab-close policy constraint.
 

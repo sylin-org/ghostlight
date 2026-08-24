@@ -31,9 +31,41 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
+        // Listing is a current read of real state. The tabs come from the live browser through
+        // a dispatching query, and only this workspace's bound tabs are named -- the person's
+        // unbound tabs stay private. With no browser connected there is no real state to read,
+        // so the call refuses instead of answering from remembered state.
+        if self.browser.browsers().is_empty() {
+            return self.failed(
+                context,
+                decision,
+                None,
+                Refusal::BrowserStartupManual { browser: None },
+                json!({"reason":"browser_startup_manual"}),
+            );
+        }
+        let live = match self.dispatch(context, BrowserCommand::ListTabs) {
+            Ok(BrowserOutcome::Tabs { tabs }) => tabs,
+            Ok(_) => return self.protocol_failure(context, decision, None),
+            Err(error) => return self.browser_failure(context, decision, error, None),
+        };
         match lease.tabs() {
-            Ok(tabs) => {
-                let facts: Vec<_> = tabs.into_iter().map(|tab| json!({"tab":tab.handle.as_str(),"title":tab.title,"url":tab.url,"active":tab.active,"readiness":readiness(tab.readiness)})).collect();
+            Ok(bindings) => {
+                let facts: Vec<_> = bindings
+                    .into_iter()
+                    .filter_map(|tab| {
+                        let current = live
+                            .iter()
+                            .find(|physical| physical.tab_id == tab.physical_id)?;
+                        Some(json!({
+                            "tab":tab.handle.as_str(),
+                            "title":current.title,
+                            "url":current.url,
+                            "active":current.active,
+                            "readiness":readiness(current.readiness),
+                        }))
+                    })
+                    .collect();
                 let outcome = Outcome::TabsListed { count: facts.len() };
                 // Listing tabs is also how a caller discovers where tabs can be opened. A model
                 // asked to choose a browser needs the choices in front of it, and this is the one

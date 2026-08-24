@@ -4,7 +4,9 @@ One task = one logical commit set. This ledger is the authority on progress.
 
 ## RESUME HERE
 
-Next up: T2 (browser_tabs live read) unless T1's commit says otherwise. T1 status is below.
+Both tasks are complete. Remaining optional follow-ups recorded in T1/T2 verdicts: a live
+proof of the fill submit-leg fix after the next unpacked-adapter reload, and the option-B
+enumeration decision if the owner ever wants unbound-tab visibility.
 
 ## Tasks
 
@@ -35,13 +37,36 @@ Deviations: none.
 
 ### T2 -- browser_tabs list becomes a current read of real state
 
-Status: NOT STARTED.
+Status: COMPLETE and proven live on the Windows development graph (windows-codex,
+2026-08-24).
 
-Design direction agreed with the owner: enumerate real tabs from the live browser, flag
-workspace binding, keep target handles stable, update LANGUAGE.md and the tool description,
-decide the no-browser answer explicitly. List becomes a dispatching call on purpose.
+What changed:
 
-Deviations: none yet.
+- `navigation.rs list_tabs` now dispatches `BrowserCommand::ListTabs` through the ordinary
+  browser seam (the wire path already existed end to end and was simply unused by this
+  tool) and joins the live result against this workspace's bindings on `physical_id`.
+  Bound tabs show their CURRENT title/url/active/readiness from the browser, bindings that
+  are gone in reality disappear from the answer, and unbound tabs never surface -- listing
+  is freshness for the workspace's own inventory, not new visibility into the person's
+  other tabs.
+- With no browser connected the call now refuses (`browser_startup_manual`, "No browser is
+  connected ...") instead of answering from remembered state.
+- Model-facing language updated at the language chokepoint: catalog description,
+  list-action constant, capability-map sentence, and the outcome summary
+  ("Listed N bound tabs.").
+
+Design decision recorded: the owner's "current read of real state" was implemented as
+freshness for the controlled inventory (option A). Full enumeration of unbound tabs
+(option B) would expand model visibility into the person's unrelated browsing and needs an
+explicit product decision of its own; it is deliberately not part of this pass.
+
+Evidence: 330 Rust tests green including two rewritten list tests and a new regression test
+(live titles shown, gone bindings dropped); clippy/fmt clean; deployed via dev-loop; live
+probe showed the dispatching read end to end -- empty roster refuses honestly, a bound tab
+returns its live title/url, and an idled MV3 worker reconnects on the next call while the
+refusal covers the gap.
+
+Deviations: none.
 
 ## Evidence
 

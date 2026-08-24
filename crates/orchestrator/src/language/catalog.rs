@@ -16,7 +16,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_tabs",
             "Browser tabs",
-            "List, focus, or close controlled tabs. Use list to recover fresh tab_ handles for later calls.",
+            "List, focus, or close this workspace's tabs. List reads the connected browser live and refuses when no browser is connected; use list to recover fresh tab handles for later calls.",
             tabs_schema(),
             Hints::browser_action(true),
         ),
@@ -270,7 +270,13 @@ fn tabs_schema() -> Value {
     union(
         vec![
             object(
-                vec![("action", constant("list", "List controlled tabs."))],
+                vec![(
+                    "action",
+                    constant(
+                        "list",
+                        "List this workspace's bound tabs from the live browser.",
+                    ),
+                )],
                 vec!["action"],
             ),
             object(

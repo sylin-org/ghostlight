@@ -192,7 +192,7 @@ pub enum SavedTo {
 /// What one completed browser action did in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Outcome {
-    /// Controlled tabs were listed.
+    /// The workspace's bound tabs were listed, read live from the browser.
     TabsListed { count: usize },
     /// A semantic selector matched zero or several visible controls.
     SelectorUnresolved { matched: usize },
@@ -381,10 +381,9 @@ impl Outcome {
                     )
                 }
             }
-            Self::TabsListed { count } => format!(
-                "Listed {}.",
-                counted(*count, "controlled tab", "controlled tabs")
-            ),
+            Self::TabsListed { count } => {
+                format!("Listed {}.", counted(*count, "bound tab", "bound tabs"))
+            }
             Self::TabActivated { host } => {
                 format!("Brought {} into view.", place(host, "the controlled tab"))
             }
@@ -1358,11 +1357,8 @@ mod tests {
     #[test]
     fn outcome_summaries_transcribe_the_product_oracles() {
         let examples = vec![
-            (
-                Outcome::TabsListed { count: 4 },
-                "Listed 4 controlled tabs.",
-            ),
-            (Outcome::TabsListed { count: 1 }, "Listed 1 controlled tab."),
+            (Outcome::TabsListed { count: 4 }, "Listed 4 bound tabs."),
+            (Outcome::TabsListed { count: 1 }, "Listed 1 bound tab."),
             (
                 Outcome::TabActivated {
                     host: Some("example.com".into()),
