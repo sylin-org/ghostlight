@@ -1,9 +1,20 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-23.
+Last updated: 2026-08-24.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
+
+## In flight: foundry demo press_key diagnosis
+
+The full-catalog foundry demo fails deterministically at its `key to end` beat with a sentence
+that claims the browser disconnected. Instrumented-authority evidence shows that sentence is a
+fallthrough rendering (`Refusal::BrowserStopped` in `work/mod.rs`) and the real event is an
+adapter error frame folded into `BrowserError::Primitive`, whose extension-authored message is
+discarded before any human or model can read it. The live authority on this machine is
+temporarily swapped to an instrumented dev build (pristine backup beside it); see
+[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md) for the machine state,
+eliminated hypotheses, and next steps before touching browser-relay code.
 
 ## Published capability restoration
 
