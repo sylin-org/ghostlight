@@ -113,7 +113,7 @@ try {
 
   const catalog = call(["--catalog"]);
   assert.equal(catalog.status, 0);
-  assert.equal(catalog.stdout.trim().split("\n").length, 22, "the CLI sees the whole catalog");
+  assert.equal(catalog.stdout.trim().split("\n").length, 23, "the CLI sees the whole catalog");
 
   // A refusal must not look like success to a shell.
   const rejected = call(["browser_navigate", "{}"]);
