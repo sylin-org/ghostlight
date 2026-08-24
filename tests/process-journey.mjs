@@ -365,17 +365,22 @@ async function waitForMcpReady(mcp, timeoutMs = 10000) {
 
 async function waitForNoBrowsers(mcp, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
-  let browsers = [];
+  let lastSeen = "no response";
   while (Date.now() < deadline) {
     const listed = structured(await mcp.request("tools/call", {
       name: "browser_tabs",
       arguments: { action: "list" }
     }));
-    browsers = listed.facts.browsers;
-    if (Array.isArray(browsers) && browsers.length === 0) return;
+    // Listing reads live state through the adapter, so once the adapter is disconnected the
+    // read refuses -- and that refusal is exactly the registry-empty signal.
+    lastSeen = listed.facts?.browsers
+      ? `tabs=${JSON.stringify(listed.facts.browsers)}`
+      : `${listed.status}: ${listed.summary ?? ""}`;
+    if (listed.status === "failed") return;
+    if (Array.isArray(listed.facts?.browsers) && listed.facts.browsers.length === 0) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
   }
-  throw new Error(`Timed out waiting for the browser registry to empty: ${JSON.stringify(browsers)}`);
+  throw new Error(`Timed out waiting for the browser registry to empty: ${lastSeen}`);
 }
 
 try {

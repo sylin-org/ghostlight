@@ -102,14 +102,19 @@ try {
   assert.equal(diagnosis.readiness.word, "Not connected");
 
   const listed = call(["browser_tabs", '{"action":"list"}']);
-  assert.equal(listed.status, 0, listed.stderr);
-  assert.equal(listed.stdout.trim(), "Listed 0 controlled tabs.");
+  // A live read has nothing to read without a connected browser: it refuses instead of
+  // answering from remembered state.
+  assert.notEqual(listed.status, 0, listed.stderr);
+  assert.equal(
+    listed.stdout.trim(),
+    "No browser is connected. Start a supported Chromium browser with the Ghostlight extension installed."
+  );
 
   const rendered = call(["browser_tabs", '{"action":"list"}', "--json"]);
-  assert.equal(rendered.status, 0);
+  assert.notEqual(rendered.status, 0);
   const result = JSON.parse(rendered.stdout.trim());
-  assert.equal(result.status, "succeeded");
-  assert.deepEqual(result.facts.tabs, []);
+  assert.equal(result.status, "failed");
+  assert.equal(result.facts.reason, "browser_startup_manual");
 
   const catalog = call(["--catalog"]);
   assert.equal(catalog.status, 0);
@@ -120,10 +125,14 @@ try {
   assert.notEqual(rejected.status, 0);
   assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog.");
 
-  // One process, one session: handles from an earlier line are usable on a later one.
+  // One process, one session: even refusals from an earlier line share the workspace with
+  // later ones.
   const batch = call(["--stdin"], 'browser_tabs {"action":"list"}\nbrowser_tabs {"action":"list"}\n\nbrowser_tabs {"action":"list"}\n');
-  assert.equal(batch.status, 0, batch.stderr);
-  assert.equal(batch.stdout.trim().split("\n").length, 3);
+  // Every line refuses for the same honest reason; the batch reports the failure.
+  assert.notEqual(batch.status, 0, batch.stderr);
+  for (const line of batch.stdout.trim().split("\n")) {
+    if (line.trim()) assert.match(line, /No browser is connected/);
+  }
 
   await sleep(300);
   // Three separate processes, then three batched calls. Retrieving the catalog invokes nothing

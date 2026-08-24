@@ -130,6 +130,9 @@ async function runAdapter(peer) {
       case "close_tab":
         result = { outcome: "tab_closed", tab_id: command.tab_id };
         break;
+      case "list_tabs":
+        result = { outcome: "tabs", tabs: [tab] };
+        break;
       default:
         throw new Error(`Unexpected physical primitive ${command.command}`);
     }
