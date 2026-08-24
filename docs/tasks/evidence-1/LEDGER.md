@@ -14,7 +14,7 @@ boundary. `RESUME HERE` names the only next task.
 | Task | State | Commit subject | Evidence |
 | --- | --- | --- | --- |
 | E1 projection evidence | COMPLETE | `feat(install): carry blocked-target evidence` | `5e5725fa`; Foreign carries the bounded found command, three cause-specific details, optional evidence field, 4 new pins, gate green. |
-| E2 card rendering | READY | `feat(workbench): show blocked-target evidence` | -- |
+| E2 card rendering | COMPLETE | `feat(workbench): show blocked-target evidence` | `203ea6b4`; verbatim evidence paragraph on blocked rows, tone-bordered style, journey assertion, preview fixtures modernized, gate green. |
 | E3 live proof + close | READY | `test(integrations): prove blocked-target evidence live` | -- |
 
 ## Deviations
