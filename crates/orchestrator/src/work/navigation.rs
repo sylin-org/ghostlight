@@ -31,11 +31,12 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        // Listing is a current read of real state. The tabs come from the live browser through
+        // Listing is a current read of real state: the tabs come from the live browser through
         // a dispatching query, and only this workspace's bound tabs are named -- the person's
-        // unbound tabs stay private. With no browser connected there is no real state to read,
-        // so the call refuses instead of answering from remembered state.
-        if self.browser.browsers().is_empty() {
+        // unbound tabs stay private. An idle MV3 worker suspends its relay silently, so the
+        // read gives a waking adapter one bounded window to reattach before answering from
+        // absence.
+        if self.browser.browsers().is_empty() && !self.wait_for_any_browser(context) {
             return self.failed(
                 context,
                 decision,

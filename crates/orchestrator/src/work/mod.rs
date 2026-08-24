@@ -1366,6 +1366,33 @@ impl ApplicationExecutor {
         }
     }
 
+    /// One bounded window for a waking adapter to reattach, used by reads that must touch
+    /// real state. Deliberately local: no launch, no installed-browser discovery, hard
+    /// ceiling.
+    fn wait_for_any_browser(&self, context: &InvocationContext<'_>) -> bool {
+        // One bounded window for a waking adapter to reattach. This is deliberately local:
+        // no launch, no installed-browser discovery, and a hard ceiling well under any
+        // caller's patience.
+        const WAKE_BUDGET: Duration = Duration::from_secs(2);
+        let started = Instant::now();
+        loop {
+            if !self.browser.browsers().is_empty() {
+                return true;
+            }
+            if context
+                .cancellation
+                .flag()
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return false;
+            }
+            if started.elapsed() >= WAKE_BUDGET || Instant::now() >= context.deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
+
     fn emit(&self, event: DomainEvent) {
         self.presentation.react(&event);
         self.workbench.react(&event);
@@ -2378,42 +2405,48 @@ mod tests {
     }
 
     #[test]
-    fn listing_tabs_reads_live_state_and_refuses_without_a_browser() {
+    fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.connect(vec![]);
-
-        let listed = executor.execute(
-            &workspace,
-            "browser_tabs",
-            json!({"action":"list"}),
-            None,
-            &CancellationToken::default(),
-        );
-
-        // Listing is a current read of real state. With no browser connected there is nothing
-        // to read, so it refuses rather than answering from remembered state.
-        assert_eq!(listed.status, Status::Failed);
-        assert_eq!(listed.facts["reason"], "browser_startup_manual");
-        assert!(listed.summary.contains("No browser is connected"));
-
-        // A connected browser answers from its live tab query. With no bindings in this
-        // workspace yet, the person's unbound tabs stay unnamed.
-        browser.connect(vec![summary(FAKE_BROWSER, true)]);
         browser.push(Ok(BrowserOutcome::Tabs {
             tabs: vec![tab(7, "https://example.com/")],
         }));
-        let listed = executor.execute(
+
+        // A suspended MV3 worker reattaches shortly after the read begins.
+        {
+            let browser = browser.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                browser.connect(vec![summary(FAKE_BROWSER, true)]);
+            });
+        }
+        let woke = executor.execute(
             &workspace,
             "browser_tabs",
             json!({"action":"list"}),
             None,
             &CancellationToken::default(),
         );
-        assert_eq!(listed.facts["tabs"], json!([]));
+        assert_eq!(woke.status, Status::Succeeded);
+        assert_eq!(woke.facts["tabs"], json!([]));
         assert_eq!(
-            listed.facts["browsers"],
+            woke.facts["browsers"],
             json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
         );
+
+        // With nothing reattaching inside the wake budget, the read refuses honestly instead
+        // of answering from remembered state.
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.connect(vec![]);
+        let absent = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(absent.status, Status::Failed);
+        assert_eq!(absent.facts["reason"], "browser_startup_manual");
     }
 
     #[test]
