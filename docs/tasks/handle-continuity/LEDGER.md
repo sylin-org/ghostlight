@@ -11,15 +11,17 @@ queued. Order chosen small-to-large: T5, T8, T9, T6, T4, T7, then T1-T3.
 
 ### T1 -- idle wake-and-retry
 
-Status: NOT STARTED.
+Status: COMPLETE (windows-codex, 2026-08-24). Implemented as a DELETION-plus-window: the
+list guard that refused instantly was removed and replaced with `wait_for_any_browser` --
+one bounded (2 s, cancellation-aware, deadline-capped) local wait at the chokepoint for a
+waking adapter to reattach, then the honest startup-manual refusal. Deviation from the
+original sketch: routing through full recovery was rejected because it consults
+installed-browser discovery (host-dependent in tests) and can launch applications during a
+mere read; the local window achieves the owner's "attempt immediate recovery" without
+either. Regression test covers both phases: relay attaches mid-wait -> one succeeded call;
+nothing attaches -> honest refusal. Live analog already observed on the dev graph.
 
-Seam: the browser-port chokepoint where a pre-dispatch empty-or-unavailable roster is
-detected today (the spot that answers "No browser is connected"). One bounded recovery
-attempt inside the invocation budget, then the existing honest refusal if it genuinely
-fails. Regression test: fake relay absent on first probe, present on second; caller sees
-one succeeded call, not an error. Fallback next_step names the repeat-to-wake behavior.
-
-Deviations: none yet.
+Deviations: recovery-by-launch rejected; recovery-by-bounded-wait chosen.
 
 ### T2 -- tab-handle continuation
 
@@ -45,12 +47,17 @@ Deviations: none yet.
 
 ### T4 -- stale-target refusals arrive pre-recovered
 
-Status: NOT STARTED.
+Status: NOT STARTED. Recon done 2026-08-24, recorded so the next session starts warm:
 
-On StaleTarget-class refusal during semantic resolution, issue one targeted query matching
-the dead observation's role/name in the same tab and attach up to three current candidates
-to the refusal facts, explicitly labeled as fresh observations. Never guesses; only
-observations taken after the staleness was detected.
+- The single chokepoint is the executor's `resolve_target` wrapper (work/mod.rs) -- every
+  handle-based family passes through it.
+- `workspace::TargetState` retains tab handle, generation, locator, credential_class, and
+  role -- but NOT the accessible name. T4 therefore requires adding a bounded `name`
+  at registration time (register_targets) plus a `stale_target_context(handle)` accessor;
+  without the name, role-only re-query matches too much.
+- Staleness has three distinct exits inside lease.resolve_target: unknown handle (nothing
+  to recover from), tab entry gone, and generation mismatch. Only the last two carry a
+  recoverable context; keep unknown-handle refusals undecorated.
 
 Deviations: none yet.
 
