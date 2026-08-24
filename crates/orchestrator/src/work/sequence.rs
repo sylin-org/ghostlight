@@ -274,21 +274,13 @@ impl ApplicationExecutor {
                 json!({"tab":selected.handle.as_str(),"present":observed.0,"dialog_type":observed.1}),
             );
         }
-        if !observed.0 {
-            return self.failed(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Refusal::NoDialogVisible,
-                json!({"tab":selected.handle.as_str(),"handled":false}),
-            );
-        }
         let accept = value.action != "dismiss";
         let text = (value.action == "respond")
             .then(|| value.text.clone())
             .flatten();
         match self.dispatch(context, BrowserCommand::HandleDialog { tab_id: selected.physical_id, accept, text }) {
             Ok(BrowserOutcome::DialogHandled { tab_id, dialog_type: handled_type, accepted }) if tab_id == selected.physical_id => self.succeeded(context, decision, Some(tab_id), Effect::Applied, readiness(selected.readiness), false, Outcome::DialogHandled { accepted }, json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){observed.1}else{handled_type},"accepted":accepted,"handled":true})),
+            Ok(BrowserOutcome::DialogAbsent { tab_id }) if tab_id == selected.physical_id => self.failed(context, decision, Some(tab_id), Refusal::NoDialogVisible, json!({"tab":selected.handle.as_str(),"handled":false})),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => self.browser_failure(context, decision, error, Some(selected.physical_id)),
         }

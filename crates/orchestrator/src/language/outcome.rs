@@ -991,6 +991,12 @@ impl Refusal {
                 "Inspect recording status, then discard it or start a shorter recording."
                     .into(),
             ],
+            Self::EffectUnknown => vec![
+                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly."
+                    .into(),
+                "Then observe the page with browser_read or browser_inspect to learn what happened."
+                    .into(),
+            ],
             _ => vec![],
         }
     }
@@ -1968,6 +1974,13 @@ mod tests {
         assert_eq!(
             Refusal::BrowserStopped { reconnect: true }.next_steps(),
             vec!["Reconnect the Ghostlight browser adapter."]
+        );
+        assert_eq!(
+            Refusal::EffectUnknown.next_steps(),
+            vec![
+                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
+                "Then observe the page with browser_read or browser_inspect to learn what happened.",
+            ]
         );
 
         let refusal = Refusal::AuthorityBlocked {

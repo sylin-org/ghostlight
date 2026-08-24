@@ -1062,6 +1062,8 @@ pub enum BrowserOutcome {
         dialog_type: String,
         accepted: bool,
     },
+    /// No dialog was showing when the handling attempt landed.
+    DialogAbsent { tab_id: u64 },
     /// Bounded, non-destructive diagnostic read.
     DiagnosticsRead {
         tab_id: u64,

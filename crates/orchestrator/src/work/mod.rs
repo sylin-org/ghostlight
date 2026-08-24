@@ -1789,6 +1789,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::Hovered { .. }
         | BrowserOutcome::Dialog { .. }
         | BrowserOutcome::DialogHandled { .. }
+        | BrowserOutcome::DialogAbsent { .. }
         | BrowserOutcome::DiagnosticsRead { .. }
         | BrowserOutcome::DiagnosticsCleared { .. }
         | BrowserOutcome::RecordingStarted { .. }
@@ -3117,7 +3118,7 @@ mod tests {
     }
 
     #[test]
-    fn uncertain_effect_has_no_replay_guidance() {
+    fn uncertain_effect_guides_recovery_without_replay() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Err(crate::browser::BrowserError::DisconnectedAfterDispatch));
         let result = executor.execute(
@@ -3130,7 +3131,13 @@ mod tests {
         assert_eq!(result.status, Status::Unknown);
         assert_eq!(result.effect, Effect::Unknown);
         assert!(!result.repeat_safe);
-        assert!(result.next_steps.is_empty());
+        assert_eq!(
+            result.next_steps,
+            vec![
+                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.".to_string(),
+                "Then observe the page with browser_read or browser_inspect to learn what happened.".to_string(),
+            ]
+        );
     }
 
     #[test]

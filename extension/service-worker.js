@@ -1549,8 +1549,14 @@ async function handleDialog(command) {
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.handleJavaScriptDialog", { accept: command.accept, promptText: command.text });
     await debuggerLifecycle.closeDialog(command.tab_id);
     return { outcome: "dialog_handled", tab_id: command.tab_id, dialog_type: type, accepted: command.accept };
-  } catch (error) { error.effectUnknown = true; throw error; }
-  finally { await detachDebugger(command.tab_id); }
+  } catch (error) {
+    if (String(error?.message ?? error).includes("No dialog is showing")) {
+      await debuggerLifecycle.closeDialog(command.tab_id);
+      return { outcome: "dialog_absent", tab_id: command.tab_id };
+    }
+    error.effectUnknown = true;
+    throw error;
+  } finally { await detachDebugger(command.tab_id); }
 }
 
 function requestRuntimeControl(intent) {
