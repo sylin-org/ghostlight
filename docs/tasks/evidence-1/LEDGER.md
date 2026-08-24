@@ -18,7 +18,7 @@ boundary. `RESUME HERE` names the only next task.
 
 ## Deviations
 
-- E3: the evidence paragraph was not seen with human eyes in the real workbench window; nobody was at the screen overnight. Everything short of pixels is proven live -- `doctor --json` on the deployed binary read the exact sentence back from a seeded foreign file -- and the rendering is pinned by the surface journey executing app.js against real fixtures. One owner-visible glance at MCP integrations with a blocked target closes it.
+- E3 (resolved same day): the evidence paragraph was not seen with human eyes during the overnight run. The owner then verified it live in the real workbench: a foreign command was swapped into the real Claude Desktop configuration under a hash-verified backup, the deployed authority's card flipped to Needs Attention showing the cause sentence and the tone-bordered evidence paragraph naming `npx intruder-agent --mode quiet` and the owned connector, and the original bytes were restored and hash-confirmed. Nothing remains owed.
 
 ## Task log
 

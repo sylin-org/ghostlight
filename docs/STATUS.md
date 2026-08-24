@@ -1180,9 +1180,10 @@ is untouched: foreign entries are still never overwritten or removed, and blocke
 offer no automatic repair. Proven by unit pins across JSON, TOML, and YAML dialects, a surface
 journey assertion, and -- after the release orchestrator swap -- `ghostlight doctor --json`
 against a seeded foreign configuration under redirected user roots reading the exact evidence
-sentence back from the deployed binary. The one unproven sliver is the paragraph's appearance in
-the real workbench window, which needs a person at the screen; the ledger records it as an
-owner-visible glance rather than claiming it.
+sentence back from the deployed binary. The paragraph was then verified with human eyes in the
+real workbench: a foreign command was temporarily swapped into the owner's real Claude Desktop
+configuration under a hash-verified backup, the card showed the cause sentence and evidence, and
+the original bytes were restored and hash-confirmed.
 
 
 ## Release gates still requiring an owner or release environment
