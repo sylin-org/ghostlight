@@ -33,6 +33,11 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **Refactor authority is standing.** When work touches a weird-shaped seam, the owner has
+  authorized refactoring toward a lean domain-driven monolith: fewest but most meaningful moving
+  parts, each kind of complexity isolated at exactly one seam. Capture facts where they are
+  learned, compose words where they are owned, and never let a boundary drop information a later
+  surface must guess about.
 - **Invisible when healthy, legible on demand.** Installation and ordinary browser work should
   succeed without a workbench ritual. Safe recovery is automatic and bounded at its owning seam;
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior

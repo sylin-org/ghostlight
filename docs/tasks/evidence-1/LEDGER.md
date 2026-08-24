@@ -5,15 +5,15 @@ boundary. `RESUME HERE` names the only next task.
 
 ## RESUME HERE
 
-- State: E1 IN PROGRESS.
-- Next task: E1, projection in `crates/orchestrator/src/install/mod.rs`.
+- State: E2 IN PROGRESS.
+- Next task: E2, surface rendering in `crates/orchestrator/ui/`.
 - Baseline: `dev` at `4d5ddb95` (docs(tasks): record D4 and close the delight ledger).
 
 ## Task table
 
 | Task | State | Commit subject | Evidence |
 | --- | --- | --- | --- |
-| E1 projection evidence | IN PROGRESS | `feat(install): carry blocked-target evidence` | -- |
+| E1 projection evidence | COMPLETE | `feat(install): carry blocked-target evidence` | -- |
 | E2 card rendering | READY | `feat(workbench): show blocked-target evidence` | -- |
 | E3 live proof + close | READY | `test(integrations): prove blocked-target evidence live` | -- |
 
@@ -26,3 +26,4 @@ None.
 | Task | Date | Status | Findings |
 | --- | --- | --- | --- |
 | Planning | 2026-08-24 | COMPLETE | Batch scaffolded from ADR-0129 Decision 4 and the STATUS owed item. Prior art (`5403b339`, reverted by `eb7cf4ed`) supplies the found-command technique; ADR-0135 re-decides the substance after ADR-0130 Decision 4 was superseded. Research confirmed no remnants of the reverted implementation remain in code. |
+| E1 | 2026-08-24 | COMPLETE | `RegistrationState::Foreign` now carries the bounded found command line; `command_registration_state` composes it at the one seam all three dialects cross, so JSON, TOML, and YAML foreign entries all disclose without per-dialect work. `inspect()` names the actual cause (foreign / malformed / unreadable) instead of one conflated sentence and sets the optional `evidence` field only when blocked; `bounded_disclosure` strips control and bidi characters, keeps whitespace through collapsing, and caps at 200 visible characters. Four new pins: foreign disclosure (normalization plus cap math), malformed parser reason, commandless-foreign and unblocked states, and dialect coverage with direct helper pins. Two test-expectation corrections during authoring: tab is whitespace and survives disclosure, and detection counts a remaining parent directory after file removal. Full gate green (63 install tests, workspace clean). |

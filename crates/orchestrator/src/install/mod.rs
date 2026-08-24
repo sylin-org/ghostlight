@@ -228,6 +228,14 @@ pub struct HarnessSummary {
     pub state: HarnessState,
     /// Fixed outcome-oriented detail.
     pub detail: String,
+    /// Optional precomposed proof behind a blocked state, authored by the orchestrator
+    /// (ADR-0135).
+    ///
+    /// Present only when the target needs attention: either the bounded command line found
+    /// where Ghostlight's connector belongs, or the bounded reason the configuration could
+    /// not be parsed. The surface renders it verbatim and authors no words of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
     /// Whether an explicit install can be attempted.
     pub can_install: bool,
     /// Whether an owned registration can be removed.
@@ -728,32 +736,61 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .iter()
             .any(|name| executable_on_path(context, name));
     let connector_ready = context.connector.is_file();
-    let state = match registration_state(context, definition) {
+    let registration = registration_state(context, definition);
+    let state = match &registration {
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
         Ok(RegistrationState::Current) => HarnessState::Installed,
         Ok(RegistrationState::Updatable) => HarnessState::Updatable,
-        Ok(RegistrationState::Foreign) | Err(_) => HarnessState::NeedsAttention,
+        Ok(RegistrationState::Foreign(_)) | Err(_) => HarnessState::NeedsAttention,
     };
-    let mut detail: String = match state {
-        HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
-        HarnessState::Updatable => {
-            "Ghostlight is registered through an older Ghostlight installation or executable."
+    // The blocked causes are named from what the inspection actually saw, never conflated
+    // (ADR-0135). The evidence line carries the specifics beside the claim.
+    let mut detail: String = match &registration {
+        Ok(RegistrationState::Foreign(_)) => {
+            "A foreign entry holds this target's Ghostlight registration; it was left untouched."
                 .into()
         }
-        HarnessState::Available if connector_ready => {
-            "Detected and ready for an explicit Ghostlight registration.".into()
+        Err(HarnessError::Malformed(_)) => {
+            "This configuration could not be parsed; it was left untouched.".into()
         }
-        HarnessState::Available => "Detected, but the sibling MCP connector is missing.".into(),
-        HarnessState::NotDetected if connector_ready => {
-            "Not detected. You can prepare its user configuration before installing it.".into()
+        Err(_) => "This configuration could not be read; it was left untouched.".into(),
+        _ => match state {
+            HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
+            HarnessState::Updatable => {
+                "Ghostlight is registered through an older Ghostlight installation or executable."
+                    .into()
+            }
+            HarnessState::Available if connector_ready => {
+                "Detected and ready for an explicit Ghostlight registration.".into()
+            }
+            HarnessState::Available => "Detected, but the sibling MCP connector is missing.".into(),
+            HarnessState::NotDetected if connector_ready => {
+                "Not detected. You can prepare its user configuration before installing it.".into()
+            }
+            HarnessState::NotDetected => {
+                "Not detected, and the sibling MCP connector is missing.".into()
+            }
+            HarnessState::NeedsAttention => String::new(),
+        },
+    };
+    let evidence: Option<String> = match &registration {
+        Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
+            Some(found) => format!(
+                "Found `{found}` where Ghostlight's connector belongs; \
+                 Ghostlight maintains `{}` there and changed nothing.",
+                context.connector.display()
+            ),
+            None => format!(
+                "Found an entry without a usable command where Ghostlight's connector belongs; \
+                 Ghostlight maintains `{}` there and changed nothing.",
+                context.connector.display()
+            ),
+        }),
+        Err(HarnessError::Malformed(reason)) => {
+            bounded_disclosure(reason).map(|reason| format!("The parser reported: {reason}"))
         }
-        HarnessState::NotDetected => {
-            "Not detected, and the sibling MCP connector is missing.".into()
-        }
-        HarnessState::NeedsAttention => {
-            "The configuration is malformed or has a foreign ghostlight entry; it was left untouched.".into()
-        }
+        _ => None,
     };
     if definition.located_stale {
         detail.push_str(" A previously located path is missing; the normal location is shown.");
@@ -766,6 +803,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         icon: definition.icon.into(),
         state,
         detail,
+        evidence,
         can_install: connector_ready
             && matches!(
                 state,
@@ -785,12 +823,14 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistrationState {
     Missing,
     Current,
     Updatable,
-    Foreign,
+    /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload is the
+    /// bounded command line found there, when one could be read (ADR-0135).
+    Foreign(Option<String>),
 }
 
 fn registration_state(
@@ -829,7 +869,7 @@ fn inspect_json(
         return Ok(RegistrationState::Missing);
     };
     Ok(
-        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign, |command| {
+        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign(None), |command| {
             let args = json_entry_args(entry, dialect);
             command_registration_state(command, args.as_deref(), connector, windows)
         }),
@@ -1095,7 +1135,7 @@ fn edit_yaml(
 ) -> Result<bool, HarnessError> {
     let original = read_or_empty(path)?;
     let state = inspect_yaml(&original, dialect, connector, cfg!(target_os = "windows"))?;
-    if state == RegistrationState::Foreign {
+    if matches!(state, RegistrationState::Foreign(_)) {
         return Err(HarnessError::ForeignEntry);
     }
     if (install && state == RegistrationState::Current)
@@ -1629,7 +1669,7 @@ fn command_registration_state(
     windows: bool,
 ) -> RegistrationState {
     if !command_owned(command, args, connector, windows) {
-        return RegistrationState::Foreign;
+        return RegistrationState::Foreign(bounded_command_line(command, args));
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
     let expected = fs::canonicalize(connector).unwrap_or_else(|_| connector.to_path_buf());
@@ -1651,6 +1691,49 @@ fn paths_equal(actual: &Path, expected: &Path, windows: bool) -> bool {
     } else {
         actual == expected
     }
+}
+
+/// Maximum visible characters disclosed from a blocked target's existing content (ADR-0135).
+const EVIDENCE_MAX_CHARS: usize = 200;
+
+/// Bound one piece of found content for disclosure.
+///
+/// Control characters and bidi overrides are stripped, whitespace collapses to single spaces,
+/// and the result is capped, so file-authored text can never smuggle formatting into a card.
+fn bounded_disclosure(value: &str) -> Option<String> {
+    let cleaned: String = value
+        .chars()
+        .filter(|character| {
+            (!character.is_control() || character.is_whitespace())
+                && !matches!(
+                    character,
+                    '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect();
+    let one_line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    let count = one_line.chars().count();
+    if count <= EVIDENCE_MAX_CHARS {
+        return Some(one_line);
+    }
+    let mut bounded: String = one_line.chars().take(EVIDENCE_MAX_CHARS - 3).collect();
+    bounded.push_str("...");
+    Some(bounded)
+}
+
+/// The bounded command line found where Ghostlight's connector belongs.
+fn bounded_command_line(command: &str, args: Option<&[&str]>) -> Option<String> {
+    let mut line = String::from(command);
+    if let Some(args) = args {
+        for argument in args {
+            line.push(' ');
+            line.push_str(argument);
+        }
+    }
+    bounded_disclosure(&line)
 }
 
 fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialect, HarnessError> {
@@ -1878,10 +1961,11 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        command_registration_state, definitions, edit_json, edit_toml, edit_yaml, harness_roots,
-        inspect_json, inspect_toml, inspect_yaml, jsonc_options, manual_json_setup,
-        replace_with_backup, resolve_through_symlink, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, JsonDialect, RegistrationState, YamlDialect,
+        bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
+        edit_yaml, harness_roots, inspect, inspect_json, inspect_toml, inspect_yaml, jsonc_options,
+        manual_json_setup, replace_with_backup, resolve_through_symlink, HarnessAction,
+        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
+        JsonDialect, RegistrationState, YamlDialect, EVIDENCE_MAX_CHARS,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2418,16 +2502,16 @@ mod tests {
             ),
             RegistrationState::Updatable
         );
-        assert_eq!(
+        assert!(matches!(
             command_registration_state(
                 legacy.to_string_lossy().as_ref(),
                 Some(&["--role", "browser"]),
                 &current,
                 cfg!(windows),
             ),
-            RegistrationState::Foreign
-        );
-        assert_eq!(
+            RegistrationState::Foreign(Some(_))
+        ));
+        assert!(matches!(
             command_registration_state(
                 directory
                     .join("foreign/v0")
@@ -2438,8 +2522,8 @@ mod tests {
                 &current,
                 cfg!(windows),
             ),
-            RegistrationState::Foreign
-        );
+            RegistrationState::Foreign(Some(_))
+        ));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2529,6 +2613,161 @@ mod tests {
             ));
         }
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A blocked card names what was actually found beside the claim (ADR-0135).
+    fn inspected_summary(directory: &Path) -> HarnessSummary {
+        let context = context(directory);
+        let definition = definitions(&context)
+            .into_iter()
+            .find(|definition| definition.id == "claude-desktop")
+            .expect("claude-desktop stays in the closed roster");
+        inspect(&context, &definition)
+    }
+
+    fn claude_desktop_config(directory: &Path) -> PathBuf {
+        let path = directory
+            .join("config")
+            .join("Claude/claude_desktop_config.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn foreign_entries_disclose_what_was_found() {
+        let directory = temporary("foreign-evidence");
+        let path = claude_desktop_config(&directory);
+        let expected_connector = connector(&directory);
+        let long_argument = "x".repeat(EVIDENCE_MAX_CHARS + 40);
+        let entry = serde_json::json!({
+            "mcpServers": {
+                "ghostlight": {
+                    "command": "  some\u{202e}other\ttool  ",
+                    "args": [long_argument],
+                }
+            }
+        });
+        fs::write(&path, entry.to_string()).unwrap();
+
+        let summary = inspected_summary(&directory);
+
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert!(
+            summary.detail.starts_with("A foreign entry holds"),
+            "{}",
+            summary.detail
+        );
+        let evidence = summary.evidence.expect("foreign entries carry evidence");
+        // The bidi override is stripped and whitespace collapses; the words themselves stay.
+        assert!(evidence.contains("someother tool"), "{evidence}");
+        assert!(
+            evidence.contains(&expected_connector.display().to_string()),
+            "{evidence}"
+        );
+        assert!(evidence.contains("changed nothing"), "{evidence}");
+        // The whole command line is capped, so the surviving x-run shrinks by the prefix and
+        // the ellipsis.
+        let prefix = "someother tool ".chars().count();
+        let capped_x = "x".repeat(EVIDENCE_MAX_CHARS - prefix - 3);
+        assert!(evidence.contains(&format!("{capped_x}...")), "{evidence}");
+        assert!(
+            !evidence.contains(&"x".repeat(EVIDENCE_MAX_CHARS + 1)),
+            "disclosure is capped: {evidence}"
+        );
+        assert!(evidence.chars().all(|character| !character.is_control()));
+        assert!(!summary.can_install);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_configurations_disclose_the_parser_reason() {
+        let directory = temporary("malformed-evidence");
+        let path = claude_desktop_config(&directory);
+        connector(&directory);
+        fs::write(&path, "{\"mcpServers\": {").unwrap();
+
+        let summary = inspected_summary(&directory);
+
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert!(
+            summary
+                .detail
+                .starts_with("This configuration could not be parsed"),
+            "{}",
+            summary.detail
+        );
+        let evidence = summary.evidence.expect("malformed files carry evidence");
+        assert!(evidence.starts_with("The parser reported:"), "{evidence}");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unblocked_targets_and_commandless_foreign_entries_stay_bounded() {
+        let directory = temporary("unblocked-evidence");
+        let path = claude_desktop_config(&directory);
+        let expected_connector = connector(&directory);
+        let installed = serde_json::json!({
+            "mcpServers": {
+                "ghostlight": {
+                    "command": expected_connector,
+                    "args": [],
+                    "env": {},
+                }
+            }
+        });
+        fs::write(&path, installed.to_string()).unwrap();
+        let summary = inspected_summary(&directory);
+        assert_eq!(summary.state, HarnessState::Installed);
+        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+
+        fs::write(&path, r#"{"mcpServers":{"ghostlight":{"env":{}}}}"#).unwrap();
+        let summary = inspected_summary(&directory);
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        let evidence = summary.evidence.clone().expect("commandless foreign entry");
+        assert!(evidence.contains("without a usable command"), "{evidence}");
+
+        // With the configuration root gone, nothing about the target remains blocked or
+        // disclosed.
+        fs::remove_dir_all(directory.join("config")).unwrap();
+        let summary = inspected_summary(&directory);
+        assert_eq!(summary.state, HarnessState::NotDetected);
+        assert!(summary.evidence.is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn every_blocked_dialect_discloses_its_found_command() {
+        let directory = temporary("dialect-evidence");
+        let expected_connector = connector(&directory);
+
+        let toml = directory.join("codex.toml");
+        std::fs::write(
+            &toml,
+            "[mcp_servers.ghostlight]\ncommand = \"alien-tool\"\nargs = [\"serve\"]\n",
+        )
+        .unwrap();
+        let toml_source = fs::read_to_string(&toml).unwrap();
+        assert!(matches!(
+            inspect_toml(&toml_source, &expected_connector, false),
+            Ok(RegistrationState::Foreign(Some(found)))
+                if found.contains("alien-tool serve")
+        ));
+
+        let yaml = "\nextensions:\n  ghostlight:\n    cmd: alien-yaml\n";
+        assert!(matches!(
+            inspect_yaml(yaml, YamlDialect::Goose, &expected_connector, false),
+            Ok(RegistrationState::Foreign(Some(found)))
+                if found.contains("alien-yaml")
+        ));
+
+        // An entry without any readable command discloses nothing.
+        assert_eq!(bounded_command_line("", None), None);
+        assert_eq!(
+            bounded_command_line("tool", Some(&["a", "b"])),
+            Some("tool a b".into())
+        );
+
         fs::remove_dir_all(directory).unwrap();
     }
 
