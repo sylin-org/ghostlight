@@ -26,7 +26,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
-| [language-delight](language-delight/) | Delight pass over all model-facing sentences: validation messages, tool descriptions, result guidance, live proof | Ready at D1 | 2026-08-23 |
+| [language-delight](language-delight/) | Delight pass over all model-facing sentences: validation messages, tool descriptions, result guidance, live proof | D1-D4 complete; deployed and proven live | 2026-08-24 |
 | [capability-restoration](capability-restoration/) | ADR-0133: restore genuine published 0.8 browser behaviors through the current 1.0 language and typed seams | R1 complete; R2 next | 2026-08-22 |
 | [reference-experience](reference-experience/) | One product across every machine: the second-machine state, adaptive familiarity, terminal citizenship, runtime control, At a glance, readiness recovery | S1-S7 and Linux V1-V5 complete; S8 blocked on required real-desktop evidence | 2026-08-17 |
 | [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Complete | 2026-08-15 |

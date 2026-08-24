@@ -5,8 +5,7 @@ task boundary. `RESUME HERE` names the only next task.
 
 ## RESUME HERE
 
-- State: D3 COMPLETE. D4 is next.
-- Next task: D4, live proof through the swapped authority, then LANGUAGE.md reconciliation and batch close.
+- State: BATCH COMPLETE. D1 through D4 are done and deployed; nothing is next in this batch.
 - Baseline: `dev` at `1a138a87` (feat(language): teach through validation messages).
 - D4 debt so far: none beyond the standing live re-probe; the D1 messages are unit-pinned and
   gate-green but have not been exercised through the swapped authority.
@@ -18,7 +17,7 @@ task boundary. `RESUME HERE` names the only next task.
 | D1 validation messages | COMPLETE | `feat(language): teach through validation messages` | `1a138a87`; 19 message families rewritten (shared validators name the allowed set and received value; every "X is required" site states the expected shape and where the value comes from); new pin test `validation_messages_teach_the_expected_shape`; full gate green (316 lib tests). |
 | D2 tool descriptions | COMPLETE | `feat(language): delight tool descriptions` | `af1ef36b`; 23 descriptions revoiced, 7 field-description families taught, 2 new pin tests, gate green. |
 | D3 result guidance | COMPLETE | `feat(language): delight result guidance` | `088a93d3`; 5 refusal next-step families added or rewritten, 1 summary de-jargoned, 4 outcome guidance arms improved, 2 partial-work arms added, 2 new pin tests, gate green. |
-| D4 live proof + close | READY | `test(language): prove delighted guidance live` | -- |
+| D4 live proof + close | COMPLETE | `test(language): prove delighted guidance live` | -- |
 
 ## Deviations
 
@@ -32,7 +31,10 @@ None.
 | D1 | 2026-08-23 | COMPLETE | Shared validators now teach: choice names the full allowed set plus the rejected value; range and timeout include the received value; handles say where handles come from; text overflow reports the received length; validate_key lists the named keys; unknown fields point at the advertised schema. Every "X is required" decode site states the expected shape (zoom percent 25-500, resize needs both dimensions, respond text may be empty, drag needs both endpoints or all four coordinates, region needs the full rectangle). |
 | D2 | 2026-08-23 | COMPLETE | All 23 tool descriptions revoiced around when to reach for the tool and what to do instead (history and window teach handle recollection, screenshot teaches that every capture returns a view_, click prefers targets over points, execute defers to semantic tools, sequence states stop-at-first-failure, dialog teaches blocking, diagnose teaches observation starts on the first call). Misuse-prone field descriptions now name their source: region/coordinate views say take a screenshot first; upload source_image says it comes from an earlier screenshot; dialog actions describe themselves instead of a shared "Dialog action." Two new pins: `catalog_descriptions_teach_the_remedy` and `catalog_strings_are_ascii`. Full gate green (318 lib tests, 127 extension tests, repository integrity). |
 | D3 | 2026-08-23 | COMPLETE | Refusal guidance now leads with the recovery action: InvalidRequest points at the invalid_input detail instead of the circular schema correction; DeadlineBeforeStart, IncompatibleReceipt, FilesUnreadable, and CaptureTooLarge gained their first next steps; the three previously silent workspace reasons (TabHeld, OwnershipMismatch, WorkspaceClosed) each name their way back. IncompatibleReceipt dropped adapter jargon for "The browser answered in a form Ghostlight does not recognize." Outcome-side: SelectorUnresolved leads with browser_find, Waited names read or inspect, and partial FlowRan/SequenceRan results now teach fix-and-rerun. Two new pins: `workspace_reasons_teach_their_own_recovery` and `outcome_next_steps_teach_the_fix`; `refusal_wording_and_recovery_stay_exact` extended. Full gate green (320 lib tests, 127 extension tests, repository integrity). |
+| D4 | 2026-08-24 | COMPLETE | Release orchestrator built in `.target-dev-loop`, exact-path swapped under deploy.lock (live pid 18240 replaced by 33280); connectors reconnected on their own and no extension reload was needed. Live failures through `ghostlight call` on one pinned session: region screenshot without a view teaches "take a screenshot, then pass its view"; a click through a stale view returns StaleView with the browser_screenshot remedy; an unsatisfied text wait reports person-plain timing with the read-or-inspect next step; model-driven close hit the preserve-tabs interlock and its taught refusal. A real MCP client over stdio negotiated 2025-11-25, listed all 23 tools, and every pinned teaching phrase is served in descriptions and input schemas. LANGUAGE.md reconciled against current schemas: eleven drifted sections corrected (navigate beforeunload, read mode plus the 50000 ceiling from R4, click_count 1-3 from R2, fill_form per-field selectors and typed values from R3, type_text branches, press_key strokes/repeat from R2, wait duration branch from R2, scroll wheel branch from R2, inspect document scope from R4, upload R5 surface) and the missing browser_flow catalog section added. Full gate green after reconciliation. |
 
 ## Deviations
 
 - D1: per-tool teaching lives at the call sites, not inside the shared coordinate helper -- a generic helper cannot name the tool. No behavior change.
+- D4: the first screenshot after the authority swap returned one transient WrongProfile refusal while the immediately preceding and following calls succeeded. Recorded, not chased: it matches an adapter reattaching mid-swap and did not recur.
+- D4: two disposable Example Domain controlled tabs remain open because the person's preserve-tabs setting correctly refused model-driven closure. Direct closure owed by the owner.

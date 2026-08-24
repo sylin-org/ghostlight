@@ -91,6 +91,22 @@ The pass found and fixed three guidance defects at the root, each committed sepa
   typed `dialog_absent` outcome; failures with unknown effect name the open-dialog hypothesis
   and point at `browser_dialog`, then at observing the page rather than replaying the call.
 
+## Language delight pass
+
+The [language-delight batch](tasks/language-delight/) completed on 2026-08-24 through `D1-D4`.
+Every validation message, tool description, and refusal or result guidance sentence was revoiced
+to teach: validators name the allowed set and received value; descriptions say when to reach for
+a tool and what to do instead; refusals lead with the recovery action, including new next steps
+for deadline, receipt, upload, capture, and the three previously silent workspace reasons. New
+pins hold the teaching sentences in place. D4 deployed the release orchestrator by exact-path
+swap, proved the taught failures live (region without a view, stale view click, unsatisfied wait,
+preserve-tabs interlock), served every pinned phrase to a real MCP client over stdio, and
+reconciled eleven drifted sections of [`1.0/LANGUAGE.md`](1.0/LANGUAGE.md) with the current
+schemas, including adding the missing `browser_flow` catalog section. The ledger carries two D4
+deviations: one transient WrongProfile refusal during the swap, and two disposable Example Domain
+tabs left open by the preserve-tabs interlock for direct closure.
+
+
 ## Where the branches stand
 
 Distances below are measured against the local remote-tracking refs, which are only as fresh as the
