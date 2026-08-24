@@ -4,9 +4,23 @@ One task = one commit. RESUME HERE is always the first open task.
 
 ## RESUME HERE
 
-Next task: T2 (unsettled-row color treatment). T1 is complete.
+Next task: T3 (model-facing policy explain tool). T1 and T2 are complete.
 
 ## Tasks
+
+### T2 -- unsettled readiness rows get color treatment
+
+Status: COMPLETE (2026-08-24).
+
+Landed shape: `words.js` gains `READINESS_ATTENTION` (loading, unknown) and
+`readinessNeedsAttention(entry)` beside the existing `READINESS_NOTE` map; "interactive" is
+informational and stays neutral. `view.js` applies the predicate to the row duration cell as an
+`unsettled` class; `styles.css` tones that cell amber (`--amber`, the established caution color)
+while the parenthetical words stay in the activity cell. The workbench surface journey gained a
+43rd assertion pinning the predicate's truth table and the view/stylesheet halves by source --
+the same text-guard practice the window already uses.
+
+Gates: node --check on changed modules; workspace tests (391 Rust); workbench-surface journey.
 
 ### T1 -- mcp-connector adopts the shared service handshake
 

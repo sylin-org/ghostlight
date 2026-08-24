@@ -269,6 +269,10 @@ body.runtime-offline .state-word { color: var(--muted); }
 .row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .row-when { color: var(--faint); font: 400 10px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
+/* A settled row whose document never settled, or whose readiness could not be observed, carries
+   the caution tone on its duration so the eye finds it while scrolling; the words stay in the
+   activity cell for anyone who stops. */
+.row-dur.unsettled { color: var(--amber); }
 .row.landing { animation: land var(--beat-settle) var(--spring) both; }
 @keyframes land { from { height: 0; opacity: 0; transform: translateY(-10px); } to { height: 42px; opacity: 1; transform: none; } }
 

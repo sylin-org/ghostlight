@@ -363,6 +363,14 @@ try {
   withButtonThrew = error.message;
 }
 
+// The never-settled treatment: the predicate lives beside the readiness words, the row applies
+// it on the duration cell, and the stylesheet carries the amber tone. The stub DOM cannot
+// accumulate row markup, so the row and stylesheet halves are pinned against their sources --
+// the same text-guard practice every other window guard uses.
+const wordsApi = sandbox.globalThis.GhostlightWords;
+const viewSource = readFileSync(join(ui, "lib", "view.js"), "utf8");
+const stylesheet = readFileSync(join(ui, "styles.css"), "utf8");
+
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -456,6 +464,18 @@ const checks = [
       && refusal.includes("D-a1b2c3") && refusal.includes("security@example.test")
       && refusal.includes('data-view="policy"'),
     `refusal: ${JSON.stringify(refusal)}`],
+  ["a never-settled row is marked for finding by eye, and informational rows stay neutral",
+    wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "loading" } }) === true
+      && wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "unknown" } }) === true
+      && wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "interactive" } }) === false
+      && wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "complete" } }) === false
+      && wordsApi.readinessNeedsAttention({ settled: false, observed: { readiness: "loading" } }) === false
+      && viewSource.includes('readinessNeedsAttention(entry)')
+      && stylesheet.includes(".row-dur.unsettled"),
+    `attention: ${JSON.stringify({
+      loading: wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "loading" } }),
+      interactive: wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "interactive" } })
+    })}`],
   ["the policy destination opens with the orchestrator's sentence",
     nodes.get("policy-headline").textContent
       === "Example Org sets the rules, and you have narrowed them further.",

@@ -401,6 +401,21 @@
   };
 
   /**
+   * Which readiness values mark a settled row as worth finding while scrolling.
+   *
+   * A document that never settled, or whose readiness could not be observed, is a caution about
+   * the sentence beside it; "interactive" is only extra information. The duration cell carries
+   * the amber treatment so the row is found by eye instead of read for.
+   */
+  const READINESS_ATTENTION = new Set(["loading", "unknown"]);
+
+  /** Whether a settled entry's observation deserves the attention treatment. */
+  function readinessNeedsAttention(entry) {
+    return Boolean(entry.settled && entry.observed
+      && READINESS_ATTENTION.has(entry.observed.readiness));
+  }
+
+  /**
    * Where the About page will send you, in the orchestrator's own closed vocabulary.
    *
    * Each row names a destination rather than an address: the surface has no URLs in it at all, so
@@ -431,6 +446,7 @@
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
+    READINESS_ATTENTION, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

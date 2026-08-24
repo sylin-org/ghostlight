@@ -12,7 +12,8 @@
   "use strict";
 
   const {
-    VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, DESTINATIONS, glyphFor, capabilityClass,
+    VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     hostReadback, patternCovers,
@@ -211,7 +212,7 @@
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + `<div class="row-client">${escapeHtml(clientFor(entry.workspace))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
-        + `<div class="row-dur">${escapeHtml(time)}</div>`
+        + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`;
     }
 

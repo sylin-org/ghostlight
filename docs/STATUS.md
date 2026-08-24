@@ -1163,17 +1163,15 @@ The executor-split batch is complete through `4d633fbc`.
 On 2026-08-24 the owner promoted four items below into the pre-freeze window
 ([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption (landed
 the same day -- the bridge is now every edge's handshake home), the unsettled-row color
-treatment, the model-facing policy explain operation, and ADR-0105 stages 2 and 3. They remain
-listed here until their tasks land; everything else in this section stays outside 1.0.
+treatment (landed the same day), the model-facing policy explain operation, and ADR-0105 stages
+2 and 3. They remain listed here until their tasks land; everything else in this section stays
+outside 1.0.
 
 - ADR-0121 Decision 3's always-available policy explain operation still exists only as a CLI command
   over a file path. The 23-tool catalog has no policy tool, so the model cannot ask what current
   authority permits, even though a person now can.
   [ADR-0122](adr/0122-readable-policy-destination-and-authored-user-layer.md) Decision 9 defers the
   model-facing rendering to a later ADR; the projection it would use exists.
-- A row that never settled reads its readiness as a parenthetical. Colour would carry it better
-  than words: the duration cell already has a running and a blocked treatment, and an unsettled one
-  would be found while scrolling instead of read for.
 - ADR-0105 stages 2 and 3 are blocked on an owner decision, recorded in that ADR's amendment.
   Identifying the socket peer and verifying a signature are both raw Win32 FFI, and the workspace
   sets `unsafe_code = "forbid"`, which no scoped `#[allow]` can override. The choice is to relax
