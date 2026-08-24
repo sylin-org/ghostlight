@@ -116,3 +116,12 @@ Clean. Instrumentation reverted from source; instrumented binaries deleted; the 
 authority was rebuilt and redeployed through `scripts/dev-loop.ps1 -Action Deploy
 -Component orchestrator` and serves from `target/release`. Throwaway probe scripts remain
 only under the machine-local temp directory outside the repository.
+
+## Linux live verification -- 2026-08-24
+
+The [dated CachyOS record](../../testing/foundry-linux-live-verification-2026-08-24.md) proves the
+same sprint at source revision `793e258`: all source gates passed, the exact optimized three-sibling
+user candidate and explicitly reloaded unpacked adapter were active, all 41 normal-paced foundry
+beats passed, and the decisive primitive refusal plus failure-only audit facts rendered correctly.
+No Linux product defect appeared. This remains development-host evidence, not package or release
+evidence.

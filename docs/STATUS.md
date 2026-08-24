@@ -7,12 +7,15 @@ preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
 ## In flight: foundry demo follow-ups
 
-Both foundry defects are fixed and proven live on the development graph: after the owner
-reloaded the unpacked extension, `scripts/demo-foundry.ps1` ran green through all 41 beats,
-including the press_key coda and every desk-stage dialog beat. Effect-unknown receipts
-render truthfully with the browser's own reason, the audit carries bounded refusal facts
-for non-successes, and RELEASE-CHECKLIST G1 gained the whole-catalog demo as a standing
-gate. See [demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). What
+Both foundry defects are fixed and proven live on the development graph. Windows passed all 41
+beats through `scripts/demo-foundry.ps1` after the owner reloaded the unpacked extension. The
+[CachyOS verification](testing/foundry-linux-live-verification-2026-08-24.md) then passed the same
+41 beats through `scripts/demo-foundry.sh` against an exact optimized three-sibling user candidate
+and explicitly reloaded unpacked adapter. Both runs include the press_key coda and every desk-stage
+dialog beat. Linux also proved that a primitive adapter refusal renders the browser's reason and
+that only non-success audit records carry bounded refusal facts. RELEASE-CHECKLIST G1 carries the
+whole-catalog demo as a standing gate. See
+[demo-press-key-diagnosis](tasks/demo-press-key-diagnosis/LEDGER.md). What
 remains for 1.0 is the release-environment track: G0 freeze, provenance-bound candidate,
 clean-machine install rows, and the store resubmission. Live authority swaps on development
 machines go through `scripts/dev-loop.ps1` only.
