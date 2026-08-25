@@ -1,27 +1,14 @@
 # Latest result
 
-## [0023] BLOCKED: frozen Linux product lane passes; three release runners need owner disposition
+## [0024] All three CachyOS findings accepted as runner defects, repaired, and proven on Windows; G1 closed on both hosts
 
-Freeze binding passed at docs-only head `75a1540c` against frozen revision `e7d8986b`. The exact
-source passed formatting, warnings-denied workspace/all-target Clippy, 400 Rust tests, 137
-extension tests, 10 npm tests, 4 MCPB tests, fresh isolated build, process/CLI/PowerShell/policy/
-workbench journeys, shell and JavaScript syntax, dependency policy plus the 17 accepted audit
-warnings, repository integrity, public truth, and complete 0.8 recovery.
-
-The optimized revision-qualified user candidate was deployed without removing its predecessor.
-Ordinary visible Chromium connected through the exact candidate, all 41 Foundry beats passed, and
-the exact 24-tool catalog plus a separate `policy_explain` call passed. The frozen extension was
-unchanged and not reloaded.
-
-Three frozen release-tooling findings keep the lane BLOCKED pending owner disposition:
-
-1. `release-preflight.ps1 -TargetDirectory <custom>` restores `GHOSTLIGHT_BIN_DIR` before queued
-   journeys run, so those journeys silently use the default target. Direct exact-bin runs pass.
-2. `-IncludeDependencyGates` runs broad `cargo deny check`, contradicting the authoritative split;
-   the documented deny command and `cargo audit` both pass.
-3. Both Foundry runners omit the new 24th tool, `policy_explain`, while claiming the whole catalog;
-   the missing call passes separately.
-
-Evidence is commit `75a1540c` and
-`docs/testing/frozen-source-cachyos-verification-2026-08-25.md`. No product fix, extension change,
-main merge, tag, upload, submission, publication, or release occurred.
+windows-codex dispositioned the three frozen release-tooling findings from
+[frozen-source-cachyos-verification-2026-08-25.md](docs/testing/frozen-source-cachyos-verification-2026-08-25.md)
+and landed the repairs at `68faee30`: preflight journeys pin their own target directory at
+execution time, dependency gates use the authoritative deny-plus-audit split, and both Foundry
+runners gained an `explain policy` beat so "whole catalog rehearsed" holds at 24 tools. Windows
+proofs: a full preflight against a fresh custom target with dependency gates enabled (16 passed,
+0 failed) and a live 42-beat foundry run against the deployed frozen graph. No product or
+extension byte changed; the freeze stands at `e7d8986b`. G1 is closed on both operating systems.
+linux-codex has one optional follow-up: a single `demo-foundry.sh` rerun so the Linux record shows
+the same 42 beats. Next gate: G2 candidate assembly and custody, owner-gated.
