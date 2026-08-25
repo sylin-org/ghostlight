@@ -43,6 +43,18 @@ the exact interaction that forced coordinate guessing before. Extension suite is
 Because extension bytes changed, the pending store review is stale against this source; the
 owner replaces it when ready (same procedure as the 2026-08-24 replacement).
 
+## Shadow-complete interaction (ADR-0139)
+
+Open shadow trees were already observed and acted on; this closes the two light-DOM-only
+seams a model actually hits mid-task. Focused-control discovery walks the
+`shadowRoot.activeElement` chain, so focused typing and clearing reach the real field
+inside a web component instead of describing its host, and point-action subjects (with the
+`[inert]` check) cross the shadow boundary through `getRootNode().host`. Closed shadow
+roots stay closed: never pierced, never patched, honestly absent from inspection. No wire,
+tool, or Rust changes. The public stage `https://sylin.org/ghostlight/demo/shadow/
+(website commit `8af8eb4`) hosts an open-root component form beside a sealed closed-root
+widget whose contents inspection truthfully does not list. Extension suite is 153 tests.
+
 ## Published capability restoration
 
 The owner accepted [ADR-0133](adr/0133-behavioral-capability-restoration.md) after a direct
