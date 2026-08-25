@@ -45,7 +45,8 @@ candidate. The next candidate must be built from the final approved revision aft
 Do not restate the commit distance here; `git rev-list --count fd86403..HEAD` answers it without
 going stale.
 
-Release state: **NO-GO**. Every gate, G0 through G10, is open.
+Release state: **G1 CLOSED**. G0 and G1 are complete at frozen revision `e7d8986b`; G2 through G10
+remain open. The next action is the owner-gated G2 candidate assembly.
 
 ## Long-lead work: start these before G0 closes
 
@@ -155,16 +156,16 @@ Linux.
   custom-target run also found that `release-preflight.ps1` restores `GHOSTLIGHT_BIN_DIR` before
   queued journeys execute; the dated evidence distinguishes the green product result from that
   frozen runner defect.)
-- [ ] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
+- [x] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
   end to end against the deployed release graph, including the desk-stage dialog beats. Rerun it
   whenever an input-path, extension, or browser-relay batch lands: automated suites have missed
   page-state interactions that this rehearsal catches (foundry press_key and desk-bell defects,
-  2026-08-24). (Ran green on the deployed frozen graph, 2026-08-25 UTC: full story including
-  press-key beats, off-domain refusal, replay save/erase, sequences, flow, history, and both
-  desk-bell dialog dispositions.) The Linux run also passed all 41 scripted beats on 2026-08-25,
-  but reconciliation found that both runners omit the new 24th tool, `policy_explain`, while
-  claiming `Whole catalog rehearsed`. A separate live call passed. Owner disposition is required
-  before this literal gate can close.
+  2026-08-24). (Closed after reconciliation: Linux passed all 41 beats at the frozen revision and
+  flagged that both runners omitted the new 24th tool; the owner-dispositioned repair added an
+  `explain policy` beat to both runners, and this host reran the deployed frozen graph green at
+  42 beats on 2026-08-25 -- see
+  [release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md). The Linux 42-beat
+  confirmation is linux-codex's one optional follow-up.)
 - [x] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
   warnings are rechecked against the frozen graph rather than assumed. (Proven locally
   2026-08-25 UTC: `cargo deny check bans licenses sources` ok; `cargo audit` exits zero with
@@ -174,12 +175,13 @@ Linux.
   readable, links valid, version aligned, ASCII exceptions fixed at 25, all 1,388 recovery entries
   and 34 Lightbox scenarios dispositioned.)
 
-Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md)
-and [2026-08-25 frozen-source CachyOS verification](testing/frozen-source-cachyos-verification-2026-08-25.md).
+Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md),
+[2026-08-25 frozen-source CachyOS verification](testing/frozen-source-cachyos-verification-2026-08-25.md),
+and [2026-08-25 release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md).
 
-Pre-freeze evidence: [2026-08-17 local release preflight](testing/release-preflight-2026-08-17.md)
-passed every locally runnable source check. G1 remains open until both operating-system passes
-cover that exact revision.
+G1 is closed on both operating systems at frozen revision `e7d8986b`. The three runner defects the
+Linux lane surfaced were repaired as release tooling (outside the freeze's product paths) and
+proven on this host; no product or extension byte changed after the freeze.
 
 Extension-specific pre-freeze evidence:
 [2026-08-22 extension release preparation](testing/extension-release-preparation-2026-08-22.md)
