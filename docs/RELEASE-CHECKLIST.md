@@ -114,8 +114,14 @@ installed-product observation, or the checklist deadlocks against itself.
   table supplies the words to both install and `doctor`, the KDE accessibility half runs on the
   existing host, and the WSL sentence needs a WSL harness rather than the clean Windows machine.
   The observation-dependent rows are evidence and close under G8.
-- [ ] Name one final source revision and stop product and packaging changes while its candidate is
-  evaluated.
+- [x] Name one final source revision and stop product and packaging changes while its candidate is
+  evaluated. Frozen 2026-08-24 (UTC) at `08f368606f3deac4115a148f6c20590a7c9afb9b`, the last commit
+  of the [pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md) batch; machine-readable declaration in
+  [release/freeze.json](release/freeze.json). From this moment, no product or packaging changes:
+  anything discovered goes to the batch ledgers as a documented limitation unless the owner
+  declares it a blocker. Unfreezing means re-declaring and restarting the affected gates.
+  `extension/` is byte-identical to its state at `70869631`, so the pending STAGED_PUBLISH store
+  review continues to cover the candidate's extension bytes without a resubmission.
 
 Evidence:
 
