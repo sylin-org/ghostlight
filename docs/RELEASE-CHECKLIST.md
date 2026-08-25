@@ -143,22 +143,28 @@ Linux.
 - [x] Workspace/all-target Clippy passes with warnings denied.
 - [x] Full Rust workspace tests pass.
 - [x] Extension, npm launcher, and MCPB launcher tests pass.
-- [ ] Changed JavaScript and all release-owned script syntax checks pass. (Windows JS checks pass;
-  `sh -n` closes with the Linux run of the frozen revision.)
+- [x] Changed JavaScript and all release-owned script syntax checks pass. (Windows JS checks pass;
+  Linux `sh -n` passed against the frozen revision on 2026-08-25.)
 - [x] The fringe-stability review passes: the connectors, the shared bridge, and the extension
   changed only where an already-real process boundary required it, and the extension remains
   policy-free. (Reviewed on the frozen revision: the batch touches exactly
   `bridge/src/client.rs` and `mcp-connector/src/service_session.rs` at the service handshake
   boundary; browser-connector and extension diffs are empty.)
-- [ ] Fresh isolated workspace build and process, CLI, PowerShell, policy, and workbench journeys
-  pass on both Windows and Linux. (Windows passes; Linux runs via the coordination lane.)
-- [x] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
+- [x] Fresh isolated workspace build and process, CLI, PowerShell, policy, and workbench journeys
+  pass on both Windows and Linux. (Linux passed against exact isolated binaries on 2026-08-25. Its
+  custom-target run also found that `release-preflight.ps1` restores `GHOSTLIGHT_BIN_DIR` before
+  queued journeys execute; the dated evidence distinguishes the green product result from that
+  frozen runner defect.)
+- [ ] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
   end to end against the deployed release graph, including the desk-stage dialog beats. Rerun it
   whenever an input-path, extension, or browser-relay batch lands: automated suites have missed
   page-state interactions that this rehearsal catches (foundry press_key and desk-bell defects,
   2026-08-24). (Ran green on the deployed frozen graph, 2026-08-25 UTC: full story including
   press-key beats, off-domain refusal, replay save/erase, sequences, flow, history, and both
-  desk-bell dialog dispositions.)
+  desk-bell dialog dispositions.) The Linux run also passed all 41 scripted beats on 2026-08-25,
+  but reconciliation found that both runners omit the new 24th tool, `policy_explain`, while
+  claiming `Whole catalog rehearsed`. A separate live call passed. Owner disposition is required
+  before this literal gate can close.
 - [x] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
   warnings are rechecked against the frozen graph rather than assumed. (Proven locally
   2026-08-25 UTC: `cargo deny check bans licenses sources` ok; `cargo audit` exits zero with
@@ -168,7 +174,8 @@ Linux.
   readable, links valid, version aligned, ASCII exceptions fixed at 25, all 1,388 recovery entries
   and 34 Lightbox scenarios dispositioned.)
 
-Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md).
+Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md)
+and [2026-08-25 frozen-source CachyOS verification](testing/frozen-source-cachyos-verification-2026-08-25.md).
 
 Pre-freeze evidence: [2026-08-17 local release preflight](testing/release-preflight-2026-08-17.md)
 passed every locally runnable source check. G1 remains open until both operating-system passes

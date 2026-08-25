@@ -29,10 +29,15 @@ ADR-0105 amendment). G1's Windows half passed: full preflight
 ([testing/release-preflight-2026-08-24.md](testing/release-preflight-2026-08-24.md)), fringe-stability
 review, and a live whole-catalog foundry run against the redeployed frozen graph. The pending
 STAGED_PUBLISH store review continues to cover the candidate bytes (`extension/` unchanged since
-`70869631`). Open for G1: the Linux lane, dispatched to linux-codex via coordination message
-[0021] against the frozen revision with the freeze rule that defects are documented BLOCKED, not
-fixed. Then G2 assembles and takes custody, and the environment lanes follow. Live authority swaps
-go through scripts/dev-loop.ps1 only.
+`70869631`). The Linux frozen-source and visible-browser work passed on CachyOS: exact source gates,
+an optimized revision-qualified user candidate, all 41 Foundry beats, and a separate successful
+`policy_explain` call. The lane remains BLOCKED pending owner disposition of three frozen
+release-tooling findings: custom preflight targets do not reach the queued journeys, the optional
+dependency stage contradicts the authoritative split, and the Foundry scripts omit the new 24th
+tool while claiming the whole catalog. See
+[the dated Linux evidence](testing/frozen-source-cachyos-verification-2026-08-25.md). Then G2
+assembles and takes custody, and the environment lanes follow. Live authority swaps go through
+scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
 
