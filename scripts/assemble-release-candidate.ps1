@@ -178,7 +178,8 @@ $expectedComponents = @(
     "ghostlight",
     "ghostlight-bridge",
     "ghostlight-browser-connector",
-    "ghostlight-mcp-connector"
+    "ghostlight-mcp-connector",
+    "ghostlight-win-peer"
 )
 $observedComponents = [System.Collections.Generic.List[string]]::new()
 foreach ($path in $SbomPath) {
