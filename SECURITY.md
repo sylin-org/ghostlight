@@ -23,8 +23,10 @@ quarantined reference material is out of scope.
 ## What to expect from the product
 
 Ghostlight is local-first: it never phones home and carries no telemetry. Network traffic is the
-browser activity the user requested. Audit and configured authority are local files; the runtime
-does not fetch policy or send audit. The extension holds no policy logic, the desktop WebView owns
+browser activity the user requested, plus one explicit exception: when an administrator configures
+it, a signed managed-authority fetch from the organization's own file or HTTPS source, which never
+contacts Ghostlight or another vendor endpoint. Audit is a local file and is never uploaded. The
+extension holds no policy logic, the desktop WebView owns
 no product state, and enforcement and audit live in the orchestrator. License state never changes
 behavior.
 

@@ -16,8 +16,9 @@ reports are handled and on what (best-effort) timelines.
 The single most important continuity property is a design one, not a staffing one:
 
 - **The runtime never phones home** and carries no telemetry. Network traffic is limited to the
-  browser activity the user requested. Audit is a local file, and managed authority is a locally
-  provisioned file; Ghostlight does not fetch either from a vendor or organization service.
+  browser activity the user requested and, when an administrator explicitly configures it, a signed
+  managed-authority fetch from the organization's own file or HTTPS source. Audit is a local file
+  and is never uploaded; no managed authority is ever fetched from a Ghostlight or vendor endpoint.
 - **License state never changes behavior.** Ghostlight runs identically whether or not anyone ever
   pays, and whether or not the maintainer is active (ADR-0028 Decision 1).
 
