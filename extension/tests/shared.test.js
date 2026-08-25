@@ -367,8 +367,7 @@ test("browser actions return the subject in the effect receipt without a describ
     /sendResponse\(\{ ok: true, result: \{ filled_count: message\.fields\.length, submitted: Boolean\(submitElement\) \} \}\)[\s\S]*?submitElement\.click\(\)/,
     "the fill reply must cross to the worker before the verified submit runs"
   );
-  assert.match(content, /source_subject: actionSubject\(source\)/);
-  assert.match(content, /destination_subject: actionSubject\(destination\)/);
+  assert.match(content, /kind === "box"[\s\S]*?rectangle: viewportRectangle\(element\), subject: actionSubject\(element\)/);
   assert.match(worker, /outcome: "activated"[\s\S]*?subject: result\.subject/);
   assert.match(worker, /outcome: "typed"[\s\S]*?subject: target\.subject/);
   assert.match(worker, /outcome: "dragged"[\s\S]*?source_subject: sourceSubject[\s\S]*?destination_subject: destinationSubject/);

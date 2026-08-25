@@ -2,6 +2,10 @@
   "use strict";
 
   const shared = globalThis.GhostlightShared;
+  // Frame transparency (ADR-0138): this instance may live in an embedded frame. Perpetual
+  // visuals belong to the top document only; target-anchored transients render wherever
+  // their element lives, because that is what the person should see.
+  const IS_TOP = window.self === window.top;
   const ACTIONABLE_SELECTOR = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
   const locators = new Map();
   const reverse = new WeakMap();
@@ -282,16 +286,6 @@
     element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 
-  function geometry(element) {
-    const rect = element.getBoundingClientRect();
-    return {
-      x: rect.left + window.scrollX,
-      y: rect.top + window.scrollY,
-      width: rect.width,
-      height: rect.height
-    };
-  }
-
   function requireActionable(element, intent) {
     if (!element.isConnected) throw new Error("stale browser locator");
     const style = getComputedStyle(element);
@@ -415,6 +409,11 @@
       }
       return false;
     }
+    // Perpetual state is a top-document decision; embedded frames acknowledge and ignore.
+    if (!IS_TOP && (message.kind === "managed_scope" || message.kind === "recording_state" || message.kind === "runtime_state")) {
+      sendResponse({ ok: true, result: { gated: true } });
+      return false;
+    }
     Promise.resolve().then(async () => {
       if (message.kind === "read_text") {
         let whole;
@@ -442,7 +441,8 @@
         dropTarget.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer }));
         return { uploaded_count: message.files.length, uploaded_bytes: message.files.reduce((sum, file) => sum + file.size, 0) };
       }
-      if (message.kind === "geometry") return geometry(resolve(message.locator));
+      if (message.kind === "box") { const element = requireActionable(resolve(message.locator), "box"); return { rectangle: viewportRectangle(element), subject: actionSubject(element) }; }
+      if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
       if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "scroll") {
@@ -472,13 +472,15 @@
         return { x, y, subject: subjectAtViewportPoint(x, y) };
       }
       if (message.kind === "hover") { const element = requireActionable(resolve(message.locator), "hover"); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { rectangle: viewportRectangle(element), subject: actionSubject(element) }; }
-      if (message.kind === "drag_geometry") { const source = requireActionable(resolve(message.source_locator), "drag"); const destination = requireActionable(resolve(message.destination_locator), "drop"); source.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); return { source: viewportRectangle(source), destination: viewportRectangle(destination), source_subject: actionSubject(source), destination_subject: actionSubject(destination) }; }
       if (message.kind === "drag_observation_arm") return armDragObservation();
       if (message.kind === "drag_observation_status") return dragObservationStatus();
       if (message.kind === "drag_observation_finish") return finishDragObservation();
       if (message.kind === "upload_files") { const element = resolve(message.locator); const subject = actionSubject(element); return { ...uploadFiles(element, message.files), subject }; }
       if (message.kind === "observe") return observe(message);
-      if (message.kind === "present") return { presented: renderPresentation(message.signal, message.preferences) };
+      if (message.kind === "present") {
+        if (!IS_TOP && !message.signal?.locator) return { presented: false };
+        return { presented: renderPresentation(message.signal, message.preferences) };
+      }
       if (message.kind === "managed_scope") { globalThis.GhostlightPresentation.setManaged(message.active); return { managed: Boolean(message.active) }; }
       if (message.kind === "presentation_visibility") { globalThis.GhostlightPresentation.setHidden(message.hidden); return { hidden: Boolean(message.hidden) }; }
       if (message.kind === "recording_state") { globalThis.GhostlightPresentation.setRecording(message.active); return { recording: Boolean(message.active) }; }

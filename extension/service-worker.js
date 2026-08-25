@@ -1,7 +1,8 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/debugger.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/debugger.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
+const frames = globalThis.GhostlightFrames;
 const screenshotApi = globalThis.GhostlightScreenshot;
 const scriptEvaluator = globalThis.GhostlightScriptEvaluator;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
@@ -28,6 +29,9 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
 const navigationWatchers = new Map();
 const dragInterceptions = new Map();
 const cancelled = new Set();
+// The per-frame semantic match cap lives in the content script; this is the same ceiling
+// applied to the merged cross-frame result so embedded frames cannot outbid the top one.
+const QUERY_SEMANTIC_CAP = 8;
 const beforeUnloadAcceptors = new Map();
 const activity = new Map();
 const topology = globalThis.GhostlightTopology.create(chrome, stateApi.TOPOLOGY_KEY);
@@ -514,28 +518,64 @@ async function dispatch(request) {
     return { outcome: "text", tab_id: command.tab_id, ...result };
   }
   if (command.command === "inspect") {
-    const result = await content(command.tab_id, { kind: "inspect", inspect_kind: command.kind, max_items: command.max_items });
-    return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };
+    const targets = await collectTargets(command.tab_id, { kind: "inspect", inspect_kind: command.kind, max_items: command.max_items }, command.max_items);
+    return { outcome: "targets", tab_id: command.tab_id, targets };
   }
   if (command.command === "read_document") {
-    const result = await content(command.tab_id, { kind: "read_text", locator: null, mode: command.mode, max_chars: command.max_chars });
-    return { outcome: "text", tab_id: command.tab_id, ...result };
+    if (command.mode === "article") {
+      const result = await content(command.tab_id, { kind: "read_text", locator: null, mode: command.mode, max_chars: command.max_chars });
+      return { outcome: "text", tab_id: command.tab_id, ...result };
+    }
+    // Visible text is a page-wide fact once embedded frames exist. Sections join in frame
+    // order; title and url stay the top document's identity.
+    const frameIds = await httpFrameIds(command.tab_id);
+    const settled = await Promise.allSettled(frameIds.map((frameId) =>
+      contentIn(command.tab_id, frameId, { kind: "read_text", locator: null, mode: "visible", max_chars: command.max_chars })));
+    const sections = [];
+    let top = null;
+    let anyTruncated = false;
+    settled.forEach((entry, index) => {
+      if (entry.status !== "fulfilled" || !entry.value) return;
+      if (frameIds[index] === frames.TOP_FRAME_ID) top = entry.value;
+      if (typeof entry.value.text === "string" && entry.value.text.trim()) sections.push(entry.value.text);
+      if (entry.value.truncated) anyTruncated = true;
+    });
+    const combined = sections.join("\n\n");
+    return {
+      outcome: "text",
+      tab_id: command.tab_id,
+      text: combined.slice(0, command.max_chars),
+      truncated: anyTruncated || combined.length > command.max_chars,
+      title: shared.bounded(top?.title, 500),
+      url: top?.url ?? ""
+    };
   }
   if (command.command === "inspect_tree") {
     const result = await content(command.tab_id, { kind: "inspect_tree", locator: command.locator, max_depth: command.max_depth });
     return { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify(result.tree), truncated: result.truncated };
   }
   if (command.command === "find") {
-    const result = await content(command.tab_id, { kind: "find", text: command.text, find_kind: command.kind, max_results: command.max_results });
-    return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };
+    const targets = await collectTargets(command.tab_id, { kind: "find", text: command.text, find_kind: command.kind, max_results: command.max_results }, command.max_results);
+    return { outcome: "targets", tab_id: command.tab_id, targets };
   }
   if (command.command === "describe_targets") {
-    const result = await content(command.tab_id, { kind: "describe", locators: command.locators });
-    return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
+    const groups = frames.groupLocators(command.locators);
+    const targets = [];
+    for (const [frameId, entries] of groups) {
+      const result = await contentIn(command.tab_id, frameId, { kind: "describe", locators: entries.map((entry) => entry.local) });
+      for (const target of result.targets ?? []) {
+        targets.push({ ...target, locator: frames.scopedLocator(frameId, target.locator) });
+      }
+    }
+    return { outcome: "targets_described", tab_id: command.tab_id, targets };
   }
   if (command.command === "query_semantic") {
-    const result = await content(command.tab_id, { kind: "query_semantic", name: command.name, role: command.role, exact: command.exact, form_scope: command.form_scope });
-    return { outcome: "targets", tab_id: command.tab_id, targets: result.targets };
+    const targets = await collectTargets(
+      command.tab_id,
+      { kind: "query_semantic", name: command.name, role: command.role, exact: command.exact, form_scope: command.form_scope },
+      QUERY_SEMANTIC_CAP
+    );
+    return { outcome: "targets", tab_id: command.tab_id, targets };
   }
   if (command.command === "screenshot") return screenshot(command);
   if (command.command === "screenshot_region") return screenshot(command);
@@ -546,7 +586,14 @@ async function dispatch(request) {
   if (command.command === "wheel_at") return wheelAt(request.correlation, command);
   if (command.command === "scroll") {
     const result = await content(command.tab_id, { kind: "scroll", locator: command.locator, direction: command.direction, amount: command.amount });
-    return { outcome: "scrolled", tab_id: command.tab_id, x: result.x, y: result.y, subject: result.subject };
+    // A scroll-into-view inside an embedded frame reports where the TAB ended up, so the
+    // outcome keeps its page-level meaning instead of leaking child scroll offsets.
+    let position = result;
+    if (frames.frameOf(command.locator) !== null) {
+      const top = await contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "scroll_offset" }, true);
+      position = top ?? result;
+    }
+    return { outcome: "scrolled", tab_id: command.tab_id, x: position.x, y: position.y, subject: result.subject };
   }
   if (command.command === "set_zoom") {
     await chrome.tabs.setZoom(command.tab_id, command.zoom);
@@ -559,7 +606,7 @@ async function dispatch(request) {
   if (command.command === "type_text") return typeText(request.correlation, command);
   if (command.command === "type_focused") return typeFocused(request.correlation, command);
   if (command.command === "describe_focused") {
-    const result = await content(command.tab_id, { kind: "describe_focused" });
+    const result = await firstFrameAnswer(command.tab_id, { kind: "describe_focused" });
     return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
   }
   if (command.command === "press_key") return pressKey(request.correlation, command);
@@ -572,7 +619,7 @@ async function dispatch(request) {
   if (command.command === "drop_image_at") return dropImageAt(request.correlation, command);
   if (command.command === "evaluate_script") return evaluateScript(request.correlation, command);
   if (command.command === "observe") {
-    const result = await content(command.tab_id, { kind: "observe", condition: command.condition, value: command.value, locator: command.locator, timeout_ms: command.timeout_ms });
+    const result = await observeAcrossFrames(command);
     return { outcome: "observed", tab_id: command.tab_id, ...result };
   }
   if (command.command === "inspect_dialog") return inspectDialog(command.tab_id);
@@ -618,6 +665,15 @@ async function deferPresentation(workspace, tabId, signal) {
   publishUiState();
 }
 
+// Presentation rides the same routing as actions: a target-anchored effect renders in the
+// frame that owns the target, with its locator unscoped back to that frame's registry;
+// page-level effects belong to the top document.
+function presentMessage(tabId, signal, prefs) {
+  const frameId = frames.frameOf(signal.locator) ?? frames.TOP_FRAME_ID;
+  const localSignal = frames.frameOf(signal.locator) === null ? signal : { ...signal, locator: frames.localOf(signal.locator) };
+  return { frameId, message: { kind: "present", signal: localSignal, preferences: prefs } };
+}
+
 async function deliverPresentation(workspace, signal) {
   const tabId = await presentationTab(workspace, signal);
   if (!tabId) return false;
@@ -625,7 +681,8 @@ async function deliverPresentation(workspace, signal) {
     await deferPresentation(workspace, tabId, signal);
     return false;
   }
-  const result = await content(tabId, { kind: "present", signal, preferences }, true);
+  const routed = presentMessage(tabId, signal, preferences);
+  const result = await contentIn(tabId, routed.frameId, routed.message, true);
   if (result.presented) {
     if (presentationQueue.forget(tabId)) {
       await persistPresentationQueue();
@@ -640,7 +697,8 @@ async function deliverPresentation(workspace, signal) {
 async function flushPendingPresentation(tabId) {
   const pending = presentationQueue.get(tabId);
   if (!pending || !(await tabIsVisible(tabId))) return false;
-  const result = await content(tabId, { kind: "present", signal: pending.signal, preferences }, true);
+  const routed = presentMessage(tabId, pending.signal, preferences);
+  const result = await contentIn(tabId, routed.frameId, routed.message, true);
   if (!result.presented) return false;
   presentationQueue.forget(tabId);
   await persistPresentationQueue();
@@ -710,7 +768,7 @@ async function interruptAllRecordings(reason) {
 
 async function captureRecordingFrame(state, frameKind) {
   await ensureDebugger(state.tabId);
-  await content(state.tabId, { kind: "presentation_visibility", hidden: true }, true);
+  await contentAll(state.tabId, { kind: "presentation_visibility", hidden: true });
   try {
     const metrics = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
@@ -734,7 +792,7 @@ async function captureRecordingFrame(state, frameKind) {
     }
     return recording.append(state.tabId, capture.data, frameKind, Date.now());
   } finally {
-    await content(state.tabId, { kind: "presentation_visibility", hidden: false }, true);
+    await contentAll(state.tabId, { kind: "presentation_visibility", hidden: false });
     await detachDebugger(state.tabId);
   }
 }
@@ -931,19 +989,101 @@ async function exportRecording(workspace, command) {
   }
 }
 
-async function content(tabId, message, optional = false) {
+// Frame-aware content routing (ADR-0138). Every frame instance answers the same message
+// vocabulary; this seam decides which instance hears a command and folds per-frame results
+// back into the one document the model sees. Locator-bearing commands route to the owning
+// frame; document-wide reads broadcast in stable frame order.
+async function httpFrameIds(tabId) {
+  try {
+    const all = await chrome.webNavigation.getAllFrames({ tabId });
+    return (all ?? [])
+      .filter((frame) => /^https?:/i.test(frame.url ?? ""))
+      .map((frame) => frame.frameId)
+      .sort((left, right) => left - right);
+  } catch (_error) {
+    return [frames.TOP_FRAME_ID];
+  }
+}
+
+async function contentIn(tabId, frameId, message, optional = false) {
   if (!tabId) {
     if (optional) return { presented: false };
     throw new Error("browser primitive requires a tab");
   }
   try {
-    const response = await chrome.tabs.sendMessage(tabId, message);
+    const response = await chrome.tabs.sendMessage(tabId, message, { frameId });
     if (!response?.ok) throw new Error(response?.error || "content primitive failed");
     return response.result;
   } catch (error) {
     if (optional) return { presented: false };
     throw error;
   }
+}
+
+async function content(tabId, message, optional = false) {
+  const locatorFrame = frames.frameOf(message.locator);
+  if (locatorFrame !== null) {
+    const local = { ...message, locator: frames.localOf(message.locator) };
+    return contentIn(tabId, locatorFrame, local, optional);
+  }
+  return contentIn(tabId, frames.TOP_FRAME_ID, message, optional);
+}
+
+// Sends one read-only message to every http(s) frame and merges fulfilled target lists in
+// stable frame order under the caller's ceiling. A frame that is mid-navigation or gone
+// simply contributes nothing, exactly like an empty document would.
+async function collectTargets(tabId, message, maximum) {
+  const frameIds = await httpFrameIds(tabId);
+  const settled = await Promise.allSettled(frameIds.map((frameId) => contentIn(tabId, frameId, message)));
+  const perFrame = {};
+  settled.forEach((entry, index) => {
+    if (entry.status === "fulfilled" && Array.isArray(entry.value?.targets)) {
+      perFrame[frameIds[index]] = frames.scopeTargets(frameIds[index], entry.value.targets);
+    }
+  });
+  return frames.mergeTargets(perFrame, maximum);
+}
+
+// Viewport-space translation for pointer work over embedded targets. One hop through CDP's
+// owner-box lookup composes the child viewport into tab space; deeper out-of-process
+// nesting refuses by name instead of clicking the wrong pixel. Self-paired on the
+// debugger lease so it nests safely inside commands that hold their own attachment.
+async function frameViewportOffset(tabId, frameId) {
+  if (!frameId) return { x: 0, y: 0 };
+  await ensureDebugger(tabId);
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "DOM.enable").catch(() => {});
+    const owner = await chrome.debugger.sendCommand({ tabId }, "DOM.getFrameOwner", { frameId });
+    const quads = await chrome.debugger.sendCommand({ tabId }, "DOM.getContentQuads", { backendNodeId: owner.backendNodeId });
+    const quad = quads?.quads?.[0];
+    if (!Array.isArray(quad) || quad.length < 2) throw new Error("embedded frame box was unavailable");
+    return { x: quad[0], y: quad[1] };
+  } catch (_error) {
+    throw new Error("target sits inside a nested embedded frame whose geometry cannot be translated");
+  } finally {
+    await detachDebugger(tabId);
+  }
+}
+
+// Broadcasts one message to every http(s) frame and ignores individual failures. Used for
+// state that every frame with visuals must hear, such as capture suppression.
+async function contentAll(tabId, message) {
+  const frameIds = await httpFrameIds(tabId);
+  await Promise.allSettled(frameIds.map((frameId) => contentIn(tabId, frameId, message, true)));
+}
+
+// Drag events land wherever the pointer packets land, which may be any frame, so the
+// observation lifecycle is a broadcast and its status is the first frame reporting a
+// started drag.
+async function dragObservationStatus(tabId) {
+  const frameIds = await httpFrameIds(tabId);
+  const settled = await Promise.allSettled(frameIds.map((frameId) => contentIn(tabId, frameId, { kind: "drag_observation_status" })));
+  for (const entry of settled) {
+    if (entry.status === "fulfilled" && entry.value?.started) {
+      return { started: true, cancelled: Boolean(entry.value.cancelled) };
+    }
+  }
+  return { started: false, cancelled: false };
 }
 
 async function setRecordingPresentation(tabId, active) {
@@ -1092,6 +1232,55 @@ async function reload(correlation, command) {
   }
 }
 
+// Wait conditions split by where their truth lives: readiness and URL belong to the top
+// document, a target belongs to its owning frame, and text is a page-wide fact because an
+// embedded form's completion sentence is as real as the top page's.
+// Browser focus lives in exactly one frame but nothing cheap names it from outside, so
+// focused-control primitives probe frames in stable order and take the first answer.
+async function firstFrameAnswer(tabId, message) {
+  const frameIds = await httpFrameIds(tabId);
+  let lastError = null;
+  for (const frameId of frameIds) {
+    try {
+      return await contentIn(tabId, frameId, message);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("no editable control is focused");
+}
+
+async function observeAcrossFrames(command) {
+  if (command.condition === "load_ready" || command.condition === "url_contains") {
+    return contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms });
+  }
+  if (command.condition === "target_present" || command.condition === "target_absent") {
+    return contentIn(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID, {
+      kind: "observe",
+      condition: command.condition,
+      value: command.value,
+      locator: frames.localOf(command.locator),
+      timeout_ms: command.timeout_ms
+    });
+  }
+  const wantsPresence = command.condition === "text_present";
+  const frameIds = await httpFrameIds(command.tab_id);
+  const settled = await Promise.all(frameIds.map((frameId) =>
+    contentIn(
+      command.tab_id,
+      frameId,
+      { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms }
+    ).catch(() => ({ satisfied: !wantsPresence, elapsed_ms: 0 }))
+  ));
+  const satisfied = wantsPresence ? settled.some((entry) => entry.satisfied) : settled.every((entry) => entry.satisfied);
+  let readiness = "loading";
+  try {
+    const top = await contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: "load_ready", timeout_ms: 0 });
+    readiness = top?.readiness ?? readiness;
+  } catch (_error) { /* an absent frame leaves readiness unknown-loading */ }
+  return { satisfied, elapsed_ms: Math.max(0, ...settled.map((entry) => entry.elapsed_ms ?? 0)), readiness };
+}
+
 async function activate(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
@@ -1111,11 +1300,35 @@ async function fill(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    const result = await content(command.tab_id, { kind: "fill", fields: command.fields, submit_locator: command.submit_locator });
-    await new Promise((resolve) => setTimeout(resolve, result.submitted ? 250 : 25));
+    // Grouped fill (ADR-0138): fields route to their owning frames in first-appearance
+    // order. A submit is only honored where its containment can be proven against a
+    // resolved field's form, so an orphan submit refuses before any dispatch.
+    const submitFrame = command.submit_locator ? frames.frameOf(command.submit_locator) : null;
+    if (command.submit_locator && (submitFrame === null || !frames.groupLocators(command.fields.map((field) => field.locator)).has(submitFrame))) {
+      throw new Error("submit control is not contained in the resolved form");
+    }
+    const groups = new Map();
+    for (const field of command.fields) {
+      const frameId = frames.frameOf(field.locator);
+      if (frameId === null) throw new Error("field target is not frame-scoped");
+      if (!groups.has(frameId)) groups.set(frameId, []);
+      groups.get(frameId).push({ ...field, locator: frames.localOf(field.locator) });
+    }
+    let filledCount = 0;
+    let submitted = false;
+    for (const [frameId, fields] of groups) {
+      const result = await contentIn(command.tab_id, frameId, {
+        kind: "fill",
+        fields,
+        submit_locator: submitFrame === frameId ? frames.localOf(command.submit_locator) : undefined
+      });
+      filledCount += result.filled_count;
+      submitted = submitted || Boolean(result.submitted);
+    }
+    await new Promise((resolve) => setTimeout(resolve, submitted ? 250 : 25));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    return { outcome: "filled", tab: physicalTab(tab), filled_count: result.filled_count, submitted: result.submitted, committed_urls: commits };
+    return { outcome: "filled", tab: physicalTab(tab), filled_count: filledCount, submitted, committed_urls: commits };
   } catch (error) {
     error.effectUnknown = true;
     throw error;
@@ -1150,7 +1363,7 @@ async function dispatchDrag(tabId, start, end) {
   let pressed = false;
   let released = false;
   const interception = beginDragInterception(tabId);
-  await content(tabId, { kind: "drag_observation_arm" });
+  await contentAll(tabId, { kind: "drag_observation_arm" });
   try {
     try {
       await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: true });
@@ -1166,7 +1379,7 @@ async function dispatchDrag(tabId, start, end) {
     if (interceptEnabled) {
       for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
         await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
-        const observed = await content(tabId, { kind: "drag_observation_status" });
+        const observed = await dragObservationStatus(tabId);
         if (!observed.started) continue;
         nextHeldPacket += 1;
         await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
@@ -1202,7 +1415,7 @@ async function dispatchDrag(tabId, start, end) {
     released = true;
   } finally {
     cancelDragInterception(tabId);
-    await content(tabId, { kind: "drag_observation_finish" }, true);
+    await contentAll(tabId, { kind: "drag_observation_finish" });
     if (interceptEnabled) {
       await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
     }
@@ -1252,21 +1465,30 @@ async function dragWithPoints(correlation, tabId, start, end, sourceSubject = nu
   }
 }
 
+// Drag endpoints may live in different frames. Each endpoint is scrolled into view inside
+// its own frame first, then both boxes are read through the scroll-free "box" primitive
+// AFTER all scrolling, so neither rectangle is stale. Each composes into tab space with
+// its own frame offset.
 async function dragLocators(correlation, command) {
-  const geometry = await content(command.tab_id, {
-    kind: "drag_geometry",
-    source_locator: command.source_locator,
-    destination_locator: command.destination_locator
+  await content(command.tab_id, { kind: "hover", locator: command.destination_locator });
+  await content(command.tab_id, { kind: "hover", locator: command.source_locator });
+  const source = await content(command.tab_id, { kind: "box", locator: command.source_locator });
+  const destination = await content(command.tab_id, { kind: "box", locator: command.destination_locator });
+  const sourceOffset = await frameViewportOffset(command.tab_id, frames.frameOf(command.source_locator) ?? frames.TOP_FRAME_ID);
+  const destinationOffset = await frameViewportOffset(command.tab_id, frames.frameOf(command.destination_locator) ?? frames.TOP_FRAME_ID);
+  const pointOf = (rectangle, offset) => ({
+    x: rectangle.left + rectangle.width / 2 + offset.x,
+    y: rectangle.top + rectangle.height / 2 + offset.y
   });
   await ensureDebugger(command.tab_id);
   try {
     return await dragWithPoints(
       correlation,
       command.tab_id,
-      { x: geometry.source.left + geometry.source.width / 2, y: geometry.source.top + geometry.source.height / 2 },
-      { x: geometry.destination.left + geometry.destination.width / 2, y: geometry.destination.top + geometry.destination.height / 2 },
-      geometry.source_subject,
-      geometry.destination_subject
+      pointOf(source.rectangle, sourceOffset),
+      pointOf(destination.rectangle, destinationOffset),
+      source.subject,
+      destination.subject
     );
   } finally {
     await detachDebugger(command.tab_id);
@@ -1319,7 +1541,7 @@ async function detachDebugger(tabId) {
 
 async function screenshot(command) {
   await ensureDebugger(command.tab_id);
-  await content(command.tab_id, { kind: "presentation_visibility", hidden: true }, true);
+  await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
   try {
     const metrics = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
@@ -1330,8 +1552,14 @@ async function screenshot(command) {
       clip = screenshotApi.regionClip(command.region);
       scope = "region";
     } else if (command.locator) {
-      const rect = await content(command.tab_id, { kind: "geometry", locator: command.locator });
-      clip = screenshotApi.ordinaryClip(Math.max(0, rect.x), Math.max(0, rect.y), Math.max(1, rect.width), Math.max(1, rect.height));
+      // Target clips compose the owning frame's viewport box into top-page coordinates
+      // (ADR-0138): an embedded element's own scroll offsets never reach this clip.
+      const frameId = frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID;
+      const box = await contentIn(command.tab_id, frameId, { kind: "box", locator: frames.localOf(command.locator) });
+      const offset = await frameViewportOffset(command.tab_id, frameId);
+      const left = Math.max(0, visual.pageX + box.rectangle.left + offset.x);
+      const top = Math.max(0, visual.pageY + box.rectangle.top + offset.y);
+      clip = screenshotApi.ordinaryClip(left, top, Math.max(1, box.rectangle.width), Math.max(1, box.rectangle.height));
       scope = "target";
     } else if (command.full_page) {
       const size = metrics.cssContentSize || metrics.contentSize;
@@ -1368,7 +1596,7 @@ async function screenshot(command) {
       }
     };
   } finally {
-    await content(command.tab_id, { kind: "presentation_visibility", hidden: false }, true);
+    await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false });
     await detachDebugger(command.tab_id);
   }
 }
@@ -1459,12 +1687,13 @@ async function activatePoint(correlation, command) {
 
 async function hoverLocator(command) {
   const geometry = await content(command.tab_id, { kind: "hover", locator: command.locator });
+  const offset = await frameViewportOffset(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID);
   await ensureDebugger(command.tab_id);
   try {
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
-      x: geometry.rectangle.left + geometry.rectangle.width / 2,
-      y: geometry.rectangle.top + geometry.rectangle.height / 2
+      x: geometry.rectangle.left + geometry.rectangle.width / 2 + offset.x,
+      y: geometry.rectangle.top + geometry.rectangle.height / 2 + offset.y
     });
     return { outcome: "hovered", tab_id: command.tab_id, subject: geometry.subject };
   } finally {
@@ -1540,7 +1769,7 @@ async function typeFocused(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    if (command.clear_first) await content(command.tab_id, { kind: "clear_focused" });
+    if (command.clear_first) await firstFrameAnswer(command.tab_id, { kind: "clear_focused" });
     await ensureDebugger(command.tab_id);
     await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);

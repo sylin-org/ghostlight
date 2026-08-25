@@ -168,6 +168,10 @@ function contentHarness() {
     input,
     delays,
     send,
+    setScroll(x, y) {
+      context.scrollX = x;
+      context.scrollY = y;
+    },
     dispatchWindowEvent(type, event) { windowListeners.get(type)?.(event); },
     hasWindowListener(type) { return windowListeners.has(type); }
   };
@@ -415,4 +419,29 @@ test("drag observation retains only native lifecycle booleans and cleans up", as
   assert.equal(finished.result.started, true);
   assert.equal(finished.result.cancelled, true);
   assert.equal(harness.hasWindowListener("dragstart"), false);
+});
+
+test("box reports the live viewport rectangle without scrolling", async () => {
+  const harness = contentHarness();
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+
+  harness.input.hidden = false;
+  harness.input.setAttribute("aria-label", "Embed field");
+  const boxed = await harness.send({ kind: "box", locator });
+
+  assert.equal(boxed.ok, true);
+  assert.equal(boxed.result.rectangle.width, 100);
+  assert.equal(boxed.result.rectangle.height, 30);
+  assert.equal(boxed.result.subject.role, "textbox");
+  assert.equal(boxed.result.subject.name, "Embed field");
+});
+
+test("scroll_offset reports the frame's own scroll position", async () => {
+  const harness = contentHarness();
+  harness.setScroll(40, 120);
+  const offset = await harness.send({ kind: "scroll_offset" });
+  assert.equal(offset.ok, true);
+  assert.equal(offset.result.x, 40);
+  assert.equal(offset.result.y, 120);
 });
