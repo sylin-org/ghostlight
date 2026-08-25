@@ -356,10 +356,12 @@ Evidence: update the dated evaluation and reference-experience ledger.
 
 ### G9. Reconcile release-facing truth
 
-- [ ] Correct `STATUS.md` against the tree before any public wording is drawn from it. Two known
-  drifts: it describes three workbench destinations while the live tab row is At a glance,
-  Integrations, Status, Policy, and About; and it claims `main` is an ancestor of `dev`, which is no
-  longer true.
+- [ ] Correct `STATUS.md` against the tree before any public wording is drawn from it. The two
+  drifts named here on 2026-08-17 were re-verified against the tree and fixed on 2026-08-25: the
+  live tab row is At a glance, Integrations, Status, Policy, and About (the last
+  three-destination wording is gone), and `main` remains an ancestor of `dev` (verified by
+  `git merge-base --is-ancestor main dev`), so the G10 promotion is still a fast-forward. Re-run
+  both checks at G9 time rather than trusting this note.
 - [ ] Finalize the `1.0.0` changelog entry from `Unreleased`.
 - [ ] Finalize release notes, supported-platform wording, compatibility rows, install instructions,
   trust claims, and rollback language from observed candidate evidence.

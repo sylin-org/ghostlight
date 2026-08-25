@@ -1314,8 +1314,8 @@ test tab for direct closure.
 - Architecture: [`1.0/ARCHITECTURE.md`](1.0/ARCHITECTURE.md)
 - Acceptance: [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md)
 - Desktop decision: [`adr/0102-integrated-desktop-workbench.md`](adr/0102-integrated-desktop-workbench.md),
-  including its 2026-08-11 amendment for the live monitor, the published palette, and the
-  three-destination workbench.
+  including its 2026-08-11 amendment for the live monitor and the published palette; the tab row
+  now carries five destinations (At a glance, Integrations, Status, Policy, About).
 - Outcome language decision:
   [`adr/0103-language-owned-outcome-voice.md`](adr/0103-language-owned-outcome-voice.md).
 - Demand-start and single-engine decision:
