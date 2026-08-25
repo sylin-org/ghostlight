@@ -498,6 +498,9 @@ async function dispatch(request) {
   if (command.command === "reload") return reload(request.correlation, command);
   if (command.command === "close_tab") {
     if (await tabPreservationEnabled()) {
+      // A released close comes from a dead workspace: the person's interlock keeps the tab, and
+      // the tab is no longer owned by anything, so it becomes adoptable again (ADR-0137).
+      if (command.released) topology.forget(command.tab_id).catch(() => {});
       throw Object.assign(
         new Error("Ghostlight is preserving controlled tabs by local browser choice."),
         { code: "local_interlock" }

@@ -572,7 +572,12 @@ pub enum BrowserCommand {
     /// Reload a physical tab.
     Reload { tab_id: u64, bypass_cache: bool },
     /// Close a physical tab.
-    CloseTab { tab_id: u64 },
+    CloseTab {
+        tab_id: u64,
+        /// True when this close is a dead-workspace release; a refused close then unbinds.
+        #[serde(default)]
+        released: bool,
+    },
     /// Navigate, accepting only this navigation's own beforeunload prompt.
     NavigateDiscardingBeforeUnload { tab_id: u64, url: String },
     /// Read bounded useful text.

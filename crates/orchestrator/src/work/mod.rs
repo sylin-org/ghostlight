@@ -1117,6 +1117,7 @@ impl ApplicationExecutor {
             context.workspace.as_str(),
             BrowserCommand::CloseTab {
                 tab_id: tab.physical_id,
+                released: false,
             },
             deadline,
             &cancelled,

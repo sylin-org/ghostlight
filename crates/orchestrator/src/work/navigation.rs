@@ -643,6 +643,7 @@ impl ApplicationExecutor {
             context,
             BrowserCommand::CloseTab {
                 tab_id: selected.physical_id,
+                released: false,
             },
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == selected.physical_id => {

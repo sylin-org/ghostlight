@@ -532,6 +532,12 @@ test("model-driven close obeys the local preserve-tabs interlock", () => {
   const options = readFileSync(join(root, "options.html"), "utf8");
   assert.match(worker, /async function tabPreservationEnabled\(\)[\s\S]*?chrome\.storage\.local\.get\(stateApi\.PRESERVE_TABS_KEY\)/);
   assert.match(worker, /if \(await tabPreservationEnabled\(\)\)[\s\S]*?code: "local_interlock"[\s\S]*?chrome\.tabs\.remove/);
+  // A released close that the interlock refuses unbinds the tab, so the reuse ladder can adopt
+  // it later (ADR-0137).
+  assert.match(
+    worker,
+    /if \(command\.released\) topology\.forget\(command\.tab_id\)[\s\S]*?code: "local_interlock"/
+  );
   assert.match(options, /id="preserve-tabs"/);
   assert.match(options, /You can always close tabs yourself\./);
 });

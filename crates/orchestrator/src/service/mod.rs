@@ -656,7 +656,10 @@ fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn
         let _ = browser.call(
             target,
             workspace,
-            BrowserCommand::CloseTab { tab_id },
+            BrowserCommand::CloseTab {
+                tab_id,
+                released: true,
+            },
             Instant::now() + Duration::from_secs(2),
             &cancelled,
         );
@@ -1004,10 +1007,19 @@ mod tests {
             calls[1],
             BrowserCommand::ClearDiagnostics { tab_ids: vec![257] }
         );
-        assert_eq!(calls[2], BrowserCommand::CloseTab { tab_id: 1 });
+        assert_eq!(
+            calls[2],
+            BrowserCommand::CloseTab {
+                tab_id: 1,
+                released: true
+            }
+        );
         assert_eq!(
             calls.last(),
-            Some(&BrowserCommand::CloseTab { tab_id: 257 })
+            Some(&BrowserCommand::CloseTab {
+                tab_id: 257,
+                released: true
+            })
         );
     }
 }
