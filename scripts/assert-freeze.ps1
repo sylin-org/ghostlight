@@ -45,8 +45,24 @@ try {
     $resolved = (git rev-parse --verify "$Revision^{commit}").Trim()
 
     if ($resolved -ne $freeze.revision) {
-        Write-Host ("FAIL: revision mismatch. freeze={0} actual={1}" -f $freeze.revision, $resolved)
-        exit 1
+        # The freeze commit that carries docs/release/freeze.json necessarily lands after the
+        # frozen source revision, so HEAD may sit ahead of it -- as long as it is a descendant
+        # and no product or packaging path has moved. Docs-only descendants pass; any product
+        # diff reopens the freeze.
+        $ancestor = git merge-base --is-ancestor $freeze.revision $resolved 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ("FAIL: revision mismatch and not a descendant. freeze={0} actual={1}" -f $freeze.revision, $resolved)
+            exit 1
+        }
+        $productPaths = @("crates", "extension", "packaging", "examples", "site", "Cargo.toml", "Cargo.lock")
+        $changed = (git diff --name-only "$($freeze.revision)..$resolved" -- @productPaths) | Where-Object { $_ }
+        if ($changed) {
+            Write-Host ("FAIL: product or packaging paths changed since the frozen revision:")
+            $changed | ForEach-Object { Write-Host "  $_" }
+            exit 1
+        }
+        Write-Host ("Freeze binding verified: {0} (HEAD {1} is a docs-only descendant)" -f $freeze.revision, $resolved)
+        exit 0
     }
 
     $dirtyLines = (git status --porcelain | Measure-Object -Line).Lines
