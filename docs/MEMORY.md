@@ -202,6 +202,16 @@ Every one of these cost something to learn.
   intentional rewrite when it is really identity and release machinery. Root documents,
   `packaging/`, `scripts/`, and legal guards need an explicit main-vs-branch reconciliation before
   any rewrite is called complete (restored 2026-08-25).
+- **Two frame-id vocabularies do not translate; the parent's DOM is the truth.** CDP names frames
+  with strings, `chrome.webNavigation` with numbers, and the tab-level debugger session cannot see
+  out-of-process frames at all, so any bridge built on CDP identity silently covers only
+  same-process frames. The parent document's own DOM answers honestly: match the embed element by
+  URL, take its content-box origin, and compose offsets recursively (ADR-0138). One mechanism for
+  same-origin and cross-origin beats a fast path plus a fallback that fails exactly where the
+  fallback was for.
+- **An anchored effect without a live box renders nowhere.** A zero-size or hidden target resolves
+  to the frame origin, and inside an embedded frame the frame boundary clips the effect in half.
+  Suppression is the honest rendering of "nothing to point at."
 
 ## Where to look
 

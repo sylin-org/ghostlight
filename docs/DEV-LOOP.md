@@ -150,8 +150,8 @@ change.
 Run `ghostlight open` to restore the backgrounded workbench, open Status, and verify a compatible
 browser instance appears. Use a
 supported MCP client registration from MCP integrations, reconnect that client, and execute the
-journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo forms for visible
-form, upload, dialog, navigation, policy-denial, and screenshot work.
+journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo pages for visible
+form, embedded-frame form, upload, dialog, navigation, policy-denial, and screenshot work.
 
 Never treat a clean Ghostlight screenshot as evidence that presentation did not render: the
 extension intentionally hides its feedback layer while capturing page pixels.

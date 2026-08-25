@@ -22,6 +22,27 @@ evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 G0 and G1 closed on both hosts at frozen revision e7d8986b (Windows preflight, CachyOS verification, and runner-repair records under docs/testing/). The owner then reported real tab and group spam, directed an architectural fix over release ceremony, and dropped the freeze itself: we publish when we are done, and the freeze machinery now only pins whichever revision becomes the candidate. ADR-0137 landed the fix: duplicate same-title groups merge into the canonical group (self-healing existing pollution), and plain opens adopt the nearest unbound same-host tab -- new_tab and reuse never still create fresh -- with the summary saying Reused the example.com tab. when it happens. Found during live verification: workspace release never tells the extension, so reaped tabs stay bound in topology and the reuse ladder cannot adopt them -- the release path must notify the extension to forget the released tab ids (then reuse works end to end). That seam landed, the unpacked extension was reloaded, and a green foundry rerun demonstrated reuse live. The G2 candidate was built by release workflow run 32846030216 at revision 994b6c85 (product bytes identical to ADR-0137 commit 8779e11b; only CI tooling differs), and custody is held in two verified local copies -- see [candidate-custody-2026-08-25](testing/candidate-custody-2026-08-25.md). On 2026-08-25, with explicit owner authorization, the stale f7b9a6ad store review was canceled through publishers.items.cancelSubmission and replaced by the custody ZIP (sha256 9ae88e67...) submitted STAGED_PUBLISH; it is PENDING_REVIEW and the public listing still serves 0.8.0 -- see [extension-store-resubmission-2026-08-25](testing/extension-store-resubmission-2026-08-25.md). Next: the owner-run environment lanes -- G4 Ubuntu GNOME Wayland, G5 clean Windows, G7 public harnesses -- which install the reviewed adapter from the store once review completes, then the owner-authorization boundaries G8 through G10; lane runbooks and gate drafts are prepared in [gates-g4-g10-preparation-2026-08-25](release/gates-g4-g10-preparation-2026-08-25.md). Live authority swaps go through
 scripts/dev-loop.ps1 only.
 
+## Frame-transparent semantic layer (ADR-0138)
+
+The cross-origin frame deferral from ADR-0078 D8 is lifted. Content scripts run in every
+frame (`all_frames: true`); locators are frame-scoped at minting and stay opaque beyond the
+extension, so the bridge, orchestrator, tool schemas, and every Rust crate are untouched.
+Document-wide reads (`inspect`, `find`, `query_semantic`, visible-mode reads, text waits)
+aggregate across frames in stable order; `fill_form` groups fields by owning frame and
+proves a contained submit before clicking. Pointer geometry over embedded targets composes
+through parent-side embed boxes matched by embed URL -- no debugger attachment, and one
+mechanism for same-origin and cross-origin frames at any depth. Perpetual visuals stay
+top-frame only; target-anchored effects render inside the owning frame and are suppressed
+when the target has no live box. The public stage
+`https://sylin.org/ghostlight/demo/iframe/` (website commit `5693092`) hosts the practice
+journey. Proven live on the daily-Chrome authority with the reloaded unpacked extension:
+inspect listed all nine embedded controls, one `fill_form` call completed and submitted the
+frame's form, the frame-rendered completion sentence satisfied a text wait, and hover landed
+on the HubSpot "Project Name*" field inside signpath.org's genuine cross-origin iframe --
+the exact interaction that forced coordinate guessing before. Extension suite is 151 tests.
+Because extension bytes changed, the pending store review is stale against this source; the
+owner replaces it when ready (same procedure as the 2026-08-24 replacement).
+
 ## Published capability restoration
 
 The owner accepted [ADR-0133](adr/0133-behavioral-capability-restoration.md) after a direct
