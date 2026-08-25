@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-24.
+Last updated: 2026-08-25.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -12,12 +12,14 @@ nine-task handle-continuity batch are landed, gated, and proven live on Windows 
 verified on CachyOS (see tasks/demo-press-key-diagnosis/ and tasks/handle-continuity/).
 The 1.0.0 extension was rebuilt deterministically from foundry-sprint source, resubmitted
 to the Chrome Web Store (PENDING_REVIEW, STAGED_PUBLISH, sha256 f7b9a6ad...), and that
-review replaces the stale one -- see
+review replaced the stale one -- see
 [extension-store-submission-2026-08-24](testing/extension-store-submission-2026-08-24.md).
+That review was itself canceled and replaced by the custody candidate on 2026-08-25; the
+current submission is described below.
 Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
 evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
-G0 and G1 closed on both hosts at frozen revision e7d8986b (Windows preflight, CachyOS verification, and runner-repair records under docs/testing/). The owner then reported real tab and group spam, directed an architectural fix over release ceremony, and dropped the freeze itself: we publish when we are done, and the freeze machinery now only pins whichever revision becomes the candidate. ADR-0137 landed the fix: duplicate same-title groups merge into the canonical group (self-healing existing pollution), and plain opens adopt the nearest unbound same-host tab -- new_tab and reuse never still create fresh -- with the summary saying Reused the example.com tab. when it happens. Found during live verification: workspace release never tells the extension, so reaped tabs stay bound in topology and the reuse ladder cannot adopt them -- the release path must notify the extension to forget the released tab ids (then reuse works end to end). Pending: land that release-notification seam, reload the unpacked extension, a green foundry rerun demonstrating reuse live, then the G2 candidate build at the final revision. Live authority swaps go through
+G0 and G1 closed on both hosts at frozen revision e7d8986b (Windows preflight, CachyOS verification, and runner-repair records under docs/testing/). The owner then reported real tab and group spam, directed an architectural fix over release ceremony, and dropped the freeze itself: we publish when we are done, and the freeze machinery now only pins whichever revision becomes the candidate. ADR-0137 landed the fix: duplicate same-title groups merge into the canonical group (self-healing existing pollution), and plain opens adopt the nearest unbound same-host tab -- new_tab and reuse never still create fresh -- with the summary saying Reused the example.com tab. when it happens. Found during live verification: workspace release never tells the extension, so reaped tabs stay bound in topology and the reuse ladder cannot adopt them -- the release path must notify the extension to forget the released tab ids (then reuse works end to end). That seam landed, the unpacked extension was reloaded, and a green foundry rerun demonstrated reuse live. The G2 candidate was built by release workflow run 32846030216 at revision 994b6c85 (product bytes identical to ADR-0137 commit 8779e11b; only CI tooling differs), and custody is held in two verified local copies -- see [candidate-custody-2026-08-25](testing/candidate-custody-2026-08-25.md). On 2026-08-25, with explicit owner authorization, the stale f7b9a6ad store review was canceled through publishers.items.cancelSubmission and replaced by the custody ZIP (sha256 9ae88e67...) submitted STAGED_PUBLISH; it is PENDING_REVIEW and the public listing still serves 0.8.0 -- see [extension-store-resubmission-2026-08-25](testing/extension-store-resubmission-2026-08-25.md). Next: the owner-run environment lanes -- G4 Ubuntu GNOME Wayland, G5 clean Windows, G7 public harnesses -- which install the reviewed adapter from the store once review completes, then the owner-authorization boundaries G8 through G10. Live authority swaps go through
 scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
