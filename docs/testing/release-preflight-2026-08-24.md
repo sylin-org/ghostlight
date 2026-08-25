@@ -43,12 +43,25 @@ cancellation forwarding, and correlation). `crates/browser-connector` and `exten
 empty diff for the whole batch; the extension remains policy-free and byte-identical to the
 bytes under Chrome Web Store review.
 
+## Rows completed on this host after the runner
+
+Run against the same clean checkout of the frozen revision:
+
+- `scripts/check-repository-integrity.ps1`: 852 tracked files readable; local links valid;
+  source version 1.0.0 aligned; historical ASCII exceptions fixed at 25 named files with no new
+  exception; every extension manifest permission has exactly one store justification; capability
+  matrix green (21 COMPLETE, 4 SUPERSEDED).
+- `scripts/check-0.8-recovery.ps1`: all 1,388 inventory entries covered in 12 reviewed groups;
+  all 34 Lightbox scenarios explicitly dispositioned.
+- `scripts/check-release-access.ps1 -Online` (read-only pre-candidate inspection): GITHUB_AUTH
+  valid, NPM_AUTH valid, CHROME_WEB_STORE v2-item-valid; the five optional Chrome API values and
+  the two MCP Registry values present as names-and-states only. No credential value was read
+  into any output.
+
 ## Rows outside this runner
 
 | Row | Where it closes |
 | --- | --- |
-| Dependency license/ban/source/advisory detail | CI dependency gate on the frozen revision (G2 candidate run) |
-| Repository truth, documentation links, ASCII policy | CI repository-integrity job on the frozen revision |
-| Complete 0.8 recovery disposition | tracked matrix (green above) plus release-environment lanes in G4/G5 |
+| Dependency license/ban/source/advisory detail | CI dependency gate on the frozen revision (G2 candidate run); cargo-deny is not installed on this host |
 | Clean Windows/Linux install, upgrade, uninstall | release-environment machines, owner-run (G5/G4) |
 | shell syntax (`sh -n`) | Linux verification run of the frozen revision |

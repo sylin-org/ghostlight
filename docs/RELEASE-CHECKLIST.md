@@ -157,8 +157,10 @@ Linux.
   desk-bell dialog dispositions.)
 - [ ] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
   warnings are rechecked against the frozen graph rather than assumed.
-- [ ] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8
-  recovery disposition pass.
+- [x] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8
+  recovery disposition pass. (Proven locally on the frozen revision, 2026-08-25 UTC: 852 files
+  readable, links valid, version aligned, ASCII exceptions fixed at 25, all 1,388 recovery entries
+  and 34 Lightbox scenarios dispositioned.)
 
 Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md).
 
@@ -179,9 +181,11 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
 
 ### G2. Assemble, verify, and take custody of the candidate
 
-- [ ] Inspect release access before spending a candidate build, so a dead GitHub or npm credential
+- [x] Inspect release access before spending a candidate build, so a dead GitHub or npm credential
   is found before the run rather than after it. The check is read-only and reports optional Chrome
-  and MCP Registry credentials without making them blockers.
+  and MCP Registry credentials without making them blockers. (Ran online 2026-08-25 UTC against
+  `~/.ghostlight-release.env`: GITHUB_AUTH valid, NPM_AUTH valid, CHROME_WEB_STORE v2-item-valid,
+  all optional values present as states only.)
 - [ ] Ordinary CI passes all Windows and Linux jobs for the frozen revision.
 - [ ] The manual build-only workflow builds the Windows NSIS package on Windows 2025 and the Debian
   package on Ubuntu 22.04.
