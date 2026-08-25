@@ -85,3 +85,4 @@ if ($actualSums -ne $expectedSums) {
 }
 
 Write-Output "Release candidate verified: version $($candidate.version), source $($candidate.sourceRevision), $($artifacts.Count) artifacts."
+exit 0
