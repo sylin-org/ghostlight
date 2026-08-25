@@ -69,13 +69,13 @@ pub fn identify_addresses(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     #[cfg(target_os = "windows")]
     fn a_live_loopback_pair_identifies_its_own_process() {
         use std::io::Write as _;
         use std::net::{TcpListener, TcpStream};
+
+        use crate::identify_connection;
 
         // The table walk must resolve an exact connection quadruple to its owning process id.
         // An in-process loopback pair pins the mechanics deterministically; the cross-process
@@ -101,5 +101,15 @@ mod tests {
             !identity.image_name.contains('\\'),
             "name only, never a path"
         );
+    }
+
+    /// Cross-platform negative control: no such connection exists, so no platform may invent
+    /// an owner for it. This also keeps the stubbed non-Windows surface compiled and pinned.
+    #[test]
+    fn an_absent_quadruple_identifies_nothing() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+        let local = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1);
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 2);
+        assert!(super::identify_addresses(local, peer).is_none());
     }
 }
