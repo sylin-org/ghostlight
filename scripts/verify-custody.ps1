@@ -84,7 +84,11 @@ Assert-Step "SHA256SUMS recomputation (18 assets)" {
         $parts = $line -split "\s+", 2
         $expectedHash = $parts[0].ToLowerInvariant()
         $relative = $parts[1].TrimStart("*")
-        $file = Join-Path $candidateDirectory $relative
+        # SHA256SUMS carries bare asset names; the assembled layout keeps them under assets/.
+        $file = Join-Path (Join-Path $candidateDirectory "assets") $relative
+        if (-not (Test-Path -LiteralPath $file)) {
+            $file = Join-Path $candidateDirectory $relative
+        }
         if (-not (Test-Path -LiteralPath $file)) { throw "checksummed file missing: $relative" }
         $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $expectedHash) { throw "hash mismatch: $relative" }
