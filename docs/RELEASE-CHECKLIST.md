@@ -135,16 +135,19 @@ Evidence:
 Commands live in [RELEASE.md](RELEASE.md) under Source. Applicable operating systems are Windows and
 Linux.
 
-- [ ] Formatting passes.
-- [ ] Workspace/all-target Clippy passes with warnings denied.
-- [ ] Full Rust workspace tests pass.
-- [ ] Extension, npm launcher, and MCPB launcher tests pass.
-- [ ] Changed JavaScript and all release-owned script syntax checks pass.
-- [ ] The fringe-stability review passes: the connectors, the shared bridge, and the extension
+- [x] Formatting passes.
+- [x] Workspace/all-target Clippy passes with warnings denied.
+- [x] Full Rust workspace tests pass.
+- [x] Extension, npm launcher, and MCPB launcher tests pass.
+- [ ] Changed JavaScript and all release-owned script syntax checks pass. (Windows JS checks pass;
+  `sh -n` closes with the Linux run of the frozen revision.)
+- [x] The fringe-stability review passes: the connectors, the shared bridge, and the extension
   changed only where an already-real process boundary required it, and the extension remains
-  policy-free.
+  policy-free. (Reviewed on the frozen revision: the batch touches exactly
+  `bridge/src/client.rs` and `mcp-connector/src/service_session.rs` at the service handshake
+  boundary; browser-connector and extension diffs are empty.)
 - [ ] Fresh isolated workspace build and process, CLI, PowerShell, policy, and workbench journeys
-  pass on both Windows and Linux.
+  pass on both Windows and Linux. (Windows passes; Linux runs via the coordination lane.)
 - [ ] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
   end to end against the deployed release graph, including the desk-stage dialog beats. Rerun it
   whenever an input-path, extension, or browser-relay batch lands: automated suites have missed
@@ -155,11 +158,11 @@ Linux.
 - [ ] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8
   recovery disposition pass.
 
-Evidence: add a dated record under `docs/testing/` and link it here.
+Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md).
 
 Pre-freeze evidence: [2026-08-17 local release preflight](testing/release-preflight-2026-08-17.md)
-passed every locally runnable source check. G1 remains open until G0 names the frozen revision and
-both operating-system passes cover that exact revision.
+passed every locally runnable source check. G1 remains open until both operating-system passes
+cover that exact revision.
 
 Extension-specific pre-freeze evidence:
 [2026-08-22 extension release preparation](testing/extension-release-preparation-2026-08-22.md)
