@@ -76,3 +76,12 @@ test("groupLocators preserves first-appearance frame order and in-group field or
 test("groupLocators refuses an unscoped handle instead of silently routing it to the top frame", () => {
   assert.throws(() => frames.groupLocators(["0:locator_ok", "locator_legacy"]), /not frame-scoped/);
 });
+
+test("embed identity is origin plus path, tolerant of query and fragment drift", () => {
+  assert.equal(frames.embedMatches("https://js-eu1.hsforms.net/embed/form", "https://js-eu1.hsforms.net/embed/form?__hstc=1"), true);
+  assert.equal(frames.embedMatches("https://sylin.org/ghostlight/demo/iframe/form/", "https://sylin.org/ghostlight/demo/iframe/form/"), true);
+  assert.equal(frames.embedMatches("https://sylin.org/other/form/", "https://sylin.org/ghostlight/demo/iframe/form/"), false);
+  assert.equal(frames.embedMatches("https://evil.test/ghostlight/demo/iframe/form/", "https://sylin.org/ghostlight/demo/iframe/form/"), false);
+  assert.equal(frames.embedMatches("", "https://sylin.org/x/"), false);
+  assert.equal(frames.embedMatches("not a url", "https://sylin.org/x/"), false);
+});

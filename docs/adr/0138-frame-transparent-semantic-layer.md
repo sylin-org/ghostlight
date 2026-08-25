@@ -50,9 +50,11 @@ that has since landed makes a narrower answer correct:
    uploads, and scroll-into-view dispatch inside the owning frame, so they are exact for any
    frame depth. Pointer paths that consume element geometry (`hover` by target, drag between
    two targets, target-scoped screenshots) translate the owning frame's viewport rectangle
-   into tab space through CDP (`DOM.getFrameOwner` plus `DOM.getContentQuads`, composed up the
-   parent chain). When Chromium cannot hand over an owner box -- deep out-of-process nesting --
-   the command refuses with that named reason instead of clicking the wrong pixel.
+   into tab space by walking up the frame tree: each frame's parent reports the content-box
+   origin of the embed that shows it, matched by embed URL, and the offsets compose
+   recursively. When a parent page hides the embed, renames its target, or offers several
+   identical embeds, the command refuses with that named reason instead of clicking the
+   wrong pixel. No debugger attachment and no second frame-id vocabulary are involved.
 
 5. **Top-frame semantics stay top-frame.** Article reading, document-tree snapshots,
    JavaScript execution, URL and load-readiness waits, landing governance, and screenshots of

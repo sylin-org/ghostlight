@@ -1044,25 +1044,29 @@ async function collectTargets(tabId, message, maximum) {
   return frames.mergeTargets(perFrame, maximum);
 }
 
-// Viewport-space translation for pointer work over embedded targets. One hop through CDP's
-// owner-box lookup composes the child viewport into tab space; deeper out-of-process
-// nesting refuses by name instead of clicking the wrong pixel. Self-paired on the
-// debugger lease so it nests safely inside commands that hold their own attachment.
+// Pointer translation over embedded targets (ADR-0138). A child element's viewport box
+// becomes a tab-space box by adding the offset of the embed that shows it: the owning
+// <iframe> element's content-box origin in its own parent's viewport, which the parent's
+// content script reports. Matching is by embed URL, so the same mechanism serves
+// same-origin and cross-origin frames at any nesting depth, with no debugger and no
+// second frame-id vocabulary.
 async function frameViewportOffset(tabId, frameId) {
   if (!frameId) return { x: 0, y: 0 };
-  await ensureDebugger(tabId);
-  try {
-    await chrome.debugger.sendCommand({ tabId }, "DOM.enable").catch(() => {});
-    const owner = await chrome.debugger.sendCommand({ tabId }, "DOM.getFrameOwner", { frameId });
-    const quads = await chrome.debugger.sendCommand({ tabId }, "DOM.getContentQuads", { backendNodeId: owner.backendNodeId });
-    const quad = quads?.quads?.[0];
-    if (!Array.isArray(quad) || quad.length < 2) throw new Error("embedded frame box was unavailable");
-    return { x: quad[0], y: quad[1] };
-  } catch (_error) {
-    throw new Error("target sits inside a nested embedded frame whose geometry cannot be translated");
-  } finally {
-    await detachDebugger(tabId);
+  const navigationFrames = await chrome.webNavigation.getAllFrames({ tabId });
+  const frame = (navigationFrames ?? []).find((entry) => entry.frameId === frameId);
+  if (!frame || frame.parentFrameId === -1 || frame.parentFrameId === undefined) {
+    throw new Error("the embedded frame has no parent to translate through");
   }
+  const parent = await contentIn(tabId, frame.parentFrameId, { kind: "frame_boxes" });
+  const owners = (parent?.boxes ?? []).filter((box) => box.visible && frames.embedMatches(box.src, frame.url));
+  if (owners.length === 0) {
+    throw new Error("no visible embed on the parent page names this frame's URL");
+  }
+  if (owners.length > 1) {
+    throw new Error("several identical embeds name this frame's URL; refusing to guess which one shows the target");
+  }
+  const ancestor = await frameViewportOffset(tabId, frame.parentFrameId);
+  return { x: ancestor.x + owners[0].left, y: ancestor.y + owners[0].top };
 }
 
 // Broadcasts one message to every http(s) frame and ignores individual failures. Used for

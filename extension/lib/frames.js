@@ -68,6 +68,22 @@
     return groups;
   }
 
+  // Decides whether a parent document's embed element owns a child frame. The child's
+  // current URL and the embed's absolute src usually agree; redirects and vendor
+  // rewrites can differ in query or fragment, so identity is origin plus path. An empty
+  // src matches nothing: a src-less embed is a scripting hole, not a navigated frame we
+  // can vouch for.
+  function embedMatches(embedSrc, frameUrl) {
+    if (!embedSrc || !frameUrl) return false;
+    try {
+      const embed = new URL(embedSrc);
+      const frame = new URL(frameUrl);
+      return embed.origin === frame.origin && embed.pathname === frame.pathname;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   return Object.freeze({
     TOP_FRAME_ID,
     scopedLocator,
@@ -75,6 +91,7 @@
     localOf,
     scopeTargets,
     mergeTargets,
-    groupLocators
+    groupLocators,
+    embedMatches
   });
 });
