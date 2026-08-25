@@ -192,7 +192,7 @@ Write-Host ('{0,-16} {1,-10} {2}' -f '----', '------', '-------------')
 
 # 1. Open the Foundry, frame the composition, and start a memory-only recording lease.
 # The frame is not decoration: a smaller viewport spends the recording's fidelity budget slower.
-$tab = (Step 'open' 'browser_navigate' @{ url = $Url; new_tab = $true }).facts.tab
+$tab = (Step 'open' 'browser_navigate' @{ url = $Url }).facts.tab
 $null = Step 'frame' 'browser_window' @{ tab = $tab; action = 'resize'; width = $Width; height = $Height }
 # The whole story is recorded. The browser owns all of it -- capture, bounds, encoding, delivery --
 # so beat seven's replay is attached to the page without one frame leaving Chromium (ADR-0109).

@@ -160,7 +160,7 @@ printf 'Stage:      %s\n\n' "$url"
 printf '%-16s %-10s %s\n' BEAT STATUS 'WHAT HAPPENED'
 printf '%-16s %-10s %s\n' ---- ------ '-------------'
 
-step open browser_navigate "$(jq -nc --arg url "$url" '{url:$url,new_tab:true}')" succeeded
+step open browser_navigate "$(jq -nc --arg url "$url" '{url:\}')" succeeded
 tab=$(jq -er '.facts.tab' "$result")
 step frame browser_window "$(jq -nc --arg tab "$tab" --argjson width "$width" --argjson height "$height" '{tab:$tab,action:"resize",width:$width,height:$height}')" succeeded
 step 'record start' browser_record "$(jq -nc --arg tab "$tab" '{action:"start",tab:$tab}')" succeeded
