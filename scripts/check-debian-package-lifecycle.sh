@@ -31,6 +31,16 @@ echo "candidate_sha256=$(sha256sum "$artifact" | cut -d ' ' -f 1)"
 if dpkg-query -W ghostlight >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get purge -y ghostlight
 fi
+# Minimized cloud images (ubuntu:24.04 among them) ship dpkg excludes that silently strip
+# /usr/share/man from every package. The lifecycle verify must see the full declared payload,
+# so the image's minimization is removed for the duration of the check.
+if ls /etc/dpkg/dpkg.cfg.d/* >/dev/null 2>&1; then
+    sed -i 's/^path-exclude/# path-exclude/' /etc/dpkg/dpkg.cfg.d/* 2>/dev/null || true
+fi
+# The archive itself must carry all three manual pages regardless of image behavior.
+dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight.1.gz'
+dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-mcp-connector.1.gz'
+dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-browser-connector.1.gz'
 DEBIAN_FRONTEND=noninteractive apt-get install -y "$artifact"
 test "$(ghostlight --version)" = "ghostlight 1.0.0"
 test "$(dpkg-query -W -f='${Version}' ghostlight)" = "1.0.0"
