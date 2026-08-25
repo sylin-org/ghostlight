@@ -195,6 +195,13 @@ Every one of these cost something to learn.
   path disappears, returns, or changes from byte-identical to evolved. Once an active path is
   explicitly `retained-evolved`, pinning each new blob adds ledger churn without preserving another
   0.8 fact. That is release bureaucracy, not release safety.
+- **Diff the public surfaces by name, not just the source tree.** The clean-room inventory compared
+  implementation and tests and still dropped the README's hero GIF, badge row, and onboarding
+  spine, the Homebrew formula template, the website publish path, the icon generator, and the
+  store-justification length guard -- a file-level "missing on the new branch" list reads as
+  intentional rewrite when it is really identity and release machinery. Root documents,
+  `packaging/`, `scripts/`, and legal guards need an explicit main-vs-branch reconciliation before
+  any rewrite is called complete (restored 2026-08-25).
 
 ## Where to look
 
