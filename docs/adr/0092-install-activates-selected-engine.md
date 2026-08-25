@@ -59,9 +59,10 @@ After stopping the verified predecessor, the installer starts the selected servi
 waits for the adapter endpoint to report that exact executable as its owner. A different owner or a
 startup timeout is a warning, not a false success.
 
-### 4. The Linux supervisor restarts after registration
+### 4. Unix supervisors restart after registration
 
-Linux runs `systemctl --user restart` after writing, reloading, and enabling the user unit. Linux package
+macOS already uses `launchctl kickstart -k`, which replaces an active predecessor. Linux now runs
+`systemctl --user restart` after writing, reloading, and enabling the user unit. Unix package
 replacement remains the supervisor's responsibility; the Windows process-owner path is not copied
 there.
 
@@ -77,3 +78,11 @@ there.
   installed service becomes the next login/self-heal choice without silently displacing them.
 - Windows gains two narrow read-only primitives: named-pipe server PID lookup and process image-path
   lookup. Neither expands Ghostlight's network or browser authority.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

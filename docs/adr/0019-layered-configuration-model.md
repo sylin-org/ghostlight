@@ -22,6 +22,7 @@ the intent, not the code:
 - **Windows Group Policy / ADMX**: machine policies live where only
   administrators can write; the policy-vs-preference distinction separates
   enforced-and-reverting settings from defaults that merely tattoo.
+- **macOS managed preferences**: MDM profiles layer above user defaults.
 - **Firefox policies.json**: a single cross-platform policy file.
 - **GNOME dconf**: system databases plus explicit lock files that mark
   individual keys read-only; the cleanest open-source key-level lock.
@@ -45,8 +46,8 @@ the intent, not the code:
    are named bundles that write the user layer only. "Safe" is today's
    Minimal. A preset is a starting point the user can then edit key by key.
 4. **The org layer is a machine-scope file.** It lives at an
-   admin-writable-only path (ProgramData or /etc) and is delivered by
-   the org's existing deployment channel (GPO, Intune, or MDM), consistent with
+   admin-writable-only path (ProgramData, /etc, /Library) and is delivered by
+   the org's existing deployment channel (GPO, Intune, Jamf), consistent with
    deployment-channel identity binding (SPEC 8.1). Each entry sets a value at
    level mandatory (locked) or recommended (overridable default). Range
    constraints (allow a key but bound its values) are a later extension.
@@ -75,7 +76,7 @@ the intent, not the code:
 - Positive: locked-field UX falls out of the model instead of being bolted on.
 - Negative: key names become a public, stable API surface; renames need
   deprecation handling.
-- Negative: two platform-specific org-file paths to document and test.
+- Negative: three platform-specific org-file paths to document and test.
 - Follow-up: implement resolution and the CLI in stage 2 step 1 (alongside the
   audit recorder, ADR-0018), since audit destinations are the first keys an
   organization will want to lock.
@@ -91,3 +92,11 @@ this ADR's Decision 2 already models, the `chrome://policy` analog this ADR's De
 the CLI's own point of comparison. `config list | get | set` remains the source of truth; the
 Console renders the same registry, never a second one. See ADR-0020's own amendment for why this
 does not reopen that ADR's "no web console" non-goal for organization policy authoring.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

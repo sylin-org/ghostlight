@@ -17,7 +17,7 @@ delivery, automated coverage of the extension's JavaScript handlers, and a
 systematic live-browser pass.
 
 Most of these are already named as pending in the README ("Packaging (partial)":
-CI, cross-platform, Linux live verification, syslog/http audit
+CI, cross-platform, macOS/Linux live verification, syslog/http audit
 destinations, a license decision). They were deferred on purpose behind engine
 and governance stability, not overlooked. This ADR records the decisions that
 schedule them, in a sequence where every prefix leaves a coherent tree, and pins
@@ -46,14 +46,14 @@ The private `.dev-key.pem` stays gitignored; it is a signing key, unrelated to t
 source license. This is the highest-leverage unblocker: the Chrome Web Store
 submission artifacts and any public release depend on a resolved license.
 
-### 2. Continuous integration: Windows-and-Linux matrix plus release artifacts
+### 2. Continuous integration: three-OS matrix plus release artifacts
 
 A GitHub Actions workflow runs on every push and pull request across
-`windows-latest` and `ubuntu-latest`: `cargo test`,
+`windows-latest`, `macos-latest`, and `ubuntu-latest`: `cargo test`,
 `cargo clippy -- -D warnings`, and `cargo fmt --check`. A separate release job,
 triggered on a version tag, cross-compiles the `ghostlight` binary for the
-shipping targets (Windows x86_64 and Linux x86_64) and uploads them as build
-artifacts. The matrix closes the Linux gap at the
+shipping targets (Windows x86_64, macOS x86_64 and aarch64, Linux x86_64) and
+uploads them as build artifacts. The matrix closes the macOS/Linux gap at the
 compile-and-unit layer, which is the bulk of cross-platform risk and was
 previously unverified; a green matrix would have caught the dual-schema-gate
 class of regression at push time; and the artifact job makes the "single
@@ -97,8 +97,8 @@ mechanism sub-question to be pinned when the stage is scoped. The manifest sourc
 loader lives in the binary, and every existing source (`file://`, `env://`, the
 org policy file) is a binary-side read, so the consistent implementation is the
 binary reading the OS-level Chrome managed-policy store for the pinned extension
-id (Windows registry or Linux managed policy JSON), which preserves the
-policy-free extension (ADR-0005). The fallback, if that store
+id (Windows registry, macOS managed plist, Linux managed policy JSON), which
+preserves the policy-free extension (ADR-0005). The fallback, if that store
 proves unreliable to read out-of-process, is for the extension to read
 `chrome.storage.managed` and forward the manifest blob to the binary over native
 messaging (still mechanism, not a policy decision). This decision commits to
@@ -116,14 +116,14 @@ standalone JavaScript modules with no `chrome.*` dependency at import time:
 shadow-DOM traversal for `form_input`, the screenshot coordinate rescale
 (ADR-0010), and accessibility-tree construction for `read_page` and `find`; these
 modules are unit-tested with a zero-dependency runner (`node --test`) inside the
-Windows-and-Linux CI matrix from Decision 2. Second, a headless-Chromium smoke (a
+three-OS CI matrix from Decision 2. Second, a headless-Chromium smoke (a
 Playwright-driven fixture page exercising `navigate`, `read_page`, `computer`
 screenshot and click, and `form_input`) is also built now, exercising the thin CDP
 glue end to end that the unit layer cannot reach. The extracted functions are the
 algorithmic core and the likeliest bug sites; the smoke covers the wiring. The
 accepted cost is that the headless smoke adds CI flakiness and maintenance the
 unit layer does not, and it runs Chromium in CI on at least one OS (Linux) rather
-than both. Constraint: extraction holds the policy-free, lean-extension line
+than all three. Constraint: extraction holds the policy-free, lean-extension line
 (ADR-0005). The modules carry mechanism and algorithms only, not new
 responsibilities and not any access decision.
 
@@ -139,7 +139,7 @@ than an edit, keeping the ledger append-only. The 44db1f3 pass also covered the
 stage-3 `s-live-1` through `s-live-4` checks and `t01-1`, `t05-1`, `t06-1`, and
 `t06-2`, all PASS. What remains owed to a human, per the not-covered notes in
 `docs/tasks/stage-2/BROWSER-TESTS.md`: `g13-1` steps 4 and 5, `g13-3`'s governed
-half, `g15-1` and `g15-2` (mode switch), and Linux live checks. That
+half, `g15-1` and `g15-2` (mode switch), and macOS and Linux live checks. That
 owed surface shrinks as Decision 6's automation grows. One known gap from the
 `t-live-1` pass stands on the record: it could not confirm the expected
 ERROR-level server log line for the
@@ -152,8 +152,8 @@ identical denial id before and after the corrupt edit.
 - Positive: the highest-leverage publishing blocker (no license) is removed by
   executing the open-core layout from ADR-0027, and the repo becomes contributable
   and legally shippable, with the engine open and the governance module commercial.
-- Positive: a Windows-and-Linux CI matrix turns the previously untested Linux surface
-  green at the compile-and-unit layer on every push, and gives per-platform
+- Positive: a three-OS CI matrix turns the largest untested surface (macOS and
+  Linux) green at the compile-and-unit layer on every push, and gives per-platform
   release artifacts that make the zero-runtime-dependency claim checkable.
 - Positive: the spec becomes an accurate current description of the built system
   rather than a stale v0.1 draft that misleads readers.
@@ -187,3 +187,11 @@ identical denial id before and after the corrupt edit.
   (`managed://`). Decision 6 lands its unit layer with Decision 2's CI and its
   headless smoke alongside. Decision 7 is a record correction plus a standing
   human-owed checklist.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

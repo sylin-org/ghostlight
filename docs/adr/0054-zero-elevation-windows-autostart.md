@@ -2,7 +2,7 @@
 
 Status: Accepted (2026-07-10; owner: "Let's do 0.5.1 then. This is exactly the kind of issues I was
 hoping to catch"). Amends ADR-0030 Decision 8 (the always-ready-service amendment) on Windows only;
-the Linux systemd user path is untouched. Fixes issue #17. Ships as v0.5.1.
+macOS launchd and Linux systemd --user paths are untouched. Fixes issue #17. Ships as v0.5.1.
 
 ## Context
 
@@ -46,12 +46,14 @@ handle -- so replacing it loses nothing.
 3. **Legacy migration.** Windows registration best-effort deletes the old scheduled task
    (`schtasks /delete /tn <name> /f`) so elevated installs from earlier versions converge on the
    Run key; uninstall keeps deleting both mechanisms.
-4. **Linux is unchanged.** Its systemd user unit is user-scoped and provides real crash-restart
-   (`Restart=on-failure`), which the Run key cannot, so the richer mechanism stays where it works.
+4. **macOS and Linux are unchanged.** launchd LaunchAgents and systemd --user units are genuinely
+   user-scoped, and both provide real crash-restart (`KeepAlive` / `Restart=on-failure`), which
+   the Run key cannot -- so the richer mechanisms stay where they work.
 5. **Pins move.** The PINNED Windows supervisor commands (H9 / PINS.md SS5.2: schtasks
    create/run/delete; the `supervisor_start_command` Windows arm) are superseded by this ADR. The
    new pins: the Run-key path + value name + data shape, the sibling-exe resolution
-   and detached creation flags. Linux pins stand as written.
+   (`ghostlight-relay*` -> sibling `ghostlight`), and the detached-spawn creation flags. macOS and
+   Linux pins stand as written.
 
 ## Consequences
 
@@ -72,3 +74,11 @@ handle -- so replacing it loses nothing.
 Found live during the Cline marketplace validation (2026-07-10): the installer's supervisor
 [warn] lines in Cline's own transcript. Root cause bisected the same hour (daily-vs-onlogon probe).
 Owner: catch-and-fix was the explicit purpose of the dogfooding pass; fix ordered as v0.5.1.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

@@ -100,7 +100,7 @@ mattered to the original decision:
 - **A view, not an authoring surface.** The config panel renders the ALREADY-RESOLVED effective
   value/layer/lock per key -- the `chrome://policy` analog ADR-0019 named outright (see that ADR's
   own amendment below) -- never a manifest editor. Organization policy is still authored and
-  deployed exclusively as a file over the org's existing channel (GPO/Intune/MDM); the Console
+  deployed exclusively as a file over the org's existing channel (GPO/Intune/Jamf); the Console
   cannot write, edit, or push a manifest, mandatory layer, or org-recommended default. `policy
   explain`, `policy simulate`, shadow enforcement, manifest identity, and structured denials are
   all unaffected and remain the CLI/file-based surfaces this ADR specifies.
@@ -110,3 +110,11 @@ mattered to the original decision:
 
 Follow-up: `docs/tasks/console/` (a task batch in the same BOOTSTRAP/LEDGER/PINS shape as
 `docs/tasks/hub/`) implements the Console against ADR-0030 Decision 9's description.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

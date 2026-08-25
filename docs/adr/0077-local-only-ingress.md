@@ -26,8 +26,8 @@ does not ingest MCP tool calls. It remains useful and can own its small HTTP lis
 
 ### 1. Ghostlight accepts browser-control sessions only through local OS IPC
 
-The MCP client path is an owner-only named pipe on Windows or Unix-domain socket on Linux. The
-Chrome extension path remains Chromium native messaging through the local relay. There
+The MCP client path is the owner-only named pipe on Windows or Unix domain socket on macOS and
+Linux. The Chrome extension path remains Chromium native messaging through the local relay. There
 is no TCP, WebSocket, Streamable HTTP, cloud-browser, or non-loopback browser-control listener.
 
 The product does not advertise SSH, VPN, port-forward, reverse-proxy, or remote-desktop tunneling
@@ -81,3 +81,11 @@ direction. Ghostlight acts in the visible browser context of the local user.
 - Existing configurations that mention retired web-ingestion keys must remove them before upgrade.
 - Organizations cannot use Ghostlight as a remotely hosted browser-control service.
 - A future remote design bears the full burden of a fresh security and product decision.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

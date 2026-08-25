@@ -58,7 +58,7 @@ repair. Four parts, prioritized by invisibility (a user should never learn the w
      creation time (GetProcessTimes). "Orphaned" means that pid is no longer *running* with the
      same creation time, so a reused pid reads as dead, not alive.
    - Unix: the original `getppid()`. "Orphaned" means `getppid()` no longer equals it (the
-     kernel reparents an orphan to init). No pid-reuse hazard, since getppid reflects
+     kernel reparents an orphan to init/launchd). No pid-reuse hazard, since getppid reflects
      the real current parent.
 
    **Liveness is the termination signal, not object existence (a correctness landmine).** A
@@ -119,3 +119,11 @@ primitive on the specific pid only.
   stdin read timeout does not address a read that blocks rather than erroring; an
   application heartbeat was already rejected for the IPC layer (ADR-0003) and is equally
   unnecessary here, since parent liveness is the real signal.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

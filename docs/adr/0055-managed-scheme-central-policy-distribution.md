@@ -14,7 +14,7 @@ conditioned on the delight ergonomics in D6 and D9.
 ## Context
 
 Today an organization deploys Ghostlight governance policy as a local FILE, dropped by its existing
-management channel (GPO / Intune / MDM) to a system location, loaded once at startup (ADR-0023) and
+management channel (GPO / Intune / Jamf) to a system location, loaded once at startup (ADR-0023) and
 hot-reloadable in place (ADR-0025). `managed://` is the deferred next step: the endpoint instance
 FETCHES its policy manifest from the organization's OWN network endpoint instead of reading a local
 file. It was named as a not-yet item in ADR-0026, listed as a paid-governance-module feature in
@@ -33,8 +33,8 @@ stays visibly on the user's side while doing so.
 Two constraints bound the mechanism: SPEC section 10 excludes "No remote policy service (HTTP
 manifest source)", and ADR-0028 Decision 9 is a permanent, marketing-visible promise to never phone
 home. A prior-art sweep (2026-07-10, four parallel research agents across OPA/OPAL/Envoy-xDS,
-enterprise policy distribution, feature-flag systems, and Vault-Agent/osquery/Puppet/SPIFFE) found
-four unrelated domains converging on one consumer-side
+Chrome-Enterprise/Intune/Apple-MDM, LaunchDarkly/Unleash/OpenFeature/Flagsmith, and
+Vault-Agent/osquery/Puppet/SPIFFE) found four unrelated domains converging on one consumer-side
 design, which this ADR adopts.
 
 ## Decision
@@ -82,14 +82,14 @@ disk. This is the lean-internals commitment: no new subsystem, a wrapper over ve
 
 Owner decision (2026-07-10): token as v1, enroll as v2.
 
-v1 -- a static hardened bearer token. The management channel (GPO / Intune / MDM) drops a token
+v1 -- a static hardened bearer token. The management channel (GPO / Intune / Jamf) drops a token
 file exactly as it drops today's policy file, the same mental model as a user-configured audit
 destination. The client sends `Authorization: Bearer` and PINS the org endpoint's CA (does not trust
 WebPKI) -- a cheap defense against DNS/MITM of the policy source, harvested from osquery
 `tls_server_certs`. This is defensible ONLY because bundles are signed (D7): the token guards read
 access and rate-limiting; the signature guards authenticity. A stolen token can read or replay stale
 policy but cannot forge one or fail the box open. The on-disk secret is encrypted at rest and
-machine-bound (DPAPI / TPM). The customer endpoint stays a dumb HTTPS host -- v1 is a
+machine-bound (DPAPI / Keychain / TPM). The customer endpoint stays a dumb HTTPS host -- v1 is a
 plain conditional GET against any host the fleet can already reach.
 
 v2 -- an enrollment exchange: the endpoint trades a broadcast bootstrap secret ONCE for a
@@ -133,9 +133,9 @@ that hole; the cache is as exposed as the wire and gets the same trust check.
 ### 6. Revocation and propagation: pull floor plus optional customer-hosted push; anti-rollback counter.
 
 The guaranteed interval pull is the correctness path. Any immediacy is an OPTIONAL accelerator and
-never a correctness dependency: a content-free "refetch now" wake (the simplest device-management
+never a correctness dependency: a content-free "refetch now" wake (Apple MDM's purest form -- the
 payload never transits the push cloud) delivered by long-poll / SSE / conditional-GET against the
-CUSTOMER's own endpoint. Never third-party push clouds: they are external
+CUSTOMER's own endpoint. Never FCM / WNS / APNs: those are third-party push clouds and external
 dependencies, phone-home-shaped and off-limits. Absent a push accelerator, the pull interval plus the
 signed-cache floor fully satisfies governance. Revocation is tightening: the customer's endpoint
 serves a stricter policy on the next poll, aligned with ADR-0028's "revocation is expiry" model (no
@@ -167,7 +167,7 @@ trust anchor. `managed://` can therefore point at any dumb HTTPS host, an S3 buc
 a file share, or a USB stick, and AIR-GAP SNEAKERNET distribution uses the IDENTICAL trust model as a
 network fetch -- the same signature check unifies the `file://` floor and `managed://`. This is the
 strongest differentiator and it reuses crypto already shipped and verified. The contrast from the
-prior art is sharp: OPA signs bundles with classical RS256 / ES256; Chrome, Intune, and device-management vendors anchor
+prior art is sharp: OPA signs bundles with classical RS256 / ES256; Chrome, Intune, and Apple anchor
 trust in TLS plus server identity (so the channel MUST be trusted); the feature-flag SDKs do not sign
 the payload at all. No surveyed system offers post-quantum-signed, transport-independent central
 policy.
@@ -367,11 +367,19 @@ playful for the corporate surface: "for a corporate solution ... keep profession
 clean, elegant, easy-to-understand UX ... give the org enough customization options ... and give
 users clear communication channels" -- which sharpened rather than softened the advocate-for-the-
 governed thesis and produced the additive-only customization rule (D9). The consumer architecture,
-auth recommendation, Continuity model, and integrity model (D3-D7) are backed by a four-agent
-prior-art study of OPA/OPAL/xDS, enterprise policy distribution, feature-flag SDKs, and secret/config
-agents; those defaults are research-backed recommendations. The two initially
+auth recommendation, Continuity model, and integrity model (D3-D7) are backed by a four-agent prior
+-art study of OPA/OPAL/xDS, Chrome-Enterprise/Intune/Apple-MDM, feature-flag SDKs, and
+secret/config agents; those defaults are research-backed recommendations. The two initially
 flagged sub-decisions were resolved by the owner the same day: D4 = "token as v1, enroll v2"; and D6
 was decided through the delight lens (the owner asked "does it bring delight?") -- adopt the
 anti-rollback sequence because the guardian behavior is delightful, conditioned on the three
 ergonomics (auto-bump at sign time, refusal-as-door, publish-sequence not wall-clock).
 Reserved-but-unsupported in code until the implementation batch.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

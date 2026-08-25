@@ -211,8 +211,8 @@ The persistent service is a STANDALONE process the user always has running. It i
 two ways, both per-user and zero-admin, and NEVER by an editor as an in-job child:
 
 - AUTO-START (the installed default): an OS supervisor registered at install (Windows Task
-  Scheduler or Linux systemd user unit with `Restart=on-failure`) starts `ghostlight service` at
-  login and restarts it on crash. The installer
+  Scheduler LeastPrivilege logon task; macOS launchd LaunchAgent; Linux systemd --user
+  Restart=on-failure) starts `ghostlight service` at login and restarts it on crash. The installer
   ALSO starts it once at install time, so the first session is already up.
 - DIRECTLY (dev / portable): the user runs `ghostlight service` themselves.
 
@@ -234,7 +234,8 @@ Every MCP invocation is ALWAYS a thin ADAPTER -- never a service, never a promot
 spawner of an in-job child. It connects to the service, sends the session-hello (Decision 4),
 relays its stdio as a pure byte pipe, and dies with its editor (the ADR-0029 parent-death watchdog
 and reaper live HERE, on the adapter). If the service is not reachable, the adapter asks the
-Windows Task Scheduler or Linux systemd user manager to start it. If that cannot
+supervisor to start it (an idempotent, out-of-job OS call: Windows `schtasks /run`, macOS
+`launchctl kickstart`, Linux `systemctl --user start`), waits briefly, and connects; if that cannot
 be done (no supervisor registered) it fails with a clear, actionable message. The adapter NEVER
 spawns an in-job child service and NEVER runs a governance decision.
 
@@ -358,9 +359,9 @@ Every prefix leaves a green, shippable tree; the process-lifecycle risk lands la
 - H7 Tab-group-per-session presentation (extension owns the durable group; groups on request only).
 - H8 Local web API = TCP; bind per policy (builtin loopback default); `channels.webapi.from` in the
   PDP; anonymous is a valid principal; the Console control plane.
-- H9 Installer auto-start: register + start the per-user OS supervisor (Windows Task Scheduler or
-  Linux systemd user manager), restart it after a crash, and unregister + stop it on uninstall.
-  This is what makes "always-ready" true for the installed
+- H9 Installer auto-start: register + start the per-user OS supervisor (Windows Task Scheduler /
+  macOS launchd / Linux systemd --user) that keeps `ghostlight service` warm and restarts it on
+  crash; unregister + stop it on uninstall. This is what makes "always-ready" true for the installed
   product; the H6 adapter self-heal targets the same supervisor identifiers.
 
 ## Consequences
@@ -439,3 +440,11 @@ Every prefix leaves a green, shippable tree; the process-lifecycle risk lands la
   chokepoint, advertised surface == the sacred fixture, a native host exits when its real peer dies).
   This is NOT license to weaken a genuine invariant: the all-open CLIENT-VISIBLE output stays
   byte-identical, the trained schemas and the native wire stay frozen, and the a7 core boundary holds.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

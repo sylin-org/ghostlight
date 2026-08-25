@@ -23,7 +23,7 @@ detection plus registration state via `doctor` (commit 2ae81de; `src/install/`).
 Native-messaging host registration is per-browser (Chrome/Edge/Brave/Chromium,
 multi-signal detection): on Windows, one shared manifest file plus a per-browser
 registry key (HKCU for --user, both WOW6432 HKLM views for --system); on
-Linux, a per-browser file drop. Removal is ownership-checked: only a
+macOS/Linux, a per-browser file drop. Removal is ownership-checked: only a
 manifest whose name is ours is deleted; a foreign manifest at the same path is
 reported as a manual skip, never removed.
 
@@ -48,3 +48,11 @@ target and manual-only runs exit 0.
   still depends on its CLI for correct JSONC editing.
 - Follow-up: `doctor` surfaces detection and registration drift so a broken
   install is diagnosable without manual file inspection.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

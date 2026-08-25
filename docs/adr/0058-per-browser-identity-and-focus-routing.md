@@ -108,7 +108,7 @@ dispatch entry point (`crate::mcp::pipeline::run_tool_call`):
 Focus itself: the extension listens for `chrome.windows.onFocusChanged` and sends a new fire-and-
 forget wire message, `{ "type": "focus" }`, whenever one of ITS OWN windows gains focus (chosen over
 OS-level window z-order specifically to avoid unsafe, platform-specific window enumeration --
-Win32 `GetForegroundWindow` and X11/Wayland compositor APIs that in several Wayland setups
+Win32 `GetForegroundWindow`, Cocoa, and X11/Wayland compositor APIs that in several Wayland setups
 refuse to expose global window state at all; `chrome.windows.getLastFocused`/`onFocusChanged` answer
 the same question from inside the one process that already knows it, portably, with no unsafe code).
 No `browserPid` field is needed in the message itself -- it travels over an already-identified
@@ -206,3 +206,11 @@ need for it. This keeps the current change scoped to identity, routing, and diag
   of repealing the singleton assumption.
 - `held`/`killed`/screenshot-cache/gif-recording staying global is a known, intentional limitation
   of this pass, not an oversight -- see "Explicitly out of scope" above.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

@@ -109,7 +109,7 @@ published.
 | P7 | Re-baseline against the official extension | Operator-assisted study task (research-12 pattern) | Operator + agent |
 | P8 | Enterprise proof pack | landscape-1 L3 | Batch |
 | P9 | WebMCP stance ADR | ADR-0043 (landed with this ADR) | Done |
-| P10 | Standing verification debts | FOUNDER-TODO.md (LIVE-VERIFY, Linux, e2e-smoke, license skim) | Operator |
+| P10 | Standing verification debts | FOUNDER-TODO.md (LIVE-VERIFY, macOS/Linux, e2e-smoke, license skim) | Operator |
 
 ## Consequences
 
@@ -126,3 +126,11 @@ Owner rulings, 2026-07-07, on the three deltas in research 14 (verbatim): (1) "g
 our vocab is validated. we can onboard the new capabilities."; (2) "we're not competing, we're
 offering alternatives/standards."; (3) "excellent, let's focus on this." [origin-flow]. And on
 the proposals: "All accepted." These are decided questions; do not re-litigate them.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

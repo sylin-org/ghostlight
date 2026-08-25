@@ -51,7 +51,7 @@ this, paired with the `deploy.lock` for the service.
   `deploy.lock` gives a production installer a clean quiesce point for an in-place upgrade (drop the
   lock, stop the service, swap the binary, remove the lock -- no self-heal race).
 - The lock is a Windows-self-heal quiesce. On Unix the service is run by the OS supervisor
-  (systemd); a deploy there stops the unit (which suppresses restart) rather than relying on
+  (launchd/systemd); a deploy there stops the unit (which suppresses restart) rather than relying on
   this file. The lock check is a no-op cost on Unix.
 - The lock only governs the SERVICE self-heal. The relay respawn is governed by the rename technique
   in the deploy script, not by this file (the extension cannot read it).
@@ -63,3 +63,11 @@ check on `<dir>/deploy.lock`) guards the Windows branch of `start_service` befor
 `DEPLOY_LOCK_MAX_AGE` constant bounds staleness; a unit test covers present / absent / stale.
 `scripts/dev-loop.ps1`: create the lock, rename any running `relay.exe` aside, kill this repo's dev
 processes, build, remove the lock, start the service, best-effort clean the `*.old` relay files.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

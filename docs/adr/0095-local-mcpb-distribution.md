@@ -29,8 +29,8 @@ phone-home behavior. The Chrome adapter also remains a Chrome Web Store install 
 
 ### 1. Ship a self-contained MCPB as a service release asset
 
-The MCPB carries the Windows x86_64 `ghostlight-mcp-connector`, `ghostlight`, and
-`ghostlight-browser-connector` binaries. A small Node launcher selects the packaged target at
+Each service release includes one MCPB containing the Windows x64, macOS Apple Silicon, and macOS
+Intel `ghostlight` and `ghostlight-relay` binaries. A small Node launcher selects the target at
 runtime. The package does not fetch binaries or dependencies after installation.
 
 The tracked MCPB manifest versions with the service. It publishes functional listing copy, the
@@ -71,8 +71,16 @@ refreshes the path, and `ghostlight uninstall` remains the explicit full cleanup
 
 - Claude Desktop can install and own Ghostlight as one local connector without a duplicate client
   entry.
-- Release assembly must include the supported Windows platform pair before it can build the MCPB.
+- Release assembly must include all three supported platform pairs before it can build the MCPB.
 - First launch performs local, idempotent browser-side registration and may start the service.
 - Users still install the Chrome Web Store adapter separately.
 - OpenAI's hosted-URL directory remains out of scope unless it accepts local stdio packages; a
   remote transport will not be built only to satisfy a listing form.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.

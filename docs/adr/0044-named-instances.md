@@ -89,6 +89,7 @@ with an empty name, which would emit a stray `ghostlight-` / `org.sylin.ghostlig
 | Native host name | `org.sylin.ghostlight` | `org.sylin.ghostlight.<n>` |
 | MCP server name | `ghostlight` | `ghostlight-<n>` |
 | Supervisor task (Win) | `Ghostlight Service` | `Ghostlight Service (<n>)` |
+| Supervisor label (mac) | `org.sylin.ghostlight.service` | `org.sylin.ghostlight.<n>.service` |
 | Supervisor unit (linux) | `ghostlight.service` | `ghostlight-<n>.service` |
 | User config / log dir leaf | `ghostlight` | `ghostlight-<n>` |
 | Org policy path | machine-wide, instance-INDEPENDENT (see Decision 3) | same machine-wide path |
@@ -102,7 +103,7 @@ and OS unit names): lowercase ASCII letters, digits, and hyphens; must start wit
 end with one; length `1..=32`; the word `default` is reserved. Hyphens are allowed (`qa-staging`)
 because the derivation is one-way -- nothing ever reverse-parses the leaf back into base plus name,
 so `ghostlight-qa-staging` is unambiguous. Uppercase is rejected to avoid the Linux
-case-sensitive vs Windows case-insensitive collision trap.
+case-sensitive vs Windows/macOS case-insensitive collision trap.
 
 ### Decision 3: user state isolates per instance; org policy stays machine-wide
 
@@ -111,9 +112,9 @@ A non-default instance suffixes the USER config dir leaf and the LOG/observabili
 touch the default's. That is the isolation a dev instance wants.
 
 The ORG POLICY path, by contrast, stays MACHINE-WIDE and instance-INDEPENDENT
-(`%ProgramData%\Ghostlight\policy.json` on Windows and
-`/etc/opt/ghostlight/policy.json` on Linux), a deliberate security property, not an oversight: if
-each instance had its own org-policy path, a
+(`%ProgramData%\ghostlight\policy.json` on Windows, `/Library/Application Support/ghostlight/policy.json`
+on macOS, `/etc/ghostlight/policy.json` on Linux -- unchanged), and EVERY instance reads it. This is
+a deliberate security property, not an oversight: if each instance had its own org-policy path, a
 user on a governed machine could escape a MANDATORY org policy simply by running
 `ghostlight --instance escape` into a fresh, policy-free (all-open) instance. Making the org policy
 machine-wide closes that hole -- `--instance` selects which user-facing install you are, it never
@@ -186,3 +187,11 @@ production native-messaging host surveyed.
 - Whether a non-default instance should default observability ON (dev usually wants it). Leaning
   yes as an install-time default for non-default instances, but it stays orthogonal (a `--debug`
   choice), not baked into identity.
+
+## Amendment (2026-08-25)
+
+This record stands as written; the text above is the decision as it was made. The 1.0 candidate
+narrows the supported operating-system matrix to Windows and Linux
+([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
+decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
+not removed from the product's future.
