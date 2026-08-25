@@ -148,11 +148,13 @@ Linux.
   boundary; browser-connector and extension diffs are empty.)
 - [ ] Fresh isolated workspace build and process, CLI, PowerShell, policy, and workbench journeys
   pass on both Windows and Linux. (Windows passes; Linux runs via the coordination lane.)
-- [ ] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
+- [x] The whole-catalog foundry demo (`scripts/demo-foundry.ps1` or `demo-foundry.sh`) runs green
   end to end against the deployed release graph, including the desk-stage dialog beats. Rerun it
   whenever an input-path, extension, or browser-relay batch lands: automated suites have missed
   page-state interactions that this rehearsal catches (foundry press_key and desk-bell defects,
-  2026-08-24).
+  2026-08-24). (Ran green on the deployed frozen graph, 2026-08-25 UTC: full story including
+  press-key beats, off-domain refusal, replay save/erase, sequences, flow, history, and both
+  desk-bell dialog dispositions.)
 - [ ] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
   warnings are rechecked against the frozen graph rather than assumed.
 - [ ] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8
