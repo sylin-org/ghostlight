@@ -315,7 +315,13 @@
   function renderPresentation(signal, preferences) {
     let rectangle = null;
     if (signal.locator) {
-      try { rectangle = viewportRectangle(resolve(signal.locator)); } catch (_error) { /* target is optional presentation */ }
+      try {
+        const box = viewportRectangle(resolve(signal.locator));
+        // An anchored effect without a live box (stale, hidden, zero-size) renders
+        // nowhere instead of collapsing onto the frame origin.
+        rectangle = box.width > 0 && box.height > 0 ? box : null;
+      } catch (_error) { /* target is optional presentation */ }
+      if (!rectangle) return false;
     }
     return globalThis.GhostlightPresentation.render(signal, preferences, rectangle);
   }
@@ -442,6 +448,24 @@
         return { uploaded_count: message.files.length, uploaded_bytes: message.files.reduce((sum, file) => sum + file.size, 0) };
       }
       if (message.kind === "box") { const element = requireActionable(resolve(message.locator), "box"); return { rectangle: viewportRectangle(element), subject: actionSubject(element) }; }
+      if (message.kind === "frame_boxes") {
+        // The parent-side half of pointer translation (ADR-0138): where this document's
+        // embeds sit, with the border and padding that separate their box from the child
+        // viewport's origin. element.src is absolute, so matching survives relative src.
+        const boxes = [];
+        for (const element of document.querySelectorAll("iframe,frame")) {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          boxes.push({
+            src: String(element.src ?? ""),
+            name: String(element.name ?? ""),
+            left: rect.left + element.clientLeft + (parseFloat(style.paddingLeft) || 0),
+            top: rect.top + element.clientTop + (parseFloat(style.paddingTop) || 0),
+            visible: rect.width > 0 && rect.height > 0
+          });
+        }
+        return { boxes };
+      }
       if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
       if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
