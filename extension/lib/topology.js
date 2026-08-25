@@ -233,7 +233,41 @@
         .map(([tabId]) => tabId);
     }
 
-    return Object.freeze({ restore, open, assign, adopt, reattach, forget, workspaceFor, titleFor, tabsFor });
+    // The reuse ladder (ADR-0137): an unbound tab is one no workspace owns -- released by a
+    // dead workspace or opened by the person. An exact-URL match wins, then the lowest tab id
+    // of the same host. Only ordinary web pages are adoption candidates.
+    async function findReusable(url) {
+      let target;
+      try {
+        target = new URL(url);
+      } catch (_error) {
+        return null;
+      }
+      if (target.protocol !== "https:" && target.protocol !== "http:") return null;
+      const unbound = (await chromeApi.tabs.query({})).filter(
+        (tab) => tab.id !== undefined && !tabWorkspaces.has(tab.id)
+      );
+      const sameHost = unbound.filter((tab) => {
+        try {
+          const candidate = new URL(tab.url ?? "");
+          return (
+            (candidate.protocol === "https:" || candidate.protocol === "http:") &&
+            candidate.host === target.host
+          );
+        } catch (_error) {
+          return false;
+        }
+      });
+      return (
+        sameHost.sort((left, right) => {
+          const leftExact = left.url === url ? 0 : 1;
+          const rightExact = right.url === url ? 0 : 1;
+          return leftExact - rightExact || left.id - right.id;
+        })[0] ?? null
+      );
+    }
+
+    return Object.freeze({ restore, open, assign, adopt, reattach, forget, findReusable, workspaceFor, titleFor, tabsFor });
   }
 
   return Object.freeze({ GROUP_PREFIX, GROUP_COLOR, validTitle, create });

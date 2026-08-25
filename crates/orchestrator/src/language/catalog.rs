@@ -345,7 +345,15 @@ fn navigate_schema() -> Value {
                             "Explicitly discard a blocking unsaved-change prompt produced by this navigation. Default stops and reports it.",
                         ),
                     ),
-                    ("new_tab", constant_bool(false, "Reuse a tab. Omit this field for the normal call.")),
+                    ("new_tab", constant_bool(false, "Create one new controlled tab. Omit this field for the normal call.")),
+                    (
+                        "reuse",
+                        enumeration(
+                            &["domain", "never"],
+                            Some("domain"),
+                            "domain adopts an existing unbound same-host tab (exact URL preferred) instead of creating another one; never always creates. Ignored when new_tab is true.",
+                        ),
+                    ),
                     ("timeout_ms", timeout()),
                 ],
                 vec!["url"],

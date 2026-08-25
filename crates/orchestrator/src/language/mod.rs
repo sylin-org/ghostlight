@@ -12,7 +12,7 @@ pub use tool_catalog::{catalog, catalog_for};
 use std::path::Path;
 
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
@@ -240,6 +240,10 @@ pub struct NavigateRequest {
     pub browser: Option<String>,
     #[serde(default)]
     pub new_tab: bool,
+    /// Whether a fresh open may adopt an unbound same-host tab (ADR-0137). Defaults to domain
+    /// reuse; `new_tab` always creates fresh regardless of this field.
+    #[serde(default)]
+    pub reuse: Option<String>,
     /// Explicitly discard a blocking unsaved-change prompt from this navigation.
     #[serde(default)]
     pub beforeunload: Option<String>,
@@ -280,6 +284,28 @@ pub struct ActivateTab {
     pub restrictions: RequestRestrictions,
 }
 
+/// Whether opening a page may adopt an existing unbound same-host tab (ADR-0137).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReusePolicy {
+    /// Adopt the nearest unbound same-host tab, exact URL preferred; create only when none.
+    #[default]
+    Domain,
+    /// Always create a fresh tab.
+    Never,
+}
+
+impl ReusePolicy {
+    /// The wire token sent to the browser adapter.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Domain => "domain",
+            Self::Never => "never",
+        }
+    }
+}
+
 /// Input for opening a page.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct OpenPage {
@@ -293,6 +319,9 @@ pub struct OpenPage {
     pub browser: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
+    /// Whether the open may adopt an unbound same-host tab instead of creating one.
+    #[serde(default)]
+    pub reuse: ReusePolicy,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
 }
@@ -306,6 +335,9 @@ pub struct NavigatePage {
     pub beforeunload_discard: bool,
     #[serde(default)]
     pub tab: Option<String>,
+    /// Applied only when a workspace with no tabs falls back to the open path (ADR-0137).
+    #[serde(default)]
+    pub reuse: ReusePolicy,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     #[serde(flatten)]
@@ -1206,6 +1238,7 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
             "tab",
             "browser",
             "new_tab",
+            "reuse",
             "beforeunload",
             "timeout_ms",
         ],
@@ -1213,6 +1246,9 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
             validate_url(&value.url)?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
             validate_optional_handle(value.browser.as_deref(), "browser_")?;
+            if let Some(reuse) = value.reuse.as_deref() {
+                validate_choice(reuse, &["domain", "never"], "reuse")?;
+            }
             if value.new_tab && value.tab.is_some() {
                 return Err(LanguageError::Invalid(
                     "tab and new_tab cannot be combined".into(),
@@ -1240,10 +1276,22 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
         },
     )?;
     Ok(if value.new_tab {
+        let reuse = match value.reuse.as_deref() {
+            // A fresh tab is the entire point of new_tab; reuse never applies there. An
+            // explicit "domain" beside new_tab is contradictory, so it is refused rather than
+            // silently ignored.
+            Some("domain") => {
+                return Err(LanguageError::Invalid(
+                    "reuse cannot be combined with new_tab".into(),
+                ))
+            }
+            _ => ReusePolicy::Never,
+        };
         Operation::OpenPage(OpenPage {
             url: value.url,
             browser: value.browser,
             timeout_ms: value.timeout_ms,
+            reuse,
             restrictions: value.restrictions,
         })
     } else {
@@ -1251,6 +1299,10 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
             beforeunload_discard: value.beforeunload.as_deref() == Some("discard"),
             url: value.url,
             tab: value.tab,
+            reuse: match value.reuse.as_deref() {
+                Some("never") => ReusePolicy::Never,
+                _ => ReusePolicy::Domain,
+            },
             timeout_ms: value.timeout_ms,
             restrictions: value.restrictions,
         })
@@ -2431,7 +2483,7 @@ fn default_diagnostic_limit() -> usize {
 mod tests {
     use serde_json::json;
 
-    use super::{catalog, decode, LanguageError, Operation};
+    use super::{catalog, decode, LanguageError, Operation, ReusePolicy};
 
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
@@ -2456,6 +2508,7 @@ mod tests {
             panic!("wrong operation")
         };
         assert_eq!(navigate.timeout_ms, 8_000);
+        assert_eq!(navigate.reuse, ReusePolicy::Domain);
         let Operation::ReadPage(read) = decode("browser_read", json!({})).unwrap() else {
             panic!("wrong operation")
         };
@@ -2465,6 +2518,37 @@ mod tests {
         };
         assert_eq!(inspect.scope, "controls");
         assert_eq!(inspect.max_items, 80);
+    }
+
+    #[test]
+    fn navigate_reuse_follows_the_documented_ladder() {
+        let reuse_of = |input: serde_json::Value| match decode("browser_navigate", input).unwrap() {
+            Operation::NavigatePage(value) => value.reuse,
+            Operation::OpenPage(value) => value.reuse,
+            other => panic!("wrong operation {other:?}"),
+        };
+        assert_eq!(
+            reuse_of(json!({"url":"https://example.com","reuse":"never"})),
+            ReusePolicy::Never
+        );
+        assert_eq!(
+            reuse_of(json!({"url":"https://example.com","new_tab":true})),
+            ReusePolicy::Never
+        );
+        assert!(matches!(
+            decode(
+                "browser_navigate",
+                json!({"url":"https://example.com","reuse":"sometimes"})
+            ),
+            Err(LanguageError::Invalid(_))
+        ));
+        assert!(matches!(
+            decode(
+                "browser_navigate",
+                json!({"url":"https://example.com","new_tab":true,"reuse":"domain"})
+            ),
+            Err(LanguageError::Invalid(_))
+        ));
     }
 
     #[test]

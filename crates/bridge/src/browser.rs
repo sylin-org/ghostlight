@@ -555,7 +555,16 @@ pub enum BrowserCommand {
     /// Bring a physical tab and its window into view.
     FocusTab { tab_id: u64 },
     /// Open and group one URL as a single physical browser effect.
-    OpenTab { url: String, group_title: String },
+    ///
+    /// `reuse` is `domain` when the edge may adopt an existing unbound same-host tab instead of
+    /// creating one, and `never` when a fresh tab is required. Older adapters that predate the
+    /// field deserialize it as absent and always create, which stays correct.
+    OpenTab {
+        url: String,
+        group_title: String,
+        #[serde(default)]
+        reuse: String,
+    },
     /// Navigate a physical tab.
     Navigate { tab_id: u64, url: String },
     /// Move through browser history.
@@ -911,10 +920,16 @@ pub enum BrowserOutcome {
         window_focused: bool,
     },
     /// A new physical tab reached its observed landing.
+    ///
+    /// `reused` is true when the adapter satisfied the open by adopting an existing unbound
+    /// same-host tab instead of creating one (ADR-0137). Absent in older adapters, which always
+    /// created.
     TabOpened {
         tab: PhysicalTab,
         #[serde(default)]
         committed_urls: Vec<String>,
+        #[serde(default)]
+        reused: bool,
     },
     /// Navigation completed or reached useful readiness.
     Navigated {
@@ -1259,6 +1274,7 @@ mod tests {
                 command: BrowserCommand::OpenTab {
                     url: "https://example.com".into(),
                     group_title: "Ghostlight - test".into(),
+                    reuse: "domain".into(),
                 },
             },
         };

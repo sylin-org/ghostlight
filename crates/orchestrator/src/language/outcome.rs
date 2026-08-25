@@ -216,6 +216,8 @@ pub enum Outcome {
     TabActivated { host: Option<String> },
     /// A requested page was opened.
     PageOpened { host: Option<String> },
+    /// An existing unbound same-host tab was adopted for the requested page (ADR-0137).
+    PageReused { host: Option<String> },
     /// An existing controlled page was navigated.
     PageNavigated { host: Option<String> },
     /// Browser history was traversed.
@@ -400,6 +402,10 @@ impl Outcome {
             Self::PageOpened { host } => {
                 format!("Opened {}.", place(host, "the requested page"))
             }
+            Self::PageReused { host } => match host {
+                Some(host) => format!("Reused the {host} tab."),
+                None => "Reused the existing tab.".to_string(),
+            },
             Self::PageNavigated { host } => {
                 format!("Navigated to {}.", place(host, "the requested page"))
             }
@@ -784,6 +790,7 @@ impl Outcome {
             },
             Self::TabActivated { host }
             | Self::PageOpened { host }
+            | Self::PageReused { host }
             | Self::PageNavigated { host }
             | Self::HistoryTraversed { host, .. }
             | Self::PageReloaded { host }
@@ -1441,6 +1448,16 @@ mod tests {
             (
                 Outcome::PageOpened { host: None },
                 "Opened the requested page.",
+            ),
+            (
+                Outcome::PageReused {
+                    host: Some("example.com".into()),
+                },
+                "Reused the example.com tab.",
+            ),
+            (
+                Outcome::PageReused { host: None },
+                "Reused the existing tab.",
             ),
             (
                 Outcome::PageNavigated {

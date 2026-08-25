@@ -110,16 +110,20 @@ each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Foc
 
 Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
-Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional
-`beforeunload` whose only value is `discard`, accepting just that navigation's own unsaved-change
-prompt; optional `timeout_ms`; optional restrictions. `tab` and `new_tab:true` cannot be combined.
-Without `beforeunload`, a blocking prompt stops the navigation and is reported, never accepted.
+Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional `reuse` of
+`domain` or `never`, default `domain`; optional `beforeunload` whose only value is `discard`,
+accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`; optional
+restrictions. `tab` and `new_tab:true` cannot be combined, and `reuse` cannot be combined with
+`new_tab`. Without `beforeunload`, a blocking prompt stops the navigation and is reported, never
+accepted.
 
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it
-navigates that exact tab. With neither, it uses the unambiguous controlled tab, creates one when
-none exists, and rejects ambiguous selection. Capability: `read`.
+navigates that exact tab. With neither, it uses the unambiguous controlled tab, and when none
+exists it opens one -- adopting an existing unbound same-host tab (exact URL preferred) unless
+`reuse:"never"` asks for a strictly fresh tab (ADR-0137). A reused open says so: the summary
+reads "Reused the example.com tab." rather than "Opened example.com." Capability: `read`.
 
-Facts: `tab`, governed `url`, bounded `title`, `created`, and `document_generation`.
+Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `document_generation`.
 
 ### `browser_history`
 

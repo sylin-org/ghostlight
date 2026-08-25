@@ -543,8 +543,44 @@ test("workspace topology accepts only bounded Ghostlight group titles", () => {
   assert.equal(topology.validTitle("Personal"), false);
 });
 
-test("same-title duplicate groups merge into the one canonical group", async () => {
-  const merged = [];
+test("reuse picks the exact-url unbound tab, then lowest id, and never a bound or non-web tab", async () => {
+  const bound = { id: 1, url: "https://example.com/", windowId: 4 };
+  const chromeApi = {
+    storage: { session: { async get() { return {}; }, async set() {} } },
+    tabs: {
+      async query() {
+        return [
+          { id: 2, url: "https://example.com/other", windowId: 4 },
+          bound,
+          { id: 3, url: "https://example.net/", windowId: 4 },
+          { id: 4, url: "chrome://version", windowId: 4 },
+          { id: undefined, url: "https://example.com/", windowId: 4 }
+        ];
+      },
+      async get(id) { return { id, windowId: 4 }; },
+      async group(value) { return value.groupId ?? 11; }
+    },
+    tabGroups: {
+      async get(id) { return { id, windowId: 4, title: "Ghostlight - Codex" }; },
+      async query() { return []; },
+      async update() {}
+    }
+  };
+  const manager = topology.create(chromeApi, "topology");
+  // Tab 1 belongs to a workspace, so it must never be adopted even on an exact match.
+  await manager.assign(bound.id, "workspace_a", "Ghostlight - Codex");
+  assert.deepEqual(await manager.findReusable("https://example.com/other"), {
+    id: 2, url: "https://example.com/other", windowId: 4
+  });
+  // Without an exact match, the lowest-id same-host unbound tab wins.
+  assert.deepEqual(await manager.findReusable("https://example.com/"), {
+    id: 2, url: "https://example.com/other", windowId: 4
+  });
+  assert.equal(await manager.findReusable("https://no-host-match.test/"), null);
+  assert.equal(await manager.findReusable("chrome://version"), null);
+});
+
+test("same-title duplicate groups merge into the one canonical group", async () => {  const merged = [];
   const chromeApi = {
     storage: { session: { async get() { return {}; }, async set() {} } },
     tabs: {

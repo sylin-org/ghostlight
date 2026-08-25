@@ -16,6 +16,17 @@ use super::{
     InvocationContext, InvocationResult, Readiness, Status, Terminal,
 };
 
+/// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenedTabKind {
+    /// Created fresh by this open.
+    Created,
+    /// Adopted from an existing unbound same-host tab.
+    Adopted,
+    /// Recreated fresh under a recovered stale handle.
+    Recovered,
+}
+
 impl ApplicationExecutor {
     pub(super) fn list_tabs(
         &self,
@@ -156,6 +167,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         url: &str,
+        reuse: crate::language::ReusePolicy,
     ) -> Terminal {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
@@ -174,17 +186,19 @@ impl ApplicationExecutor {
             Err(error) => return self.workspace_failure(context, error),
         };
         let group_title = format!("Ghostlight - {}", bounded(&client_label, 80));
-        let (tab, commits) = match self.dispatch(
+        let (tab, commits, reused) = match self.dispatch(
             context,
             BrowserCommand::OpenTab {
                 url: url.into(),
                 group_title,
+                reuse: reuse.as_str().into(),
             },
         ) {
             Ok(BrowserOutcome::TabOpened {
                 tab,
                 committed_urls,
-            }) => (tab, committed_urls),
+                reused,
+            }) => (tab, committed_urls, reused),
             Ok(_) => return self.protocol_failure(context, decision, None),
             Err(error) => return self.browser_failure(context, decision, error, None),
         };
@@ -192,7 +206,18 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        self.settle_opened_tab(context, lease, tab, controlled, commits, true)
+        self.settle_opened_tab(
+            context,
+            lease,
+            tab,
+            controlled,
+            commits,
+            if reused {
+                OpenedTabKind::Adopted
+            } else {
+                OpenedTabKind::Created
+            },
+        )
     }
 
     /// Govern the just-opened tab: landing authorization with close compensation, governed
@@ -205,7 +230,7 @@ impl ApplicationExecutor {
         tab: ghostlight_bridge::browser::PhysicalTab,
         controlled: SelectedTab,
         commits: Vec<String>,
-        created: bool,
+        kind: OpenedTabKind,
     ) -> Terminal {
         self.emit(DomainEvent::TabCreated {
             invocation: context.invocation.into(),
@@ -253,7 +278,18 @@ impl ApplicationExecutor {
             tab: governed.handle.clone(),
             physical_id: governed.physical_id,
         });
-        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, Outcome::PageOpened { host: observed_host(&governed.url) }, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":created,"document_generation":governed.generation}))
+        let reused = kind == OpenedTabKind::Adopted;
+        let created = kind != OpenedTabKind::Adopted;
+        let outcome = if reused {
+            Outcome::PageReused {
+                host: observed_host(&governed.url),
+            }
+        } else {
+            Outcome::PageOpened {
+                host: observed_host(&governed.url),
+            }
+        };
+        self.succeeded(context, landing, Some(governed.physical_id), Effect::Applied, readiness(governed.readiness), false, outcome, json!({"tab":governed.handle.as_str(),"url":governed.url,"title":governed.title,"created":created,"reused":reused,"document_generation":governed.generation}))
     }
 
     pub(super) fn navigate_page(
@@ -263,6 +299,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         url: &str,
         discard_beforeunload: bool,
+        reuse: crate::language::ReusePolicy,
     ) -> Terminal {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
@@ -279,7 +316,7 @@ impl ApplicationExecutor {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
             Err(WorkspaceError::NoTab) if requested_tab.is_none() => {
-                return self.open_page(context, lease, url)
+                return self.open_page(context, lease, url, reuse)
             }
             // The caller's durable tab handle points at a tab that is gone. Recreate it
             // through the governed open path under the same handle, and say so plainly.
@@ -307,11 +344,15 @@ impl ApplicationExecutor {
                     BrowserCommand::OpenTab {
                         url: url.into(),
                         group_title,
+                        // A recovered stale handle must be a fresh tab under that handle, not
+                        // an adoption of an unrelated same-host tab.
+                        reuse: crate::language::ReusePolicy::Never.as_str().into(),
                     },
                 ) {
                     Ok(BrowserOutcome::TabOpened {
                         tab,
                         committed_urls,
+                        ..
                     }) => (tab, committed_urls),
                     Ok(_) => return self.protocol_failure(context, decision, None),
                     Err(error) => return self.browser_failure(context, decision, error, None),
@@ -320,8 +361,14 @@ impl ApplicationExecutor {
                     Ok(tab) => tab,
                     Err(error) => return self.workspace_failure(context, error),
                 };
-                let mut terminal =
-                    self.settle_opened_tab(context, lease, tab, controlled, commits, true);
+                let mut terminal = self.settle_opened_tab(
+                    context,
+                    lease,
+                    tab,
+                    controlled,
+                    commits,
+                    OpenedTabKind::Recovered,
+                );
                 if terminal.result.status == Status::Succeeded {
                     terminal.result.repeat_safe = false;
                     if let Some(host) = terminal.observed.host.as_deref() {

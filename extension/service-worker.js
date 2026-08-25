@@ -987,6 +987,24 @@ async function openTab(correlation, workspace, command) {
   const commits = [];
   let openedTab = null;
   try {
+    // Domain reuse (ADR-0137): a plain open adopts the nearest unbound same-host tab instead
+    // of creating another one. new_tab and stale-handle recovery send reuse "never".
+    if (command.reuse === "domain") {
+      const candidate = await topology.findReusable(command.url);
+      if (candidate) {
+        openedTab = candidate;
+        navigationWatchers.set(openedTab.id, { correlation, commits });
+        const firstWorkspaceTab = topology.tabsFor(workspace).length === 0;
+        await topology.assign(openedTab.id, workspace, command.group_title);
+        await chrome.tabs.update(openedTab.id, { url: command.url, active: true });
+        if (firstWorkspaceTab) {
+          await chrome.windows.update(openedTab.windowId, { focused: true });
+        }
+        await retainManagedDebugger(openedTab.id);
+        const landed = await waitForReady(openedTab.id, correlation);
+        return { outcome: "tab_opened", tab: physicalTab(landed), committed_urls: commits, reused: true };
+      }
+    }
     openedTab = await topology.open(command.url, workspace, command.group_title, (tab) => {
       openedTab = tab;
       navigationWatchers.set(tab.id, { correlation, commits });

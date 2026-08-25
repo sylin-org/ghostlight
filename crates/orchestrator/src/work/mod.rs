@@ -436,13 +436,14 @@ impl ApplicationExecutor {
         match operation {
             Operation::ListTabs(_) => self.list_tabs(context, lease),
             Operation::ActivateTab(value) => self.activate_tab(context, lease, &value.tab),
-            Operation::OpenPage(value) => self.open_page(context, lease, &value.url),
+            Operation::OpenPage(value) => self.open_page(context, lease, &value.url, value.reuse),
             Operation::NavigatePage(value) => self.navigate_page(
                 context,
                 lease,
                 value.tab.as_deref(),
                 &value.url,
                 value.beforeunload_discard,
+                value.reuse,
             ),
             Operation::NavigateHistory(value) => {
                 self.navigate_history(context, lease, value.tab.as_deref(), &value.direction)
@@ -2182,6 +2183,7 @@ mod tests {
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
 
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2271,6 +2273,7 @@ mod tests {
         let (executor, browser, _, workspace, _) = fixture();
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2374,6 +2377,7 @@ mod tests {
         let (executor, browser, _, workspace, _) = fixture();
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(9, "https://example.com/again"),
             committed_urls: vec!["https://example.com/again".into()],
         }));
@@ -2464,6 +2468,7 @@ mod tests {
         );
 
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2561,6 +2566,7 @@ mod tests {
             summary("browser_edge", true),
         ]);
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2673,6 +2679,7 @@ mod tests {
             summary("browser_edge", true),
         ]);
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2751,6 +2758,7 @@ mod tests {
         let (executor, browser, _, workspace, _) = fixture();
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -2874,6 +2882,7 @@ mod tests {
     fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3169,6 +3178,7 @@ mod tests {
     fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3220,6 +3230,7 @@ mod tests {
     fn open_read_close_is_one_truthful_result_per_call() {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3261,7 +3272,7 @@ mod tests {
         assert_eq!(calls.len(), 3);
         assert!(matches!(
             &calls[0],
-            BrowserCommand::OpenTab { url, group_title }
+            BrowserCommand::OpenTab { url, group_title, .. }
                 if url == "https://example.com" && group_title == "Ghostlight - test"
         ));
     }
@@ -3315,6 +3326,7 @@ mod tests {
     fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://Example.com/patients/48219?ssn=1#note"),
             committed_urls: vec!["https://example.com/patients/48219?ssn=1#note".into()],
         }));
@@ -3369,6 +3381,7 @@ mod tests {
     fn an_observation_never_outlives_the_invocation_it_describes() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3397,6 +3410,7 @@ mod tests {
     fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3477,6 +3491,7 @@ mod tests {
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3550,6 +3565,7 @@ mod tests {
 
         // An ordinary, fully governed opener tab, admitted under the narrow policy.
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://approved.example/"),
             committed_urls: vec!["https://approved.example/".into()],
         }));
@@ -3599,6 +3615,7 @@ mod tests {
     fn physical_action_receipt_names_the_target_without_trusting_its_role() {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3672,6 +3689,7 @@ mod tests {
         let (executor, browser, _, workspace, audit) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3730,6 +3748,7 @@ mod tests {
     fn local_preserve_tabs_refusal_is_blocked_without_an_effect() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3785,6 +3804,7 @@ mod tests {
     fn direct_and_sequence_actions_use_the_same_physical_executor_path() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3866,6 +3886,7 @@ mod tests {
     fn credential_target_requests_handoff_before_any_value_dispatch() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3926,6 +3947,7 @@ mod tests {
     fn denied_redirect_is_compensated_without_replay_risk() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "http://127.0.0.1/private"),
             committed_urls: vec![
                 "https://example.com/".into(),
@@ -3959,6 +3981,7 @@ mod tests {
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "http://127.0.0.1/private"),
             committed_urls: vec![
                 "https://example.com/".into(),
@@ -3985,6 +4008,7 @@ mod tests {
     fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensation() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "http://127.0.0.1/private"),
             committed_urls: vec![
                 "https://example.com/".into(),
@@ -4013,6 +4037,7 @@ mod tests {
     fn stale_target_fails_before_browser_dispatch() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -4094,6 +4119,7 @@ mod tests {
     fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
