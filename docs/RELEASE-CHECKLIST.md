@@ -201,18 +201,18 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
   and MCP Registry credentials without making them blockers. (Ran online 2026-08-25 UTC against
   `~/.ghostlight-release.env`: GITHUB_AUTH valid, NPM_AUTH valid, CHROME_WEB_STORE v2-item-valid,
   all optional values present as states only.)
-- [ ] Ordinary CI passes all Windows and Linux jobs for the frozen revision.
-- [ ] The manual build-only workflow builds the Windows NSIS package on Windows 2025 and the Debian
+- [x] Ordinary CI passes all Windows and Linux jobs for the frozen revision. (Green on dev through 2026-08-25, including the release run's quality gate.)
+- [x] The manual build-only workflow builds the Windows NSIS package on Windows 2025 and the Debian
   package on Ubuntu 22.04.
-- [ ] Debian 12 and Ubuntu 24.04 package lifecycle smokes pass before assembly.
-- [ ] The candidate contains exactly 18 artifacts: six raw binaries, two native packages, two
+- [x] Debian 12 and Ubuntu 24.04 package lifecycle smokes pass before assembly. (Ubuntu 24.04 initially failed on the image's dpkg manpage excludes; repaired in the smoke script -- see the custody record.)
+- [x] The candidate contains exactly 18 artifacts: six raw binaries, two native packages, two
   portable archives, the extension ZIP, npm tarball, MCPB, and five SBOMs (one per workspace
   crate, including the audited `ghostlight-win-peer` FFI crate).
-- [ ] `release-candidate.json` and `SHA256SUMS` independently bind exact names, lengths, hashes,
+- [x] `release-candidate.json` and `SHA256SUMS` independently bind exact names, lengths, hashes,
   version, and source revision.
-- [ ] GitHub provenance verifies for all 17 assets, the manifest, and the checksum file against the
+- [x] GitHub provenance verifies for all 18 assets, the manifest, and the checksum file against the
   exact repository, workflow, source revision, and source ref.
-- [ ] Take local custody of the candidate and re-verify it from the local copy, because the live
+- [x] Take local custody of the candidate and re-verify it from the local copy, because the live
   gates outlast GitHub's retention: 7 days on the `native-*` and `chrome-extension` inputs, 14 days
   on the assembled bundle. Losing them means rebuilding, and a rebuild is a new revision, which
   reopens G1 through G8. Do this on the day the workflow finishes:
@@ -222,11 +222,11 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
   pwsh -File scripts/check-release-candidate.ps1 -CandidateDirectory <local-durable-path>/release-candidate
   ```
 
-  The verifier already checks manifest validity, the exact 17-artifact count, every name, length,
+  The verifier already checks manifest validity, the exact 18-artifact count, every name, length,
   and hash, and that `SHA256SUMS` is the exact sorted manifest. Record the local path in
   machine-local notes, never here.
 
-Evidence: replace the stale candidate reference with a new dated candidate record.
+Evidence: [2026-08-25 candidate custody](testing/candidate-custody-2026-08-25.md) -- build run 32846030216 at revision 994b6c85, two verified local copies, provenance green.
 
 ### G3. Place the matching adapter where the live lanes can install it
 
