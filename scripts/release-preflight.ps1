@@ -112,7 +112,6 @@ try {
     $nodeVersion = (node --version).Trim()
     $osLine = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription.Trim()
     $hasShell = [bool](Get-Command sh -ErrorAction SilentlyContinue)
-    $hasCargoDeny = [bool](Get-Command cargo-deny -ErrorAction SilentlyContinue)
 
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $repository $TargetDirectory))
     $binDirectory = Join-Path $targetDirectory "debug"
@@ -173,27 +172,27 @@ try {
     if ($SkipJourneys) {
         $stages += @{ Name = "journeys (process/CLI/PowerShell/workbench)"; Skip = "skipped by request"; Action = {} }
     } else {
+        # Each journey pins GHOSTLIGHT_BIN_DIR to THIS runner's isolated target at execution time,
+        # so a -TargetDirectory run can never silently verify stale binaries from the default
+        # location (CachyOS finding 1, 2026-08-25).
         $previousBinDir = $env:GHOSTLIGHT_BIN_DIR
-        $env:GHOSTLIGHT_BIN_DIR = $binDirectory
 
         $stages += @{ Name = "process journey"; Skip = ""; Action = {
+            $env:GHOSTLIGHT_BIN_DIR = $binDirectory
             Run-Gate { node tests/process-journey.mjs } "process journey failed"
         } }
         $stages += @{ Name = "CLI journey"; Skip = ""; Action = {
+            $env:GHOSTLIGHT_BIN_DIR = $binDirectory
             Run-Gate { node tests/cli-journey.mjs } "CLI journey failed"
         } }
         $stages += @{ Name = "CLI PowerShell journey"; Skip = ""; Action = {
+            $env:GHOSTLIGHT_BIN_DIR = $binDirectory
             Run-Gate { node tests/cli-powershell-journey.mjs } "PowerShell journey failed"
         } }
         $stages += @{ Name = "workbench surface"; Skip = ""; Action = {
+            $env:GHOSTLIGHT_BIN_DIR = $binDirectory
             Run-Gate { node tests/workbench-surface.mjs } "workbench surface failed"
         } }
-
-        if ($previousBinDir) {
-            $env:GHOSTLIGHT_BIN_DIR = $previousBinDir
-        } else {
-            Remove-Item Env:GHOSTLIGHT_BIN_DIR -ErrorAction SilentlyContinue
-        }
     }
 
     $stages += @{ Name = "policy grammar"; Skip = ""; Action = {
@@ -221,19 +220,27 @@ try {
         }
     }
 
-    $dependencySkip = if (-not $hasCargoDeny) {
-        "cargo-deny not installed; CI runs license/ban/source/advisory"
+    $missingDependencyTools = @()
+    if (-not (Get-Command cargo-deny -ErrorAction SilentlyContinue)) { $missingDependencyTools += "cargo-deny" }
+    if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) { $missingDependencyTools += "cargo-audit" }
+    $dependencySkip = if ($missingDependencyTools.Count -gt 0) {
+        "$($missingDependencyTools -join ' and ') not installed; CI runs license/ban/source/advisory"
     } elseif (-not $IncludeDependencyGates) {
-        "known GTK/Tauri advisory allowances; rechecked against the frozen graph (CI, or -IncludeDependencyGates)"
+        "rechecked against the frozen graph when run with -IncludeDependencyGates (or by CI)"
     } else {
         ""
     }
 
+    # The authoritative split from RELEASE.md: policy checks via deny's non-advisory tables, and
+    # advisories through cargo audit, whose configuration carries the accepted GTK/Tauri-chain
+    # allowances. A broad `cargo deny check` would fail on that accepted set (CachyOS finding 2,
+    # 2026-08-25).
     $stages += @{
-        Name   = "dependency gates (cargo deny check)"
+        Name   = "dependency gates (deny licenses/bans/sources + audit)"
         Skip   = $dependencySkip
         Action = {
-            Run-Gate { cargo deny check } "dependency gates failed"
+            Run-Gate { cargo deny check licenses bans sources } "dependency policy failed"
+            Run-Gate { cargo audit } "dependency advisories failed"
         }
     }
 
@@ -248,6 +255,13 @@ try {
         $results += Invoke-Stage -Name $stage.Name -Skip $stage.Skip -Action $stage.Action
         $lastResult = $results[-1]
         if ($lastResult.Result -eq "FAIL" -and -not $ContinueOnFailure) { break }
+    }
+
+    # Restore the caller's environment now that every stage has run.
+    if ($previousBinDir) {
+        $env:GHOSTLIGHT_BIN_DIR = $previousBinDir
+    } else {
+        Remove-Item Env:GHOSTLIGHT_BIN_DIR -ErrorAction SilentlyContinue
     }
 
     Write-Host ""

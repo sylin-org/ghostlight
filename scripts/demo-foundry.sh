@@ -237,6 +237,9 @@ step 'scroll back' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,directio
 step 'read title' browser_execute "$(jq -nc --arg tab "$tab" '{tab:$tab,script:"document.title"}')" succeeded
 step 'seq scroll-wait' browser_sequence "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{action:"scroll",direction:"down",amount:"small"},{action:"wait",condition:"text_present",value:"SYLIN"}]}')" succeeded
 step 'flow title-find' browser_flow "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{id:"title",tool:"browser_execute",arguments:{script:"document.title"}},{id:"find it",tool:"browser_find",arguments:{text:{flow_ref:{step:"title",pointer:"/facts/value"}}}}]}')" succeeded
+# The 24th catalog tool belongs in the story, or "whole catalog rehearsed" stops being true
+# (CachyOS finding 3, 2026-08-25).
+step 'explain policy' policy_explain '{}' succeeded
 step 'demo index' browser_navigate "$(jq -nc --arg tab "$tab" --arg index 'https://sylin.org/ghostlight/demo/' '{tab:$tab,url:$index}')" succeeded
 step 'history back' browser_history "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"back"}')" succeeded
 

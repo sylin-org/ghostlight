@@ -278,6 +278,12 @@ $null = Step 'flow title-find' 'browser_flow' @{
         } }
     )
 }
+# The 24th catalog tool belongs in the story, or "whole catalog rehearsed" stops being true
+# (CachyOS finding 3, 2026-08-25).
+$explain = Step 'explain policy' 'policy_explain' @{}
+if ($explain.summary -notmatch '^Explained current authority across ') {
+    throw "policy_explain summary drifted: $($explain.summary)"
+}
 $null = Step 'demo index' 'browser_navigate' @{ tab = $tab; url = 'https://sylin.org/ghostlight/demo/' }
 $null = Step 'history back' 'browser_history' @{ tab = $tab; action = 'back' }
 
