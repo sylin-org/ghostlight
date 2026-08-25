@@ -17,26 +17,7 @@ review replaces the stale one -- see
 Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
 evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
-G0 is closed and the candidate is frozen at `e7d8986b` (`docs/release/freeze.json`; first declared
-at `08f36860`, re-declared after ordinary CI exposed a Linux-only Clippy failure in the new
-`ghostlight-win-peer` test module, fixed at its seam and re-frozen). The pre-freeze debt batch
-landed before the freeze
-([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the shared bridge handshake, amber
-never-settled rows, [ADR-0136](adr/0136-model-facing-policy-explain.md) plus the 24th catalog tool
-`policy_explain`, and ADR-0105 stage 2 observed socket-peer attribution through the new audited
-`ghostlight-win-peer` crate; stage 3 was re-deferred on evidence by owner decision (see the
-ADR-0105 amendment). G1's Windows half passed: full preflight
-([testing/release-preflight-2026-08-24.md](testing/release-preflight-2026-08-24.md)), fringe-stability
-review, and a live whole-catalog foundry run against the redeployed frozen graph. The pending
-STAGED_PUBLISH store review continues to cover the candidate bytes (`extension/` unchanged since
-`70869631`). The Linux frozen-source and visible-browser work passed on CachyOS: exact source gates,
-an optimized revision-qualified user candidate, all 41 Foundry beats, and a separate successful
-`policy_explain` call. The lane remains BLOCKED pending owner disposition of three frozen
-release-tooling findings: custom preflight targets do not reach the queued journeys, the optional
-dependency stage contradicts the authoritative split, and the Foundry scripts omit the new 24th
-tool while claiming the whole catalog. See
-[the dated Linux evidence](testing/frozen-source-cachyos-verification-2026-08-25.md). Then G2
-assembles and takes custody, and the environment lanes follow. Live authority swaps go through
+G0 and G1 closed on both hosts at frozen revision e7d8986b (Windows preflight, CachyOS verification, and runner-repair records under docs/testing/). The owner then reported real tab and group spam, directed an architectural fix over release ceremony, and dropped the freeze itself: we publish when we are done, and the freeze machinery now only pins whichever revision becomes the candidate. ADR-0137 landed the fix: duplicate same-title groups merge into the canonical group (self-healing existing pollution), and plain opens adopt the nearest unbound same-host tab -- new_tab and reuse never still create fresh -- with the summary saying Reused the example.com tab. when it happens. Pending: the owner reloads the unpacked extension (mandatory after service-worker changes), a green foundry rerun demonstrating reuse live, then the G2 candidate build at the final revision. Live authority swaps go through
 scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
