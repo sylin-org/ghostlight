@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "8779e11b750a53f4f63478d02778adc1dd1a6722",
-  "frozen_at_utc": "2026-08-25T04:38:55Z",
+  "revision": "994b6c85dcd7c8df74237cf329461d85ce49b13a",
+  "frozen_at_utc": "2026-08-25T12:41:02Z",
   "frozen_by": "onose",
-  "note": "1.0 candidate build revision (owner-directed build-when-done)"
+  "note": "1.0 candidate build revision (the revision the G2 run built)"
 }
