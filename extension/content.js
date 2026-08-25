@@ -148,7 +148,27 @@
   function subjectAtViewportPoint(x, y) {
     const hit = document.elementFromPoint?.(x, y);
     if (!hit) return null;
-    return actionSubject(hit.closest?.(ACTIONABLE_SELECTOR) || hit);
+    return actionSubject(closestAcrossBoundaries(hit, ACTIONABLE_SELECTOR) || hit);
+  }
+
+  // closest() stops at the shadow boundary (ADR-0139): a component's inner node has no
+  // light-DOM ancestors, so the nearest actionable element may live in an enclosing root.
+  function closestAcrossBoundaries(start, selector) {
+    for (let node = start; node; ) {
+      const hit = node.closest?.(selector);
+      if (hit) return hit;
+      const root = node.getRootNode?.();
+      node = root && root.host ? root.host : null;
+    }
+    return null;
+  }
+
+  // document.activeElement inside a component is the shadow host; the real focused
+  // element hides one shadowRoot.activeElement hop per nesting level.
+  function deepestActiveElement() {
+    let element = document.activeElement;
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    return element;
   }
 
   function roots() {
@@ -301,7 +321,7 @@
         : "zero-size";
       throw new Error(`target is not visible for ${intent} (${reason})`);
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true" || element.closest("[inert]")) {
+    if (element.disabled || element.getAttribute("aria-disabled") === "true" || closestAcrossBoundaries(element, "[inert]")) {
       throw new Error(`target is disabled for ${intent}`);
     }
     return element;
@@ -339,7 +359,7 @@
     if (!(element instanceof HTMLInputElement) || element.type !== "file") {
       throw new Error("target is not a file input");
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true" || element.closest("[inert]")) {
+    if (element.disabled || element.getAttribute("aria-disabled") === "true" || closestAcrossBoundaries(element, "[inert]")) {
       throw new Error("target is disabled for upload");
     }
     return element;
@@ -437,8 +457,8 @@
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "query_semantic") return { targets: querySemanticTargets(message) };
-      if (message.kind === "describe_focused") { const element = document.activeElement; if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
-      if (message.kind === "clear_focused") { const element = requireActionable(document.activeElement, "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
+      if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
+      if (message.kind === "clear_focused") { const element = requireActionable(deepestActiveElement(), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "drop_files") {
         const dropTarget = document.elementFromPoint(message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");

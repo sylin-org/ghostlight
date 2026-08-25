@@ -167,6 +167,7 @@ function contentHarness() {
   return {
     input,
     delays,
+    document,
     send,
     setScroll(x, y) {
       context.scrollX = x;
@@ -444,4 +445,63 @@ test("scroll_offset reports the frame's own scroll position", async () => {
   assert.equal(offset.ok, true);
   assert.equal(offset.result.x, 40);
   assert.equal(offset.result.y, 120);
+});
+
+function shadowFixture(name) {
+  return {
+    tagName: "INPUT",
+    id: "",
+    labels: [],
+    isConnected: true,
+    disabled: false,
+    hidden: false,
+    isContentEditable: true,
+    textContent: "stale draft",
+    events: [],
+    getAttribute(key) { return key === "aria-label" ? name : null; },
+    getBoundingClientRect() { return { left: 4, top: 4, width: 40, height: 20 }; },
+    dispatchEvent(event) { this.events.push(event.type); return true; }
+  };
+}
+
+test("focused-control discovery reaches the element living inside a shadow host", async () => {
+  const harness = contentHarness();
+  const inner = shadowFixture("Inner field");
+  harness.document.activeElement = { shadowRoot: { activeElement: inner } };
+
+  const described = await harness.send({ kind: "describe_focused" });
+  assert.equal(described.ok, true);
+  assert.equal(described.result.targets[0].role, "textbox");
+  assert.equal(described.result.targets[0].name, "Inner field");
+
+  const cleared = await harness.send({ kind: "clear_focused" });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.result.cleared, true);
+  assert.equal(cleared.result.subject.name, "Inner field");
+  assert.equal(inner.textContent, "");
+  assert.deepEqual(inner.events, ["input"]);
+});
+
+test("point subjects cross the shadow boundary to the nearest actionable host", async () => {
+  const harness = contentHarness();
+  const inner = shadowFixture("Inner field");
+  const button = {
+    tagName: "BUTTON",
+    id: "",
+    labels: [],
+    closest(selector) { return selector.includes("button") ? this : null; },
+    getAttribute(key) { return key === "aria-label" ? "Seal" : null; },
+    getRootNode() { return {}; }
+  };
+  inner.getRootNode = () => ({ host: button });
+  harness.document.elementFromPoint = () => inner;
+
+  const crossed = await harness.send({ kind: "scroll_point", x: 30, y: 30 });
+  assert.equal(crossed.result.subject.role, "button");
+  assert.equal(crossed.result.subject.name, "Seal");
+
+  const orphan = { tagName: "SPAN", id: "", labels: [], matches() { return false; }, getRootNode() { return {}; }, getAttribute() { return null; } };
+  harness.document.elementFromPoint = () => orphan;
+  const plain = await harness.send({ kind: "scroll_point", x: 30, y: 30 });
+  assert.equal(plain.result.subject.role, "span");
 });
