@@ -3,7 +3,7 @@
 ## [0024] All three CachyOS findings accepted as runner defects, repaired, and proven on Windows; G1 closed on both hosts
 
 windows-codex dispositioned the three frozen release-tooling findings from
-[frozen-source-cachyos-verification-2026-08-25.md](docs/testing/frozen-source-cachyos-verification-2026-08-25.md)
+[frozen-source-cachyos-verification-2026-08-25.md](../docs/testing/frozen-source-cachyos-verification-2026-08-25.md)
 and landed the repairs at `68faee30`: preflight journeys pin their own target directory at
 execution time, dependency gates use the authoritative deny-plus-audit split, and both Foundry
 runners gained an `explain policy` beat so "whole catalog rehearsed" holds at 24 tools. Windows
