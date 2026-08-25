@@ -17,14 +17,20 @@ review replaces the stale one -- see
 Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
 evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
-Next: G0 is one box from closed. The store-adapter route and the Owed disposition are recorded
-(2026-08-24): the live lanes wait for the pending staged review, and four non-extension Owed items
-were promoted into a pre-freeze window running now under
-[tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md). The freeze follows that batch's last
-commit; `b9a017a1` stays the extension-byte floor matching the submitted review bytes. Then G1 runs
-at the frozen sha (preflight plus the Linux verification lane via coordination/CHAT.md), G2
-assembles and takes custody, and the environment lanes follow. Live authority swaps go through
-scripts/dev-loop.ps1 only.
+G0 is closed and the candidate is frozen at `08f36860` (`docs/release/freeze.json`, committed
+`84e9e7db`). The pre-freeze debt batch landed first
+([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the shared bridge handshake, amber
+never-settled rows, [ADR-0136](adr/0136-model-facing-policy-explain.md) plus the 24th catalog tool
+`policy_explain`, and ADR-0105 stage 2 observed socket-peer attribution through the new audited
+`ghostlight-win-peer` crate; stage 3 was re-deferred on evidence by owner decision (see the
+ADR-0105 amendment). G1's Windows half passed: full preflight
+([testing/release-preflight-2026-08-24.md](testing/release-preflight-2026-08-24.md)), fringe-stability
+review, and a live whole-catalog foundry run against the redeployed frozen graph. The pending
+STAGED_PUBLISH store review continues to cover the candidate bytes (`extension/` unchanged since
+`70869631`). Open for G1: the Linux lane, dispatched to linux-codex via coordination message
+[0021] against the frozen revision with the freeze rule that defects are documented BLOCKED, not
+fixed. Then G2 assembles and takes custody, and the environment lanes follow. Live authority swaps
+go through scripts/dev-loop.ps1 only.
 
 ## Published capability restoration
 
