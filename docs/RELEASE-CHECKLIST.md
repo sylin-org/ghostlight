@@ -234,18 +234,20 @@ G4, G5, and G7 all require the matching store adapter rather than an unpacked bu
 to exist before those lanes run, which is why this gate sits here instead of inside publication.
 Nothing in this gate makes the adapter publicly visible.
 
-- [ ] Upload the exact candidate extension ZIP, and confirm the uploaded bytes match the candidate
+- [x] Upload the exact candidate extension ZIP, and confirm the uploaded bytes match the candidate
   hash. The store build is deterministic, so a mismatch means the wrong artifact.
-- [ ] Submit for review with staged publication, so review approval does not silently make the
+- [x] Submit for review with staged publication, so review approval does not silently make the
   adapter public.
-- [ ] Take G2 custody before opening this gate: a staged review goes stale the moment the package
+- [x] Take G2 custody before opening this gate: a staged review goes stale the moment the package
   changes, so submission is ordered strictly after the frozen candidate's bytes are assembled,
   verified, and held locally.
 - [ ] Reach the distribution state chosen in G0, and record which route was used.
 - [ ] Install the reviewed adapter from the store on a live-lane machine and confirm its extension id
   and version match the candidate.
 
-Evidence: add a dated adapter record under `docs/testing/`, content-free, with no credential values.
+Evidence: [2026-08-25 store resubmission](testing/extension-store-resubmission-2026-08-25.md) --
+custody ZIP `9ae88e67...` uploaded over the canceled stale review (`f7b9a6ad...`), submitted
+STAGED_PUBLISH, now PENDING_REVIEW; public listing still serves 0.8.0.
 
 ### G4. Pass the Ubuntu GNOME Wayland installed-product lane
 
