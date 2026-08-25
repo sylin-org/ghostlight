@@ -149,11 +149,14 @@ jobs:
       - name: Verify Debian package lifecycle on ${{ matrix.distribution }}
         shell: bash
         run: |
+          set -x
           artifact=$(find "$PWD/candidate" -type f -name '*.deb' -print -quit)
           test -n "$artifact"
           apt-get update
           apt-get install -y binutils desktop-file-utils jq procps xvfb
-          ./scripts/check-debian-package-lifecycle.sh \
+          echo "MARKER: apt finished ok"
+          ls -la scripts/check-debian-package-lifecycle.sh
+          bash -x ./scripts/check-debian-package-lifecycle.sh \
             "$artifact" \
             "${{ matrix.distribution }}" \
             "${{ github.sha }}"
