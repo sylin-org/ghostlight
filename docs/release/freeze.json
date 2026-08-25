@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "e7d8986bb96625335cd9cff7d04d7e8b083f845d",
-  "frozen_at_utc": "2026-08-25T01:11:00Z",
+  "revision": "8779e11b750a53f4f63478d02778adc1dd1a6722",
+  "frozen_at_utc": "2026-08-25T04:38:55Z",
   "frozen_by": "onose",
-  "note": "1.0 release candidate (re-declared after Linux-clippy gate repair)"
+  "note": "1.0 candidate build revision (owner-directed build-when-done)"
 }
