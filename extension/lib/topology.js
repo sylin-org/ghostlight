@@ -75,12 +75,37 @@
       });
     }
 
+    // One exact-title group per client label is the shipped invariant, and history can leave
+    // duplicates behind (service-worker restarts between creation and titling, pre-repair
+    // releases). Chromium removes a group the moment its last tab leaves, so merging is: move
+    // every stray tab of every same-title group into the canonical one and the duplicates
+    // cease to exist. Best-effort per duplicate; the next assignment retries.
+    async function mergeDuplicates(title, canonical) {
+      const duplicates = (await chromeApi.tabGroups.query({}))
+        .filter((group) => group.title === title && group.id !== canonical.id)
+        .sort((left, right) => left.id - right.id);
+      for (const duplicate of duplicates) {
+        try {
+          const strays = await chromeApi.tabs.query({ groupId: duplicate.id });
+          const tabIds = strays.map((tab) => tab.id).filter((id) => id !== undefined);
+          if (tabIds.length > 0) {
+            await chromeApi.tabs.group({ groupId: canonical.id, tabIds });
+          }
+        } catch (_error) {
+          // Left for the next assignment; never fail the caller over cleanup.
+        }
+      }
+    }
+
     async function canonicalGroup(title) {
       const storedId = groups.get(title);
       if (storedId !== undefined) {
         try {
           const stored = await chromeApi.tabGroups.get(storedId);
-          if (stored.title === title) return stored;
+          if (stored.title === title) {
+            await mergeDuplicates(title, stored);
+            return stored;
+          }
         } catch (_error) {
           // Exact-title discovery below repairs stale group ids.
         }
@@ -89,8 +114,12 @@
       const exact = (await chromeApi.tabGroups.query({}))
         .filter((group) => group.title === title)
         .sort((left, right) => left.id - right.id)[0];
-      if (exact) groups.set(title, exact.id);
-      return exact;
+      if (exact) {
+        groups.set(title, exact.id);
+        await mergeDuplicates(title, exact);
+        return exact;
+      }
+      return undefined;
     }
 
     async function ghostlightWindow() {

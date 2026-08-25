@@ -543,8 +543,41 @@ test("workspace topology accepts only bounded Ghostlight group titles", () => {
   assert.equal(topology.validTitle("Personal"), false);
 });
 
-test("workspace topology reuses the established exact-title blue group", async () => {
-  let grouped = null;
+test("same-title duplicate groups merge into the one canonical group", async () => {
+  const merged = [];
+  const chromeApi = {
+    storage: { session: { async get() { return {}; }, async set() {} } },
+    tabs: {
+      async get(id) { return { id, windowId: 4 }; },
+      async query(value) {
+        return value.groupId === 12 ? [{ id: 12, windowId: 5 }] : [{ id: 13, windowId: 6 }];
+      },
+      async group(value) { merged.push(value); return value.groupId; }
+    },
+    tabGroups: {
+      async get(id) { return { id, windowId: 4, title: "Ghostlight - Codex" }; },
+      async query() {
+        return [
+          { id: 12, windowId: 5, title: "Ghostlight - Codex" },
+          { id: 9, windowId: 4, title: "Ghostlight - Codex" },
+          { id: 13, windowId: 6, title: "Ghostlight - Codex" }
+        ];
+      },
+      async update() {}
+    }
+  };
+  const manager = topology.create(chromeApi, "topology");
+  await manager.assign(7, "workspace_a", "Ghostlight - Codex");
+  // Strays move into the lowest-id canonical group first; Chromium then deletes the emptied
+  // duplicates itself. The new tab joins the same canonical group afterwards.
+  assert.deepEqual(merged, [
+    { groupId: 9, tabIds: [12] },
+    { groupId: 9, tabIds: [13] },
+    { groupId: 9, tabIds: [7] }
+  ]);
+});
+
+test("workspace topology reuses the established exact-title blue group", async () => {  let grouped = null;
   let updated = null;
   const chromeApi = {
     storage: { session: { async get() { return {}; }, async set() {} } },
