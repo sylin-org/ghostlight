@@ -18,6 +18,7 @@ ed25519-dalek = "2"
 fips204 = "0.4"
 getrandom = "0.2"
 ghostlight-bridge = { path = "../bridge" }
+ghostlight-win-peer = { path = "../win-peer" }
 jsonc-parser = { version = "=0.26.3", features = ["cst", "serde"] }
 serde.workspace = true
 serde_json.workspace = true

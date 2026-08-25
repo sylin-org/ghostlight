@@ -354,6 +354,10 @@ fn serve_session(
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
+    // Capture the connection quadruple before the stream moves into the writer; the observed
+    // peer is resolved after hello, where stage-2 attribution belongs.
+    let observed_local = stream.local_addr().ok();
+    let observed_peer = stream.peer_addr().ok();
     let reader_stream = stream.try_clone()?;
     let mut reader = BufReader::new(reader_stream);
     let writer = Arc::new(Mutex::new(stream));
@@ -459,9 +463,18 @@ fn serve_session(
     // Before opening anything, release workspaces whose owner is gone and close the tabs they
     // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
     reap_finished_sessions(&workspaces, browser.as_ref());
+    // Observed attribution (ADR-0105 stage 2): the kernel names the connection's owner; nothing
+    // caller-asserted can forge it. Only the bounded lowercase image name is kept -- never the
+    // path, and never as an authority input.
+    let peer_image = match (observed_local, observed_peer) {
+        (Some(local), Some(peer)) => {
+            ghostlight_win_peer::identify_addresses(local, peer).map(|peer| peer.image_name)
+        }
+        _ => None,
+    };
     let workspace = match session {
-        Some(marker) => workspaces.resume_or_admit(client_label, channel, marker),
-        None => workspaces.admit(client_label, channel),
+        Some(marker) => workspaces.resume_or_admit(client_label, channel, marker, peer_image),
+        None => workspaces.admit(client_label, channel, peer_image),
     };
     write_response(
         &writer,

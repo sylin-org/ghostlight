@@ -4,9 +4,47 @@ One task = one commit. RESUME HERE is always the first open task.
 
 ## RESUME HERE
 
-Next task: T4 (ADR-0105 stages 2 and 3). T1 through T3 are complete.
+All four tasks are closed. Next: the G0 freeze, then the G1 pipeline (see
+docs/RELEASE-CHECKLIST.md).
 
 ## Tasks
+
+### T4 -- ADR-0105 stages 2 and 3
+
+Status: COMPLETE as a scoped landing -- stage 2 shipped; stage 3 re-deferred by owner decision
+during implementation (2026-08-24). Recorded as the ADR-0105 amendment of the same date.
+
+What landed:
+
+- New workspace member crate `crates/win-peer` (`ghostlight-win-peer`), the one audited home of
+  raw memory access. Its manifest deliberately omits `[lints] workspace = true` because Cargo
+  applies inherited workspace lints as command-line flags no in-source allow can override; every
+  foreign function is hand-declared against system libraries with `// SAFETY:` notes; no new
+  third-party dependency was added.
+- Stage 2 end to end: at hello the orchestrator captures the connection quadruple, resolves the
+  owning process through `GetExtendedTcpTable` plus a bounded image-name read, and records only
+  that name beside the claimed channel in every audit record (new optional `peer_image` field;
+  name only, never the path; never an authority input). Non-Windows builds return absence and
+  behave exactly as before.
+- A repository guard test proves raw memory access stays confined to that crate across the whole
+  workspace, forever.
+- Live proof on this Windows host: the crate's loopback test resolves an in-process pair to its
+  own pid and image; process-journey and cli-journey pass with attribution intact.
+
+Why stage 3 did not land (owner decision, mid-task): Ghostlight has no signed Windows artifact,
+so no allowlist entry could ever admit anything and the verification success path could not be
+exercised by any test or live lane in this tree. The practical boundary is already covered by
+the runtime token plus the stage-1 channel switch. The implementation attempt confirmed real
+integration cost (a correct-looking hand-rolled WinVerifyTrust call returned
+TRUST_E_PROVIDER_UNKNOWN against signed system binaries while platform tooling verified them)
+and was withdrawn rather than half-shipped. Revisit trigger: Ghostlight's first signed release
+artifact.
+
+Deviation D1: the task title said "stages 2 and 3"; the landing is stage 2 plus an explicit
+re-deferral of stage 3. The ADR amendment carries the decision, not this ledger alone.
+
+Gates: fmt; clippy `-D warnings`; full workspace suite (393 Rust incl. guard + win-peer);
+process-journey and cli-journey against fresh `.target-t1/debug` binaries.
 
 ### T3 -- model-facing policy explain tool
 
@@ -107,7 +145,9 @@ stale against the tree; fix the number while touching claims.
 
 ### T4 -- ADR-0105 stages 2 and 3
 
-Status: PENDING.
+Status: CLOSED (scoped; see RESUME HERE above for the landing summary).
+
+Original design note (kept for provenance):
 
 Owner decision recorded 2026-08-24: relax the invariant for one audited module, implemented
 as ONE new workspace member crate whose manifest omits `[lints] workspace = true` (Cargo

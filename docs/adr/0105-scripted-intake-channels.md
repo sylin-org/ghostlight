@@ -136,6 +136,39 @@ Until that decision is made, nothing may treat the channel as an authenticated i
 what Decision 2 says it is: attribution. The switch above governs whether an intake may open a
 session at all, which is a different and weaker claim than knowing who is calling.
 
+## Amendment 2026-08-24 (stage 2 lands through one audited FFI crate; stage 3 stays deferred)
+
+The owner revisited the deferred question on 2026-08-24 and decided it in two halves.
+
+**Stage 2 (observed attribution) ships.** The owner chose to relax the invariant for one audited
+module and to take no new third-party dependency on a security-sensitive path. Both halves are
+implemented literally in one new workspace member crate, `ghostlight-win-peer`, whose manifest
+deliberately does not inherit the workspace lints table -- Cargo applies inherited lints as
+command-line flags no in-source `allow` can override, so a per-crate opt-out alongside inheritance
+is impossible and relaxing the shared table would relax everywhere. The crate declares its foreign
+functions by hand (`GetExtendedTcpTable`, `OpenProcess`, `QueryFullProcessImageNameW`) against
+system link libraries, carries a `// SAFETY:` note at each call site, and is confined by a
+repository guard test that fails if raw memory access ever appears in any other crate. At hello,
+before any workspace exists, the orchestrator resolves the connection quadruple to the owning
+process and keeps only the executable's bounded lowercase file name. The name rides the workspace
+state and lands beside the claimed channel as its own audit field -- name only, never the path,
+and never an authorization input -- exactly as Decision 2 specified. Where identification cannot
+answer, the field stays absent and admission behaves exactly as before.
+
+**Stage 3 (signer-gated admission) remains deferred, for a new reason.** The original blocker was
+the unsafe invariant; that door is now open. What closes it again is evidence: Ghostlight publishes
+no signed Windows binaries, so there exists no artifact a signer allowlist could admit, no test or
+live lane anywhere in this tree could exercise the verification success path, and shipping
+security-critical FFI whose accepting branch has never executed would be theater, not control.
+The practical gate today is also already covered: the runtime discovery token decides who may
+connect, and the stage-1 channel switch plus capability ceilings decide what an admitted caller
+may do. Stage 3 becomes worth building when Ghostlight signs its first release artifact; that
+event reopens this ADR, and the audited-crate seam this amendment establishes is where the
+`WinVerifyTrust` work belongs when it happens. An implementation attempt on 2026-08-24 confirmed
+the integration cost is real -- a hand-rolled `WinVerifyTrust` call kept refusing valid inputs
+with `TRUST_E_PROVIDER_UNKNOWN` while platform tooling verified the same binary -- and was
+withdrawn rather than half-shipped; its working notes live in the batch ledger only.
+
 ## Consequences
 
 - Governance is not bypassed. Every channel crosses the same executor, workspace aggregate,

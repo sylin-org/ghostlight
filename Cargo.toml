@@ -4,6 +4,7 @@ members = [
     "crates/orchestrator",
     "crates/mcp-connector",
     "crates/browser-connector",
+    "crates/win-peer",
 ]
 resolver = "2"
 

@@ -1983,6 +1983,12 @@ pub struct AuditRecord {
     /// Absent when the workspace was already gone by the time the record was written.
     #[serde(default)]
     pub channel: Option<IntakeChannel>,
+    /// The peer executable's observed file name beside that channel (ADR-0105 stage 2).
+    ///
+    /// Claimed and observed attribution stay separate fields; the name is the bounded lowercase
+    /// file name only, never the path, and it is never an authority input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_image: Option<String>,
 }
 
 impl AuditRecord {
@@ -2025,6 +2031,7 @@ impl AuditRecord {
             duration_ms,
             observed: Observed::default(),
             channel: None,
+            peer_image: None,
         }
     }
 
@@ -2032,6 +2039,13 @@ impl AuditRecord {
     #[must_use]
     pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
         self.channel = channel;
+        self
+    }
+
+    /// Attach the observed peer image name beside the claimed channel (ADR-0105 stage 2).
+    #[must_use]
+    pub fn with_peer_image(mut self, peer_image: Option<String>) -> Self {
+        self.peer_image = peer_image;
         self
     }
 
@@ -2146,6 +2160,63 @@ mod tests {
 
     fn all_open_grant() -> &'static str {
         r#"[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]"#
+    }
+
+    /// The workspace forbids raw memory access everywhere except the one audited FFI crate
+    /// (ADR-0105 amendment 2026-08-24). The forbid itself cannot see across crates, so this
+    /// guard does.
+    #[test]
+    fn unsafe_stays_confined_to_the_audited_ffi_crate() {
+        // The needles are assembled from pieces so this test's own source never contains a
+        // matching sequence and can read every crate file, including itself.
+        let keyword = ["uns", "afe"].concat();
+        let needles = [
+            format!("{keyword} {{"),
+            format!("{keyword} fn"),
+            format!("{keyword} impl"),
+            format!("{keyword}_code"),
+        ];
+        fn walk(directory: &PathBuf, needles: &[String], hits: &mut Vec<String>) {
+            for entry in fs::read_dir(directory).expect("crate source directory is readable") {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    walk(&path, needles, hits);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let text = fs::read_to_string(&path).unwrap_or_default();
+                    for (number, line) in text.lines().enumerate() {
+                        // Comment lines may legitimately name the keyword; code lines may not.
+                        if line.trim_start().starts_with("// ") {
+                            continue;
+                        }
+                        if needles.iter().any(|needle| line.contains(needle)) {
+                            hits.push(format!("{}:{}", path.display(), number + 1));
+                        }
+                    }
+                }
+            }
+        }
+        // The orchestrator crate lives at <workspace>/crates/orchestrator; its parent IS the
+        // crates directory.
+        let crates = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut offenders = Vec::new();
+        for entry in fs::read_dir(&crates).expect("crates directory is readable") {
+            let path = entry.expect("crate directory").path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name == "win-peer" || name == "target" {
+                continue;
+            }
+            let source = path.join("src");
+            if source.is_dir() {
+                walk(&source, &needles, &mut offenders);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "raw memory access must stay inside crates/win-peer; found at:\n{}",
+            offenders.join("\n")
+        );
     }
 
     fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {

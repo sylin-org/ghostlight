@@ -1165,15 +1165,15 @@ On 2026-08-24 the owner promoted four items below into the pre-freeze window
 the same day -- the bridge is now every edge's handshake home), the unsettled-row color
 treatment (landed the same day), the model-facing policy explain operation (landed the same day
 as [ADR-0136](adr/0136-model-facing-policy-explain.md) and `policy_explain`), and ADR-0105 stages
-2 and 3. They remain listed here until their tasks land; everything else in this section stays
-outside 1.0.
+2 and 3. That last one landed as its stage-2 half only -- observed socket-peer attribution in
+audit through the new audited `ghostlight-win-peer` crate ([ADR-0105](adr/0105-scripted-intake-channels.md)
+amendment) -- with stage 3 deliberately re-deferred on evidence; see that amendment and the batch
+ledger for the reasoning. Everything else in this section stays outside 1.0.
 
-- ADR-0105 stages 2 and 3 are blocked on an owner decision, recorded in that ADR's amendment.
-  Identifying the socket peer and verifying a signature are both raw Win32 FFI, and the workspace
-  sets `unsafe_code = "forbid"`, which no scoped `#[allow]` can override. The choice is to relax
-  that invariant for one audited module or to depend on a wrapper crate on a security-sensitive
-  path. Until then the channel stays attribution: the `channels` switch decides whether an intake
-  may open a session, which is a weaker claim than knowing who is calling.
+- ADR-0105 Decision 3's signer-gated admission stays deferred. The audited FFI crate exists and
+  stage 2 observes the socket peer; what remains missing is any signed Ghostlight artifact to
+  verify against, so no positive verification path can be exercised. Revisit when the first
+  signed release artifact exists.
 - The extension stylesheet could move to its own module now that it is static. Lowest value of the
   maintainability steps; needs about eight test assertions reworked.
 - GIF quality remains deferred. The vendored encoder quantizes each frame to its own 256-colour

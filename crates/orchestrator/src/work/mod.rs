@@ -227,6 +227,7 @@ impl ApplicationExecutor {
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
                         channel: self.workspaces.channel(workspace).ok(),
+                        peer_image: self.workspaces.peer_image(workspace).ok().flatten(),
                     },
                 );
             }
@@ -330,6 +331,7 @@ impl ApplicationExecutor {
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
                 channel: self.workspaces.channel(workspace).ok(),
+                peer_image: self.workspaces.peer_image(workspace).ok().flatten(),
             },
         )
     }
@@ -347,6 +349,7 @@ impl ApplicationExecutor {
             snapshot,
             duration_ms,
             channel,
+            peer_image,
         } = completion;
         let denial_attention = terminal.result.status == Status::Blocked
             && self
@@ -412,6 +415,7 @@ impl ApplicationExecutor {
             duration_ms,
         )
         .from_channel(channel)
+        .with_peer_image(peer_image)
         .with_policy(snapshot, terminal.decision)
         .with_observation(observed)
         // Refusal facts are mechanism metadata authored by the language layer; success facts
@@ -1508,6 +1512,8 @@ struct Completion<'a> {
     duration_ms: u64,
     /// Which intake admitted the workspace this work arrived on.
     channel: Option<IntakeChannel>,
+    /// The observed peer image beside that channel (ADR-0105 stage 2).
+    peer_image: Option<String>,
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -2511,7 +2517,7 @@ mod tests {
     ) {
         let browser = Arc::new(FakeBrowser::default());
         let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
+        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
         let audit = Arc::new(MemoryAudit::default());
         let executor = ApplicationExecutor::new(
             governance,

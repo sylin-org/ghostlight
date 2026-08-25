@@ -1,0 +1,20 @@
+[package]
+name = "ghostlight-win-peer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+
+# This crate deliberately does NOT inherit the workspace lints table. Cargo applies inherited
+# workspace lints as command-line flags, which no in-source allow can override, and a per-crate
+# override alongside inheritance is rejected outright. ADR-0105 stages 2 and 3 need raw Win32
+# FFI, so this one audited crate carries the whole workspace's unsafe surface and every other
+# crate keeps the forbid. A repository guard test asserts nothing else ever contains unsafe.
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "warn"
