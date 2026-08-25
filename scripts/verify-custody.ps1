@@ -74,11 +74,11 @@ Assert-Step "deep candidate checks (check-release-candidate)" {
     if ($LASTEXITCODE -ne 0) { throw "deep checks reported failures" }
 }
 
-Assert-Step "SHA256SUMS recomputation (17 assets)" {
+Assert-Step "SHA256SUMS recomputation (18 assets)" {
     $sumsPath = Join-Path $candidateDirectory "SHA256SUMS"
     $lines = Get-Content -LiteralPath $sumsPath | Where-Object { $_.Trim() }
-    if ($lines.Count -ne 17) {
-        throw ("expected 17 checksum lines, found {0}" -f $lines.Count)
+    if ($lines.Count -ne 18) {
+        throw ("expected 18 checksum lines, found {0}" -f $lines.Count)
     }
     foreach ($line in $lines) {
         $parts = $line -split "\s+", 2

@@ -209,7 +209,7 @@ jobs:
           $env:SOURCE_DATE_EPOCH = (git show -s --format=%ct HEAD).Trim()
           cargo cyclonedx --format json --spec-version 1.5 --override-filename "ghostlight-v$version-sbom.cyclonedx"
           $sboms = @(Get-ChildItem -LiteralPath crates -Recurse -File -Filter "ghostlight-v$version-sbom.cyclonedx.json")
-          if ($sboms.Count -ne 4) { throw "cargo-cyclonedx produced $($sboms.Count) component SBOMs, expected 4" }
+          if ($sboms.Count -ne 5) { throw "cargo-cyclonedx produced $($sboms.Count) component SBOMs, expected 5" }
           "GHOSTLIGHT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build checksum-bound client launchers from the raw candidates
         shell: pwsh

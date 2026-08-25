@@ -46,7 +46,8 @@ $expectedCoordinates = @(
     "sbom|ghostlight",
     "sbom|ghostlight-bridge",
     "sbom|ghostlight-browser-connector",
-    "sbom|ghostlight-mcp-connector"
+    "sbom|ghostlight-mcp-connector",
+    "sbom|ghostlight-win-peer"
 )
 $artifacts = @($candidate.artifacts | Sort-Object name)
 if ($artifacts.Count -ne $expectedCoordinates.Count) {

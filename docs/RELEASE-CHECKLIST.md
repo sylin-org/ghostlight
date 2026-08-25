@@ -205,8 +205,9 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
 - [ ] The manual build-only workflow builds the Windows NSIS package on Windows 2025 and the Debian
   package on Ubuntu 22.04.
 - [ ] Debian 12 and Ubuntu 24.04 package lifecycle smokes pass before assembly.
-- [ ] The candidate contains exactly 17 artifacts: six raw binaries, two native packages, two
-  portable archives, the extension ZIP, npm tarball, MCPB, and four SBOMs.
+- [ ] The candidate contains exactly 18 artifacts: six raw binaries, two native packages, two
+  portable archives, the extension ZIP, npm tarball, MCPB, and five SBOMs (one per workspace
+  crate, including the audited `ghostlight-win-peer` FFI crate).
 - [ ] `release-candidate.json` and `SHA256SUMS` independently bind exact names, lengths, hashes,
   version, and source revision.
 - [ ] GitHub provenance verifies for all 17 assets, the manifest, and the checksum file against the

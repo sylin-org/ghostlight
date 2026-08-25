@@ -47,8 +47,8 @@ $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $ArtifactRoot -PathType Container)) {
     throw "Artifact root does not exist: $ArtifactRoot"
 }
-if ($SbomPath.Count -ne 4) {
-    throw "Candidate requires exactly four component SBOMs, found $($SbomPath.Count)"
+if ($SbomPath.Count -ne 5) {
+    throw "Candidate requires exactly five component SBOMs, found $($SbomPath.Count)"
 }
 foreach ($path in $SbomPath) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
