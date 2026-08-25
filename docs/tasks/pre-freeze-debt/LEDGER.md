@@ -162,4 +162,12 @@ Non-Windows keeps stage-1 behavior; signer-requiring policy denies there.
 
 ## Deviations
 
-(none yet)
+D1: the task title said "stages 2 and 3"; the landing is stage 2 plus an explicit re-deferral of
+stage 3. The ADR amendment carries the decision, not this ledger alone.
+
+D2: ordinary CI on the pushed freeze exposed a Linux-only Clippy failure in the new crate's test
+module (`use super::*` unused where the Windows-only test is cfg-gated out). Repaired at the seam
+in `e7d8986b` with a cross-platform negative-control pin, proven against the installed
+`x86_64-unknown-linux-gnu` target locally, and the candidate re-frozen at `e7d8986b` per
+declare-freeze's deliberate `-Force` path. Lesson carried forward: run the Linux-target Clippy
+check on any cfg-split module before pushing, since Windows-local gates cannot see it.

@@ -65,3 +65,19 @@ Run against the same clean checkout of the frozen revision:
 | Dependency license/ban/source/advisory detail | CI dependency gate on the frozen revision (G2 candidate run); cargo-deny is not installed on this host |
 | Clean Windows/Linux install, upgrade, uninstall | release-environment machines, owner-run (G5/G4) |
 | shell syntax (`sh -n`) | Linux verification run of the frozen revision |
+
+## Addendum 2026-08-25T01:11Z -- re-freeze after a Linux-only gate repair
+
+Ordinary CI on the pushed frozen revision exposed one Linux-only Clippy failure: the
+`ghostlight-win-peer` test module carried a `use super::*` that went unused where its
+Windows-only test is cfg-gated out. Fixed at the owning seam in `e7d8986b`
+("fix(win-peer): keep the Linux test surface compiled without dead imports") with a
+cross-platform negative-control pin (`an_absent_quadruple_identifies_nothing`) so the stubbed
+non-Windows surface stays compiled and asserted on both hosts; proven locally with
+`cargo clippy -p ghostlight-win-peer --target x86_64-unknown-linux-gnu --all-targets -- -D warnings`.
+The candidate was re-frozen at `e7d8986bb96625335cd9cff7d04d7e8b083f845d`. The delta from this
+record's revision touches exactly that one test module; every stage result above stands.
+Additionally closed on this host against the frozen graph: repository integrity (852 files,
+links valid, version aligned), ASCII policy (exceptions fixed at 25), complete 0.8 recovery
+disposition (1,388 entries, 34 scenarios), and release access inspection online (GitHub valid,
+npm valid, Chrome Web Store v2 item valid).

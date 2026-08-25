@@ -17,8 +17,10 @@ review replaces the stale one -- see
 Release tooling now exists: scripts/release-preflight.ps1 (one-command G1 gates plus
 evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
-G0 is closed and the candidate is frozen at `08f36860` (`docs/release/freeze.json`, committed
-`84e9e7db`). The pre-freeze debt batch landed first
+G0 is closed and the candidate is frozen at `e7d8986b` (`docs/release/freeze.json`; first declared
+at `08f36860`, re-declared after ordinary CI exposed a Linux-only Clippy failure in the new
+`ghostlight-win-peer` test module, fixed at its seam and re-frozen). The pre-freeze debt batch
+landed before the freeze
 ([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the shared bridge handshake, amber
 never-settled rows, [ADR-0136](adr/0136-model-facing-policy-explain.md) plus the 24th catalog tool
 `policy_explain`, and ADR-0105 stage 2 observed socket-peer attribution through the new audited

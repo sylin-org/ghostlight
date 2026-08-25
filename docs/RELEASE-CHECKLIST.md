@@ -115,13 +115,17 @@ installed-product observation, or the checklist deadlocks against itself.
   existing host, and the WSL sentence needs a WSL harness rather than the clean Windows machine.
   The observation-dependent rows are evidence and close under G8.
 - [x] Name one final source revision and stop product and packaging changes while its candidate is
-  evaluated. Frozen 2026-08-24 (UTC) at `08f368606f3deac4115a148f6c20590a7c9afb9b`, the last commit
-  of the [pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md) batch; machine-readable declaration in
-  [release/freeze.json](release/freeze.json). From this moment, no product or packaging changes:
-  anything discovered goes to the batch ledgers as a documented limitation unless the owner
-  declares it a blocker. Unfreezing means re-declaring and restarting the affected gates.
-  `extension/` is byte-identical to its state at `70869631`, so the pending STAGED_PUBLISH store
-  review continues to cover the candidate's extension bytes without a resubmission.
+  evaluated. First frozen 2026-08-24 (UTC) at `08f368606f3deac4115a148f6c20590a7c9afb9b`;
+  re-declared the same session at `e7d8986bb96625335cd9cff7d04d7e8b083f845d` after ordinary CI
+  exposed a Linux-only Clippy failure in the new `ghostlight-win-peer` test module -- fixed at
+  its owning seam with a cross-platform negative-control pin, then re-frozen per the gate rule
+  that a journey which cannot close honestly is repaired, not waived. Machine-readable
+  declaration: [release/freeze.json](release/freeze.json). From this moment, no product or
+  packaging changes: anything discovered goes to the batch ledgers as a documented limitation
+  unless the owner declares it a blocker. Unfreezing means re-declaring and restarting the
+  affected gates. `extension/` remains byte-identical to its state at `70869631`, so the pending
+  STAGED_PUBLISH store review continues to cover the candidate's extension bytes without a
+  resubmission.
 
 Evidence:
 
@@ -155,8 +159,10 @@ Linux.
   2026-08-24). (Ran green on the deployed frozen graph, 2026-08-25 UTC: full story including
   press-key beats, off-domain refusal, replay save/erase, sequences, flow, history, and both
   desk-bell dialog dispositions.)
-- [ ] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
-  warnings are rechecked against the frozen graph rather than assumed.
+- [x] Dependency license, ban, source, and advisory gates pass. The 17 accepted GTK/Tauri-chain
+  warnings are rechecked against the frozen graph rather than assumed. (Proven locally
+  2026-08-25 UTC: `cargo deny check bans licenses sources` ok; `cargo audit` exits zero with
+  exactly the 17 documented allowances.)
 - [x] Release truth, repository integrity, documentation links, ASCII policy, and the complete 0.8
   recovery disposition pass. (Proven locally on the frozen revision, 2026-08-25 UTC: 852 files
   readable, links valid, version aligned, ASCII exceptions fixed at 25, all 1,388 recovery entries
