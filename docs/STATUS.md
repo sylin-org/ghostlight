@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-25.
+Last updated: 2026-08-26.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -21,6 +21,18 @@ evidence skeleton), declare-freeze/assert-freeze (G0), verify-custody.ps1 (G2).
 
 G0 and G1 closed on both hosts at frozen revision e7d8986b (Windows preflight, CachyOS verification, and runner-repair records under docs/testing/). The owner then reported real tab and group spam, directed an architectural fix over release ceremony, and dropped the freeze itself: we publish when we are done, and the freeze machinery now only pins whichever revision becomes the candidate. ADR-0137 landed the fix: duplicate same-title groups merge into the canonical group (self-healing existing pollution), and plain opens adopt the nearest unbound same-host tab -- new_tab and reuse never still create fresh -- with the summary saying Reused the example.com tab. when it happens. Found during live verification: workspace release never tells the extension, so reaped tabs stay bound in topology and the reuse ladder cannot adopt them -- the release path must notify the extension to forget the released tab ids (then reuse works end to end). That seam landed, the unpacked extension was reloaded, and a green foundry rerun demonstrated reuse live. The G2 candidate was built by release workflow run 32846030216 at revision 994b6c85 (product bytes identical to ADR-0137 commit 8779e11b; only CI tooling differs), and custody is held in two verified local copies -- see [candidate-custody-2026-08-25](testing/candidate-custody-2026-08-25.md). On 2026-08-25, with explicit owner authorization, the stale f7b9a6ad store review was canceled through publishers.items.cancelSubmission and replaced by the custody ZIP (sha256 9ae88e67...) submitted STAGED_PUBLISH; it is PENDING_REVIEW and the public listing still serves 0.8.0 -- see [extension-store-resubmission-2026-08-25](testing/extension-store-resubmission-2026-08-25.md). Next: the owner-run environment lanes -- G4 Ubuntu GNOME Wayland, G5 clean Windows, G7 public harnesses -- which install the reviewed adapter from the store once review completes, then the owner-authorization boundaries G8 through G10; lane runbooks and gate drafts are prepared in [gates-g4-g10-preparation-2026-08-25](release/gates-g4-g10-preparation-2026-08-25.md). Live authority swaps go through
 scripts/dev-loop.ps1 only.
+
+## SignPath Foundation application (2026-08-26)
+
+The owner submitted the free SignPath.io OSS application on 2026-08-26, seeking a
+SignPath Foundation code signing certificate for the Windows release artifacts, which today
+carry checksums and Sigstore provenance but no Authenticode signature. The ADR-0140
+relicensing is what made the project eligible: the foundation requires an OSI-approved license
+without commercial dual-licensing and no proprietary components, which the former open-core
+split failed. The application is pending review; acceptance follow-ups (code signing policy
+page, binary product metadata, MFA verification, release-workflow signing gate, trust-doc
+updates) are recorded in
+[signpath-foundation-application-2026-08-26](release/signpath-foundation-application-2026-08-26.md).
 
 ## Frame-transparent semantic layer (ADR-0138)
 
