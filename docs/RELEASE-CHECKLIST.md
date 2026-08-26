@@ -243,7 +243,12 @@ Nothing in this gate makes the adapter publicly visible.
 - [x] Take G2 custody before opening this gate: a staged review goes stale the moment the package
   changes, so submission is ordered strictly after the frozen candidate's bytes are assembled,
   verified, and held locally.
-- [ ] Reach the distribution state chosen in G0, and record which route was used.
+- [x] Reach the distribution state chosen in G0, and record which route was used. (The staged
+  review of the exact candidate bytes cleared on 2026-08-26 -- dashboard "Ready to publish", API
+  `STAGED` -- and the owner-directed G10 publication then published that approved staged revision
+  publicly the same day; the live lanes can now install the public adapter directly. Evidence:
+  [extension-store-resubmission-2026-08-25-frames-shadow](testing/extension-store-resubmission-2026-08-25-frames-shadow.md),
+  [candidate-custody-2026-08-26](testing/candidate-custody-2026-08-26.md).)
 - [ ] Install the reviewed adapter from the store on a live-lane machine and confirm its extension id
   and version match the candidate.
 
@@ -381,23 +386,49 @@ Evidence: release-note draft, plan output, and an owner-approved channel sequenc
 ### G10. Publish and verify one recoverable channel at a time
 
 The adapter was already submitted under G3. This gate makes it public and publishes everything else.
+Executed 2026-08-26 at revision `b2c27993` per the owner's explicit direction; evidence observed
+and recorded the same day in [STATUS.md](STATUS.md) and
+[candidate-custody-2026-08-26](testing/candidate-custody-2026-08-26.md).
 
-- [ ] Create the remote `v1.0.0` tag at the candidate revision only with owner approval.
-- [ ] Create the GitHub draft, re-download every asset, compare names and hashes, then publish the
-  immutable release with owner approval.
-- [ ] Publish the exact candidate-bound `ghostlight@1.0.0` tarball only after all six raw GitHub
-  assets are observable and provenance verifies.
-- [ ] Publish the reviewed Chrome adapter from its staged state.
+- [x] Create the remote `v1.0.0` tag at the candidate revision only with owner approval.
+  (Tagged `b2c27993a223c220f8828736b125676ae6f9d027` and pushed 2026-08-26.)
+- [x] Create the GitHub draft, re-download every asset, compare names and hashes, then publish the
+  immutable release with owner approval. (`publish-github-release.ps1` draft and publish, 2026-08-26;
+  release `v1.0.0` carries all 20 files; the script re-downloads every asset for exact hash
+  comparison before publishing.)
+- [x] Publish the exact candidate-bound `ghostlight@1.0.0` tarball only after all six raw GitHub
+  assets are observable and provenance verifies. (`publish-npm.ps1 Publish -Execute`, 2026-08-26;
+  tarball SHA-256 `ca43a866f30e839d608596835c9120d7f35c54c2486de4f8859f56a2e176e49b`; `npm view`
+  observed 1.0.0.)
+- [x] Publish the reviewed Chrome adapter from its staged state. (`publish-extension.ps1 Publish
+  -Execute` returned `PUBLISHED`/`DEFAULT_PUBLISH`, 2026-08-26; the public listing and the CRX feed
+  were then observed serving 1.0.0; the published bytes are the approved `3570494f` revision.)
 - [ ] Publish candidate-derived Scoop and WinGet metadata only after their referenced assets are
-  observable.
-- [ ] Publish MCP Registry metadata only after the exact npm coordinate is observable.
-- [ ] Execute the `main` outcome decided in G0.
-- [ ] Reconcile the Chrome feed and every public surface from independently downloaded artifacts.
-- [ ] Update `docs/public-status.json`, README, trust review stamps, website copy, distribution
-  records, and changelog to observed public state.
-- [ ] Run one public install-to-first-task smoke on Windows and Linux.
-- [ ] Record final hashes, links, compatibility, known limitations, and recovery guidance in
-  `STATUS.md`.
+  observable. (The referenced assets are observable; the metadata is prepared from the candidate
+  under the machine-local `.target-pkg-metadata` directory. The external bucket submissions are
+  owner actions and remain owed.)
+- [x] Publish MCP Registry metadata only after the exact npm coordinate is observable.
+  (`publish-mcp-registry.ps1` returned "Successfully published" for `org.sylin/ghostlight` 1.0.0,
+  2026-08-26; `server.json` points at the published coordinate.)
+- [x] Execute the `main` outcome decided in G0. (Fast-forward push `0116feca..4ca4e6a1`,
+  2026-08-26; `main` now carries the published 1.0 line.)
+- [x] Reconcile the Chrome feed and every public surface from independently downloaded artifacts.
+  (`reconcile-chrome-store.ps1` observed public adapter 1.0.0 matching the recorded state;
+  `check-public-surfaces.ps1 -Online` reports GitHub, npm, the Chrome update feed, the MCP
+  Registry, and the website in agreement at 1.0.0.)
+- [x] Update `docs/public-status.json`, README, trust review stamps, website copy, distribution
+  records, and changelog to observed public state. (public-status.json, README release language,
+  server.json, and the changelog date updated 2026-08-26; the online check reports the website in
+  agreement; the trust-center review stamps were not re-stamped and follow with the post-publication
+  documentation pass.)
+- [ ] Run one public install-to-first-task smoke on Windows and Linux. (A bounded public-channel
+  smoke ran on Windows 2026-08-26 in an isolated profile: `npx -y ghostlight@1.0.0` downloaded and
+  checksum-verified all three binaries from the public release and the 1.0.0 orchestrator answered
+  `doctor --json`. The full installed first-task browser journey on both platforms remains owed --
+  this host's live development graph contends with the installed swap, and the clean machines are
+  the G4/G5 lanes.)
+- [x] Record final hashes, links, compatibility, known limitations, and recovery guidance in
+  `STATUS.md`. (The "1.0 is published" section, 2026-08-26.)
 
 Evidence: independently observed public URLs and hashes. Publication failure never rewrites or
 reuses a released version; recovery uses a higher version.

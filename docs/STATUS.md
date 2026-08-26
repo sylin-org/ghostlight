@@ -5,6 +5,55 @@ Last updated: 2026-08-26.
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
 
+## 1.0 is published (2026-08-26)
+
+The owner directed publication on 2026-08-26 ("get the binaries out and guarantee publication, and
+then we flip the extension to 1.0"). Everything shipped from candidate build run
+[33020313866](https://github.com/sylin-org/ghostlight/actions/runs/33020313866) at revision
+`b2c27993a223c220f8828736b125676ae6f9d027`, custody-verified in two local copies
+([candidate-custody-2026-08-26](testing/candidate-custody-2026-08-26.md)):
+
+- GitHub release [`v1.0.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.0.0), tag at
+  the candidate revision, all 20 files, draft re-downloaded and hash-compared before publication.
+- npm `ghostlight@1.0.0` (tarball SHA-256 `ca43a866f30e839d608596835c9120d7f35c54c2486de4f8859f56a2e176e49b`).
+- Chrome Web Store adapter 1.0.0, published from the approved staged revision (extension ZIP
+  SHA-256 `3570494faf580a2286d9f7a5f1cbb6f657864ee369b0f70b944b0c927e64770c`, byte-identical to
+  the release bundle because the packager now pins its cross-OS fields); the public listing and
+  the CRX feed both observed serving 1.0.0.
+- MCP Registry record `org.sylin/ghostlight` 1.0.0.
+- `main` promoted by fast-forward (`0116feca..4ca4e6a1`); `v1.0.0` is tagged.
+- `docs/public-status.json`, README release language, `server.json`, and the changelog date
+  recorded the observed public state; `check-public-surfaces.ps1 -Online` reports GitHub, npm,
+  the Chrome update feed, the MCP Registry, and the website in agreement at 1.0.0.
+- Public-channel install smoke on Windows in an isolated profile: `npx -y ghostlight@1.0.0`
+  downloaded and checksum-verified all three binaries from the public release and the real 1.0.0
+  orchestrator answered `doctor --json`.
+
+Publication went ahead with the G4 (Ubuntu GNOME Wayland), G5 (clean Windows), G6 (npm channel
+upgrade), G7 (public harnesses), and G8 (reference-experience closure) lanes open at the owner's
+direction; their evidence remains owed and the GO decision is recorded in the
+[release checklist](RELEASE-CHECKLIST.md). Scoop and WinGet metadata are prepared from the
+candidate under the machine-local `.target-pkg-metadata` directory; their external bucket
+submissions are owner actions.
+
+## Publication-day engineering record
+
+Three release-pipeline defects were found and fixed at their seams on publication day, and the
+determinism repair that matters most is recorded here for the next release:
+
+- The 0.8 artifact-relationship ledgers had drifted across the ADR-0140 relicensing (twelve
+  files); ordinary CI had been red since. Regenerated at `89bed6c6`.
+- A broken ADR index link (ADR-0137 row still pointing at ADR-0106's pre-rename filename) fixed
+  at `ded44e2d`.
+- **The extension ZIP was not cross-OS deterministic.** Two independent .NET/PowerShell behaviors
+  made the Linux CI archive differ from the Windows-built, store-approved bytes: `ConvertTo-Json`
+  writes the platform newline into the rewritten `manifest.json`, and .NET's `ZipArchive` stamps
+  the central directory's host-system marker (0 on Windows, 3 on Unix) and Unix mode bits from
+  the running platform. 33 records, 99 differing bytes, zero differing content. The packager now
+  pins the manifest serialization to CRLF and rewrites both central-directory fields to the
+  Windows shape after archiving (`bd3bffe4`, `9ee05666`), so every host reproduces the approved
+  store revision byte for byte. Durable lesson recorded in [MEMORY.md](MEMORY.md).
+
 ## In flight: 1.0 release pipeline
 
 Engineering batches are closed: the foundry sprint, the interface-truth polish, and the

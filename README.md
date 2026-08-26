@@ -34,12 +34,13 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-This branch is the 1.0 source candidate. It builds and runs, and the browser tool schemas are
-stable -- I am holding those steady. What is still settling is the shape around them: packaging,
-upgrade guarantees, and the installed-product path to 1.0.
+The published release is 1.0. It is available as the GitHub release
+[`v1.0.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.0.0), the npm package
+`ghostlight@1.0.0`, the Chrome Web Store adapter v1.0.0, and the MCP Registry record
+`org.sylin/ghostlight 1.0.0`, all observed on 2026-08-26 and recorded in
+[`docs/public-status.json`](docs/public-status.json).
 
-The published release is 0.8, recorded in [`docs/public-status.json`](docs/public-status.json).
-Keep a 0.8 package and a 1.0 source build apart; they are not interchangeable.
+A 0.8 installation upgrades in place; the two lines are not interchangeable.
 
 ## What you get
 
@@ -192,26 +193,25 @@ covers browser registration and the full validation loop.
 After that first setup there is no startup ritual: launching a connected MCP client or Chromium
 demand-starts Ghostlight when it is not already running. There is no service-only launch mode.
 
-The 1.0 one-command install keeps the same journey as 0.8:
+The one-command install is the primary journey:
 
 ```sh
-npx -y ghostlight@1.0.0 install
+npx -y ghostlight install
 ```
 
-That coordinate is not public until the gates in [`docs/STATUS.md`](docs/STATUS.md) are met. Signed
-native packages, portable archives, and a self-contained Claude Desktop MCPB are equivalent release
-routes. Every route uses the matching store adapter and the same three native executables.
+Signed-checksum native packages, portable archives, and a self-contained Claude Desktop MCPB are
+equivalent release routes. Every route uses the matching store adapter and the same three native
+executables.
 
 <details>
 <summary><strong>Current release and compatibility</strong></summary>
 
-**Platform state.** Windows and Linux are the 1.0 candidate platforms, both verified against live
-browsers on development hosts; the clean installed-product lanes are remaining release gates.
-macOS has no 1.0 artifact yet.
+**Platform state.** Windows and Linux are the supported 1.0 platforms, verified against live
+browsers on development hosts; the clean installed-product evidence lanes continue after
+publication. macOS has no 1.0 artifact yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v0.8.0, which covers Ghostlight
-service versions v0.8.x. A v1.0.0 adapter is under store review with staged publication; review
-approval does not change the public listing until publication is authorized.
+**Extension state.** The Chrome Web Store listing serves adapter v1.0.0, matching the published
+1.0.0 service line.
 
 The service and Chrome adapter version independently. The
 [compatibility map](compatibility.json) is authoritative, and the

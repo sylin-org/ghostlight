@@ -5,10 +5,11 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0]
+## [1.0.0] - 2026-08-26
 
-Date set at publication. The candidate is built and held at the revision pinned by
-`docs/release/freeze.json`.
+Published 2026-08-26 as the GitHub release `v1.0.0`, the npm package `ghostlight@1.0.0`, the
+Chrome Web Store adapter `1.0.0`, and the MCP Registry record `org.sylin/ghostlight 1.0.0`,
+from candidate build run 33020313866 at revision `b2c27993`.
 
 Ghostlight 1.0 is the clean-room rebuild around one orchestrator that owns every product decision,
 a stable protocol-versioned MCP edge, a browser-only relay, and a policy-free Chromium adapter.

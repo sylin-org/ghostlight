@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "release": "0.8.0",
+  "release": "1.0.0",
   "platformSummary": "Windows and Linux are the supported operating systems and are verified end to end against live browsers.",
-  "extensionSummary": "The Chrome Web Store serves Chrome adapter v0.8.0. Chrome adapter v0.8.0 covers Ghostlight service versions v0.8.x. Install the extension from the public listing.",
+  "extensionSummary": "The Chrome Web Store serves Chrome adapter v1.0.0. Install the extension from the public listing.",
   "chromeStore": {
     "itemId": "lejccfmoeogmhemakeknjjdhkfkgncdl",
-    "publicAdapterVersion": "0.8.0"
+    "publicAdapterVersion": "1.0.0"
   },
-  "lastVerified": "2026-08-13"
+  "lastVerified": "2026-08-26"
 }

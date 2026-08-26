@@ -218,6 +218,14 @@ Every one of these cost something to learn.
   -- no error, no deadline, no recovery, across reconnects. When a success arm asserts a fallback,
   the fallback must be produced on that same path (ADR-0138's describe now feeds the receipt), and
   a test must walk the full success path, not just the refusals around it.
+- **Per-host reproducibility is not determinism; pin every platform-derived byte.** The extension
+  ZIP was "deterministic" (two runs byte-identical) on each host and still differed across hosts:
+  `ConvertTo-Json` writes the platform newline into rewritten JSON, and .NET's `ZipArchive` stamps
+  the central directory's host-system marker and Unix mode bits from the running OS. Identical
+  sources, two archives, 99 differing bytes of pure metadata -- and only one of them was the
+  reviewed Chrome Web Store artifact. A packager used for publication must pin serialization and
+  container fields explicitly to the reviewed artifact's exact shape, and a release must prove
+  determinism across operating systems, not just across runs on one machine.
 
 ## Where to look
 
