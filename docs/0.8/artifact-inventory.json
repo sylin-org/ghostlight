@@ -6,8 +6,8 @@
     "total": 809,
     "byCurrentState": {
       "absent": 261,
-      "retained-evolved": 190,
-      "retained-identical": 358
+      "retained-evolved": 197,
+      "retained-identical": 351
     }
   },
   "entries": [
@@ -71,8 +71,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "91edbc1627644d87319ba109cf02dd89c712d54b",
-      "currentState": "retained-identical",
-      "currentBlob": "91edbc1627644d87319ba109cf02dd89c712d54b"
+      "currentState": "retained-evolved",
+      "currentBlob": "f41e5925b6fb378fd1e1d5d38511c7c253c97e7d"
     },
     {
       "path": ".github/release-template.md",
@@ -81,7 +81,7 @@
       "historicalType": "blob",
       "historicalBlob": "db01dec35ea7c728ed4c5104cd99d5e4a50352c6",
       "currentState": "retained-evolved",
-      "currentBlob": "a3a4aa512ca1734d5487ce41cca987b8f48f7759"
+      "currentBlob": "b6167d7d98404fd128b6930adcb68580bd2ef6c8"
     },
     {
       "path": ".github/workflows/ci.yml",
@@ -90,7 +90,7 @@
       "historicalType": "blob",
       "historicalBlob": "7c9842d6b04ef4d86b87f244f0bd39030d8d2667",
       "currentState": "retained-evolved",
-      "currentBlob": "31237f1f4f457bebed67b58e270abf2cb157f91d"
+      "currentBlob": "493935209c2b1abdbd7ee53ca8b8e95b7018f326"
     },
     {
       "path": ".github/workflows/pages.yml",
@@ -108,7 +108,7 @@
       "historicalType": "blob",
       "historicalBlob": "2249445a1a6803d152d3a24861e6b3145b9f335c",
       "currentState": "retained-evolved",
-      "currentBlob": "5be3c685b79d097bd1d34f616c72d511776eda88"
+      "currentBlob": "cea6308a9415c25dcd78d8c990d155666ce2359c"
     },
     {
       "path": ".gitignore",
@@ -117,7 +117,7 @@
       "historicalType": "blob",
       "historicalBlob": "fe8cbb81f6693b70d4b19b4330168c53eaa18749",
       "currentState": "retained-evolved",
-      "currentBlob": "e0b2456f43d83babd9b148b36abf5f82a203e8e5"
+      "currentBlob": "c765ac2f3696b4a91c1bfcbeb27186e42da401cb"
     },
     {
       "path": ".oss-adoption/.gitignore",
@@ -144,7 +144,7 @@
       "historicalType": "blob",
       "historicalBlob": "f766ea1692554231b286ac296b738d09d34eb098",
       "currentState": "retained-evolved",
-      "currentBlob": "01622240edf8926ec7f5392bbec7f4bfe3718fb8"
+      "currentBlob": "fd8b865fb5413d2c5887e941cc8e6987cd9b914e"
     },
     {
       "path": ".oss-adoption/current/ecosystem-map.md",
@@ -153,7 +153,7 @@
       "historicalType": "blob",
       "historicalBlob": "489d3b71f847c19a25ccab3d27a0d777db8f9874",
       "currentState": "retained-evolved",
-      "currentBlob": "72057465d79238ba121cb1542c24b5a782ebed38"
+      "currentBlob": "9ee38b67516024c47e490d46fca6f99e59f5231e"
     },
     {
       "path": ".oss-adoption/current/measurement-plan.md",
@@ -171,7 +171,7 @@
       "historicalType": "blob",
       "historicalBlob": "38388bc368de28c57a213d55ae462ce5094eb722",
       "currentState": "retained-evolved",
-      "currentBlob": "29a62d64a2890954336e5fb5ce80d03408c89e77"
+      "currentBlob": "5efd3cd430693f22ae4f9230d51ce7664bb2efb3"
     },
     {
       "path": ".oss-adoption/current/publication-pack/community-post.md",
@@ -179,8 +179,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "0f05820da43c3070b5e48e863bbd59de78624095",
-      "currentState": "retained-identical",
-      "currentBlob": "0f05820da43c3070b5e48e863bbd59de78624095"
+      "currentState": "retained-evolved",
+      "currentBlob": "227873f5fe747e9054daef1b0977abe64b4564eb"
     },
     {
       "path": ".oss-adoption/current/publication-pack/curator-brief.md",
@@ -189,7 +189,7 @@
       "historicalType": "blob",
       "historicalBlob": "e35515f84e065037dd1008f9529f8c4d7633271a",
       "currentState": "retained-evolved",
-      "currentBlob": "65288a6ce17872248280e3155fbda4a88a656e08"
+      "currentBlob": "9d6a183cd30eaaf3f830017d9d3754340c284cea"
     },
     {
       "path": ".oss-adoption/current/publication-pack/launch-brief.md",
@@ -198,7 +198,7 @@
       "historicalType": "blob",
       "historicalBlob": "637e240fa9338dbef165857c5d42ff5c8ff8177d",
       "currentState": "retained-evolved",
-      "currentBlob": "ea73061c889b38f2722eb4eaca932f6cb05423a5"
+      "currentBlob": "a8f828b6e222cf739ec40999ca29431588b273a6"
     },
     {
       "path": ".oss-adoption/current/publication-pack/release-announcement.md",
@@ -207,7 +207,7 @@
       "historicalType": "blob",
       "historicalBlob": "329b88d79f5545b800ff875db449e27b8d93764f",
       "currentState": "retained-evolved",
-      "currentBlob": "484ce2df75cdc56d3b97fb7cf79d1214280808ce"
+      "currentBlob": "ace5c916718215c5ad35eb81fc96bb9826da91a4"
     },
     {
       "path": ".oss-adoption/current/publication-plan.md",
@@ -216,7 +216,7 @@
       "historicalType": "blob",
       "historicalBlob": "d3773a695bada66e215bea22dac8af2a67af6b8d",
       "currentState": "retained-evolved",
-      "currentBlob": "0ede9811768b1944eefef4e1fceea5df53c8a453"
+      "currentBlob": "5bfb539da3cebf0bb239b15a19d98d5c7a3d1714"
     },
     {
       "path": ".oss-adoption/current/readiness-audit.md",
@@ -225,7 +225,7 @@
       "historicalType": "blob",
       "historicalBlob": "70b96dd4b374b4fed7299c6691e88befc47e148e",
       "currentState": "retained-evolved",
-      "currentBlob": "386a255a36a10dcb432d012ff5c67e626dcb44fa"
+      "currentBlob": "335e6002dfea312537563baeb84903c2930de0d1"
     },
     {
       "path": ".oss-adoption/current/repository-inventory.json",
@@ -251,8 +251,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "67c12801c257755baae36c21ab1846ccd906fe75",
-      "currentState": "retained-identical",
-      "currentBlob": "67c12801c257755baae36c21ab1846ccd906fe75"
+      "currentState": "retained-evolved",
+      "currentBlob": "aa2b424c05a7fe2a2b7e0f2bfb2911adb8a9efbc"
     },
     {
       "path": ".oss-adoption/workspace.json",
@@ -270,7 +270,7 @@
       "historicalType": "blob",
       "historicalBlob": "8578eef3ff340d7f9f14f4fc35b0abb4598a6d13",
       "currentState": "retained-evolved",
-      "currentBlob": "302f0e180536f12e6c752ce9eff09b88b45cd096"
+      "currentBlob": "1cbb3e9cf1dbefb1b714ec0f2c978573efe61839"
     },
     {
       "path": "build.bat",
@@ -288,7 +288,7 @@
       "historicalType": "blob",
       "historicalBlob": "26880fea533e4b5cabbe3844ccdd6de5082ef8b2",
       "currentState": "retained-evolved",
-      "currentBlob": "84dc57ea170297a674b97d3f0d206835f8c06f9c"
+      "currentBlob": "482b6727f6fd54687e048652cec2f497211434c1"
     },
     {
       "path": "Cargo.toml",
@@ -297,7 +297,7 @@
       "historicalType": "blob",
       "historicalBlob": "c0fc30542e83e54ea2956feb2a858db67693ba24",
       "currentState": "retained-evolved",
-      "currentBlob": "2df239d290b2251f4bf6de418a6aff683b545bc3"
+      "currentBlob": "d046c9a2d897b68de6b242953c4896429e7abd2b"
     },
     {
       "path": "CHANGELOG.md",
@@ -306,7 +306,7 @@
       "historicalType": "blob",
       "historicalBlob": "189da3a4210ef1f6dfb89ddc03abb7628e119a07",
       "currentState": "retained-evolved",
-      "currentBlob": "5068fe450681027c63a43ead2e3d1486ba5bb473"
+      "currentBlob": "52a66764353ee184ee17e210b6bd1281266fca07"
     },
     {
       "path": "CLAUDE.md",
@@ -342,7 +342,7 @@
       "historicalType": "blob",
       "historicalBlob": "3a76c46f628276c224029409373723170143ecda",
       "currentState": "retained-evolved",
-      "currentBlob": "c1488eca3f8f5ccbfa84f66b811197f2c08b5ce2"
+      "currentBlob": "d6599393d2987db430ee6dec2c742dface93dfb4"
     },
     {
       "path": "coordination/CHAT.md",
@@ -351,7 +351,7 @@
       "historicalType": "blob",
       "historicalBlob": "c9cd0394f880809d16ad392c5dc0774c73b26ed7",
       "currentState": "retained-evolved",
-      "currentBlob": "8e4a8ca2b30f5bcb2e67ddcb370ce091e910fa62"
+      "currentBlob": "d1a2cf1475154da6d3ecf105080268ddf018e7d3"
     },
     {
       "path": "coordination/INSTRUCTIONS.md",
@@ -369,7 +369,7 @@
       "historicalType": "blob",
       "historicalBlob": "e109b6bd73ef3277ec0c6ba8623388d8ee11ac8d",
       "currentState": "retained-evolved",
-      "currentBlob": "b778b9a924b1fe53afd938a7c2b2f9e1a6d51722"
+      "currentBlob": "71f00488f877400b1ca125dfad8b49f4ea579d57"
     },
     {
       "path": "crates/browser-connector/Cargo.toml",
@@ -1476,7 +1476,7 @@
       "historicalType": "blob",
       "historicalBlob": "5a1c1b5efdc08d3c3f41d0f27d9729a9e1cdcae5",
       "currentState": "retained-evolved",
-      "currentBlob": "9153c3e27bfd9a0c138b50716995f4b9736e9927"
+      "currentBlob": "4da7ebfed18def23a8d8a76f0712c74152238080"
     },
     {
       "path": "crates/mcp-connector/src/mcp_2025_11_25.rs",
@@ -1485,7 +1485,7 @@
       "historicalType": "blob",
       "historicalBlob": "851abc937405f17328751d8b02c5d3416a525954",
       "currentState": "retained-evolved",
-      "currentBlob": "a340bf19fddaccf0da73925ed58c1a2e9a156654"
+      "currentBlob": "d433356f5c19d625610fb724acb940f27783cf92"
     },
     {
       "path": "crates/mcp-connector/src/mcp_2026_07_28.rs",
@@ -1701,7 +1701,7 @@
       "historicalType": "blob",
       "historicalBlob": "caf45c47c6321cdef439cd5896b137b10e9520cb",
       "currentState": "retained-evolved",
-      "currentBlob": "3a31dd640053da8915bc1efc91049b3d8add848f"
+      "currentBlob": "5a4b5b9feac505f6206724e175c63b564b1d8b02"
     },
     {
       "path": "docs/adr/0001-single-binary-thin-extension.md",
@@ -1836,7 +1836,7 @@
       "historicalType": "blob",
       "historicalBlob": "02f6771c15809a1cfa93ae221458dd228b159de4",
       "currentState": "retained-evolved",
-      "currentBlob": "bbe1034915396a94dc4cf6779036e79e0bd3c997"
+      "currentBlob": "44a8e17d3cfb034713782a7939bd3167c4e090ab"
     },
     {
       "path": "docs/adr/0016-debug-mode-pinned-extension-id.md",
@@ -1872,7 +1872,7 @@
       "historicalType": "blob",
       "historicalBlob": "e5ef671f2155c365cd9a2476bb30be136c1baa07",
       "currentState": "retained-evolved",
-      "currentBlob": "1e1688d3605d1ca13c36a72aad56489291b4a76b"
+      "currentBlob": "5c798e66cf916ce46c77593b4b207742a6e67912"
     },
     {
       "path": "docs/adr/0020-org-policy-experience.md",
@@ -1881,7 +1881,7 @@
       "historicalType": "blob",
       "historicalBlob": "52ba8a4c894b1eb056ff4d69f45b832d713de971",
       "currentState": "retained-evolved",
-      "currentBlob": "d06135595bd46053f34dc3ff1354130dc49e49e2"
+      "currentBlob": "d44a47b9ae0ccc9d470de6732b0d0dcaed9dcd5f"
     },
     {
       "path": "docs/adr/0021-ghostlight-brand-and-family.md",
@@ -1935,7 +1935,7 @@
       "historicalType": "blob",
       "historicalBlob": "13e3be2dcaa27ac75c1456fc082bfe4ab2458c9d",
       "currentState": "retained-evolved",
-      "currentBlob": "665192be8cb0c2d77281cc183008082b54e8c411"
+      "currentBlob": "dad0dcdd8d52ccea67c0dd00d1fb2e7222f2cf00"
     },
     {
       "path": "docs/adr/0027-open-core-business-model-and-licensing.md",
@@ -1962,7 +1962,7 @@
       "historicalType": "blob",
       "historicalBlob": "66f2cad4268518ca34f800d48555d883c45ea239",
       "currentState": "retained-evolved",
-      "currentBlob": "5ad63d875c0ce7b8c7df19bb71ac63e4906cfbb5"
+      "currentBlob": "18c6aa05499ae35e11d80792334abccd076c194d"
     },
     {
       "path": "docs/adr/0030-ghostlight-hub-orchestrator.md",
@@ -1971,7 +1971,7 @@
       "historicalType": "blob",
       "historicalBlob": "fb42556bbd2fc373ff398dbe90d02321d6925bca",
       "currentState": "retained-evolved",
-      "currentBlob": "dfc7317d7b2088370d1032dd5bf8ea4138422643"
+      "currentBlob": "0e9ed5b462545af68234f6c97d03dd6fbee9589f"
     },
     {
       "path": "docs/adr/0031-agent-onboarding-contract.md",
@@ -1989,7 +1989,7 @@
       "historicalType": "blob",
       "historicalBlob": "b0c039b9b0b6711a76c3c55d21c6e2a5f014d4df",
       "currentState": "retained-evolved",
-      "currentBlob": "666d614f7981a4da58a9f5177024aa0fb97513fc"
+      "currentBlob": "42c83e85b9de162b318aa3d2beec3dd8b1eb63c5"
     },
     {
       "path": "docs/adr/0033-inbound-outbound-manage-zones.md",
@@ -2070,7 +2070,7 @@
       "historicalType": "blob",
       "historicalBlob": "6186b3b52de32986b6cadbdc1a0448d5f06858a7",
       "currentState": "retained-evolved",
-      "currentBlob": "2df7bce482badffb7aca414f0eecc74270224d79"
+      "currentBlob": "3e8d6b849d98c75a36ded8dd87601457e5635922"
     },
     {
       "path": "docs/adr/0042-origin-flow-provenance.md",
@@ -2097,7 +2097,7 @@
       "historicalType": "blob",
       "historicalBlob": "fe39075c123e56af74abaafeff15b592d5937613",
       "currentState": "retained-evolved",
-      "currentBlob": "190cdb11b57d7fac227766e2f116d9c7d13d4f66"
+      "currentBlob": "e74e978c74a0b8a987b8a844e9493ffd87868ce9"
     },
     {
       "path": "docs/adr/0045-resilient-reconnecting-adapter.md",
@@ -2187,7 +2187,7 @@
       "historicalType": "blob",
       "historicalBlob": "98252c8811b5ad9b32fe5635c798c0aaa119d4da",
       "currentState": "retained-evolved",
-      "currentBlob": "519e8701c545a7b1a2cc74571d4f2062dee0832b"
+      "currentBlob": "c1ee80aae46a1c9ebdf4d7418e2c905a696ae1e4"
     },
     {
       "path": "docs/adr/0055-managed-scheme-central-policy-distribution.md",
@@ -2196,7 +2196,7 @@
       "historicalType": "blob",
       "historicalBlob": "42dde89e3f9b5fceed358c1be48c2e31b55dbcec",
       "currentState": "retained-evolved",
-      "currentBlob": "de2bc45460050bec3f0f8015db54255f98f34de6"
+      "currentBlob": "2e2f1e94f8a7b5b8d4874963da3b2ffb233721c7"
     },
     {
       "path": "docs/adr/0056-lightbox-injectable-composition-and-e2e-harness.md",
@@ -2223,7 +2223,7 @@
       "historicalType": "blob",
       "historicalBlob": "a1b91b52e63c03494b0ff8cf3e687eab7bc403cf",
       "currentState": "retained-evolved",
-      "currentBlob": "0d319bb79f796f75b924b4f19675c3397f7c45e9"
+      "currentBlob": "d0c1c3f065c10bd99bd6cc5bd755ecc915cbe9bb"
     },
     {
       "path": "docs/adr/0059-developer-instrumentation-and-live-test-tooling.md",
@@ -2268,7 +2268,7 @@
       "historicalType": "blob",
       "historicalBlob": "5d2df3ff49285269975ef2c0b9c1ae7b41a0e1fa",
       "currentState": "retained-evolved",
-      "currentBlob": "88e56e6ec8a2896a26ceb8d280afb64fc7be0577"
+      "currentBlob": "3d798cfeba298961efcfb798ccd2225cf331dc1e"
     },
     {
       "path": "docs/adr/0064-explicit-dev-isolation.md",
@@ -2340,7 +2340,7 @@
       "historicalType": "blob",
       "historicalBlob": "d695ee5dc1016d5dddf24ccec8c29825d80bedbc",
       "currentState": "retained-evolved",
-      "currentBlob": "cec7a59b1ead838e93af6264000492b030dfe774"
+      "currentBlob": "d56ae84d84580c89ce2ea987b4d07d2117d7ff3a"
     },
     {
       "path": "docs/adr/0072-agent-narration.md",
@@ -2394,7 +2394,7 @@
       "historicalType": "blob",
       "historicalBlob": "7b27a82256aa6e019a8f2e96b9f2e8996b41f2ea",
       "currentState": "retained-evolved",
-      "currentBlob": "9fff5563b42e99e1389acffee2e8e40bc536a5cf"
+      "currentBlob": "682dbddaffb0fb4254af0072a2fe84f4c98fd803"
     },
     {
       "path": "docs/adr/0078-closed-loop-browser-core.md",
@@ -2529,7 +2529,7 @@
       "historicalType": "blob",
       "historicalBlob": "8587d8df38f60b4ee031f04f400de3d0a1c4d1c2",
       "currentState": "retained-evolved",
-      "currentBlob": "54586237e2299fa3b75d5876b1a789d3020fe01c"
+      "currentBlob": "f2e70e50cc312c213d3aa27046522a3ed8b93057"
     },
     {
       "path": "docs/adr/0093-independent-browser-adapter-versioning.md",
@@ -2556,7 +2556,7 @@
       "historicalType": "blob",
       "historicalBlob": "6b140badbe0304e64a1aa8cdb8e9ada5e0844eac",
       "currentState": "retained-evolved",
-      "currentBlob": "ac697490ec9ab1ea6b0c690622f17934d39af78c"
+      "currentBlob": "93057a0161e2f48898642681a99e5e1bdca80ae2"
     },
     {
       "path": "docs/adr/0096-protocol-versioned-mcp-edge-and-neutral-service.md",
@@ -2619,7 +2619,7 @@
       "historicalType": "blob",
       "historicalBlob": "4a8c566c732a1a9623d9e816c62fc0637531f72a",
       "currentState": "retained-evolved",
-      "currentBlob": "16f83ab403c9944ba3db1f19e762bfd8c0ba9882"
+      "currentBlob": "9b9a8b08dee01142a05dfc3b464896228d529250"
     },
     {
       "path": "docs/assets/demo.gif",
@@ -2663,8 +2663,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "51dcfc138be06c17130875c5f0914d5233e79092",
-      "currentState": "retained-identical",
-      "currentBlob": "51dcfc138be06c17130875c5f0914d5233e79092"
+      "currentState": "retained-evolved",
+      "currentBlob": "480ba9e4faddb60b2eb6176b2075b77dda7a1f15"
     },
     {
       "path": "docs/business/DISTRIBUTION.md",
@@ -2682,7 +2682,7 @@
       "historicalType": "blob",
       "historicalBlob": "a7a4155fe5336bff7cb2cc9917fcd2e590a22a7e",
       "currentState": "retained-evolved",
-      "currentBlob": "5606f3bfa0f011ba6e07c6fb41a113359ad51985"
+      "currentBlob": "f34551c5bd31c500804ab6e8c6312599a6abc34e"
     },
     {
       "path": "docs/business/issuing-licenses.md",
@@ -2700,7 +2700,7 @@
       "historicalType": "blob",
       "historicalBlob": "12709e3ae272727d4d785b380f0a28d0a3e24438",
       "currentState": "retained-evolved",
-      "currentBlob": "bb2207e72186d8bae6985953728fe942844bc65d"
+      "currentBlob": "5f598dcb65cdaff93e344b8b9e8d0d058e6d082c"
     },
     {
       "path": "docs/business/PUBLIC-COPY-DRAFTS-0.8.md",
@@ -2727,7 +2727,7 @@
       "historicalType": "blob",
       "historicalBlob": "4c72c6a30850cf803abe02489639f1e56dd70212",
       "currentState": "retained-evolved",
-      "currentBlob": "08b96659f5aab360e9cb7d0b7bbb17061decc0de"
+      "currentBlob": "3c0cbe7e85b3b912e144ea608fe558932ce2753c"
     },
     {
       "path": "docs/design/agent-journey-artifact-v0.md",
@@ -2898,7 +2898,7 @@
       "historicalType": "blob",
       "historicalBlob": "35b57908872084339c6b0070d360baa872e5d324",
       "currentState": "retained-evolved",
-      "currentBlob": "cce1ffe311187feb88c5f58d057ec877e8673a4c"
+      "currentBlob": "2839d1c5f8518ec0361ae3a42600056e8572e38a"
     },
     {
       "path": "docs/guides/compliance-team.md",
@@ -2916,7 +2916,7 @@
       "historicalType": "blob",
       "historicalBlob": "4faf6da1531e99f4065492f4293150f1d0d55e33",
       "currentState": "retained-evolved",
-      "currentBlob": "97d86c67237b07e73c0516375db42b06d197109a"
+      "currentBlob": "e2a0bb48d01d0671b9bb0b46ddd658696391c4d0"
     },
     {
       "path": "docs/guides/installation.md",
@@ -2925,7 +2925,7 @@
       "historicalType": "blob",
       "historicalBlob": "92899027be3f0cbeceabea0cb9bca13a4844232f",
       "currentState": "retained-evolved",
-      "currentBlob": "38ce4ac5304798be2597e7823ae559d00e5290c2"
+      "currentBlob": "029722df57446e17e537738e34b4d388edbdcfe7"
     },
     {
       "path": "docs/guides/licensing.md",
@@ -2934,7 +2934,7 @@
       "historicalType": "blob",
       "historicalBlob": "19b33819cbc521a6111eaab45976b69bba6e01fd",
       "currentState": "retained-evolved",
-      "currentBlob": "1521ba20f39ca821437370cc53b1534145c94d67"
+      "currentBlob": "fdc16e9bbb31ae3eebd36aa17c6ad063e8ad9c2e"
     },
     {
       "path": "docs/guides/open-source-publication.md",
@@ -2952,7 +2952,7 @@
       "historicalType": "blob",
       "historicalBlob": "52eabe840a6ba9984ba32493e4b340ab2a14eec7",
       "currentState": "retained-evolved",
-      "currentBlob": "1ba3f73ecc9bb66f7a6339fb843e8a91d970c72b"
+      "currentBlob": "a25d9261395a51cb47f13cb090713e05d475feee"
     },
     {
       "path": "docs/guides/siem-integration.md",
@@ -2979,7 +2979,7 @@
       "historicalType": "blob",
       "historicalBlob": "c9f6567e33b176c4f9cae7c9fb11c25f66a7add4",
       "currentState": "retained-evolved",
-      "currentBlob": "6d60ef3ee00fec48294094b8b2fc48dca017d98a"
+      "currentBlob": "83999083386139de87a430640e08b198862df970"
     },
     {
       "path": "docs/legal/PRIVACY.md",
@@ -2988,7 +2988,7 @@
       "historicalType": "blob",
       "historicalBlob": "72b3b7dc9721f76501e767e084e2341bb824329e",
       "currentState": "retained-evolved",
-      "currentBlob": "652df49b3e0f36d4b16ca61286a43baef6712f30"
+      "currentBlob": "5c1e4e578020ea50abe2b3aefce962bd52f99b8d"
     },
     {
       "path": "docs/legal/STORE_LISTING.md",
@@ -2997,7 +2997,7 @@
       "historicalType": "blob",
       "historicalBlob": "82127045dcfef92074b480f9417d69be58c3fd02",
       "currentState": "retained-evolved",
-      "currentBlob": "1b82b75aaf2033ea14cda78c5b20ff7b08462c3b"
+      "currentBlob": "91cc64a6d4eb8b764f2c6be3b4515e778830ebc5"
     },
     {
       "path": "docs/licenses/LicenseRef-Ghostlight-Commercial.txt",
@@ -3005,8 +3005,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "0bc5a419e113836ce90deb60745da762f4324ba3",
-      "currentState": "retained-identical",
-      "currentBlob": "0bc5a419e113836ce90deb60745da762f4324ba3"
+      "currentState": "absent",
+      "currentBlob": null
     },
     {
       "path": "docs/licenses/MIT.txt",
@@ -3024,7 +3024,7 @@
       "historicalType": "blob",
       "historicalBlob": "891ab7a4da78ea50d6b8f67da8228e56b9897f19",
       "currentState": "retained-evolved",
-      "currentBlob": "0dc811655732583f187abaf17642b29e757a5c89"
+      "currentBlob": "899829a00be681d43802442e6ec4849dfef935bc"
     },
     {
       "path": "docs/public-status.json",
@@ -3042,7 +3042,7 @@
       "historicalType": "blob",
       "historicalBlob": "2e1edc340e68f383aa83e2ac3fd0690f0a1a5da6",
       "currentState": "retained-evolved",
-      "currentBlob": "c32303d30cc265e26c35ee86802b12d88da87a22"
+      "currentBlob": "a97439bfd46f0486452fd5a4191cbcec1bc6914b"
     },
     {
       "path": "docs/research/00-synthesis-and-decisions.md",
@@ -3285,7 +3285,7 @@
       "historicalType": "blob",
       "historicalBlob": "1bc5b1bfe532623fac0cd5d6eedddae79c6b9d3a",
       "currentState": "retained-evolved",
-      "currentBlob": "a20fc8b1f907f135fbcc1856ccfc5a82e373cd99"
+      "currentBlob": "b78ed6095fb1131ca304439227f11574f33b864b"
     },
     {
       "path": "docs/research/tool-surfaces/CAPTURE-PROMPT.md",
@@ -3348,7 +3348,7 @@
       "historicalType": "blob",
       "historicalBlob": "8dfdc5cb4236cc518c6b94dad08d26f09f923455",
       "currentState": "retained-evolved",
-      "currentBlob": "7d290b5b585670fa572724ff5bbeb2506ffc62dc"
+      "currentBlob": "c3657e1da3bccc719796ed7583af6b6d10fb7007"
     },
     {
       "path": "docs/STATUS.md",
@@ -3357,7 +3357,7 @@
       "historicalType": "blob",
       "historicalBlob": "9eabb624c54f70fa3c5f7f424c15f7723eeebc8e",
       "currentState": "retained-evolved",
-      "currentBlob": "ce3796fe406cf5029638325fb0eb6ac1e8309605"
+      "currentBlob": "2ed3d87b5cb2f80304717ce6a39c751c31980929"
     },
     {
       "path": "docs/tasks/browser-kernel/BOOTSTRAP.md",
@@ -5481,7 +5481,7 @@
       "historicalType": "blob",
       "historicalBlob": "793d9bd9b0883017a08fc3a878ea90c4b6ecc54d",
       "currentState": "retained-evolved",
-      "currentBlob": "71c9c34cbe70c28f26036ddca02eca16559bca0c"
+      "currentBlob": "0aeaeb4994178d13b93af0d0c563a3ab298afc0b"
     },
     {
       "path": "docs/trust/continuity.md",
@@ -5490,7 +5490,7 @@
       "historicalType": "blob",
       "historicalBlob": "89c9c9e564b2c53606e9494ef1b9b4bf1f8774d8",
       "currentState": "retained-evolved",
-      "currentBlob": "eaf8e5d0d416f10bc7cb33dac768518c87c01d2e"
+      "currentBlob": "c89dceef4b220d8079f39e98d9e02dc6349e315c"
     },
     {
       "path": "docs/trust/controls.md",
@@ -5499,7 +5499,7 @@
       "historicalType": "blob",
       "historicalBlob": "9751c4429fa901ae765682233a560499add35f0c",
       "currentState": "retained-evolved",
-      "currentBlob": "d3f4fb6dc4b3f3a674b315d70887755e1e909c62"
+      "currentBlob": "e7b65b29b012fceaeeed0162f3dd2dc2a5de8cc7"
     },
     {
       "path": "docs/trust/data-flows.md",
@@ -5508,7 +5508,7 @@
       "historicalType": "blob",
       "historicalBlob": "1bfd054025819f4c902bbc58d5637c2e25941433",
       "currentState": "retained-evolved",
-      "currentBlob": "3b7c5577efd4d2cafa94f8d702a07113c10fdeba"
+      "currentBlob": "7571f7e29339974fce718468174c1c55246d7fb0"
     },
     {
       "path": "docs/trust/dpa.md",
@@ -5516,8 +5516,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "51d1efb054599bda1cc6a98bd76084137e80d8e0",
-      "currentState": "retained-identical",
-      "currentBlob": "51d1efb054599bda1cc6a98bd76084137e80d8e0"
+      "currentState": "retained-evolved",
+      "currentBlob": "23fb0618ea5b80424089201428720309fe139c86"
     },
     {
       "path": "docs/trust/faq.md",
@@ -5526,7 +5526,7 @@
       "historicalType": "blob",
       "historicalBlob": "76bd12090e7c6023671c411a3f4661eaa57393b8",
       "currentState": "retained-evolved",
-      "currentBlob": "dfade8813a1d1eedd3d1c312271236675743f6e0"
+      "currentBlob": "850486e5180dcfe34371fa1e2cb3e701dfa4d990"
     },
     {
       "path": "docs/trust/msa.md",
@@ -5534,8 +5534,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "1b1d7cb07ddf99993f946f77f2a34eb0ddfed80c",
-      "currentState": "retained-identical",
-      "currentBlob": "1b1d7cb07ddf99993f946f77f2a34eb0ddfed80c"
+      "currentState": "retained-evolved",
+      "currentBlob": "f33fc82917eefd68671fad46a45832719f6c684e"
     },
     {
       "path": "docs/trust/openssf-self-assessment.md",
@@ -5544,7 +5544,7 @@
       "historicalType": "blob",
       "historicalBlob": "b555446b547995750aa02706c52eaa5839cf124b",
       "currentState": "retained-evolved",
-      "currentBlob": "49228b05fdeeb0a791a97639eda07c7346e99729"
+      "currentBlob": "b3808d18e675c7ab3bb766faa288899e2674a26d"
     },
     {
       "path": "docs/trust/questionnaire.md",
@@ -5553,7 +5553,7 @@
       "historicalType": "blob",
       "historicalBlob": "4161195cc95ccf7f8135145d8afe08baa40b0752",
       "currentState": "retained-evolved",
-      "currentBlob": "64a56368b451b5504c6220423d5331646738303e"
+      "currentBlob": "afa86cb3b3e22987d35d3004b0269260eec36bd6"
     },
     {
       "path": "docs/trust/README.md",
@@ -5562,7 +5562,7 @@
       "historicalType": "blob",
       "historicalBlob": "3034e9768207dc28090b5f5ab613a489213fbd70",
       "currentState": "retained-evolved",
-      "currentBlob": "68e4421e1f5f052d65534f0fb30039d9fb81ad8c"
+      "currentBlob": "4efa9bad0b10600c5a612b1517cdacc40df011b7"
     },
     {
       "path": "docs/trust/security-overview.md",
@@ -5571,7 +5571,7 @@
       "historicalType": "blob",
       "historicalBlob": "b7457b441b74c300dc8600f6ba74bdbbec8e8843",
       "currentState": "retained-evolved",
-      "currentBlob": "c068eed21ccc717891cbd799ac6253ac43b74d50"
+      "currentBlob": "54d0ec8d575408ba42a22ddb0a5081b5e7cc43af"
     },
     {
       "path": "docs/trust/sub-processors.md",
@@ -5579,8 +5579,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "6c06509b5f754879cc27c0f7f8a72f0d4b2cc480",
-      "currentState": "retained-identical",
-      "currentBlob": "6c06509b5f754879cc27c0f7f8a72f0d4b2cc480"
+      "currentState": "retained-evolved",
+      "currentBlob": "4179c01a286b7fc79f52481cdbfdb15771f4c40a"
     },
     {
       "path": "docs/trust/supply-chain.md",
@@ -5589,7 +5589,7 @@
       "historicalType": "blob",
       "historicalBlob": "8026938c62546722f64612a79af6812e9131c90d",
       "currentState": "retained-evolved",
-      "currentBlob": "b28d5221e87fd359e88945cdeea2405c5ec2963a"
+      "currentBlob": "82d69e9533ab5e7a6c0e194ae4855661a1bead76"
     },
     {
       "path": "docs/trust/support-policy.md",
@@ -5598,7 +5598,7 @@
       "historicalType": "blob",
       "historicalBlob": "b65f059007dda46bb77f453945556c9435032b5e",
       "currentState": "retained-evolved",
-      "currentBlob": "f32d1aa02508376fd8ac2b3dbef63f091b18b479"
+      "currentBlob": "12c1b2373b89f5c2e8207a131878e3980aa63f67"
     },
     {
       "path": "docs/trust/tiers.md",
@@ -5607,7 +5607,7 @@
       "historicalType": "blob",
       "historicalBlob": "85c19392c0dcd92ddd35b6e340b10344e97af9b1",
       "currentState": "retained-evolved",
-      "currentBlob": "2dba36d7610ac904f85e17409e941fe105e78e9a"
+      "currentBlob": "717278497697f32b576224d8cbe3ba79bd4c3e31"
     },
     {
       "path": "examples/demo-policy.json",
@@ -5688,7 +5688,7 @@
       "historicalType": "blob",
       "historicalBlob": "2959da0b667b2cb9f13b6ac77ff87249da1c02be",
       "currentState": "retained-evolved",
-      "currentBlob": "7415788e8e93e9d7522193378622eeb362d58350"
+      "currentBlob": "8eb16839f4c2523ebe821d9ef244dbd7ea4d8f96"
     },
     {
       "path": "extension/icons/ghost-mark.svg",
@@ -5994,7 +5994,7 @@
       "historicalType": "blob",
       "historicalBlob": "e07b382011062d9413691142bf66f4151fcec34d",
       "currentState": "retained-evolved",
-      "currentBlob": "f107e9f6f28fb6c747b18a5beb1a4608eabd8c39"
+      "currentBlob": "60160127e07013620031c008961b44afdc6765e7"
     },
     {
       "path": "extension/native-messaging-host.json",
@@ -6012,7 +6012,7 @@
       "historicalType": "blob",
       "historicalBlob": "95a6823ccf4217b6600abc3e13c8259f6af3f7a9",
       "currentState": "retained-evolved",
-      "currentBlob": "9eca201623df0f665189cfcb1fa85974bb872fc2"
+      "currentBlob": "fbb6bbb9de0e0f4f976dd0f30c690fe8b70beb99"
     },
     {
       "path": "extension/options.js",
@@ -6021,7 +6021,7 @@
       "historicalType": "blob",
       "historicalBlob": "98ad2ca84b36d7e9a63cc6fa5fc7269f0a038553",
       "currentState": "retained-evolved",
-      "currentBlob": "c44e5b6456c317e74ef734b93e90740275fb2570"
+      "currentBlob": "9197b3d139fc644841f14c39831358fe367db533"
     },
     {
       "path": "extension/popup.html",
@@ -6030,7 +6030,7 @@
       "historicalType": "blob",
       "historicalBlob": "2db2724a69058b1af219cb41762ac9c901a56a5e",
       "currentState": "retained-evolved",
-      "currentBlob": "f379fc140beeae464c7ce312c8975551465591cb"
+      "currentBlob": "16ea9f2434823fd778a0efdf82cb73a95aad05ed"
     },
     {
       "path": "extension/popup.js",
@@ -6039,7 +6039,7 @@
       "historicalType": "blob",
       "historicalBlob": "c8077641a59cabe8e66fc9d85acffbba01458fcc",
       "currentState": "retained-evolved",
-      "currentBlob": "79c92dd7a22e064cdd823c1b4970f7bda37ef5b6"
+      "currentBlob": "d84fb3474c3fee3a243d7526536d317dfce14817"
     },
     {
       "path": "extension/README.md",
@@ -6048,7 +6048,7 @@
       "historicalType": "blob",
       "historicalBlob": "bb3c382e328a616d80534357fb56bad5503aaaf0",
       "currentState": "retained-evolved",
-      "currentBlob": "d7697ada28e1260bc7fc8309c2b0828ffe6aa71e"
+      "currentBlob": "7d3637e9cc03ba1e3bf3831774072f1b5cfbaffd"
     },
     {
       "path": "extension/service-worker.js",
@@ -6057,7 +6057,7 @@
       "historicalType": "blob",
       "historicalBlob": "597ed352cae51e5569c4c3d96c7fca0c98082d6b",
       "currentState": "retained-evolved",
-      "currentBlob": "17d8de1914bd444ecd039fc2d876cef5c7c97fc0"
+      "currentBlob": "a26d50c430c82156b24fe2444d109ab939e858f4"
     },
     {
       "path": "glama.json",
@@ -6075,7 +6075,7 @@
       "historicalType": "blob",
       "historicalBlob": "20ece6d12341ab3fb303e154788192d28c845b5f",
       "currentState": "retained-evolved",
-      "currentBlob": "45f1c65c4ad71772b0e01e2c44c9a3deabb70df0"
+      "currentBlob": "19a655eaffede4f2c669365905d0244f89e29c87"
     },
     {
       "path": "kickoff.md",
@@ -6102,7 +6102,7 @@
       "historicalType": "blob",
       "historicalBlob": "290c37b75dbe9f2c5b4f1e18ad4f6750d4209d21",
       "currentState": "retained-evolved",
-      "currentBlob": "faa8383b8837c248d39583c5efc46bd0efffdcf2"
+      "currentBlob": "b97dace4fd75a84d873289905eaf4c24c05451fb"
     },
     {
       "path": "llms-install.md",
@@ -6129,7 +6129,7 @@
       "historicalType": "blob",
       "historicalBlob": "e68dba0a04c59ed7fd07a782080752e9da42794e",
       "currentState": "retained-evolved",
-      "currentBlob": "9c548306c22007535572e36a2a4954a7b345fc3b"
+      "currentBlob": "2c6ee5bc4bfc2780118c530194391dfe103a887f"
     },
     {
       "path": "open-spec/rawx-capability-model.md",
@@ -6228,7 +6228,7 @@
       "historicalType": "blob",
       "historicalBlob": "dcae20ffeab753ecda9735de4c4e3fc0a659b445",
       "currentState": "retained-evolved",
-      "currentBlob": "842da174a537522a9a9dc6017600f432a6706b12"
+      "currentBlob": "c15271cac74f347aee43693ada5df01a86f0e801"
     },
     {
       "path": "packaging/npm/README.md",
@@ -6237,7 +6237,7 @@
       "historicalType": "blob",
       "historicalBlob": "f676c0ff12dbbaad88ec1caf927ea841ebb60ca0",
       "currentState": "retained-evolved",
-      "currentBlob": "800e3cb7eca517b28ed4b422fdc3e041d7a715f9"
+      "currentBlob": "0a8ce26537dc5a27170407dab5316979ae13f195"
     },
     {
       "path": "packaging/npm/test/launcher.test.js",
@@ -6255,7 +6255,7 @@
       "historicalType": "blob",
       "historicalBlob": "9814efbb5fe19454a1ec7675e2fab547e6a8bc16",
       "currentState": "retained-evolved",
-      "currentBlob": "ed9ea03d9b05cbaaa48c15eee8b7df757beb7739"
+      "currentBlob": "3af480c5c563c9076cdc30b16592082970155610"
     },
     {
       "path": "packaging/winget/Sylin.Ghostlight.yaml",
@@ -6264,7 +6264,7 @@
       "historicalType": "blob",
       "historicalBlob": "f6e045a90848a93f6ec3ab024c6fb5a92fef5152",
       "currentState": "retained-evolved",
-      "currentBlob": "146c8948d52790262cb9d3d733971d099712cda4"
+      "currentBlob": "df63dcaf5668236f931d48e805e6e2f6a9a0be44"
     },
     {
       "path": "PRICING.md",
@@ -6272,8 +6272,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "24b6aa05386d0d214c89541cf220eca44e1bd74b",
-      "currentState": "retained-evolved",
-      "currentBlob": "6aaeec586550dc38893a113ace8fd77738523588"
+      "currentState": "absent",
+      "currentBlob": null
     },
     {
       "path": "README.md",
@@ -6282,7 +6282,7 @@
       "historicalType": "blob",
       "historicalBlob": "29f1cbbda0cf22cd1a521cb9fd1631253c37ecad",
       "currentState": "retained-evolved",
-      "currentBlob": "adebda7d109566a4712773e41400f3b2519030ed"
+      "currentBlob": "26fa5dbddfd54637d6c6dcb0c43c75b1080ccc81"
     },
     {
       "path": "ROADMAP.md",
@@ -6291,7 +6291,7 @@
       "historicalType": "blob",
       "historicalBlob": "83e11d83d6df4aa546aae7cfea862396705b2c34",
       "currentState": "retained-evolved",
-      "currentBlob": "efc71c920057387a27b9f2a939232729eb026923"
+      "currentBlob": "30d68f8efbf4f92976bc859e7ac875133f909e9e"
     },
     {
       "path": "rust-toolchain.toml",
@@ -6335,8 +6335,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "c6dc83f0a4b7f966821845e5f61f7daf02805e4d",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-identical",
+      "currentBlob": "c6dc83f0a4b7f966821845e5f61f7daf02805e4d"
     },
     {
       "path": "scripts/get-cws-refresh-token.ps1",
@@ -6345,7 +6345,7 @@
       "historicalType": "blob",
       "historicalBlob": "a183456433a2ca26e57756060180d7438a2de07d",
       "currentState": "retained-evolved",
-      "currentBlob": "1431315861ec5e713c93b274b376220368978bbb"
+      "currentBlob": "35968031a10e83d3fef0621d09552141eee7f91a"
     },
     {
       "path": "scripts/get.ps1",
@@ -6372,7 +6372,7 @@
       "historicalType": "blob",
       "historicalBlob": "d56e326c50fc18fbe37f7722ca8ffa704670071b",
       "currentState": "retained-evolved",
-      "currentBlob": "51823b07be516d02611bb4e4bd2aea0acc812356"
+      "currentBlob": "425f943fdcbe2f6d5e72530801db9c94c1f313ef"
     },
     {
       "path": "scripts/package-mcpb.ps1",
@@ -6381,7 +6381,7 @@
       "historicalType": "blob",
       "historicalBlob": "20e4b09beaa27a2441eb2f97bc82b3d439d9250b",
       "currentState": "retained-evolved",
-      "currentBlob": "a8cd055c7ac87bb4af529271bd06a3cae0b3aab0"
+      "currentBlob": "a4c0d406b434efe69cf383a6887bed7ede2a3c8f"
     },
     {
       "path": "scripts/prepare-winget.ps1",
@@ -6399,7 +6399,7 @@
       "historicalType": "blob",
       "historicalBlob": "03e944037d16aa43781010559ef64694ceb702bc",
       "currentState": "retained-evolved",
-      "currentBlob": "8fd1b997c91a0ceebfd1558edd53f507421c46d4"
+      "currentBlob": "129e3ddef2a419f1400e029d50ec19b04a0a5027"
     },
     {
       "path": "scripts/publish-website.ps1",
@@ -6407,8 +6407,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "de0ea274e2bfcfc73a59935bf045d40abfa27dd7",
-      "currentState": "absent",
-      "currentBlob": null
+      "currentState": "retained-identical",
+      "currentBlob": "de0ea274e2bfcfc73a59935bf045d40abfa27dd7"
     },
     {
       "path": "scripts/reconcile-chrome-store.ps1",
@@ -6434,8 +6434,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "cdb92184d6f6c138f065610772e44e4e175f5196",
-      "currentState": "retained-identical",
-      "currentBlob": "cdb92184d6f6c138f065610772e44e4e175f5196"
+      "currentState": "retained-evolved",
+      "currentBlob": "1a25205208edc6ff6805b4cc6cd251a5acd8a51a"
     },
     {
       "path": "SECURITY.md",
@@ -6444,7 +6444,7 @@
       "historicalType": "blob",
       "historicalBlob": "04bb1f4992877cc51428d7d60d628031733e331e",
       "currentState": "retained-evolved",
-      "currentBlob": "0209ce7d4a3733cf0fb8e28ad87462dd3d27289e"
+      "currentBlob": "795324b93e13c11138e8b7c3860c3126ab68707e"
     },
     {
       "path": "server.json",
@@ -6534,7 +6534,7 @@
       "historicalType": "blob",
       "historicalBlob": "451394e7dc2f5e420de602756448ac75b1d0f773",
       "currentState": "retained-evolved",
-      "currentBlob": "1be5c813ca7d90f2e33592728509ec543cbe8bbd"
+      "currentBlob": "b758aa0b123a6e2018c46a4abcf8378ed0c57edd"
     },
     {
       "path": "tests/act_on.rs",

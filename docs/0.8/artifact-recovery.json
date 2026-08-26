@@ -6,14 +6,13 @@
     "total": 809,
     "byTreatment": {
       "behavior-dispositioned": 95,
+      "historical-document-in-git": 1,
       "historical-implementation-only": 161,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 190,
-      "retained-identical": 358,
+      "retained-evolved": 197,
+      "retained-identical": 351,
       "retired-low-value-conductor": 1,
-      "reviewed-repository-history": 1,
-      "reviewed-tooling-history": 1,
-      "superseded-by-current-workflow": 1
+      "reviewed-repository-history": 2
     }
   },
   "entries": [
@@ -55,9 +54,9 @@
     },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".github/release-template.md",
@@ -127,9 +126,9 @@
     },
     {
       "path": ".oss-adoption/current/publication-pack/community-post.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/current/publication-pack/curator-brief.md",
@@ -175,9 +174,9 @@
     },
     {
       "path": ".oss-adoption/STATE.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": ".oss-adoption/workspace.json",
@@ -1783,9 +1782,9 @@
     },
     {
       "path": "docs/business/DIRECTORY-SUBMISSIONS.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/business/DISTRIBUTION.md",
@@ -2011,9 +2010,9 @@
     },
     {
       "path": "docs/licenses/LicenseRef-Ghostlight-Commercial.txt",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "absent",
+      "treatment": "historical-document-in-git",
+      "reason": "The historical document remains recoverable at the named source revision and is not active 1.0 authority."
     },
     {
       "path": "docs/licenses/MIT.txt",
@@ -3685,9 +3684,9 @@
     },
     {
       "path": "docs/trust/dpa.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/trust/faq.md",
@@ -3697,9 +3696,9 @@
     },
     {
       "path": "docs/trust/msa.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/trust/openssf-self-assessment.md",
@@ -3727,9 +3726,9 @@
     },
     {
       "path": "docs/trust/sub-processors.md",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "docs/trust/supply-chain.md",
@@ -4189,9 +4188,9 @@
     },
     {
       "path": "PRICING.md",
-      "currentState": "retained-evolved",
-      "treatment": "retained-evolved",
-      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
+      "currentState": "absent",
+      "treatment": "reviewed-repository-history",
+      "reason": "The artifact remains named and content-addressed here even though it has no current-tree path."
     },
     {
       "path": "README.md",
@@ -4231,9 +4230,9 @@
     },
     {
       "path": "scripts/gen-icons.py",
-      "currentState": "absent",
-      "treatment": "reviewed-tooling-history",
-      "reason": "The tool remains recoverable from Git and is restored only where it serves the current release unit."
+      "currentState": "retained-identical",
+      "treatment": "retained-identical",
+      "reason": "The current tree retains the exact historical blob at the same path."
     },
     {
       "path": "scripts/get-cws-refresh-token.ps1",
@@ -4279,9 +4278,9 @@
     },
     {
       "path": "scripts/publish-website.ps1",
-      "currentState": "absent",
-      "treatment": "superseded-by-current-workflow",
-      "reason": "The tracked Pages workflow owns website deployment; release publication must not rewrite another tree."
+      "currentState": "retained-identical",
+      "treatment": "retained-identical",
+      "reason": "The current tree retains the exact historical blob at the same path."
     },
     {
       "path": "scripts/reconcile-chrome-store.ps1",
@@ -4297,9 +4296,9 @@
     },
     {
       "path": "security-insights.yml",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "SECURITY.md",
