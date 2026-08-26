@@ -2560,6 +2560,62 @@ mod tests {
     }
 
     #[test]
+    fn focused_typing_names_the_control_it_described_and_settles() {
+        let (executor, browser, _workspaces, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        // The describe step observes the focused control; the typed outcome itself carries
+        // no subject. The receipt must name the described control instead of panicking
+        // after the effect has already landed.
+        browser.push(Ok(BrowserOutcome::TargetsDescribed {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "0:locator_1".into(),
+                role: "textbox".into(),
+                name: "Ledger project".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
+        browser.push(Ok(BrowserOutcome::Typed {
+            tab: tab(7, "https://example.com/"),
+            character_count: 5,
+            subject: None,
+            committed_urls: vec![],
+        }));
+
+        let typed = executor.execute(
+            &workspace,
+            "browser_type_text",
+            json!({"text":"Ember","focused":true,"clear_first":true}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(typed.status, Status::Succeeded);
+        assert_eq!(typed.effect, Effect::Applied);
+        assert!(
+            typed.summary.contains("Ledger project"),
+            "summary must name the described control: {}",
+            typed.summary
+        );
+        let calls = browser.calls();
+        assert!(matches!(calls[1], BrowserCommand::DescribeFocused { .. }));
+        assert!(matches!(calls[2], BrowserCommand::TypeFocused { .. }));
+    }
+
+    #[test]
     fn work_follows_the_attended_browser_and_then_stays_where_it_started() {
         let (executor, browser, workspaces, workspace, _) = fixture();
         browser.connect(vec![

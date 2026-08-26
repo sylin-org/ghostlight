@@ -2,7 +2,9 @@
 
 use std::time::Instant;
 
-use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome, PhysicalField};
+use ghostlight_bridge::browser::{
+    BrowserCommand, BrowserOutcome, PhysicalActionSubject, PhysicalField,
+};
 use serde_json::{json, Value};
 
 use crate::events::DomainEvent;
@@ -884,7 +886,11 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
+        // The describe step is not only a credential gate: the control it observes is the
+        // typing receipt's subject. The typed outcome itself carries no subject, so without
+        // this fallback a fully successful focused typing panicked after the effect landed
+        // (the work done, the operation never settled).
+        let focused = match self.dispatch(
             context,
             BrowserCommand::DescribeFocused {
                 tab_id: selected.physical_id,
@@ -896,12 +902,16 @@ impl ApplicationExecutor {
                 if targets[0].credential_class {
                     return self.credential_handoff(context, decision, &selected);
                 }
+                Some(PhysicalActionSubject {
+                    role: targets[0].role.clone(),
+                    name: targets[0].name.clone(),
+                })
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
-        }
+        };
         match self.dispatch(
             context,
             BrowserCommand::TypeFocused {
@@ -918,8 +928,8 @@ impl ApplicationExecutor {
             }) => {
                 let outcome = Outcome::TextTyped {
                     host: observed_host(&tab.url),
-                    subject: action_subject(context, subject, None)
-                        .expect("typing has a fallback subject"),
+                    subject: action_subject(context, subject.or(focused), None)
+                        .expect("focused typing always names its control"),
                     characters: character_count,
                 };
                 self.finish_with_expectation(
