@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "revision": "bd3bffe47f46073ade59505d7c29a18d0dfaffdb",
-  "frozen_at_utc": "2026-08-26T22:05:00Z",
+  "frozen_at_utc": "2026-08-26T22:35:00Z",
   "frozen_by": "onose",
-  "note": "1.0 candidate build revision (the revision the G2 run built); supersedes ded44e2d so the release bundle reproduces the approved store extension bytes exactly"
+  "note": "1.0 candidate build revision (the revision the G2 run built); the packaging-determinism commits bd3bffe4 and 9ee05666 changed release tooling only, and the candidate reproduces the approved store extension bytes exactly"
 }
