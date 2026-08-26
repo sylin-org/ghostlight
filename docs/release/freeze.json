@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "994b6c85dcd7c8df74237cf329461d85ce49b13a",
-  "frozen_at_utc": "2026-08-25T12:41:02Z",
+  "revision": "bd3bffe47f46073ade59505d7c29a18d0dfaffdb",
+  "frozen_at_utc": "2026-08-26T22:05:00Z",
   "frozen_by": "onose",
-  "note": "1.0 candidate build revision (the revision the G2 run built)"
+  "note": "1.0 candidate build revision (the revision the G2 run built); supersedes ded44e2d so the release bundle reproduces the approved store extension bytes exactly"
 }
