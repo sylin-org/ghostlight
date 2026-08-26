@@ -45,8 +45,10 @@ candidate. The next candidate must be built from the final approved revision aft
 Do not restate the commit distance here; `git rev-list --count fd86403..HEAD` answers it without
 going stale.
 
-Release state: **G1 CLOSED**. G0 and G1 are complete at frozen revision `e7d8986b`; G2 through G10
-remain open. The next action is the owner-gated G2 candidate assembly.
+Release state: **G2 CLOSED at `b2c27993`** (2026-08-26); G3's distribution state is reached
+(the store review of the exact candidate bytes is approved and staged). G4 through G8 remain
+open, and G10 publication is proceeding at the owner's explicit 2026-08-26 direction: binaries
+out and published, then the store adapter flips to 1.0.
 
 ## Long-lead work: start these before G0 closes
 
@@ -226,7 +228,7 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
   and hash, and that `SHA256SUMS` is the exact sorted manifest. Record the local path in
   machine-local notes, never here.
 
-Evidence: [2026-08-25 candidate custody](testing/candidate-custody-2026-08-25.md) -- build run 32846030216 at revision 994b6c85, two verified local copies, provenance green.
+Evidence: [2026-08-25 candidate custody](testing/candidate-custody-2026-08-25.md) -- build run 32846030216 at revision 994b6c85, superseded; [2026-08-26 candidate custody](testing/candidate-custody-2026-08-26.md) -- build run 33020313866 at revision `b2c27993a223c220f8828736b125676ae6f9d027`, two verified local copies, provenance green, and the candidate extension ZIP byte-identical to the approved store revision `3570494f`.
 
 ### G3. Place the matching adapter where the live lanes can install it
 
@@ -406,11 +408,11 @@ Fill this in once, when the release is called. A GO here is the owner's, not an 
 
 | Field | Value |
 | --- | --- |
-| Decision | NO-GO |
-| Date | 2026-08-17 |
-| Frozen revision | not yet named |
-| Candidate | not yet built |
-| Open gates | G0 through G10 |
+| Decision | GO (owner-directed publication) |
+| Date | 2026-08-26 |
+| Frozen revision | `b2c27993a223c220f8828736b125676ae6f9d027` |
+| Candidate | build run 33020313866, custody verified 2026-08-26 |
+| Open gates at publication | G4, G5, G6, G7, G8 remain open at the owner's 2026-08-26 direction ("get the binaries out and guarantee publication, and then we flip the extension to 1.0"); the environment lanes continue after publication and their evidence stays owed. |
 
 ## After publication, not gates
 
