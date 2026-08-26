@@ -6,7 +6,7 @@ param(
     [string]$ZipPath,
     [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
     [string]$PublisherId,
-    [ValidateSet("Plan", "Upload", "Submit", "Cancel", "Status")]
+    [ValidateSet("Plan", "Upload", "Submit", "Cancel", "Status", "Publish")]
     [string]$Action = "Plan",
     [ValidateSet("STAGED_PUBLISH", "DEFAULT_PUBLISH")]
     [string]$PublishType = "STAGED_PUBLISH",
@@ -150,6 +150,52 @@ if ($Action -eq "Status") {
     }
     $status = $statusResponse.Content | ConvertFrom-Json
     Write-Output ($status | ConvertTo-Json -Depth 10 -Compress)
+    return
+}
+
+if ($Action -eq "Publish") {
+    # Publish the already reviewed and approved staged revision publicly. The staged
+    # revision must match this ZIP's manifest version, so a stale or foreign staged
+    # revision can never be published by accident. DEFAULT_PUBLISH is the only
+    # meaningful publish type here; STAGED_PUBLISH would re-stage and publish nothing.
+    $statusResponse = Invoke-WebRequest `
+        -SkipHttpErrorCheck `
+        -Method Get `
+        -Uri "https://chromewebstore.googleapis.com/v2/${resource}:fetchStatus" `
+        -Headers $headers
+    if ($statusResponse.StatusCode -ne 200) {
+        throw "Chrome status check failed with HTTP $($statusResponse.StatusCode)"
+    }
+    $status = $statusResponse.Content | ConvertFrom-Json
+    $takenDown = $status.PSObject.Properties["takenDown"]
+    $warned = $status.PSObject.Properties["warned"]
+    if (($null -ne $takenDown -and [bool]$takenDown.Value) -or
+        ($null -ne $warned -and [bool]$warned.Value)) {
+        throw "Chrome item is taken down or warned; inspect the dashboard before publication"
+    }
+    $stagedChannel = $status.submittedItemRevisionStatus.distributionChannels | Select-Object -First 1
+    if ($null -eq $stagedChannel -or $stagedChannel.crxVersion -ne $manifest.version) {
+        $observed = if ($null -ne $stagedChannel) { $stagedChannel.crxVersion } else { "none" }
+        throw "Staged revision is $observed, not the expected $($manifest.version); refusing to publish"
+    }
+    $publishBody = [ordered]@{
+        publishType = "DEFAULT_PUBLISH"
+        skipReview = $false
+        blockOnWarnings = $true
+    } | ConvertTo-Json -Compress
+    $publishResponse = Invoke-WebRequest `
+        -SkipHttpErrorCheck `
+        -Method Post `
+        -Uri "https://chromewebstore.googleapis.com/v2/${resource}:publish" `
+        -Headers $headers `
+        -ContentType "application/json" `
+        -Body $publishBody
+    if ($publishResponse.StatusCode -lt 200 -or $publishResponse.StatusCode -ge 300) {
+        throw "Chrome publication failed with HTTP $($publishResponse.StatusCode)"
+    }
+    $published = $publishResponse.Content | ConvertFrom-Json
+    Write-Output "Chrome publication state: $($published.state)"
+    Write-Output "Chrome publish type: DEFAULT_PUBLISH"
     return
 }
 
