@@ -39,7 +39,7 @@ sysinfo = { version = "=0.36.1", default-features = false, features = ["system"]
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(windows)'.dependencies]
-winreg = "=0.55.0"
+winreg = "=0.56.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = "=0.18.5"
