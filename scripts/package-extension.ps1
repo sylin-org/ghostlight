@@ -128,6 +128,48 @@ try {
         $archive.Dispose()
     }
 
+    # .NET writes two central-directory fields from the running platform: the
+    # host-system marker (0 on Windows, 3 on Unix) and, on Unix, the file-mode
+    # attribute bits. Identical staged bytes therefore produced different
+    # archives on Windows and Linux. Pin both fields to the Windows shape --
+    # host 0, no attribute bits -- which is the exact form of the approved
+    # Chrome Web Store revision (3570494f), so every host reproduces the
+    # reviewed bytes byte for byte. On Windows this patch writes only the
+    # values already present.
+    $patched = [System.IO.File]::ReadAllBytes($OutputPath)
+    $eocd = -1
+    for ($i = $patched.Length - 22; $i -ge 0; $i--) {
+        if ($patched[$i] -eq 0x50 -and $patched[$i + 1] -eq 0x4B -and
+            $patched[$i + 2] -eq 0x05 -and $patched[$i + 3] -eq 0x06) {
+            $eocd = $i
+            break
+        }
+    }
+    if ($eocd -lt 0) {
+        throw "extension ZIP has no end-of-central-directory record"
+    }
+    $entryCount = [BitConverter]::ToUInt16($patched, $eocd + 10)
+    $directoryOffset = [BitConverter]::ToInt32($patched, $eocd + 16)
+    $cursor = $directoryOffset
+    for ($entryIndex = 0; $entryIndex -lt $entryCount; $entryIndex++) {
+        if ($patched[$cursor] -ne 0x50 -or $patched[$cursor + 1] -ne 0x4B -or
+            $patched[$cursor + 2] -ne 0x01 -or $patched[$cursor + 3] -ne 0x02) {
+            throw "extension ZIP central directory is malformed at entry $entryIndex"
+        }
+        $patched[$cursor + 5] = 0x00
+        for ($attr = 0; $attr -lt 4; $attr++) {
+            $patched[$cursor + 38 + $attr] = 0x00
+        }
+        $nameLength = [BitConverter]::ToUInt16($patched, $cursor + 28)
+        $extraLength = [BitConverter]::ToUInt16($patched, $cursor + 30)
+        $commentLength = [BitConverter]::ToUInt16($patched, $cursor + 32)
+        $cursor += 46 + $nameLength + $extraLength + $commentLength
+    }
+    if ($cursor -ne $eocd) {
+        throw "extension ZIP central directory does not end where its record walk ends"
+    }
+    [System.IO.File]::WriteAllBytes($OutputPath, $patched)
+
     $zip = [System.IO.Compression.ZipFile]::OpenRead($OutputPath)
     try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") } | Sort-Object)
