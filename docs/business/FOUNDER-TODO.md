@@ -1,5 +1,11 @@
 # Founder to-do (personal actions only)
 
+> **SUPERSEDED 2026-08-25 by [ADR-0140](../adr/0140-fully-open-source-licensing.md).** Items
+> below that exist to operate paid licensing (license operations, the private licensing repo,
+> Stripe or Polar checkout, founding-program outreach, trademark-on-first-paid-license) are
+> moot: every paid option was withdrawn and the product is Apache-2.0 OR MIT throughout.
+> The checklist is kept as history; do not execute those items.
+
 Personal checklist for actions only the founder can take. Agentic work is NOT tracked
 here (it lives in docs/tasks/licensing-1/ and the frontier queue in
 docs/business/PLAN.md). Check items off in place; add dates.

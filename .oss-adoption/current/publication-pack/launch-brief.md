@@ -79,7 +79,7 @@ and Linux machines.
 | Why not Playwright or agent-browser? | They are excellent for testing and owned automation sessions; Ghostlight is for the user's visible authenticated context plus optional fused governance. | Owner, comparison guide |
 | Why no Ghostlight account? | No vendor service is in the runtime path. The service and extension pair as the local OS user. | Owner, architecture and data flows |
 | Can it touch ordinary tabs? | Ghostlight works in its managed tab surface; the tab group shows scope but does not create authority. | Owner, ADR-0066 and tests |
-| Is it actually free? | The automation core is Apache-2.0 OR MIT. Organization governance has separate licensing terms. | Owner, LICENSE/PRICING |
+| Is it actually free? | Yes: the entire product, governance included, is Apache-2.0 OR MIT with no paid options (ADR-0140). | Owner, LICENSE/LICENSING |
 | Does governance stop prompt injection? | No. It constrains host and capability and records actions; semantic intent belongs with the client and user. | Owner, SECURITY |
 | Why an extension? | It reaches the user's existing Chromium session and renders truthful visible feedback. | Owner, architecture |
 

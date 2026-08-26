@@ -105,9 +105,9 @@ only to the repository comparison. A single link near "Is this your problem?" or
 guide would help evaluators choose without pulling organization material into the first screen.
 ## Legal and ownership
 
-- **Strong:** the engine is Apache-2.0 OR MIT; governance has an explicit separate license.
-- **Strong:** CONTRIBUTING explains DCO versus CLA boundaries.
-- **Strong:** pricing explains exactly when organization governance needs a paid license.
+- **Strong:** the whole product, governance included, is Apache-2.0 OR MIT (ADR-0140).
+- **Strong:** CONTRIBUTING explains DCO contribution terms.
+- **Strong:** LICENSING states plainly that there is nothing to buy.
 - **Important:** before soliciting funding, settle recipient, entity, tax, and provider details and
   state that support earns gratitude only.
 

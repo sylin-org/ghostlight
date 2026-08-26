@@ -12,7 +12,7 @@ Created: 2026-07-18T21:49:44Z
 | Local and no Ghostlight account | Runtime path, excluding user-configured destinations and normal browser traffic | README, ADR-0028, trust data flows | v0.6.0 | High | "No Ghostlight account or vendor runtime service is required." | "No network traffic of any kind" | Logged-out greenfield install |
 | No product telemetry or update pings | Ghostlight runtime | README, ADR-0028, source and trust docs | v0.6.0 | High | "Ghostlight does not phone home or send product telemetry." | Claims about the browser, npm, GitHub, or website analytics | Recheck release tree before reuse |
 | Visible and interruptible work | Managed tabs and supported visible effects | Hero, demo, extension tests, live Windows verification | v0.6.0 | High | "Browser actions stay visible, with scope and activity feedback and user controls." | "Every possible browser effect is visible" | Proof cohort observation |
-| Free local core with separate organization governance license | Engine versus governance module | LICENSE, LICENSING, PRICING, ADR-0027 | v0.6.0 | High | "The local automation core is Apache-2.0 OR MIT; organization governance has separate terms." | "Everything is open source" or "free for every governed production use" | Legal copy review before broad launch |
+| Fully open source, including governance | Whole repository, engine and governance module | LICENSE, LICENSING, ADR-0140 | 2026-08-25 | High | "Ghostlight is free and open source; the entire product, governance included, is Apache-2.0 OR MIT." | Claims of certification, warranty, or support guarantees that do not exist | Confirm public surfaces carry no stale paid-tier language before launch |
 | 25 browser tools with stable trained core schemas | Declared MCP surface | README tool table, schema fidelity test, ADR-0007 | v0.6.0 | High | "Ghostlight exposes 25 tools; the 13 trained schemas are preserved byte-for-byte." | "Models are trained on every additive tool" | Release schema test |
 | Identity, domain, capability policy, and per-call audit | Governance-enabled local service | examples, Trust Center, tests, ADRs | v0.6.0 | High | "Optional governance authorizes by identity, host, and capability and records each call." | "Understands whether every click matches user intent" or "prevents prompt injection" | Managed proof user and audit sample |
 | Protects ordinary tabs through managed scope | Extension and service managed-tab boundary | README, ADR-0066, extension tests, project memory | v0.6.0 | High | "Ghostlight works only in tabs it manages; ordinary tabs remain outside that surface." | "The tab group is a security sandbox" | Regression test at each extension release |
@@ -31,7 +31,8 @@ Created: 2026-07-18T21:49:44Z
 - The Chrome Web Store path is not public yet.
 - There is no SOC 2, ISO certification, completed third-party penetration test, bounty program, or
   maintainer team.
-- Organization governance is source-available under separate terms, not Apache-2.0 OR MIT.
+- The whole product, governance module included, is Apache-2.0 OR MIT (ADR-0140, 2026-08-25);
+  the former commercial license and pricing tiers were withdrawn.
 - Donations are not enabled and would not buy access or influence.
 
 ## Claims requiring owner confirmation

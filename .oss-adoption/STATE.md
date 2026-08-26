@@ -11,8 +11,9 @@ External publication authorized: no
 - Ghostlight is local user-context browser automation. Headless, isolated-profile, cloud, stealth,
   and bulk automation are deliberate exclusions.
 - The practitioner story leads. Organization governance and licensing come later in the journey.
-- The local automation core remains free under Apache-2.0 OR MIT. Organization governance is the
-  separately licensed boundary.
+- The whole product is free and open source under Apache-2.0 OR MIT, governance module included
+  ([ADR-0140](../docs/adr/0140-fully-open-source-licensing.md), 2026-08-25). There are no paid
+  options to position around.
 - Donations, when enabled, earn gratitude only and do not buy influence or special treatment.
 - Broad publication waits for a public Chrome Web Store path and clean greenfield install proof.
 - Informed manual-extension proof users may begin before store acceptance under the tracked

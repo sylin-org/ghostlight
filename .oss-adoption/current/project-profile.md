@@ -14,8 +14,9 @@ It is to help an unaffiliated MCP user install Ghostlight, reach a useful result
 understand the local and visible boundary, and describe the product accurately without founder
 intervention.
 
-The free local core should remain genuinely free. Organization-level governance is the paid
-boundary. Donations, when enabled later, earn gratitude only and do not buy influence or special
+The whole product is genuinely free: everything, organization-level governance included, is
+Apache-2.0 OR MIT ([ADR-0140](../../docs/adr/0140-fully-open-source-licensing.md)). Donations,
+when enabled later, earn gratitude only and do not buy influence or special
 treatment. Funding setup is intentionally deferred until receiving-account details are ready.
 
 Deliberate non-goals are headless browsing, isolated browser profiles, cloud browser execution,

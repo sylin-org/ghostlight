@@ -58,7 +58,7 @@ the local, visible, authenticated-browser boundary accurately.
 - Publish three client-specific first-task pages or Discussions: one for Codex, one for a VS Code
   client such as Cline, and one for OpenCode or another independent client.
 - Review a very small number of maintained MCP directories. Add only those that can represent a
-  local stdio server, canonical URL, license split, and current version accurately.
+  local stdio server, canonical URL, the Apache-2.0 OR MIT license, and current version accurately.
 - Prepare an OpenSSF assessment. Publish it only when answers have named evidence and an owner for
   maintenance.
 - Use RAWX mappings as technical ecosystem material, separate from the product launch pitch.

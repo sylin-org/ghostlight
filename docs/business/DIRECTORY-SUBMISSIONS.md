@@ -48,10 +48,11 @@ profile. It asks for:
 - agreement to the MCP Directory Terms and Conditions.
 
 Ghostlight's repository is public, its MCPB launcher is Node.js, and its manifest author URL
-points to the Sylin GitHub organization. The complete package is not MIT-only: the engine is
-Apache-2.0 OR MIT, while the governance module is under the Ghostlight Commercial License. Do not
-describe the bundle as MIT licensed or submit it until Anthropic confirms that this open-core
-license boundary is eligible.
+points to the Sylin GitHub organization. The eligibility question below existed because the
+package was open-core (engine Apache-2.0 OR MIT, governance module under the Ghostlight
+Commercial License) against an MIT-only form rule. [ADR-0140](../adr/0140-fully-open-source-licensing.md)
+(2026-08-25) relicensed the whole repository Apache-2.0 OR MIT, which resolves that concern at
+the source; the inquiry draft is kept only as history and should not be sent.
 
 The former mechanical gate is clear. The v0.8.0 release contains the self-contained MCPB, the
 launcher uses the package-host-safe installer mode, and the release asset passes the official

@@ -110,7 +110,8 @@ primary adoption surfaces.
 - Product-site version drift can invalidate otherwise careful claims.
 - Competitors ship quickly; comparison facts must be date-stamped and rechecked.
 - A solo founder can be overwhelmed by simultaneous attention and security questions.
-- Governance language can make the free core look paid or enterprise-first if it appears too early.
+- Governance language can make the product look enterprise-first if it appears too early; there
+  is no paid boundary anymore (ADR-0140), but positioning still leads with the practitioner story.
 - Trending bots, stars, clone counts, and generic directories can create misleading demand signals.
 - A real authenticated browser is powerful. Promotion that hides this responsibility would attract
   the wrong users and increase risk.

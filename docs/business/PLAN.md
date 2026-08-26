@@ -1,5 +1,11 @@
 # Ghostlight go-to-market and monetization plan
 
+> **SUPERSEDED 2026-08-25 by [ADR-0140](../adr/0140-fully-open-source-licensing.md).** The
+> monetization model below was withdrawn: Ghostlight is now entirely free and open source
+> (Apache-2.0 OR MIT), with every paid option, tier, and price removed. This document is kept
+> as the historical record of the original business reasoning; its tiers, pricing, founding
+> program, and commercial-license operations no longer describe any active plan.
+
 Living document. Ratified decisions live in ADR-0027 (open-core) and ADR-0028 (tripwire
 licensing, tiers, Continuity Promise); this file is the execution plan around them.
 Authored 2026-07-03 with agentic assistance, at the founder's direction, and kept public

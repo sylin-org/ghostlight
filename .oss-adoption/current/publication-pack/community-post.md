@@ -30,9 +30,9 @@ byte-stable. Additive tools handle forms, files, multi-step scripts, waits, narr
 and semantic actions with compact receipts, so useful work takes fewer calls and less context.
 
 Everything in the runtime stays local. There is no Ghostlight account, activation server,
-telemetry, or update ping. The browser automation core is Apache-2.0 OR MIT. There is a separately
-licensed governance layer for organizations that want identity-bound domain/capability policy and
-one local audit record per call; it never disables the software or phones home.
+telemetry, or update ping. The whole product, governance layer included, is Apache-2.0 OR MIT
+(ADR-0140) -- free for anyone who wants identity-bound domain/capability policy and one local
+audit record per call; it never disables the software or phones home.
 
 This is intentionally not a headless scraping or cloud-browser tool. It is for user-context work
 where a person remains responsible for the authenticated browser. Governance constrains where and

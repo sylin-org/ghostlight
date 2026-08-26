@@ -20,8 +20,7 @@ work remains local, visible, interruptible, and optionally governed.
 - Current release: v0.6.0, published 2026-07-15.
 - Runtime: native Rust service and relay plus a thin Chromium MV3 extension.
 - Distribution: npm, GitHub Releases, official MCP Registry, and package-manager manifests.
-- License: automation core Apache-2.0 OR MIT; organization governance source-available under
-  separate terms.
+- License: Apache-2.0 OR MIT for the whole product, governance module included (ADR-0140).
 - Account/telemetry: no Ghostlight account, activation service, product telemetry, or update ping.
 - Tool surface: 25 tools; the 13 trained core schemas are preserved byte-for-byte.
 - Release evidence: per-asset checksums, SHA256SUMS, CycloneDX SBOM, and GitHub provenance

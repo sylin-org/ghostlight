@@ -60,7 +60,7 @@ Use `npx -y ghostlight doctor` if the browser or client connection is incomplete
 - It is for visible authenticated user-context work, not headless, stealth, isolated, cloud, or
   bulk automation.
 - Governance constrains capability and destination but does not infer user intent.
-- Support is solo-maintainer and best effort outside separately licensed commitments.
+- Support is solo-maintainer and best effort; the product is free with no paid support tier.
 - Fill this section from the exact release acceptance record before publishing.
 
 ## Acknowledgements and support route
