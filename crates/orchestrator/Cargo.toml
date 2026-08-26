@@ -35,7 +35,7 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
-sysinfo = { version = "=0.36.1", default-features = false, features = ["system"] }
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(windows)'.dependencies]
