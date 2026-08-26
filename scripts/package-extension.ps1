@@ -87,7 +87,11 @@ try {
         $stagedManifestPath = Join-Path $stage "manifest.json"
         $stagedManifest = Get-Content -LiteralPath $stagedManifestPath -Raw | ConvertFrom-Json
         [void]$stagedManifest.PSObject.Properties.Remove("key")
-        $json = $stagedManifest | ConvertTo-Json -Depth 20
+        # ConvertTo-Json separates lines with the platform newline, which made the
+        # archive hash differ between Windows and Linux builds of identical source.
+        # Pin CRLF: it is the exact serialization of the approved Chrome Web Store
+        # revision (3570494f), so every host reproduces the reviewed bytes.
+        $json = ($stagedManifest | ConvertTo-Json -Depth 20) -replace "\r?\n", "`r`n"
         [System.IO.File]::WriteAllText(
             $stagedManifestPath,
             $json + "`n",
