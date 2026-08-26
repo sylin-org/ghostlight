@@ -59,7 +59,13 @@ R2 precision-input restoration): focused typing discarded the describe step's ob
 and then expected a fallback subject that did not exist, so a fully successful type landed
 its effect and never settled. Fixed at the seam -- the described control is the receipt's
 subject -- pinned by a test that panics the old code, deployed by exact-path swap, and
-proven live (`Typed 5 characters into the "Ledger project" text field.`).
+proven live (`Typed 5 characters into the "Ledger project" text field.`). With the owner's
+authorization the stale store review was canceled and replaced the same day by the
+current-source package (sha256 `3570494f...`, deterministic across two builds, permission
+surface unchanged) -- see
+[extension-store-resubmission-2026-08-25-frames-shadow](testing/extension-store-resubmission-2026-08-25-frames-shadow.md);
+`scripts/publish-extension.ps1` gained first-class Cancel and Status actions so the remedy
+no longer needs inline authenticated calls. The review is staged and publishes nothing.
 
 ## Published capability restoration
 

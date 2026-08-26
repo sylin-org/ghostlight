@@ -6,7 +6,7 @@ param(
     [string]$ZipPath,
     [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
     [string]$PublisherId,
-    [ValidateSet("Plan", "Upload", "Submit")]
+    [ValidateSet("Plan", "Upload", "Submit", "Cancel", "Status")]
     [string]$Action = "Plan",
     [ValidateSet("STAGED_PUBLISH", "DEFAULT_PUBLISH")]
     [string]$PublishType = "STAGED_PUBLISH",
@@ -125,6 +125,33 @@ $publisherId = [uri]::EscapeDataString($values.CWS_PUBLISHER_ID)
 $itemId = [uri]::EscapeDataString($values.CWS_ITEM_ID)
 $resource = "publishers/$publisherId/items/$itemId"
 $headers = @{ Authorization = "Bearer $($token.access_token)" }
+
+if ($Action -eq "Cancel") {
+    # Google's documented remedy for replacing a submission that is still in review
+    # (developer.chrome.com/docs/webstore/cancel-review): the pending review locks the
+    # item against package edits until it is canceled.
+    $cancelResponse = Invoke-WebRequest `
+        -SkipHttpErrorCheck `
+        -Method Post `
+        -Uri "https://chromewebstore.googleapis.com/v2/${resource}:cancelSubmission" `
+        -Headers $headers
+    Write-Output "Chrome cancelSubmission HTTP $($cancelResponse.StatusCode): $($cancelResponse.Content)"
+    return
+}
+
+if ($Action -eq "Status") {
+    $statusResponse = Invoke-WebRequest `
+        -SkipHttpErrorCheck `
+        -Method Get `
+        -Uri "https://chromewebstore.googleapis.com/v2/${resource}:fetchStatus" `
+        -Headers $headers
+    if ($statusResponse.StatusCode -ne 200) {
+        throw "Chrome status check failed with HTTP $($statusResponse.StatusCode)"
+    }
+    $status = $statusResponse.Content | ConvertFrom-Json
+    Write-Output ($status | ConvertTo-Json -Depth 10 -Compress)
+    return
+}
 
 if ($Action -eq "Upload") {
     $response = Invoke-WebRequest `
