@@ -1,5 +1,13 @@
 # sylin.org Ghostlight copy refresh -- 2026-08-25 (draft)
 
+APPLIED 2026-08-26: sections 1 through 7 shipped in website commit `f45d3b7`
+(sylin-org/website main) after this document's sequencing preconditions closed, and the live
+site was observed serving the 1.0 story the same day. Section 3's diagram, section 4's four
+personas, section 5's step 3, section 6's fifth recipe, and section 7's published block are all
+live; the site checker pins them (`check-site.js` now requires the orchestrator chain and
+exactly five proof recipes). The install-guide fallback was refreshed from `main`'s updated
+`llms-install.md`, and `scripts/publish-website.ps1 -DryRun` reports the fallbacks in sync.
+
 This is a drafting document, not a deployment. The website lives in `sylin-org/website`; the
 owner carries approved copy there. Nothing here may claim 1.0 before independently observable
 1.0 artifacts exist (G10), and the Chrome Web Store listing serves 0.8.0 until publication is

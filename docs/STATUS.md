@@ -28,6 +28,14 @@ then we flip the extension to 1.0"). Everything shipped from candidate build run
 - Public-channel install smoke on Windows in an isolated profile: `npx -y ghostlight@1.0.0`
   downloaded and checksum-verified all three binaries from the public release and the real 1.0.0
   orchestrator answered `doctor --json`.
+- The website shipped its 1.0 story the same day: `llms-install.md` now speaks of 1.0 as the
+  published release (`97508008`), and website commit `f45d3b7` applied the drafted copy refresh --
+  v1.0.0 badge, the orchestrator chain in the local-by-construction diagram, four personas
+  including scripts and organization, the tab-reuse "minute" step and fifth recipe, and the
+  published "Where it stands" block -- with both fallback snapshots refreshed and the checker
+  pins moved to the new truth. The live site and the live install guide were observed serving
+  the 1.0 story on 2026-08-26
+  ([website copy refresh](release/website-copy-refresh-2026-08-25.md)).
 
 Publication went ahead with the G4 (Ubuntu GNOME Wayland), G5 (clean Windows), G6 (npm channel
 upgrade), G7 (public harnesses), and G8 (reference-experience closure) lanes open at the owner's
