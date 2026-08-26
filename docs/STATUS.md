@@ -54,6 +54,12 @@ roots stay closed: never pierced, never patched, honestly absent from inspection
 tool, or Rust changes. The public stage `https://sylin.org/ghostlight/demo/shadow/
 (website commit `8af8eb4`) hosts an open-root component form beside a sealed closed-root
 widget whose contents inspection truthfully does not list. Extension suite is 153 tests.
+The stage's fill-then-focused-type journey exposed a latent orchestrator panic (from the
+R2 precision-input restoration): focused typing discarded the describe step's observation
+and then expected a fallback subject that did not exist, so a fully successful type landed
+its effect and never settled. Fixed at the seam -- the described control is the receipt's
+subject -- pinned by a test that panics the old code, deployed by exact-path swap, and
+proven live (`Typed 5 characters into the "Ledger project" text field.`).
 
 ## Published capability restoration
 

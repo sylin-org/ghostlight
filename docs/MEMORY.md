@@ -212,6 +212,12 @@ Every one of these cost something to learn.
 - **An anchored effect without a live box renders nowhere.** A zero-size or hidden target resolves
   to the frame origin, and inside an embedded frame the frame boundary clips the effect in half.
   Suppression is the honest rendering of "nothing to point at."
+- **A panic after the effect is the worst failure shape; prove every success arm's expect.** Focused
+  typing discarded the describe step's observation and then `.expect`ed a fallback subject that did
+  not exist. The typing landed, the operation task died, and the workbench showed "Typing" forever
+  -- no error, no deadline, no recovery, across reconnects. When a success arm asserts a fallback,
+  the fallback must be produced on that same path (ADR-0138's describe now feeds the receipt), and
+  a test must walk the full success path, not just the refusals around it.
 
 ## Where to look
 
