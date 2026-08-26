@@ -8,11 +8,10 @@ I want the input. Questions, requests, and contributions have three lanes.
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [GitHub Issues](https://github.com/sylin-org/ghostlight/issues)           | Bugs, defects, anything reproducible.                                                                                                                                      |
 | [GitHub Discussions](https://github.com/sylin-org/ghostlight/discussions) | Questions, ideas, feature requests, policy patterns, show-and-tell.                                                                                                        |
-| hello@sylin.org                         | Anything that cannot be public: security reports (see [SECURITY.md](SECURITY.md)), licensing and founding-program matters, or a compliance team that cannot post publicly. |
+| hello@sylin.org                         | Anything that cannot be public: security reports (see [SECURITY.md](SECURITY.md)), licensing questions, or a compliance team that cannot post publicly. |
 
 Use a public lane where you can: an answered question becomes documentation, and a
-discussed request becomes a visible roadmap decision. Founding and enterprise licensees
-get the response times in [PRICING.md](PRICING.md). Everyone else gets my best effort.
+discussed request becomes a visible roadmap decision. Everyone gets my best effort.
 
 ## How requests are evaluated
 
@@ -21,8 +20,7 @@ when), deferred (and what would change that), or declined (and why). The filter 
 project's recorded vision, not taste of the day:
 
 - **User delight first; governance that never punishes the ungoverned.** All-open stays
-  first-class. Features that make the free path worse to upsell the paid one are
-  declined on principle.
+  first-class. The free path is the only path, and features must make it better.
 - **One meaningful 1.0 language.** Tool names, schemas, defaults, terminal truth, and recovery
   language are owned by the orchestrator and recorded in
   [docs/1.0/LANGUAGE.md](docs/1.0/LANGUAGE.md). Requests are evaluated as user jobs, not as
@@ -37,21 +35,14 @@ project's recorded vision, not taste of the day:
   without a demonstrated boundary that the current modular monolith cannot express.
 
 A request that fits the vision and comes with a concrete use case (especially from a
-team running Ghostlight governed in anger) carries real weight; the quarterly founding
-questionnaire exists precisely to harvest those.
+team running Ghostlight governed in anger) carries real weight.
 
 ## Contributing code
 
-Contribution terms follow the open-core boundary (ADR-0027 Decision 5):
-
-- **Engine** (everything outside `crates/orchestrator/src/governance/`): contributions are accepted under
-  the [Developer Certificate of Origin](https://developercertificate.org/); sign off
-  your commits (`git commit -s`). Inbound = outbound under Apache-2.0 OR MIT.
-- **Governance module** (`crates/orchestrator/src/governance/`): contributions require a Contributor
-  License Agreement (the module is distributed under a commercial license, and only the
-  copyright holder can sell that). The CLA will be in place before the first outside
-  governance PR is merged. If you want to contribute there, open a Discussion first and
-  I will sort out the paperwork with you.
+The whole repository is Apache-2.0 OR MIT ([ADR-0140](docs/adr/0140-fully-open-source-licensing.md)).
+Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/);
+sign off your commits (`git commit -s`). Inbound = outbound, everywhere, including
+`crates/orchestrator/src/governance/`.
 
 Practical expectations for PRs: `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and

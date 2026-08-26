@@ -1,27 +1,23 @@
 # Ghostlight source licensing
 
-Ghostlight's source tree has one deliberate open-core boundary. This page explains that boundary;
-the exact terms remain in the license files and [`../../LICENSING.md`](../../LICENSING.md).
+Ghostlight's source tree carries one license: Apache-2.0 OR MIT, at your option, for the whole
+product. This page explains what that covers; the exact terms remain in the license files and
+[`../../LICENSING.md`](../../LICENSING.md).
 
-## Engine
+## The whole tree
 
-Everything outside `crates/orchestrator/src/governance/` is offered under Apache-2.0 OR MIT. This
-includes the typed bridge, orchestrator application and browser engine, MCP connector, browser
-connector, policy-free extension, desktop adapter, and bundled workbench UI.
+Everything -- the typed bridge, orchestrator application, browser engine, governance module,
+MCP connector, browser connector, policy-free extension, desktop adapter, and bundled workbench
+UI -- is offered under Apache-2.0 OR MIT. There is no separately licensed module.
 
-You may use either permissive license. Preserve notices and follow the chosen license's terms when
-redistributing.
+You may use either permissive license. Preserve notices and follow the chosen license's terms
+when redistributing.
 
-## Governance module
-
-`crates/orchestrator/src/governance/` is offered under the Ghostlight Commercial License in
-[`../licenses/LicenseRef-Ghostlight-Commercial.txt`](../licenses/LicenseRef-Ghostlight-Commercial.txt).
-The source is visible, but it is not covered by the engine's Apache/MIT grant.
-
-The standing free-use terms cover individuals, teams of up to five, evaluation, development,
-all-open operation, and qualifying noncommercial use. Larger organizations using configured
-governance operationally should consult [`../../PRICING.md`](../../PRICING.md) or contact
-hello@sylin.org.
+The former open-core boundary (engine permissive, governance module commercially licensed) was
+withdrawn by [ADR-0140](../adr/0140-fully-open-source-licensing.md) on 2026-08-25. The
+`crates/orchestrator/src/governance/` directory remains an architecture boundary -- it is where
+policy authority, admission decisions, runtime controls, and minimized audit live -- but it is no
+longer a license boundary.
 
 ## Runtime behavior
 
@@ -29,11 +25,12 @@ Ghostlight 1.0 has no activation server, update ping, telemetry, license gate, o
 command. License state does not alter authority, audit, browser results, or continuity. An
 installed copy keeps working without access to a Ghostlight-operated service.
 
-Commercial terms and technical enforcement are intentionally separate. Do not add a network call,
-behavior gate, or audit payload to enforce a source license.
+Do not add a network call or behavior gate to enforce anything about the source: there is
+nothing to enforce, and the never-phone-home rule ([ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md))
+is permanent.
 
 ## Contributions
 
-Engine contributions use the Developer Certificate of Origin and inbound-equals-outbound terms.
-Governance-module contributions require a contributor agreement so the copyright holder can keep
-offering the commercial license. See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md).
+Contributions to any part of the repository use the Developer Certificate of Origin and
+inbound-equals-outbound terms under Apache-2.0 OR MIT; sign off your commits (`git commit -s`).
+See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md).

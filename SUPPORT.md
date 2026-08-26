@@ -1,7 +1,7 @@
 # Support
 
-I maintain Ghostlight on my own. Ask in public whenever you can, and expect best-effort timing
-unless a separate agreement says otherwise.
+I maintain Ghostlight on my own. Ask in public whenever you can, and expect best-effort timing:
+there are no separate support agreements, because there is nothing to buy.
 
 Use the narrowest lane that fits:
 

@@ -5,7 +5,7 @@
 **Author:** Leonardo Botinelly / Kintsugi Architecture  
 **Date:** 2026-07-01  
 **Status:** Historical baseline, superseded in part -- see the note below  
-**License:** Open-core -- engine Apache-2.0 OR MIT; `crates/orchestrator/src/governance/` source-available (ADR-0027)
+**License:** Apache-2.0 OR MIT for the whole product (ADR-0140; the open-core split described by ADR-0027 at writing time was superseded 2026-08-25)
 
 > **Historical design baseline.** This document preserves the original 2026-07-01 design and its
 > deep governance rationale. It is not the 1.0 topology, policy schema, tool inventory, or release

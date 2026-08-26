@@ -261,14 +261,14 @@ protocol, command runner, filesystem access, or browser primitives.
 
 ## License and continuity
 
-Everything outside `crates/orchestrator/src/governance/` is Apache-2.0 OR MIT. The governance
-module is source-available under the Ghostlight Commercial License, free for individuals, teams of
-five or fewer, evaluation, development, all-open operation, and qualifying noncommercial use.
-[`LICENSING.md`](LICENSING.md) draws the exact line.
+Ghostlight is entirely free and open source: everything in this repository, including the
+governance module, is Apache-2.0 OR MIT. [`LICENSING.md`](LICENSING.md) explains what that
+covers. The former open-core split and its paid tiers were withdrawn by
+[ADR-0140](docs/adr/0140-fully-open-source-licensing.md).
 
-License state never reaches runtime. An installed copy keeps working on its own terms, with no
-check-in and no expiry. The [Continuity Promise](docs/trust/continuity.md) and
-[`PRICING.md`](PRICING.md) carry the durable version of that.
+License state never reaches runtime -- there is no license check to reach it. An installed copy
+keeps working on its own terms, with no check-in and no expiry. The
+[Continuity Promise](docs/trust/continuity.md) carries the durable version of that.
 
 ## Questions and contributions
 

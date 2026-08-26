@@ -18,13 +18,13 @@ These behaviors are exercised by unit and service tests for:
 - signature verification on cache read; and
 - the absence of policy network work when no bootstrap exists.
 
-If the vendor ceases to exist, installed software and customer-hosted policy continue operating as
-before. The engine is Apache-2.0 OR MIT and the governance module source remains available under
-its published commercial license. This is a continuity property of the shipped software, not a
-promise of future releases or successor maintenance.
+If the vendor ceases to exist, installed software and organization-hosted policy continue operating as
+before. The entire product is Apache-2.0 OR MIT ([ADR-0140](../adr/0140-fully-open-source-licensing.md)),
+so the source you run is the source you hold the rights to. This is a continuity property of the
+shipped software, not a promise of future releases or successor maintenance.
 
 See [the licensing guide](../guides/licensing.md),
 [the governance guide](../guides/governance-configuration.md), and
 [ADR-0121](../adr/0121-restore-rawx-policy-and-managed-fetch.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org

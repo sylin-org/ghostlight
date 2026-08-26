@@ -13,7 +13,7 @@ guides rather than restating them, so a change lands in one place instead of thr
 | Roll governance out across an organization | [compliance-team.md](compliance-team.md)                   |
 | Understand the content-minimized audit contract | [governance-configuration.md#audit-collection](governance-configuration.md#audit-collection) |
 | Collect audit into a SIEM, field by field   | [siem-integration.md](siem-integration.md)                 |
-| Understand the source-license boundary     | [licensing.md](licensing.md)                               |
+| Understand the license                     | [licensing.md](licensing.md)                               |
 | Review Ghostlight for procurement or security | [Trust Center (procurement and security review)](../trust/README.md) |
 
 ## Reference

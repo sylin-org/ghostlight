@@ -4,7 +4,7 @@ This page maps Ghostlight's properties onto the frameworks reviewers assess vend
 It is an orientation, not a certification: Ghostlight holds no SOC 2 report and no ISO/IEC
 27001, ISO/IEC 42001, or CSA STAR certification, as stated in the trust center index under
 [what we do not have](README.md#what-we-do-not-have). The purpose here is to help a reviewer find where each
-framework's concerns land against a local-only, source-available tool, and where the evidence
+framework's concerns land against a local-only, fully open-source tool, and where the evidence
 for each answer lives.
 
 ## ISO/IEC 27001 Annex A orientation
@@ -25,7 +25,7 @@ where to verify it.
 | Incident management (A.5.24-A.5.28) | A defined vendor incident and notification posture | Prompt advisory after confirming a vendor-side compromise, typically within a few business days as a best-effort target; private disclosure channel | [security-overview.md](security-overview.md), [SECURITY.md](../../SECURITY.md) |
 | ICT readiness for continuity (A.5.30) | Continuity that does not depend on the supplier surviving | The Continuity Promise, last-known-good cache, fail-closed cold boot | [continuity.md](continuity.md) |
 
-On supplier auditing specifically, the governance module is source-available, so source access
+On supplier auditing specifically, Ghostlight is open source, so source access
 is a standing audit right: you can read the code that enforces policy at any time, with no
 audit window to schedule.
 
@@ -60,4 +60,4 @@ discharge them.
 See the [compliance team guide](../guides/compliance-team.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org

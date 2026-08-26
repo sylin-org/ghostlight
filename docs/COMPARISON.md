@@ -1,6 +1,7 @@
 # Choosing a browser-control approach
 
-Updated 2026-08-10 for the Ghostlight 1.0 contract, retaining the
+Updated 2026-08-25 for the Ghostlight 1.0 contract and the fully open-source relicensing
+(ADR-0140), retaining the
 [public truth and reception baseline](research/public-reception-2026-08.md) and the linked primary
 sources below. This is a decision guide, not a scorecard. Existing signed-in browser access is a
 shared capability, not a Ghostlight uniqueness claim.
@@ -39,9 +40,9 @@ Its supported combination is:
 4. optional monotonic capability, host, and tab-close policy plus payload-free audit; and
 5. a local runtime with no Ghostlight account, hosted control plane, or telemetry.
 
-Personal and all-open operation is complete without governance. Ghostlight is open-core: the
-engine is Apache-2.0 OR MIT, while the governance module is source-available under the Ghostlight
-Commercial License. See [LICENSING.md](../LICENSING.md) for the exact boundary.
+Personal and all-open operation is complete without governance. Ghostlight is free and open
+source: the whole product, governance module included, is Apache-2.0 OR MIT. See
+[LICENSING.md](../LICENSING.md).
 
 ## Closest approaches
 

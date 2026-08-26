@@ -35,7 +35,7 @@ PublisherUrl: https://sylin.org/
 PublisherSupportUrl: https://github.com/sylin-org/ghostlight/issues
 PackageName: Ghostlight
 PackageUrl: https://github.com/sylin-org/ghostlight
-License: Apache-2.0 OR MIT with source-available governance module
+License: Apache-2.0 OR MIT
 LicenseUrl: https://github.com/sylin-org/ghostlight/blob/main/LICENSING.md
 ShortDescription: Visible local browser automation in your signed-in Chromium profile.
 Description: Ghostlight gives AI clients a governed, visible tab group in the signed-in Chromium profile you already use.

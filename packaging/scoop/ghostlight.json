@@ -3,9 +3,9 @@
   "description": "Visible local browser automation in your signed-in Chromium profile, with optional policy and audit.",
   "homepage": "https://sylin.org/ghostlight/",
   "license": {
-    "identifier": "Apache-2.0 OR MIT with source-available governance module",
-    "url": "https://github.com/sylin-org/ghostlight/blob/main/LICENSING.md"
-  },
+      "identifier": "Apache-2.0 OR MIT",
+      "url": "https://github.com/sylin-org/ghostlight/blob/main/LICENSING.md"
+    },
   "architecture": {
     "64bit": {
       "url": "https://github.com/sylin-org/ghostlight/releases/download/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip",

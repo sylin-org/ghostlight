@@ -19,8 +19,9 @@ The single most important continuity property is a design one, not a staffing on
   browser activity the user requested and, when an administrator explicitly configures it, a signed
   managed-authority fetch from the organization's own file or HTTPS source. Audit is a local file
   and is never uploaded; no managed authority is ever fetched from a Ghostlight or vendor endpoint.
-- **License state never changes behavior.** Ghostlight runs identically whether or not anyone ever
-  pays, and whether or not the maintainer is active (ADR-0028 Decision 1).
+- **License state never changes behavior.** Ghostlight runs identically regardless of the
+  maintainer's activity (ADR-0028 Decision 1), and the whole product is Apache-2.0 OR MIT
+  ([ADR-0140](docs/adr/0140-fully-open-source-licensing.md)), so there is no license state at all.
 
 So an installed copy does not degrade if maintenance goes quiet. It keeps doing exactly what it did
 the day you installed it. Nothing expires, calls home, or waits for a server that might go away.
@@ -36,7 +37,6 @@ engine; local audit; the docs, tests, and CI that verify each release.
 - Merging a dependency or security bump.
 - Responding to a security report or a support question within any particular window (best-effort,
   not guaranteed -- [SECURITY.md](SECURITY.md)).
-- Issuing a commercial license.
 
 ## Single points of failure (named plainly)
 
@@ -49,8 +49,6 @@ is planned work, not a solved problem:
    the release workflow, and Sigstore provenance is keyless GitHub Actions attestation, not a
    maintainer-held release-signing key. Mitigation intent: establish a second repository owner who
    can review and publish a release.
-3. **Commercial contracting** is founder-only. This can halt new agreements if the maintainer goes
-   fully minimal; it does not affect any running copy or locally provisioned authority.
 
 Progress on 1 and 2 is tracked as continuity work; this file is updated when backup publishing
 access is in place.
@@ -65,10 +63,10 @@ The project is built to be resumable:
 - **The design is written down:** [docs/SPEC.md](docs/SPEC.md) preserves the original deep design,
   while the accepted and amended decisions under [docs/adr/](docs/adr/) and the live tree are
   authoritative where the system evolved.
-- **The engine is permissively licensed.** Everything outside `crates/orchestrator/src/governance/` is
-  Apache-2.0 OR MIT (see [LICENSING.md](LICENSING.md)), so it can be forked, ported, or continued
-  freely. The vendor-neutral capability model ([RAWX](open-spec/rawx-capability-model.md)) is
-  designed to outlive any single implementation.
+- **The product is permissively licensed.** The whole repository, including
+  `crates/orchestrator/src/governance/`, is Apache-2.0 OR MIT (see [LICENSING.md](LICENSING.md)),
+  so it can be forked, ported, or continued freely. The vendor-neutral capability model
+  ([RAWX](open-spec/rawx-capability-model.md)) is designed to outlive any single implementation.
 - **Verification is automated, not tribal:** workspace Rust tests, extension tests, the real
   process-restart journey, and visible release gates tell a newcomer what is proven and what still
   needs a desktop or browser environment.

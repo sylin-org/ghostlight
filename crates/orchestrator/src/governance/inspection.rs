@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Ghostlight-Commercial
-// See docs/licenses/LicenseRef-Ghostlight-Commercial.txt.
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Deterministic local policy validation, explanation, and audit-free simulation.
 

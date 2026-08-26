@@ -20,10 +20,14 @@ Proposed at 1.0 publication: badge `1.0`; blurb unchanged (it ages well).
 
 Current: `v0.8.0 - open-core - pre-1.0`.
 
-Proposed at 1.0 publication:
+AMENDED same day: Ghostlight became fully free and open source
+([ADR-0140](../adr/0140-fully-open-source-licensing.md)), so "open-core" is retired everywhere.
+The website working tree now carries `stage: 'free and open source'` for the Ghostlight card,
+which renders as `v0.8.0 - free and open source` until the 1.0 version replaces it at
+publication:
 
 ```text
-v1.0.0 - open-core
+v1.0.0 - free and open source
 ```
 
 Keep the tagline, CTAs, paste-install prompt, and motto exactly as they are.
@@ -126,7 +130,29 @@ Safe now (optional, 0.8-honest): unchanged. The current block is accurate.
   guide reaches the site at publication -- no hand-edited install copy.
 - The Trust Center, decision aid, and comparison links.
 
-## 9. Publication sequencing reminder
+## 9. Applied the same day: FOSS copy and decision-aid cost-layer removal
+
+With owner direction, the website working tree (`sylin-org/website`, local edits only, not
+deployed) was updated for ADR-0140 alongside this repository:
+
+- `src/_data/portfolio.js`: Ghostlight card stage changed from `open-core / pre-1.0` to
+  `free and open source`.
+- `src/index.njk` Continuity card and `src/way.njk`: the "paid layer" and "open source at the
+  core" framing in both places was replaced with whole-product free-and-open-source statements.
+- `/ghostlight/decision-aid/`: the entire cost layer was removed (price tuner, currency,
+  planning scale and inference mix, annual totals and formulas, cost assumptions table, share
+  cost toggle, cost interest and insights, and their now-dead CSS). It remains a fit-comparison
+  aid; Ghostlight's scenario card states governance is included free under Apache-2.0 OR MIT.
+  `GHOSTLIGHT-DECISION-AID-REFRESH.md` carries a matching amendment so refresh work never
+  reinstates pricing entries.
+- Site checks updated and green: check-site.js pins the retired ids as absent, rejects retired
+  licensing phrases ("commercial layer", "paid layer", "open-core", "source-available") across
+  all built pages, and check-decision-aid.js pins that prices/inputDefaults/cost insights stay
+  removed.
+
+Nothing here is deployed. Publication still follows section 10's sequencing.
+
+## 10. Publication sequencing reminder
 
 This batch deploys only after, in order: G10 tag and GitHub release observable, npm tarball
 observable, Chrome adapter published from staged state. The website must never describe a 1.0

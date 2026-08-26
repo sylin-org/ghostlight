@@ -193,8 +193,8 @@ None yet. Ghostlight holds no SOC 2 report and no ISO/IEC 27001, ISO/IEC 42001, 
 certification. Most of those attestations describe how a vendor protects data on its own
 systems, and Ghostlight's runtime holds your data only on your systems, so their assurance
 does not map onto this architecture. In their place I offer architecture-as-evidence
-(documented decisions, runnable scenarios, source-available governance code); certification
-is planned as the customer base grows, beginning with a CSA STAR Level 1 self-assessment
+(documented decisions, runnable scenarios, fully open-source code); certification
+is planned as the project grows, beginning with a CSA STAR Level 1 self-assessment
 submission. The full inventory of absent attestations, with reasons, is published in the
 Ghostlight trust center.
 
@@ -222,8 +222,8 @@ Evidence: supply-chain.md (build and change management); ADR-0121 (customer-owne
 
 Ghostlight has not yet commissioned a third-party penetration test; one is planned and will be
 run when funding allows. I make a standing commitment that any third-party security audit of
-Ghostlight will be published in full, including findings, and until then the source access
-granted by the governance license functions as a standing audit right: you can read the code
+Ghostlight will be published in full, including findings, and until then the open-source license
+functions as a standing audit right: you can read the code
 that enforces policy. Suspected vulnerabilities go through the private disclosure channel
 documented in the project's SECURITY.md. As a solo-maintainer project, acknowledgment, triage, and
 remediation timelines are published there as best-effort targets rather than contractual windows.
@@ -249,16 +249,17 @@ target).
 
 ## Continuity and viability
 
-### What happens if the vendor disappears, or we stop paying?
+### What happens if the vendor disappears?
 
-Nothing stops working. The Continuity Promise, binding on all tiers, states it directly:
+Nothing stops working. The Continuity Promise states it directly:
 "Ghostlight never phones home and license state never affects behavior. Enforcement, audit,
 and your production workflows are never interrupted, degraded, or disabled by license expiry,
 by the vendor's unavailability, or by the vendor ceasing to exist." Ghostlight 1.0 has no runtime
-license state, license-status command, license gate, or license field in audit. Because the
-governance module source is available, you already hold the code; no escrow trigger stands between
-you and it. Managed-policy tests prove that enforcement continues from verified last-known-good
-when your source goes dark.
+license state, license-status command, license gate, or license field in audit -- and since
+[ADR-0140](../adr/0140-fully-open-source-licensing.md) there is no paid relationship whose end
+could matter. The whole product is open source, so you already hold the code; no escrow trigger
+stands between you and it. Managed-policy tests prove that enforcement continues from verified
+last-known-good when your source goes dark.
 
 See [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md), the
 [licensing guide](../guides/licensing.md), and [continuity.md](continuity.md).
@@ -319,29 +320,29 @@ Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaS
 
 ### What support do you commit to?
 
-Support runs by email at support@sylin.org, and the commitment is an acknowledgment time, not
-a resolution time: a first human acknowledgment within 3 business days for Team and within 2
-business days for Enterprise. From there I work the issue with you; the acknowledgment clock
-is what I promise to meet. Suspected security vulnerabilities do not go to the support lane;
+Support is community support, because Ghostlight is free and open source with no paid tier.
+GitHub Issues for reproducible defects, GitHub Discussions for questions, and best-effort email
+at hello@sylin.org only for what cannot be public; there is no guaranteed acknowledgment or
+resolution window. Suspected security vulnerabilities do not go to a public lane;
 they go through the private disclosure channel documented in the project's SECURITY.md.
 
 See [support-policy.md](support-policy.md).
 
-Evidence: support-policy.md (acknowledgment commitments, scope); SECURITY.md (security-report channel).
+Evidence: support-policy.md (channels and scope); SECURITY.md (security-report channel).
 
-### What are the license terms, and what happens at expiry?
+### What are the license terms?
 
-Ghostlight is open-core. The automation engine is licensed Apache-2.0 OR MIT, both of them
-open source licenses. The governance module is source-available under the Ghostlight
-Commercial License: you can read and audit its code, but the license grants narrower rights
-than the engine's. Commercial scope and seat counts are contractual. Ghostlight 1.0 has no
+Ghostlight is free and open source: the entire product, including the governance module, is
+licensed Apache-2.0 OR MIT ([ADR-0140](../adr/0140-fully-open-source-licensing.md)). There are
+no tiers, seats, activation, or paid options of any kind. Ghostlight 1.0 has no
 activation server, license-status command, runtime license gate, or audit license stamp, so
-license terms do not alter browser behavior or local continuity.
+nothing about licensing can alter browser behavior or local continuity -- there is no runtime
+license state at all.
 
 See the [licensing guide](../guides/licensing.md),
-[ADR-0027](../adr/0027-open-core-business-model-and-licensing.md), and
-[ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md).
+[ADR-0027](../adr/0027-open-core-business-model-and-licensing.md) (the superseded open-core
+split), and [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md).
 
-Evidence: docs/guides/licensing.md; ADR-0027 (open-core split); ADR-0028 (license state never gates behavior).
+Evidence: docs/guides/licensing.md; ADR-0140 (whole-product Apache-2.0 OR MIT); ADR-0028 (license state never gates behavior).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org

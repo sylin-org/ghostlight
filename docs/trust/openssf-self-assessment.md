@@ -41,10 +41,10 @@ Status vocabulary:
 | OSPS-DO-01.01 | Met | `README.md`, `docs/guides/`, CLI help, configuration docs, and the canonical install guide cover installation and basic use. Consequential capabilities and residual risks are called out. |
 | OSPS-DO-02.01 | Met | `SUPPORT.md`, `CONTRIBUTING.md`, and structured Issue forms explain defect and installation reporting. |
 | OSPS-GV-02.01 | Met | GitHub Discussions is the public lane for proposed changes and usage obstacles; Issues handle reproducible defects. |
-| OSPS-GV-03.01 | Met | `CONTRIBUTING.md` explains contribution terms, validation, design boundaries, and the DCO/CLA split. |
-| OSPS-LE-02.01 | Not met | The automation engine is Apache-2.0 OR MIT, but the repository also contains the deliberately source-available governance module under a commercial license. A claim that all project source meets the OSI/FSF definition would be false. `LICENSING.md` defines the boundary. |
-| OSPS-LE-02.02 | Not met | Public release binaries contain both the permissively licensed engine and the separately licensed governance module. The license is clear and included, but not every released-software license meets the OSI/FSF definition required by this control. |
-| OSPS-LE-03.01 | Met | Root `LICENSE`, `docs/licenses/MIT.txt`, `docs/licenses/LicenseRef-Ghostlight-Commercial.txt`, and `LICENSING.md` identify each source boundary and its governing text. |
+| OSPS-GV-03.01 | Met | `CONTRIBUTING.md` explains contribution terms, validation, design boundaries, and the DCO. |
+| OSPS-LE-02.01 | Met (revised 2026-08-25) | Originally Not met because the governance module carried a commercial source-available license. ADR-0140 relicensed the whole repository Apache-2.0 OR MIT, so all project source now meets the OSI/FSF definition. |
+| OSPS-LE-02.02 | Met (revised 2026-08-25) | Originally Not met for the same mixed-license reason. Released binaries now contain only permissively licensed components; `LICENSING.md` and the shipped license texts identify them. |
+| OSPS-LE-03.01 | Met (revised 2026-08-25) | Root `LICENSE`, `docs/licenses/MIT.txt`, and `LICENSING.md` identify the source and its governing text. The former commercial license text was retired by ADR-0140 and removed from packaging. |
 | OSPS-LE-03.02 | Met | Source archives carry all license texts; release packaging and the hash manifest associate assets with the release. |
 | OSPS-QA-01.01 | Met | The authoritative source is publicly readable at `https://github.com/sylin-org/ghostlight`. |
 | OSPS-QA-01.02 | Met | Git history publicly records changes, authors, and timestamps. Pull requests and signed-off commits provide additional review history. |
@@ -59,9 +59,11 @@ Status vocabulary:
 Ghostlight has strong public evidence for build isolation, authenticated distribution, user and
 contributor documentation, source history, dependencies, disclosure, and release integrity. It
 must not claim full OSPS Level 1 compliance yet. One account control needs owner verification,
-direct pushes are not blocked, secret push protection is disabled, the open-core license makes two
-Level 1 controls inapplicable as compliance claims, and tracked binary media still needs an
-explicit Baseline interpretation.
+direct pushes are not blocked, secret push protection is disabled, and tracked binary media still
+needs an explicit Baseline interpretation. The two license controls that were Not met under the
+former open-core split became Met when ADR-0140 relicensed the whole repository Apache-2.0 OR MIT
+on 2026-08-25; that revision is recorded in the table rather than by rewriting the original
+2026-07-18 assessment.
 
 ## Closure checklist
 
@@ -72,14 +74,15 @@ explicit Baseline interpretation.
 - [x] Verify deletion protection through the active ruleset.
 - [ ] Enable GitHub secret scanning and push protection, or document and verify an equivalent
       preventive control.
-- [x] Record OSPS-LE-02.01 and OSPS-LE-02.02 as Not met. Do not restructure or mislabel the
-      open-core project merely to obtain a badge.
+- [x] Record OSPS-LE-02.01 and OSPS-LE-02.02 as Not met (2026-07-18), then Met upon ADR-0140's
+      whole-repo Apache-2.0 OR MIT relicensing (revised 2026-08-25).
 - [ ] Resolve OSPS-QA-05.02 treatment for necessary documentation media.
 - [ ] Re-run this assessment against the then-current named Baseline version.
 - [ ] Only after every Level 1 control is Met or validly Not applicable, consider an external
       self-attestation or badge submission.
 
 This assessment should be reviewed when repository ownership, branch rules, release workflows,
-licensing boundaries, or the current OSPS Baseline version changes.
+licensing boundaries, or the current OSPS Baseline version changes. It was revised on 2026-08-25
+for the ADR-0140 licensing change.
 
-Last reviewed: 2026-07-18 against v0.8.0 | Contact: support@sylin.org
+Last reviewed: 2026-08-25 (originally 2026-07-18 against v0.8.0) | Contact: hello@sylin.org

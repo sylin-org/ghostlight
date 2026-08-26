@@ -32,10 +32,6 @@ $legalFiles = @(
         source = Join-Path $repo "docs/licenses/MIT.txt"
     },
     [pscustomobject]@{
-        name = "LicenseRef-Ghostlight-Commercial.txt"
-        source = Join-Path $repo "docs/licenses/LicenseRef-Ghostlight-Commercial.txt"
-    },
-    [pscustomobject]@{
         name = "LICENSING.md"
         source = Join-Path $repo "LICENSING.md"
     }

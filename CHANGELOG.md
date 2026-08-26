@@ -83,6 +83,13 @@ model-facing surface is revoiced to teach.
 
 ### Changed
 
+- **Fully open-source licensing (ADR-0140).** The whole product, including the governance module,
+  is now Apache-2.0 OR MIT. Every paid option -- the tier table, founding program, prices,
+  commercial license text, `PRICING.md` itself, and the governance-module CLA -- was withdrawn.
+  The trust center's support, MSA, DPA, and tiers
+  pages were revised or retired to match; packaging ships only Apache-2.0 and MIT texts.
+  The runtime never enforced licensing before and nothing changed there: the Continuity Promise
+  holds unchanged.
 - **1.0 implementation rebaseline.** The active implementation is the clean-room orchestrator,
   shared typed bridge, stable MCP and browser connectors, and policy-free browser adapter. The
   branch now descends from the complete post-0.8 project history rather than an orphan root.

@@ -34,7 +34,7 @@ onboarding document is [AGENTS.md](../AGENTS.md) at the root.
 | [research/](research/) | Dated research and landscape work. Evidence of what was true when it was written, not a live claim. |
 | [business/](business/) | Business and go-to-market records. |
 | [legal/](legal/) | Legal and entity records. |
-| [licenses/](licenses/) | License texts, including the Ghostlight Commercial License covering the governance module. |
+| [licenses/](licenses/) | License texts (MIT; the root `LICENSE` is the Apache-2.0 text). |
 | [assets/](assets/) | Images and artwork used by the documentation. |
 | [0.8/](0.8/) | The preserved 0.8 release documentation. Historical truth about a shipped product, not a 1.0 claim. |
 

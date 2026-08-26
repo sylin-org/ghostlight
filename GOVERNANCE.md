@@ -1,6 +1,6 @@
 # Project governance
 
-Ghostlight is a maintainer-led open-core project. I maintain it (`lbotinelly`), and the release,
+Ghostlight is a maintainer-led free and open-source project. I maintain it (`lbotinelly`), and the release,
 roadmap, security, licensing, and final merge calls are mine. There is no foundation, no steering
 committee, and no community consensus behind those decisions -- one person makes them, and you
 should know that before you build on it.
@@ -19,9 +19,9 @@ should know that before you build on it.
 
 ## Contributions and licensing
 
-Contributions to the open engine use the DCO and the repository's Apache-2.0 OR MIT terms.
-Contributions to `crates/orchestrator/src/governance/` require a CLA because that module has a separate
-commercial license. Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting substantial work.
+The whole repository is Apache-2.0 OR MIT ([ADR-0140](docs/adr/0140-fully-open-source-licensing.md)).
+Contributions everywhere use the DCO and the repository's Apache-2.0 OR MIT terms.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting substantial work.
 
 ## Accountability and continuity
 

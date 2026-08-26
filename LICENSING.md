@@ -1,32 +1,33 @@
 # Ghostlight Licensing Guide
 
-Ghostlight is open-core. This page is the plain-language guide; the license
-files govern. Decision record:
-[ADR-0027](docs/adr/0027-open-core-business-model-and-licensing.md).
+Ghostlight is free and open source. The entire product -- the orchestrator, browser engine,
+relays, governance module, desktop workbench, extension, and installers -- is offered under
+Apache-2.0 OR MIT, at your option ([Apache-2.0](LICENSE), [MIT](docs/licenses/MIT.txt)).
 
-## The split
+Decision record: [ADR-0027](docs/adr/0027-open-core-business-model-and-licensing.md) originally
+split the tree into a permissive engine and a commercially licensed governance module.
+[ADR-0140](docs/adr/0140-fully-open-source-licensing.md) superseded that split on 2026-08-25:
+every paid option was withdrawn, and the whole repository now carries one permissive license.
 
-| Part | License | SPDX |
-|---|---|---|
-| Engine: everything outside `crates/orchestrator/src/governance/` -- the orchestrator application, browser engine, relays, desktop workbench, and installers | Apache-2.0 OR MIT, at your option ([Apache-2.0](LICENSE), [MIT](docs/licenses/MIT.txt)) | `Apache-2.0 OR MIT` |
-| Governance module: `crates/orchestrator/src/governance/` -- authority snapshots, protected-host ceiling, local and managed restrictions, runtime controls, and payload-free audit | Ghostlight Commercial License, source-available ([license text](docs/licenses/LicenseRef-Ghostlight-Commercial.txt)) | `LicenseRef-Ghostlight-Commercial` |
+## What this means
 
-## Am I free to use it?
+| You get | Because |
+|---|---|
+| Use for anything, including commercial and operational use | Apache-2.0 OR MIT place no field-of-use or seat limits |
+| Full source to every component, including governance | There is no separately licensed module |
+| Redistribution and modification | Both licenses permit it; preserve notices and follow the chosen license's terms |
 
-| You | Engine | Governance module |
-|---|---|---|
-| An individual or solo developer, including operational use and your own one-person business | Free | Free |
-| A nonprofit organization or an open-source project (noncommercial use) | Free | Free |
-| A company evaluating, developing, or testing | Free | Free |
-| A team of up to 5 people, including operational governance use | Free | Free |
-| A company running operationally in all-open mode (no governance manifest or org policy configured) | Free | Free (the governance layer is a pass-through) |
-| An organization of more than 5 people running governance operationally (manifests, org policy, audit -- what the license text calls "production use") | Free | Commercial subscription |
+There are no tiers, no seats, no activation, and nothing to buy. Support is community support:
+GitHub Issues and [Discussions](https://github.com/sylin-org/ghostlight/discussions) first;
+hello@sylin.org for what cannot be public (see [CONTRIBUTING.md](CONTRIBUTING.md)). The former
+pricing page was removed entirely; the git history of that path records what pricing used to be.
 
-If your row says "commercial subscription", contact hello@sylin.org. In short: exactly
-one situation pays, and everything else is free -- see [PRICING.md](PRICING.md) for the
-tiers, plus the hardship and outgrew-the-tier accommodations. Ghostlight 1.0 has no runtime key,
-activation, status command, or behavior gate; [docs/guides/licensing.md](docs/guides/licensing.md)
-explains the source boundary.
+## Runtime promise
+
+License state never reached runtime under the old model and there is no license left to reach it:
+Ghostlight has no key file, activation server, license-status command, telemetry, or network
+traffic. An installed copy keeps working offline indefinitely. This is the Continuity Promise
+([ADR-0028](docs/adr/0028-tripwire-licensing-and-continuity-promise.md) Decision 6), unchanged.
 
 ## Vendored third-party code
 
@@ -41,24 +42,14 @@ It is pinned to an exact version and reviewed like any other dependency
 ([ADR-0109](docs/adr/0109-browser-owned-gif-encoding.md)). Rust dependencies are declared in
 `Cargo.toml` and resolved normally.
 
-## Labels, precisely
-
-- The engine is open source (OSI-approved licenses).
-- The governance module is source-available: the code is published and
-  inspectable, but it is not open source and not "Fair Source".
-- The product as a whole is open-core.
-
 ## Commitments
 
-- The engine stays Apache-2.0 OR MIT. It will not be relicensed.
-- A bug fix, a security fix, or a core automation capability is never moved
-  behind payment.
-- A later version of the commercial license will not retroactively narrow
-  rights granted by the version you received the software under.
+- The whole product stays Apache-2.0 OR MIT. It will not be relicensed restrictively.
+- A bug fix, a security fix, or a core automation capability is never moved behind payment,
+  because there is no payment layer to move it behind.
 
 ## Contributing
 
-- Engine contributions are accepted under the Developer Certificate of
-  Origin (inbound = outbound, Apache-2.0 OR MIT).
-- Contributions to `crates/orchestrator/src/governance/` are not open yet; if you want to
-  contribute there, open an issue first (a CLA will be required).
+Contributions are accepted under the Developer Certificate of Origin
+(inbound = outbound, Apache-2.0 OR MIT) across the entire repository; sign off your commits
+(`git commit -s`). See [CONTRIBUTING.md](CONTRIBUTING.md).

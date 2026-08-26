@@ -52,4 +52,4 @@ See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org

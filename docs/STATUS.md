@@ -395,10 +395,23 @@ research input [24-policy-surface-user-delight-2026-08.md](research/24-policy-su
   `node tests/workbench-surface.mjs` (27 assertions). The amendment recorded in ADR-0122 covers the
   single rule list, stated polarity, authored restrictions, and the A4 permission-toggle framing.
 
-The active 1.0 guides, contracts, public RAWX specification, pricing language, and Trust Center now
+The active 1.0 guides, contracts, public RAWX specification, licensing language, and Trust Center now
 describe this feature set rather than the removed flat policy. The invented cohort-based
 `greenfield-first-success.md` process is explicitly rejected as a release gate. Historical SPEC,
 ADRs, research, and 0.8 task evidence remain preserved as history.
+
+## Fully open-source relicensing (ADR-0140)
+
+On 2026-08-25 the owner withdrew the open-core business model: the entire repository, including
+`crates/orchestrator/src/governance/`, is Apache-2.0 OR MIT, and every paid option (tiers,
+prices, the founding program, the commercial license text, and the governance-module CLA) was
+removed. `PRICING.md` was deleted outright (git history preserves it); LICENSING.md, the licensing guide, README,
+CONTRIBUTING, GOVERNANCE, MAINTENANCE, the trust center (FAQ, support policy, continuity,
+controls, OpenSSF rows), GitHub templates, security-insights.yml, the workbench About view, and
+all packaging payloads were revised to match. The retired MSA/DPA/tiers pages carry dated
+retirement notices; historical records (ADRs 0026-0030, CHANGELOG history, 0.8 material,
+business planning) are preserved as history under the supersession banners or index notes.
+The runtime never enforced licensing and still contains no gate of any kind.
 
 Direct UDP syslog from 0.8 was not rebuilt. The 1.0 audit contract is append-only local JSONL,
 collected by the endpoint's existing file agent. Trust Center claims now say that plainly instead

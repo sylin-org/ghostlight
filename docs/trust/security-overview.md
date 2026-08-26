@@ -69,4 +69,4 @@ audit of Ghostlight will be published in full, including findings.
 
 See [data-flows.md](data-flows.md) and [supply-chain.md](supply-chain.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org

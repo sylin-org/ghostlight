@@ -1,19 +1,21 @@
-# Ghostlight Tiers: Claims to Evidence
+# Ghostlight Tiers: Retired
 
-This page maps each claim on the [pricing page](../../PRICING.md) to the tier that carries
-it, the feature that delivers it, and the evidence behind it.
+> **RETIRED 2026-08-25 by [ADR-0140](../adr/0140-fully-open-source-licensing.md).** The pricing
+> page and its tiers were withdrawn; no claim is gated behind a tier anymore. This page records
+> where each capability a tier once sold ships today.
 
-| Pricing-page claim | Tier | Shipped feature | Evidence |
-| --- | --- | --- | --- |
-| Central policy | Team and above | Signed file or HTTPS policy from a customer-owned source, activated by an administrator-provisioned bootstrap | [ADR-0121](../adr/0121-restore-rawx-policy-and-managed-fetch.md), [governance configuration guide](../guides/governance-configuration.md) |
-| SIEM audit | Team and above | Content-minimized JSONL with `policy_seq` and denial attribution, collected by the endpoint's existing file agent | [SIEM integration guide](../guides/siem-integration.md) |
-| Email support | Team and above | support@sylin.org, acknowledged within 3 business days (Team) or 2 (Enterprise) | [support-policy.md](support-policy.md) |
-| Security questionnaires | Enterprise | The published CAIQ-shaped self-assessment, the evidence-linked FAQ, and one completed questionnaire per year on request | [questionnaire.md](questionnaire.md), [faq.md](faq.md) |
-| MSA | Enterprise | Master software agreement template (draft, pending counsel) | [msa.md](msa.md) |
-| DPA | Enterprise | No-processing data processing addendum template (draft, pending counsel) | [dpa.md](dpa.md) |
-| Deployment help and roadmap input | Enterprise | Enterprise extras | [support-policy.md](support-policy.md) |
+Every capability the tiers once sold is simply a shipped feature of a free product now:
 
-Seat and licensee counts are contractual terms, never enforced at runtime: Ghostlight never
-phones home, never counts seats, and license state never changes behavior (ADR-0028).
+| Former claim | Where it lives today | Evidence |
+| --- | --- | --- |
+| Central policy | Signed file or HTTPS policy from an organization-owned source, activated by an administrator-provisioned bootstrap | [ADR-0121](../adr/0121-restore-rawx-policy-and-managed-fetch.md), [governance configuration guide](../guides/governance-configuration.md) |
+| SIEM audit | Content-minimized JSONL with `policy_seq` and denial attribution, collected by the endpoint's existing file agent | [SIEM integration guide](../guides/siem-integration.md) |
+| Support | Community support on GitHub, best-effort email for what cannot be public | [support-policy.md](support-policy.md) |
+| Security questionnaires | The published CAIQ-shaped self-assessment and the evidence-linked FAQ, available to everyone | [questionnaire.md](questionnaire.md), [faq.md](faq.md) |
+| MSA and DPA | Retired with paid licensing; the underlying facts (license grant, no vendor data flows) are documented directly | [msa.md](msa.md), [dpa.md](dpa.md), [data-flows.md](data-flows.md) |
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Nothing about Ghostlight is enforced at runtime by any commercial term: it never phones home,
+never counted seats, and license state never changed behavior ([ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md)).
+Now there is also nothing to count.
+
+Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org

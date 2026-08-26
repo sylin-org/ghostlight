@@ -43,11 +43,11 @@ local-only architecture.
 | [continuity.md](continuity.md) | The Continuity Promise, why it holds structurally, and runnable proof. |
 | [controls.md](controls.md) | Framework orientation: ISO/IEC 27001 Annex A, SOC 2 criteria, and the AI frameworks. |
 | [questionnaire.md](questionnaire.md) | A CAIQ v4-shaped self-assessment you can file as vendor due diligence. |
-| [support-policy.md](support-policy.md) | Support channel, acknowledgment commitments, and scope. |
+| [support-policy.md](support-policy.md) | Community support channels and scope. |
 | [openssf-self-assessment.md](openssf-self-assessment.md) | Point-in-time OSPS Baseline Level 1 evidence map, open checks, and claim boundary. |
-| [msa.md](msa.md) | The master software agreement template (draft, pending counsel review). |
-| [dpa.md](dpa.md) | The data processing addendum template (draft, pending counsel review). |
-| [tiers.md](tiers.md) | Each pricing-page claim mapped to the shipped feature and its evidence. |
+| [msa.md](msa.md) | Retired with paid licensing; where the agreement's substance lives now. |
+| [dpa.md](dpa.md) | Retired as a template; the no-vendor-processing facts it recorded, stated directly. |
+| [tiers.md](tiers.md) | Retired with the pricing page; each former tier claim mapped to its shipped feature. |
 | [SECURITY.md](../../SECURITY.md) | Vulnerability reporting: the private disclosure channel and its response times. |
 
 ## What we do not have
@@ -59,20 +59,20 @@ reviewer can act on a stated absence, and cannot act on a page of green checkmar
   attestations largely describe how a vendor handles data on its own systems. Ghostlight's
   runtime handles your data only on your systems, so the assurance those reports provide does
   not map onto this architecture. In their place I offer architecture-as-evidence: the design
-  is documented in decision records, the behavior is exercised by runnable scenarios, and the
-  governance module ships as source-available code you can read. Certification is planned as
-  the customer base grows, beginning with a CSA STAR Level 1 self-assessment submission; see
-  [controls.md](controls.md) for how a reviewer can orient these frameworks against
+  is documented in decision records, the behavior is exercised by runnable scenarios, and every
+  line of code -- governance included -- ships as open source you can read. Certification is
+  planned as the project grows, beginning with a CSA STAR Level 1 self-assessment submission;
+  see [controls.md](controls.md) for how a reviewer can orient these frameworks against
   Ghostlight today.
 - **No completed third-party penetration test.** One is planned and will be commissioned when
   funding allows, and any third-party security audit of Ghostlight will be published in full,
-  including findings. Until then, the source access described in the governance license
-  functions as a standing audit right: you can read the code that enforces policy yourself.
+  including findings. Until then, the open-source license functions as a standing audit right:
+  you can read the code that enforces policy yourself.
 - **No team beyond a solo founder.** One maintainer builds, signs, and supports Ghostlight
   today.
   The mitigation is structural rather than contractual: the Continuity Promise guarantees the
-  software keeps working regardless of the vendor's status, the engine is Apache-2.0 OR MIT
-  licensed, and the governance module is source-available, so a customer's ability to keep
-  operating never depends on the company's survival. See [continuity.md](continuity.md).
+  software keeps working regardless of the vendor's status, and the whole product is
+  Apache-2.0 OR MIT licensed, so a user's ability to keep operating never depends on the
+  company's survival. See [continuity.md](continuity.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org

@@ -73,8 +73,8 @@ keyless build-provenance attestations are the artifact-integrity controls.
 | Component SBOMs | All | `ghostlight-v${VERSION}-sbom-*.cyclonedx.json` |
 | Checksums | All | `SHA256SUMS` |
 
-GitHub also provides source archives for the exact release tag. Ghostlight is open-core; see
-`LICENSING.md` in the source archive and the exact license texts installed with each native
+GitHub also provides source archives for the exact release tag. Ghostlight is Apache-2.0 OR MIT;
+see `LICENSING.md` in the source archive and the exact license texts installed with each native
 package.
 
 ## Checksums

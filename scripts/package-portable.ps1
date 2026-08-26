@@ -51,7 +51,6 @@ try {
     foreach ($legalFile in @(
         [ordered]@{ source = "LICENSE"; destination = "LICENSE" },
         [ordered]@{ source = "docs/licenses/MIT.txt"; destination = "MIT.txt" },
-        [ordered]@{ source = "docs/licenses/LicenseRef-Ghostlight-Commercial.txt"; destination = "LicenseRef-Ghostlight-Commercial.txt" },
         [ordered]@{ source = "LICENSING.md"; destination = "LICENSING.md" }
     )) {
         Copy-Item -LiteralPath (Join-Path $repo $legalFile.source) -Destination (Join-Path $stage $legalFile.destination)

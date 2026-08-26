@@ -62,4 +62,4 @@ the best-effort advisory target in [SECURITY.md](../../SECURITY.md).
 
 See [security-overview.md](security-overview.md) for the vendor-side security posture.
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org

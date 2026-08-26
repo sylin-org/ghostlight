@@ -38,4 +38,4 @@ For a client the installer does not recognize, use Ghostlight as this stdio serv
 
 - Project: https://github.com/sylin-org/ghostlight
 - What it is and why: https://sylin.org/ghostlight/
-- License: engine is Apache-2.0 OR MIT; governance module is source-available (see LICENSE).
+- License: Apache-2.0 OR MIT for the whole product (see LICENSE and LICENSING.md).

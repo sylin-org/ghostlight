@@ -378,8 +378,7 @@
         ["Sessions", `${snapshot.sessions.length} connected`],
         ["Browsers", `${snapshot.browsers.length} attached`],
         ["Recorded", `${snapshot.history.length} actions on this device`],
-        ["Engine", "Apache-2.0 OR MIT"],
-        ["Governance", "Ghostlight Commercial License, source-available"]
+        ["License", "Apache-2.0 OR MIT"]
       ];
       el["about-facts"].innerHTML = facts
         .map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`)

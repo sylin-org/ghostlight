@@ -29,7 +29,8 @@ documents it points to.
    truth (which engine is running, install state, local gotchas) and sensitive/working memory
    (owner context, credential *locations*, session handoffs). Do not read them without explicit
    owner authorization. See [local/README.md](local/README.md).
-8. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, licensing boundary.
+8. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, and the whole-repo
+   Apache-2.0 OR MIT / DCO contribution terms.
 
 Larger work is organized as task batches under `docs/tasks/<batch>/`, each with a
 `BOOTSTRAP.md` (ground rules) and a `LEDGER.md` (durable progress, one task = one commit,

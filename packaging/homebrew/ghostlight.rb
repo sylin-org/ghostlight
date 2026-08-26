@@ -5,7 +5,7 @@ class Ghostlight < Formula
   desc "Visible browser automation in your signed-in Chromium profile"
   homepage "https://sylin.org/ghostlight/"
   version "0.8.0"
-  license "Apache-2.0"
+  license any_of: ["Apache-2.0", "MIT"]
 
   on_macos do
     if Hardware::CPU.arm?

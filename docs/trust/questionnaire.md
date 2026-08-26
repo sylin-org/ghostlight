@@ -30,4 +30,4 @@ structural reason, rather than left blank or answered as if a service existed.
 | TVM (Threat & Vulnerability Management) | Vulnerabilities are reported through a private channel. Acknowledgment, triage, and remediation follow the best-effort solo-maintainer targets in SECURITY.md; there is no bug bounty today, and a third-party penetration test is planned when funded. | [SECURITY.md](../../SECURITY.md), [supply-chain.md](supply-chain.md) |
 | UEM (Universal Endpoint Management) | N/A -- structurally impossible: Ghostlight manages no fleet of vendor endpoints; endpoint management is yours, and central policy ships through your own MDM. | [governance configuration guide](../guides/governance-configuration.md) |
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: support@sylin.org
+Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org

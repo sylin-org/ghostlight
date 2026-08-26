@@ -1,16 +1,10 @@
 Ghostlight
 Copyright (c) 2026 Leonardo Botinelly
 
-The engine, which is everything outside
-crates/orchestrator/src/governance/, is available under Apache-2.0 or
-MIT, at your option. On Debian systems, the full Apache-2.0 text is at
+The whole product is available under Apache-2.0 or MIT, at your option.
+On Debian systems, the full Apache-2.0 text is at
 /usr/share/common-licenses/Apache-2.0. The exact MIT text shipped by
 Ghostlight is at /usr/lib/Ghostlight/licenses/MIT.txt.
 
-The governance module at crates/orchestrator/src/governance/ is
-source-available under LicenseRef-Ghostlight-Commercial. The exact
-license text is at
-/usr/lib/Ghostlight/licenses/LicenseRef-Ghostlight-Commercial.txt.
-
-The complete plain-language boundary is at
+The plain-language licensing guide is at
 /usr/lib/Ghostlight/LICENSING.md.

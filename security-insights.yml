@@ -31,8 +31,8 @@ repository:
   license:
     expression: Apache-2.0 OR MIT
     comment: |
-      The automation engine is licensed Apache-2.0 OR MIT. The governance module is
-      source-available under the Ghostlight Commercial License (LICENSE-GOVERNANCE).
+      The entire product, including the governance module, is licensed Apache-2.0 OR MIT
+      (ADR-0140).
   security:
     assessments:
       self:

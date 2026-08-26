@@ -439,7 +439,7 @@
     ["Read the reasoning", [
       ["trust_center", "What it promises", "Each public claim, and where the code keeps it."],
       ["decision_records", "Why it is built this way", "Every architectural decision, kept as written."],
-      ["licensing_guide", "What you may do with it", "The open engine and the source-available governance split."],
+      ["licensing_guide", "What you may do with it", "The whole product is Apache-2.0 OR MIT."],
       ["sylin_tools", "The rest of the toolkit", "The other Sylin tools this one grew up beside."]
     ]]
   ];
