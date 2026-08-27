@@ -9,8 +9,8 @@
       "historical-document-in-git": 1,
       "historical-implementation-only": 161,
       "redesign-after-signed-candidate": 1,
-      "retained-evolved": 197,
-      "retained-identical": 351,
+      "retained-evolved": 198,
+      "retained-identical": 350,
       "retired-low-value-conductor": 1,
       "reviewed-repository-history": 2
     }
@@ -4308,9 +4308,9 @@
     },
     {
       "path": "server.json",
-      "currentState": "retained-identical",
-      "treatment": "retained-identical",
-      "reason": "The current tree retains the exact historical blob at the same path."
+      "currentState": "retained-evolved",
+      "treatment": "retained-evolved",
+      "reason": "The path remains active and has evolved; current contracts and source govern its present meaning."
     },
     {
       "path": "site/index.html",

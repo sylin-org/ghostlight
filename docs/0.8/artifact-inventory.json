@@ -6,8 +6,8 @@
     "total": 809,
     "byCurrentState": {
       "absent": 261,
-      "retained-evolved": 197,
-      "retained-identical": 351
+      "retained-evolved": 198,
+      "retained-identical": 350
     }
   },
   "entries": [
@@ -306,7 +306,7 @@
       "historicalType": "blob",
       "historicalBlob": "189da3a4210ef1f6dfb89ddc03abb7628e119a07",
       "currentState": "retained-evolved",
-      "currentBlob": "52a66764353ee184ee17e210b6bd1281266fca07"
+      "currentBlob": "0a6f102e33413d6bbd0b025746b18fd275c7d9a8"
     },
     {
       "path": "CLAUDE.md",
@@ -2619,7 +2619,7 @@
       "historicalType": "blob",
       "historicalBlob": "4a8c566c732a1a9623d9e816c62fc0637531f72a",
       "currentState": "retained-evolved",
-      "currentBlob": "9b9a8b08dee01142a05dfc3b464896228d529250"
+      "currentBlob": "efd2f57cd8ada62497159e5054865998a434ccab"
     },
     {
       "path": "docs/assets/demo.gif",
@@ -3024,7 +3024,7 @@
       "historicalType": "blob",
       "historicalBlob": "891ab7a4da78ea50d6b8f67da8228e56b9897f19",
       "currentState": "retained-evolved",
-      "currentBlob": "899829a00be681d43802442e6ec4849dfef935bc"
+      "currentBlob": "cecb3bd6b5c560c797e1abb5c85dc6749ca72709"
     },
     {
       "path": "docs/public-status.json",
@@ -3033,7 +3033,7 @@
       "historicalType": "blob",
       "historicalBlob": "fd06311f6d58080e9739eaf1a5b4496a92c43825",
       "currentState": "retained-evolved",
-      "currentBlob": "1cfd16138dc334c13131420afe740bff1233a0f8"
+      "currentBlob": "8a210bb74916f26e1b44e9b1a2d62fe4c5b46a2c"
     },
     {
       "path": "docs/RELEASE.md",
@@ -3357,7 +3357,7 @@
       "historicalType": "blob",
       "historicalBlob": "9eabb624c54f70fa3c5f7f424c15f7723eeebc8e",
       "currentState": "retained-evolved",
-      "currentBlob": "2ed3d87b5cb2f80304717ce6a39c751c31980929"
+      "currentBlob": "e2b56d0a7fdf52fbde3bd8230fae9aedcc8c2fa1"
     },
     {
       "path": "docs/tasks/browser-kernel/BOOTSTRAP.md",
@@ -5994,7 +5994,7 @@
       "historicalType": "blob",
       "historicalBlob": "e07b382011062d9413691142bf66f4151fcec34d",
       "currentState": "retained-evolved",
-      "currentBlob": "60160127e07013620031c008961b44afdc6765e7"
+      "currentBlob": "baac0abf74fba2524dc2c66e083b1287d6edb823"
     },
     {
       "path": "extension/native-messaging-host.json",
@@ -6111,7 +6111,7 @@
       "historicalType": "blob",
       "historicalBlob": "4b344ae768311d2eceb1241784e860dd8db21883",
       "currentState": "retained-evolved",
-      "currentBlob": "5cd1f6f75df77c5984b0f18073ef7a9a0dbee2c3"
+      "currentBlob": "8e5037e085f64567fabe1166b8ffbabedb6b9869"
     },
     {
       "path": "local/README.md",
@@ -6282,7 +6282,7 @@
       "historicalType": "blob",
       "historicalBlob": "29f1cbbda0cf22cd1a521cb9fd1631253c37ecad",
       "currentState": "retained-evolved",
-      "currentBlob": "26fa5dbddfd54637d6c6dcb0c43c75b1080ccc81"
+      "currentBlob": "ac6422998d5d526ff374a7280702a014798c124c"
     },
     {
       "path": "ROADMAP.md",
@@ -6372,7 +6372,7 @@
       "historicalType": "blob",
       "historicalBlob": "d56e326c50fc18fbe37f7722ca8ffa704670071b",
       "currentState": "retained-evolved",
-      "currentBlob": "425f943fdcbe2f6d5e72530801db9c94c1f313ef"
+      "currentBlob": "7d8a1c5264a581616e90229204397eae9383dfae"
     },
     {
       "path": "scripts/package-mcpb.ps1",
@@ -6452,8 +6452,8 @@
       "historicalMode": "100644",
       "historicalType": "blob",
       "historicalBlob": "aeee8da8b14a71e4e902189fbe350038c6a400da",
-      "currentState": "retained-identical",
-      "currentBlob": "aeee8da8b14a71e4e902189fbe350038c6a400da"
+      "currentState": "retained-evolved",
+      "currentBlob": "caf6f6c7925438215a6a0e858ffe6b9a1af9fd39"
     },
     {
       "path": "site/index.html",
