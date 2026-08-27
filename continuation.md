@@ -1,86 +1,95 @@
-# CONTINUATION: Ghostlight 1.0 release -- G2 held, G3 next
+# CONTINUATION: Ghostlight 1.0 published -- 1.0-plus batch, D2 next
 
-Read AGENTS.md first, then docs/STATUS.md ("In flight" section), then this prompt. You are
-continuing in F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp, branch `dev`.
+Read AGENTS.md first, then docs/STATUS.md (the "1.0 is published" section), then
+docs/tasks/1.0-plus/LEDGER.md (the progress authority), then this prompt. You are continuing in
+F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp, branch `dev`.
 
-## Where things stand (all verified 2026-08-25, tree clean at/after 1f7367c4)
+## Where things stand (verified 2026-08-26, tree clean)
 
-The 1.0 candidate is BUILT and CUSTODY IS HELD:
+**1.0 IS PUBLISHED on every channel.** Do not re-plan publication; it happened. GitHub release
+`v1.0.0` (tag at candidate `b2c27993a223c220f8828736b125676ae6f9d027`, run 33020313866), npm
+`ghostlight@1.0.0`, Chrome Web Store adapter 1.0.0 (approved review `3570494f...` published
+DEFAULT_PUBLISH; live listing + CRX feed observed serving 1.0.0), MCP Registry
+`org.sylin/ghostlight` 1.0.0, `main` fast-forwarded. `check-public-surfaces.ps1 -Online` reports
+all surfaces in agreement. Evidence: docs/testing/candidate-custody-2026-08-26.md, STATUS.md.
 
-- Build: release workflow run 32846030216, all jobs green, at candidate revision
-  `994b6c85dcd7c8df74237cf329461d85ce49b13a`. Product bytes are identical to `8779e11b`
-  (the ADR-0137 feature commit); the delta between them is CI tooling only.
-- `docs/release/freeze.json` pins `994b6c85...` per the owner's explicit decision: the freeze
-  ceremony is DROPPED ("we publish when we're done"). The freeze machinery only pins whichever
-  revision becomes the candidate. Do not re-impose change-ban rules.
-- Custody: two verified local copies under repo-local `.target-g2-custody/release-candidate`
-  and `.target-g2-custopy-copy` (note: second dir name is `.target-g2-custody-copy`).
-  `scripts/verify-custody.ps1 -IncludeProvenance` passes all five steps against BOTH copies
-  (freeze binding, deep checks, SHA256SUMS rehash of 18 assets, GitHub provenance on all six
-  raw binaries). Evidence: docs/testing/candidate-custody-2026-08-25.md.
-- G2 is fully ticked in docs/RELEASE-CHECKLIST.md. Release state: G0-G2 done; G3 next.
-- Candidate contract is now 18 artifacts / five SBOMs (win-peer joined the workspace);
-  every checker agrees (check-release-candidate, verify-custody, release.yml, assemble script).
-- The extension ZIP in the candidate is `ghostlight-extension-v1.0.0.zip`, SHA-256
-  `9ae88e6729c830a9871802a39a2301c27c1d2baa00a2213332c310a7746a6db8`. It deliberately does NOT
-  match the `f7b9a6ad...` bytes under the pending Chrome Web Store review: ADR-0137 (tab/group
-  reuse) changed the service worker after that submission. The stale review must be REPLACED.
+**main sits at `28a5892e`; dev is ahead (docs/tasks/1.0-plus opening, D1, install-guide fix).**
+Post-publication, work happens on `dev`; promoting `main` is a deliberate owner decision, not a
+sync habit.
 
-## ADR-0137 context (shipped, live-proven)
+**The 1.0-plus batch is open** (docs/tasks/1.0-plus/): D1 complete (`f8bff79a`, presentation
+stylesheet moved to `extension/lib/presentation-css.js`, byte-equivalence proven, 153/153
+extension tests green). The debt ladder runs simplest-to-most-complex; evidence lanes and
+owner-action externals follow. Read its BOOTSTRAP.md before doing anything -- one task = one
+commit, green tree always, published 1.0.0 is immutable, recovery ships as a higher version.
 
-The owner reported tab/group spam; ADR-0137 landed: duplicate same-title groups merge into the
-canonical one (self-healing), plain `browser_navigate` opens adopt the nearest unbound
-same-host tab (`reuse: "domain"` default; `new_tab:true` and `reuse:"never"` create fresh;
-stale-handle recovery always fresh), and the summary says "Reused the sylin.org tab." when it
-happens. A refused release-close unbinds the tab so it becomes adoptable. Foundry runs green
-with the open beat printing "Reused the sylin.org tab." The unpacked extension on the dev
-machine is RELOADED and current.
+## Your next task: D2 -- GIF palette quality
+
+Authoritative task file: docs/tasks/1.0-plus/D2-gif-palette-quality.md. Summary of the shape:
+
+- `extension/lib/recording.js` + pinned `extension/vendor/gifenc.js` encode recordings in the
+  offscreen document; today every frame gets its own local palette with no dithering, so static
+  photographic content shifts color frame to frame.
+- Deliver: (1) a shared palette derived from a bounded sample of the replay's frames, falling
+  back to per-frame when a frame exceeds a chosen error bound; (2) optional dithering bounded by
+  the existing byte budget; (3) tests with COMPUTED ORACLES -- pin expected palette counts,
+  per-frame deltas, byte-budget adherence, and the unchanged thinning invariant (a thinned
+  replay still plays for as long as the work took) from fixtures you compute first. The
+  executor transcribes oracles; it never derives them.
+- Ownership contract is untouchable: frames never cross a process boundary (ADR-0109), thinning
+  lives only in recording.js, save budget 16 MiB. If a change would move either, STOP and write
+  an ADR first.
+- Prove live afterwards: one real recording on the dev authority, save, inspect; the unpacked
+  extension needs a manual reload in chrome://extensions after any extension JS change (owner
+  action).
+
+After D2: D3 needs an ADR first (mapping old ADR-0084 attention routing onto the
+plural-browser/ADR-0126 world; several rows may already be satisfied by current means -- record
+that instead of building a second mechanism). Then evidence lanes E1-E5, then owner-action
+externals X1-X3 (parked; never act without the owner naming the action).
 
 ## Standing owner decisions (do not re-litigate)
 
-- Freeze ceremony dropped; publish when done. Gates are verification, not change-bans.
-- Store mutations still need explicit owner authorization at the moment of the action.
-- Never: main merge, version tag, publish, npm publish, store publish, phone-home, reference/
-  copying, /private/ or saps/ reads, local/ reads beyond release credential LOCATIONS
-  (~/.ghostlight-release.env holds values; never print them).
+- Publication is DONE and owner-directed; the GO decision row in docs/RELEASE-CHECKLIST.md
+  records that G4-G8 stayed open by the owner's call. Evidence lanes still close honestly.
+- Store mutations, npm publishes, website deploys, anything public: explicit owner authorization
+  at the moment of the action. scripts/publish-extension.ps1 now has Plan/Upload/Submit/Cancel/
+  Status/Publish actions (Publish = publish the approved staged revision publicly; it refuses a
+  staged revision whose crxVersion does not match the ZIP manifest).
+- Never: phone home (ADR-0028), copy from reference/, read /private/, saps/, or local/ contents,
+  weaken trust-doc claims, discard docs/ADRs/history, weaken an over-claim guard.
+- Windows releases have no Authenticode signing by design (0.8 trust model: checksums + GitHub
+  provenance). SignPath application pending; on acceptance its follow-ups unblock ADR-0105 D3.
 
-## Your tasks, in order
+## Gotchas learned 2026-08-26 (do not rediscover)
 
-1. G3 -- replace the stale store review (ASK OWNER FIRST; they have authorized this pattern
-   twice before). Use scripts/publish-extension.ps1 (CWS API; chrome.google.com is unscriptable)
-   to upload the candidate's exact ZIP
-   (.target-g2-custody/release-candidate/assets/ghostlight-extension-v1.0.0.zip,
-   sha256 9ae88e67...) as the existing item's 1.0.0 draft and submit STAGED_PUBLISH, replacing
-   the stale f7b9a6ad review. Record a dated testing doc. Tick G3's upload/submit rows.
-2. G4/G5/G7 environment lanes (Ubuntu GNOME Wayland, clean Windows, public harnesses) are
-   owner-run machines -- prepare instructions, do not improvise environments.
-3. G8/G9/G10 (accessibility matrix, publication adapters in plan mode, tag/release/publication)
-   are ALL owner-authorization boundaries. Draft, then wait.
-4. Keep docs honest: STATUS.md "In flight" still says "pending: owner reloads the unpacked
-   extension ... then the G2 candidate build" -- that is STALE. Update it to: custody held at
-   994b6c85, G3 store resubmission next, environment lanes after.
-
-## Gotchas learned this session (do not rediscover)
-
-- ubuntu:24.04 docker image strips /usr/share/man via dpkg excludes; the lifecycle smoke
-  strips the excludes before install (scripts/check-debian-package-lifecycle.sh).
-- The candidate contract is 18 artifacts / five SBOMs -- check-release-candidate.ps1,
-  verify-custody.ps1, release.yml, and assemble-release-candidate.ps1 all agree; do not
-  "fix" the count back to 17.
-- verify-custody.ps1 resolves SHA256SUMS names against assets/ (with root fallback).
-- After ANY extension JS change, the unpacked extension must be manually reloaded in
-  chrome://extensions (owner action; protected origin).
-- `ghostlight call` sessions are keyed by the PARENT process: two calls from one shell share a
-  workspace; a fresh cmd/pwsh parent is a fresh workspace.
-- The release workflow's quality gate runs check-repository-integrity.ps1, which validates
-  every local doc link -- relative links inside coordination/*.md must start with ../.
-- Windows-local gates cannot see Linux-only Clippy failures; for cfg-split code run
-  `cargo clippy -p <crate> --target x86_64-unknown-linux-gnu --all-targets -- -D warnings`.
+- **Cross-OS packaging determinism**: `ConvertTo-Json` writes platform newlines into rewritten
+  JSON, and .NET's ZipArchive stamps the central directory's host-system marker + Unix mode bits
+  from the running OS. scripts/package-extension.ps1 pins both to the approved store shape; any
+  packager change must keep `3570494f...` reproducible from Linux CI. Lesson in docs/MEMORY.md.
+- The extension ZIP hash to preserve: `3570494faf580a2286d9f7a5f1cbb6f657864ee369b0f70b944b0c927e64770c`.
+  Future extension-source changes make this the "one commit older" revision -- normal forward
+  flow, a NEW version ships next, never a mutation of published 1.0.0.
+- A CWS submission in review LOCKS the item; replacing it is `:cancelSubmission` then upload+submit
+  (script-gated; owner-authorized pattern used three times).
+- Mass relicensing-style edits require regenerating docs/0.8/artifact-inventory.json +
+  artifact-recovery.json via scripts/harvest-0.8-artifacts.ps1 -Revision <the LEDGER's recorded
+  0.8 rev, not HEAD>; check-0.8-artifacts.ps1 fails CI otherwise.
+- check-repository-integrity.ps1 validates every local doc link; an ADR rename must update every
+  index row that names it.
+- The website (sibling repo sylin-org/website) fetches llms-install.md live from ghostlight main
+  at build time via a CDN-cached raw URL: push browser-mcp main FIRST, wait ~90s, then rebuild.
+  Its check-site.js pins the current story (orchestrator chain, five proof recipes).
+- Custody copies live in repo-local .target-g2-custody{,-copy} (gitignored working state); the
+  superseded 994b6c85 candidate is archived at .target-g2-custody-superseded-994b6c85.
+- Scoop/WinGet metadata for 1.0.0 is prepared under .target-pkg-metadata; the external bucket
+  submissions are owner actions.
 
 ## Verification commands
 
-git status --short                          # must be empty
-git log --oneline -5                        # HEAD 1f7367c4 or later (docs only beyond 8779e11b product)
-pwsh scripts/assert-freeze.ps1              # pins 994b6c85...
-pwsh scripts/verify-custody.ps1 .target-g2-custody/release-candidate -IncludeProvenance
-Select-String -Path docs/RELEASE-CHECKLIST.md -Pattern '^- \[ \]'   # G3+ rows only
+git status --short                                 # must be empty
+git log --oneline -8                               # e440c0c3 or later
+npm test --prefix extension                        # 153+ tests
+node --check extension/lib/presentation-css.js     # new module from D1
+pwsh -NoProfile -File scripts/check-public-surfaces.ps1 -Online   # all surfaces agree at 1.0.0
+pwsh -NoProfile -File scripts/verify-custody.ps1 -IncludeProvenance -CandidateDirectory .target-g2-custody/release-candidate

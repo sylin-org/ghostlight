@@ -1300,17 +1300,9 @@ ledger for the reasoning. Everything else in this section stays outside 1.0.
   stage 2 observes the socket peer; what remains missing is any signed Ghostlight artifact to
   verify against, so no positive verification path can be exercised. Revisit when the first
   signed release artifact exists.
-- The extension stylesheet could move to its own module now that it is static. Lowest value of the
-  maintainability steps; needs about eight test assertions reworked.
-- GIF quality remains deferred. The vendored encoder quantizes each frame to its own 256-colour
-  palette with no dithering, which suits flat interface pixels and not photographs. Overlays,
-  action tagging, and perceptual palettes are still unbuilt. Output size is no longer the pressure
-  it was: a browser-local save may spend 16 MiB, and anything over its budget is thinned rather
-  than refused.
-- `origin/main` still carries 0.8, and the two branches have diverged rather than staying linear.
-  Deciding when the 1.0 line is promoted is a release decision; see "Where the branches stand".
-- ADR-0084's complete browser-window attention routing remains deferred; only the narrow Chromium
-  slice is implemented.
+- GIF quality and ADR-0084 attention routing continue as the 1.0-plus batch's D2 and D3; the
+  extension-stylesheet item was closed there by D1 (`f8bff79a`), and the former origin/main
+  promotion item closed with the 2026-08-26 publication.
 
 ## Blocked-target evidence
 
