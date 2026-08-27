@@ -18,7 +18,7 @@ Build a package from one checked release candidate:
 pwsh -File scripts/package-mcpb.ps1 -CandidateDirectory dist/release-candidate
 ```
 
-The result is `dist/ghostlight-v1.0.0.mcpb`.
+The result is `dist/ghostlight-v<version>.mcpb`.
 
 ## Privacy Policy
 
