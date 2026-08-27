@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-27.
+Last updated: 2026-08-27 (1.1.0 candidate held).
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -77,6 +77,24 @@ artwork. Gates: fmt, warnings-denied workspace Clippy, the full workspace suite,
 debug-build `doctor` check of the new row on this machine. The deployed release build predates
 the change, so the workbench card appears after the next release deployment through
 `scripts/dev-loop.ps1`.
+
+## 1.1.0 candidate held (2026-08-27)
+
+The workspace 1.1.0 bump surfaced every hand-stamped 1.0.0 copy that asserts against live
+output, and three runs found them in sequence: the CLI journey's banner pin, four literals in
+the Debian lifecycle smoke, and finally the npm candidate guard correctly refusing
+`packaging/npm/package.json`, which the bump commit had missed along with the MCPB manifest,
+the npm checksums placeholder, the Debian changelog, and the man pages. Test assertions now
+derive the expected version from the workspace (`45874122`, `a73533cf`); released artifact
+identity is stamped (`f912a834`), and the identity guards held as designed.
+
+Candidate run [33089681641](https://github.com/sylin-org/ghostlight/actions/runs/33089681641)
+is green at revision `f912a834a30eb704269c21dc25d7fe3f76ec3d31`, pinned in
+`docs/release/freeze.json`, and held in two verified local copies -- see
+[candidate-custody-2026-08-27](testing/candidate-custody-2026-08-27.md). The 1.1.0 extension
+ZIP (`32e7c21b...`) is not yet on the store; the store serves approved 1.0.0. GitHub release,
+npm publish, store submission, MCP Registry record, and website copy remain owner-authorized
+channel actions.
 
 ## In flight: 1.0 release pipeline
 
