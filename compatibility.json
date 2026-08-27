@@ -23,6 +23,10 @@
     {
       "adapterVersion": "1.0.0",
       "serviceVersionBlock": "1.0"
+    },
+    {
+      "adapterVersion": "1.1.0",
+      "serviceVersionBlock": "1.1"
     }
   ]
 }

@@ -5,6 +5,14 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- ZCode joins the supported harness registry (ADR-0141): install, uninstall, doctor, and the
+  workbench manage `~/.zcode/cli/config.json` under its `mcp.servers` dialect, and a
+  hand-registered orchestrator command stays pinned foreign evidence.
+
 ## [1.0.0] - 2026-08-26
 
 Published 2026-08-26 as the GitHub release `v1.0.0`, the npm package `ghostlight@1.0.0`, the
