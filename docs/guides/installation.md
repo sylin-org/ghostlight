@@ -1,4 +1,4 @@
-# Installing Ghostlight 1.0
+# Installing Ghostlight
 
 Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
 matching Chromium extension. No account, no resident launcher service, no admin rights.
@@ -7,7 +7,7 @@ This guide covers the published package and the source-development path you can 
 
 ## Release installation journey
 
-1. Run `npx -y ghostlight@1.0.0 install`. The checksum-bound launcher downloads one exact sibling
+1. Run `npx -y ghostlight@1.1.0 install`. The checksum-bound launcher downloads one exact sibling
    set, registers detected native browsers for the current user, creates the Linux Applications
    entry, and connects detected MCP clients.
    A native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
@@ -16,7 +16,7 @@ This guide covers the published package and the source-development path you can 
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
    Open Ghostlight from Applications whenever you want the workbench.
 
-That is the normal installation path. `npx -y ghostlight@1.0.0 doctor` is recovery when something
+That is the normal installation path. `npx -y ghostlight@1.1.0 doctor` is recovery when something
 does not connect; it is not another required setup step.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
@@ -34,7 +34,7 @@ journey. Provenance verification, clean-machine install, upgrade, and uninstall 
 not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
-registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.0.0`
+registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.1.0`
 remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior

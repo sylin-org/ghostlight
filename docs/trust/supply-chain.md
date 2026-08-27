@@ -14,9 +14,9 @@ release asset from 2026-07 onward; earlier releases attest the packaged archives
 also carry a canonical `SHA256SUMS` manifest. A read-only assembly job creates the complete
 release bundle, including the SBOM; the privileged publisher can only download that bundle,
 verify its exact file list and hashes, attest it, and create the release.
-The public channels currently serve 0.8.0. The 1.0 workflow builds and attests a complete candidate
-without publishing it; channel publication remains an explicit owner-approved operation after
-native verification. Scoop and WinGet metadata is prepared only against observable matching
+The public channels currently serve 1.1.0 (the Chrome Web Store adapter stays 1.0.0 by design).
+The workflow builds and attests a complete candidate without publishing it; channel publication
+remains an explicit owner-approved operation after verification. Scoop and WinGet metadata is prepared only against observable matching
 assets. See [the current build-only workflow](../../.github/workflows/release.yml) and
 [SECURITY.md](../../SECURITY.md).
 

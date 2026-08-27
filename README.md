@@ -34,10 +34,10 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-The published release is 1.0. It is available as the GitHub release
-[`v1.0.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.0.0), the npm package
-`ghostlight@1.0.0`, the Chrome Web Store adapter v1.0.0, and the MCP Registry record
-`org.sylin/ghostlight 1.0.0`, all observed on 2026-08-26 and recorded in
+The published release is 1.1. It is available as the GitHub release
+[`v1.1.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.1.0), the npm package
+`ghostlight@1.1.0`, the Chrome Web Store adapter v1.0.0, and the MCP Registry record
+`org.sylin/ghostlight 1.1.0`, all observed on 2026-08-27 and recorded in
 [`docs/public-status.json`](docs/public-status.json).
 
 ## What you get

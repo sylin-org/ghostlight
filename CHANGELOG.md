@@ -5,7 +5,11 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-08-27
+
+Published 2026-08-27 as the GitHub release `v1.1.0` and the npm package `ghostlight@1.1.0`,
+from candidate run 33097568009 at revision `655e2078`. The Chrome Web Store adapter stays at
+1.0.0; adapter 1.0.0 covers this service line (ADR-0142).
 
 ### Added
 
