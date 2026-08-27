@@ -74,41 +74,49 @@ test("presentation preserves the established Ghostlight palette and motion", () 
   });
   const root = join(__dirname, "..");
   const renderer = readFileSync(join(root, "lib", "presentation.js"), "utf8");
+  const presentationCss = readFileSync(join(root, "lib", "presentation-css.js"), "utf8");
   const chrome = readFileSync(join(root, "ui.css"), "utf8");
   assert.match(renderer, /M0 0 L0 19 L5 14\.5 L8\.2 22/);
-  assert.match(renderer, /ghostlight-capframe 1500ms cubic-bezier\(\.5,0,\.2,1\)/);
   assert.match(renderer, /managed && runtimeReachable && !recordingActive/);
   assert.match(renderer, /function setRecording\(value\)/);
   assert.match(renderer, /host\.style\.display = hiddenForTool \? "none" : "block"/);
   assert.match(renderer, /role", "status"/);
   assert.match(renderer, /aria-live", "polite"/);
   assert.match(renderer, /aria-atomic", "true"/);
-  assert.match(renderer, /\.denial-ribbon\{animation:none!important\}/);
+  // The stylesheet is its own module; the renderer consumes it through that one seam and must
+  // not grow an inline template back.
+  assert.match(renderer, /GhostlightPresentationCss\.build\(TOKENS, REDUCED_FADE_SELECTOR\)/);
+  assert.doesNotMatch(renderer, /style\.textContent = `/);
+  assert.match(presentationCss, /build\(tokens, reducedFadeSelector\)/);
+  assert.match(presentationCss, /ghostlight-capframe 1500ms cubic-bezier\(\.5,0,\.2,1\)/);
+  assert.match(presentationCss, /\.denial-ribbon\{animation:none!important\}/);
   // The guardrail must rise, not squash: scaling a flex row vertically deforms its badge.
-  assert.doesNotMatch(renderer, /ghostlight-notif-grow\{0%\{opacity:0;transform:scaleY\(0\)\}/);
+  assert.doesNotMatch(presentationCss, /ghostlight-notif-grow\{0%\{opacity:0;transform:scaleY\(0\)\}/);
   // One ring per click, dashed for a secondary button (tool-visual-signatures.md).
-  assert.match(renderer, /\.ripple\.secondary\{border-style:dashed\}/);
+  assert.match(presentationCss, /\.ripple\.secondary\{border-style:dashed\}/);
   assert.match(renderer, /const clicks = Math\.min\(3, Math\.max\(1, Number\(shape && shape\.clicks\) \|\| 1\)\)/);
   assert.match(renderer, /index \* CLICK_STAGGER_MS/);
   // The read scan must reach zero, or an interrupted sweep leaves a lit bar.
-  assert.doesNotMatch(renderer, /100%\{opacity:\.85;transform:translateY\(100vh\)\}/);
+  assert.doesNotMatch(presentationCss, /100%\{opacity:\.85;transform:translateY\(100vh\)\}/);
 
-  // Identity reaches the stylesheet once as custom properties; the vocabulary below is static
-  // CSS, so a colour or curve changes in exactly one place.
-  assert.match(renderer, /:host\{all:initial;\$\{TOKENS\}\}/);
+  // Identity reaches the stylesheet once as custom properties; the vocabulary in the module is
+  // static CSS apart from the two values build() receives, so a colour or curve changes in
+  // exactly one place.
+  assert.match(presentationCss, /:host\{all:initial;\$\{tokens\}\}/);
   assert.match(renderer, /--gl-sky:\$\{SKY\};--gl-argb:\$\{SKY_RGB\}/);
-  const stylesheet = renderer.slice(renderer.indexOf("style.textContent = `"), renderer.indexOf("`;", renderer.indexOf("style.textContent = `")));
-  const interpolations = stylesheet.match(/\$\{[A-Z_]+\}/g) || [];
+  const templateStart = presentationCss.indexOf("return `");
+  const stylesheet = presentationCss.slice(templateStart + "return `".length, presentationCss.indexOf("`;", templateStart));
+  const interpolations = stylesheet.match(/\$\{[a-zA-Z_]+\}/g) || [];
   assert.deepEqual(
     [...new Set(interpolations)].sort(),
-    ["${REDUCED_FADE_SELECTOR}", "${TOKENS}"],
+    ["${reducedFadeSelector}", "${tokens}"],
     "the stylesheet must stay static apart from its tokens and generated reduced-motion list"
   );
 
   // Reduced-motion coverage is generated from the registry, so a new effect cannot silently
   // keep animating for someone who asked it not to.
-  assert.match(renderer, /\$\{REDUCED_FADE_SELECTOR\}\{animation-name:ghostlight-fade!important/);
-  assert.doesNotMatch(renderer, /\.trail-dot,\.field-shimmer,\.field-splash,\.target-glow/);
+  assert.match(stylesheet, /\$\{reducedFadeSelector\}\{animation-name:ghostlight-fade!important/);
+  assert.doesNotMatch(stylesheet, /\.trail-dot,\.field-shimmer,\.field-splash,\.target-glow/);
   const registrySource = renderer.slice(renderer.indexOf("const TRANSIENT_EFFECTS"), renderer.indexOf("REDUCED_FADE_SELECTOR"));
   const registry = [...registrySource.matchAll(/"([a-z- ]+)"/g)].map((match) => match[1]);
   assert.ok(registry.length >= 18, `expected the full transient vocabulary, saw ${registry.length}`);
