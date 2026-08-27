@@ -10,6 +10,11 @@ case "$state_label" in
     *[!a-zA-Z0-9.-]*) echo "state label contains unsupported characters: $state_label" >&2; exit 2 ;;
 esac
 artifact=$(realpath "$artifact")
+# The package must report the workspace version, derived here so a version bump cannot
+# silently invalidate this smoke; the pin is "package reflects source truth", not a literal.
+repository=$(cd "$(dirname "$0")/.." && pwd)
+expected_version=$(awk '/^\[workspace\.package\]/{found=1} found && /^version = "/{sub(/^version = "/, ""); sub(/"$/, ""); print; exit}' "$repository/Cargo.toml")
+test -n "$expected_version"
 test_home=/home/ghostlight-package-test-$state_label
 runtime=$test_home/.cache/ghostlight/ghostlight-runtime.json
 authority_pid=
@@ -42,8 +47,8 @@ dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight.1.gz'
 dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-mcp-connector.1.gz'
 dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-browser-connector.1.gz'
 DEBIAN_FRONTEND=noninteractive apt-get install -y "$artifact"
-test "$(ghostlight --version)" = "ghostlight 1.0.0"
-test "$(dpkg-query -W -f='${Version}' ghostlight)" = "1.0.0"
+test "$(ghostlight --version)" = "ghostlight $expected_version"
+test "$(dpkg-query -W -f='${Version}' ghostlight)" = "$expected_version"
 test "$(dpkg-query -W -f='${Maintainer}' ghostlight)" = "Leonardo Botinelly <hello@sylin.org>"
 test "$(dpkg-query -W -f='${Section}' ghostlight)" = "utils"
 dpkg-query -W -f='${Depends}' ghostlight | grep -Fq 'libc6 (>= 2.34)'
@@ -111,7 +116,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
     setpriv --reuid=1000 --regid=1000 --clear-groups \
         env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" \
         timeout 10s ghostlight-mcp-connector >"$test_home/mcp.json"
-jq -e '.result.serverInfo.name == "ghostlight" and .result.serverInfo.version == "1.0.0"' \
+jq -e --arg version "$expected_version" \
+    '.result.serverInfo.name == "ghostlight" and .result.serverInfo.version == $version' \
     "$test_home/mcp.json" >/dev/null
 cleanup_authority
 authority_pid=
@@ -119,7 +125,7 @@ authority_pid=
 DEBIAN_FRONTEND=noninteractive apt-get remove -y ghostlight
 test ! -e /usr/bin/ghostlight
 DEBIAN_FRONTEND=noninteractive apt-get install -y "$artifact"
-test "$(ghostlight --version)" = "ghostlight 1.0.0"
+test "$(ghostlight --version)" = "ghostlight $expected_version"
 DEBIAN_FRONTEND=noninteractive apt-get purge -y ghostlight
 ! dpkg-query -W ghostlight >/dev/null 2>&1
 test ! -e /usr/bin/ghostlight
