@@ -226,6 +226,15 @@ Every one of these cost something to learn.
   reviewed Chrome Web Store artifact. A packager used for publication must pin serialization and
   container fields explicitly to the reviewed artifact's exact shape, and a release must prove
   determinism across operating systems, not just across runs on one machine.
+- **Any content edit to a 0.8-inventoried file drifts the artifact ledgers, and CI is where you
+  find out.** The 809-row disposition ledger tracks each tracked historical path's relationship
+  to its 0.8 blob, so touching `server.json`, the PR template, a trust page, or README in a way
+  that changes bytes flips that row to stale -- discovered only in CI's release-truth job, twice
+  on 2026-08-26 (relicensing pass, registry version bump). Run
+  `pwsh -NoProfile -File scripts/check-0.8-artifacts.ps1` locally before pushing any commit that
+  edits an active file inherited from 0.8, and if it fails, regenerate the ledgers with
+  `scripts/harvest-0.8-artifacts.ps1 -Revision <the ledger's recorded 0.8 revision>` in the same
+  commit.
 
 ## Where to look
 
