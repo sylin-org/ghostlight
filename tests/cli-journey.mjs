@@ -26,6 +26,11 @@ const environment = {
 
 const ghostlight = join(binDir, `ghostlight${executableSuffix}`);
 if (!existsSync(ghostlight)) throw new Error(`Missing ${ghostlight}; build the workspace first.`);
+// The expected banner derives from the workspace version so a version bump cannot silently
+// invalidate this journey; the pin is "banner reflects source truth", not a literal.
+const sourceVersion = readFileSync(join(repository, "Cargo.toml"), "utf8")
+  .match(/\[workspace\.package\][\s\S]*?^version = "([^"]+)"/m)?.[1];
+if (!sourceVersion) throw new Error("Could not read the workspace version from Cargo.toml");
 
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 const call = (args, input) =>
@@ -48,7 +53,7 @@ const cleanup = [runtimeFile, auditFile, leaseFile];
 try {
   const version = spawnSync(ghostlight, ["--version"], { env: environment, encoding: "utf8" });
   assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), "ghostlight 1.0.0");
+  assert.equal(version.stdout.trim(), `ghostlight ${sourceVersion}`);
   const help = spawnSync(ghostlight, ["--help"], { env: environment, encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ghostlight install/);
