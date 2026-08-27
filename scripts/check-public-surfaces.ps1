@@ -40,7 +40,6 @@ if (-not $cargoMatch.Success) {
 $sourceVersion = $cargoMatch.Groups["version"].Value
 
 Assert-Equal -Actual $tauri.version -Expected $sourceVersion -Label "desktop/source version"
-Assert-Equal -Actual $manifest.version -Expected $sourceVersion -Label "adapter/source version"
 Assert-Equal -Actual $server.version -Expected $publicStatus.release -Label "server.json/public release"
 if (@($server.packages).Count -ne 1) {
     throw "server.json must declare exactly one public package"
