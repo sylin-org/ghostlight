@@ -81,20 +81,28 @@ the change, so the workbench card appears after the next release deployment thro
 ## 1.1.0 candidate held (2026-08-27)
 
 The workspace 1.1.0 bump surfaced every hand-stamped 1.0.0 copy that asserts against live
-output, and three runs found them in sequence: the CLI journey's banner pin, four literals in
-the Debian lifecycle smoke, and finally the npm candidate guard correctly refusing
-`packaging/npm/package.json`, which the bump commit had missed along with the MCPB manifest,
-the npm checksums placeholder, the Debian changelog, and the man pages. Test assertions now
-derive the expected version from the workspace (`45874122`, `a73533cf`); released artifact
-identity is stamped (`f912a834`), and the identity guards held as designed.
+output, and the runs found them in sequence: the CLI journey's banner pin, four literals in
+the Debian lifecycle smoke, and the npm candidate guard correctly refusing
+`packaging/npm/package.json` along with the MCPB manifest, the npm checksums placeholder, the
+Debian changelog, and the man pages. Test assertions now derive the expected version from the
+workspace (`45874122`, `a73533cf`); released artifact identity is stamped (`f912a834`).
 
-Candidate run [33089681641](https://github.com/sylin-org/ghostlight/actions/runs/33089681641)
-is green at revision `f912a834a30eb704269c21dc25d7fe3f76ec3d31`, pinned in
+The owner then caught the deeper disease: that bump had mechanically restamped the unmodified
+Chrome adapter as 1.1.0. The adapter is independently versioned (ADR-0093), so the manifest
+reverted to 1.0.0, `compatibility.json` records adapter 1.0.0 covering service 1.0.0-1.1.0 as
+one range row, and the two equality guards that had forced the restamping
+(`check-public-surfaces.ps1`, `check-repository-integrity.ps1`) were removed in favor of the
+registry-derived coverage gate. The assembler also stopped restamping the ZIP's name with the
+service version (`1670e237`, `655e2078`).
+
+Candidate run [33097568009](https://github.com/sylin-org/ghostlight/actions/runs/33097568009)
+is green at revision `655e2078ef1631e1d64e50c777c0ac12398a1196`, pinned in
 `docs/release/freeze.json`, and held in two verified local copies -- see
-[candidate-custody-2026-08-27](testing/candidate-custody-2026-08-27.md). The 1.1.0 extension
-ZIP (`32e7c21b...`) is not yet on the store; the store serves approved 1.0.0. GitHub release,
-npm publish, store submission, MCP Registry record, and website copy remain owner-authorized
-channel actions.
+[candidate-custody-2026-08-27](testing/candidate-custody-2026-08-27.md). The candidate's
+extension ZIP is the current 1.0.0-labeled source (post-D1 refactor, so not byte-identical to
+the store's approved 1.0.0) and binds provenance only; the store listing needs no action for
+1.1.0. GitHub release, npm publish, MCP Registry record, and website copy remain
+owner-authorized channel actions.
 
 ## In flight: 1.0 release pipeline
 
