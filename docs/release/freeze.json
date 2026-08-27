@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "f912a834a30eb704269c21dc25d7fe3f76ec3d31",
-  "frozen_at_utc": "2026-08-27T16:35:00Z",
+  "revision": "655e2078ef1631e1d64e50c777c0ac12398a1196",
+  "frozen_at_utc": "2026-08-27T18:35:00Z",
   "frozen_by": "onose",
-  "note": "1.1.0 candidate build revision (the revision candidate run 33089681641 built); supersedes the 1.0.0 pin b2c27993, whose candidate is published"
+  "note": "1.1.0 candidate build revision (the revision candidate run 33097568009 built); the Chrome adapter stays 1.0.0 and supersedes the retracted f912a834 and 464f145a candidates"
 }
