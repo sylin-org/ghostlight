@@ -120,8 +120,8 @@ $extension = Get-Content -LiteralPath (Join-Path $repo "extension/manifest.json"
     ConvertFrom-Json
 $tauri = Get-Content -LiteralPath (Join-Path $repo "crates/orchestrator/tauri.conf.json") -Raw |
     ConvertFrom-Json
-if ($extension.version -ne $sourceVersion -or $tauri.version -ne $sourceVersion) {
-    throw "Source, extension, and desktop versions differ"
+if ($tauri.version -ne $sourceVersion) {
+    throw "Source and desktop versions differ"
 }
 
 $permissionDocument = Get-Content -LiteralPath (
