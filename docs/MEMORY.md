@@ -19,10 +19,11 @@ the owner wants, and what this project learned the hard way.
 - **Release work must earn its place.** Keep the checks that prevent a real failure, prove a user
   promise, or make recovery safer. Do not turn restamping, duplicate checklists, optional directory
   submissions, or one giant conductor into release gates.
-- **The 0.8 artifact trust model remains authoritative.** Ghostlight ships checksum-bound artifacts
-  with keyless GitHub build-provenance attestations. It has no Windows code-signing certificate.
-  Chrome API credentials are optional automation; manual Developer Dashboard submission is a
-  supported release path. Do not invent either as a readiness gate without a new owner decision.
+- **The artifact trust model is checksums plus keyless GitHub build-provenance attestations.**
+  Ghostlight has no Windows code-signing certificate (the SignPath Foundation application is
+  pending). Chrome API credentials are optional automation; manual Developer Dashboard submission
+  is a supported release path. Do not invent either as a readiness gate without a new owner
+  decision.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
   the visual language, the motion character, and user expectations are identity. Model-facing tools
   and descriptions are mechanisms the orchestrator owns and may redesign.
@@ -174,11 +175,6 @@ Every one of these cost something to learn.
   satisfy a file-exists wait before the new authority publishes, producing a truthful result about
   the wrong candidate. Namespace the test home by candidate, and pass the effective Cargo target
   directory explicitly when packaging so a host profile cannot redirect the binaries under test.
-- **The 0.8 distribution and trust records are active inputs, not a working 1.0 pipeline.** Harvest
-  their tests, platform facts, public-state model, and delivery safeguards, then adapt the machinery
-  to current boundaries before claiming a 1.0 artifact exists. Keep a machine-checked disposition
-  for every harvested behavior group and process scenario; never use a smaller raw test count as a
-  claim of equivalent coverage.
 - **An internal rewrite does not reset the user experience.** Preserve observable commands,
   launchers, packages, identity, tests, and accumulated platform evidence unless the owner changes
   them explicitly. The npm launcher is a mandatory Ghostlight entry point, and 1.0 may not ship
@@ -191,10 +187,6 @@ Every one of these cost something to learn.
   event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
   Tauri workbench has died. Windows desktop acceptance identifies the exact `Ghostlight` / `Tauri
   Window` HWND and checks its visible, minimized, Close, activation, and recreation states.
-- **A historical guard should protect relationships, not freeze active files.** Detect when an old
-  path disappears, returns, or changes from byte-identical to evolved. Once an active path is
-  explicitly `retained-evolved`, pinning each new blob adds ledger churn without preserving another
-  0.8 fact. That is release bureaucracy, not release safety.
 - **Diff the public surfaces by name, not just the source tree.** The clean-room inventory compared
   implementation and tests and still dropped the README's hero GIF, badge row, and onboarding
   spine, the Homebrew formula template, the website publish path, the icon generator, and the
@@ -226,15 +218,6 @@ Every one of these cost something to learn.
   reviewed Chrome Web Store artifact. A packager used for publication must pin serialization and
   container fields explicitly to the reviewed artifact's exact shape, and a release must prove
   determinism across operating systems, not just across runs on one machine.
-- **Any content edit to a 0.8-inventoried file drifts the artifact ledgers, and CI is where you
-  find out.** The 809-row disposition ledger tracks each tracked historical path's relationship
-  to its 0.8 blob, so touching `server.json`, the PR template, a trust page, or README in a way
-  that changes bytes flips that row to stale -- discovered only in CI's release-truth job, twice
-  on 2026-08-26 (relicensing pass, registry version bump). Run
-  `pwsh -NoProfile -File scripts/check-0.8-artifacts.ps1` locally before pushing any commit that
-  edits an active file inherited from 0.8, and if it fails, regenerate the ledgers with
-  `scripts/harvest-0.8-artifacts.ps1 -Revision <the ledger's recorded 0.8 revision>` in the same
-  commit.
 - **A READY card covers only the roster.** Registration state is per-client, read from that
   client's own configuration; a client with no registry row is invisible no matter how broken
   its hand-written entry is, and one client's green card never contradicts another's failure

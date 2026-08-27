@@ -1,10 +1,9 @@
 # Releasing Ghostlight 1.0
 
-This is the release plan for the current 1.0 implementation. The completed 0.8 publication record
-lives in [`business/PUBLICATION-PACKET-0.8.md`](business/PUBLICATION-PACKET-0.8.md), and the active
-harvest lives in [`0.8/HARVEST.md`](0.8/HARVEST.md). The old raw-binary packages and implementation
-cannot be relabeled as 1.0, but their tests, platform facts, compatibility model, release safety,
-and publication lessons are inputs to this pipeline.
+This is the release plan for the current implementation. The completed 0.8 publication record and
+the 0.8 harvest layer were retired on 2026-08-27 and live only in git history. The old raw-binary
+packages and implementation cannot be relabeled as 1.0; their accumulated platform facts and
+publication lessons are carried by this pipeline and its records.
 
 Current gate state and evidence are tracked in the
 [1.0 release checklist](RELEASE-CHECKLIST.md). This file remains the process authority; the

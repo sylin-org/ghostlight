@@ -85,4 +85,4 @@ This assessment should be reviewed when repository ownership, branch rules, rele
 licensing boundaries, or the current OSPS Baseline version changes. It was revised on 2026-08-25
 for the ADR-0140 licensing change.
 
-Last reviewed: 2026-08-25 (originally 2026-07-18 against v0.8.0) | Contact: hello@sylin.org
+Last reviewed: 2026-08-25 | Contact: hello@sylin.org

@@ -56,8 +56,8 @@ or quarantined during an implementation rewrite.
   1.0 clean-room rewrite. Preserve its Git history, but do not copy it into the new internals.
 - Clean-room does not make tests, fixtures, CI, packaging knowledge, platform findings, release
   evidence, or publication history disposable. Inventory and translate those assets onto current
-  seams before retiring a working predecessor. The active 0.8 harvest is indexed from
-  `docs/0.8/HARVEST.md`.
+  seams before retiring a working predecessor. The retired 0.8 layer lives only in git history
+  and the `archive/0.9-pre-1.0` tag.
 - Product identity is inherited. Names, icons, visual language, animation, public character, legal
   identity, and user expectations survive the rewrite unless the owner explicitly changes them.
 - Internal tools and model-facing descriptions are mechanisms, not product identity. The

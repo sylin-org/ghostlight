@@ -36,7 +36,6 @@ onboarding document is [AGENTS.md](../AGENTS.md) at the root.
 | [legal/](legal/) | Legal and entity records. |
 | [licenses/](licenses/) | License texts (MIT; the root `LICENSE` is the Apache-2.0 text). |
 | [assets/](assets/) | Images and artwork used by the documentation. |
-| [0.8/](0.8/) | The preserved 0.8 release documentation. Historical truth about a shipped product, not a 1.0 claim. |
 
 ## Two rules that keep this readable
 

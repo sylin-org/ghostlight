@@ -25,17 +25,6 @@ jobs:
       - name: Check source, public, and compatibility truth
         shell: pwsh
         run: ./scripts/check-public-surfaces.ps1
-      - name: Regenerate the 0.8 evidence inventory
-        shell: pwsh
-        run: |
-          ./scripts/harvest-0.8-test-inventory.ps1
-          git diff --exit-code -- docs/0.8/test-inventory.json
-      - name: Check every harvested behavior group has a disposition
-        shell: pwsh
-        run: ./scripts/check-0.8-recovery.ps1
-      - name: Check every historical artifact has a disposition
-        shell: pwsh
-        run: ./scripts/check-0.8-artifacts.ps1
       - name: Check whole-repository integrity
         shell: pwsh
         run: ./scripts/check-repository-integrity.ps1

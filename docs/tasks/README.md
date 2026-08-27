@@ -35,7 +35,6 @@ tree.
 | [executor-split](executor-split/) | Splitting `work/mod.rs` (5824 lines) into per-operation-family files | Complete | 2026-08-15 |
 | [outcome-language](outcome-language/) | ADR-0103: one module owns what Ghostlight says happened | Complete | 2026-08-11 |
 | [browser-kernel](browser-kernel/) | ADR-0101: canonical browser operations, native surface, compatibility adapter | Open at stage R5 | 2026-08-08 |
-| [public-delight-0.8](public-delight-0.8/) | The public surfaces of the 0.8 release | E1-E6 complete; 0.8 in its observation loop | 2026-08-07 |
 | [protocol-versioned-mcp-edge](protocol-versioned-mcp-edge/) | ADR-0096/0098: protocol-versioned MCP edge, neutral service | Implementation and corrections landed | 2026-08-05 |
 | [closed-loop-core](closed-loop-core/) | ADR-0078: closed-loop browser core | C1-C6 complete | 2026-07-15 |
 | [lightbox-legacy](lightbox-legacy/) | Migrating legacy scenarios onto isolated process orchestration | T1-T4 migrated | 2026-07-14 |

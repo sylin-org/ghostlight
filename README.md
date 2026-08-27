@@ -40,8 +40,6 @@ The published release is 1.0. It is available as the GitHub release
 `org.sylin/ghostlight 1.0.0`, all observed on 2026-08-26 and recorded in
 [`docs/public-status.json`](docs/public-status.json).
 
-A 0.8 installation upgrades in place; the two lines are not interchangeable.
-
 ## What you get
 
 - **24 catalog tools**: 23 browser tools covering tabs, navigation, reading a page, screenshots,

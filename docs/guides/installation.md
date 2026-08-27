@@ -3,10 +3,7 @@
 Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
 matching Chromium extension. No account, no resident launcher service, no admin rights.
 
-This guide covers the planned provenance-attested 1.0 package and the source-development path you
-can follow today. The published 0.8 package and its Chrome adapter are documented in
-[`../public-status.json`](../public-status.json); keep those and a 1.0 build apart, because they
-are not interchangeable.
+This guide covers the published package and the source-development path you can follow today.
 
 ## Release installation journey
 

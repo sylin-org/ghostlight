@@ -5,9 +5,9 @@ Last checked: 2026-08-07.
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
 paths. It is not proof that a submission was sent or accepted.
 
-The synchronized 0.8 package, store, directory, and showcase candidates live in
-[`PUBLIC-COPY-DRAFTS-0.8.md`](PUBLIC-COPY-DRAFTS-0.8.md). They remain owner-gated until the release
-and each named external surface are ready.
+The synchronized 0.8 package, store, directory, and showcase candidates lived in
+`PUBLIC-COPY-DRAFTS-0.8.md`, retired with the 0.8 layer on 2026-08-27 and preserved in git
+history. Directory submissions remain owner-gated per surface.
 
 ## Current public directory state
 

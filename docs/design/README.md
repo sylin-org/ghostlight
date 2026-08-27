@@ -25,7 +25,6 @@ commitments, and they were not rewritten as the product moved.
 | Note | Date |
 | --- | --- |
 | [mcp-spec-currency-2026-07.md](mcp-spec-currency-2026-07.md) | MCP spec currency against the tree |
-| [public-message-0.8.md](public-message-0.8.md) | The 0.8 public message architecture |
 | [developer-first-entry-2026-07.md](developer-first-entry-2026-07.md) | Repository and installation entry review |
 | [non-author-experience-review-2026-07.md](non-author-experience-review-2026-07.md) | Retrospective non-author experience review |
 | [public-awareness-plan-2026-07.md](public-awareness-plan-2026-07.md) | Public awareness plan |

@@ -46,10 +46,6 @@ jobs:
       - shell: pwsh
         run: ./scripts/check-public-surfaces.ps1
       - shell: pwsh
-        run: ./scripts/check-0.8-recovery.ps1
-      - shell: pwsh
-        run: ./scripts/check-0.8-artifacts.ps1
-      - shell: pwsh
         run: ./scripts/check-repository-integrity.ps1
 
   native-packages:

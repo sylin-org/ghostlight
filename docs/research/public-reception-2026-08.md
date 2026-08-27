@@ -174,7 +174,7 @@ local audit, without a Ghostlight-hosted service or telemetry.
 
 E6 repeated the version, store, release, traffic, directory, discovery, and comparison checks. The
 full owner-gated action order is in
-[`PUBLICATION-PACKET-0.8.md`](../business/PUBLICATION-PACKET-0.8.md). This section records what
+`PUBLICATION-PACKET-0.8.md` (retired 2026-08-27; preserved in git history). This section records what
 changed after the E1 snapshot without rewriting that earlier observation.
 
 - The live canonical website changed. Website `main` and the E5 work branch both resolve to
@@ -211,6 +211,6 @@ changed after the E1 snapshot without rewriting that earlier observation.
   adapter, source 0.8.0 service and adapter, platform, and entry-path claims.
 
 The release, 7-day, and 30-day manual record is
-[`public-reception-loop-0.8.md`](public-reception-loop-0.8.md). It keeps public counters,
+`public-reception-loop-0.8.md` (retired 2026-08-27; preserved in git history). It keeps public counters,
 owner-visible aggregates, voluntary human reports, and project-authored distribution in separate
 evidence categories.

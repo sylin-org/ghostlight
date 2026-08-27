@@ -2,8 +2,8 @@
 
 Last updated: 2026-08-27 (1.1.0 candidate held).
 
-This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
-preserved `docs/0.8/` material carry history; this file does not rewrite it.
+This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
+history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
 
 ## 1.0 is published (2026-08-26)
 
@@ -859,14 +859,10 @@ full visible browser matrix remain owed.
 - `dev` is the working branch and the release source line. Workspace version `1.1.0`, the ZCode
   harness line, whose candidate is held in custody. It absorbed `ghostlight-1.0`, which was a
   fast-forward and has been retired; `main` was promoted to the published 1.0.0 on 2026-08-26.
-- `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
-  routine sync. The 1.0 line now carries Windows and Linux source, extension, process, and
-  supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
-  `dev`. Manual build-only run `31920647296` created, inspected, and attested the current candidate
-  without publishing it. Visible native operating-system validation and publication remain owed.
-  Do not promote `dev` before those live gates pass. As of 2026-08-16 the owner also decided that
-  1.0 waits for the reference-experience epic, so that epic's completion, including its S8
-  evaluation, is a release gate rather than parallel work.
+- `main` carries the published 1.0 line, promoted by fast-forward on 2026-08-26. Promoting `dev`
+  again for 1.1.0 is a deliberate release decision, not routine sync. The line carries Windows and
+  Linux source, extension, process, and supply-chain CI; a manual Pages deployment; and bounded
+  monthly dependency updates targeting `dev`.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
@@ -875,11 +871,6 @@ full visible browser matrix remain owed.
 - The pre-1.0 worktree snapshot is preserved as the annotated tag `archive/0.9-pre-1.0`
   (`f5d43768`), pushed to the remote. It replaced a local-only branch that existed on one machine.
   It is history, never implementation authority for the 1.0 tree.
-- The 0.8 recovery is now source-backed rather than implicit. `docs/0.8/HARVEST.md` distinguishes
-  the released, reconciled, mature, and archived snapshots; `docs/0.8/test-inventory.json` records
-  1,354 ordinary test declarations and 34 source-enumerated Lightbox scenarios; and the dated
-  publication observation corrects WinGet to merged while recording Glama drift. The old ledger's
-  unexplained claim of 37 Lightbox scenarios is preserved as a discrepancy, not repeated as fact.
 - Release safeguards are active again on `dev`: Rust, extension, and process CI cover Windows and
   Linux; dependency licenses, sources, wildcards, and
   advisories are gated; source and observed-public versions are checked separately; and the store
@@ -893,25 +884,13 @@ full visible browser matrix remain owed.
   candidate passed payload, install, doctor, idempotency, workbench-lifecycle, and uninstall checks
   on this development host. Clean-machine, provenance-verified, login/reboot, 0.8 package-upgrade, and Linux
   native-package journeys remain required evidence.
-- The 0.8 test recovery is now dispositioned rather than merely counted.
-  `docs/0.8/RECOVERY-MATRIX.md` maps all 1,388 entries through twelve current behavior areas;
-  `docs/0.8/test-recovery.json` gives each of the 34 Lightbox process scenarios an explicit
-  reexpressed, superseded, invariant-retained, or deferred state; and CI checks the map against the
-  source-derived inventory. Two missing high-value proofs were added: sibling runtime discovery
-  does not depend on Linux session environment, and an unreachable configured managed authority
-  fails closed from cold start.
-- The file-level harvest now names and content-addresses 809 in-scope artifacts from the mature 0.8 tree.
-  Four high-value absences are restored on current seams: static Windows runtime policy, a narrow
-  live-swap command, Chrome OAuth recovery, and independent Chrome publication. The checked ledger
-  still detects a removed, newly restored, or identical-to-evolved path, but an already-evolved
-  active file may keep evolving without an 809-row bookkeeping rewrite.
 - Release construction is one checked 17-artifact unit: two native packages, two portable
   archives, six raw binaries, the deterministic extension, four component SBOMs, the npm launcher,
   and the Claude Desktop MCPB. Exact byte length and SHA-256 bind every item to one version and full
   source revision. The workflow adds GitHub build provenance but remains build-only. GitHub, npm,
   Chrome, and MCP Registry adapters each default to a non-mutating plan and require an explicit
   named action plus owner-approved execution; there is no master conductor.
-- The 0.8 user entry points are restored on current seams. `npx -y ghostlight install` remains the
+- The published user entry points are restored on current seams. `npx -y ghostlight install` remains the
   primary journey; a bare npm launch remains MCP stdio; the launcher verifies all three cached
   binaries on every run. `ghostlight install`, `uninstall`, `doctor`, `doctor --fix`, `status
   --json`, `service`, dry-run, repeated client selection, and repeated browser selection are live.
@@ -920,8 +899,8 @@ full visible browser matrix remain owed.
 - Release access was recovered without exposing values. GitHub and npm authentication work, and
   the MCP DNS key and official publisher binary are present. Chrome API V2 access now validates the
   exact existing item after a PKCE refresh-token renewal and a non-secret publisher-id override.
-  Ghostlight has no Windows code-signing certificate; 0.8 used checksums plus keyless GitHub
-  provenance, and 1.0 now retains that model instead of inventing a signing gate.
+  Ghostlight has no Windows code-signing certificate; checksums plus keyless GitHub provenance are
+  the trust model instead of a signing gate.
 
 ## Implemented
 
@@ -1466,11 +1445,8 @@ test tab for direct closure.
   authorization for Store mutation and later public publication.
 - Re-run the Linux lifecycle and visible-browser policy matrix on the current policy-restoration
   revision using the `test-01` development host.
-- Publish the candidate-bound `ghostlight@1.0.0` tarball only after its six raw GitHub assets are
-  observable. Then update `server.json` and publish the MCP Registry record; it must never point a
-  1.0 record at the public 0.8 launcher.
-- Keep the checked 0.8 recovery matrix aligned as current proofs move. Its remaining live-package
-  and visible-browser rows are covered by the release gates above.
+- The MCP Registry record must point at the published npm coordinate of its own release, never an
+  older one.
 
 ## Canonical 1.0 sources
 

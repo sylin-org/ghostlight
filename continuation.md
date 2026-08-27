@@ -58,7 +58,7 @@ externals X1-X3 (parked; never act without the owner naming the action).
   staged revision whose crxVersion does not match the ZIP manifest).
 - Never: phone home (ADR-0028), copy from reference/, read /private/, saps/, or local/ contents,
   weaken trust-doc claims, discard docs/ADRs/history, weaken an over-claim guard.
-- Windows releases have no Authenticode signing by design (0.8 trust model: checksums + GitHub
+- Windows releases have no Authenticode signing by design (trust model: checksums + GitHub
   provenance). SignPath application pending; on acceptance its follow-ups unblock ADR-0105 D3.
 
 ## Gotchas learned 2026-08-26 (do not rediscover)
@@ -72,9 +72,8 @@ externals X1-X3 (parked; never act without the owner naming the action).
   flow, a NEW version ships next, never a mutation of published 1.0.0.
 - A CWS submission in review LOCKS the item; replacing it is `:cancelSubmission` then upload+submit
   (script-gated; owner-authorized pattern used three times).
-- Mass relicensing-style edits require regenerating docs/0.8/artifact-inventory.json +
-  artifact-recovery.json via scripts/harvest-0.8-artifacts.ps1 -Revision <the LEDGER's recorded
-  0.8 rev, not HEAD>; check-0.8-artifacts.ps1 fails CI otherwise.
+- The 0.8 artifact-harvest layer was retired on 2026-08-27 (ADR-0143); no ledger regeneration
+  exists anymore.
 - check-repository-integrity.ps1 validates every local doc link; an ADR rename must update every
   index row that names it.
 - The website (sibling repo sylin-org/website) fetches llms-install.md live from ghostlight main
