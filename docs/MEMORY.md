@@ -95,7 +95,12 @@ the owner wants, and what this project learned the hard way.
   suppresses demand-start while it works; bypassing it makes the connector respawn the authority
   mid-swap, which produced two live instances and two workbench windows at once (2026-08-24,
   foundry press_key diagnosis). If the service seems stuck, deploy again through the script; do
-  not improvise around it.
+  not improvise around it. Convergence after a version change also means hunting the superseded
+  install's own long-lived connectors: an orphan connector demand-starts its exact sibling by
+  path, so stopping a stale orchestrator alone just gets it respawned (2026-08-27, installed 1.0.0
+  MCP connector kept reviving its orchestrator beside the deployed 1.1.0 authority). Stop the
+  connector by exact path first; the parent harness then reconnects through its configured,
+  current-path command.
 
 ## Durable lessons
 
