@@ -856,8 +856,9 @@ candidate above now supplies matching GitHub provenance and the accepted two-row
 Ubuntu GNOME Wayland L1-L9, the matching store adapter, login/reboot, tray, notifications, and the
 full visible browser matrix remain owed.
 
-- `dev` is the working branch and the 1.0 source candidate. Workspace version `1.0.0`. It absorbed
-  `ghostlight-1.0`, which was a fast-forward and has been retired.
+- `dev` is the working branch and the release source line. Workspace version `1.1.0`, the ZCode
+  harness line, whose candidate is held in custody. It absorbed `ghostlight-1.0`, which was a
+  fast-forward and has been retired; `main` was promoted to the published 1.0.0 on 2026-08-26.
 - `main` carries the 0.8 line at `0116feca`. Promoting it is a deliberate release decision, not
   routine sync. The 1.0 line now carries Windows and Linux source, extension, process, and
   supply-chain CI; a manual Pages deployment; and bounded monthly dependency updates targeting
