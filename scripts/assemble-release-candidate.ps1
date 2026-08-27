@@ -122,7 +122,10 @@ $specifications = @(
         target = "chromium-store"
         directory = "chrome-extension"
         pattern = "*.zip"
-        name = "ghostlight-extension-v$Version.zip"
+        # The adapter is independently versioned (ADR-0093): package-extension.ps1
+        # names the ZIP from the manifest, and assembly preserves that name instead
+        # of restamping it with the service version.
+        name = ""
     }
 )
 
@@ -161,7 +164,8 @@ foreach ($specification in $specifications) {
     $source = Resolve-OneArtifact `
         -DirectoryName $specification.directory `
         -Pattern $specification.pattern
-    $destination = Join-Path $assetDirectory $specification.name
+    $assetName = if ($specification.name) { $specification.name } else { (Get-Item -LiteralPath $source).Name }
+    $destination = Join-Path $assetDirectory $assetName
     Copy-Item -LiteralPath $source -Destination $destination
     $item = Get-Item -LiteralPath $destination
     $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
