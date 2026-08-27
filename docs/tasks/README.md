@@ -26,6 +26,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
+| [1.0-plus](1.0-plus/) | Post-publication batch: deferred debt (simplest to most complex), the release-evidence lanes left open at publication, and owner-action externals | D1 next | 2026-08-26 |
 | [demo-press-key-diagnosis](demo-press-key-diagnosis/) | Why the foundry demo's press_key beat failed with a misleading disconnect sentence (diagnosis record, not an execution batch) | Root causes fixed (script ordering; primitive rendering); desk-bell blocking-dialog click defect documented, open | 2026-08-24 |
 | [language-delight](language-delight/) | Delight pass over all model-facing sentences: validation messages, tool descriptions, result guidance, live proof | D1-D4 complete; deployed and proven live | 2026-08-24 |
 | [evidence-1](evidence-1/) | Blocked integration targets show what Ghostlight found (ADR-0129 Decision 4, ADR-0135) | E1-E3 complete; deployed and proven live | 2026-08-24 |

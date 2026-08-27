@@ -1283,6 +1283,9 @@ The executor-split batch is complete through `4d633fbc`.
 
 ## Owed
 
+Post-publication debt and evidence are organized as the
+[1.0-plus batch](tasks/1.0-plus/LEDGER.md); its ledger is the authority on what remains there.
+
 On 2026-08-24 the owner promoted four items below into the pre-freeze window
 ([tasks/pre-freeze-debt](tasks/pre-freeze-debt/LEDGER.md)): the ServiceClient adoption (landed
 the same day -- the bridge is now every edge's handshake home), the unsettled-row color
