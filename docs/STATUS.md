@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-27 (1.1.0 candidate held).
+Last updated: 2026-08-27 (1.1.0 published).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
@@ -78,31 +78,37 @@ debug-build `doctor` check of the new row on this machine. The deployed release 
 the change, so the workbench card appears after the next release deployment through
 `scripts/dev-loop.ps1`.
 
-## 1.1.0 candidate held (2026-08-27)
+## 1.1.0 published (2026-08-27)
 
-The workspace 1.1.0 bump surfaced every hand-stamped 1.0.0 copy that asserts against live
-output, and the runs found them in sequence: the CLI journey's banner pin, four literals in
-the Debian lifecycle smoke, and the npm candidate guard correctly refusing
-`packaging/npm/package.json` along with the MCPB manifest, the npm checksums placeholder, the
-Debian changelog, and the man pages. Test assertions now derive the expected version from the
-workspace (`45874122`, `a73533cf`); released artifact identity is stamped (`f912a834`).
+Publication used the custody-verified candidate at revision
+`655e2078ef1631e1d64e50c777c0ac12398a1196`
+([candidate-custody-2026-08-27](testing/candidate-custody-2026-08-27.md)), which took three runs
+to reach: the version bump surfaced every hand-stamped 1.0.0 copy asserting against live output
+(CLI banner pin, four Debian smoke literals, the npm identity guard correctly refusing the
+missed packaging stamps), and then the owner caught the deeper disease -- the bump had
+mechanically restamped the unmodified Chrome adapter. Per-member release version spaces are
+ratified in [ADR-0142](adr/0142-per-member-release-version-spaces.md): the adapter stayed 1.0.0,
+the two equality guards that forced the restamping were removed, and the assembler stopped
+restamping the ZIP's name.
 
-The owner then caught the deeper disease: that bump had mechanically restamped the unmodified
-Chrome adapter as 1.1.0. The adapter is independently versioned (ADR-0093), so the manifest
-reverted to 1.0.0, `compatibility.json` records adapter 1.0.0 covering service 1.0.0-1.1.0 as
-one range row, and the two equality guards that had forced the restamping
-(`check-public-surfaces.ps1`, `check-repository-integrity.ps1`) were removed in favor of the
-registry-derived coverage gate. The assembler also stopped restamping the ZIP's name with the
-service version (`1670e237`, `655e2078`).
+The publication itself:
 
-Candidate run [33097568009](https://github.com/sylin-org/ghostlight/actions/runs/33097568009)
-is green at revision `655e2078ef1631e1d64e50c777c0ac12398a1196`, pinned in
-`docs/release/freeze.json`, and held in two verified local copies -- see
-[candidate-custody-2026-08-27](testing/candidate-custody-2026-08-27.md). The candidate's
-extension ZIP is the current 1.0.0-labeled source (post-D1 refactor, so not byte-identical to
-the store's approved 1.0.0) and binds provenance only; the store listing needs no action for
-1.1.0. GitHub release, npm publish, MCP Registry record, and website copy remain
-owner-authorized channel actions.
+- GitHub release [`v1.1.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.1.0), tagged
+  at the candidate revision: the draft was created from the verified custody copy after per-file
+  provenance checks, re-downloaded and hash-compared, then published (20 files).
+- npm `ghostlight@1.1.0` (tarball SHA-256 `b4dee8b0...`, pinned against the candidate manifest).
+- MCP Registry record `org.sylin/ghostlight` 1.1.0.
+- The Chrome Web Store adapter stays 1.0.0 by design; no store action.
+- The website's public-status fallback was refreshed and pushed (website commit `759e848`), and
+  `check-public-surfaces.ps1 -Online` reports GitHub, npm, the Chrome update feed, the official
+  MCP Registry, and the website in agreement at 1.1.0 / adapter 1.0.0.
+
+The same day the owner directed the retirement of the 0.8 layer
+([ADR-0143](adr/0143-retire-the-0-8-layer.md)): `docs/0.8/`, the harvest and recovery machinery
+and its CI gates, the 0.8-named business, design, research, and task records, and the pre-1.0
+compatibility rows are removed from the working tree. Git history and the `archive/0.9-pre-1.0`
+tag preserve every byte; ADRs and dated records keep their mentions as history; the runtime
+pre-1.0 supervisor migration stays because real upgrades depend on it.
 
 ## In flight: 1.0 release pipeline
 

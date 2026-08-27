@@ -1,8 +1,11 @@
 # 1.1.0 candidate custody -- 2026-08-27
 
-Status: HELD. The 1.1.0 candidate (the ZCode harness integration) is assembled, attested,
-downloaded, and verified from two independent local copies. Nothing has published or submitted.
-The Chrome adapter is 1.0.0 in this candidate and on the store; there is no extension candidate.
+Status: PUBLISHED 2026-08-27. The candidate was assembled, attested, downloaded, and verified
+from two independent local copies, then published from custody: GitHub release `v1.1.0` (draft
+verified by re-download and hash comparison before publish), npm `ghostlight@1.1.0`, and the
+MCP Registry record 1.1.0; the website fallback refresh triggered the site rebuild, and
+`check-public-surfaces.ps1 -Online` reports all channels in agreement. The Chrome adapter is
+1.0.0 in this candidate and on the store; there is no extension release.
 
 ## Build
 
