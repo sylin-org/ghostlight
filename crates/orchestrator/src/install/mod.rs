@@ -405,6 +405,7 @@ enum JsonDialect {
     Crush,
     OpenCodeV1,
     OpenCodeV2,
+    ZCode,
 }
 
 fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
@@ -413,6 +414,7 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
     } else {
         context.config.join("zed/settings.json")
     };
+    let zcode = context.home.join(".zcode/cli/config.json");
     let claude_desktop = context.roaming.join("Claude/claude_desktop_config.json");
     let vscode = context.roaming.join("Code/User/mcp.json");
     let opencode_jsonc = context.home.join(".config/opencode/opencode.jsonc");
@@ -507,6 +509,19 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             zed,
             &["zed", "zeditor"],
             ConfigDialect::Json(JsonDialect::ContextServers),
+        ),
+        // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
+        // (ADR-0141). No official download destination is pinned until one is verified.
+        row(
+            "zcode",
+            "zcode",
+            "ZCode",
+            "User",
+            "zcode.svg",
+            None,
+            zcode,
+            &["zcode"],
+            ConfigDialect::Json(JsonDialect::ZCode),
         ),
         row(
             "opencode",
@@ -1433,7 +1448,9 @@ fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
         JsonDialect::ContextServers => root.get("context_servers")?.get(SERVER_NAME),
         JsonDialect::Crush => root.get("mcp")?.get(SERVER_NAME),
         JsonDialect::OpenCodeV1 => root.get("mcp")?.get(SERVER_NAME),
-        JsonDialect::OpenCodeV2 => root.get("mcp")?.get("servers")?.get(SERVER_NAME),
+        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
+            root.get("mcp")?.get("servers")?.get(SERVER_NAME)
+        }
     }
 }
 
@@ -1445,7 +1462,7 @@ fn expected_json_entry(connector: &Path, dialect: JsonDialect) -> Value {
         }
         JsonDialect::Servers => json!({"type":"stdio","command":command,"args":[]}),
         JsonDialect::Crush => json!({"type":"stdio","command":command,"args":[]}),
-        JsonDialect::McpServers | JsonDialect::ContextServers => {
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
             json!({"command":command,"args":[],"env":{}})
         }
         JsonDialect::OpenCodeV1 => {
@@ -1460,7 +1477,7 @@ fn json_collection(
     dialect: JsonDialect,
     create: bool,
 ) -> Result<Option<CstObject>, HarnessError> {
-    if dialect == JsonDialect::OpenCodeV2 {
+    if matches!(dialect, JsonDialect::OpenCodeV2 | JsonDialect::ZCode) {
         let mcp = if create {
             root.object_value_or_create("mcp")
         } else {
@@ -1491,7 +1508,7 @@ fn json_collection(
         JsonDialect::Servers => "servers",
         JsonDialect::ContextServers => "context_servers",
         JsonDialect::Crush | JsonDialect::OpenCodeV1 => "mcp",
-        JsonDialect::OpenCodeV2 => unreachable!("handled above"),
+        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => unreachable!("handled above"),
     };
     let collection = if create {
         root.object_value_or_create(key)
@@ -1553,7 +1570,8 @@ fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
         | JsonDialect::Copilot
         | JsonDialect::Servers
         | JsonDialect::ContextServers
-        | JsonDialect::Crush => entry.get("command").and_then(Value::as_str),
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => entry.get("command").and_then(Value::as_str),
         JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => entry
             .get("command")
             .and_then(Value::as_array)
@@ -1568,7 +1586,8 @@ fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
         | JsonDialect::Copilot
         | JsonDialect::Servers
         | JsonDialect::ContextServers
-        | JsonDialect::Crush => entry.get("args")?.as_array()?,
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => entry.get("args")?.as_array()?,
         JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
             let command = entry.get("command")?.as_array()?;
             command.get(1..)?
@@ -1604,7 +1623,9 @@ fn manual_json_setup(connector: &Path, dialect: JsonDialect) -> Result<String, H
         JsonDialect::Servers => json!({"servers": {SERVER_NAME: entry}}),
         JsonDialect::ContextServers => json!({"context_servers": {SERVER_NAME: entry}}),
         JsonDialect::Crush | JsonDialect::OpenCodeV1 => json!({"mcp": {SERVER_NAME: entry}}),
-        JsonDialect::OpenCodeV2 => json!({"mcp": {"servers": {SERVER_NAME: entry}}}),
+        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
+            json!({"mcp": {"servers": {SERVER_NAME: entry}}})
+        }
     };
     serde_json::to_string_pretty(&document)
         .map_err(|error| HarnessError::Malformed(error.to_string()))
@@ -2136,6 +2157,7 @@ mod tests {
             "goose",
             "continue",
             "antigravity",
+            "zcode",
         ] {
             assert!(rows.iter().any(|row| row.id == id), "missing {id}");
         }
@@ -2596,6 +2618,94 @@ mod tests {
         assert!(removed.contains("// keep this thought"));
         assert!(!removed.contains("\"ghostlight\""));
         assert!(removed.contains("\"context_servers\": {},"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn zcode_nested_install_and_uninstall_preserve_sibling_servers() {
+        let directory = temporary("zcode");
+        let path = directory.join("config.json");
+        let connector = connector(&directory);
+        let source = "{\n  \"mcp\": {\n    \"servers\": {\n      \"other\": {\"command\": \"keep\"}\n    }\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        assert!(edit_json(&path, &connector, JsonDialect::ZCode, true).unwrap());
+        assert!(!edit_json(&path, &connector, JsonDialect::ZCode, true).unwrap());
+        let installed = fs::read_to_string(&path).unwrap();
+        assert!(installed.contains("\"other\""));
+        assert_eq!(
+            inspect_json(&installed, JsonDialect::ZCode, &connector, cfg!(windows)).unwrap(),
+            RegistrationState::Current
+        );
+        // Pinned against ZCode's own written shape, observed live in ~/.zcode/cli/config.json
+        // on 2026-08-27 (ADR-0141): the entry is a plain string command with args and env,
+        // nested under `mcp.servers`, exactly like the McpServers dialect but one level deeper.
+        let written: Value = parse_to_serde_value(&installed, &jsonc_options())
+            .unwrap()
+            .unwrap();
+        let entry = &written["mcp"]["servers"]["ghostlight"];
+        assert!(entry["command"].is_string());
+        assert!(entry["args"].is_array());
+        assert!(entry["env"].is_object());
+        assert!(edit_json(&path, &connector, JsonDialect::ZCode, false).unwrap());
+        let removed = fs::read_to_string(&path).unwrap();
+        assert!(removed.contains("\"other\""));
+        assert!(!removed.contains("\"ghostlight\""));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn zcode_is_detected_by_its_cli_configuration_directory() {
+        let directory = temporary("zcode-detection");
+        let context = context(&directory);
+        let config = context.home.join(".zcode/cli/config.json");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "{}\n").unwrap();
+        let registry = HarnessRegistry::with_context(context);
+        let zcode = registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "zcode")
+            .expect("zcode stays in the closed roster");
+        assert_eq!(zcode.state, HarnessState::Available);
+        assert!(zcode.can_install);
+        assert!(
+            !zcode.can_download,
+            "no verified download destination exists"
+        );
+        assert_eq!(zcode.config_path, config.to_string_lossy());
+        assert!(zcode.manual_setup.contains("\"mcp\""));
+        assert!(zcode.manual_setup.contains("\"servers\""));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_hand_registered_orchestrator_command_stays_foreign() {
+        // Pinned against the live 2026-08-27 incident (ADR-0141): ZCode was registered by hand
+        // with the orchestrator binary, which has no MCP stdio mode. Ghostlight must report the
+        // entry as foreign evidence, never overwrite or remove it.
+        let directory = temporary("zcode-foreign-orchestrator");
+        let path = directory.join("config.json");
+        let connector = connector(&directory);
+        let orchestrator = directory
+            .join("ghostlight")
+            .to_string_lossy()
+            .replace('\\', "\\\\");
+        let source = format!(
+            "{{\"mcp\":{{\"servers\":{{\"ghostlight\":{{\"command\":\"{orchestrator}\",\"args\":[],\"env\":{{}}}}}}}}}}"
+        );
+        fs::write(&path, &source).unwrap();
+        for install in [true, false] {
+            assert!(matches!(
+                edit_json(&path, &connector, JsonDialect::ZCode, install),
+                Err(HarnessError::ForeignEntry)
+            ));
+        }
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        let state = inspect_json(&source, JsonDialect::ZCode, &connector, cfg!(windows)).unwrap();
+        assert!(
+            matches!(state, RegistrationState::Foreign(Some(_))),
+            "{state:?}"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

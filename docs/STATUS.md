@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-26.
+Last updated: 2026-08-27.
 
 This is the mutable implementation snapshot. Git history, the ADR index, dated research, and the
 preserved `docs/0.8/` material carry history; this file does not rewrite it.
@@ -47,7 +47,7 @@ submissions are owner actions.
 ## Publication-day engineering record
 
 Three release-pipeline defects were found and fixed at their seams on publication day, and the
-determinism repair that matters most is recorded here for the next release:
+  determinism repair that matters most is recorded here for the next release:
 
 - The 0.8 artifact-relationship ledgers had drifted across the ADR-0140 relicensing (twelve
   files); ordinary CI had been red since. Regenerated at `89bed6c6`.
@@ -61,6 +61,22 @@ determinism repair that matters most is recorded here for the next release:
   pins the manifest serialization to CRLF and rewrites both central-directory fields to the
   Windows shape after archiving (`bd3bffe4`, `9ee05666`), so every host reproduces the approved
   store revision byte for byte. Durable lesson recorded in [MEMORY.md](MEMORY.md).
+
+## ZCode harness integration (2026-08-27)
+
+A live contradiction was reported: the workbench showed Zed READY while ZCode showed "The MCP
+process failed to start." Both were true. Zed's registration was correct and was verified with a
+live MCP initialize handshake, and ZCode, which the harness roster has never covered, held a
+hand-written entry pointing at the orchestrator executable, which has no MCP stdio mode. The
+user-side config was corrected on the spot to the sibling MCP connector.
+
+[ADR-0141](adr/0141-zcode-harness-integration.md) then added `zcode` to the fixed harness
+registry: config `~/.zcode/cli/config.json`, a `ZCode` dialect for its `mcp.servers` document
+with the observed string-command shape, no pinned download destination, and neutral monogram
+artwork. Gates: fmt, warnings-denied workspace Clippy, the full workspace suite, and a live
+debug-build `doctor` check of the new row on this machine. The deployed release build predates
+the change, so the workbench card appears after the next release deployment through
+`scripts/dev-loop.ps1`.
 
 ## In flight: 1.0 release pipeline
 
