@@ -4,7 +4,7 @@
 
 # Rust build output
 /target/
-/.target-*/
+/.target-*
 /target-*/
 
 # Throwaway fixtures for live lanes: seeded configuration forests and other scratch inputs
