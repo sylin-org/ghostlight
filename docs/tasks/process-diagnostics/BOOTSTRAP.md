@@ -24,11 +24,15 @@ authority on progress; a task here describes intent, the ledger records what hap
   justification in that task's ledger entry.
 - A sink fault must never disturb the product: append failures disable the sink for the
   process lifetime, and no product path returns an error because diagnostics could not write.
-- Activation is a person's act: the product never creates the `diagnostics.on` marker, and
-  every component evaluates the activation layers once, at process birth.
+- Activation is a person's act: the product creates or removes the `diagnostics.on` marker
+  only at an explicit request from a control surface (hand, CLI, extension popup), and every
+  component re-evaluates the marker layer on the 2-second tick while the variable layer stays
+  fixed at birth.
 - stdout purity: the MCP connector's stdout stays pure protocol. The sink writes files only.
-- The extension changes nothing: no files, no push channel, no console logging.
-  `browser_diagnose` and its ring are out of scope.
+- The extension gains only the popup toggle and its request type: a human control, no policy,
+  no files, no console logging. `browser_diagnose` and its ring are out of scope. The
+  extension suite and `node --check` gates apply to the change, and the changed bytes ride
+  the next store submission.
 - ASCII only in every new file and line. Plain sentences in user-visible output; no Rust
   identifiers where plain words work.
 - Nothing leaves the machine. Local commits are normal; pushes, releases, and anything
@@ -57,24 +61,33 @@ in the ledger; if any has moved, STOP and record what changed.
    `<utc-start>-<component>-<pid>.jsonl`, writes the header record, appends bounded lines
    behind a mutex, disables itself on append failure, and prunes to the newest 8 files per
    component within a 64 MiB total ceiling, touching only component log files and never the
-   marker. Unit tests cover the layer matrix (variable over marker over off), file naming,
-   detail clipping, self-disable, prune order and its marker safety, and a schema test that
-   pins the record fields (timestamp, run id, component, event, level, optional operation id,
-   bounded detail).
+   marker. The sink re-evaluates the marker layer on the 2-second tick -- turning off closes
+   the file with a final line, turning on opens a fresh file with a header, and a name that
+   already exists gains a sequence number before the extension -- reusing a component's
+   existing timers where it has them and a minimal ticker in the sink module otherwise. Unit
+   tests cover the layer matrix (variable over marker over off, variable pinning at birth),
+   live on and off transitions, same-second naming, detail clipping, self-disable, prune
+   order and its marker safety, and a schema test that pins the record
+   fields (timestamp, run id, component, event, level, optional operation id, bounded detail).
 2. D2 orchestrator wiring: initialize the sink at startup when the switch is present, and emit
    the process, connection, framing and negotiation, operation boundary, and liveness families
    at the seams that already exist (service host start and readiness, harness attach and
    detach, browser adapter hello and replacement, deadline firing). Event names come from the
-   closed vocabulary; no literal event strings at call sites.
+   closed vocabulary; no literal event strings at call sites. The orchestrator also owns the
+   toggle act: on a runtime-control request from the CLI, workbench, or extension relay it
+   creates or removes the marker, then lets its own tick apply the change like every other
+   component.
 3. D3 mcp-connector wiring: emit process start, demand-start attempts and outcomes, service
    connection lifecycle, and framing errors. The existing disconnect-streak stderr line stays;
    the sink records the same fact.
 4. D4 browser-connector wiring: emit process start, demand-start attempts and outcomes,
    native-messaging connection lifecycle, and framing errors. Browser identity is recorded as
-   the relay sees it (ids and epochs), never page facts.
-5. D5 the `ghostlight diagnostics` CLI: `path`, `show`, and `prune` in the orchestrator's
-   hand-rolled parser. `path` names the active layer (explicit directory, marker, or off) and
-   the directory. `show` merges all files into one chronological timeline, renders plain
+   the relay sees it (ids and epochs), never page facts. The relay also forwards the new
+   typed toggle request unchanged; it decides nothing.
+5. D5 the `ghostlight diagnostics` CLI: `path`, `show`, `prune`, `on`, and `off` in the
+   orchestrator's hand-rolled parser. `path` names the active layer (explicit directory,
+   marker, or off) and the directory; `on` and `off` create and remove the marker and report
+   the resulting layer. `show` merges all files into one chronological timeline, renders plain
    sentences with a component tag and local timestamps, supports `--last`, `--component`,
    `--op`, and `--json`, and states missing coverage in range. It never demand-starts.
 6. D6 the doctor row: the active layer (explicit directory, marker, or off), the directory,
@@ -83,9 +96,16 @@ in the ledger; if any has moved, STOP and record what changed.
    asserting per-component files with header records, lines for a real operation from both
    connector sides, prune behavior, and `diagnostics show --json` output containing that
    operation. One case activates by marker alone with the variable absent from every spawned
-   environment, proving the browser-side path needs no propagation. Pass `GHOSTLIGHT_BIN_DIR`
-   explicitly; the journey must exercise fresh binaries.
-8. D8 contract and documentation reconciliation: `docs/1.0/ARCHITECTURE.md` describes the
+   environment, proving the browser-side path needs no propagation. Another creates and
+   removes the marker mid-run and asserts the clean-close line and the fresh header without
+   restarting anything. Pass `GHOSTLIGHT_BIN_DIR` explicitly; the journey must exercise fresh
+   binaries.
+8. D8 the extension popup toggle: one diagnostics control beside the popup's existing human
+   controls, reflecting the current layer from connection state and sending one request over
+   the existing runtime-control request path (`runtime_control_requested`,
+   `RuntimeControlState`). The extension stays policy-free with no filesystem access, and
+   when the authority is unreachable the control reports that honestly.
+9. D9 contract and documentation reconciliation: `docs/1.0/ARCHITECTURE.md` describes the
    process sink beside the `browser_diagnose` diagnostics paragraph; `docs/DEV-LOOP.md` gains
    a short "when an agent reports an error" route; the tasks README row and the STATUS section
    are made truthful about the batch's final state. Public trust claims wait: nothing is
