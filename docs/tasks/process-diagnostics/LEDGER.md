@@ -164,6 +164,19 @@ Status: complete (2026-08-29).
 - `docs/DEV-LOOP.md` gains "When an agent reports an error": the four-step support route.
 - This ledger, the tasks README row, and the STATUS section are made truthful.
 
+## Post-deployment corrections (2026-08-29, same day, from live use)
+
+- The default log directory polluted the application root (`target/release/` in a dev
+  deployment): the default is now a `logs` folder beside the runtime file, for the marker
+  layer and for the report, which names the folder even while off. `show` and `prune` act on
+  that folder while off, so retained history stays readable. The activation marker did not
+  move. ADR-0145 amended in place.
+- The workbench card never flipped its button: the status section's change-detection
+  dependencies omitted `process_diagnostics`, so the card rendered once at boot. Fixed in
+  `view.js` and pinned by a new surface check that flips the layer under the card.
+- `show` also read `audit.jsonl` as if it were diagnostics output; it now selects only files
+  matching the diagnostics naming.
+
 ## Gate note for the batch
 
 Observed per task and on the final tree, 2026-08-29: `cargo fmt --check` clean;

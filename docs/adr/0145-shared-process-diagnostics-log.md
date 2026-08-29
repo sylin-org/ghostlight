@@ -11,6 +11,9 @@
 - Amended: 2026-08-29, pre-implementation, a fourth time: the workbench toggle and folder
   reveal became decided surfaces, and the log voice is pinned to terse facts over teaching
   prose (Decisions 4, 7, and 8)
+- Amended: 2026-08-29, after local deployment, from live use: the default directory became a
+  `logs` folder beside the runtime file instead of the runtime folder itself, and the report
+  names that folder even while off (Decisions 1 and 6)
 - Builds on: ADR-0016, ADR-0028, ADR-0107, ADR-0127, ADR-0143
 
 ## Context
@@ -56,12 +59,14 @@ Constraints that shape the new decision:
 ### 1. One local diagnostics directory
 
 Every Ghostlight process that has something to say about its own operation writes into one
-directory. The default is the directory holding the runtime discovery file -- the same place
-`audit.jsonl` already lives -- resolved with the same shape the runtime file uses:
-`GHOSTLIGHT_DIAGNOSTICS_DIR` override, then the runtime-file sibling with the Linux
-system-package cache location, then a temporary-directory fallback. Local-only, permanently
-(ADR-0028). The activation marker from Decision 2 lives in this default directory, so the
-directory exists whenever the marker does.
+directory. The default is a `logs` folder inside the directory holding the runtime discovery
+file -- never the application root itself, which stays clean -- resolved with the same shape
+the runtime file uses: `GHOSTLIGHT_DIAGNOSTICS_DIR` override, then the runtime-file sibling's
+`logs` folder with the Linux system-package cache location, then a temporary-directory
+fallback. Local-only, permanently (ADR-0028). The activation marker stays beside the runtime
+discovery file, not inside the logs folder. Surfaces name and open the folder even while
+diagnostics are off: retained logs remain there within the retention bounds, and it is where
+the next activation writes.
 
 ### 2. Layered activation, re-checked live
 
