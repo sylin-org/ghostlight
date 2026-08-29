@@ -16,7 +16,8 @@ public submissions of the arc are therefore live and nothing is blocked. What re
 waiting and watching: PR #30's review queue (four earlier third-party plugin PRs are still
 unmerged), issue #419's triage pipeline, and the Anthropic review reaching out to
 `hello@sylin.org` if it needs more. The optional P4 install verification in the real ZCode
-client is the only open local work.
+client is the only open local work. Every outward and state-changing action of the arc is
+indexed in [ACTION-LOG.md](ACTION-LOG.md).
 
 ## P1 plugin package and one-address catalogs
 
