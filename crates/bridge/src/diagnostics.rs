@@ -438,6 +438,14 @@ impl Sink {
         if let Some((_, file)) = state.open.as_mut() {
             let _ = writeln!(file, "{}", header);
         }
+        Self::write_record(
+            sink,
+            state,
+            event::SINK_OPENED,
+            Level::Info,
+            None,
+            &format!("activation on ({})", sink.activation().layer()),
+        );
     }
 
     fn write_record(
@@ -578,8 +586,9 @@ pub fn prune_directory(directory: &Path) -> PruneReport {
 }
 
 /// Parse a diagnostics log file name into its component and stamp. Returns `None` for anything
-/// that is not a diagnostics log, which is how the marker and foreign files survive pruning.
-fn parse_log_name(name: &str) -> Option<(String, String)> {
+/// that is not a diagnostics log, which is how the marker and foreign files survive pruning,
+/// and how `diagnostics show` knows which files are its own.
+pub fn parse_log_name(name: &str) -> Option<(String, String)> {
     let base = name.strip_suffix(".jsonl")?;
     let mut parts = base.split('-').collect::<Vec<_>>();
     if parts.len() < 3 {
@@ -773,6 +782,9 @@ mod tests {
         }
         assert_eq!(header["schema"], SCHEMA);
         assert_eq!(header["component"], "orchestrator");
+        let opened: serde_json::Value =
+            serde_json::from_str(lines.next().expect("record")).expect("opened json");
+        assert_eq!(opened["event"], event::SINK_OPENED);
         let record: serde_json::Value =
             serde_json::from_str(lines.next().expect("record")).expect("record json");
         let mut keys: Vec<&str> = record
@@ -814,10 +826,10 @@ mod tests {
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "before marker");
         let marker = marker_path(&runtime);
         fs::write(&marker, b"").expect("marker");
-        wait_until_bounded(|| log_lines(&root) >= 1);
+        wait_until_bounded(|| log_lines(&root) >= 2);
         sink.evaluate();
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
-        wait_until_bounded(|| log_lines(&root) == 2);
+        wait_until_bounded(|| log_lines(&root) == 3);
         let log = fs::read_dir(&root)
             .expect("dir")
             .filter_map(Result::ok)
@@ -826,16 +838,16 @@ mod tests {
         let content = fs::read_to_string(log.path()).expect("content");
         assert_eq!(
             content.lines().count(),
-            2,
-            "header plus the post-marker line"
+            3,
+            "header, the opened line, and the post-marker line"
         );
         fs::remove_file(&marker).expect("remove marker");
-        wait_until_bounded(|| log_lines(&root) == 3);
+        wait_until_bounded(|| log_lines(&root) == 4);
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after off");
         let content = fs::read_to_string(log.path()).expect("content");
         assert_eq!(
             content.lines().count(),
-            3,
+            4,
             "off writes a closing line and then nothing more"
         );
     }

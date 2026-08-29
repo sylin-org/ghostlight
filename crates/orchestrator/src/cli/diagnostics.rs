@@ -189,7 +189,8 @@ fn run_show(
     let entries = std::fs::read_dir(directory)?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.ends_with(".jsonl") {
+        // Only diagnostics logs, never audit.jsonl or anything else sharing the folder.
+        if ghostlight_bridge::diagnostics::parse_log_name(&name).is_none() {
             continue;
         }
         let content = match std::fs::read_to_string(entry.path()) {
