@@ -403,6 +403,20 @@ const checks = [
         && grid.innerHTML.includes('data-diagnostics-operation="toggle"')
         && grid.innerHTML.includes('data-diagnostics-operation="reveal"');
     })()],
+  ["the status card flips to Turn on when the layer changes under it",
+    (() => {
+      view.collections({
+        sessions: [], browsers: [],
+        diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Ghostlight is accepting local connections." }],
+        history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
+        process_diagnostics: { layer: "off", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
+        configuration: { managed_policy: { configured: false } },
+        harnesses: []
+      }, []);
+      const grid = nodes.get("diagnostic-grid");
+      return grid.innerHTML.includes("Turn on") && !grid.innerHTML.includes("Turn off")
+        && grid.innerHTML.includes("Operational log is off");
+    })()],
   ["integrations stay one flat roster with category order before alphabetic name order",
     !rosterHtml.includes("integration-group")
       && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
