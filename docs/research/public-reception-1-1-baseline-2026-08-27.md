@@ -35,10 +35,15 @@ is not an absence-of-interest claim, and every number is labeled with what it ca
 
 - Official MCP Registry record current at 1.1.0.
 - mcpservers.org: fresh text -- 1.0, Apache-2.0 OR MIT, 24 tools, correct platform scope.
-- Glama: STALE and now actively wrong -- describes adapter 0.8.0, the retired
+- Glama: STALE at baseline time -- described adapter 0.8.0, the retired
   "Ghostlight Commercial License" open-core split (withdrawn by ADR-0140), a macOS claim the
-  platform-scope decision never made, and 0.8-era vocabulary. One favorite. Refresh is a
-  pre-announcement cleanup item; the canonical repository text it crawls is current.
+  platform-scope decision never made, and 0.8-era vocabulary. One favorite (the owner's own).
+  Refreshed the same day through the listing's admin Sync Server control (the listing was
+  already claimed; last sync had predated the final 1.0 restamps): the page now serves the
+  current text -- Apache-2.0 OR MIT, published 1.1.0 with the 1.0.0 store adapter, and the
+  correct platform state. The sync also exposed a stray working file that had been committed
+  publicly (`.target-release-notes-v1.1.0.md`, missed by a directory-only ignore pattern);
+  removed at source with the pattern fixed, and the next Glama sync drops it from the listing.
 - A third-party registry mirror (manifest.manifold.security) lists the server with current
   description text.
 
