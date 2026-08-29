@@ -5,6 +5,20 @@ Last updated: 2026-08-29 (public distribution arc opened).
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
 
+## Process diagnostics batch opened (2026-08-29)
+
+Agents report errors that no surface records: the demand-started orchestrator's output is
+nulled at spawn, the connectors log one line per disconnect streak, and the extension is
+silent by design. [ADR-0145](adr/0145-shared-process-diagnostics-log.md) accepts a shared
+local diagnostics directory -- `GHOSTLIGHT_DIAGNOSTICS_DIR`, defaulting beside the runtime
+file -- where all three executables append bounded, content-free operational JSONL from
+process birth, with a closed event vocabulary, run and operation correlation, automatic
+retention, and a read-only `ghostlight diagnostics` CLI plus a doctor row. The
+[process-diagnostics batch](tasks/process-diagnostics/BOOTSTRAP.md) is authored to execute it;
+D1 (the sink in the bridge crate) is next. The design revives the observability half of the
+retired ADR-0016 on the 1.0 tree and leaves audit, `browser_diagnose`, and the extension's
+silence exactly as they are.
+
 ## Public distribution arc opened (2026-08-29)
 
 The owner directed a public distribution arc after distribution research (the
