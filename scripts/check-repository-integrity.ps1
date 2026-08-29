@@ -137,6 +137,54 @@ if (($documentedPermissions -join "`n") -ne ($manifestPermissions -join "`n")) {
     throw "Extension manifest permissions and Chrome Web Store justifications differ"
 }
 
+# The plugin distribution member: twin manifests and both catalogs must agree (ADR-0144).
+$pluginDir = Join-Path $repo "packaging/plugin/ghostlight"
+$claudeManifest = Get-Content -LiteralPath (
+    Join-Path $pluginDir ".claude-plugin/plugin.json"
+) -Raw | ConvertFrom-Json
+$zcodeManifest = Get-Content -LiteralPath (
+    Join-Path $pluginDir ".zcode-plugin/plugin.json"
+) -Raw | ConvertFrom-Json
+if ($claudeManifest.name -ne $zcodeManifest.name -or $claudeManifest.name -ne "ghostlight") {
+    throw "Plugin manifests disagree on the plugin name"
+}
+if ($claudeManifest.version -ne $zcodeManifest.version) {
+    throw "Plugin manifests disagree on the plugin version"
+}
+$claudeSkills = if ($claudeManifest.PSObject.Properties["skills"]) {
+    @($claudeManifest.skills)
+}
+else {
+    @("skills")
+}
+$zcodeSkills = @($zcodeManifest.skills)
+if ((($claudeSkills | Sort-Object) -join "`n") -ne (($zcodeSkills | Sort-Object) -join "`n")) {
+    throw "Plugin manifests disagree on the skill set"
+}
+$claudeServer = $claudeManifest.mcpServers.ghostlight
+$zcodeServer = $zcodeManifest.mcpServers.ghostlight
+if (-not $claudeServer -or -not $zcodeServer) {
+    throw "A plugin manifest is missing the ghostlight MCP server"
+}
+if ($claudeServer.command -ne $zcodeServer.command) {
+    throw "Plugin manifests disagree on the MCP server command"
+}
+if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
+    throw "Plugin manifests disagree on the MCP server arguments"
+}foreach ($catalogPath in @(".claude-plugin/marketplace.json", "marketplace.json")) {
+    $catalog = Get-Content -LiteralPath (Join-Path $repo $catalogPath) -Raw | ConvertFrom-Json
+    $entries = @($catalog.plugins | Where-Object { $_.name -eq "ghostlight" })
+    if ($entries.Count -ne 1) {
+        throw "Catalog $catalogPath does not list the ghostlight plugin exactly once"
+    }
+    if ($entries[0].version -ne $claudeManifest.version) {
+        throw "Catalog $catalogPath version differs from the plugin manifests"
+    }
+    if ($entries[0].source -ne "./packaging/plugin/ghostlight") {
+        throw "Catalog $catalogPath points at an unexpected plugin source"
+    }
+}
+
 Write-Output "Repository integrity: $($tracked.Count) tracked files readable; local links valid; source version $sourceVersion aligned."
 Write-Output "Historical ASCII exceptions remain fixed at $($expectedNonAscii.Count) named files; no new exception is allowed."
 Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
