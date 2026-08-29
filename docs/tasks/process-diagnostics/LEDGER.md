@@ -24,6 +24,9 @@ against the tree first; they were verified on 2026-08-29 and are recorded below.
 - ADR-0016 is the historical shape (per-PID files, bounded bodies, swallowed I/O, stdout
   purity, distinct from audit). Its mechanism was removed with the 0.8 layer by ADR-0143;
   nothing of it remains in `crates/`.
+- ADR-0145 Decision 2 was amended in place before any task executed (2026-08-29): activation
+  is layered, an explicit-directory variable over a presence-only `diagnostics.on` marker
+  beside the runtime discovery file, over off. The batch implements the amended decision.
 
 ## Delight bar (owner directive, 2026-08-29)
 

@@ -24,6 +24,8 @@ authority on progress; a task here describes intent, the ledger records what hap
   justification in that task's ledger entry.
 - A sink fault must never disturb the product: append failures disable the sink for the
   process lifetime, and no product path returns an error because diagnostics could not write.
+- Activation is a person's act: the product never creates the `diagnostics.on` marker, and
+  every component evaluates the activation layers once, at process birth.
 - stdout purity: the MCP connector's stdout stays pure protocol. The sink writes files only.
 - The extension changes nothing: no files, no push channel, no console logging.
   `browser_diagnose` and its ring are out of scope.
@@ -49,13 +51,16 @@ in the ledger; if any has moved, STOP and record what changed.
 
 ## Tasks
 
-1. D1 the sink in bridge: `crates/bridge/src/diagnostics.rs` resolves the directory (override,
-   runtime-file sibling with the Linux system-package cache location, temporary fallback),
-   names files `<utc-start>-<component>-<pid>.jsonl`, writes the header record, appends bounded
-   lines behind a mutex, disables itself on append failure, and prunes to the newest 8 files
-   per component within a 64 MiB total ceiling. Unit tests cover the resolution matrix, file
-   naming, detail clipping, self-disable, prune order, and a schema test that pins the record
-   fields (timestamp, run id, component, event, level, optional operation id, bounded detail).
+1. D1 the sink in bridge: `crates/bridge/src/diagnostics.rs` resolves activation in layers
+   (`GHOSTLIGHT_DIAGNOSTICS_DIR` override, then a presence-only `diagnostics.on` marker beside
+   the runtime discovery file activating at the default directory, then off), names files
+   `<utc-start>-<component>-<pid>.jsonl`, writes the header record, appends bounded lines
+   behind a mutex, disables itself on append failure, and prunes to the newest 8 files per
+   component within a 64 MiB total ceiling, touching only component log files and never the
+   marker. Unit tests cover the layer matrix (variable over marker over off), file naming,
+   detail clipping, self-disable, prune order and its marker safety, and a schema test that
+   pins the record fields (timestamp, run id, component, event, level, optional operation id,
+   bounded detail).
 2. D2 orchestrator wiring: initialize the sink at startup when the switch is present, and emit
    the process, connection, framing and negotiation, operation boundary, and liveness families
    at the seams that already exist (service host start and readiness, harness attach and
@@ -68,15 +73,18 @@ in the ledger; if any has moved, STOP and record what changed.
    native-messaging connection lifecycle, and framing errors. Browser identity is recorded as
    the relay sees it (ids and epochs), never page facts.
 5. D5 the `ghostlight diagnostics` CLI: `path`, `show`, and `prune` in the orchestrator's
-   hand-rolled parser. `show` merges all files into one chronological timeline, renders plain
+   hand-rolled parser. `path` names the active layer (explicit directory, marker, or off) and
+   the directory. `show` merges all files into one chronological timeline, renders plain
    sentences with a component tag and local timestamps, supports `--last`, `--component`,
    `--op`, and `--json`, and states missing coverage in range. It never demand-starts.
-6. D6 the doctor row: whether diagnostics are active, the directory, and its size, in both
-   text and `--json` output.
+6. D6 the doctor row: the active layer (explicit directory, marker, or off), the directory,
+   and its size, in both text and `--json` output.
 7. D7 the journey: extend `tests/process-journey.mjs` to run the graph with the switch set,
    asserting per-component files with header records, lines for a real operation from both
    connector sides, prune behavior, and `diagnostics show --json` output containing that
-   operation. Pass `GHOSTLIGHT_BIN_DIR` explicitly; the journey must exercise fresh binaries.
+   operation. One case activates by marker alone with the variable absent from every spawned
+   environment, proving the browser-side path needs no propagation. Pass `GHOSTLIGHT_BIN_DIR`
+   explicitly; the journey must exercise fresh binaries.
 8. D8 contract and documentation reconciliation: `docs/1.0/ARCHITECTURE.md` describes the
    process sink beside the `browser_diagnose` diagnostics paragraph; `docs/DEV-LOOP.md` gains
    a short "when an agent reports an error" route; the tasks README row and the STATUS section
