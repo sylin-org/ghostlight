@@ -1,9 +1,24 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-27 (1.1.0 published).
+Last updated: 2026-08-29 (public distribution arc opened).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Public distribution arc opened (2026-08-29)
+
+The owner directed a public distribution arc after distribution research (the
+[batch ledger](tasks/public-distribution/LEDGER.md) carries the sources and the live proof).
+[ADR-0144](adr/0144-public-plugin-distribution.md) adds the plugin as a fifth distribution
+member with its own version space: twin manifests at `packaging/plugin/ghostlight/`
+(Claude schema canonical, ZCode native twin), one-address marketplace catalogs at the
+repository root for both ecosystems, and the bundled `control-browser` skill written against
+the 1.0 language contract. The plugin's MCP server is `npx -y ghostlight`, the npm launcher's
+zero-argument checksum-verified handoff, proven live the same day with a real MCP initialize
+and the full 24-tool catalog. The repository-integrity gate now pins twin-manifest and catalog
+agreement. Three external submissions (a Z.ai feedback request for a public plugin intake
+process, a `zai-coding-plugins` pull request, and the Anthropic directory submission) are
+drafted in the batch and wait for owner action; nothing external has been sent.
 
 ## 1.0 is published (2026-08-26)
 

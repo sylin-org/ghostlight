@@ -26,6 +26,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
+| [public-distribution](public-distribution/) | ADR-0144: Ghostlight as an installable plugin member (twin manifests, one-address catalogs, bundled skill) and drafted external submissions | P1-P3, X1, D1 complete | 2026-08-29 |
 | [1.0-plus](1.0-plus/) | Post-publication batch: deferred debt (simplest to most complex), the release-evidence lanes left open at publication, and owner-action externals | D1 complete; D2 next | 2026-08-26 |
 | [demo-press-key-diagnosis](demo-press-key-diagnosis/) | Why the foundry demo's press_key beat failed with a misleading disconnect sentence (diagnosis record, not an execution batch) | Root causes fixed (script ordering; primitive rendering); desk-bell blocking-dialog click defect documented, open | 2026-08-24 |
 | [language-delight](language-delight/) | Delight pass over all model-facing sentences: validation messages, tool descriptions, result guidance, live proof | D1-D4 complete; deployed and proven live | 2026-08-24 |
