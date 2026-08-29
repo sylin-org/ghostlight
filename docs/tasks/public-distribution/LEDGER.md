@@ -5,10 +5,14 @@ BOOTSTRAP's task list, is the authority on where the batch stopped.
 
 ## RESUME HERE
 
-The batch's local work is complete through D1. What remains is owner action: choose and send
+The batch's local work is complete through D1, and the owner has since authorized and executed
+the distribution step: `dev` was pushed and `main` was promoted by fast-forward to
+`ac154245` on 2026-08-29, and the public surfaces were observed serving both catalogs, the
+ZCode manifest, and the marketplace icon at that revision. The repository is now a live
+one-address marketplace in both ecosystems. What remains is owner action: choose and send
 any of the three submissions in `submissions.md` (Z.ai feedback, `zai-coding-plugins` PR,
-Anthropic directory form), and push this branch so the repository works as a one-address
-marketplace. Nothing below in this ledger sends anything.
+Anthropic directory form), and optionally the P4 install verification in the real client.
+Nothing below in this ledger sends anything.
 
 ## P1 plugin package and one-address catalogs
 
