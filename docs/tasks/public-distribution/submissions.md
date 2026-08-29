@@ -59,7 +59,8 @@ about.
 
 ## 3. Anthropic plugin-directory submission
 
-Status: prepared, blocked on owner authentication (2026-08-29).
+Status: SUBMITTED for review (2026-08-29). The Console confirmation reads "Plugin submitted
+for review. Your plugin submission has been received." from Leo's Individual Org.
 
 Correction from attempting it live: the 2026-08-29 research note about a
 `clau.de/plugin-directory-submission` form is outdated. The current documented mechanism
@@ -110,5 +111,14 @@ The owner authorized sending the submissions through the browser this day:
    `sylin-org:feat/ghostlight-plugin`, one commit adding `plugins/ghostlight/` (manifest,
    skill, README) and one catalog entry. The fork and clone live at
    `F:\Replica\NAS\Files\repo\github\zai-org\zai-coding-plugins` per the local convention.
-3. Anthropic community marketplace: blocked on the owner's Console login; validation passed
-   locally; answers prepared above.
+3. Anthropic community marketplace: submitted through `platform.claude.com/plugins/submit`
+   and confirmed received ("Plugin submitted for review"). The wizard required an
+   organization (created as the individual org, billing skipped) and a terms
+   acknowledgement on the introduction step; the first Submit click bounced to that
+   acknowledgement and the resubmit carried identical content. Submitted values: platforms
+   Claude Code and Claude Cowork, license "Apache-2.0 OR MIT", privacy policy
+   `https://sylin.org/ghostlight/privacy/` (the live page behind `src/ghostlight/privacy.njk`
+   in the website repository; the earlier `/trust/` guess was wrong), contact
+   `hello@sylin.org` (owner-set), plus the step-2 fields recorded above. Per the docs,
+   approval pins the plugin by commit SHA in `anthropics/claude-plugins-community` with the
+   pin auto-bumping on new pushes.

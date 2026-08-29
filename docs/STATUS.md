@@ -34,8 +34,8 @@ agreement. On the same day the owner authorized the send: the Z.ai feedback requ
 public plugin intake process is live as `zai-org/feedback#419`, the `zai-coding-plugins`
 proposal is live as `zai-org/zai-coding-plugins#30` from the org fork, the repository's
 one-address catalogs are promoted to `main`, and the Anthropic community-marketplace
-submission is prepared and validation-checked (`claude plugin validate` passes) but blocked
-on the owner's Console login. See the
+submission is confirmed received through the Console form ("Plugin submitted for review").
+All three public submissions of the distribution arc are live; see the
 [batch ledger](tasks/public-distribution/LEDGER.md) and `submissions.md` for the exact
 outcomes.
 
