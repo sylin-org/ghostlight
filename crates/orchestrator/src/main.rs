@@ -27,6 +27,7 @@ const SUBCOMMANDS: &[&str] = &[
     "doctor",
     "status",
     "call",
+    "diagnostics",
     "policy",
 ];
 
@@ -37,6 +38,8 @@ enum LaunchMode {
     Open,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
+    /// Process diagnostics: read the shared log and actuate the marker (ADR-0145).
+    Diagnostics(ghostlight::cli::diagnostics::Command),
     /// Local policy validation, explanation, and audit-free simulation.
     Policy(ghostlight::governance::inspection::Command),
     /// The narrow package-facing Chromium registration seam (ADR-0115).
@@ -90,6 +93,7 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Open => open_desktop(),
         LaunchMode::Call => run_call(),
+        LaunchMode::Diagnostics(command) => ghostlight::cli::diagnostics::run(&command),
         LaunchMode::Policy(command) => run_policy(&command),
         LaunchMode::NativeHost(command) => run_native_host(command),
         LaunchMode::Install(options) => run_setup(true, &options),
@@ -692,7 +696,7 @@ fn executable_name(name: &str) -> String {
 
 fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-3 policy\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported Chromium browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     )
 }
@@ -935,6 +939,22 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
         Ok(LaunchMode::Open)
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
+    } else if arguments
+        .first()
+        .is_some_and(|argument| argument == "diagnostics")
+    {
+        let values = arguments[1..]
+            .iter()
+            .map(|argument| {
+                argument
+                    .to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| anyhow::anyhow!("diagnostics arguments must be valid UTF-8"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(LaunchMode::Diagnostics(
+            ghostlight::cli::diagnostics::parse(&values)?,
+        ))
     } else if arguments
         .first()
         .is_some_and(|argument| argument == "policy")

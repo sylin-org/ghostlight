@@ -4,7 +4,7 @@
 # The command list below is checked against the command line's own list by a test in the
 # orchestrator. Adding a subcommand without adding it here fails that test.
 
-set -l ghostlight_commands open install uninstall doctor status call policy
+set -l ghostlight_commands open install uninstall doctor status call diagnostics policy
 
 complete -c ghostlight -f
 
@@ -14,6 +14,7 @@ complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a doctor -d "Check the complete local installation"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a status -d "Check the local service endpoint"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a call -d "Run one browser tool"
+complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a diagnostics -d "Read the shared diagnostics log, or turn it on and off"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a policy -d "Validate, explain, sign, or publish policy"
 
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l dry-run -d "Show changes without writing them"

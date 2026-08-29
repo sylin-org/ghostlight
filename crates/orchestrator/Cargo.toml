@@ -30,6 +30,7 @@ tauri-plugin-notification = "=2.3.3"
 tauri-plugin-opener = "=2.5.4"
 tauri-plugin-dialog = "=2.7.2"
 tauri-plugin-clipboard-manager = "=2.3.2"
+time = { version = "0.3", default-features = false, features = ["local-offset", "std"] }
 toml_edit = "=0.22.27"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 url.workspace = true

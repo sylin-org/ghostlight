@@ -5,7 +5,7 @@
 # orchestrator. Adding a subcommand without adding it here fails that test.
 
 _ghostlight() {
-    local commands="open install uninstall doctor status call policy"
+    local commands="open install uninstall doctor status call diagnostics policy"
     local current previous
     current="${COMP_WORDS[COMP_CWORD]}"
     previous="${COMP_WORDS[COMP_CWORD - 1]}"
