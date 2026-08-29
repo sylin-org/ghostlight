@@ -1,0 +1,18 @@
+{
+  "name": "sylin-org-plugins",
+  "plugins": [
+    {
+      "name": "ghostlight",
+      "source": "./packaging/plugin/ghostlight",
+      "description": "Governed, semantic browser control for coding agents.",
+      "version": "1.0.0",
+      "category": "developer-tools",
+      "displayName": "Ghostlight",
+      "icon": "https://raw.githubusercontent.com/sylin-org/ghostlight/main/assets/ghostlight-mascot-128x128.png",
+      "examplePrompts": [
+        "Open our staging site, log the checkout flow end to end, and screenshot the confirmation page.",
+        "Find the broken form on this page: inspect the controls, fill it, submit, and diagnose any console errors."
+      ]
+    }
+  ]
+}

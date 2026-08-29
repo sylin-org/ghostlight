@@ -1,0 +1,16 @@
+{
+  "name": "sylin-org-plugins",
+  "owner": {
+    "name": "sylin-org",
+    "url": "https://github.com/sylin-org"
+  },
+  "plugins": [
+    {
+      "name": "ghostlight",
+      "source": "./packaging/plugin/ghostlight",
+      "description": "Governed, semantic browser control for coding agents.",
+      "version": "1.0.0",
+      "category": "developer-tools"
+    }
+  ]
+}
