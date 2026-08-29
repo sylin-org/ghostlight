@@ -24,16 +24,19 @@ against the tree first; they were verified on 2026-08-29 and are recorded below.
 - ADR-0016 is the historical shape (per-PID files, bounded bodies, swallowed I/O, stdout
   purity, distinct from audit). Its mechanism was removed with the 0.8 layer by ADR-0143;
   nothing of it remains in `crates/`.
-- ADR-0145 was amended three times in place before any task executed (2026-08-29): first,
+- ADR-0145 was amended four times in place before any task executed (2026-08-29): first,
   activation is layered, an explicit-directory variable over a presence-only `diagnostics.on`
   marker beside the runtime discovery file, over off; second, the marker is actuated from
   surfaces -- the person's hand, `diagnostics on|off`, and an extension popup toggle through
   the orchestrator-owned runtime-control path; third, the live re-check became a layered OS
-  watch with a 2-second safety-net tick, whichever fires first. The batch implements the
-  amended decision.
+  watch with a 2-second safety-net tick, whichever fires first; fourth, the workbench toggle
+  and folder reveal became decided surfaces, and the log voice was pinned to terse facts over
+  teaching prose. The batch implements the amended decision.
 
 ## Delight bar (owner directive, 2026-08-29)
 
 The log must be useful and easy to access, use, and infer root causes from. ADR-0145 Decision
-7 turns that into acceptance criteria: findable, readable, correlatable, cause-first, bounded,
-honest, shareable. Each task's ledger entry states how it met the bar.
+7 turns that into acceptance criteria: findable, readable, correlatable, factual, reachable,
+bounded, honest, shareable. The owner sharpened it the same day: delight for the person
+chasing an error, human or agent, is useful information, not prose. Each task's ledger entry
+states how it met the bar.

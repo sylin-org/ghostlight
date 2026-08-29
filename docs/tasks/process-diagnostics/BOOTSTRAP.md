@@ -16,7 +16,8 @@ authority on progress; a task here describes intent, the ledger records what hap
 - The delight bar is acceptance criteria, not flavor. The log must be findable (`doctor` and
   `diagnostics path` name the directory), readable (`diagnostics show` is one command to one
   chronological story), correlatable (run ids and operation ids survive into the rendered
-  line), cause-first (details lead with the reason and, where known, the remedy), bounded
+  line), factual (details are terse and dense -- what happened, to what, the numbers that
+  matter; no teaching prose), reachable (the workbench toggles and opens the folder), bounded
   (retention is automatic), and honest (`show` states missing coverage instead of implying a
   quiet past). A task that lands a line type or a command without meeting the bar is not done.
 - Content-free discipline is enforced by a schema test, the way
@@ -110,7 +111,12 @@ in the ledger; if any has moved, STOP and record what changed.
    the existing runtime-control request path (`runtime_control_requested`,
    `RuntimeControlState`). The extension stays policy-free with no filesystem access, and
    when the authority is unreachable the control reports that honestly.
-9. D9 contract and documentation reconciliation: `docs/1.0/ARCHITECTURE.md` describes the
+9. D9 the workbench surface: the Status destination gains the process-diagnostics row -- the
+   active layer, a toggle that sends the same orchestrator act, and a reveal action that
+   opens the diagnostics folder through the operating system from the native process. The
+   WebView gains no opener, shell, or filesystem grant (the ADR-0125 Locate pattern), and
+   the existing workbench-surface journey covers the row.
+10. D10 contract and documentation reconciliation: `docs/1.0/ARCHITECTURE.md` describes the
    process sink beside the `browser_diagnose` diagnostics paragraph; `docs/DEV-LOOP.md` gains
    a short "when an agent reports an error" route; the tasks README row and the STATUS section
    are made truthful about the batch's final state. Public trust claims wait: nothing is
