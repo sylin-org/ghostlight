@@ -315,6 +315,18 @@ mechanisms, and never writes them to extension storage. The orchestrator owns au
 applies cross-origin authority plus final filtering before any model disclosure. Reads are
 non-destructive and visually quiet. Diagnostic payloads never enter audit or presentation.
 
+Process diagnostics are a separate, local surface (ADR-0145). When activated, all three
+executables append bounded, content-free operational JSONL -- connection lifecycle, demand-start
+outcomes, negotiation, operation boundaries -- into one directory beside the runtime file.
+Activation is layered and eventual: `GHOSTLIGHT_DIAGNOSTICS_DIR` pins a process on at birth, and
+a presence-only `diagnostics.on` marker beside the runtime file is applied live by an OS watch
+with a 2-second safety-net re-check, whichever fires first. An OS person toggles it by hand,
+with `ghostlight diagnostics on|off`, from the extension popup through the runtime-control path,
+or from the workbench Status card, which also opens the folder through a native-process act.
+Records carry no URLs, page content, payloads, or credentials, so the folder is safe to share;
+the schema is pinned by test, retention is automatic, and the governance audit remains the only
+decision record.
+
 ## Governance
 
 No policy configured means all four independent RAWX capabilities are open. Browser-internal

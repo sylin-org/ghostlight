@@ -5,25 +5,29 @@ Last updated: 2026-08-29 (public distribution arc opened).
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
 
-## Process diagnostics batch opened (2026-08-29)
+## Process diagnostics implemented and deployed locally (2026-08-29)
 
 Agents report errors that no surface records: the demand-started orchestrator's output is
 nulled at spawn, the connectors log one line per disconnect streak, and the extension is
-silent by design. [ADR-0145](adr/0145-shared-process-diagnostics-log.md) accepts a shared
-local diagnostics directory under layered activation -- `GHOSTLIGHT_DIAGNOSTICS_DIR` for an
-explicit location, or a presence-only `diagnostics.on` marker beside the runtime file that
-even the Chrome-spawned browser connector can see without environment propagation -- where
-all three executables append bounded, content-free operational JSONL from
-process birth, with a closed event vocabulary, run and operation correlation, and automatic
-retention. The marker is watched by the OS with a 2-second safety-net re-check, so toggles
-land in milliseconds and never need a restart;
-`ghostlight diagnostics on|off` actuates it, as do an extension popup toggle and a
-workbench toggle-and-reveal row, all through orchestrator-owned paths, beside a read-only
-`show` and a doctor row. The
-[process-diagnostics batch](tasks/process-diagnostics/BOOTSTRAP.md) is authored to execute it;
-D1 (the sink in the bridge crate) is next. The design revives the observability half of the
-retired ADR-0016 on the 1.0 tree and leaves audit, `browser_diagnose`, and the extension's
-silence exactly as they are.
+silent by design. [ADR-0145](adr/0145-shared-process-diagnostics-log.md) (amended four times
+in place, pre-implementation, under the owner's fewest-moving-parts bar) accepts a shared
+local diagnostics directory under layered activation -- `GHOSTLIGHT_DIAGNOSTICS_DIR`, or a
+presence-only `diagnostics.on` marker beside the runtime file that even the Chrome-spawned
+browser connector can see without environment propagation -- where all three executables
+append bounded, content-free operational JSONL from process birth. The marker is applied live
+by an OS watch with a 2-second safety-net tick, whichever fires first, so toggles need no
+restart; surfaces actuate the same marker: the person's hand, `ghostlight diagnostics
+on|off`, the extension popup, and the workbench Status card, which also opens the folder.
+`show` merges everything into one chronological timeline; `doctor` names the layer, folder,
+and size. Records carry no page content or payloads, so the folder is shareable as-is.
+
+The [process-diagnostics batch](tasks/process-diagnostics/LEDGER.md) executed D1-D10 the same
+day: the bridge sink (watch plus tick, closed event vocabulary, automatic retention, schema
+pinned by test), orchestrator hub and emissions, both connectors, the CLI, the doctor row,
+the extended process journey, the popup toggle, the workbench card, and the contract
+reconciliation. The known-flaky bridge test was fixed at its root (wait on observable
+effects, not resolution). The batch's local work is complete; the extension bytes ride the
+next store submission.
 
 ## Public distribution arc opened (2026-08-29)
 

@@ -106,6 +106,18 @@ destination image paths under `target/release`, copies with a bounded retry, rem
 starts the orchestrator only when it was selected. Both directories must stay inside this
 repository. A browser-connector replacement still requires an explicit extension reload.
 
+## When an agent reports an error
+
+Turn the process log on, reproduce, read the story:
+
+1. `ghostlight diagnostics on` (creates the marker; every running component picks it up within
+   about two seconds) or set `GHOSTLIGHT_DIAGNOSTICS_DIR` in the client's server configuration.
+2. Reproduce the failure.
+3. `ghostlight diagnostics show --last 10m` reads one merged timeline; `--json`, `--component`,
+   and `--op` filter it. `doctor` names the active layer and folder.
+4. The folder is content-free by construction (no page content, no payloads), so it can be
+   attached to a report as-is. Prune is automatic; `ghostlight diagnostics prune` forces it.
+
 ## Automated gates
 
 ```powershell
