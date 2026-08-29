@@ -7,8 +7,9 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use ghostlight_bridge::diagnostics::{event, Level, Sink};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
-use ghostlight_bridge::lifecycle::request_orchestrator_start;
+use ghostlight_bridge::lifecycle::{request_orchestrator_start, StartDisposition};
 use ghostlight_bridge::runtime::runtime_file;
 use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition,
@@ -49,13 +50,14 @@ impl ServiceSession {
     /// Start one reconnect loop for the lifetime of the MCP stdio process.
     pub fn start(
         client_label: String,
+        diagnostics: Arc<Sink>,
         event_handler: Arc<dyn Fn(ServiceEvent) + Send + Sync>,
     ) -> Result<Self> {
         let state = Arc::new((Mutex::new(SessionState::default()), Condvar::new()));
         let worker_state = Arc::clone(&state);
         thread::Builder::new()
             .name("ghostlight-service-session".into())
-            .spawn(move || reconnect_loop(worker_state, client_label, event_handler))
+            .spawn(move || reconnect_loop(worker_state, client_label, diagnostics, event_handler))
             .context("spawn service session")?;
         Ok(Self { state })
     }
@@ -97,22 +99,54 @@ impl ServiceSession {
 fn reconnect_loop(
     state: Arc<(Mutex<SessionState>, Condvar)>,
     client_label: String,
+    diagnostics: Arc<Sink>,
     event_handler: Arc<dyn Fn(ServiceEvent) + Send + Sync>,
 ) {
     let mut startup_error_reported = false;
+    let mut reported_disposition: Option<String> = None;
     loop {
         let connection = connect(&client_label);
         let Ok((stream, reader, server, catalog)) = connection else {
-            if let Err(error) = request_orchestrator_start() {
-                if !startup_error_reported {
-                    eprintln!("Ghostlight could not start its local orchestrator: {error}");
-                    startup_error_reported = true;
+            match request_orchestrator_start() {
+                Ok(disposition) => {
+                    let note = match &disposition {
+                        StartDisposition::Spawned { process_id } => (
+                            event::DEMAND_START_SPAWNED,
+                            format!("orchestrator pid {process_id}"),
+                        ),
+                        StartDisposition::AlreadyRunning => (
+                            event::DEMAND_START_ALREADY_RUNNING,
+                            "lease held; retrying connection".into(),
+                        ),
+                        StartDisposition::DeploymentInProgress => (
+                            event::DEMAND_START_DEPLOYMENT_IN_PROGRESS,
+                            "deploy lock present; startup quiesced".into(),
+                        ),
+                    };
+                    let marker = format!("{}|{}", note.0, note.1);
+                    if reported_disposition.as_deref() != Some(marker.as_str()) {
+                        reported_disposition = Some(marker);
+                        diagnostics.emit(note.0, Level::Info, None, &note.1);
+                    }
+                }
+                Err(error) => {
+                    if !startup_error_reported {
+                        eprintln!("Ghostlight could not start its local orchestrator: {error}");
+                        startup_error_reported = true;
+                        diagnostics.emit(
+                            event::DEMAND_START_FAILED,
+                            Level::Warn,
+                            None,
+                            &format!("demand-start failed: {error}"),
+                        );
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(500));
             continue;
         };
         startup_error_reported = false;
+        reported_disposition = None;
         let writer = Arc::new(Mutex::new(stream));
         let (generation, catalog_changed) = {
             let mut locked = lock(&state.0);
@@ -132,6 +166,12 @@ fn reconnect_loop(
             state.1.notify_all();
             (generation, catalog_changed)
         };
+        diagnostics.emit(
+            event::SERVICE_CONNECTED,
+            Level::Info,
+            None,
+            &format!("{client_label} connected to the orchestrator"),
+        );
         event_handler(ServiceEvent::Connected { catalog_changed });
         read_until_disconnected(reader, &state, generation, &event_handler);
         let was_current = {
@@ -148,6 +188,12 @@ fn reconnect_loop(
             }
         };
         if was_current {
+            diagnostics.emit(
+                event::SERVICE_DISCONNECTED,
+                Level::Warn,
+                None,
+                &format!("{client_label} lost the orchestrator connection"),
+            );
             event_handler(ServiceEvent::Disconnected);
         }
         thread::sleep(Duration::from_millis(500));

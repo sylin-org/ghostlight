@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
+use ghostlight_bridge::diagnostics::{event, Component, Level, Sink};
 use ghostlight_bridge::framing::{read_json_line, FrameError};
+use ghostlight_bridge::runtime::runtime_file;
 use ghostlight_bridge::service::{ServiceContent, ServiceRequest, ServiceResponse};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -25,6 +27,17 @@ struct PendingCall {
 }
 
 fn main() -> Result<()> {
+    let diagnostics = Sink::birth(
+        Component::McpConnector,
+        env!("CARGO_PKG_VERSION"),
+        &runtime_file(),
+    );
+    diagnostics.emit(
+        event::PROCESS_STARTED,
+        Level::Info,
+        None,
+        "mcp stdio edge starting",
+    );
     let stdin = io::stdin();
     // Bounded, typed reads through the same framing every other process boundary in this
     // codebase uses -- never the raw `Lines` iterator this used to be. `Lines`/`read_line` has no
@@ -81,7 +94,7 @@ fn main() -> Result<()> {
             }
         })
     };
-    let service = ServiceSession::start(initial_client_label, handler)
+    let service = ServiceSession::start(initial_client_label, Arc::clone(&diagnostics), handler)
         .context("start Ghostlight service session")?;
     let server = service.wait_until_connected();
     if let Some(discovery) = discovery {
