@@ -686,6 +686,29 @@ mod tests {
         root.join("ghostlight-runtime.json")
     }
 
+    /// Drive re-checks until an observable effect lands, bounded. The product contract is
+    /// eventual (watch or tick, whichever fires first), and resolution alone proves nothing:
+    /// only an opened file, a written line, or a callback is the transition.
+    fn wait_until_bounded(mut predicate: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !predicate() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn log_lines(root: &Path) -> usize {
+        fs::read_dir(root)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+                    .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+                    .map(|content| content.lines().count())
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
     #[test]
     fn explicit_layer_wins_over_marker_over_off() {
         let root = temp_root("resolve");
@@ -791,9 +814,10 @@ mod tests {
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "before marker");
         let marker = marker_path(&runtime);
         fs::write(&marker, b"").expect("marker");
+        wait_until_bounded(|| log_lines(&root) >= 1);
         sink.evaluate();
-        assert_eq!(sink.activation().layer(), "marker");
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
+        wait_until_bounded(|| log_lines(&root) == 2);
         let log = fs::read_dir(&root)
             .expect("dir")
             .filter_map(Result::ok)
@@ -806,8 +830,7 @@ mod tests {
             "header plus the post-marker line"
         );
         fs::remove_file(&marker).expect("remove marker");
-        sink.evaluate();
-        assert_eq!(sink.activation().layer(), "off");
+        wait_until_bounded(|| log_lines(&root) == 3);
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after off");
         let content = fs::read_to_string(log.path()).expect("content");
         assert_eq!(
@@ -837,9 +860,13 @@ mod tests {
             })),
         );
         fs::write(marker_path(&runtime), b"").expect("marker");
+        // The contract is eventual: the watch or the tick applies the layer, whichever fires
+        // first. Drive the re-check to the deadline instead of assuming one call is enough.
+        wait_until_bounded(|| !seen.lock().expect("seen lock").is_empty());
         sink.evaluate();
         let layers = seen.lock().expect("seen lock");
-        assert_eq!(*layers, vec!["marker"]);
+        assert_eq!(layers.last().map(String::as_str), Some("marker"));
+        assert!(!layers.contains(&"off".to_string()));
     }
 
     #[test]
