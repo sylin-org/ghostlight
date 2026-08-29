@@ -7,6 +7,9 @@
   const sessionStatus = document.getElementById("session-status");
   const sessionButton = document.getElementById("session-button");
   const releaseDebuggerButton = document.getElementById("release-debugger-button");
+  const diagnosticsRow = document.getElementById("diagnostics-row");
+  const diagnosticsStatus = document.getElementById("diagnostics-status");
+  const diagnosticsToggle = document.getElementById("diagnostics-toggle");
   const attentionSection = document.getElementById("attention-section");
   const attentionList = document.getElementById("attention-list");
   const setupSection = document.getElementById("setup-section");
@@ -149,6 +152,19 @@
     }));
   }
 
+  // The service advertises diagnostics state in its hello; when it does not (an older
+  // Ghostlight), the whole row stays hidden instead of offering a button that cannot work.
+  function renderDiagnostics(snapshot) {
+    const state = snapshot.diagnostics;
+    diagnosticsRow.hidden = !state;
+    if (!state) return;
+    const layer = state.layer === "off" ? "off" : `on (${state.layer})`;
+    diagnosticsStatus.textContent = `Process diagnostics log: ${layer}.`;
+    diagnosticsToggle.textContent = state.layer === "off"
+      ? "Turn on the diagnostics log"
+      : "Turn off the diagnostics log";
+  }
+
   function render(snapshot) {
     latestSnapshot = snapshot;
     renderLink(snapshot);
@@ -157,6 +173,7 @@
     renderReleaseDebugger(snapshot);
     renderAttention(snapshot);
     renderSetup(snapshot);
+    renderDiagnostics(snapshot);
   }
 
   async function refresh() {
@@ -206,6 +223,16 @@
       await request({ kind: "release_debugger_sessions" });
     } catch (error) {
       sessionStatus.textContent = String(error?.message ?? error);
+    } finally {
+      await refresh();
+    }
+  });
+  diagnosticsToggle.addEventListener("click", async () => {
+    diagnosticsToggle.disabled = true;
+    try {
+      await request({ kind: "diagnostics_toggle" });
+    } catch (error) {
+      diagnosticsStatus.textContent = String(error?.message ?? error);
     } finally {
       await refresh();
     }

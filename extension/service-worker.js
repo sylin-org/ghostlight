@@ -46,6 +46,9 @@ let liveState = {
   compatible: true,
   service_version: null,
   control_state: "active",
+  // Process-diagnostics wire state from the service (ADR-0145); null until the service
+  // advertises it in hello_accepted, which is also the permission to send the toggle event.
+  diagnostics: null,
   last_error: null
 };
 
@@ -451,6 +454,7 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
       compatible: frame.major === shared.ADAPTER_PROTOCOL_MAJOR,
       service_version: frame.service_version,
       control_state: stateApi.controlState(frame.control_state),
+      diagnostics: frame.diagnostics ?? null,
       last_error: frame.major === shared.ADAPTER_PROTOCOL_MAJOR ? null : "The service uses an incompatible browser adapter protocol."
     });
     await applyRuntimeState(stateApi.controlState(frame.control_state));
@@ -462,6 +466,7 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
   }
   if (frame.kind === "control_state") {
     const controlState = stateApi.controlState(frame.state);
+    setConnection({ diagnostics: frame.diagnostics ?? null });
     await applyRuntimeState(controlState);
     return;
   }
@@ -1813,6 +1818,17 @@ async function handleDialog(command) {
   } finally { await detachDebugger(command.tab_id); }
 }
 
+// A person's diagnostics toggle rides the same closed event envelope as runtime control. The
+// service that advertises diagnostics state in hello_accepted is the only one that decodes the
+// event, so an older service can never receive it.
+function requestDiagnosticsToggle() {
+  if (!nativePort) throw new Error("Ghostlight service is disconnected.");
+  if (!liveState.diagnostics) {
+    throw new Error("This Ghostlight service does not offer the diagnostics toggle.");
+  }
+  send(shared.browserEventFrame({ event: "diagnostics_toggle_requested" }));
+}
+
 function requestRuntimeControl(intent) {
   if (!nativePort) throw new Error("Ghostlight service is disconnected.");
   if (!["toggle_hold", "hold", "resume", "end_session", "start_session"].includes(intent)) {
@@ -1839,6 +1855,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.kind === "ui_snapshot") return uiSnapshot();
     if (message?.kind === "runtime_control") {
       requestRuntimeControl(message.intent);
+      return { queued: true };
+    }
+    if (message?.kind === "diagnostics_toggle") {
+      requestDiagnosticsToggle();
       return { queued: true };
     }
     if (message?.kind === "release_debugger_sessions") {

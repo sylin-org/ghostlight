@@ -37,6 +37,12 @@
       <button id="session-button" type="button" disabled>Loading...</button>
       <button id="release-debugger-button" type="button" class="link-button" disabled hidden>Release debugger sessions</button>
 
+      <section id="diagnostics-row" hidden>
+        <hr>
+        <div id="diagnostics-status" aria-live="polite"></div>
+        <button id="diagnostics-toggle" type="button" class="link-button"></button>
+      </section>
+
       <hr>
       <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
       <p id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</p>
