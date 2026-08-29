@@ -57,6 +57,7 @@ const snapshot = () => ({
     manual_setup: "[mcp_servers.ghostlight]"
   }],
   diagnostics: [],
+  process_diagnostics: { layer: "marker", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
   // The aggregate answer is the orchestrator's, exactly like the policy sentence below. The
   // fixture carries a word the window has no way to compute, so a surface that authored its own
   // would visibly disagree with this.
@@ -371,6 +372,16 @@ const wordsApi = sandbox.globalThis.GhostlightWords;
 const viewSource = readFileSync(join(ui, "lib", "view.js"), "utf8");
 const stylesheet = readFileSync(join(ui, "styles.css"), "utf8");
 
+// The ADR-0145 status card: rendered from the orchestrator-owned state, with both person acts.
+view.collections({
+  sessions: [], browsers: [],
+  diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Ghostlight is accepting local connections." }],
+  history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
+  process_diagnostics: { layer: "marker", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
+  configuration: { managed_policy: { configured: false } },
+  harnesses: []
+}, []);
+
 const checks = [
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
@@ -384,6 +395,14 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["the status card renders the diagnostics state and both person acts",
+    (() => {
+      const grid = nodes.get("diagnostic-grid");
+      return Boolean(grid) && grid.innerHTML.includes("Process diagnostics")
+        && grid.innerHTML.includes("on (marker)")
+        && grid.innerHTML.includes('data-diagnostics-operation="toggle"')
+        && grid.innerHTML.includes('data-diagnostics-operation="reveal"');
+    })()],
   ["integrations stay one flat roster with category order before alphabetic name order",
     !rosterHtml.includes("integration-group")
       && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
