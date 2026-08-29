@@ -4,6 +4,8 @@
 - Date: 2026-08-29
 - Amended: 2026-08-29, pre-implementation: Decision 2 became layered activation (environment
   variable, then a marker file)
+- Amended: 2026-08-29, pre-implementation, again: the marker is re-checked live and actuated
+  from control surfaces (Decisions 2, 3, 6, and 8)
 - Builds on: ADR-0016, ADR-0028, ADR-0107, ADR-0127, ADR-0143
 
 ## Context
@@ -56,7 +58,7 @@ system-package cache location, then a temporary-directory fallback. Local-only, 
 (ADR-0028). The activation marker from Decision 2 lives in this default directory, so the
 directory exists whenever the marker does.
 
-### 2. Layered activation, honored from process birth
+### 2. Layered activation, re-checked live
 
 Activation is layered, and any single layer is enough. All three executables evaluate the
 layers at startup, before any connection exists, because the most valuable lines are written
@@ -65,36 +67,39 @@ exactly when nothing connects:
 1. `GHOSTLIGHT_DIAGNOSTICS_DIR` set to a usable directory turns the sink on and chooses the
    directory. Propagation through the MCP client chain is free: demand-start inherits the
    parent's environment, so a variable set in a client's server configuration reaches the
-   connector and the orchestrator it starts with no code on that path.
+   connector and the orchestrator it starts with no code on that path. The variable cannot
+   change under a running process, so this layer pins the sink on for that process's life.
 2. Otherwise, a presence-only `diagnostics.on` marker file beside the runtime discovery file
    turns the sink on at the default directory. This layer needs no environment at all, which
    is the point: the browser connector that Chromium spawns inherits the browser's
    environment, and now no environment has to reach it. The shared runtime-file resolution
    every component already performs (`bridge/src/runtime.rs`) is the only discovery it needs.
+   This layer is re-evaluated every 2 seconds, so creating or removing the marker toggles
+   every running component without a restart: turning off closes the file cleanly with a
+   final line, and turning on opens a fresh file with a new header.
 3. Otherwise the sink is off. When the variable and the marker are both present, the variable
    wins outright: it names both the fact and the place.
 
-The marker is presence-only: no content, no format, created by the person or by support,
-never by the product. Its name is deliberate. `.debug.lock` was rejected because in this tree
-a lock file means suppression (`deploy.lock` quiesces demand-start; the runtime lease is a
-lock), so an activation marker named like a lock would invert the vocabulary, and a leading
-dot is hostile on Windows, where the "create this one file" support flow will actually
-happen.
+The marker is presence-only: no content, no format. Its name is deliberate. `.debug.lock`
+was rejected because in this tree a lock file means suppression (`deploy.lock` quiesces
+demand-start; the runtime lease is a lock), so an activation marker named like a lock would
+invert the vocabulary, and a leading dot is hostile on Windows, where the "create this one
+file" support flow will actually happen.
 
 A CLI flag is rejected: the no-argument authority launch is pinned by test, and no flag can
 reach a process the product did not spawn.
 
-Deferred, not decided: live re-reading, so a running authority toggles without a restart (the
-runtime-control seam is the natural home for it); a registered setting with a workbench
-toggle; and distributing a custom directory to an already-connected browser connector at
-handshake. Until one of those lands, changing activation takes a process restart, which the
-connectors do naturally and the authority takes once.
+Deferred, not decided: distributing a custom directory to an already-connected browser
+connector at handshake. Activation itself no longer waits on a restart; Decision 8 gives the
+person surfaces that actuate the marker directly.
 
 ### 3. Per-process-instance bounded JSONL files
 
-Each process instance owns exactly one file, opened at startup and named
-`<utc-start>-<component>-<pid>.jsonl`, so a plain directory listing reads chronologically. No
-two processes ever write one file, so there is no cross-process locking. The first record is a
+Each activation period owns one file, opened when the sink turns on and named
+`<utc-start>-<component>-<pid>.jsonl`, so a plain directory listing reads chronologically; a
+name that already exists gains a sequence number before the extension, because live toggling
+can start a second period in the same second. No two writers ever share one open file, so
+there is no cross-process locking. The first record is a
 header: schema marker, component, product version, pid, run id, start time. Every later record
 is one line: timestamp, run id, component, event name, level (info, warn, error), optional
 operation id, and one bounded detail string clipped at 500 bytes on a UTF-8 boundary.
@@ -128,8 +133,9 @@ writes files only.
 
 ### 6. One human front door
 
-`ghostlight diagnostics` gains three subcommands, all read-only over the directory and never
-demand-starting (the doctor rule):
+`ghostlight diagnostics` gains five subcommands and never demand-starts (the doctor rule).
+`path`, `show`, and `prune` are read-only over the directory; `on` and `off` actuate the
+marker as Decision 8 describes:
 
 - `path` prints the effective directory and names the active layer: explicit directory,
   marker, or off.
@@ -158,6 +164,28 @@ ceremony.
 - Shareable: content-free by construction, so the folder can be attached to a report without
   leaking page content. Public trust claims about that property wait until the tree proves it.
 
+### 8. The marker is the single activation truth, actuated from surfaces
+
+One file answers "are diagnostics on" for the whole machine, so every surface actuates that
+file and nothing else:
+
+- A person's hand remains the zero-dependency route: create or delete `diagnostics.on`.
+- `ghostlight diagnostics on` and `off` do the same from a script or a terminal.
+- The extension popup gains a diagnostics toggle beside its other human controls. The
+  extension has no filesystem and stays policy-free: it sends one request over the existing
+  runtime-control request path (`runtime_control_requested`, `RuntimeControlState`), the
+  orchestrator owns the toggle semantics and performs the file act, and the browser connector
+  stays a pure relay. The workbench can use the same orchestrator act; its own toggle is an
+  obvious later surface.
+
+The product never creates or removes the marker on its own initiative, only at an explicit
+person's request from one of these surfaces, so "activation is a person's act" stays true.
+A registered settings key was rejected because it would fork activation truth into a second
+source the connectors and the CLI cannot see; the file is the one source every layer and
+every surface already shares. When the authority is unreachable, the surfaces say so
+honestly and the manual file remains the fallback; ordinary demand-start usually brings the
+authority up before the popup can ask.
+
 ### Boundaries
 
 Audit stays the only governance record. `browser_diagnose` stays the only page-evidence
@@ -183,6 +211,10 @@ standing channel.
   retention bounds.
 - The marker closes the browser-connector activation gap: the Chrome-spawned relay reads it
   through the runtime-file resolution it already performs, with no environment propagation.
-  The residual limitation is restart-timed pickup: every component evaluates the layers at
-  birth, so turning diagnostics on for a running authority takes one restart, which
-  demand-start makes cheap.
+  With live re-checking and the control surfaces, toggling diagnostics anywhere takes effect
+  machine-wide within about two seconds and no restart; the env-var layer remains the
+  explicit per-client configuration whose on-state is fixed at birth.
+- The extension gains one human control and one request type over the existing runtime-control
+  path, so extension bytes change in this batch and ride the next store submission. The
+  connector's only change is forwarding the typed request; the relay contract is otherwise
+  untouched.

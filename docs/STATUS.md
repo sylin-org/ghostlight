@@ -14,8 +14,11 @@ local diagnostics directory under layered activation -- `GHOSTLIGHT_DIAGNOSTICS_
 explicit location, or a presence-only `diagnostics.on` marker beside the runtime file that
 even the Chrome-spawned browser connector can see without environment propagation -- where
 all three executables append bounded, content-free operational JSONL from
-process birth, with a closed event vocabulary, run and operation correlation, automatic
-retention, and a read-only `ghostlight diagnostics` CLI plus a doctor row. The
+process birth, with a closed event vocabulary, run and operation correlation, and automatic
+retention. The marker is re-checked live every 2 seconds so toggles need no restart;
+`ghostlight diagnostics on|off` actuates it, and an extension popup toggle actuates it for
+the whole machine through the orchestrator-owned runtime-control path, beside a read-only
+`show` and a doctor row. The
 [process-diagnostics batch](tasks/process-diagnostics/BOOTSTRAP.md) is authored to execute it;
 D1 (the sink in the bridge crate) is next. The design revives the observability half of the
 retired ADR-0016 on the 1.0 tree and leaves audit, `browser_diagnose`, and the extension's
