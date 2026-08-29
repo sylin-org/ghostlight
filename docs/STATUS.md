@@ -15,7 +15,8 @@ explicit location, or a presence-only `diagnostics.on` marker beside the runtime
 even the Chrome-spawned browser connector can see without environment propagation -- where
 all three executables append bounded, content-free operational JSONL from
 process birth, with a closed event vocabulary, run and operation correlation, and automatic
-retention. The marker is re-checked live every 2 seconds so toggles need no restart;
+retention. The marker is watched by the OS with a 2-second safety-net re-check, so toggles
+land in milliseconds and never need a restart;
 `ghostlight diagnostics on|off` actuates it, and an extension popup toggle actuates it for
 the whole machine through the orchestrator-owned runtime-control path, beside a read-only
 `show` and a doctor row. The

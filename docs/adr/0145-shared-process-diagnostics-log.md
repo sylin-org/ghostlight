@@ -6,6 +6,8 @@
   variable, then a marker file)
 - Amended: 2026-08-29, pre-implementation, again: the marker is re-checked live and actuated
   from control surfaces (Decisions 2, 3, 6, and 8)
+- Amended: 2026-08-29, pre-implementation, once more: the live re-check became a layered OS
+  watch plus a safety-net tick (Decision 2)
 - Builds on: ADR-0016, ADR-0028, ADR-0107, ADR-0127, ADR-0143
 
 ## Context
@@ -74,9 +76,16 @@ exactly when nothing connects:
    is the point: the browser connector that Chromium spawns inherits the browser's
    environment, and now no environment has to reach it. The shared runtime-file resolution
    every component already performs (`bridge/src/runtime.rs`) is the only discovery it needs.
-   This layer is re-evaluated every 2 seconds, so creating or removing the marker toggles
-   every running component without a restart: turning off closes the file cleanly with a
-   final line, and turning on opens a fresh file with a new header.
+   This layer is served by two triggers, and whichever fires first wins: an OS directory
+   watch (inotify, ReadDirectoryChangesW, or equivalent, through the `notify` crate behind an
+   injected seam) filtered to the marker's name fires immediately, and a 2-second re-check
+   stands as the safety net for filesystems where watches do not fire, such as network
+   shares and overlay mounts. Both triggers converge on one idempotent re-evaluation, so a
+   missed or duplicated event costs nothing, and the watcher filters events to the marker's
+   name before acting, so the sink's own log appends in the same directory never trigger an
+   evaluation. Toggling the marker therefore flips every running component in milliseconds
+   where the watch fires and within 2 seconds everywhere else: turning off closes the file
+   cleanly with a final line, and turning on opens a fresh file with a new header.
 3. Otherwise the sink is off. When the variable and the marker are both present, the variable
    wins outright: it names both the fact and the place.
 
@@ -211,8 +220,9 @@ standing channel.
   retention bounds.
 - The marker closes the browser-connector activation gap: the Chrome-spawned relay reads it
   through the runtime-file resolution it already performs, with no environment propagation.
-  With live re-checking and the control surfaces, toggling diagnostics anywhere takes effect
-  machine-wide within about two seconds and no restart; the env-var layer remains the
+  With the watch and the control surfaces, toggling diagnostics anywhere takes effect
+  machine-wide in milliseconds where the platform's watch fires and within 2 seconds
+  anywhere else, with no restart; the env-var layer remains the
   explicit per-client configuration whose on-state is fixed at birth.
 - The extension gains one human control and one request type over the existing runtime-control
   path, so extension bytes change in this batch and ride the next store submission. The
