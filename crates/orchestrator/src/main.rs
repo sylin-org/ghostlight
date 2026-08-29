@@ -525,7 +525,7 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
     let report = &observation.diagnostics;
-    match (&report.layer[..], &report.directory) {
+    match (report.layer, &report.directory) {
         (layer, Some(directory)) => println!(
             "Process diagnostics: {layer} -- {} bytes of log in {directory}",
             report.used_bytes
