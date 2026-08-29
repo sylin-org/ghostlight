@@ -45,10 +45,11 @@ the owner wants, and what this project learned the hard way.
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
 - **Diagnostics are a product surface, not a developer afterthought.** Process logs must be
-  findable, readable, correlatable, and cause-first: one command to one chronological story,
-  operation ids that follow one call across processes, lines that lead with the reason and the
-  remedy, bounded retention, and honest gaps. A raw dump that needs manual stitching is a
-  defect, not a v1 (ADR-0145, the process-diagnostics batch).
+  findable, readable, correlatable, and factual: one command to one chronological story,
+  operation ids that follow one call across processes, terse dense lines carrying the numbers
+  that matter, bounded retention, and honest gaps. A raw dump that needs manual stitching is a
+  defect, not a v1 -- and so is a chatty one: the person chasing an error, human or agent,
+  wants information, not prose (ADR-0145, the process-diagnostics batch).
 - **One product across every machine.** The same words, controls, and truth on each computer a
   person uses, shaped to the desktop they are on: a tray where the shell has one, an Applications
   entry everywhere, a notification area on Windows, and never a single one of those as the only

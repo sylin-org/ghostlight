@@ -8,6 +8,9 @@
   from control surfaces (Decisions 2, 3, 6, and 8)
 - Amended: 2026-08-29, pre-implementation, once more: the live re-check became a layered OS
   watch plus a safety-net tick (Decision 2)
+- Amended: 2026-08-29, pre-implementation, a fourth time: the workbench toggle and folder
+  reveal became decided surfaces, and the log voice is pinned to terse facts over teaching
+  prose (Decisions 4, 7, and 8)
 - Builds on: ADR-0016, ADR-0028, ADR-0107, ADR-0127, ADR-0143
 
 ## Context
@@ -127,8 +130,10 @@ reconnect); protocol framing and negotiation (revision agreed, malformed frame r
 operation boundaries (started, completed, failed, timed out) carrying the operation id; and
 liveness (heartbeat lost, heartbeat resumed).
 
-Detail strings are plain sentences that lead with the cause and, where one is known, name the
-remedy -- the same teaching voice the model-facing language already uses. Records are
+Detail strings are terse facts: what happened, to what, and the numbers and ids that matter.
+The log is read mid-hunt, usually by search, and its delight is information density, not
+prose; it does not teach, advise, or narrate. The teaching voice belongs to model-facing
+results and stays there. Records are
 content-free by construction: identifiers, counts, durations, states, and typed reasons from
 the product's own failure vocabulary. Never URLs, page content, payloads, selectors, or
 credentials. A schema test pins the record shape the way the audit record shape is pinned.
@@ -167,7 +172,10 @@ ceremony.
   of four files.
 - Correlatable: run ids bind a process instance's lines, and operation ids let one search
   follow one tool call across orchestrator and connectors.
-- Cause-first: lines lead with the reason and the remedy, not a code path.
+- Factual: lines lead with the reason and the numbers that matter, not a code path and not a
+  sermon; density is the courtesy.
+- Reachable: the workbench toggles diagnostics and opens the folder, so chasing an error
+  never requires a terminal unless a terminal is faster.
 - Bounded and honest: retention is automatic, and missing coverage is stated, never implied
   away.
 - Shareable: content-free by construction, so the folder can be attached to a report without
@@ -184,8 +192,12 @@ file and nothing else:
   extension has no filesystem and stays policy-free: it sends one request over the existing
   runtime-control request path (`runtime_control_requested`, `RuntimeControlState`), the
   orchestrator owns the toggle semantics and performs the file act, and the browser connector
-  stays a pure relay. The workbench can use the same orchestrator act; its own toggle is an
-  obvious later surface.
+  stays a pure relay.
+- The workbench Status destination gains the same toggle and a reveal action that opens the
+  diagnostics folder through the operating system's file manager. Both are native-process
+  acts: the WebView gains no opener, shell, or filesystem grant (the ADR-0125 Locate
+  pattern), and the folder revealed is the one `diagnostics path` names. Showing recent lines
+  inside the window is an obvious later surface and is not decided here.
 
 The product never creates or removes the marker on its own initiative, only at an explicit
 person's request from one of these surfaces, so "activation is a person's act" stays true.
@@ -228,3 +240,6 @@ standing channel.
   path, so extension bytes change in this batch and ride the next store submission. The
   connector's only change is forwarding the typed request; the relay contract is otherwise
   untouched.
+- The workbench gains one Status row and one reveal act inside the native process it already
+  owns; no WebView privilege changes, and the bounded-native-action pattern of ADR-0125
+  applies.

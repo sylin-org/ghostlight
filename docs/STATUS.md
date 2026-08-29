@@ -17,8 +17,8 @@ all three executables append bounded, content-free operational JSONL from
 process birth, with a closed event vocabulary, run and operation correlation, and automatic
 retention. The marker is watched by the OS with a 2-second safety-net re-check, so toggles
 land in milliseconds and never need a restart;
-`ghostlight diagnostics on|off` actuates it, and an extension popup toggle actuates it for
-the whole machine through the orchestrator-owned runtime-control path, beside a read-only
+`ghostlight diagnostics on|off` actuates it, as do an extension popup toggle and a
+workbench toggle-and-reveal row, all through orchestrator-owned paths, beside a read-only
 `show` and a doctor row. The
 [process-diagnostics batch](tasks/process-diagnostics/BOOTSTRAP.md) is authored to execute it;
 D1 (the sink in the bridge crate) is next. The design revives the observability half of the
