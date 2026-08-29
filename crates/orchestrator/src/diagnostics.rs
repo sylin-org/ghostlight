@@ -5,9 +5,51 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ghostlight_bridge::browser::{DiagnosticsLayer, DiagnosticsState};
-use ghostlight_bridge::diagnostics::{self, event, set_marker, Activation, Component, Level, Sink};
+use ghostlight_bridge::diagnostics::{
+    self, event, resolve, set_marker, Activation, Component, Level, Sink,
+};
 
 use crate::browser::AdapterLifecycleObserver;
+
+/// A point-in-time read of the diagnostics state for `doctor` and the workbench. It observes
+/// only; it never demand-starts anything.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct DiagnosticsReport {
+    /// The active activation layer.
+    pub layer: &'static str,
+    /// The directory diagnostics write into, when active.
+    pub directory: Option<String>,
+    /// Bytes of diagnostics log files currently on disk.
+    pub used_bytes: u64,
+}
+
+/// Observe the diagnostics state for one runtime file location.
+#[must_use]
+pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
+    let activation = resolve(None, runtime_path);
+    let layer = activation.layer();
+    let directory = activation
+        .directory()
+        .map(Path::to_string_lossy)
+        .map(String::from);
+    let used_bytes = activation
+        .directory()
+        .and_then(|directory| std::fs::read_dir(directory).ok())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+                .filter_map(|entry| entry.metadata().ok())
+                .map(|meta| meta.len())
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    DiagnosticsReport {
+        layer,
+        directory,
+        used_bytes,
+    }
+}
 
 /// The orchestrator-owned hub around the shared process sink (ADR-0145).
 pub struct DiagnosticsHub {

@@ -425,6 +425,7 @@ struct DoctorObservation {
     harnesses: Vec<ghostlight::install::HarnessSummary>,
     runtime: RuntimeObservation,
     readiness: Option<ghostlight::workbench::ReadinessSummary>,
+    diagnostics: ghostlight::diagnostics::DiagnosticsReport,
 }
 
 fn observe_doctor() -> anyhow::Result<DoctorObservation> {
@@ -455,6 +456,7 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     } else {
         None
     };
+    let diagnostics = ghostlight::diagnostics::observe(&ghostlight_bridge::runtime::runtime_file());
     Ok(DoctorObservation {
         // Same module as the install summary, so the two can never describe this machine
         // differently.
@@ -468,6 +470,7 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         harnesses: HarnessRegistry::discover().refresh()?,
         runtime,
         readiness,
+        diagnostics,
     })
 }
 
@@ -521,6 +524,16 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         );
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
+    let report = &observation.diagnostics;
+    match (&report.layer[..], &report.directory) {
+        (layer, Some(directory)) => println!(
+            "Process diagnostics: {layer} -- {} bytes of log in {directory}",
+            report.used_bytes
+        ),
+        (layer, None) => println!(
+            "Process diagnostics: {layer} -- set GHOSTLIGHT_DIAGNOSTICS_DIR or create diagnostics.on beside the runtime file to turn them on"
+        ),
+    }
     if fix {
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
@@ -553,6 +566,7 @@ fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
         "readiness": observation.readiness,
+        "process_diagnostics": observation.diagnostics,
     })
 }
 
