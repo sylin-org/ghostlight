@@ -24,12 +24,13 @@ against the tree first; they were verified on 2026-08-29 and are recorded below.
 - ADR-0016 is the historical shape (per-PID files, bounded bodies, swallowed I/O, stdout
   purity, distinct from audit). Its mechanism was removed with the 0.8 layer by ADR-0143;
   nothing of it remains in `crates/`.
-- ADR-0145 was amended twice in place before any task executed (2026-08-29): first,
+- ADR-0145 was amended three times in place before any task executed (2026-08-29): first,
   activation is layered, an explicit-directory variable over a presence-only `diagnostics.on`
-  marker beside the runtime discovery file, over off; second, the marker layer is re-checked
-  live every 2 seconds and actuated from surfaces -- the person's hand, `diagnostics on|off`,
-  and an extension popup toggle through the orchestrator-owned runtime-control path. The
-  batch implements the amended decision.
+  marker beside the runtime discovery file, over off; second, the marker is actuated from
+  surfaces -- the person's hand, `diagnostics on|off`, and an extension popup toggle through
+  the orchestrator-owned runtime-control path; third, the live re-check became a layered OS
+  watch with a 2-second safety-net tick, whichever fires first. The batch implements the
+  amended decision.
 
 ## Delight bar (owner directive, 2026-08-29)
 

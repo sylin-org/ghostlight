@@ -26,8 +26,8 @@ authority on progress; a task here describes intent, the ledger records what hap
   process lifetime, and no product path returns an error because diagnostics could not write.
 - Activation is a person's act: the product creates or removes the `diagnostics.on` marker
   only at an explicit request from a control surface (hand, CLI, extension popup), and every
-  component re-evaluates the marker layer on the 2-second tick while the variable layer stays
-  fixed at birth.
+  component re-evaluates the marker layer on the OS watch or the 2-second safety-net tick,
+  whichever fires first, while the variable layer stays fixed at birth.
 - stdout purity: the MCP connector's stdout stays pure protocol. The sink writes files only.
 - The extension gains only the popup toggle and its request type: a human control, no policy,
   no files, no console logging. `browser_diagnose` and its ring are out of scope. The
@@ -61,13 +61,18 @@ in the ledger; if any has moved, STOP and record what changed.
    `<utc-start>-<component>-<pid>.jsonl`, writes the header record, appends bounded lines
    behind a mutex, disables itself on append failure, and prunes to the newest 8 files per
    component within a 64 MiB total ceiling, touching only component log files and never the
-   marker. The sink re-evaluates the marker layer on the 2-second tick -- turning off closes
-   the file with a final line, turning on opens a fresh file with a header, and a name that
-   already exists gains a sequence number before the extension -- reusing a component's
-   existing timers where it has them and a minimal ticker in the sink module otherwise. Unit
-   tests cover the layer matrix (variable over marker over off, variable pinning at birth),
-   live on and off transitions, same-second naming, detail clipping, self-disable, prune
-   order and its marker safety, and a schema test that pins the record
+   marker. The marker layer is served by an injected OS-watch seam over the `notify` crate,
+   filtered to the marker's name so the sink's own appends never trigger an evaluation, plus
+   a 2-second safety-net re-check that reuses a component's existing timers where it has
+   them and a minimal ticker in the sink module otherwise; whichever fires first wins, and
+   re-evaluation is idempotent -- turning off closes the file with a final line, turning on
+   opens a fresh file with a header, and a name that already exists gains a sequence number
+   before the extension. Watch tests inject event sources rather than relying on real
+   inotify or ReadDirectoryChangesW in CI (ADR-0032's seam rule), and the dependency-policy
+   gate passes with the new crate. Unit tests cover the layer matrix (variable over marker
+   over off, variable pinning at birth), live on and off transitions through both triggers,
+   same-second naming, detail clipping, self-disable, prune order and its marker safety, and
+   a schema test that pins the record
    fields (timestamp, run id, component, event, level, optional operation id, bounded detail).
 2. D2 orchestrator wiring: initialize the sink at startup when the switch is present, and emit
    the process, connection, framing and negotiation, operation boundary, and liveness families
@@ -75,8 +80,8 @@ in the ledger; if any has moved, STOP and record what changed.
    detach, browser adapter hello and replacement, deadline firing). Event names come from the
    closed vocabulary; no literal event strings at call sites. The orchestrator also owns the
    toggle act: on a runtime-control request from the CLI, workbench, or extension relay it
-   creates or removes the marker, then lets its own tick apply the change like every other
-   component.
+   creates or removes the marker, then lets its own watch or tick apply the change like
+   every other component.
 3. D3 mcp-connector wiring: emit process start, demand-start attempts and outcomes, service
    connection lifecycle, and framing errors. The existing disconnect-streak stderr line stays;
    the sink records the same fact.
