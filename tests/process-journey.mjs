@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -10,12 +10,14 @@ const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghost
 const runtimeFile = join(repository, `tests/.ghostlight-runtime-${process.pid}.json`);
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
 const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
+const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
 const deployLock = join(binDir, "deploy.lock");
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
   GHOSTLIGHT_AUDIT_FILE: auditFile,
-  GHOSTLIGHT_POLICY_FILE: policyFile
+  GHOSTLIGHT_POLICY_FILE: policyFile,
+  GHOSTLIGHT_DIAGNOSTICS_DIR: diagnosticsDir
 };
 const children = [];
 const physicalCommands = [];
@@ -440,9 +442,9 @@ try {
   assert.equal(browserHello.kind, "hello_accepted");
   assert.equal(browserHello.control_state, "active");
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-  assert.deepEqual(await native.next(), { kind: "control_state", state: "held" });
+  assert.deepEqual(await native.next(), { kind: "control_state", state: "held", diagnostics: { layer: "explicit" } });
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  assert.deepEqual(await native.next(), { kind: "control_state", state: "active" });
+  assert.deepEqual(await native.next(), { kind: "control_state", state: "active", diagnostics: { layer: "explicit" } });
   void runAdapter(native);
 
   const discovered = await discovery.promise;
@@ -745,6 +747,47 @@ try {
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
 
+  // ADR-0145: the explicit layer pinned every process at birth, so all three wrote bounded,
+  // content-free operational logs into the one journey directory.
+  const diagnosticNames = readdirSync(diagnosticsDir).filter((name) => name.endsWith(".jsonl"));
+  assert.equal(diagnosticNames.some((name) => name.includes("-orchestrator-")), true);
+  assert.equal(diagnosticNames.some((name) => name.includes("-mcp-connector-")), true);
+  assert.equal(diagnosticNames.some((name) => name.includes("-browser-connector-")), true);
+  const diagnosticRecords = diagnosticNames
+    .flatMap((name) => readFileSync(join(diagnosticsDir, name), "utf8").trim().split("\n"))
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.event !== undefined);
+  for (const name of diagnosticNames) {
+    const header = JSON.parse(readFileSync(join(diagnosticsDir, name), "utf8").split("\n")[0]);
+    assert.equal(header.schema, "ghostlight-diagnostics-1");
+  }
+  const readOperation = diagnosticRecords.findLast(
+    (record) => record.event === "operation_completed" && record.detail.includes("browser_read")
+  );
+  assert.equal(readOperation.component, "orchestrator");
+  assert.equal(typeof readOperation.op, "string");
+  assert.match(readOperation.detail, /browser_read succeeded/);
+  assert.equal(diagnosticRecords.some((record) => JSON.stringify(record).includes("Example Domain")), false);
+  assert.equal(diagnosticRecords.some((record) => record.event === "harness_attached" && record.detail.includes("acceptance")), true);
+  assert.equal(diagnosticRecords.some((record) => record.event === "adapter_attached" && record.detail.includes(PROCESS_BROWSER)), true);
+  assert.equal(diagnosticRecords.some((record) => record.component === "mcp-connector" && record.event === "service_connected"), true);
+  assert.equal(diagnosticRecords.some((record) => record.component === "browser-connector" && record.event === "service_connected"), true);
+
+  const runDiagnosticsCli = (args) =>
+    new Promise((resolvePromise, reject) => {
+      const child = spawn(executable("ghostlight"), ["diagnostics", ...args], { env: environment, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      let out = "";
+      child.stdout.on("data", (chunk) => { out += chunk; });
+      child.on("exit", (code) => (code === 0 ? resolvePromise(out) : reject(new Error(`diagnostics ${args.join(" ")} exited ${code}`))));
+    });
+  const shown = JSON.parse(await runDiagnosticsCli(["show", "--json"]));
+  assert.equal(shown.some((record) => record.event === "operation_completed" && record.detail.includes("browser_read")), true);
+  assert.match(await runDiagnosticsCli(["path"]), /explicit/);
+  await runDiagnosticsCli(["on"]);
+  assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), true, "on creates the marker");
+  await runDiagnosticsCli(["off"]);
+  assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), false, "off removes the marker");
+
   // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
   // disconnects, recovery must preserve the profile binding and stop before repair, launch, or
   // adapter dispatch. Injected Rust tests own the exact unpinned startup behavior matrix.
@@ -775,5 +818,6 @@ try {
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true });
   rmSync(policyFile, { force: true });
+  rmSync(diagnosticsDir, { recursive: true, force: true });
   if (createdDeployLock) rmSync(deployLock, { force: true });
 }

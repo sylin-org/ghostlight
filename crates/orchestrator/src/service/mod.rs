@@ -22,7 +22,7 @@ use ghostlight_bridge::service::{
 };
 use uuid::Uuid;
 
-use crate::browser::{BrowserEventSink, BrowserPort, RelayBrowserPort};
+use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
@@ -91,6 +91,8 @@ impl ServiceHost {
         let browser = Arc::new(RelayBrowserPort::new(service_epoch));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         let diagnostics = DiagnosticsHub::birth(path);
+        browser
+            .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
         {
             // Every activation transition, from any layer, republishes wire state so connected
             // adapters and the workbench always show the same truth.
