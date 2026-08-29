@@ -9,10 +9,11 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use ghostlight_bridge::diagnostics::{event, Component, Level, Sink};
 use ghostlight_bridge::framing::{
     read_length_frame, read_native, write_length_frame, write_native,
 };
-use ghostlight_bridge::lifecycle::request_orchestrator_start;
+use ghostlight_bridge::lifecycle::{request_orchestrator_start, StartDisposition};
 use ghostlight_bridge::relay::{
     BrowserRelayRequest, BrowserRelayResponse, BrowserRelayStatus, BROWSER_RELAY_MAJOR,
 };
@@ -30,6 +31,17 @@ enum RelayEvent {
 }
 
 fn main() -> Result<()> {
+    let diagnostics = Sink::birth(
+        Component::BrowserConnector,
+        env!("CARGO_PKG_VERSION"),
+        &runtime_file(),
+    );
+    diagnostics.emit(
+        event::PROCESS_STARTED,
+        Level::Info,
+        None,
+        "browser native relay starting",
+    );
     let (events, incoming) = sync_channel(FRAME_BUFFER);
     let chrome_alive = Arc::new(AtomicBool::new(true));
     spawn_chrome_reader(events.clone(), Arc::clone(&chrome_alive))?;
@@ -47,13 +59,19 @@ fn main() -> Result<()> {
                 Err(_) => {
                     write_native(&mut chrome_output, &BrowserRelayStatus::BackendUnavailable)
                         .context("report unavailable backend")?;
-                    connect_adapter(&adapter_hello, &chrome_alive)?
+                    connect_adapter(&adapter_hello, &chrome_alive, &diagnostics)?
                 }
             };
             let Some((stream, first_adapter_response)) = connection else {
                 return Ok(());
             };
             generation = generation.wrapping_add(1);
+            diagnostics.emit(
+                event::SERVICE_CONNECTED,
+                Level::Info,
+                None,
+                "orchestrator browser relay connected",
+            );
             write_length_frame(&mut chrome_output, &first_adapter_response)
                 .context("forward adapter negotiation")?;
             spawn_service_reader(stream.try_clone()?, generation, events.clone())?;
@@ -81,6 +99,12 @@ fn main() -> Result<()> {
                     .context("forward service adapter frame")?;
             }
             Ok(RelayEvent::ServiceClosed { generation: source }) if source == generation => {
+                diagnostics.emit(
+                    event::SERVICE_DISCONNECTED,
+                    Level::Warn,
+                    None,
+                    "orchestrator browser relay connection ended",
+                );
                 service = None;
             }
             Ok(RelayEvent::ServiceFrame { .. } | RelayEvent::ServiceClosed { .. }) => {}
@@ -134,19 +158,50 @@ fn receive_adapter_hello(incoming: &Receiver<RelayEvent>) -> Result<Vec<u8>> {
 fn connect_adapter(
     adapter_hello: &[u8],
     chrome_alive: &AtomicBool,
+    diagnostics: &Sink,
 ) -> Result<Option<(TcpStream, Vec<u8>)>> {
     if adapter_hello.is_empty() {
         return Ok(None);
     }
     let mut startup_error_reported = false;
+    let mut reported_disposition: Option<String> = None;
     while chrome_alive.load(Ordering::SeqCst) {
         if let Ok(connection) = connect_once(adapter_hello) {
             return Ok(Some(connection));
         }
-        if let Err(error) = request_orchestrator_start() {
-            if !startup_error_reported {
-                eprintln!("Ghostlight could not start its local orchestrator: {error}");
-                startup_error_reported = true;
+        match request_orchestrator_start() {
+            Ok(disposition) => {
+                let note = match &disposition {
+                    StartDisposition::Spawned { process_id } => (
+                        event::DEMAND_START_SPAWNED,
+                        format!("orchestrator pid {process_id}"),
+                    ),
+                    StartDisposition::AlreadyRunning => (
+                        event::DEMAND_START_ALREADY_RUNNING,
+                        "lease held; retrying connection".into(),
+                    ),
+                    StartDisposition::DeploymentInProgress => (
+                        event::DEMAND_START_DEPLOYMENT_IN_PROGRESS,
+                        "deploy lock present; startup quiesced".into(),
+                    ),
+                };
+                let marker = format!("{}|{}", note.0, note.1);
+                if reported_disposition.as_deref() != Some(marker.as_str()) {
+                    reported_disposition = Some(marker);
+                    diagnostics.emit(note.0, Level::Info, None, &note.1);
+                }
+            }
+            Err(error) => {
+                if !startup_error_reported {
+                    eprintln!("Ghostlight could not start its local orchestrator: {error}");
+                    startup_error_reported = true;
+                    diagnostics.emit(
+                        event::DEMAND_START_FAILED,
+                        Level::Warn,
+                        None,
+                        &format!("demand-start failed: {error}"),
+                    );
+                }
             }
         }
         thread::sleep(RETRY_INTERVAL);
