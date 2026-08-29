@@ -23,6 +23,7 @@ use ghostlight_bridge::service::{
 use uuid::Uuid;
 
 use crate::browser::{BrowserEventSink, BrowserPort, RelayBrowserPort};
+use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -40,6 +41,8 @@ pub struct ServiceHost {
     pub endpoint: RuntimeEndpoint,
     /// Typed in-process application boundary for the disposable desktop workbench.
     pub workbench: WorkbenchFacade,
+    /// The process-diagnostics hub this authority owns.
+    pub diagnostics: Arc<DiagnosticsHub>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     runtime_path: PathBuf,
@@ -87,8 +90,20 @@ impl ServiceHost {
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
         let browser = Arc::new(RelayBrowserPort::new(service_epoch));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
+        let diagnostics = DiagnosticsHub::birth(path);
+        {
+            // Every activation transition, from any layer, republishes wire state so connected
+            // adapters and the workbench always show the same truth.
+            let browser_for_diagnostics = Arc::clone(&browser);
+            let sink_for_diagnostics = diagnostics.sink();
+            diagnostics.sink().set_on_change(Arc::new(move |_| {
+                let _ = browser_for_diagnostics
+                    .publish_diagnostics(crate::diagnostics::wire_state(&sink_for_diagnostics));
+            }));
+        }
         let _ = governance.runtime_decision();
         let _ = browser_port.publish_control_state(governance.runtime_state());
+        let _ = browser.publish_diagnostics(diagnostics.state());
         let presentation = PresentationReactor::new(Arc::new(BrowserPresentation::new(
             browser_port.clone(),
             workspaces.clone(),
@@ -117,6 +132,7 @@ impl ServiceHost {
             presentation.clone(),
             projection,
             audit.clone(),
+            Arc::clone(&diagnostics),
         ));
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
             governance: governance.clone(),
@@ -124,6 +140,7 @@ impl ServiceHost {
             active: executor.active_authority(),
             audit,
             browser: browser_port.clone(),
+            diagnostics: Arc::clone(&diagnostics),
         }));
 
         write_runtime(path, &endpoint).context("publish runtime endpoint")?;
@@ -137,6 +154,7 @@ impl ServiceHost {
             workbench.clone(),
             governance.clone(),
             endpoint.token.clone(),
+            Arc::clone(&diagnostics),
         );
         let browser_thread = spawn_browser_listener(
             browser_listener,
@@ -147,11 +165,18 @@ impl ServiceHost {
         Ok(Self {
             endpoint,
             workbench,
+            diagnostics,
             stop,
             threads: vec![service_thread, browser_thread],
             runtime_path: path.into(),
             _lease: lease,
         })
+    }
+
+    /// The process-diagnostics hub this authority owns.
+    #[must_use]
+    pub fn diagnostics(&self) -> Arc<DiagnosticsHub> {
+        Arc::clone(&self.diagnostics)
     }
 
     fn join(&mut self) {
@@ -234,6 +259,7 @@ fn spawn_service_listener(
     workbench: WorkbenchFacade,
     governance: GovernanceFacade,
     token: String,
+    diagnostics: Arc<DiagnosticsHub>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name("ghostlight-service-listener".into())
@@ -247,12 +273,19 @@ fn spawn_service_listener(
                         let workbench = workbench.clone();
                         let governance = governance.clone();
                         let token = token.clone();
+                        let diagnostics = Arc::clone(&diagnostics);
                         let _ = thread::Builder::new()
                             .name("ghostlight-mcp-session".into())
                             .spawn(move || {
                                 if let Err(error) = serve_session(
-                                    stream, executor, workspaces, browser, workbench, governance,
+                                    stream,
+                                    executor,
+                                    workspaces,
+                                    browser,
+                                    workbench,
+                                    governance,
                                     &token,
+                                    diagnostics,
                                 ) {
                                     eprintln!("MCP service session ended: {error:#}");
                                 }
@@ -351,6 +384,7 @@ fn serve_session(
     workbench: WorkbenchFacade,
     governance: GovernanceFacade,
     expected_token: &str,
+    diagnostics: Arc<DiagnosticsHub>,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
@@ -472,6 +506,7 @@ fn serve_session(
         }
         _ => None,
     };
+    let label_for_diagnostics = client_label.clone();
     let workspace = match session {
         Some(marker) => workspaces.resume_or_admit(client_label, channel, marker, peer_image),
         None => workspaces.admit(client_label, channel, peer_image),
@@ -487,6 +522,12 @@ fn serve_session(
                 instructions: SERVER_INSTRUCTIONS.into(),
             },
         },
+    );
+    diagnostics.sink().emit(
+        ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
+        ghostlight_bridge::diagnostics::Level::Info,
+        None,
+        &format!("{label_for_diagnostics} via {}", channel.as_str()),
     );
     let active: Arc<Mutex<HashMap<String, CancellationToken>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -622,6 +663,12 @@ fn serve_session(
         let released = workspaces.release(&workspace);
         cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
     }
+    diagnostics.sink().emit(
+        ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
+        ghostlight_bridge::diagnostics::Level::Info,
+        None,
+        workspace.as_str(),
+    );
     served
 }
 
@@ -707,6 +754,7 @@ struct ServiceBrowserEvents {
     active: ActiveAuthorityRegistry,
     audit: Arc<dyn AuditSink>,
     browser: Arc<dyn BrowserPort>,
+    diagnostics: Arc<DiagnosticsHub>,
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
@@ -778,6 +826,9 @@ impl BrowserEventSink for ServiceBrowserEvents {
             BrowserEvent::RuntimeControlRequested { intent } => {
                 let state = self.governance.apply_runtime_intent(intent);
                 let _ = self.browser.publish_control_state(state);
+            }
+            BrowserEvent::DiagnosticsToggleRequested => {
+                self.diagnostics.toggle();
             }
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id)

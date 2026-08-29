@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use ghostlight_bridge::browser::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-    BrowserOutcome, BrowserRequest, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
+    BrowserOutcome, BrowserRequest, DiagnosticsState, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
     COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
 };
 use ghostlight_bridge::framing::{read_native, write_length_frame, write_native, FrameError};
@@ -282,12 +282,21 @@ impl ConnectionLiveness {
     }
 }
 
+/// Observes adapter connection lifecycle at the physical port boundary. The port calls this
+/// where connections are registered, replaced, and lost; observers log or publish.
+pub trait AdapterLifecycleObserver: Send + Sync + 'static {
+    fn adapter_attached(&self, browser_id: &str, replaced: bool);
+    fn adapter_detached(&self, browser_id: &str);
+}
+
 /// Authenticated loopback implementation of the physical browser port.
 pub struct RelayBrowserPort {
     service_epoch: String,
     adapters: Arc<Mutex<AdapterRegistry>>,
     event_sink: Mutex<Option<Arc<dyn BrowserEventSink>>>,
     control_state: Mutex<RuntimeControlState>,
+    diagnostics: Mutex<Option<DiagnosticsState>>,
+    lifecycle: Mutex<Option<Arc<dyn AdapterLifecycleObserver>>>,
     heartbeat: HeartbeatSettings,
 }
 
@@ -309,6 +318,8 @@ impl RelayBrowserPort {
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
+            diagnostics: Mutex::new(None),
+            lifecycle: Mutex::new(None),
             heartbeat: HeartbeatSettings::default(),
         }
     }
@@ -321,6 +332,8 @@ impl RelayBrowserPort {
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
+            diagnostics: Mutex::new(None),
+            lifecycle: Mutex::new(None),
             heartbeat,
         }
     }
@@ -328,6 +341,11 @@ impl RelayBrowserPort {
     /// Install the direct typed event reaction target.
     pub fn set_event_sink(&self, sink: Arc<dyn BrowserEventSink>) {
         *lock(&self.event_sink) = Some(sink);
+    }
+
+    /// Install the adapter lifecycle observer.
+    pub fn set_lifecycle_observer(&self, observer: Arc<dyn AdapterLifecycleObserver>) {
+        *lock(&self.lifecycle) = Some(observer);
     }
 
     /// Whether at least one compatible adapter is currently connected.
@@ -433,6 +451,7 @@ impl RelayBrowserPort {
                 service_version: env!("CARGO_PKG_VERSION").into(),
                 service_epoch: self.service_epoch.clone(),
                 control_state: *lock(&self.control_state),
+                diagnostics: *lock(&self.diagnostics),
             },
         )
         .map_err(|error| BrowserError::Protocol(error.to_string()))?;
@@ -448,14 +467,20 @@ impl RelayBrowserPort {
             capabilities,
             liveness: liveness.clone(),
         };
-        {
+        let replaced = {
             let mut adapters = lock(&self.adapters);
-            if let Some(previous) = adapters.connections.insert(browser_id.clone(), connection) {
-                retire(&previous);
+            let previous = adapters.connections.insert(browser_id.clone(), connection);
+            if let Some(previous) = &previous {
+                retire(previous);
             }
             if reports_attention && attended {
                 adapters.attend(&browser_id);
             }
+            previous.is_some()
+        };
+        let lifecycle = lock(&self.lifecycle).clone();
+        if let Some(observer) = lifecycle.as_ref() {
+            observer.adapter_attached(&browser_id, replaced);
         }
         let sink = lock(&self.event_sink).clone();
         let tag = ConnectionTag {
@@ -465,6 +490,10 @@ impl RelayBrowserPort {
         let reader_adapters = Arc::clone(&self.adapters);
         let reader_tag = tag.clone();
         let reader_liveness = liveness.clone();
+        let reader_notifications = AdapterNotifications {
+            sink,
+            lifecycle: lock(&self.lifecycle).clone(),
+        };
         let heartbeat_writer = Arc::clone(&writer);
         let heartbeat_pending = Arc::clone(&pending);
         if let Err(error) = thread::Builder::new()
@@ -474,7 +503,7 @@ impl RelayBrowserPort {
                     reader,
                     writer,
                     pending,
-                    sink,
+                    reader_notifications,
                     reader_adapters,
                     reader_tag,
                     reader_liveness,
@@ -663,6 +692,23 @@ impl BrowserPort for RelayBrowserPort {
     /// rest.
     fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
         *lock(&self.control_state) = state;
+        self.broadcast_control(state)
+    }
+}
+
+impl RelayBrowserPort {
+    /// Publish process-diagnostics state to every connected adapter and remember it so the
+    /// next hello carries it too.
+    pub fn publish_diagnostics(&self, diagnostics: DiagnosticsState) -> Result<(), BrowserError> {
+        *lock(&self.diagnostics) = Some(diagnostics);
+        self.broadcast_control(*lock(&self.control_state))
+    }
+
+    fn broadcast_control(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
+        let frame = BrowserFrame::ControlState {
+            state,
+            diagnostics: *lock(&self.diagnostics),
+        };
         let writers: Vec<_> = lock(&self.adapters)
             .connections
             .values()
@@ -670,7 +716,7 @@ impl BrowserPort for RelayBrowserPort {
             .collect();
         let mut published = Ok(());
         for writer in writers {
-            if write_native(&mut *lock(&writer), &BrowserFrame::ControlState { state }).is_err() {
+            if write_native(&mut *lock(&writer), &frame).is_err() {
                 published = Err(BrowserError::DisconnectedAfterDispatch);
             }
         }
@@ -771,11 +817,18 @@ fn send_cancel(writer: &Arc<Mutex<TcpStream>>, correlation: &str) {
     let _ = write_native(&mut *lock(writer), &frame);
 }
 
+/// The notification targets one adapter reader reports to: the typed event sink and the
+/// lifecycle observer.
+struct AdapterNotifications {
+    sink: Option<Arc<dyn BrowserEventSink>>,
+    lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
+}
+
 fn read_adapter(
     mut reader: TcpStream,
     writer: Arc<Mutex<TcpStream>>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
-    sink: Option<Arc<dyn BrowserEventSink>>,
+    notifications: AdapterNotifications,
     adapters: Arc<Mutex<AdapterRegistry>>,
     tag: ConnectionTag,
     liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
@@ -810,7 +863,7 @@ fn read_adapter(
                     lock(&adapters).attend(browser_id);
                     continue;
                 }
-                if let Some(sink) = &sink {
+                if let Some(sink) = &notifications.sink {
                     sink.on_event(browser_id, event);
                 }
             }
@@ -837,8 +890,11 @@ fn read_adapter(
                     current
                 };
                 if was_current {
-                    if let Some(sink) = &sink {
+                    if let Some(sink) = &notifications.sink {
                         sink.on_event(browser_id, BrowserEvent::Disconnected);
+                    }
+                    if let Some(observer) = &notifications.lifecycle {
+                        observer.adapter_detached(browser_id);
                     }
                 }
                 return;

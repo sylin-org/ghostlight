@@ -6,6 +6,7 @@ compile_error!("Ghostlight supports Windows and Linux only.");
 pub mod browser;
 pub mod cli;
 pub mod desktop;
+pub mod diagnostics;
 pub mod events;
 pub mod governance;
 pub mod install;

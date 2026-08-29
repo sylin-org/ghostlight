@@ -84,6 +84,7 @@ pub struct ApplicationExecutor {
     presentation: PresentationReactor,
     workbench: WorkbenchProjection,
     audit: Arc<dyn AuditSink>,
+    diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     active_authority: ActiveAuthorityRegistry,
     observations: ObservationRegistry,
     stale_candidates: StaleCandidateRegistry,
@@ -154,6 +155,7 @@ impl ApplicationExecutor {
         presentation: PresentationReactor,
         workbench: WorkbenchProjection,
         audit: Arc<dyn AuditSink>,
+        diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         let recovery = BrowserRecovery::discover(governance.clone(), Arc::clone(&browser));
         Self {
@@ -164,6 +166,7 @@ impl ApplicationExecutor {
             presentation,
             workbench,
             audit,
+            diagnostics,
             active_authority: Arc::new(Mutex::new(HashMap::new())),
             observations: Arc::new(Mutex::new(HashMap::new())),
             stale_candidates: Arc::new(Mutex::new(HashMap::new())),
@@ -396,6 +399,20 @@ impl ApplicationExecutor {
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| "unknown".into());
+        self.diagnostics.sink().emit(
+            if terminal.result.status == Status::Failed {
+                ghostlight_bridge::diagnostics::event::OPERATION_FAILED
+            } else {
+                ghostlight_bridge::diagnostics::event::OPERATION_COMPLETED
+            },
+            if terminal.result.status == Status::Failed {
+                ghostlight_bridge::diagnostics::Level::Warn
+            } else {
+                ghostlight_bridge::diagnostics::Level::Info
+            },
+            Some(terminal.result.invocation.as_str()),
+            &format!("{tool} {status} {effect} {}ms", duration_ms),
+        );
         let observed = self
             .take_observation(&terminal.result.invocation)
             .merged(terminal.observed.clone());
@@ -2532,6 +2549,7 @@ mod tests {
             PresentationReactor::new(Arc::new(NoPresentation)),
             WorkbenchProjection::default(),
             audit.clone(),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
         );
         (executor, browser, workspaces, workspace, audit)
     }

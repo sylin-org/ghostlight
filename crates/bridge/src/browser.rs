@@ -450,6 +450,26 @@ pub enum RuntimeControlState {
     Ended,
 }
 
+/// The closed process-diagnostics activation layers (ADR-0145).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticsLayer {
+    /// An explicit `GHOSTLIGHT_DIAGNOSTICS_DIR` pinned the sink on.
+    Explicit,
+    /// The `diagnostics.on` marker beside the runtime discovery file is present.
+    Marker,
+    /// Diagnostics are off.
+    Off,
+}
+
+/// Authoritative content-free process-diagnostics state published beside runtime control.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticsState {
+    /// The active activation layer.
+    pub layer: DiagnosticsLayer,
+}
+
 /// A content-free browser presentation signal.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1181,6 +1201,11 @@ pub enum BrowserEvent {
     Attended,
     /// A local human requested a runtime-control change.
     RuntimeControlRequested { intent: RuntimeControlIntent },
+    /// A local human toggled process diagnostics from a connected surface.
+    ///
+    /// Only an adapter whose hello acceptance carried diagnostics state may send this; an older
+    /// service never advertises it, so the unknown variant can never reach its decoder.
+    DiagnosticsToggleRequested,
     /// A tab closed outside an invocation.
     TabClosed { tab_id: u64 },
     /// The adapter connection ended.
@@ -1222,6 +1247,10 @@ pub enum BrowserFrame {
         /// Restart-local orchestrator service epoch.
         service_epoch: String,
         control_state: RuntimeControlState,
+        /// Process-diagnostics state, when this service implements the ADR-0145 contract. Its
+        /// presence is the adapter's permission to send `DiagnosticsToggleRequested`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diagnostics: Option<DiagnosticsState>,
     },
     /// Service asks the adapter to prove that Chrome is consuming native messages.
     Heartbeat { sequence: u32 },
@@ -1246,7 +1275,12 @@ pub enum BrowserFrame {
     /// Adapter emits an asynchronous event.
     Event { event: BrowserEvent },
     /// Service publishes authoritative content-free control state.
-    ControlState { state: RuntimeControlState },
+    ControlState {
+        state: RuntimeControlState,
+        /// Process-diagnostics state, when this service implements the ADR-0145 contract.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diagnostics: Option<DiagnosticsState>,
+    },
     /// Either side reports a bridge or primitive error.
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1262,12 +1296,13 @@ mod tests {
     use super::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
         BrowserOutcome, BrowserReceipt, BrowserRequest, CaptureScope, DiagnosticDetail,
-        DiagnosticEntry, DiagnosticSource, EncodedRecording, PhysicalActionSubject,
-        PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab, PresentationActivity,
-        PresentationKind, PresentationSignal, RecordingDelivery, RecordingDestination,
-        RecordingState, RecordingStopReason, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR,
-        COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
-        RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
+        DiagnosticEntry, DiagnosticSource, DiagnosticsLayer, DiagnosticsState, EncodedRecording,
+        PhysicalActionSubject, PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab,
+        PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
+        RecordingDestination, RecordingState, RecordingStopReason, RuntimeControlState,
+        ViewportGeometry, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
+        COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS, RECORDING_LOCAL_MAX_BYTES,
+        RECORDING_TRANSFER_MAX_BYTES,
     };
 
     #[test]
@@ -1365,6 +1400,55 @@ mod tests {
             serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn diagnostics_toggle_round_trips_and_additive_fields_stay_optional() {
+        let event = BrowserEvent::DiagnosticsToggleRequested;
+        let encoded = serde_json::to_vec(&event).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<BrowserEvent>(&encoded).unwrap(),
+            event
+        );
+        let state = DiagnosticsState {
+            layer: DiagnosticsLayer::Marker,
+        };
+        let accepted = BrowserFrame::HelloAccepted {
+            major: ADAPTER_PROTOCOL_MAJOR,
+            service_version: "9.9.9".into(),
+            service_epoch: "service_test".into(),
+            control_state: RuntimeControlState::Active,
+            diagnostics: Some(state),
+        };
+        let encoded = serde_json::to_vec(&accepted).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
+            accepted
+        );
+        let control = BrowserFrame::ControlState {
+            state: RuntimeControlState::Active,
+            diagnostics: Some(state),
+        };
+        let encoded = serde_json::to_vec(&control).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<BrowserFrame>(&encoded).unwrap(),
+            control
+        );
+        let legacy = serde_json::json!({
+            "kind": "hello_accepted",
+            "major": ADAPTER_PROTOCOL_MAJOR,
+            "service_version": "1.0.0",
+            "service_epoch": "service_legacy",
+            "control_state": "active",
+        });
+        let decoded = serde_json::from_value::<BrowserFrame>(legacy).expect("legacy frame");
+        assert!(matches!(
+            decoded,
+            BrowserFrame::HelloAccepted {
+                diagnostics: None,
+                ..
+            }
+        ));
     }
 
     #[test]
