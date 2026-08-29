@@ -38,9 +38,11 @@ pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
             .to_string_lossy()
             .into(),
     );
-    let used_bytes = activation
-        .directory()
-        .and_then(|directory| std::fs::read_dir(directory).ok())
+    let folder: std::path::PathBuf = directory
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .expect("the report always names a folder");
+    let used_bytes = std::fs::read_dir(&folder)
         .map(|entries| {
             entries
                 .flatten()
