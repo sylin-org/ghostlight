@@ -10,8 +10,10 @@ history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 
 Agents report errors that no surface records: the demand-started orchestrator's output is
 nulled at spawn, the connectors log one line per disconnect streak, and the extension is
 silent by design. [ADR-0145](adr/0145-shared-process-diagnostics-log.md) accepts a shared
-local diagnostics directory -- `GHOSTLIGHT_DIAGNOSTICS_DIR`, defaulting beside the runtime
-file -- where all three executables append bounded, content-free operational JSONL from
+local diagnostics directory under layered activation -- `GHOSTLIGHT_DIAGNOSTICS_DIR` for an
+explicit location, or a presence-only `diagnostics.on` marker beside the runtime file that
+even the Chrome-spawned browser connector can see without environment propagation -- where
+all three executables append bounded, content-free operational JSONL from
 process birth, with a closed event vocabulary, run and operation correlation, automatic
 retention, and a read-only `ghostlight diagnostics` CLI plus a doctor row. The
 [process-diagnostics batch](tasks/process-diagnostics/BOOTSTRAP.md) is authored to execute it;

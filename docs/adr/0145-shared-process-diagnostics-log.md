@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-08-29
+- Amended: 2026-08-29, pre-implementation: Decision 2 became layered activation (environment
+  variable, then a marker file)
 - Builds on: ADR-0016, ADR-0028, ADR-0107, ADR-0127, ADR-0143
 
 ## Context
@@ -51,23 +53,42 @@ directory. The default is the directory holding the runtime discovery file -- th
 `audit.jsonl` already lives -- resolved with the same shape the runtime file uses:
 `GHOSTLIGHT_DIAGNOSTICS_DIR` override, then the runtime-file sibling with the Linux
 system-package cache location, then a temporary-directory fallback. Local-only, permanently
-(ADR-0028).
+(ADR-0028). The activation marker from Decision 2 lives in this default directory, so the
+directory exists whenever the marker does.
 
-### 2. The switch is an environment variable, honored from process birth
+### 2. Layered activation, honored from process birth
 
-`GHOSTLIGHT_DIAGNOSTICS_DIR` set to a usable directory turns the sink on for that process. All
-three executables check it at startup, before any connection exists, because the most valuable
-lines are written exactly when nothing connects. Propagation through the MCP client chain is
-free: demand-start inherits the parent's environment, so a variable set in a client's server
-configuration reaches the connector and the orchestrator it starts with no code on that path.
+Activation is layered, and any single layer is enough. All three executables evaluate the
+layers at startup, before any connection exists, because the most valuable lines are written
+exactly when nothing connects:
 
-A CLI flag is rejected: the no-argument authority launch is pinned by test, and Chromium spawns
-the browser connector with the browser's own environment, which a flag on some other component
-cannot reach either.
+1. `GHOSTLIGHT_DIAGNOSTICS_DIR` set to a usable directory turns the sink on and chooses the
+   directory. Propagation through the MCP client chain is free: demand-start inherits the
+   parent's environment, so a variable set in a client's server configuration reaches the
+   connector and the orchestrator it starts with no code on that path.
+2. Otherwise, a presence-only `diagnostics.on` marker file beside the runtime discovery file
+   turns the sink on at the default directory. This layer needs no environment at all, which
+   is the point: the browser connector that Chromium spawns inherits the browser's
+   environment, and now no environment has to reach it. The shared runtime-file resolution
+   every component already performs (`bridge/src/runtime.rs`) is the only discovery it needs.
+3. Otherwise the sink is off. When the variable and the marker are both present, the variable
+   wins outright: it names both the fact and the place.
 
-Deferred, not decided: handing the configuration to an already-connected browser connector at
-handshake, and a registered setting with a workbench toggle for the "turn this on, reproduce,
-send me the folder" support flow. Either would be a new ADR.
+The marker is presence-only: no content, no format, created by the person or by support,
+never by the product. Its name is deliberate. `.debug.lock` was rejected because in this tree
+a lock file means suppression (`deploy.lock` quiesces demand-start; the runtime lease is a
+lock), so an activation marker named like a lock would invert the vocabulary, and a leading
+dot is hostile on Windows, where the "create this one file" support flow will actually
+happen.
+
+A CLI flag is rejected: the no-argument authority launch is pinned by test, and no flag can
+reach a process the product did not spawn.
+
+Deferred, not decided: live re-reading, so a running authority toggles without a restart (the
+runtime-control seam is the natural home for it); a registered setting with a workbench
+toggle; and distributing a custom directory to an already-connected browser connector at
+handshake. Until one of those lands, changing activation takes a process restart, which the
+connectors do naturally and the authority takes once.
 
 ### 3. Per-process-instance bounded JSONL files
 
@@ -80,7 +101,8 @@ operation id, and one bounded detail string clipped at 500 bytes on a UTF-8 boun
 
 Retention is automatic, and the numbers are pinned: at process startup and at
 `ghostlight diagnostics prune`, keep the newest 8 files per component and no more than 64 MiB
-total, pruning oldest first.
+total, pruning oldest first. Prune considers only files matching the component log naming and
+never touches the activation marker or anything else in the directory.
 
 ### 4. A closed event vocabulary with cause-first detail
 
@@ -109,15 +131,16 @@ writes files only.
 `ghostlight diagnostics` gains three subcommands, all read-only over the directory and never
 demand-starting (the doctor rule):
 
-- `path` prints the effective directory and says whether the switch is present.
+- `path` prints the effective directory and names the active layer: explicit directory,
+  marker, or off.
 - `show` merges every component's files into one chronological timeline rendered as plain
   sentences with a component tag and local timestamps. It supports `--last`, `--component`,
   `--op`, and `--json` for tooling. Where coverage is missing it says so -- "no orchestrator
   log in this range; diagnostics were probably off" -- rather than displaying a quiet past.
 - `prune` applies the retention bounds on demand.
 
-`doctor` gains one row: whether diagnostics are active, where the directory is, and how large
-it is, so support has one command that finds the folder.
+`doctor` gains one row: the active layer (explicit directory, marker, or off), where the
+directory is, and how large it is, so support has one command that finds the folder.
 
 ### 7. What useful means here
 
@@ -158,7 +181,8 @@ standing channel.
   an event firehose, and a read-only CLI reader instead of a rendered snapshot.
 - Off by default and bounded when on: no files appear unless asked for, and none outlive the
   retention bounds.
-- The Chrome-spawned browser connector logs only when its own environment carries the
-  variable; until a handshake or setting decision lands, turning diagnostics on for that
-  process means setting the variable at the user level before starting the browser. This
-  limitation is accepted for now and recorded rather than papered over.
+- The marker closes the browser-connector activation gap: the Chrome-spawned relay reads it
+  through the runtime-file resolution it already performs, with no environment propagation.
+  The residual limitation is restart-timed pickup: every component evaluates the layers at
+  birth, so turning diagnostics on for a running authority takes one restart, which
+  demand-start makes cheap.
