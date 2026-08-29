@@ -28,10 +28,16 @@ pub struct DiagnosticsReport {
 pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
     let activation = resolve(None, runtime_path);
     let layer = activation.layer();
-    let directory = activation
-        .directory()
-        .map(Path::to_string_lossy)
-        .map(String::from);
+    // The folder is named even while off: retained logs stay readable there, and the folder is
+    // where the next activation will write.
+    let directory = Some(
+        activation
+            .directory()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(runtime_path))
+            .to_string_lossy()
+            .into(),
+    );
     let used_bytes = activation
         .directory()
         .and_then(|directory| std::fs::read_dir(directory).ok())

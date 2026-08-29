@@ -8,7 +8,7 @@ use anyhow::bail;
 use ghostlight_bridge::diagnostics::{
     marker_path, prune_directory, resolve, set_marker, Activation, Component, ENV_DIR,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One `ghostlight diagnostics` invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,6 +121,15 @@ fn effective(runtime: &std::path::Path) -> Activation {
     resolve(explicit, runtime)
 }
 
+/// The folder this command should act on: the active directory, or the default one when off,
+/// so retained logs stay readable and prunable after diagnostics are turned off.
+fn target_directory(runtime: &std::path::Path, activation: &Activation) -> PathBuf {
+    activation
+        .directory()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(runtime))
+}
+
 fn report(activation: &Activation, marker: &std::path::Path) {
     match activation {
         Activation::Explicit { directory } => println!(
@@ -142,16 +151,17 @@ fn report(activation: &Activation, marker: &std::path::Path) {
 fn run_path(runtime: &std::path::Path) -> anyhow::Result<()> {
     let activation = effective(runtime);
     report(&activation, &marker_path(runtime));
+    println!(
+        "Log folder: {}",
+        target_directory(runtime, &activation).display()
+    );
     Ok(())
 }
 
 fn run_prune(runtime: &std::path::Path) -> anyhow::Result<()> {
     let activation = effective(runtime);
-    let Some(directory) = activation.directory() else {
-        println!("Diagnostics are off; there is nothing to prune.");
-        return Ok(());
-    };
-    let report = prune_directory(directory);
+    let directory = target_directory(runtime, &activation);
+    let report = prune_directory(&directory);
     println!(
         "Pruned {} log files; kept {} files ({} bytes) in {}.",
         report.deleted,
@@ -170,12 +180,14 @@ fn run_show(
     json: bool,
 ) -> anyhow::Result<()> {
     let activation = effective(runtime);
-    let Some(directory) = activation.directory() else {
+    let off = matches!(activation, Activation::Off);
+    let directory = target_directory(runtime, &activation);
+    if off {
         println!(
-            "Diagnostics are off; there is nothing to show. Run `ghostlight diagnostics on` first."
+            "Diagnostics are off; showing the retained records in {}.",
+            directory.display()
         );
-        return Ok(());
-    };
+    }
     let window = last.map(parse_window).transpose()?;
     let cutoff = window.map(|window| {
         let now = std::time::SystemTime::now()
@@ -186,7 +198,7 @@ fn run_show(
     });
     let mut records: Vec<serde_json::Value> = Vec::new();
     let mut malformed = 0usize;
-    let entries = std::fs::read_dir(directory)?;
+    let entries = std::fs::read_dir(&directory)?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         // Only diagnostics logs, never audit.jsonl or anything else sharing the folder.

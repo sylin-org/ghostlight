@@ -499,9 +499,9 @@
         : "";
       const toggle = `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
         + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>`;
-      const reveal = report.directory
-        ? `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>`
-        : "";
+      // The folder is named and openable even while off: retained logs live there, and it is
+      // where the next activation writes.
+      const reveal = `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>`;
       return `<article class="card"><span class="severity passing"><span class="dot"></span>passing</span>`
         + `<h2>Process diagnostics</h2><p>Operational log is ${layer}.${place}</p>`
         + `<p>${toggle} ${reveal}</p></article>`;
@@ -1157,7 +1157,11 @@
       ifChanged("connections", [snapshot.sessions, snapshot.browsers], () => connections(snapshot));
       ifChanged("about", [snapshot.service, snapshot.sessions.length, snapshot.browsers.length, snapshot.history.length], () => about(snapshot));
       ifChanged("integrations", [snapshot.harnesses, [...pending]], () => integrations(snapshot, pending));
-      ifChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service], () => status(snapshot));
+      ifChanged(
+        "status",
+        [snapshot.diagnostics, snapshot.process_diagnostics, snapshot.configuration, snapshot.service],
+        () => status(snapshot),
+      );
     }
 
     /* -------------------------------- chrome ------------------------------ */

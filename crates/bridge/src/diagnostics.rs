@@ -131,18 +131,24 @@ pub fn marker_path(runtime_path: &Path) -> PathBuf {
     runtime_path.with_file_name(MARKER_FILE_NAME)
 }
 
+/// The default log directory: a `logs` folder beside the runtime discovery file, never the
+/// application root itself. This is where logs go when the marker layer activates, and where
+/// retained logs remain readable after they are turned off.
+pub fn default_directory(runtime_path: &Path) -> PathBuf {
+    match marker_path(runtime_path).parent() {
+        Some(directory) => directory.join("logs"),
+        None => PathBuf::from("logs"),
+    }
+}
+
 /// Resolve the activation layers: an explicit directory wins, then the marker, then off.
 pub fn resolve(explicit: Option<PathBuf>, runtime_path: &Path) -> Activation {
     if let Some(directory) = explicit {
         return Activation::Explicit { directory };
     }
-    let marker = marker_path(runtime_path);
-    if marker.is_file() {
-        match marker.parent() {
-            Some(directory) => Activation::Marker {
-                directory: directory.to_path_buf(),
-            },
-            None => Activation::Off,
+    if marker_path(runtime_path).is_file() {
+        Activation::Marker {
+            directory: default_directory(runtime_path),
         }
     } else {
         Activation::Off
@@ -706,6 +712,7 @@ mod tests {
     }
 
     fn log_lines(root: &Path) -> usize {
+        let root = root.join("logs");
         fs::read_dir(root)
             .map(|entries| {
                 entries
@@ -727,7 +734,7 @@ mod tests {
         assert_eq!(
             resolve(None, &runtime),
             Activation::Marker {
-                directory: root.clone()
+                directory: root.join("logs")
             }
         );
         assert_eq!(
@@ -830,7 +837,8 @@ mod tests {
         sink.evaluate();
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
         wait_until_bounded(|| log_lines(&root) == 3);
-        let log = fs::read_dir(&root)
+        let log_dir = root.join("logs");
+        let log = fs::read_dir(&log_dir)
             .expect("dir")
             .filter_map(Result::ok)
             .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
