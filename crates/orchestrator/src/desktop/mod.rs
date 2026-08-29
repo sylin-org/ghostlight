@@ -131,6 +131,8 @@ pub fn run() -> Result<()> {
             apply_user_policy,
             remove_user_policy,
             apply_runtime_intent,
+            toggle_diagnostics,
+            reveal_diagnostics,
             refresh_harnesses,
             manage_harness,
             locate_harness,
@@ -629,6 +631,26 @@ fn test_notification(state: State<'_, DesktopState>) -> Result<(), String> {
     state
         .workbench
         .test_notification()
+        .map_err(|error| error.to_string())
+}
+
+/// Flip the shared process-diagnostics marker and report the resulting state.
+#[tauri::command]
+fn toggle_diagnostics(state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
+    serde_json::to_value(state.workbench.apply_diagnostics_toggle())
+        .map_err(|error| error.to_string())
+}
+
+/// Open the diagnostics folder in the operating system's file manager. The folder is the one
+/// the diagnostics state names; this actuation lives in the native process, and the WebView
+/// gains no opener permission.
+#[tauri::command]
+fn reveal_diagnostics(state: State<'_, DesktopState>, app: AppHandle) -> Result<(), String> {
+    let Some(directory) = state.workbench.diagnostics_report().directory else {
+        return Err("Diagnostics are off; turn them on first.".into());
+    };
+    app.opener()
+        .open_path(directory, None::<&str>)
         .map_err(|error| error.to_string())
 }
 

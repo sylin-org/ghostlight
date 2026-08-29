@@ -31,6 +31,12 @@
       /** Hold, resume, end or start the runtime session. */
       applyIntent: (intent) => call("apply_runtime_intent", { intent }),
 
+      /** Flip the shared process-diagnostics marker; returns the resulting state. */
+      toggleDiagnostics: () => call("toggle_diagnostics"),
+
+      /** Open the diagnostics folder through the native shell. */
+      revealDiagnostics: () => call("reveal_diagnostics"),
+
       /** The compiled policy: what applies here, and who decided each line. */
       policy: () => call("workbench_policy"),
 

@@ -126,6 +126,7 @@ impl ServiceHost {
             workspaces.clone(),
             governance.clone(),
             browser.clone(),
+            Arc::clone(&diagnostics),
         );
         let executor = Arc::new(ApplicationExecutor::new(
             governance.clone(),

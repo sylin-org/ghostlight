@@ -478,13 +478,33 @@
       el["diagnostic-grid"].innerHTML = snapshot.diagnostics.map((item) =>
         `<article class="card"><span class="severity ${escapeHtml(item.severity)}"><span class="dot"></span>`
         + `${escapeHtml(item.severity)}</span><h2>${escapeHtml(item.label)}</h2>`
-        + `<p>${escapeHtml(item.detail)}</p></article>`).join("");
+        + `<p>${escapeHtml(item.detail)}</p></article>`).join("")
+        + processDiagnosticsCard(snapshot.process_diagnostics);
 
       const started = snapshot.service.started_at_ms
         ? new Date(snapshot.service.started_at_ms).toLocaleString()
         : "unknown";
       el.colophon.textContent =
         `Ghostlight ${snapshot.service.version} - running since ${started} - everything on this page stays on this device.`;
+    }
+
+    /* The ADR-0145 card: whether the shared process log is on, and the two person acts. */
+    function processDiagnosticsCard(report) {
+      if (!report) return "";
+      const layer = report.layer === "off"
+        ? "off"
+        : `on (${escapeHtml(report.layer)})`;
+      const place = report.directory
+        ? ` Logs live in ${escapeHtml(report.directory)} (${report.used_bytes} bytes).`
+        : "";
+      const toggle = `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
+        + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>`;
+      const reveal = report.directory
+        ? `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>`
+        : "";
+      return `<article class="card"><span class="severity passing"><span class="dot"></span>passing</span>`
+        + `<h2>Process diagnostics</h2><p>Operational log is ${layer}.${place}</p>`
+        + `<p>${toggle} ${reveal}</p></article>`;
     }
 
     /* -------------------------------- policy -------------------------------- */

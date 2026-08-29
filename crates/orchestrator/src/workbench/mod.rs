@@ -293,6 +293,7 @@ pub struct WorkbenchFacade {
     workspaces: WorkspaceStore,
     governance: GovernanceFacade,
     browser: Arc<RelayBrowserPort>,
+    diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
     started_at_ms: u64,
 }
@@ -305,15 +306,29 @@ impl WorkbenchFacade {
         workspaces: WorkspaceStore,
         governance: GovernanceFacade,
         browser: Arc<RelayBrowserPort>,
+        diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         Self {
             projection,
             workspaces,
             governance,
             browser,
+            diagnostics,
             harnesses: HarnessRegistry::discover(),
             started_at_ms: unix_ms(),
         }
+    }
+
+    /// The current process-diagnostics state for surfaces.
+    #[must_use]
+    pub fn diagnostics_report(&self) -> crate::diagnostics::DiagnosticsReport {
+        self.diagnostics.report()
+    }
+
+    /// The person-facing toggle act, then the resulting state.
+    pub fn apply_diagnostics_toggle(&self) -> crate::diagnostics::DiagnosticsReport {
+        self.diagnostics.toggle();
+        self.diagnostics.report()
     }
 
     /// Attach the best-effort operating-system presentation adapter.
@@ -413,6 +428,7 @@ impl WorkbenchFacade {
             browsers,
             history,
             diagnostics,
+            process_diagnostics: self.diagnostics.report(),
             harnesses: self.harnesses.summaries(),
             configuration: ConfigurationSummary {
                 runtime_state: self.governance.runtime_state(),
@@ -908,6 +924,8 @@ pub struct WorkbenchSnapshot {
     /// Current local checkup results.
     pub diagnostics: Vec<DiagnosticItem>,
     /// Cached, explicitly supported development-harness registrations.
+    /// Read the process-diagnostics state (ADR-0145).
+    pub process_diagnostics: crate::diagnostics::DiagnosticsReport,
     pub harnesses: Vec<HarnessSummary>,
     /// Content-free authority and runtime configuration facts.
     pub configuration: ConfigurationSummary,
@@ -1789,6 +1807,7 @@ mod tests {
             crate::workspace::WorkspaceStore::default(),
             GovernanceFacade::new(None, None),
             Arc::new(crate::browser::RelayBrowserPort::new("epoch".into())),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
         );
 
         let preview = facade

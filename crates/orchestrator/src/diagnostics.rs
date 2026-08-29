@@ -108,6 +108,12 @@ impl DiagnosticsHub {
         self.sink.activation().directory().map(Path::to_path_buf)
     }
 
+    /// A point-in-time report for `doctor` and the workbench.
+    #[must_use]
+    pub fn report(&self) -> DiagnosticsReport {
+        observe(&self.runtime_path)
+    }
+
     /// The person-facing toggle act: flip the marker, then let the sink re-evaluate. The
     /// sink's change callback publishes the new state to connected adapters.
     pub fn toggle(&self) -> DiagnosticsState {

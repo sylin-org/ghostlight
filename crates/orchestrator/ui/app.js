@@ -193,6 +193,27 @@ async function applyIntent(intent) {
   }
 }
 
+// The person's diagnostics controls: flip the shared marker, or open its folder through the
+// native shell. Both live behind closed commands, like every other act in this window.
+async function handleDiagnosticsAction(button) {
+  if (!transport.available || button.disabled) return;
+  const operation = button.dataset.diagnosticsOperation;
+  button.disabled = true;
+  try {
+    if (operation === "toggle") {
+      const report = await transport.toggleDiagnostics();
+      view.toast(`Process diagnostics are ${report.layer === "off" ? "off" : `on (${report.layer})`}.`);
+    } else if (operation === "reveal") {
+      await transport.revealDiagnostics();
+    }
+  } catch (error) {
+    view.toast(String(error), true);
+  } finally {
+    button.disabled = false;
+    await resync();
+  }
+}
+
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
   const { harness: id, harnessOperation: operation, harnessAction: action,
@@ -305,6 +326,8 @@ function wire() {
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
+    const diagnostics = event.target.closest("[data-diagnostics-operation]");
+    if (diagnostics) handleDiagnosticsAction(diagnostics);
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");
