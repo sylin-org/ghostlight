@@ -5,14 +5,15 @@ BOOTSTRAP's task list, is the authority on where the batch stopped.
 
 ## RESUME HERE
 
-The batch's local work is complete through D1, and the owner has since authorized and executed
-the distribution step: `dev` was pushed and `main` was promoted by fast-forward to
-`ac154245` on 2026-08-29, and the public surfaces were observed serving both catalogs, the
-ZCode manifest, and the marketplace icon at that revision. The repository is now a live
-one-address marketplace in both ecosystems. What remains is owner action: choose and send
-any of the three submissions in `submissions.md` (Z.ai feedback, `zai-coding-plugins` PR,
-Anthropic directory form), and optionally the P4 install verification in the real client.
-Nothing below in this ledger sends anything.
+The batch's local work is complete through D1, and the owner-authorized send-day happened on
+2026-08-29 (see the Outcomes section of `submissions.md`): the Z.ai feedback request is live as
+`zai-org/feedback#419`, the community-marketplace PR is live as
+`zai-org/zai-coding-plugins#30` from the org fork, and `main` carries the one-address
+marketplace catalogs at the pushed revision. The one open item is the Anthropic community
+marketplace submission, blocked on the owner logging into `platform.claude.com` in the
+browser; the plugin already passes `claude plugin validate`, and the prepared answers are in
+`submissions.md`. Watch items: PR #30 review (four earlier third-party plugin PRs are still
+unmerged), and feedback issue #419's triage pipeline.
 
 ## P1 plugin package and one-address catalogs
 

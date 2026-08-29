@@ -16,9 +16,14 @@ repository root for both ecosystems, and the bundled `control-browser` skill wri
 the 1.0 language contract. The plugin's MCP server is `npx -y ghostlight`, the npm launcher's
 zero-argument checksum-verified handoff, proven live the same day with a real MCP initialize
 and the full 24-tool catalog. The repository-integrity gate now pins twin-manifest and catalog
-agreement. Three external submissions (a Z.ai feedback request for a public plugin intake
-process, a `zai-coding-plugins` pull request, and the Anthropic directory submission) are
-drafted in the batch and wait for owner action; nothing external has been sent.
+agreement. On the same day the owner authorized the send: the Z.ai feedback request for a
+public plugin intake process is live as `zai-org/feedback#419`, the `zai-coding-plugins`
+proposal is live as `zai-org/zai-coding-plugins#30` from the org fork, the repository's
+one-address catalogs are promoted to `main`, and the Anthropic community-marketplace
+submission is prepared and validation-checked (`claude plugin validate` passes) but blocked
+on the owner's Console login. See the
+[batch ledger](tasks/public-distribution/LEDGER.md) and `submissions.md` for the exact
+outcomes.
 
 ## 1.0 is published (2026-08-26)
 

@@ -57,12 +57,28 @@ maintainers want general-productivity plugins (the current catalog is GLM-plan t
 ready to explain the npm launcher's download-on-first-run model, which reviewers may ask
 about.
 
-## 3. Anthropic `claude-plugins-official` directory submission
+## 3. Anthropic plugin-directory submission
 
-Channel: the plugin directory submission form (`clau.de/plugin-directory-submission`).
-Third-party plugins land in `external_plugins/` after quality and security review.
+Status: prepared, blocked on owner authentication (2026-08-29).
 
-Prepared answers (adapt to the form's actual fields):
+Correction from attempting it live: the 2026-08-29 research note about a
+`clau.de/plugin-directory-submission` form is outdated. The current documented mechanism
+(code.claude.com docs, "Submit your plugin to the community marketplace") is:
+
+- Third-party submissions land in **`anthropics/claude-plugins-community`** after review.
+  The official `claude-plugins-official` marketplace is curated at Anthropic's discretion;
+  there is no application process and the submission form does not feed it.
+- Submission forms: `claude.ai/admin-settings/directory/submissions/plugins/new` (requires a
+  Team or Enterprise organization) or `platform.claude.com/plugins/submit` (the Console form,
+  for individual authors).
+- The review pipeline runs `claude plugin validate` plus automated safety screening;
+  approved plugins are pinned by commit SHA in the community catalog and the pin auto-bumps
+  on new pushes.
+
+Local status: `claude plugin validate ./packaging/plugin/ghostlight` prints
+"Validation passed" (Claude Code CLI 2.1.250, 2026-08-29). The Console form is behind the
+owner's Anthropic login, which the browser session does not have; filing it is an owner
+action. Prepared answers (adapt to the form's actual fields):
 
 - Plugin name (immutable slug): `ghostlight`
 - Repository: `https://github.com/sylin-org/ghostlight`
@@ -81,3 +97,18 @@ Prepared answers (adapt to the form's actual fields):
 - Why it fits the directory: it gives agents safe, semantic control of the user's signed-in
   browser with per-action capability classification and structured audit -- a common request
   for web-UI testing and verification journeys.
+
+## Outcomes of the first send-day (2026-08-29)
+
+The owner authorized sending the submissions through the browser this day:
+
+1. Z.ai feedback: filed as `zai-org/feedback` issue **#419** ("Public intake process for the
+   official plugin marketplace (follow-up to #66)"), category Tool use / MCP, after a real
+   duplicate search that found #66 (shipped marketplace-adding, closed as launched) and a
+   CONTRIBUTING.md read.
+2. Z.ai community marketplace: pull request **`zai-org/zai-coding-plugins#30`**, branch
+   `sylin-org:feat/ghostlight-plugin`, one commit adding `plugins/ghostlight/` (manifest,
+   skill, README) and one catalog entry. The fork and clone live at
+   `F:\Replica\NAS\Files\repo\github\zai-org\zai-coding-plugins` per the local convention.
+3. Anthropic community marketplace: blocked on the owner's Console login; validation passed
+   locally; answers prepared above.
