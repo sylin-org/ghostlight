@@ -15,9 +15,10 @@ before publication), npm `ghostlight@1.2.0`, and the MCP Registry record
 revision `765df478` (two local custody copies). `main` was fast-forward promoted and the public
 install smoke passed: `npx -y ghostlight@1.2.0` downloaded and checksum-verified all three
 binaries and the real 1.2.0 orchestrator answered `doctor --json` with the new
-`process_diagnostics` state. The public adapter stays 1.0.0; adapter 1.1.0 (popup toggle) is
-staged for store submission once the owner refreshes the expired Chrome Web Store refresh token
-(`scripts/get-cws-refresh-token.ps1`), then `publish-extension.ps1` uploads and submits it.
+`process_diagnostics` state. The Chrome Web Store adapter moved to 1.1.0 on 2026-08-30: the owner refreshed the expired
+refresh token, and `publish-extension.ps1` uploaded the exact candidate ZIP
+(SHA-256 `ce59185e...3bb5ce`) and submitted it STAGED_PUBLISH -- PENDING_REVIEW at submission;
+the public listing serves 1.1.0 automatically when review approves.
 Scoop and WinGet metadata ride the `package-manager-metadata` artifact and remain owner
 submissions as before. Website fallback refreshed and pushed; `check-public-surfaces -Online`
 reports GitHub, npm, the Chrome update feed, the MCP Registry, and the website in agreement
