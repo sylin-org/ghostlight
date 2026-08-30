@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "f4bdcb6721e8353fdc210573efe5bcbf46307d8e",
-  "frozen_at_utc": "2026-08-30T00:51:20Z",
+  "revision": "765df478d3a993a2a8bf27ea045cf78c62a7b06a",
+  "frozen_at_utc": "2026-08-30T01:36:07Z",
   "frozen_by": "onose",
-  "note": "1.2.0 service line with the process diagnostics feature set; adapter 1.1.0 popup toggle"
+  "note": "1.2.0 candidate revision: the revision candidate run 33284810442 built; f4bdcb67 predated the preflight evidence and ASCII evidence fix, docs and tooling only"
 }
