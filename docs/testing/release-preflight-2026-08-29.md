@@ -1,9 +1,9 @@
-# Release preflight -- 5fb7cb956101d397021d2c66071c8616dea69cb4
+# Release preflight -- 627df04493e7f748cf6023b1650f05ed321e25f4
 
 ```text
-date_utc: 2026-08-30T00:54:55Z
-source_revision: 5fb7cb956101d397021d2c66071c8616dea69cb4
-tree_dirty: false
+date_utc: 2026-08-30T01:04:01Z
+source_revision: 627df04493e7f748cf6023b1650f05ed321e25f4
+tree_dirty: true
 toolchain: rustc 1.95.0 (59807616e 2026-04-14); node v24.7.0
 host: Microsoft Windows 10.0.26200
 ```
@@ -15,22 +15,22 @@ from RELEASE-CHECKLIST.md G1, then delete this note.
 | Stage | Result | Detail |
 | --- | --- | --- |
 | cargo fmt --all -- --check | PASS |  |
-| cargo clippy --workspace --all-targets -D warnings | PASS |     Checking ghostlight v1.2.0 (F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp\crates\orchestrator);     Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.39s |
+| cargo clippy --workspace --all-targets -D warnings | PASS |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.56s |
 | cargo test --workspace | PASS | test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s;  |
-| extension tests (npm test) | PASS | Γä╣ todo 0; Γä╣ duration_ms 347.5355 |
-| npm launcher tests (packaging/npm) | PASS | Γä╣ todo 0; Γä╣ duration_ms 184.3729 |
-| MCPB launcher tests | PASS | Γä╣ todo 0; Γä╣ duration_ms 122.1748 |
+| extension tests (npm test) | PASS | ??? todo 0; ??? duration_ms 200.9055 |
+| npm launcher tests (packaging/npm) | PASS | ??? todo 0; ??? duration_ms 98.3506 |
+| MCPB launcher tests | PASS | ??? todo 0; ??? duration_ms 57.3789 |
 | shell script syntax (sh -n scripts/*.sh) | PASS |  |
-| isolated workspace build (F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp\.target-ghostlight-1.0) | PASS |    Compiling webview2-com v0.38.2;     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 42s |
-| process journey | PASS | [ghostlight.exe] Ghostlight 1.0 ready on local ports 53572 and 53573; process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal |
-| CLI journey | PASS | [ghostlight] Ghostlight 1.0 ready on local ports 58564 and 58565; cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal |
+| isolated workspace build (F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp\.target-ghostlight-1.0) | PASS |    Compiling ghostlight v1.2.0 (F:\Replica\NAS\Files\repo\github\sylin-org\browser-mcp\crates\orchestrator);     Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.65s |
+| process journey | PASS | [ghostlight.exe] Ghostlight 1.0 ready on local ports 55409 and 55410; process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal |
+| CLI journey | PASS | [ghostlight] Ghostlight 1.0 ready on local ports 65001 and 65002; cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal |
 | CLI PowerShell journey | PASS | ; powershell journey ok: separate processes, one session, open/list/read/capture/close |
 | workbench surface | PASS | ; workbench surface ok: a broken panel costs its own panel and nothing else |
 | policy grammar | PASS | ; policy grammar ok: the readback matches what the matcher does |
 | capability matrix (behavior evidence map) | PASS | capability matrix ok: 21 COMPLETE rows, 4 SUPERSEDED rows, all evidenced |
 | JavaScript syntax (ui/app.js, preview server) | PASS |  |
 | freeze binding (docs/release/freeze.json) | PASS |  |
-| dependency gates (deny licenses/bans/sources + audit) | PASS | bans ok, licenses ok, sources ok; ; warning: 17 allowed warnings found |
+| dependency gates (deny licenses/bans/sources + audit) | PASS | bans ok, licenses ok, sources ok; URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429;  |
 
 ## Rows outside this runner (complete by hand or in CI)
 

@@ -282,6 +282,9 @@ try {
         }
         $rows = $results | ForEach-Object {
             $detail = ($_.Detail -replace "\r?\n", "; ")
+            # Console capture can carry codepage mojibake or tool glyphs; the evidence must be
+            # ASCII so the repository-integrity gate stays green on the committed record.
+            $detail = ($detail.ToCharArray() | ForEach-Object { if ([int]$_ -le 126) { $_ } else { "?" } }) -join ""
             "| $($_.Name) | $($_.Result) | $detail |"
         }
         $manualRows = @"
