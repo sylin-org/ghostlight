@@ -5,6 +5,24 @@ Last updated: 2026-08-29 (public distribution arc opened).
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
 
+## 1.2.0 published (2026-08-30)
+
+Ghostlight 1.2.0 is public: GitHub release
+[`v1.2.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.2.0) (20 files, hash-compared
+before publication), npm `ghostlight@1.2.0`, and the MCP Registry record
+`org.sylin/ghostlight 1.2.0`, all from custody-verified candidate run
+[33284810442](https://github.com/sylin-org/ghostlight/actions/runs/33284810442) at the frozen
+revision `765df478` (two local custody copies). `main` was fast-forward promoted and the public
+install smoke passed: `npx -y ghostlight@1.2.0` downloaded and checksum-verified all three
+binaries and the real 1.2.0 orchestrator answered `doctor --json` with the new
+`process_diagnostics` state. The public adapter stays 1.0.0; adapter 1.1.0 (popup toggle) is
+staged for store submission once the owner refreshes the expired Chrome Web Store refresh token
+(`scripts/get-cws-refresh-token.ps1`), then `publish-extension.ps1` uploads and submits it.
+Scoop and WinGet metadata ride the `package-manager-metadata` artifact and remain owner
+submissions as before. Website fallback refreshed and pushed; `check-public-surfaces -Online`
+reports GitHub, npm, the Chrome update feed, the MCP Registry, and the website in agreement
+(source 1.2.0, public 1.2.0, public adapter 1.0.0).
+
 ## Process diagnostics implemented and deployed locally (2026-08-29)
 
 Agents report errors that no surface records: the demand-started orchestrator's output is
