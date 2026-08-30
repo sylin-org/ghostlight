@@ -1,9 +1,31 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (Cursor and Devin harness continuity).
+Last updated: 2026-08-30 (recovery never presents a browser choice).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Recovery never presents a browser choice (2026-08-30)
+
+The owner rejected the recovery ambiguity refusal as bureaucracy rather than delight: a person
+who cares which browser is used has one open already, or names one, so a choice is the one thing
+Ghostlight must never present. [ADR-0149](adr/0149-recovery-never-presents-a-browser-choice.md)
+retires it. With several installed browsers and none connected, both postures now return the
+model-directed ask naming every browser whose native-host registration is current; stale
+Ghostlight-owned registrations among them are repaired silently first through the same flight;
+when nothing usable is registered the answer is the existing named, choice-free remedy; and if
+two adapters arrive inside the same launch wait the workspace binds the first arrival under the
+ordinary pinned-session rules. The `browser_recovery_ambiguous` failure and its person-facing
+sentence are removed from the closed vocabularies, and a launch happens only for a unique
+candidate under the `on_demand` posture.
+
+The same change unblocks `dev` CI, which had gone red on both runner images: the CLI journey
+pinned the manual sentence that only single-registered-browser machines produce, while CI
+machines carry two unregistered browsers and honestly answered with the removed failure. The
+journey now pins the closed language contract -- the ask or the named remedy, with exact facts
+per reason -- instead of the local inventory. Gates on this Windows host: formatting,
+warnings-denied workspace/all-target Clippy, every Rust workspace suite, the process, CLI,
+PowerShell, policy-grammar, and workbench-surface journeys, and all 156 extension tests.
 
 ## Cursor and Devin harness continuity (2026-08-30)
 

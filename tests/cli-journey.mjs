@@ -108,18 +108,33 @@ try {
 
   const listed = call(["browser_tabs", '{"action":"list"}']);
   // A live read has nothing to read without a connected browser: it refuses instead of
-  // answering from remembered state.
+  // answering from remembered state. Which honest answer arrives depends on this machine's
+  // installed browsers, so the journey pins the closed language contract, not the inventory:
+  // plural evidence asks the person to open a named browser, unusable registrations name the
+  // choice-free remedy, and no refusal ever says Ghostlight declined to choose.
   assert.notEqual(listed.status, 0, listed.stderr);
-  assert.equal(
-    listed.stdout.trim(),
-    "No browser is connected. Ask the user to open a Chromium browser window with the Ghostlight extension installed, then repeat the call."
-  );
-
   const rendered = call(["browser_tabs", '{"action":"list"}', "--json"]);
   assert.notEqual(rendered.status, 0);
   const result = JSON.parse(rendered.stdout.trim());
   assert.equal(result.status, "failed");
-  assert.equal(result.facts.reason, "browser_startup_manual");
+  if (result.facts.reason === "browser_startup_manual") {
+    assert.match(
+      listed.stdout.trim(),
+      /^No browser is connected\. Ask the user to open a .+ browser window with the Ghostlight extension installed, then repeat the call\.$/
+    );
+    assert.ok(result.facts.browsers.length >= 1, listed.stdout);
+    if (result.facts.browsers.length === 1) {
+      assert.equal(result.facts.browser, result.facts.browsers[0]);
+    }
+  } else if (result.facts.reason === "native_host_unavailable") {
+    assert.equal(
+      listed.stdout.trim(),
+      "The browser cannot use Ghostlight's native messaging registration."
+    );
+    assert.ok(result.facts.details.length >= 1, listed.stdout);
+  } else {
+    assert.fail(`unexpected no-browser reason: ${result.facts.reason}`);
+  }
 
   const catalog = call(["--catalog"]);
   assert.equal(catalog.status, 0);
@@ -136,7 +151,9 @@ try {
   // Every line refuses for the same honest reason; the batch reports the failure.
   assert.notEqual(batch.status, 0, batch.stderr);
   for (const line of batch.stdout.trim().split("\n")) {
-    if (line.trim()) assert.match(line, /No browser is connected/);
+    if (line.trim()) {
+      assert.match(line, /No browser is connected|native messaging registration/);
+    }
   }
 
   await sleep(300);

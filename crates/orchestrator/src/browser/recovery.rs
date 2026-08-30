@@ -1,12 +1,14 @@
 //! Pre-effect browser-readiness recovery decisions.
 //!
 //! The executor asks this service only when the ordinary plural-browser resolver proves that no
-//! usable adapter exists. This module inspects local installation facts, chooses no browser unless
-//! the evidence is unique, and joins simultaneous requests per recovery scope. Where the selected
-//! platform and policy permit it, the same flight performs one ordinary-profile launch and waits
-//! within the invocation deadline for an inbound adapter.
+//! usable adapter exists. This module inspects local installation facts and never presents a
+//! browser choice: unique connectable evidence acts under the configured posture, plural
+//! evidence repairs what Ghostlight already owns and leaves startup to the person, and no
+//! refusal spends its words declining to choose. Where the selected platform and policy permit
+//! it, the same flight performs one ordinary-profile launch and waits within the invocation
+//! deadline for an inbound adapter.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,13 +56,11 @@ pub enum RecoveryFailure {
     WrongProfile,
     /// No adapter handshake arrived within the bounded wait.
     HandshakeTimeout,
-    /// More than one browser is equally plausible.
-    Ambiguous,
 }
 
 impl RecoveryFailure {
     /// Every closed failure in stable order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::BrowserAbsent,
         Self::LaunchFailed,
         Self::SandboxedPackage,
@@ -68,7 +68,6 @@ impl RecoveryFailure {
         Self::NativeHostUnavailable,
         Self::WrongProfile,
         Self::HandshakeTimeout,
-        Self::Ambiguous,
     ];
 
     /// Stable structured fact vocabulary.
@@ -82,7 +81,6 @@ impl RecoveryFailure {
             Self::NativeHostUnavailable => "native_host_unavailable",
             Self::WrongProfile => "browser_wrong_profile",
             Self::HandshakeTimeout => "browser_handshake_timeout",
-            Self::Ambiguous => "browser_recovery_ambiguous",
         }
     }
 }
@@ -90,9 +88,10 @@ impl RecoveryFailure {
 /// One deterministic recovery answer before any browser process is started.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryDecision {
-    /// The configured posture leaves startup to the person.
+    /// Startup is left to the person: either the configured posture is manual, or more than one
+    /// browser could serve and Ghostlight does not choose where to direct attention.
     Manual {
-        /// Installed browsers with current Ghostlight native-host registration.
+        /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
     },
     /// A later physical seam may make one bounded attempt for this exact browser.
@@ -300,6 +299,10 @@ enum RecoveryPlan {
         repair_owned_registration: bool,
         launch: bool,
     },
+    /// Repair every stale Ghostlight-owned registration, then leave startup to the person.
+    RepairAll {
+        queue: Vec<RecoveryCandidate>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -308,6 +311,10 @@ enum FlightPhase {
     Repairing {
         browser: RecoveryCandidate,
         launch_after: bool,
+    },
+    RepairingQueue {
+        remaining: VecDeque<RecoveryCandidate>,
+        named: Vec<RecoveryCandidate>,
     },
     Launching {
         browser: RecoveryCandidate,
@@ -521,6 +528,30 @@ impl BrowserRecovery {
                     }))
                 }
             },
+            FlightPhase::RepairingQueue {
+                mut remaining,
+                named,
+            } => {
+                let Some(browser) = remaining.pop_front() else {
+                    return Ok(FlightPhase::Complete(RecoveryDecision::Manual {
+                        browsers: named,
+                    }));
+                };
+                match self.mechanism.repair(&browser, deadline, cancelled) {
+                    Ok(()) => {
+                        let mut named = named;
+                        named.push(browser);
+                        Ok(FlightPhase::RepairingQueue { remaining, named })
+                    }
+                    Err(MechanismError::Wait(error)) => Err(error),
+                    Err(MechanismError::Failed((reason, detail))) => {
+                        Ok(FlightPhase::Complete(RecoveryDecision::Failed {
+                            reason,
+                            details: vec![detail],
+                        }))
+                    }
+                }
+            }
             FlightPhase::Launching { browser } => {
                 match self.mechanism.launch(&browser, deadline, cancelled) {
                     Ok(()) => Ok(FlightPhase::Launched { browser }),
@@ -545,21 +576,12 @@ impl BrowserRecovery {
                 }
                 let decision = match choose_browser(None, None, &connected) {
                     Ok(browser) => RecoveryDecision::Ready { browser },
-                    Err(super::BrowserError::AmbiguousBrowser(candidates)) => {
-                        RecoveryDecision::Failed {
-                            reason: RecoveryFailure::Ambiguous,
-                            details: candidates
-                                .into_iter()
-                                .map(|id| {
-                                    connected
-                                        .iter()
-                                        .find(|browser| browser.id == id)
-                                        .and_then(|browser| browser.name.clone())
-                                        .unwrap_or(id)
-                                })
-                                .collect(),
-                        }
-                    }
+                    // Several adapters arrived inside the same bounded wait. The workspace binds
+                    // to the first arrival; the ordinary pinned-session rules own placement from
+                    // here, and no refusal ever asks anyone to resolve a browser choice.
+                    Err(super::BrowserError::AmbiguousBrowser(_)) => RecoveryDecision::Ready {
+                        browser: connected[0].id.clone(),
+                    },
                     Err(_) => RecoveryDecision::Failed {
                         reason: RecoveryFailure::HandshakeTimeout,
                         details: vec![browser.name],
@@ -596,19 +618,30 @@ fn decide(
         })
         .cloned()
         .collect();
-    if mode == BrowserStartup::Manual {
-        let ready: Vec<_> = installed
+    if installed.len() > 1 {
+        // Plural evidence never chooses and never says it declined to. Name every connectable
+        // browser and leave startup to the person; repair only what Ghostlight already owns so
+        // the named browsers can actually connect when opened.
+        let connectable: Vec<_> = installed
             .iter()
             .filter(|browser| browser.registration == NativeHostState::Current)
             .cloned()
             .collect();
-        if !ready.is_empty() {
-            return RecoveryPlan::Complete(RecoveryDecision::Manual { browsers: ready });
+        if !connectable.is_empty() {
+            return RecoveryPlan::Complete(RecoveryDecision::Manual {
+                browsers: connectable,
+            });
         }
-    }
-    if installed.len() > 1 {
+        let repairable: Vec<_> = installed
+            .iter()
+            .filter(|browser| browser.registration == NativeHostState::Updatable)
+            .cloned()
+            .collect();
+        if !repairable.is_empty() {
+            return RecoveryPlan::RepairAll { queue: repairable };
+        }
         return RecoveryPlan::Complete(RecoveryDecision::Failed {
-            reason: RecoveryFailure::Ambiguous,
+            reason: RecoveryFailure::NativeHostUnavailable,
             details: installed
                 .iter()
                 .map(|browser| browser.name.clone())
@@ -659,6 +692,10 @@ fn decide(
 fn phase_from_plan(plan: RecoveryPlan) -> FlightPhase {
     match plan {
         RecoveryPlan::Complete(decision) => FlightPhase::Complete(decision),
+        RecoveryPlan::RepairAll { queue } => FlightPhase::RepairingQueue {
+            remaining: queue.into(),
+            named: Vec::new(),
+        },
         RecoveryPlan::Prepare {
             browser,
             repair_owned_registration: true,
@@ -725,6 +762,8 @@ mod tests {
         launches: AtomicUsize,
         outcome: Mutex<Result<(), MechanismFailure>>,
         connect: Option<Arc<FakeBrowser>>,
+        /// Additional adapter ids that arrive inside the same launch wait.
+        extra_arrivals: Vec<String>,
     }
 
     impl RecoveryMechanism for FakeMechanism {
@@ -750,7 +789,9 @@ mod tests {
             let outcome = lock(&self.outcome).clone();
             if outcome.is_ok() {
                 if let Some(browser) = &self.connect {
-                    browser.connect(vec![summary("browser_chromium", true)]);
+                    let mut arrivals = vec![summary("browser_chromium", true)];
+                    arrivals.extend(self.extra_arrivals.iter().map(|id| summary(id, true)));
+                    browser.connect(arrivals);
                 }
             }
             outcome.map_err(MechanismError::Failed)
@@ -766,6 +807,7 @@ mod tests {
             launches: AtomicUsize::new(0),
             outcome: Mutex::new(outcome),
             connect,
+            extra_arrivals: Vec::new(),
         })
     }
 
@@ -1182,7 +1224,7 @@ mod tests {
     }
 
     #[test]
-    fn two_verified_windows_executables_remain_ambiguous() {
+    fn two_verified_candidates_leave_startup_to_the_person() {
         let decision = decide(
             BrowserStartup::OnDemand,
             None,
@@ -1201,13 +1243,12 @@ mod tests {
             ],
         );
 
-        assert_eq!(
+        assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::Ambiguous,
-                details: vec!["Google Chrome".into(), "Microsoft Edge".into()],
-            })
-        );
+            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+                if browsers.iter().map(|browser| browser.name.as_str())
+                    .eq(["Google Chrome", "Microsoft Edge"])
+        ));
     }
 
     #[test]
@@ -1312,7 +1353,31 @@ mod tests {
     }
 
     #[test]
-    fn an_ambiguous_browser_set_refuses_and_names_candidates() {
+    fn installed_browsers_without_usable_registrations_name_the_remedy() {
+        let decision = decide(
+            BrowserStartup::Manual,
+            None,
+            None,
+            &[
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::Missing,
+                ),
+                candidate("Chromium", BrowserPackage::Native, NativeHostState::Missing),
+            ],
+        );
+        assert_eq!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::NativeHostUnavailable,
+                details: vec!["Google Chrome".into(), "Chromium".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn plural_evidence_names_only_the_connectable_browsers() {
         let decision = decide(
             BrowserStartup::OnDemand,
             None,
@@ -1321,17 +1386,102 @@ mod tests {
                 candidate(
                     "Google Chrome",
                     BrowserPackage::Native,
+                    NativeHostState::Missing,
+                ),
+                candidate(
+                    "Microsoft Edge",
+                    BrowserPackage::Native,
                     NativeHostState::Current,
                 ),
-                candidate("Chromium", BrowserPackage::Native, NativeHostState::Current),
             ],
         );
+        assert!(matches!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+                if browsers.iter().map(|browser| browser.name.as_str())
+                    .eq(["Microsoft Edge"])
+        ));
+    }
+
+    #[test]
+    fn plural_stale_registrations_are_repaired_then_startup_is_left_to_the_person() {
+        let inventory = Arc::new(FakeInventory {
+            candidates: vec![
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::Updatable,
+                ),
+                candidate(
+                    "Microsoft Edge",
+                    BrowserPackage::Native,
+                    NativeHostState::Updatable,
+                ),
+            ],
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        let mechanism = mechanism(Ok(()), None);
+        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
+
+        let decision = recovery
+            .request(
+                None,
+                None,
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            RecoveryDecision::Manual { browsers }
+                if browsers.iter().map(|browser| browser.name.as_str())
+                    .eq(["Google Chrome", "Microsoft Edge"])
+        ));
+        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 2);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn adapters_arriving_together_bind_the_first_arrival_without_a_choice() {
+        let browser = Arc::new(FakeBrowser::default());
+        let inventory = Arc::new(FakeInventory {
+            candidates: vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Current,
+            )],
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        recovery.browser = Arc::clone(&browser) as Arc<dyn BrowserPort>;
+        recovery.mechanism = Arc::new(FakeMechanism {
+            repairs: AtomicUsize::new(0),
+            launches: AtomicUsize::new(0),
+            outcome: Mutex::new(Ok(())),
+            connect: Some(Arc::clone(&browser)),
+            extra_arrivals: vec!["browser_second".into()],
+        });
+
+        let decision = recovery
+            .request(
+                None,
+                None,
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::Ambiguous,
-                details: vec!["Google Chrome".into(), "Chromium".into()],
-            })
+            RecoveryDecision::Ready {
+                browser: "browser_chromium".into(),
+            }
         );
     }
 

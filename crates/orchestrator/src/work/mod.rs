@@ -1751,7 +1751,6 @@ const fn recovery_reason(reason: RecoveryFailure) -> BrowserRecoveryReason {
         RecoveryFailure::NativeHostUnavailable => BrowserRecoveryReason::NativeHostUnavailable,
         RecoveryFailure::WrongProfile => BrowserRecoveryReason::WrongProfile,
         RecoveryFailure::HandshakeTimeout => BrowserRecoveryReason::HandshakeTimeout,
-        RecoveryFailure::Ambiguous => BrowserRecoveryReason::Ambiguous,
     }
 }
 

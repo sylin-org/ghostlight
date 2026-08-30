@@ -47,6 +47,11 @@ the owner wants, and what this project learned the hard way.
 - **Manual browser recovery speaks to the model.** When browser auto-open is off, never make the
   model translate a person-facing error. Tell it to ask the user to open any eligible installed
   browser Ghostlight can name, with the extension installed, then repeat the call.
+- **Plural evidence asks; unique evidence acts.** A person who cares which browser is used has
+  one open already or names one, so Ghostlight never presents a browser choice and never spends
+  a refusal saying it declined to choose (the owner's verdict on the ambiguity refusal,
+  ADR-0149). Name every connectable browser, repair silently what Ghostlight already owns, and
+  reserve launching for a unique candidate.
 - **Diagnostics are a product surface, not a developer afterthought.** Process logs must be
   findable, readable, correlatable, and factual: one command to one chronological story,
   operation ids that follow one call across processes, terse dense lines carrying the numbers
@@ -122,6 +127,11 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **A journey that runs against the real machine pins the contract, not the inventory.** The CLI
+  journey pinned the one no-browser sentence a single-registered-browser machine produces; every
+  continuous-integration image carries two unregistered browsers and answered with a different
+  honest refusal. Assert the closed set of honest answers with the exact sentence and facts for
+  each reason, and keep machine-shaped exactness in unit tests over a controlled inventory.
 - **A capability split across a boundary grows two implementations of one policy**, and they
   diverge. Recording thinning lived in the extension and in Rust at once; the Rust copy dropped each
   discarded frame's duration, so a thinned replay played back faster than the work it recorded.

@@ -187,6 +187,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     verify no browser starts. The failed result tells the model to ask the user to open one of
     every eligible installed browser it names with the Ghostlight extension installed, carries
     the same names in structured facts, and does not repeat the instruction in `next_steps`.
+22. With several installed browsers and no adapter connected, no browser refusal names a choice
+    or says Ghostlight declined to choose: plural evidence returns the ask in either posture,
+    stale Ghostlight-owned registrations are repaired silently before the ask, and nothing
+    usable answers with one named choice-free remedy instead (ADR-0149).
 
 ## Presentation gates
 

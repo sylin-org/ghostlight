@@ -841,8 +841,6 @@ pub enum BrowserRecoveryReason {
     WrongProfile,
     /// The selected adapter did not arrive within the bounded wait.
     HandshakeTimeout,
-    /// More than one installed browser is equally plausible.
-    Ambiguous,
 }
 
 /// Why a browser job did not complete in Ghostlight's product language.
@@ -886,7 +884,8 @@ pub enum Refusal {
     BrowserUnknown,
     /// This session already works in a different browser.
     BrowserPinned,
-    /// The configured posture leaves browser startup to the person.
+    /// Startup is left to the person: the posture is manual, or more than one browser could
+    /// serve and Ghostlight does not choose where to direct attention.
     BrowserStartupManual { browsers: Vec<String> },
     /// Automatic readiness recovery failed before any browser effect.
     BrowserRecoveryFailed { reason: BrowserRecoveryReason },
@@ -971,9 +970,6 @@ impl Refusal {
                 BrowserRecoveryReason::HandshakeTimeout => {
                     "The browser started, but its Ghostlight adapter did not connect in time."
                 }
-                BrowserRecoveryReason::Ambiguous => {
-                    "More than one installed browser could handle this work, so Ghostlight did not choose one."
-                }
             },
             Self::EffectUnknown => "Sent, but the browser never confirmed what happened.",
             Self::LandingDeniedUnknown => {
@@ -1048,10 +1044,6 @@ impl Refusal {
                 ],
                 BrowserRecoveryReason::WrongProfile => vec![
                     "Open the browser profile this Ghostlight session already uses, then repeat the call."
-                        .into(),
-                ],
-                BrowserRecoveryReason::Ambiguous => vec![
-                    "Start the browser you want to use, then repeat the call with its browser handle."
                         .into(),
                 ],
                 BrowserRecoveryReason::LaunchFailed | BrowserRecoveryReason::HandshakeTimeout => {

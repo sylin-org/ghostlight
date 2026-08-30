@@ -91,11 +91,16 @@ say `Clicked the "Save" button on example.com.` Governance may remove all target
 never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
 unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
-When `browser.startup` is `manual` and no browser is connected, the refusal addresses the MCP
-model: ask the user to open one of the eligible installed browser windows it names, with the
-Ghostlight extension installed, then repeat the call. Facts carry the closed
-`browser_startup_manual` reason and a `browsers` array; one choice also retains the singular
-`browser` fact. The summary contains the whole recovery instruction, so `next_steps` is empty.
+When no browser is connected and startup is left to the person -- because `browser.startup` is
+`manual`, or because more than one installed browser could serve and Ghostlight does not choose
+where to direct attention -- the refusal addresses the MCP model: ask the user to open one of the
+eligible installed browser windows it names, with the Ghostlight extension installed, then repeat
+the call. Facts carry the closed `browser_startup_manual` reason and a `browsers` array; one
+choice also retains the singular `browser` fact. The summary contains the whole recovery
+instruction, so `next_steps` is empty. Stale Ghostlight-owned registrations among several
+installed browsers are repaired silently first, so the named browsers can actually connect; when
+no installed browser has a usable registration, the refusal names the browsers found and one
+choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.
 
 ## Catalog
 
