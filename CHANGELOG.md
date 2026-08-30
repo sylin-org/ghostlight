@@ -5,10 +5,12 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.0] - Unreleased
+## [1.2.0] - 2026-08-30
 
-Preparation for the next service line. The Chrome Web Store adapter moves to 1.1.0 for the
-popup toggle; adapter 1.0.0 remains compatible with this service line (ADR-0142).
+Published 2026-08-30 as the GitHub release `v1.2.0` and the npm package `ghostlight@1.2.0`,
+from candidate run 33284810442 at revision `765df478`. The Chrome Web Store adapter 1.1.0
+(submitted separately) adds the popup toggle; adapter 1.0.0 remains compatible with this
+service line (ADR-0142).
 
 ### Added
 
