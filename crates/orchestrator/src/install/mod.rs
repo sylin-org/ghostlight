@@ -616,6 +616,20 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             &["windsurf"],
             ConfigDialect::Json(JsonDialect::McpServers),
         ),
+        // Windsurf's current official distribution is named Devin and moved its user MCP
+        // configuration. Keep the historical target above so either installed generation can be
+        // managed without guessing one path from the other (ADR-0148).
+        row(
+            "devin",
+            "windsurf",
+            "Devin",
+            "Devin user",
+            "windsurf.svg",
+            Some("https://windsurf.com/editor/download"),
+            context.config.join("devin/mcp_config.json"),
+            &["devin", "devin-desktop", "surf"],
+            ConfigDialect::Json(JsonDialect::McpServers),
+        ),
         row(
             "zed",
             "zed",
@@ -2287,6 +2301,7 @@ mod tests {
             "continue",
             "antigravity",
             "zcode",
+            "devin",
         ] {
             assert!(rows.iter().any(|row| row.id == id), "missing {id}");
         }
@@ -2294,6 +2309,10 @@ mod tests {
             rows.iter().filter(|row| row.product_id == "cline").count(),
             4
         );
+        let devin = rows.iter().find(|row| row.id == "devin").unwrap();
+        assert_eq!(devin.product_id, "windsurf");
+        assert_eq!(devin.path, context.config.join("devin/mcp_config.json"));
+        assert_eq!(devin.executables, ["devin", "devin-desktop", "surf"]);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2520,6 +2539,31 @@ mod tests {
         ))
         .unwrap();
         assert!(vscode.contains("ghostlight"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn devin_setup_does_not_touch_the_historical_windsurf_target() {
+        let directory = temporary("devin-windsurf-continuity");
+        let context = context(&directory);
+        let devin = context.config.join("devin/mcp_config.json");
+        let windsurf = context.home.join(".codeium/windsurf/mcp_config.json");
+        fs::create_dir_all(devin.parent().unwrap()).unwrap();
+        fs::create_dir_all(windsurf.parent().unwrap()).unwrap();
+        fs::write(&windsurf, "{\n  \"mcpServers\": {}\n}\n").unwrap();
+
+        let registry = HarnessRegistry::with_context(context.clone());
+        registry.apply("devin", HarnessAction::Install).unwrap();
+
+        let configured: Value = serde_json::from_str(&fs::read_to_string(&devin).unwrap()).unwrap();
+        assert_eq!(
+            configured["mcpServers"]["ghostlight"]["command"].as_str(),
+            Some(context.connector.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            fs::read_to_string(&windsurf).unwrap(),
+            "{\n  \"mcpServers\": {}\n}\n"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

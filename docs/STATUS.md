@@ -1,9 +1,35 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (model-directed manual browser handoff).
+Last updated: 2026-08-30 (Cursor and Devin harness continuity).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Cursor and Devin harness continuity (2026-08-30)
+
+[ADR-0148](adr/0148-windsurf-devin-harness-continuity.md) records the current Windsurf product
+transition without breaking installed historical clients. The fixed registry retains `windsurf`
+at `~/.codeium/windsurf/mcp_config.json` and adds `devin` at the effective platform config root's
+`devin/mcp_config.json`, recognizing `devin`, `devin-desktop`, and `surf`. Both targets group under
+one product card and keep independent detection and mutation evidence. The complete workbench
+preview now pins the actual 23-target, 19-product roster; it also restores ZCode, which the fixture
+had omitted despite claiming completeness.
+
+Cursor 3.14.27 and the current official Windsurf distribution, Devin 3.8.20, are installed in this
+Linux user's local application directories with command launchers and desktop entries. The live
+Ghostlight installer registered its exact existing MCP connector in `~/.cursor/mcp.json` and
+`~/.config/devin/mcp_config.json`. The deployed doctor reports both targets `installed`, and both
+editors restart from their installed images. Devin's shipped CLI names `--add-mcp`, and its bundled
+application resolves `mcp_config.json` from the current Devin config directory. Neither editor
+started a new connector child before its visible onboarding or user-session boundary, so this pass
+does not claim an authenticated model-path invocation. The exact evidence and boundary are in
+[the Linux Cursor and Devin report](testing/linux-cursor-devin-2026-08-30.md).
+
+Formatting, warnings-denied workspace/all-target Clippy, all Rust workspace tests, all 156
+extension tests, changed-JavaScript syntax checks, shell syntax, and the workbench surface journey
+pass. The orchestrator alone was deployed locally at SHA-256
+`af7897063037e19b44492ffa07ae43def24d1c3ef9faa119e40203a5186e3e33`; both connectors stayed
+running.
 
 ## Model-directed manual browser handoff (2026-08-30)
 

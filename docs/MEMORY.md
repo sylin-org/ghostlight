@@ -97,6 +97,9 @@ the owner wants, and what this project learned the hard way.
 - **A representative fixture does not prove a fixed roster is complete.** When a surface promises
   every supported product, assert the exact target ids and product cardinality, then verify the
   deployed live projection. A small fixture may prove layout, but it cannot prove completeness.
+- **A vendor rename can be a configuration migration, not an executable alias.** Keep independently
+  installed generations as concrete targets under one product identity when their paths differ.
+  Otherwise detection can make setup write a valid file that the detected client never reads.
 - **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
   durable fact changes, and commit before writing a restart prompt.
 - **Live swaps only through `scripts/dev-loop.ps1`.** Never hand-copy a binary over

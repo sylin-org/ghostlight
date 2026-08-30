@@ -53,6 +53,7 @@ const harnesses = [
     evidence: "The parser reported: expected value at line 1 column 2 of the JSON input"
   }),
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
+  previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", icon: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
   previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorCommand}"\nargs = []\n` }),
   previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "updatable", configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorCommand}"\n    args: []\n` }),
@@ -64,6 +65,7 @@ const harnesses = [
     evidence: `Found \`npx other-agent\` where Ghostlight's connector belongs; Ghostlight maintains \`${connectorCommand}\` there and changed nothing.`
   }),
   previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "available", configPath: "/home/test/.cursor/mcp.json" }),
+  previewHarness({ id: "zcode", name: "ZCode", target: "User", state: "installed", configPath: "/home/test/.zcode/cli/config.json" }),
   previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
   previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "not_detected", configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorCommand}"\n    args: []\n    envs: {}\n    timeout: 300\n` }),
   previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
@@ -88,12 +90,13 @@ const harnesses = [
 const expectedHarnessIds = [
   "antigravity", "claude-code", "claude-desktop", "cline-cli", "cline-cursor",
   "cline-vscode", "cline-windsurf", "codex", "continue", "copilot-cli", "crush", "cursor",
-  "goose", "junie", "kilo-code", "kiro", "opencode", "qwen-code", "vscode", "windsurf", "zed"
+  "devin", "goose", "junie", "kilo-code", "kiro", "opencode", "qwen-code", "vscode",
+  "windsurf", "zcode", "zed"
 ];
 const actualHarnessIds = harnesses.map((harness) => harness.id).sort();
 const previewProductCount = new Set(harnesses.map((harness) => harness.product_id)).size;
 if (JSON.stringify(actualHarnessIds) !== JSON.stringify(expectedHarnessIds)
-  || previewProductCount !== 18) {
+  || previewProductCount !== 19) {
   throw new Error(`preview harness roster drifted: ${harnesses.length} rows / ${previewProductCount} products`);
 }
 

@@ -265,12 +265,15 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 7. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
 8. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
-   Cursor, Visual Studio Code, Windsurf, Zed, OpenCode, and Crush registrations. Mutations are
+   Cursor, Visual Studio Code, historical Windsurf, current Devin, Zed, OpenCode, and Crush
+   registrations. Mutations are
    serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
    command identifies Ghostlight's connector. One `Set up everything` action adds missing
    registrations and updates Ghostlight-owned registrations for every detected target while
    skipping current and not-detected targets. One target's environmental failure does not prevent
    independent targets from being attempted, and foreign or malformed entries remain untouched.
+   Windsurf and Devin share one product card but retain their own executable evidence and config
+   path, so neither generation can make Ghostlight write the other generation's file.
 9. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
    install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
    entries are left untouched with an actionable result.
