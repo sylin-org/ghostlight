@@ -5,6 +5,51 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - Unreleased
+
+Preparation for the next service line. The Chrome Web Store adapter stays at 1.1.0;
+adapter 1.1.0 and adapter 1.0.0 both remain compatible with this service line (ADR-0142).
+
+### Added
+
+- **One-step harness setup (ADR-0146).** The workbench Integrations destination gains
+  `Set up everything`: one action configures every detected target and updates every
+  Ghostlight-owned stale one through the existing serialized, backup-preserving writers. It
+  skips current and absent products, leaves foreign or malformed entries untouched and
+  visible, and continues across independent environmental failures with a bounded result per
+  target. A generic home, configuration, or roaming root is no longer detection evidence, so
+  an absent client can no longer look actionable.
+- **Current Windsurf continuity (ADR-0148).** Windsurf's official Linux distribution is now
+  named Devin and moved its user MCP configuration. A concrete `devin` target joins the fixed
+  registry under the existing `windsurf` product card: it reads
+  `<config root>/devin/mcp_config.json` and recognizes the `devin`, `devin-desktop`, and
+  `surf` executables. The historical `~/.codeium/windsurf` target stays independent, so
+  either installed generation is maintained without guessing one path from the other. The
+  complete workbench roster is pinned at 23 targets across 19 products, restoring the ZCode
+  row the preview fixture had omitted.
+
+### Changed
+
+- **Manual browser startup speaks to the model (ADR-0147).** The `browser.startup` setting is
+  presented as `Auto-open browser on request` with `On` and `Off`. With it off, recovery
+  launches nothing and a refused browser call tells the MCP model to ask the user to open one
+  of the eligible installed browsers it names, with the Ghostlight extension installed, then
+  repeat the call. Structured facts carry the plural `browsers` list (the singular `browser`
+  fact remains for one choice), and tab listing crosses the same recovery seam instead of a
+  separate generic refusal.
+- **Recovery never presents a browser choice (ADR-0149).** With several installed browsers
+  and none connected, both postures return the model-directed ask naming every browser whose
+  native-host registration is current; stale Ghostlight-owned registrations among them are
+  repaired silently first; when nothing usable is registered the answer is one named,
+  choice-free remedy; and if two adapters arrive inside the same launch wait, the workspace
+  binds the first arrival under the ordinary pinned-session rules. A launch happens only for
+  a unique candidate under `on_demand`.
+
+### Removed
+
+- The `browser_recovery_ambiguous` failure and its "Ghostlight did not choose one" sentence
+  leave the closed vocabularies; no browser refusal ever says Ghostlight declined to choose.
+
 ## [1.2.0] - 2026-08-30
 
 Published 2026-08-30 as the GitHub release `v1.2.0` and the npm package `ghostlight@1.2.0`,

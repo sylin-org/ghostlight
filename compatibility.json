@@ -4,12 +4,12 @@
     {
       "adapterVersion": "1.0.0",
       "minimumServiceVersion": "1.0.0",
-      "maximumServiceVersion": "1.2.0"
+      "maximumServiceVersion": "1.3.0"
     },
     {
       "adapterVersion": "1.1.0",
       "minimumServiceVersion": "1.2.0",
-      "maximumServiceVersion": "1.2.0"
+      "maximumServiceVersion": "1.3.0"
     }
   ]
 }

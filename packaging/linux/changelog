@@ -1,3 +1,10 @@
+ghostlight (1.3.0) unstable; urgency=medium
+
+  * One-step harness setup, Devin harness continuity, and choice-free
+    browser recovery (ADR-0146, ADR-0147, ADR-0148, ADR-0149).
+
+ -- Leonardo Botinelly <hello@sylin.org>  Sun, 30 Aug 2026 00:00:00 -0400
+
 ghostlight (1.2.0) unstable; urgency=medium
 
   * Add ZCode to the supported harness registry (ADR-0141).
