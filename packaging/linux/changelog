@@ -1,4 +1,4 @@
-ghostlight (1.1.0) unstable; urgency=medium
+ghostlight (1.2.0) unstable; urgency=medium
 
   * Add ZCode to the supported harness registry (ADR-0141).
 

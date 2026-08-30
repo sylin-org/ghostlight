@@ -5,6 +5,30 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - Unreleased
+
+Preparation for the next service line. The Chrome Web Store adapter moves to 1.1.0 for the
+popup toggle; adapter 1.0.0 remains compatible with this service line (ADR-0142).
+
+### Added
+
+- **Shared process diagnostics log (ADR-0145).** All three executables append bounded,
+  content-free operational records -- connection lifecycle, demand-start outcomes,
+  negotiation, and operation boundaries -- into one local folder. Activation is layered and
+  eventual: `GHOSTLIGHT_DIAGNOSTICS_DIR` pins a process on, or a `diagnostics.on` marker
+  beside the runtime file is applied live by an OS watch with a 2-second safety-net re-check,
+  whichever fires first. Logs default to a `logs` folder beside the runtime file, records
+  carry no page content or payloads, retention is automatic, and the record schema is pinned
+  by test.
+- **Diagnostics surfaces.** `ghostlight diagnostics path|show|prune|on|off` merges every
+  component into one chronological timeline (`--last`, `--component`, `--op`, `--json`);
+  `doctor` reports the active layer, folder, and size; the workbench Status card toggles and
+  opens the log folder; the Chrome adapter popup toggles through the runtime-control path,
+  gated on the service's advertised state (adapter 1.1.0).
+- **Diagnostics state on the wire.** `hello_accepted` and `control_state` carry the
+  activation layer as an optional additive field, and the toggle event is sent only to
+  services that advertise it, so an older service never decodes an unknown variant.
+
 ## [1.1.0] - 2026-08-27
 
 Published 2026-08-27 as the GitHub release `v1.1.0` and the npm package `ghostlight@1.1.0`,

@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "ghostlight",
   "display_name": "Ghostlight",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Use signed-in Chromium from Claude with visible local execution and optional policy and audit.",
   "long_description": "Ghostlight gives Claude a visible tab group in the signed-in Chromium profile you already use. The persistent authority, protocol-versioned MCP edge, browser relay, and extension run locally. There is no Ghostlight account, telemetry, or hosted control plane. Ghostlight in Browser from the Chrome Web Store is required.",
   "author": {
