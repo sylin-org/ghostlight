@@ -102,8 +102,9 @@ the Applications entry as interaction routes.
 - At a glance can clear completed actions from the current view without deleting the local audit.
   Running work remains visible, and a fresh desktop process can reconstruct history from audit.
 - MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
-  supported MCP clients. It never overwrites a foreign entry or exposes a generic file editor or
-  command runner.
+  supported MCP clients. `Set up everything` connects or updates every detected target Ghostlight
+  can change safely in one pass. It never installs a third-party product, overwrites a foreign
+  entry, or exposes a generic file editor or command runner.
 - Status explains service, browser, and authority state, tests native notifications, and applies
   the explicit end-session intent through the same governance owner used by browser and MCP flows.
 - Pause, resume, and start-session apply from the persistent header beside the connection state

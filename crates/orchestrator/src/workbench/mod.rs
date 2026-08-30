@@ -21,7 +21,7 @@ use crate::governance::{
 };
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessError, HarnessRegistry,
-    HarnessSummary,
+    HarnessSetupResult, HarnessSummary,
 };
 use crate::language::outcome::Observed;
 use crate::language::readiness;
@@ -732,6 +732,11 @@ impl WorkbenchFacade {
         action: HarnessAction,
     ) -> Result<HarnessActionResult, HarnessError> {
         self.harnesses.apply(id, action)
+    }
+
+    /// Set up and update every detected harness target Ghostlight can change safely.
+    pub fn setup_detected_harnesses(&self) -> Result<HarnessSetupResult, HarnessError> {
+        self.harnesses.setup_detected()
     }
 
     /// Resolve product-owned manual setup text for one supported harness target.

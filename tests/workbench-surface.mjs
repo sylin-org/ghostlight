@@ -29,11 +29,15 @@ const ids = [...markup.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
 
 const listeners = [];
 const documentHandlers = new Map();
+const elementHandlers = new Map();
 const failedSetupManual = { open: false };
 const node = (id) => ({
   id, textContent: "", innerHTML: "", className: "", hidden: true, disabled: false, scrollTop: 0,
   style: { setProperty() {} }, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
-  addEventListener: (kind) => listeners.push(`${id}:${kind}`),
+  addEventListener: (kind, handler) => {
+    listeners.push(`${id}:${kind}`);
+    elementHandlers.set(`${id}:${kind}`, handler);
+  },
   removeEventListener() {}, setAttribute() {}, removeAttribute() {},
   querySelector: () => null, querySelectorAll: () => [], appendChild() {}, prepend() {},
   replaceChildren() {}, remove() {}, closest: () => null, focus() {}, append() {},
@@ -44,6 +48,7 @@ const nodes = new Map(ids.map((id) => [id, node(id)]));
 const reported = [];
 let heartbeat = false;
 let snapshots = 0;
+let bulkSetups = 0;
 
 const snapshot = () => ({
   seq: ++snapshots,
@@ -107,6 +112,10 @@ const sandbox = {
     __TAURI__: {
       core: { invoke: async (cmd) => {
         if (cmd === "workbench_snapshot") return snapshot();
+        if (cmd === "setup_detected_harnesses") {
+          bulkSetups += 1;
+          return { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." };
+        }
         if (cmd === "manage_harness") throw new Error("deliberate setup failure");
         return [];
       } },
@@ -172,6 +181,10 @@ const connections = nodes.get("connections");
 // Read what the booted surface drew before anything below repaints the same nodes: the second
 // view instance shares this one stub document, so a later render would answer for the first.
 const integrationsHtml = nodes.get("integration-grid").innerHTML;
+const setupEverythingButton = nodes.get("setup-integrations");
+const setupEverythingWasActionable = !setupEverythingButton.disabled
+  && setupEverythingButton.dataset.actionable === "true";
+await elementHandlers.get("setup-integrations:click")({ currentTarget: setupEverythingButton });
 const policy = nodes.get("policy-state");
 
 // The Policy destination, drawn from a compiled view exactly as the orchestrator hands it over.
@@ -395,6 +408,10 @@ const checks = [
     integrationsHtml.includes("Update")
       && integrationsHtml.includes('data-harness-action="install"'),
     `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["one setup-everything action reaches the aggregate orchestrator command",
+    setupEverythingWasActionable && bulkSetups === 1
+      && listeners.includes("setup-integrations:click"),
+    `actionable=${setupEverythingWasActionable} calls=${bulkSetups}`],
   ["the status card renders the diagnostics state and both person acts",
     (() => {
       const grid = nodes.get("diagnostic-grid");

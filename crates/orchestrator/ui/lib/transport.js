@@ -60,6 +60,9 @@
       /** Re-detect the MCP clients installed for this user. */
       refreshHarnesses: () => call("refresh_harnesses"),
 
+      /** Set up or update every detected MCP target the orchestrator can change safely. */
+      setupDetectedHarnesses: () => call("setup_detected_harnesses"),
+
       /** Set up, update, or remove Ghostlight from one concrete MCP target. */
       manageHarness: (id, action) => call("manage_harness", { id, action }),
 

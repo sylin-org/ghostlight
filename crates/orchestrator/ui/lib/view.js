@@ -386,6 +386,11 @@
     }
 
     function integrations(snapshot, pending) {
+      const setup = el["setup-integrations"];
+      const actionable = snapshot.harnesses.some((harness) => harness.can_install
+        && (harness.state === "available" || harness.state === "updatable"));
+      setup.disabled = !actionable;
+      setup.dataset.actionable = String(actionable);
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
           '<div class="empty">No supported MCP client was found for this user.</div>';

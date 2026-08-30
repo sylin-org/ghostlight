@@ -18,7 +18,9 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::governance::effective::EffectiveAuthority;
-use crate::install::{HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSummary};
+use crate::install::{
+    HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSetupResult, HarnessSummary,
+};
 use crate::service::ServiceHost;
 use crate::workbench::{
     PolicyPreview, SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink,
@@ -134,6 +136,7 @@ pub fn run() -> Result<()> {
             toggle_diagnostics,
             reveal_diagnostics,
             refresh_harnesses,
+            setup_detected_harnesses,
             manage_harness,
             locate_harness,
             copy_harness_text,
@@ -538,6 +541,20 @@ async fn refresh_harnesses(state: State<'_, DesktopState>) -> Result<Vec<Harness
     tauri::async_runtime::spawn_blocking(move || {
         workbench
             .refresh_harnesses()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn setup_detected_harnesses(
+    state: State<'_, DesktopState>,
+) -> Result<HarnessSetupResult, String> {
+    let workbench = state.workbench.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        workbench
+            .setup_detected_harnesses()
             .map_err(|error| error.to_string())
     })
     .await

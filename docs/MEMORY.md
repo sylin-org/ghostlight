@@ -107,6 +107,10 @@ the owner wants, and what this project learned the hard way.
   MCP connector kept reviving its orchestrator beside the deployed 1.1.0 authority). Stop the
   connector by exact path first; the parent harness then reconnects through its configured,
   current-path command.
+- **A generic configuration root is not product detection evidence.** A config file directly under
+  home, the platform config root, or roaming must exist itself, or the product needs independent
+  executable evidence. Treating the generic parent as detection makes absent clients actionable
+  and causes aggregate setup to overreach.
 
 ## Durable lessons
 

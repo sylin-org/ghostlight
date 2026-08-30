@@ -100,6 +100,68 @@ impl HarnessRegistry {
         Ok(result)
     }
 
+    /// Set up or update every detected target Ghostlight can change safely.
+    ///
+    /// Current registrations and targets that are not detected are left alone. Malformed and
+    /// foreign registrations remain blocked by the same per-target ownership check used by
+    /// [`Self::apply`]. One target failing does not prevent an independent target from becoming
+    /// ready; the result names the failures and the refreshed roster carries their evidence.
+    pub fn setup_detected(&self) -> Result<HarnessSetupResult, HarnessError> {
+        let _action = lock(&self.inner.action);
+        let initial = self.refresh()?;
+        let states: BTreeMap<&str, HarnessState> = initial
+            .iter()
+            .map(|summary| (summary.id.as_str(), summary.state))
+            .collect();
+        let eligible: Vec<HarnessDefinition> = definitions(&self.inner.context)
+            .into_iter()
+            .filter(|definition| {
+                matches!(
+                    states.get(definition.id),
+                    Some(HarnessState::Available | HarnessState::Updatable)
+                )
+            })
+            .collect();
+
+        let mut set_up = 0;
+        let mut updated = 0;
+        let mut failures = Vec::new();
+        for definition in eligible {
+            let state = states
+                .get(definition.id)
+                .copied()
+                .unwrap_or(HarnessState::NotDetected);
+            match apply_install(&self.inner.context, &definition) {
+                Ok(result) if result.changed => match state {
+                    HarnessState::Available => set_up += 1,
+                    HarnessState::Updatable => updated += 1,
+                    _ => {}
+                },
+                Ok(_) => {}
+                Err(error) => failures.push(HarnessSetupFailure {
+                    id: definition.id.into(),
+                    name: definition.name.into(),
+                    detail: bounded_disclosure(&error.to_string())
+                        .unwrap_or_else(|| "The target could not be changed.".into()),
+                }),
+            }
+        }
+
+        let summaries = self.refresh()?;
+        let needs_attention = summaries
+            .iter()
+            .filter(|summary| summary.state == HarnessState::NeedsAttention)
+            .count();
+        let message = setup_message(set_up, updated, needs_attention, failures.len());
+        Ok(HarnessSetupResult {
+            set_up,
+            updated,
+            needs_attention,
+            failures,
+            message,
+        })
+    }
+
     /// Return product-owned text for the desktop clipboard boundary.
     pub fn copy_text(&self, id: &str, kind: HarnessCopyKind) -> Result<String, HarnessError> {
         let definition = definition(&self.inner.context, id)?;
@@ -261,6 +323,61 @@ pub struct HarnessActionResult {
     pub summary: HarnessSummary,
     /// Fixed user-facing outcome.
     pub message: String,
+}
+
+/// Definite aggregate result of setting up every safely changeable detected target.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessSetupResult {
+    /// Missing registrations added for detected targets.
+    pub set_up: usize,
+    /// Stale Ghostlight-owned registrations updated to the current connector.
+    pub updated: usize,
+    /// Refused malformed or foreign targets still requiring a person's attention.
+    pub needs_attention: usize,
+    /// Independent target writes that failed for an environmental reason.
+    pub failures: Vec<HarnessSetupFailure>,
+    /// Product-owned plain-language outcome for the workbench.
+    pub message: String,
+}
+
+/// One target the aggregate setup could not change.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessSetupFailure {
+    /// Stable target id.
+    pub id: String,
+    /// User-facing product name.
+    pub name: String,
+    /// Bounded typed failure rendered by the existing harness boundary.
+    pub detail: String,
+}
+
+fn setup_message(set_up: usize, updated: usize, needs_attention: usize, failed: usize) -> String {
+    let changed = set_up + updated;
+    let mut message = if changed == 0 {
+        "Everything Ghostlight can set up is already ready.".to_owned()
+    } else {
+        format!(
+            "Ghostlight set up {set_up} and updated {updated} MCP integration{}.",
+            if changed == 1 { "" } else { "s" }
+        )
+    };
+    if changed > 0 {
+        message.push_str(" Restart or reconnect those clients to load the tools.");
+    }
+    if needs_attention > 0 {
+        message.push_str(&format!(
+            " {needs_attention} target{} still need{} attention.",
+            if needs_attention == 1 { "" } else { "s" },
+            if needs_attention == 1 { "s" } else { "" }
+        ));
+    }
+    if failed > 0 {
+        message.push_str(&format!(
+            " {failed} target{} could not be changed.",
+            if failed == 1 { "" } else { "s" }
+        ));
+    }
+    message
 }
 
 #[derive(Clone)]
@@ -741,7 +858,7 @@ fn row(
 
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
     let detected = definition.path.exists()
-        || definition.path.parent().is_some_and(Path::exists)
+        || product_config_parent_exists(context, &definition.path)
         || definition
             .located_executable
             .as_ref()
@@ -836,6 +953,18 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             )
         }),
     }
+}
+
+fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
+    let Some(parent) = path.parent().filter(|parent| parent.exists()) else {
+        return false;
+    };
+    // A product-specific settings directory is useful installation evidence. A generic home or
+    // configuration root is not: treating `$HOME` as Claude Code detection made that harness
+    // appear installed on every ordinary machine and would make aggregate setup overreach.
+    ![&context.home, &context.config, &context.roaming]
+        .into_iter()
+        .any(|root| paths_equal(parent, root, context.windows))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2281,6 +2410,32 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn a_generic_home_directory_is_not_product_detection_evidence() {
+        let directory = temporary("generic-home-detection");
+        let mut context = context(&directory);
+        fs::create_dir_all(&context.home).unwrap();
+        let binaries = directory.join("bin");
+        fs::create_dir_all(&binaries).unwrap();
+        context.path_entries = vec![binaries.clone()];
+
+        let absent = HarnessRegistry::with_context(context.clone())
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-code")
+            .unwrap();
+        assert_eq!(absent.state, HarnessState::NotDetected);
+
+        fs::write(binaries.join("claude"), b"test").unwrap();
+        let detected = HarnessRegistry::with_context(context)
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-code")
+            .unwrap();
+        assert_eq!(detected.state, HarnessState::Available);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_missing_located_executable_is_visible_and_falls_back_safely() {
@@ -2365,6 +2520,105 @@ mod tests {
         ))
         .unwrap();
         assert!(vscode.contains("ghostlight"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn setup_detected_adds_missing_updates_owned_and_preserves_blocked_targets() {
+        let directory = temporary("setup-detected");
+        let mut context = context(&directory);
+        let binaries = directory.join("bin");
+        fs::create_dir_all(&binaries).unwrap();
+        fs::write(binaries.join("qwen"), b"test").unwrap();
+        fs::write(binaries.join("zcode"), b"test").unwrap();
+        context.path_entries = vec![binaries];
+
+        let codex = context.codex_config.clone();
+        fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        let old_connector = directory.join("old/ghostlight-mcp-connector");
+        fs::write(
+            &codex,
+            format!(
+                "[mcp_servers.ghostlight]\ncommand = {}\nargs = []\n",
+                serde_json::to_string(&old_connector.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+
+        let blocked = context
+            .home
+            .join(".cline/data/settings/cline_mcp_settings.json");
+        fs::create_dir_all(blocked.parent().unwrap()).unwrap();
+        fs::write(
+            &blocked,
+            r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#,
+        )
+        .unwrap();
+
+        let registry = HarnessRegistry::with_context(context);
+        let actionable: Vec<_> = registry
+            .summaries()
+            .into_iter()
+            .filter(|summary| {
+                matches!(
+                    summary.state,
+                    HarnessState::Available | HarnessState::Updatable
+                )
+            })
+            .map(|summary| (summary.id, summary.state))
+            .collect();
+        assert_eq!(
+            actionable,
+            vec![
+                ("codex".into(), HarnessState::Updatable),
+                ("zcode".into(), HarnessState::Available),
+                ("qwen-code".into(), HarnessState::Available),
+            ]
+        );
+        let result = registry.setup_detected().unwrap();
+        assert_eq!(result.set_up, 2);
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.needs_attention, 1);
+        assert!(result.failures.is_empty());
+        assert!(result.message.contains("set up 2 and updated 1"));
+
+        let summaries = registry.summaries();
+        for id in ["codex", "qwen-code", "zcode"] {
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == id)
+                    .unwrap()
+                    .state,
+                HarnessState::Installed,
+                "{id}"
+            );
+        }
+        assert_eq!(
+            summaries
+                .iter()
+                .find(|summary| summary.id == "cline-cli")
+                .unwrap()
+                .state,
+            HarnessState::NeedsAttention
+        );
+        assert_eq!(
+            summaries
+                .iter()
+                .find(|summary| summary.id == "cursor")
+                .unwrap()
+                .state,
+            HarnessState::NotDetected
+        );
+
+        let repeated = registry.setup_detected().unwrap();
+        assert_eq!(repeated.set_up, 0);
+        assert_eq!(repeated.updated, 0);
+        assert!(repeated.message.contains("already ready"));
+        assert_eq!(
+            fs::read_to_string(&blocked).unwrap(),
+            r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

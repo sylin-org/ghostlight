@@ -1,9 +1,39 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-29 (public distribution arc opened).
+Last updated: 2026-08-30 (aggregate detected-harness setup).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Aggregate detected-harness setup (2026-08-30)
+
+[ADR-0146](adr/0146-aggregate-detected-harness-setup.md) adds the requested one-step workbench job:
+`Set up everything` configures every detected `Available` target and updates every detected
+Ghostlight-owned `Updatable` target through the existing serialized, backup-preserving writers. It
+skips current and absent products, does not install third-party software, and leaves foreign or
+malformed entries untouched while reporting their attention count. Independent environmental
+failures are bounded and do not stop the remaining targets.
+
+The implementation also closes a detector false positive exposed by the aggregate path: a generic
+home, configuration, or roaming root is no longer product evidence for a config stored directly
+under it. Focused Rust tests pin safe add, owned update, blocked-entry preservation, idempotence,
+and generic-root detection. The workbench surface journey pins the real button-to-orchestrator
+route. Formatting, all 421 Rust workspace tests, all 156 extension tests, JavaScript syntax checks,
+the surface journey, and release-profile workspace/all-target warnings-denied Clippy pass. The
+orchestrator was deployed locally at SHA-256
+`a67209edadad9ed482f8119f5d5813a868c18ec2c844ef16571b61426f492359`.
+
+The [live Linux evidence](testing/linux-harness-setup-everything-2026-08-30.md) exercised the actual
+button under one-time person-approved KDE input control. Its visible outcome was 3 registrations
+added, 13 owned registrations updated, and 1 blocked target preserved. The refreshed roster held
+16 installed, 1 needs-attention, and 5 not-detected targets. Claude Code, OpenCode, Qwen Code, and
+Kilo Code then reported the live connector connected through their own MCP health commands; Codex
+and GitHub Copilot CLI read the exact registration through their native lists. The person then
+completed ZCode login: its live chain reached `ZCode -> zcode-host -> zcode-cli ->
+ghostlight-mcp-connector`, and a visible read-only task invoked `policy_explain` and rendered
+Ghostlight's successful authority report. Kiro login and goose provider configuration remain
+explicit boundaries, and this pass does not claim a model path for the other clients without a
+non-interactive health command.
 
 ## 1.2.0 published (2026-08-30)
 

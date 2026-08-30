@@ -414,6 +414,20 @@ function wire() {
       await resync();
     }, "MCP clients re-checked."));
 
+  el["setup-integrations"].addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await transport.setupDetectedHarnesses();
+      await resync();
+      view.toast(result.message, result.failures.length > 0);
+    } catch (error) {
+      view.toast(String(error), true);
+    } finally {
+      button.disabled = button.dataset.actionable !== "true";
+    }
+  });
+
   el["test-notification"].addEventListener("click", (event) =>
     withButton(event, () => transport.testNotification(), "Test notification sent."));
 
