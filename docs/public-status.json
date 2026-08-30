@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "release": "1.2.0",
+  "release": "1.3.0",
   "platformSummary": "Windows and Linux are the supported operating systems and are verified end to end against live browsers.",
   "extensionSummary": "The Chrome Web Store serves Chrome adapter v1.0.0. Install the extension from the public listing.",
   "chromeStore": {
