@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "dfcf8c4a5d5881ab2d9fc6ded8b99030b0435be0",
-  "frozen_at_utc": "2026-08-30T20:22:31Z",
+  "revision": "7b92562521d72f6c03378aeccc4441c0bcb57d59",
+  "frozen_at_utc": "2026-08-30T20:30:42Z",
   "frozen_by": "onose",
-  "note": "1.3.0 candidate revision: the release-preparation head; no product or packaging change lands after this without re-freezing"
+  "note": "1.3.0 candidate revision: the revision candidate run 33333813230 builds; dfcf8c4a predates the freeze commit and preflight evidence, docs only"
 }
