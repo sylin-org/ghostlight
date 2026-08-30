@@ -1,9 +1,20 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (recovery never presents a browser choice).
+Last updated: 2026-08-30 (1.3.0 service line prepared).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## 1.3.0 service line prepared (2026-08-30)
+
+The workspace version is 1.3.0 and the changelog carries the line's four features: one-step
+harness setup (ADR-0146), Devin harness continuity (ADR-0148), the model-directed manual
+browser handoff (ADR-0147), and choice-free recovery (ADR-0149). The Chrome adapter stays at
+1.1.0, and compatibility.json covers the new line with both adapter 1.0.0 and 1.1.0. The
+published-state surfaces (`server.json`, `docs/public-status.json`, README release language)
+still say 1.2.0 and move only at publication, as the offline truth check requires. Next:
+owner-gated candidate assembly, custody, and the publication sequence in
+[RELEASE.md](RELEASE.md).
 
 ## Recovery never presents a browser choice (2026-08-30)
 
