@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "655e2078ef1631e1d64e50c777c0ac12398a1196",
-  "frozen_at_utc": "2026-08-27T18:35:00Z",
+  "revision": "f4bdcb6721e8353fdc210573efe5bcbf46307d8e",
+  "frozen_at_utc": "2026-08-30T00:51:20Z",
   "frozen_by": "onose",
-  "note": "1.1.0 candidate build revision (the revision candidate run 33097568009 built); the Chrome adapter stays 1.0.0 and supersedes the retracted f912a834 and 464f145a candidates"
+  "note": "1.2.0 service line with the process diagnostics feature set; adapter 1.1.0 popup toggle"
 }
