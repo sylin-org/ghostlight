@@ -747,7 +747,7 @@
         `<option value="${escapeHtml(entry.value)}"${entry.value === selected ? " selected" : ""}>`
         + `${escapeHtml(entry.label)}</option>`).join("");
       const detail = forcedBy
-        ? `${escapeHtml(forcedBy)} requires you to start the browser yourself.`
+        ? `${escapeHtml(forcedBy)} requires browser auto-open to stay off.`
         : escapeHtml(choice.detail);
       return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
         + `<div class="setting-body"><label class="setting-name" for="setting-browser-startup">`

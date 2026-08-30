@@ -92,8 +92,8 @@ impl RecoveryFailure {
 pub enum RecoveryDecision {
     /// The configured posture leaves startup to the person.
     Manual {
-        /// The uniquely selected installed browser, when local evidence found one.
-        browser: Option<RecoveryCandidate>,
+        /// Installed browsers with current Ghostlight native-host registration.
+        browsers: Vec<RecoveryCandidate>,
     },
     /// A later physical seam may make one bounded attempt for this exact browser.
     Launch {
@@ -179,6 +179,19 @@ impl BrowserInventory for SystemBrowserInventory {
                     .collect()
             })
             .map_err(|_| ())
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct FixedBrowserInventory {
+    candidates: Vec<RecoveryCandidate>,
+}
+
+#[cfg(test)]
+impl BrowserInventory for FixedBrowserInventory {
+    fn inspect(&self) -> Result<Vec<RecoveryCandidate>, ()> {
+        Ok(self.candidates.clone())
     }
 }
 
@@ -359,6 +372,12 @@ impl BrowserRecovery {
         }
     }
 
+    /// Replace machine discovery with deterministic browser facts in unit tests.
+    #[cfg(test)]
+    pub(crate) fn set_test_candidates(&mut self, candidates: Vec<RecoveryCandidate>) {
+        self.inventory = Arc::new(FixedBrowserInventory { candidates });
+    }
+
     /// Decide one missing-browser recovery request, joining an overlapping request in the same
     /// owning scope.
     pub fn request(
@@ -492,7 +511,7 @@ impl BrowserRecovery {
             } => match self.mechanism.repair(&browser, deadline, cancelled) {
                 Ok(()) if launch_after => Ok(FlightPhase::Launching { browser }),
                 Ok(()) => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
-                    browser: Some(browser),
+                    browsers: vec![browser],
                 })),
                 Err(MechanismError::Wait(error)) => Err(error),
                 Err(MechanismError::Failed((reason, detail))) => {
@@ -577,6 +596,16 @@ fn decide(
         })
         .cloned()
         .collect();
+    if mode == BrowserStartup::Manual {
+        let ready: Vec<_> = installed
+            .iter()
+            .filter(|browser| browser.registration == NativeHostState::Current)
+            .cloned()
+            .collect();
+        if !ready.is_empty() {
+            return RecoveryPlan::Complete(RecoveryDecision::Manual { browsers: ready });
+        }
+    }
     if installed.len() > 1 {
         return RecoveryPlan::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::Ambiguous,
@@ -616,7 +645,7 @@ fn decide(
         },
         NativeHostState::Current if mode == BrowserStartup::Manual => {
             RecoveryPlan::Complete(RecoveryDecision::Manual {
-                browser: Some(browser),
+                browsers: vec![browser],
             })
         }
         NativeHostState::Current => RecoveryPlan::Prepare {
@@ -648,7 +677,7 @@ fn phase_from_plan(plan: RecoveryPlan) -> FlightPhase {
             repair_owned_registration: false,
             launch: false,
         } => FlightPhase::Complete(RecoveryDecision::Manual {
-            browser: Some(browser),
+            browsers: vec![browser],
         }),
     }
 }
@@ -1082,8 +1111,8 @@ mod tests {
         assert!(matches!(
             decision,
             RecoveryDecision::Manual {
-                browser: Some(RecoveryCandidate { name, .. })
-            } if name == "Chromium"
+                browsers
+            } if browsers.iter().map(|browser| browser.name.as_str()).eq(["Chromium"])
         ));
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
         assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
@@ -1179,6 +1208,34 @@ mod tests {
                 details: vec!["Google Chrome".into(), "Microsoft Edge".into()],
             })
         );
+    }
+
+    #[test]
+    fn manual_mode_names_every_current_registered_browser() {
+        let decision = decide(
+            BrowserStartup::Manual,
+            None,
+            None,
+            &[
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::Current,
+                ),
+                candidate(
+                    "Microsoft Edge",
+                    BrowserPackage::Native,
+                    NativeHostState::Current,
+                ),
+            ],
+        );
+
+        assert!(matches!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+                if browsers.iter().map(|browser| browser.name.as_str())
+                    .eq(["Google Chrome", "Microsoft Edge"])
+        ));
     }
 
     #[test]

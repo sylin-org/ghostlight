@@ -47,16 +47,10 @@ impl ApplicationExecutor {
         // Listing is a current read of real state: the tabs come from the live browser through
         // a dispatching query, and only this workspace's bound tabs are named -- the person's
         // unbound tabs stay private. An idle MV3 worker suspends its relay silently, so the
-        // read gives a waking adapter one bounded window to reattach before answering from
-        // absence.
-        if self.browser.browsers().is_empty() && !self.wait_for_any_browser(context) {
-            return self.failed(
-                context,
-                decision,
-                None,
-                Refusal::BrowserStartupManual { browser: None },
-                json!({"reason":"browser_startup_manual"}),
-            );
+        // read gives a waking adapter one bounded window to reattach before invoking the same
+        // policy-owned recovery as every other browser crossing.
+        if self.browser.browsers().is_empty() {
+            self.wait_for_any_browser(context);
         }
         let live = match self.dispatch(context, BrowserCommand::ListTabs) {
             Ok(BrowserOutcome::Tabs { tabs }) => tabs,

@@ -18,6 +18,15 @@ pub const HUMAN_PAUSE_DIRECTIVE: &str =
 pub const HUMAN_STOP_DIRECTIVE: &str =
     "The user asked to interrupt the process. Wait for further instructions.";
 
+fn browser_choices(browsers: &[String]) -> String {
+    match browsers {
+        [] => "a supported Chromium".into(),
+        [browser] => format!("a {browser}"),
+        [first, second] => format!("a {first} or {second}"),
+        [head @ .., last] => format!("a {}, or {last}", head.join(", ")),
+    }
+}
+
 /// The noun named by a target-listing outcome.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TargetNoun {
@@ -878,7 +887,7 @@ pub enum Refusal {
     /// This session already works in a different browser.
     BrowserPinned,
     /// The configured posture leaves browser startup to the person.
-    BrowserStartupManual { browser: Option<String> },
+    BrowserStartupManual { browsers: Vec<String> },
     /// Automatic readiness recovery failed before any browser effect.
     BrowserRecoveryFailed { reason: BrowserRecoveryReason },
     /// A dispatched effect cannot be determined.
@@ -934,10 +943,10 @@ impl Refusal {
             }
             Self::BrowserUnknown => "That browser is not connected.",
             Self::BrowserPinned => "This session is already working in a different browser.",
-            Self::BrowserStartupManual { browser } => {
-                return browser.as_ref().map_or_else(
-                    || "No browser is connected. Start a supported Chromium browser with the Ghostlight extension installed.".into(),
-                    |name| format!("No browser is connected. Start {name} to continue."),
+            Self::BrowserStartupManual { browsers } => {
+                let choices = browser_choices(browsers);
+                return format!(
+                    "No browser is connected. Ask the user to open {choices} browser window with the Ghostlight extension installed, then repeat the call."
                 );
             }
             Self::BrowserRecoveryFailed { reason } => match reason {
@@ -1020,10 +1029,7 @@ impl Refusal {
             Self::BrowserPinned => vec![
                 "Omit browser to continue in the browser this session already works in.".into(),
             ],
-            Self::BrowserStartupManual { .. } => vec![
-                "Start the browser you normally use with the Ghostlight extension installed, then repeat the call."
-                    .into(),
-            ],
+            Self::BrowserStartupManual { .. } => Vec::new(),
             Self::BrowserRecoveryFailed { reason } => match reason {
                 BrowserRecoveryReason::BrowserAbsent => vec![
                     "Install Chrome, Edge, Brave, or Chromium as a native package, then run ghostlight install."

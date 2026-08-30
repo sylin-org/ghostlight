@@ -183,6 +183,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     match, cursor continuation, eviction, host filtering, expiry, browser loss, and tab closure.
 20. Prove diagnostics never return headers, bodies, cookies, authorization, post data, query
     strings, fragments, or another workspace's entries, and that a read cannot clear history.
+21. With `Auto-open browser on request` off and no adapter connected, call a browser tool and
+    verify no browser starts. The failed result tells the model to ask the user to open one of
+    every eligible installed browser it names with the Ghostlight extension installed, carries
+    the same names in structured facts, and does not repeat the instruction in `next_steps`.
 
 ## Presentation gates
 

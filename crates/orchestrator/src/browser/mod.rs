@@ -1099,8 +1099,8 @@ pub enum BrowserError {
     /// Browser readiness recovery reached a useful manual-mode outcome.
     #[error("browser startup is manual")]
     RecoveryManual {
-        /// Unique installed browser name, when one was found.
-        browser: Option<String>,
+        /// Installed browser names with current Ghostlight native-host registration.
+        browsers: Vec<String>,
     },
     /// Browser readiness recovery reached one exact closed failure.
     #[error("browser recovery failed: {reason:?}")]

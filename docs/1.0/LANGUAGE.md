@@ -84,11 +84,18 @@ projection from one typed outcome or refusal. A sentence that names a host, coun
 carries the same value in that projection. Ghostlight owns the sentence. The browser may return the
 role and accessible name of the physical element in the same action receipt, without a describe
 round trip. The role is narrowed to a closed Ghostlight noun; an unknown role becomes `control`.
+
 The name is normalized, bounded to 80 visible characters, and included by default, so an action can
 say `Clicked the "Save" button on example.com.` Governance may remove all target names with
 `privacy.preserve_target_names: false`, leaving `Clicked a button on example.com.` Editable values are
 never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
 unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
+
+When `browser.startup` is `manual` and no browser is connected, the refusal addresses the MCP
+model: ask the user to open one of the eligible installed browser windows it names, with the
+Ghostlight extension installed, then repeat the call. Facts carry the closed
+`browser_startup_manual` reason and a `browsers` array; one choice also retains the singular
+`browser` fact. The summary contains the whole recovery instruction, so `next_steps` is empty.
 
 ## Catalog
 

@@ -595,7 +595,7 @@ const checks = [
     `permissions: ${JSON.stringify(permissionsOnLoad)}, authored: ${JSON.stringify(authoredAfterStartup)}`],
   ["an organization manual ceiling pins and explains browser startup",
     /data-setting-choice="browser\.startup"[^>]*disabled/.test(pinnedStartupControl)
-      && pinnedStartupControl.includes("Example Org requires you to start the browser yourself."),
+      && pinnedStartupControl.includes("Example Org requires browser auto-open to stay off."),
     `permissions: ${JSON.stringify(pinnedStartupControl)}`],
   ["turning a permission off authors only the tightening value",
     authoredAfterEdit.some((entry) => entry.key === "channels.mcp.enabled" && entry.value === false)

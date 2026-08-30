@@ -206,17 +206,17 @@
         {
           key: "browser.startup",
           kind: "choice",
-          name: "When no browser is connected",
+          name: "Auto-open browser on request",
           choices: [
             {
               value: "on_demand",
-              label: "Start my browser when needed",
+              label: "On",
               detail: "Ghostlight may make one bounded attempt to start the browser you normally use."
             },
             {
               value: "manual",
-              label: "I will start it myself",
-              detail: "Ghostlight names the missing browser and waits for you to start it."
+              label: "Off",
+              detail: "Ghostlight tells the model which eligible browser windows to ask you to open."
             }
           ]
         }

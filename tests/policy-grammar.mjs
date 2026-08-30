@@ -80,7 +80,7 @@ check("browser startup is a closed choice",
   JSON.stringify(startup));
 check("browser startup values read as choices rather than raw keys",
   words.settingWords("browser.startup", "manual") ===
-    "When no browser is connected: I will start it myself",
+    "Auto-open browser on request: Off",
   words.settingWords("browser.startup", "manual"));
 
 let failed = 0;

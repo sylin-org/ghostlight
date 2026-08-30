@@ -1047,9 +1047,9 @@ impl ApplicationExecutor {
                     context.deadline,
                     context.cancellation.flag(),
                 ) {
-                    Ok(RecoveryDecision::Manual { browser }) => {
+                    Ok(RecoveryDecision::Manual { browsers }) => {
                         return Err(BrowserError::RecoveryManual {
-                            browser: browser.map(|browser| browser.name),
+                            browsers: browsers.into_iter().map(|browser| browser.name).collect(),
                         });
                     }
                     Ok(RecoveryDecision::Failed { reason, details }) => {
@@ -1715,11 +1715,11 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
             },
             json!({"reason":"browser_primitive_failed","detail":detail}),
         )),
-        BrowserError::RecoveryManual { browser } => Some((
+        BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
-                browser: browser.clone(),
+                browsers: browsers.clone(),
             },
-            json!({"reason":"browser_startup_manual","browser":browser}),
+            manual_browser_facts(browsers),
         )),
         BrowserError::RecoveryFailed { reason, details } => Some((
             Refusal::BrowserRecoveryFailed {
@@ -1729,6 +1729,17 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
         )),
         _ => None,
     }
+}
+
+fn manual_browser_facts(browsers: &[String]) -> Value {
+    let mut facts = json!({
+        "reason": "browser_startup_manual",
+        "browsers": browsers,
+    });
+    if let [browser] = browsers {
+        facts["browser"] = json!(browser);
+    }
+    facts
 }
 
 const fn recovery_reason(reason: RecoveryFailure) -> BrowserRecoveryReason {
@@ -2060,10 +2071,13 @@ mod tests {
     use ghostlight_bridge::service::ServiceContent;
     use serde_json::json;
 
+    use crate::browser::recovery::RecoveryCandidate;
     use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
     use ghostlight_bridge::service::IntakeChannel;
 
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
+    use crate::install::browser_package::BrowserPackage;
+    use crate::install::native_host::NativeHostState;
     use crate::language::outcome::Observed;
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
     use crate::workbench::WorkbenchProjection;
@@ -2148,7 +2162,12 @@ mod tests {
                 "ambiguous",
                 BrowserError::AmbiguousBrowser(vec!["a".into()]),
             ),
-            ("manual", BrowserError::RecoveryManual { browser: None }),
+            (
+                "manual",
+                BrowserError::RecoveryManual {
+                    browsers: Vec::new(),
+                },
+            ),
             (
                 "recovery_failed",
                 BrowserError::RecoveryFailed {
@@ -2542,7 +2561,7 @@ mod tests {
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
         let audit = Arc::new(MemoryAudit::default());
-        let executor = ApplicationExecutor::new(
+        let mut executor = ApplicationExecutor::new(
             governance,
             workspaces.clone(),
             browser.clone(),
@@ -2551,6 +2570,16 @@ mod tests {
             audit.clone(),
             crate::diagnostics::DiagnosticsHub::for_tests(),
         );
+        executor
+            .recovery
+            .set_test_candidates(vec![RecoveryCandidate {
+                id: "chromium".into(),
+                name: "Chromium".into(),
+                package: BrowserPackage::Native,
+                package_detail: "Chromium native package".into(),
+                registration: NativeHostState::Current,
+                ordinary_executable: Some(PathBuf::from("chromium")),
+            }]);
         (executor, browser, workspaces, workspace, audit)
     }
 
@@ -2724,25 +2753,40 @@ mod tests {
     }
 
     #[test]
-    fn manual_recovery_maps_to_stable_facts_summary_and_one_next_step() {
+    fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
         let (refusal, facts) = routing_refusal(&BrowserError::RecoveryManual {
-            browser: Some("Chromium".into()),
+            browsers: vec!["Chromium".into()],
         })
         .expect("manual recovery is a model-facing refusal");
 
         assert_eq!(
             facts,
-            json!({"reason":"browser_startup_manual","browser":"Chromium"})
+            json!({
+                "reason":"browser_startup_manual",
+                "browser":"Chromium",
+                "browsers":["Chromium"]
+            })
         );
         assert_eq!(
             refusal.summary(),
-            "No browser is connected. Start Chromium to continue."
+            "No browser is connected. Ask the user to open a Chromium browser window with the Ghostlight extension installed, then repeat the call."
+        );
+        assert!(refusal.next_steps().is_empty());
+
+        let (plural, plural_facts) = routing_refusal(&BrowserError::RecoveryManual {
+            browsers: vec!["Google Chrome".into(), "Microsoft Edge".into()],
+        })
+        .expect("plural manual recovery is model-facing");
+        assert_eq!(
+            plural.summary(),
+            "No browser is connected. Ask the user to open a Google Chrome or Microsoft Edge browser window with the Ghostlight extension installed, then repeat the call."
         );
         assert_eq!(
-            refusal.next_steps(),
-            vec![
-                "Start the browser you normally use with the Ghostlight extension installed, then repeat the call."
-            ]
+            plural_facts,
+            json!({
+                "reason":"browser_startup_manual",
+                "browsers":["Google Chrome", "Microsoft Edge"]
+            })
         );
     }
 
@@ -2815,7 +2859,16 @@ mod tests {
 
         // With nothing reattaching inside the wake budget, the read refuses honestly instead
         // of answering from remembered state.
-        let (executor, browser, _, workspace, _) = fixture();
+        let policy = temporary_policy("manual-browser-startup");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"browser.startup","value":"manual","level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let (executor, browser, _, workspace, _) =
+            fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.connect(vec![]);
         let absent = executor.execute(
             &workspace,
@@ -2826,6 +2879,7 @@ mod tests {
         );
         assert_eq!(absent.status, Status::Failed);
         assert_eq!(absent.facts["reason"], "browser_startup_manual");
+        let _ = fs::remove_file(policy);
     }
 
     #[test]

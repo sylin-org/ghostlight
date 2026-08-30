@@ -44,6 +44,9 @@ the owner wants, and what this project learned the hard way.
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **Manual browser recovery speaks to the model.** When browser auto-open is off, never make the
+  model translate a person-facing error. Tell it to ask the user to open any eligible installed
+  browser Ghostlight can name, with the extension installed, then repeat the call.
 - **Diagnostics are a product surface, not a developer afterthought.** Process logs must be
   findable, readable, correlatable, and factual: one command to one chronological story,
   operation ids that follow one call across processes, terse dense lines carrying the numbers

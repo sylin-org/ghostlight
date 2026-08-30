@@ -112,7 +112,7 @@ try {
   assert.notEqual(listed.status, 0, listed.stderr);
   assert.equal(
     listed.stdout.trim(),
-    "No browser is connected. Start a supported Chromium browser with the Ghostlight extension installed."
+    "No browser is connected. Ask the user to open a Chromium browser window with the Ghostlight extension installed, then repeat the call."
   );
 
   const rendered = call(["browser_tabs", '{"action":"list"}', "--json"]);

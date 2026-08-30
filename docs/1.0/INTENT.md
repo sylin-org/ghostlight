@@ -107,6 +107,9 @@ the Applications entry as interaction routes.
   entry, or exposes a generic file editor or command runner.
 - Status explains service, browser, and authority state, tests native notifications, and applies
   the explicit end-session intent through the same governance owner used by browser and MCP flows.
+- Policy names `browser.startup` as `Auto-open browser on request`. When it is off, Ghostlight
+  does not launch a browser; a refused browser call tells the model to ask the person to open any
+  eligible installed browser it names, with the Ghostlight extension installed.
 - Pause, resume, and start-session apply from the persistent header beside the connection state
   and match the tray, so taking the wheel has one affordance rather than several.
 - A pause prevents the next browser effect by refusing it at the existing final boundary. It does

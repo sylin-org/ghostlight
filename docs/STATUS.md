@@ -1,9 +1,32 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (aggregate detected-harness setup).
+Last updated: 2026-08-30 (model-directed manual browser handoff).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Model-directed manual browser handoff (2026-08-30)
+
+[ADR-0147](adr/0147-model-directed-manual-browser-handoff.md) keeps the existing governed
+`browser.startup` setting and presents it as `Auto-open browser on request` with `On` and `Off`
+choices. With it off, recovery launches nothing and returns every installed native browser whose
+ordinary executable and current Ghostlight native-host registration are verified. Multiple manual
+choices are useful rather than ambiguous; automatic startup keeps its unique-candidate rule.
+
+The language-owned refusal now tells the MCP model to ask the user to open one of the named browser
+windows with the Ghostlight extension installed, then repeat the call. Structured facts add the
+plural `browsers` list and retain the singular `browser` field when exactly one choice exists. The
+complete recovery instruction lives in the summary, so `next_steps` does not repeat it. After its
+existing bounded extension-wake window, tab listing now crosses the same recovery seam instead of
+constructing a generic refusal.
+
+Formatting, warnings-denied workspace/all-target Clippy, all 422 Rust workspace tests, all 156
+extension tests, changed-JavaScript syntax checks, policy grammar, the workbench surface journey,
+the process journey, and the real CLI journey pass. The orchestrator alone was deployed locally at
+SHA-256 `729b14c6695f70d1ea9f6311dd237ed9ce7a9cf5edb6132b8c4369796a05083a`; both connectors were
+left running. A live `browser_tabs` call against that service returned failed/no-effect truth,
+`browser_startup_manual`, `browsers: ["Chromium"]`, no duplicate next step, and the exact
+model-directed summary.
 
 ## Aggregate detected-harness setup (2026-08-30)
 
