@@ -1,9 +1,32 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (1.3.0 service line prepared).
+Last updated: 2026-08-30 (1.3.0 published).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## 1.3.0 published (2026-08-30)
+
+Ghostlight 1.3.0 is public: GitHub release
+[`v1.3.0`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.0) (20 files, re-downloaded
+and hash-compared before publication), npm `ghostlight@1.3.0` (tarball SHA-256
+`9c818de3569f5178b4b7d027a8c48f175c2ac955496148e709f1a6fdc1fbc576`), and the MCP Registry record
+`org.sylin/ghostlight 1.3.0`, all from custody-verified candidate run
+[33333813230](https://github.com/sylin-org/ghostlight/actions/runs/33333813230) at the frozen
+revision `7b925625` (two verified local copies,
+[candidate-custody-2026-08-30](testing/candidate-custody-2026-08-30.md)). `main` was
+fast-forward promoted (`a12391e3..296b0209`). The public install smoke passed: `npx -y
+ghostlight@1.3.0` downloaded and checksum-verified all three binaries from the public release,
+and the real 1.3.0 orchestrator answered `doctor --json`, with the new Devin registry row live
+on Windows. The Chrome adapter needs no action this line: the candidate's extension ZIP is
+byte-identical to the approved store 1.1.0 revision (`ce59185e...`), whose staged review
+remains the store path; the public listing serves adapter 1.0.0. Website fallback refreshed and
+pushed; `check-public-surfaces.ps1 -Online` reports GitHub, npm, the Chrome update feed, the
+MCP Registry, and the website in agreement (source 1.3.0, public 1.3.0, public adapter 1.0.0).
+Scoop and WinGet metadata ride the `package-manager-metadata` artifact and remain owner
+submissions as before. The line carries four features: one-step harness setup (ADR-0146), the
+model-directed manual browser handoff (ADR-0147), Devin harness continuity (ADR-0148), and
+choice-free recovery (ADR-0149).
 
 ## 1.3.0 service line prepared (2026-08-30)
 
