@@ -11,13 +11,17 @@ const runtimeFile = join(repository, `tests/.ghostlight-runtime-${process.pid}.j
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
 const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
 const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
+const nativeHostDir = join(repository, `tests/.ghostlight-native-host-${process.pid}`);
 const deployLock = join(binDir, "deploy.lock");
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
   GHOSTLIGHT_AUDIT_FILE: auditFile,
   GHOSTLIGHT_POLICY_FILE: policyFile,
-  GHOSTLIGHT_DIAGNOSTICS_DIR: diagnosticsDir
+  GHOSTLIGHT_DIAGNOSTICS_DIR: diagnosticsDir,
+  // No process this journey spawns may touch the machine's real native-host registration
+  // (ADR-0149 makes recovery repair owned registrations toward the running tree).
+  GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
 };
 const children = [];
 const physicalCommands = [];
@@ -816,6 +820,7 @@ try {
     if (!child.killed) child.kill();
   }
   rmSync(runtimeFile, { force: true });
+  rmSync(nativeHostDir, { force: true, recursive: true });
   rmSync(auditFile, { force: true });
   rmSync(policyFile, { force: true });
   rmSync(diagnosticsDir, { recursive: true, force: true });

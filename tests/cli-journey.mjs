@@ -18,11 +18,64 @@ const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.j
 // The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
 const scriptingDisabledPolicyFile = join(repository, "examples/scripting-disabled.json");
+// The whole native-host registration surface (manifests and Windows registry keys) is isolated
+// below this directory. Recovery silently repairs Ghostlight-owned registrations toward the
+// running tree (ADR-0149), so an un-isolated journey would adopt the machine's real browser
+// registration into whatever build is under test -- exactly the 2026-08-30 preflight leak.
+const nativeHostDir = join(repository, `tests/.ghostlight-cli-native-host-${process.pid}`);
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
-  GHOSTLIGHT_AUDIT_FILE: auditFile
+  GHOSTLIGHT_AUDIT_FILE: auditFile,
+  GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
 };
+
+// The machine's persistent native-host registration, as one comparable string. The journey
+// snapshots it before its first process and asserts it is byte-identical after its last, so no
+// journey beat can ever mutate the real registration unnoticed.
+const REGISTRY_VENDORS = [
+  ["Google", "Chrome"],
+  ["Microsoft", "Edge"],
+  ["BraveSoftware", "Brave-Browser"],
+  ["Chromium"]
+];
+const LINUX_MANIFEST_DIRECTORIES = [
+  "google-chrome",
+  "microsoft-edge",
+  "BraveSoftware/Brave-Browser",
+  "chromium"
+];
+function machineRegistration() {
+  const parts = [];
+  const readManifest = (path) =>
+    existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
+  if (process.platform === "win32") {
+    parts.push(
+      readManifest(
+        join(
+          process.env.LOCALAPPDATA || "",
+          "Ghostlight",
+          "NativeMessagingHosts",
+          "org.sylin.ghostlight.json"
+        )
+      )
+    );
+    for (const vendor of REGISTRY_VENDORS) {
+      const key = `HKCU\\Software\\${vendor.join("\\")}\\NativeMessagingHosts\\org.sylin.ghostlight`;
+      const query = spawnSync("reg", ["query", key, "/ve"], { encoding: "utf8" });
+      parts.push(query.status === 0 ? (query.stdout || "").trim() : "<absent>");
+    }
+  } else {
+    const configHome = process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
+    for (const directory of LINUX_MANIFEST_DIRECTORIES) {
+      parts.push(
+        readManifest(join(configHome, directory, "NativeMessagingHosts", "org.sylin.ghostlight.json"))
+      );
+    }
+  }
+  return parts.join("\n---\n");
+}
+const registrationBefore = machineRegistration();
 
 const ghostlight = join(binDir, `ghostlight${executableSuffix}`);
 if (!existsSync(ghostlight)) throw new Error(`Missing ${ghostlight}; build the workspace first.`);
@@ -132,6 +185,8 @@ try {
       "The browser cannot use Ghostlight's native messaging registration."
     );
     assert.ok(result.facts.details.length >= 1, listed.stdout);
+  } else if (result.facts.reason === "browser_absent") {
+    assert.equal(listed.stdout.trim(), "No supported Chromium browser is installed.");
   } else {
     assert.fail(`unexpected no-browser reason: ${result.facts.reason}`);
   }
@@ -220,8 +275,17 @@ try {
     "the governed service is otherwise healthy"
   );
 
+  // The strongest guarantee this journey owns: after every beat, the machine's real
+  // native-host registration is byte-identical to the snapshot taken before the first process.
+  assert.equal(
+    machineRegistration(),
+    registrationBefore,
+    "the journey changed the machine's native-host registration"
+  );
+
   console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal");
 } finally {
   for (const child of services) if (!child.killed) child.kill();
   for (const file of cleanup) rmSync(file, { force: true });
+  rmSync(nativeHostDir, { force: true, recursive: true });
 }
