@@ -104,6 +104,61 @@ try {
         $output | Select-Object -Last 2 | ForEach-Object { "$_" }
     }
 
+    # The machine's persistent native-host registration as one comparable string. Recovery
+    # silently repairs Ghostlight-owned registrations toward the running tree (ADR-0149), so a
+    # journey that is not registration-isolated would adopt the real browsers into the build
+    # under test -- the 2026-08-30 preflight leak. Journeys isolate via
+    # GHOSTLIGHT_NATIVE_HOST_DIR; this snapshot proves it held.
+    function Get-MachineNativeHostState {
+        $parts = @()
+        if ($IsWindows) {
+            $manifest = Join-Path $env:LOCALAPPDATA "Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json"
+            $parts += if (Test-Path -LiteralPath $manifest) {
+                (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+            } else { "<absent>" }
+            foreach ($vendor in @(
+                , @("Google", "Chrome")
+                , @("Microsoft", "Edge")
+                , @("BraveSoftware", "Brave-Browser")
+                , @("Chromium")
+            )) {
+                $key = "Registry::HKEY_CURRENT_USER\Software\$($vendor -join '\')\NativeMessagingHosts\org.sylin.ghostlight"
+                $value = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue)."(default)"
+                $parts += if ($null -ne $value) { "$value" } else { "<absent>" }
+            }
+        } else {
+            $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME ".config" }
+            foreach ($directory in @("google-chrome", "microsoft-edge", "BraveSoftware/Brave-Browser", "chromium")) {
+                $manifest = Join-Path $configHome "$directory/NativeMessagingHosts/org.sylin.ghostlight.json"
+                $parts += if (Test-Path -LiteralPath $manifest) {
+                    (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+                } else { "<absent>" }
+            }
+        }
+        return ($parts -join "`n---`n")
+    }
+
+    # Ghostlight processes still running from this runner's isolated target directory. Nothing
+    # legitimate runs from a scratch build tree, so the guard stops them and reports them.
+    function Get-LeakedTargetProcesses {
+        param([Parameter(Mandatory)] [string] $TargetRoot)
+        if ($IsWindows) {
+            $result = @(
+                Get-CimInstance Win32_Process -Filter "Name like 'ghostlight%'" -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.ExecutablePath -and
+                        $_.ExecutablePath.StartsWith($TargetRoot, [System.StringComparison]::OrdinalIgnoreCase)
+                    }
+            )
+        } else {
+            $result = @(ps -eo pid=,args= | Where-Object { "$_" -like "*$TargetRoot*ghostlight*" } |
+                ForEach-Object { "$_" -replace '^\s*(\d+)\s+.*$', '$1' })
+        }
+        # The comma keeps the array intact through the function's output pipeline, so an empty
+        # result is still an array and .Count stays legal under StrictMode.
+        return , $result
+    }
+
     # ---------------------------------------------------------------- environment
 
     $headSha = (git rev-parse HEAD).Trim()
@@ -169,13 +224,19 @@ try {
         } }
     }
 
+    # Each journey pins GHOSTLIGHT_BIN_DIR to THIS runner's isolated target at execution time,
+    # so a -TargetDirectory run can never silently verify stale binaries from the default
+    # location (CachyOS finding 1, 2026-08-25).
+    $previousBinDir = $env:GHOSTLIGHT_BIN_DIR
     if ($SkipJourneys) {
+        $stages += @{ Name = "machine registration snapshot"; Skip = "skipped with the journeys"; Action = {} }
         $stages += @{ Name = "journeys (process/CLI/PowerShell/workbench)"; Skip = "skipped by request"; Action = {} }
+        $stages += @{ Name = "machine state guard (registration + leaked processes)"; Skip = "skipped with the journeys"; Action = {} }
     } else {
-        # Each journey pins GHOSTLIGHT_BIN_DIR to THIS runner's isolated target at execution time,
-        # so a -TargetDirectory run can never silently verify stale binaries from the default
-        # location (CachyOS finding 1, 2026-08-25).
-        $previousBinDir = $env:GHOSTLIGHT_BIN_DIR
+        $stages += @{ Name = "machine registration snapshot"; Skip = ""; Action = {
+            $script:journeyRegistrationSnapshot = Get-MachineNativeHostState
+            "real native-host registration captured before the journeys"
+        } }
 
         $stages += @{ Name = "process journey"; Skip = ""; Action = {
             $env:GHOSTLIGHT_BIN_DIR = $binDirectory
@@ -192,6 +253,32 @@ try {
         $stages += @{ Name = "workbench surface"; Skip = ""; Action = {
             $env:GHOSTLIGHT_BIN_DIR = $binDirectory
             Run-Gate { node tests/workbench-surface.mjs } "workbench surface failed"
+        } }
+
+        # The guarantee stage (2026-08-30 leak): the journeys leave the machine's registration
+        # untouched and leave no process behind inside the isolated target. Leaked processes are
+        # stopped (nothing legitimate runs from a scratch tree) and still fail the gate so the
+        # leak is fixed at its seam, not cleaned silently.
+        $stages += @{ Name = "machine state guard (registration + leaked processes)"; Skip = ""; Action = {
+            $after = Get-MachineNativeHostState
+            if ($after -ne $script:journeyRegistrationSnapshot) {
+                throw "the journeys changed the machine's native-host registration"
+            }
+            $leaked = Get-LeakedTargetProcesses -TargetRoot $targetDirectory
+            foreach ($leak in $leaked) {
+                if ($IsWindows) {
+                    Stop-Process -Id $leak.ProcessId -Force -ErrorAction SilentlyContinue
+                } else {
+                    & kill -9 $leak 2> $null
+                }
+            }
+            if ($leaked.Count -gt 0) {
+                $described = ($leaked | ForEach-Object {
+                    if ($IsWindows) { "$($_.ProcessId): $($_.ExecutablePath)" } else { "pid $_" }
+                }) -join "; "
+                throw "the journeys left ghostlight processes inside $TargetDirectory -- $described"
+            }
+            "registration unchanged; no process leaked from the isolated target"
         } }
     }
 
