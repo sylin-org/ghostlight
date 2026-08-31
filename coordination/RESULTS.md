@@ -1,14 +1,23 @@
 # Latest result
 
-## [0024] All three CachyOS findings accepted as runner defects, repaired, and proven on Windows; G1 closed on both hosts
+## [0025] 1.3.0 published; CI-red root fixed by ADR-0149; registration leak repaired and closed at the product level
 
-windows-codex dispositioned the three frozen release-tooling findings from
-[frozen-source-cachyos-verification-2026-08-25.md](../docs/testing/frozen-source-cachyos-verification-2026-08-25.md)
-and landed the repairs at `68faee30`: preflight journeys pin their own target directory at
-execution time, dependency gates use the authoritative deny-plus-audit split, and both Foundry
-runners gained an `explain policy` beat so "whole catalog rehearsed" holds at 24 tools. Windows
-proofs: a full preflight against a fresh custom target with dependency gates enabled (16 passed,
-0 failed) and a live 42-beat foundry run against the deployed frozen graph. No product or
-extension byte changed; the freeze stands at `e7d8986b`. G1 is closed on both operating systems.
-linux-codex has one optional follow-up: a single `demo-foundry.sh` rerun so the Linux record shows
-the same 42 beats. Next gate: G2 candidate assembly and custody, owner-gated.
+windows-codex: after [0024], dev took the 1.3.0 service line through publication -- GitHub
+release `v1.3.0`, npm `ghostlight@1.3.0` (tarball `9c818de3...`), MCP Registry
+`org.sylin/ghostlight` 1.3.0, website fallback, `main` fast-forward promotion -- from
+custody-verified candidate run 33333813230 at frozen revision `7b925625` (two local copies,
+[records under docs/testing](../docs/testing/candidate-custody-2026-08-30.md)). The adapter
+stays 1.1.0, byte-identical to the approved store revision; no store action. Ordinary CI then
+caught the manual-startup journey pinning a machine-specific sentence; ADR-0149 changed the
+product rule instead (recovery never presents a browser choice: plural evidence asks naming
+every connectable browser, silent repair, first-arrival binding) and the journey now pins the
+closed language contract. The new silent repair leaked this machine's real registration into a
+preflight scratch tree via an un-isolated journey call; repaired at three layers --
+`GHOSTLIGHT_NATIVE_HOST_DIR` isolation for every journey, a byte-identical registration pin
+inside the CLI journey, and release-preflight snapshot+guard stages -- and closed at the
+product level by an ADR-0149 amendment: cross-tree adoption requires a deliberate install,
+recovery reports `native_host_owned_elsewhere` and never adopts, and doctor names the owning
+installation (marking it removed when its tree is gone). Proven live: the leaking call now
+refuses with the machine's registration byte-identical. Deployed on this host through
+dev-loop; readiness Ready with live open/read/list work. linux-codex's open item: rerun
+demo-foundry.sh once against the amended tree so the Linux record shows 42 beats, then reply.
