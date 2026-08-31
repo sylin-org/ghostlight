@@ -1,9 +1,41 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (1.3.0 published).
+Last updated: 2026-08-30 (native-host registration isolation).
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
+
+## Native-host registration isolation (2026-08-30)
+
+After the 1.3.0 publication, the owner found three orchestrators running at once. Two were
+legitimate one-per-scope authorities (the dev tree and the installed 1.2.0; the runtime file
+lives beside each executable, so each installation directory elects exactly one). The third ran
+from the preflight scratch tree, and the machine's real native-host registration pointed there
+too. Root cause: ADR-0149's silent repair adopts every stale Ghostlight-owned registration
+toward whichever tree crosses the no-browser seam, and the CLI journey crossed it from the
+preflight build with the real environment -- one `browser_tabs list` assertion rewrote all four
+browser registrations into `.target-preflight-130` (reproduced on demand as the negative
+control: a single un-isolated call rewrites the manifest within seconds). Chrome then spawned
+the scratch connector, which demand-started the scratch authority. The machine was restored
+(`target/release` owns the registration again, scratch processes stopped), and the recurrence
+mechanism is three layers:
+
+1. `GHOSTLIGHT_NATIVE_HOST_DIR` isolates the entire registration surface -- manifests and the
+   Windows registry keys (below a Ghostlight-owned `Software\\Ghostlight\\Isolated` subkey no
+   Chromium release reads) -- following the established env-seam pattern. Pinned by unit tests.
+2. Every journey that spawns real executables (CLI, process, PowerShell) sets it, and the CLI
+   journey snapshots the real registration before its first process and asserts it
+   byte-identical after its last, so the journey itself fails red on any future leak.
+3. The release preflight gained a machine registration snapshot stage before the journeys and a
+   guard stage after: registration must be unchanged, and any ghostlight process left inside the
+   isolated target is stopped and fails the gate. A pre-existing StrictMode crash in the
+   `-SkipJourneys` restore path was fixed at the same seam.
+
+Proven together: the un-isolated negative control leaks, the isolated journeys stay green with
+the manifest untouched, and the preflight passes 18 stages including both new ones. Full gates
+green (formatting, warnings-denied Clippy, 350 orchestrator tests, journeys, extension suite
+unchanged). No product behavior changed outside the isolation seam; the published 1.3.0 bytes
+are unaffected (the seam is additive and defaults to off).
 
 ## 1.3.0 published (2026-08-30)
 

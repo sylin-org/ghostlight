@@ -127,6 +127,14 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **Recovery repair adopts the machine toward whichever tree runs it.** Silent registration
+  repair (ADR-0149) is right for an installed product and hazardous on a multi-tree machine:
+  any un-isolated scratch build that crosses the no-browser seam rewrites the machine's real
+  browser registration into that build's directory, and Chrome then keeps its connector and an
+  authority alive from there. Every journey isolates the whole registration surface behind
+  `GHOSTLIGHT_NATIVE_HOST_DIR`; never run an un-isolated scratch build's browser tools against a
+  machine you care about, and remember the runtime file lives beside each executable, so N
+  installed trees legitimately mean N single authorities.
 - **A journey that runs against the real machine pins the contract, not the inventory.** The CLI
   journey pinned the one no-browser sentence a single-registered-browser machine produces; every
   continuous-integration image carries two unregistered browsers and answered with a different
