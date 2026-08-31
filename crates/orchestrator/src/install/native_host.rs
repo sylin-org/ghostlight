@@ -1,4 +1,9 @@
 //! Ownership-checked per-user Chromium native-messaging registration.
+//!
+//! The context resolves from the running executable and the user environment. Setting
+//! `GHOSTLIGHT_NATIVE_HOST_DIR` roots every manifest and Windows registry key below one
+//! directory, so journeys and scratch builds exercise the real install and recovery seams
+//! without adopting the machine's persistent browser registration.
 
 use std::collections::HashSet;
 use std::env;
@@ -194,6 +199,8 @@ struct NativeHostContext {
     connector: PathBuf,
     browser_packages: BrowserPackageContext,
     windows_browser_roots: Vec<PathBuf>,
+    /// Registry writes stay below the Ghostlight-owned isolated subkey (env-scoped journeys).
+    registry_isolated: bool,
 }
 
 impl NativeHostContext {
@@ -207,12 +214,12 @@ impl NativeHostContext {
         } else {
             NativeHostPlatform::Linux
         };
-        let config = env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config"));
-        let local = env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("AppData/Local"));
+        let (local, config, registry_isolated) = native_host_roots(
+            env::var_os("GHOSTLIGHT_NATIVE_HOST_DIR").map(PathBuf::from),
+            env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            &home,
+        );
         let connector = env::current_exe()
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -234,7 +241,41 @@ impl NativeHostContext {
             connector: normalize_path(&connector),
             browser_packages,
             windows_browser_roots,
+            registry_isolated,
         }
+    }
+
+    /// Registry location this context reads and writes for one browser.
+    fn registry_key(&self, browser: &BrowserSpec) -> String {
+        if self.registry_isolated {
+            format!(
+                r"Software\Ghostlight\Isolated\{}\NativeMessagingHosts\{HOST_NAME}",
+                browser.windows_vendor.join(r"\")
+            )
+        } else {
+            windows_registry_key(browser)
+        }
+    }
+}
+
+/// Resolve the manifest roots and the registry scope for this process.
+///
+/// An explicit root (from `GHOSTLIGHT_NATIVE_HOST_DIR`) carries both platform roots and marks
+/// the registry isolated, so no real browser key is read or written. Without it, the ordinary
+/// per-user locations apply.
+fn native_host_roots(
+    explicit: Option<PathBuf>,
+    local_appdata: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+    home: &Path,
+) -> (PathBuf, PathBuf, bool) {
+    match explicit {
+        Some(root) => (root.clone(), root, true),
+        None => (
+            local_appdata.unwrap_or_else(|| home.join("AppData/Local")),
+            xdg_config_home.unwrap_or_else(|| home.join(".config")),
+            false,
+        ),
     }
 }
 
@@ -486,7 +527,7 @@ fn inspect_browser(
     match context.platform {
         NativeHostPlatform::Windows => {
             let Some(registered_path) =
-                registration_io.read_registry(&windows_registry_key(browser))?
+                registration_io.read_registry(&context.registry_key(browser))?
             else {
                 return Ok(NativeHostState::Missing);
             };
@@ -651,7 +692,7 @@ fn apply_install_for_mode(
                     .expect("every browser specification has an inspection result");
                 if observed.state != NativeHostState::NeedsAttention {
                     registration_io
-                        .write_registry(&windows_registry_key(browser), manifest_value.as_ref())?;
+                        .write_registry(&context.registry_key(browser), manifest_value.as_ref())?;
                 }
             }
         }
@@ -706,7 +747,7 @@ fn apply_uninstall_for(
     match context.platform {
         NativeHostPlatform::Windows => {
             for browser in browsers {
-                let key = windows_registry_key(browser);
+                let key = context.registry_key(browser);
                 let Some(value) = registration_io.read_registry(&key)? else {
                     continue;
                 };
@@ -741,7 +782,7 @@ fn apply_uninstall_for(
         let mut still_referenced = false;
         for browser in BROWSERS {
             if registration_io
-                .read_registry(&windows_registry_key(browser))?
+                .read_registry(&context.registry_key(browser))?
                 .is_some_and(|value| {
                     same_path(&PathBuf::from(value), &path, NativeHostPlatform::Windows)
                 })
@@ -1123,7 +1164,52 @@ mod tests {
                 root.join("Program Files"),
                 root.join("Program Files (x86)"),
             ],
+            registry_isolated: false,
         }
+    }
+
+    #[test]
+    fn an_explicit_native_host_root_isolates_both_platform_roots() {
+        let (local, config, isolated) = native_host_roots(
+            Some(PathBuf::from("/isolated")),
+            Some(PathBuf::from("/real/Local")),
+            Some(PathBuf::from("/real/config")),
+            Path::new("/home/test"),
+        );
+        assert_eq!(local, PathBuf::from("/isolated"));
+        assert_eq!(config, PathBuf::from("/isolated"));
+        assert!(isolated);
+
+        let (local, config, isolated) = native_host_roots(
+            None,
+            Some(PathBuf::from("/real/Local")),
+            Some(PathBuf::from("/real/config")),
+            Path::new("/home/test"),
+        );
+        assert_eq!(local, PathBuf::from("/real/Local"));
+        assert_eq!(config, PathBuf::from("/real/config"));
+        assert!(!isolated);
+
+        let (local, config, isolated) =
+            native_host_roots(None, None, None, Path::new("/home/test"));
+        assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
+        assert_eq!(config, PathBuf::from("/home/test/.config"));
+        assert!(!isolated);
+    }
+
+    #[test]
+    fn an_isolated_context_writes_registry_keys_only_ghostlight_owns() {
+        let mut isolated = context(NativeHostPlatform::Windows);
+        isolated.registry_isolated = true;
+        assert_eq!(
+            isolated.registry_key(&BROWSERS[0]),
+            r"Software\Ghostlight\Isolated\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
+        );
+        let real = context(NativeHostPlatform::Windows);
+        assert_eq!(
+            real.registry_key(&BROWSERS[0]),
+            r"Software\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
+        );
     }
 
     #[test]
@@ -1150,6 +1236,7 @@ mod tests {
             connector: PathBuf::from("/opt/ghostlight/ghostlight-browser-connector"),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
             windows_browser_roots: Vec::new(),
+            registry_isolated: false,
         };
         assert_eq!(BROWSERS.len(), 4);
         assert_eq!(
