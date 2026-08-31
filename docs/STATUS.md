@@ -1,6 +1,28 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (cross-tree registration adoption requires install).
+Last updated: 2026-08-31 (1.3.1 published).
+
+## 1.3.1 published (2026-08-31)
+
+Ghostlight 1.3.1 is public: GitHub release
+[`v1.3.1`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.1) (20 files, re-downloaded
+and hash-compared before publication), npm `ghostlight@1.3.1` (tarball SHA-256
+`e291c27c229a1f266575d70bf2653ac7f1690733119e45fbfe95637699d81b4f`), the MCP Registry record
+`org.sylin/ghostlight 1.3.1`, and the refreshed website, from custody-verified candidate run
+[33355735166](https://github.com/sylin-org/ghostlight/actions/runs/33355735166) at frozen
+revision `0d7b7759` (two verified local copies,
+[candidate-custody-2026-08-31](testing/candidate-custody-2026-08-31.md)). `main` was
+fast-forward promoted (`296b0209..2e4e1448`), so main and dev are current together. The release
+carries the ADR-0149 amendment (cross-tree adoption requires a deliberate install, the
+`owned_elsewhere` diagnosis with dead-tree visibility) and the `GHOSTLIGHT_NATIVE_HOST_DIR`
+isolation seam with its journey and preflight machine-state guards. The adapter stays 1.1.0
+with byte-identical candidate bytes; no store action. The public install smoke passed: the
+public npm launcher checksum-verified all three binaries, and the real 1.3.1 orchestrator
+answered `doctor --json` reporting this machine's browsers `owned_elsewhere` with the dev tree
+named -- the amendment's honest answer, observed on the public channel. Scoop and WinGet
+metadata ride the `package-manager-metadata` artifact; their bucket submissions remain owner
+actions.
+
 
 ## Cross-tree registration adoption requires install (2026-08-30)
 
