@@ -1403,7 +1403,12 @@ mod tests {
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
-        let other_connector = PathBuf::from(r"C:\other-tree\ghostlight-browser-connector.exe");
+        // Joined components, not a backslash literal: Path::parent must split this path on
+        // every host operating system, not only on Windows.
+        let other_connector = context
+            .local
+            .join("other-tree")
+            .join("ghostlight-browser-connector.exe");
         let manifest_path = context.local.join("Ghostlight-old/host.json");
         registration_io.files().insert(
             manifest_path.clone(),
@@ -1425,16 +1430,22 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::OwnedElsewhere));
-        assert!(observed.browsers.iter().all(|browser| browser
-            .detail
-            .contains(r"Another Ghostlight installation at C:\other-tree")));
+        assert!(
+            observed.browsers.iter().all(|browser| browser
+                .detail
+                .contains("Another Ghostlight installation at"))
+                && observed
+                    .browsers
+                    .iter()
+                    .all(|browser| browser.detail.contains("other-tree"))
+        );
 
         // The owning installation is deleted: the dead-path diagnosis replaces the alive one.
         registration_io.files().remove(&other_connector);
         let removed = inspect(&context, &registration_io).unwrap();
         assert!(removed.browsers.iter().all(|browser| browser
             .detail
-            .contains(r"A removed Ghostlight installation at C:\other-tree")));
+            .contains("A removed Ghostlight installation at")));
 
         // Recovery's ownership-checked repair refuses; only a deliberate install adopts.
         let refused = apply_owned_repair_for(&context, &registration_io, &[BROWSERS[0]]);
