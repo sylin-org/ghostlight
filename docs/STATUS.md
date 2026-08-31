@@ -1,6 +1,26 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-30 (native-host registration isolation).
+Last updated: 2026-08-30 (cross-tree registration adoption requires install).
+
+## Cross-tree registration adoption requires install (2026-08-30)
+
+The owner accepted both follow-ups to the registration-leak incident. The
+[ADR-0149 amendment](adr/0149-recovery-never-presents-a-browser-choice.md) narrows silent repair
+to stale details within the running installation's own directory. A Ghostlight-owned
+registration naming another installation's connector is the new closed state `owned_elsewhere`:
+recovery reports it (fact `native_host_owned_elsewhere`, the summary `Another Ghostlight
+installation owns the browser registration.`, one next step teaching `ghostlight install` from
+the installation that should own the browsers) and never adopts it; deliberate install still
+adopts it; recovery's owned repair refuses it exactly as it refuses foreign state. `doctor`
+names the owning directory and marks it removed when that installation no longer exists, so a
+deleted scratch tree becomes a visible row instead of silent breakage -- the dead-path
+detection the owner asked for. Unit tests pin the classification, both diagnoses, adoption by
+install, refusal by repair, the recovery ladder arms (single, mixed plural, all-elsewhere), and
+the exact sentence and next step. An un-isolated live call from the scratch build against this
+machine now returns the refusal with the machine's registration byte-identical. The upgrade
+consequence is accepted and recorded in the amendment: every delivery channel re-registers on
+upgrade, so cross-tree self-healing was redundant where it was safe and is what let a scratch
+build hijack the machine where it was not.
 
 This is the mutable implementation snapshot. Git history, the ADR index, and dated research carry
 history; this file does not rewrite it. The 0.8 layer was retired on 2026-08-27 (ADR-0143).
