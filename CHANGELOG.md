@@ -5,6 +5,34 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - Unreleased
+
+Preparation for the next service line. The Chrome Web Store adapter stays at 1.1.0; adapters
+1.1.0 and 1.0.0 both remain compatible with this service line (ADR-0142).
+
+### Fixed
+
+- **Cross-tree registration adoption requires a deliberate install (ADR-0149 amendment).**
+  1.3.0's silent repair adopted any stale Ghostlight-owned registration toward whichever tree
+  crossed the no-browser seam, so a scratch build's browser call could rewrite the machine's
+  real registration. Silent repair now applies only to stale details within the running
+  installation's own directory; a registration owned by another installation is reported, never
+  adopted, and only `ghostlight install` takes ownership.
+
+### Added
+
+- **The `owned_elsewhere` diagnosis.** Recovery answers `Another Ghostlight installation owns
+  the browser registration.` with the `native_host_owned_elsewhere` fact and one next step
+  teaching `ghostlight install` from the installation that should own the browsers. `doctor`
+  names the owning installation's directory and marks it removed when that installation no
+  longer exists, so a deleted tree becomes a visible row instead of silent breakage.
+- **`GHOSTLIGHT_NATIVE_HOST_DIR` isolation for test tooling.** Setting it roots every
+  native-host manifest and Windows registry key below one directory, so journeys and scratch
+  builds exercise the real install and recovery seams without touching the machine's
+  registration. Every shipped journey sets it, the CLI journey asserts the machine's real
+  registration is byte-identical across its run, and the release preflight gained
+  snapshot-and-guard stages that fail on any machine-state leak or leftover process.
+
 ## [1.3.0] - 2026-08-30
 
 Published 2026-08-30 as the GitHub release `v1.3.0` and the npm package `ghostlight@1.3.0`,
