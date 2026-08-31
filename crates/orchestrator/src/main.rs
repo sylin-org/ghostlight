@@ -743,6 +743,7 @@ fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
             NativeHostState::Missing => "missing",
             NativeHostState::Current => "current",
             NativeHostState::Updatable => "updatable",
+            NativeHostState::OwnedElsewhere => "owned by another installation",
             NativeHostState::NeedsAttention => "needs attention",
         };
         println!("{}: {state} -- {}", browser.name, browser.detail);

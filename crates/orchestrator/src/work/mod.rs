@@ -1749,6 +1749,7 @@ const fn recovery_reason(reason: RecoveryFailure) -> BrowserRecoveryReason {
         RecoveryFailure::SandboxedPackage => BrowserRecoveryReason::SandboxedPackage,
         RecoveryFailure::ExtensionAbsent => BrowserRecoveryReason::ExtensionAbsent,
         RecoveryFailure::NativeHostUnavailable => BrowserRecoveryReason::NativeHostUnavailable,
+        RecoveryFailure::OwnedElsewhere => BrowserRecoveryReason::OwnedElsewhere,
         RecoveryFailure::WrongProfile => BrowserRecoveryReason::WrongProfile,
         RecoveryFailure::HandshakeTimeout => BrowserRecoveryReason::HandshakeTimeout,
     }

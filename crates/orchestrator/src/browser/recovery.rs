@@ -52,6 +52,8 @@ pub enum RecoveryFailure {
     ExtensionAbsent,
     /// Native-host registration is missing, foreign, or otherwise unusable.
     NativeHostUnavailable,
+    /// A different Ghostlight installation owns the native-host registration.
+    OwnedElsewhere,
     /// A browser opened, but not the profile the workspace belongs to.
     WrongProfile,
     /// No adapter handshake arrived within the bounded wait.
@@ -60,12 +62,13 @@ pub enum RecoveryFailure {
 
 impl RecoveryFailure {
     /// Every closed failure in stable order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::BrowserAbsent,
         Self::LaunchFailed,
         Self::SandboxedPackage,
         Self::ExtensionAbsent,
         Self::NativeHostUnavailable,
+        Self::OwnedElsewhere,
         Self::WrongProfile,
         Self::HandshakeTimeout,
     ];
@@ -79,6 +82,7 @@ impl RecoveryFailure {
             Self::SandboxedPackage => "browser_sandboxed",
             Self::ExtensionAbsent => "browser_extension_absent",
             Self::NativeHostUnavailable => "native_host_unavailable",
+            Self::OwnedElsewhere => "native_host_owned_elsewhere",
             Self::WrongProfile => "browser_wrong_profile",
             Self::HandshakeTimeout => "browser_handshake_timeout",
         }
@@ -640,6 +644,19 @@ fn decide(
         if !repairable.is_empty() {
             return RecoveryPlan::RepairAll { queue: repairable };
         }
+        // A registration another installation owns explains the whole machine at once, so it
+        // wins over the generic unusable-registration remedy (ADR-0149 amendment).
+        let elsewhere: Vec<_> = installed
+            .iter()
+            .filter(|browser| browser.registration == NativeHostState::OwnedElsewhere)
+            .map(|browser| browser.name.clone())
+            .collect();
+        if !elsewhere.is_empty() {
+            return RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::OwnedElsewhere,
+                details: elsewhere,
+            });
+        }
         return RecoveryPlan::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::NativeHostUnavailable,
             details: installed
@@ -671,6 +688,10 @@ fn decide(
                 details: vec![browser.name],
             })
         }
+        NativeHostState::OwnedElsewhere => RecoveryPlan::Complete(RecoveryDecision::Failed {
+            reason: RecoveryFailure::OwnedElsewhere,
+            details: vec![browser.name],
+        }),
         NativeHostState::Updatable => RecoveryPlan::Prepare {
             browser,
             repair_owned_registration: true,
@@ -1371,6 +1392,82 @@ mod tests {
             decision,
             RecoveryPlan::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
+                details: vec!["Google Chrome".into(), "Chromium".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn a_registration_owned_elsewhere_names_the_deliberate_remedy() {
+        let decision = decide(
+            BrowserStartup::OnDemand,
+            None,
+            None,
+            &[candidate(
+                "Google Chrome",
+                BrowserPackage::Native,
+                NativeHostState::OwnedElsewhere,
+            )],
+        );
+        assert_eq!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::OwnedElsewhere,
+                details: vec!["Google Chrome".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn plural_ownership_mixed_states_ask_only_for_current_browsers() {
+        let decision = decide(
+            BrowserStartup::Manual,
+            None,
+            None,
+            &[
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::Current,
+                ),
+                candidate(
+                    "Microsoft Edge",
+                    BrowserPackage::Native,
+                    NativeHostState::OwnedElsewhere,
+                ),
+            ],
+        );
+        assert!(matches!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+                if browsers.iter().map(|browser| browser.name.as_str())
+                    .eq(["Google Chrome"])
+        ));
+    }
+
+    #[test]
+    fn plural_ownership_all_elsewhere_explains_the_whole_machine() {
+        let decision = decide(
+            BrowserStartup::OnDemand,
+            None,
+            None,
+            &[
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::OwnedElsewhere,
+                ),
+                candidate(
+                    "Chromium",
+                    BrowserPackage::Native,
+                    NativeHostState::OwnedElsewhere,
+                ),
+            ],
+        );
+        assert_eq!(
+            decision,
+            RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::OwnedElsewhere,
                 details: vec!["Google Chrome".into(), "Chromium".into()],
             })
         );

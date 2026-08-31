@@ -44,8 +44,13 @@ pub enum NativeHostState {
     Missing,
     /// The registration exactly names this sibling connector and the fixed origins.
     Current,
-    /// A Ghostlight-owned registration is present but carries stale details.
+    /// A Ghostlight-owned registration of this installation carries stale details.
     Updatable,
+    /// A Ghostlight-owned registration names a connector outside this installation.
+    ///
+    /// Recovery must not adopt it: silent cross-tree repair is how a scratch build rewrites the
+    /// machine's real registration (ADR-0149 amendment). Only a deliberate install adopts it.
+    OwnedElsewhere,
     /// Malformed or foreign state occupies Ghostlight's registration location.
     NeedsAttention,
 }
@@ -58,6 +63,7 @@ impl NativeHostState {
             Self::Missing => "not registered",
             Self::Current => "registered",
             Self::Updatable => "registered, needs an update",
+            Self::OwnedElsewhere => "registered to another installation",
             Self::NeedsAttention => "needs attention",
         }
     }
@@ -448,6 +454,8 @@ trait RegistrationIo {
     fn read_registry(&self, key: &str) -> Result<Option<String>, NativeHostError>;
     fn write_registry(&self, key: &str, value: &str) -> Result<(), NativeHostError>;
     fn remove_registry(&self, key: &str) -> Result<(), NativeHostError>;
+    /// Whether one path names an existing file, for dead-connector diagnosis.
+    fn path_exists(&self, path: &Path) -> bool;
 }
 
 struct SystemRegistrationIo;
@@ -490,6 +498,10 @@ impl RegistrationIo for SystemRegistrationIo {
     fn remove_registry(&self, key: &str) -> Result<(), NativeHostError> {
         remove_registry_key(key)
     }
+
+    fn path_exists(&self, path: &Path) -> bool {
+        path.is_file()
+    }
 }
 
 fn inspect(
@@ -500,15 +512,22 @@ fn inspect(
     let browsers = BROWSERS
         .iter()
         .map(|browser| {
-            let state = inspect_browser(context, registration_io, browser, &expected)?;
+            let (state, registered_connector) =
+                inspect_browser(context, registration_io, browser, &expected)?;
             let package = browser_package::inspect(&context.browser_packages, browser.package);
+            let detail = match state {
+                NativeHostState::OwnedElsewhere => {
+                    owned_elsewhere_detail(registration_io, registered_connector.as_deref())
+                }
+                _ => state_detail(state).into(),
+            };
             Ok(BrowserRegistration {
                 id: browser.id.into(),
                 name: browser.name.into(),
                 package,
                 package_detail: browser_package::detail(browser.name, package),
                 state,
-                detail: state_detail(state).into(),
+                detail,
             })
         })
         .collect::<Result<Vec<_>, NativeHostError>>()?;
@@ -523,13 +542,13 @@ fn inspect_browser(
     registration_io: &dyn RegistrationIo,
     browser: &BrowserSpec,
     expected: &HostManifest,
-) -> Result<NativeHostState, NativeHostError> {
+) -> Result<(NativeHostState, Option<PathBuf>), NativeHostError> {
     match context.platform {
         NativeHostPlatform::Windows => {
             let Some(registered_path) =
                 registration_io.read_registry(&context.registry_key(browser))?
             else {
-                return Ok(NativeHostState::Missing);
+                return Ok((NativeHostState::Missing, None));
             };
             let registered_path = PathBuf::from(registered_path);
             let contents = registration_io.read_file(&registered_path)?;
@@ -556,33 +575,45 @@ fn inspect_browser(
     }
 }
 
+/// Classify one registration and, when a Ghostlight-owned manifest named a connector, return
+/// that connector path so the owning installation can be named in the diagnosis.
 fn classify_manifest(
     contents: Option<&str>,
     expected: &HostManifest,
     platform: NativeHostPlatform,
     current_location: bool,
-) -> Result<NativeHostState, NativeHostError> {
+) -> Result<(NativeHostState, Option<PathBuf>), NativeHostError> {
+    let absent = if current_location {
+        NativeHostState::Missing
+    } else {
+        NativeHostState::NeedsAttention
+    };
     let Some(contents) = contents else {
-        return Ok(if current_location {
-            NativeHostState::Missing
-        } else {
-            NativeHostState::NeedsAttention
-        });
+        return Ok((absent, None));
     };
     let manifest: HostManifest = match serde_json::from_str(contents) {
         Ok(manifest) => manifest,
-        Err(_) => return Ok(NativeHostState::NeedsAttention),
+        Err(_) => return Ok((NativeHostState::NeedsAttention, None)),
     };
     if !manifest.owned() {
-        return Ok(NativeHostState::NeedsAttention);
+        return Ok((NativeHostState::NeedsAttention, None));
     }
-    Ok(
+    let registered_connector = manifest.path.clone();
+    let same_installation = manifest
+        .path
+        .parent()
+        .zip(expected.path.parent())
+        .is_some_and(|(registered, expected)| same_path(registered, expected, platform));
+    Ok((
         if current_location && manifest.current(expected, platform) {
             NativeHostState::Current
+        } else if !same_installation {
+            NativeHostState::OwnedElsewhere
         } else {
             NativeHostState::Updatable
         },
-    )
+        Some(registered_connector),
+    ))
 }
 
 fn apply_install(
@@ -670,7 +701,7 @@ fn apply_install_for_mode(
             .expect("every browser specification has an inspection result");
         matches!(
             observed.state,
-            NativeHostState::Missing | NativeHostState::Updatable
+            NativeHostState::Missing | NativeHostState::Updatable | NativeHostState::OwnedElsewhere
         )
     });
     match context.platform {
@@ -720,7 +751,9 @@ fn apply_install_for_mode(
         match mode {
             InstallMode::InstallOrUpdate => matches!(
                 observed.state,
-                NativeHostState::Missing | NativeHostState::Updatable
+                NativeHostState::Missing
+                    | NativeHostState::Updatable
+                    | NativeHostState::OwnedElsewhere
             ),
             InstallMode::OwnedRepair => observed.state != NativeHostState::Current,
         }
@@ -811,9 +844,32 @@ fn state_detail(state: NativeHostState) -> &'static str {
         NativeHostState::Missing => "Ghostlight is not registered with this browser.",
         NativeHostState::Current => "The browser points at this installation's connector.",
         NativeHostState::Updatable => "A Ghostlight-owned registration points at older details.",
+        NativeHostState::OwnedElsewhere => {
+            "A Ghostlight-owned registration belongs to another installation."
+        }
         NativeHostState::NeedsAttention => {
             "Malformed or foreign state was found and will not be changed."
         }
+    }
+}
+
+/// Name the installation that owns a cross-tree registration, and say when that installation
+/// no longer exists -- the state a deleted scratch tree leaves behind.
+fn owned_elsewhere_detail(
+    registration_io: &dyn RegistrationIo,
+    registered_connector: Option<&Path>,
+) -> String {
+    let Some(connector) = registered_connector else {
+        return state_detail(NativeHostState::OwnedElsewhere).into();
+    };
+    let location = connector.parent().map_or_else(
+        || connector.display().to_string(),
+        |dir| dir.display().to_string(),
+    );
+    if registration_io.path_exists(connector) {
+        format!("Another Ghostlight installation at {location} owns this registration.")
+    } else {
+        format!("A removed Ghostlight installation at {location} still owns this registration.")
     }
 }
 
@@ -1086,6 +1142,10 @@ mod tests {
             self.registry().remove(key);
             Ok(())
         }
+
+        fn path_exists(&self, path: &Path) -> bool {
+            self.files().contains_key(path)
+        }
     }
 
     fn symlink_probe_directory(name: &str) -> PathBuf {
@@ -1292,14 +1352,31 @@ mod tests {
     }
 
     #[test]
-    fn owned_stale_state_is_updatable_but_foreign_state_needs_attention() {
-        let expected = HostManifest::expected(Path::new("/current/browser"));
-        let stale = HostManifest::expected(Path::new("/old/browser"))
+    fn same_tree_stale_is_updatable_and_another_installation_is_owned_elsewhere() {
+        let expected = HostManifest::expected(Path::new("/opt/ghost/browser-connector"));
+        let mut stale = expected.clone();
+        stale.description = "Ghostlight connector (old)".into();
+        assert_eq!(
+            classify_manifest(
+                Some(&stale.to_json().unwrap()),
+                &expected,
+                NativeHostPlatform::Linux,
+                true
+            )
+            .unwrap()
+            .0,
+            NativeHostState::Updatable
+        );
+        let elsewhere = HostManifest::expected(Path::new("/other/tree/browser-connector"))
             .to_json()
             .unwrap();
+        let (state, registered) =
+            classify_manifest(Some(&elsewhere), &expected, NativeHostPlatform::Linux, true)
+                .unwrap();
+        assert_eq!(state, NativeHostState::OwnedElsewhere);
         assert_eq!(
-            classify_manifest(Some(&stale), &expected, NativeHostPlatform::Linux, true).unwrap(),
-            NativeHostState::Updatable
+            registered.as_deref(),
+            Some(Path::new("/other/tree/browser-connector"))
         );
         assert_eq!(
             classify_manifest(
@@ -1308,14 +1385,71 @@ mod tests {
                 NativeHostPlatform::Linux,
                 true
             )
-            .unwrap(),
+            .unwrap()
+            .0,
             NativeHostState::NeedsAttention
         );
         assert_eq!(
             classify_manifest(Some("not json"), &expected, NativeHostPlatform::Linux, true)
-                .unwrap(),
+                .unwrap()
+                .0,
             NativeHostState::NeedsAttention
         );
+    }
+
+    #[test]
+    fn a_registration_owned_elsewhere_is_diagnosed_then_adopted_only_by_install() {
+        let context = context(NativeHostPlatform::Windows);
+        let registration_io = MemoryIo::default();
+        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+        fs::write(&context.connector, b"connector").unwrap();
+        let other_connector = PathBuf::from(r"C:\other-tree\ghostlight-browser-connector.exe");
+        let manifest_path = context.local.join("Ghostlight-old/host.json");
+        registration_io.files().insert(
+            manifest_path.clone(),
+            HostManifest::expected(&other_connector).to_json().unwrap(),
+        );
+        // The other installation still exists, so the diagnosis names it as alive.
+        registration_io
+            .files()
+            .insert(other_connector.clone(), "connector".into());
+        for browser in BROWSERS {
+            registration_io.registry().insert(
+                windows_registry_key(browser),
+                manifest_path.to_string_lossy().into_owned(),
+            );
+        }
+
+        let observed = inspect(&context, &registration_io).unwrap();
+        assert!(observed
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::OwnedElsewhere));
+        assert!(observed.browsers.iter().all(|browser| browser
+            .detail
+            .contains(r"Another Ghostlight installation at C:\other-tree")));
+
+        // The owning installation is deleted: the dead-path diagnosis replaces the alive one.
+        registration_io.files().remove(&other_connector);
+        let removed = inspect(&context, &registration_io).unwrap();
+        assert!(removed.browsers.iter().all(|browser| browser
+            .detail
+            .contains(r"A removed Ghostlight installation at C:\other-tree")));
+
+        // Recovery's ownership-checked repair refuses; only a deliberate install adopts.
+        let refused = apply_owned_repair_for(&context, &registration_io, &[BROWSERS[0]]);
+        assert!(matches!(
+            refused,
+            Err(NativeHostError::OwnedRepairUnavailable(_))
+        ));
+        assert!(apply_install(&context, &registration_io).unwrap().changed);
+        assert!(inspect(&context, &registration_io)
+            .unwrap()
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Current));
+
+        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
@@ -1438,11 +1572,14 @@ mod tests {
         );
         assert!(!registration_io.files().contains_key(&current_manifest));
 
+        // Same-tree stale details are the state recovery may silently repair; a connector in
+        // another installation is OwnedElsewhere and is pinned by its own test.
+        let stale_connector = context
+            .connector
+            .with_file_name("ghostlight-browser-connector-old.exe");
         registration_io.files().insert(
             occupied,
-            HostManifest::expected(Path::new(r"C:\old\ghostlight-browser-connector.exe"))
-                .to_json()
-                .unwrap(),
+            HostManifest::expected(&stale_connector).to_json().unwrap(),
         );
         let repaired = apply_owned_repair_for(&context, &registration_io, &[browser]).unwrap();
         assert!(repaired.changed);

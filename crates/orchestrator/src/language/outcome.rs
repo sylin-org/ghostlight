@@ -837,6 +837,8 @@ pub enum BrowserRecoveryReason {
     ExtensionAbsent,
     /// The native messaging registration cannot be used safely.
     NativeHostUnavailable,
+    /// Another Ghostlight installation owns the native messaging registration.
+    OwnedElsewhere,
     /// The opened browser is not the profile this session belongs to.
     WrongProfile,
     /// The selected adapter did not arrive within the bounded wait.
@@ -964,6 +966,9 @@ impl Refusal {
                 BrowserRecoveryReason::NativeHostUnavailable => {
                     "The browser cannot use Ghostlight's native messaging registration."
                 }
+                BrowserRecoveryReason::OwnedElsewhere => {
+                    "Another Ghostlight installation owns the browser registration."
+                }
                 BrowserRecoveryReason::WrongProfile => {
                     "This session belongs to a browser profile that is not connected."
                 }
@@ -1038,6 +1043,10 @@ impl Refusal {
                 BrowserRecoveryReason::NativeHostUnavailable => {
                     vec!["Run ghostlight doctor, then repair the named browser registration.".into()]
                 }
+                BrowserRecoveryReason::OwnedElsewhere => vec![
+                    "Ask the user to run ghostlight install from the Ghostlight installation that should own the browsers, then repeat the call."
+                        .into(),
+                ],
                 BrowserRecoveryReason::ExtensionAbsent => vec![
                     "Install Ghostlight in the selected browser profile, then repeat the call."
                         .into(),
@@ -2324,6 +2333,24 @@ mod tests {
             assert_eq!(WorkspaceReason::from(error), expected);
         }
         assert_eq!(WorkspaceReason::TabUnavailable.as_fact(), "tab_unavailable");
+    }
+
+    #[test]
+    fn cross_tree_ownership_refusal_teaches_the_deliberate_install() {
+        let refusal = Refusal::BrowserRecoveryFailed {
+            reason: super::BrowserRecoveryReason::OwnedElsewhere,
+        };
+        assert_eq!(
+            refusal.summary(),
+            "Another Ghostlight installation owns the browser registration."
+        );
+        assert_eq!(
+            refusal.next_steps(),
+            vec![
+                "Ask the user to run ghostlight install from the Ghostlight installation that should own the browsers, then repeat the call."
+                    .to_owned()
+            ]
+        );
     }
 
     #[test]

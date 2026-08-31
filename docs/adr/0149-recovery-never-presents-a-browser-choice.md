@@ -81,3 +81,37 @@ Acceptance evidence:
 2. The CLI journey accepts exactly the two honest no-browser refusals and their closed facts on
    any machine.
 3. The removed reason key appears nowhere in the language or recovery modules.
+
+## Amendment 2026-08-30: cross-tree adoption is an install action
+
+Accepted the same evening, after Decision 2's silent repair leaked the machine's real
+registration into a preflight scratch tree (STATUS, "Native-host registration isolation"): one
+un-isolated no-browser call from a fresh build rewrote every browser registration toward that
+build. Journeys now isolate the registration surface behind `GHOSTLIGHT_NATIVE_HOST_DIR`, and
+this amendment closes the product-side rule.
+
+Silent repair narrows to registrations whose connector already lives in the running
+installation's own directory: stale details within one tree, the original self-healing case.
+A Ghostlight-owned registration naming a connector in another installation is a new closed
+state, `owned_elsewhere`:
+
+- recovery reports it and never adopts it -- fact `native_host_owned_elsewhere`, summary
+  `Another Ghostlight installation owns the browser registration.`, and one next step asking
+  the user to run `ghostlight install` from the installation that should own the browsers;
+- deliberate install still adopts it (InstallOrUpdate), and recovery's ownership-checked
+  repair refuses it exactly as it refuses foreign state;
+- `doctor` names the owning directory and says when that installation no longer exists, so a
+  deleted scratch tree becomes a visible row instead of silent breakage.
+
+The accepted consequence: on a machine whose registration still names an older installation's
+directory after an upgrade, recovery now teaches the one install command instead of silently
+rewiring the machine. Every delivery channel re-registers on upgrade (npm handoff, package
+hooks, dev-loop), so cross-tree self-healing was redundant for real upgrades -- and it was the
+mechanism by which a scratch build hijacked the machine.
+
+Additional acceptance evidence:
+
+1. Unit tests pin the same-tree/cross-tree classification, the alive and removed owning-tree
+   diagnoses, deliberate adoption by install, refusal by owned repair, and the recovery ladder
+   arms (single, mixed plural, all-elsewhere).
+2. The exact refusal sentence and next step are pinned in the language module.

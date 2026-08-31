@@ -189,8 +189,13 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     the same names in structured facts, and does not repeat the instruction in `next_steps`.
 22. With several installed browsers and no adapter connected, no browser refusal names a choice
     or says Ghostlight declined to choose: plural evidence returns the ask in either posture,
-    stale Ghostlight-owned registrations are repaired silently before the ask, and nothing
-    usable answers with one named choice-free remedy instead (ADR-0149).
+    stale same-tree registrations are repaired silently before the ask, and nothing usable
+    answers with one named choice-free remedy instead (ADR-0149).
+23. A registration owned by another Ghostlight installation is never adopted by recovery: the
+    call fails with `native_host_owned_elsewhere`, the machine's registration is byte-identical
+    afterward, `doctor` names the owning directory and marks it removed when that installation
+    no longer exists, and a deliberate `ghostlight install` from the adopting installation is
+    what takes ownership (ADR-0149 amendment).
 
 ## Presentation gates
 

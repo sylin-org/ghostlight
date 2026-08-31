@@ -101,6 +101,11 @@ instruction, so `next_steps` is empty. Stale Ghostlight-owned registrations amon
 installed browsers are repaired silently first, so the named browsers can actually connect; when
 no installed browser has a usable registration, the refusal names the browsers found and one
 choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.
+When the registration names a connector belonging to a different Ghostlight installation,
+recovery changes nothing and answers `Another Ghostlight installation owns the browser
+registration.` with the `native_host_owned_elsewhere` fact and one next step: the user runs
+`ghostlight install` from the installation that should own the browsers. Silent repair applies
+only to stale details within the running installation's own directory (ADR-0149 amendment).
 
 ## Catalog
 
