@@ -29,7 +29,15 @@ authority again. The corrected demand-start reaches the launcher stage at the ne
 hand copies into the launcher's versioned cache are reverted by checksum verification on every
 launch, so "deploy it to the npx stage" means "publish". Until then a release-era connector
 with the override converges whenever the elected authority is up; only its demand-start half
-needs the new build. The publication is owner-gated and not started.
+needs the new build.
+
+The 1.3.2 candidate is assembled and held: candidate run
+[33643387463](https://github.com/sylin-org/ghostlight/actions/runs/33643387463) at frozen
+revision `45639541` ([candidate-custody-2026-09-02](testing/candidate-custody-2026-09-02.md)),
+preflight 19/19 green ([release-preflight-2026-09-02](testing/release-preflight-2026-09-02.md)),
+two verified local copies, provenance green, and the extension ZIP byte-identical to the
+approved store adapter 1.1.0 (no store action). The publication sequence
+(GitHub draft/publish, npm, MCP Registry, website) is owner-gated and not started.
 
 ## npm distribution moved under the sylin-org org (2026-09-01)
 
