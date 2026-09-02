@@ -171,6 +171,10 @@ extension intentionally hides its feedback layer while capturing page pixels.
 ## Isolation and cleanup
 
 For tests, set `GHOSTLIGHT_RUNTIME_FILE` and `GHOSTLIGHT_AUDIT_FILE` to repository-local temporary
-paths. Stop only processes whose exact executable path is the build you started. Never terminate
+paths. The runtime override elects the whole authority directory (ADR-0150): a connector run with
+it reads that document there, honors a `deploy.lock` beside it, and demand-starts the `ghostlight`
+executable in its directory, so point it inside the build directory under test -- pointing it at a
+directory with no authority is a loud failure, never a fallback to the running tree. Stop only
+processes whose exact executable path is the build you started. Never terminate
 all `ghostlight`, browser, or MCP-client processes by image name; an installed or user-owned stack
 may be running at the same time.

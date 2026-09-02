@@ -127,6 +127,15 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **A launcher channel re-verifies its download on every launch, so a hand-staged binary at its
+  versioned cache path never runs.** `npx -y ghostlight` checksum-validates
+  `~/.ghostlight/bin/<version>/` against the published manifest before each spawn and
+  re-downloads on mismatch (2026-09-02, during the ADR-0150 verification): deploying to the npx
+  stage means publishing a release, and verifying an unreleased connector belongs in a
+  directory the launcher does not checksum. Routing, meanwhile, is configuration: the
+  `GHOSTLIGHT_RUNTIME_FILE` override (ADR-0150) steers a floating launcher entry at the
+  machine's real authority without touching its checksums.
+
 - **Cross-tree registration adoption requires a deliberate install.** Silent registration
   repair once adopted the machine toward whichever tree crossed the no-browser seam, which let
   an un-isolated scratch build rewrite the real browser registration (2026-08-30 incident);

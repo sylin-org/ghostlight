@@ -1,6 +1,35 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-01 (npm distribution under the org; maintainership flip owed).
+Last updated: 2026-09-02 (ADR-0150 dev-routing override in the tree; publication owner-gated).
+
+## ADR-0150: the runtime override elects the demand-start authority (2026-09-02)
+
+The owner found two Ghostlight workbenches running at once: the browser's native-host
+registration named the development tree while Cline's `npx -y ghostlight` entry resolved to the
+installed 1.3.1, whose connector demand-started its own sibling -- one authority serving the
+browser and its harnesses, one serving only Cline with no browser and no way to reach one.
+[ADR-0150](adr/0150-runtime-override-elects-demand-start-authority.md) completes the existing
+`GHOSTLIGHT_RUNTIME_FILE` seam instead of building a new affordance or reviving the retired
+ADR-0048 auto-shadow: with the override set, its directory elects the authority for discovery,
+lease, deploy lock, and demand-start identity, and an elected directory without an authority
+fails loudly rather than letting a foreign binary spawn into the slot. Without the override,
+per-installation election beside the executable is unchanged. Routing writes and adopts no
+registration; `owned_elsewhere` stands.
+
+Gates green: formatting, warnings-denied workspace Clippy, every Rust workspace suite, all 156
+extension tests, and the process, CLI, and PowerShell journeys, whose runtime overrides now
+point inside the build under test so the elected directory and the quiesce lock stay coherent.
+Proven live on this machine: a fixed connector pointed at an elected directory holding only a
+fixed orchestrator demand-started exactly that authority (one new process, from the elected
+path, initialize answered), and the real `npx -y ghostlight` chain with the override converged
+on the dev authority spawning nothing. Cline's server entry now carries the override to the dev
+runtime file (original kept beside it as `cline_mcp_settings.json.bak-2026-09-02`), and the
+stale installed 1.3.1 pair was stopped connector-first by exact path, so the machine runs one
+authority again. The corrected demand-start reaches the launcher stage at the next release:
+hand copies into the launcher's versioned cache are reverted by checksum verification on every
+launch, so "deploy it to the npx stage" means "publish". Until then a release-era connector
+with the override converges whenever the elected authority is up; only its demand-start half
+needs the new build. The publication is owner-gated and not started.
 
 ## npm distribution moved under the sylin-org org (2026-09-01)
 
