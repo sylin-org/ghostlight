@@ -6,14 +6,14 @@
     "url": "https://github.com/sylin-org/ghostlight",
     "source": "github"
   },
-  "version": "1.3.1",
+  "version": "1.3.2",
   "websiteUrl": "https://sylin.org/ghostlight/",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "ghostlight",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "transport": {
         "type": "stdio"
       }
