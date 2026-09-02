@@ -1,3 +1,16 @@
+## [1.3.2] - 2026-09-02
+
+### Fixed
+
+- **Demand-start identity follows the runtime override (ADR-0150).** With
+  `GHOSTLIGHT_RUNTIME_FILE` set, its directory now elects the whole authority: runtime
+  discovery, the service lease, the deploy lock, and the demand-started `ghostlight` sibling
+  all resolve there. A floating launcher entry on a development machine (for example Cline's
+  `npx -y ghostlight`) can route at the machine's real authority instead of starting a second
+  one, and an elected directory without an authority fails loudly instead of letting a foreign
+  binary spawn into the slot. Routing writes and adopts no browser registration; without the
+  override, per-installation election beside each executable is unchanged.
+
 # Changelog
 
 All notable changes to Ghostlight are documented here.
