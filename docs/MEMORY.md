@@ -264,6 +264,14 @@ Every one of these cost something to learn.
   support means a registry row with the client's real config dialect, pinned against what the
   client itself writes -- never the assumption that a known sibling binary doubles as a stdio
   server.
+- **An npm maintainership move needs a one-time code that a passkey-only account cannot
+  produce.** The website has no organization-as-maintainer flow (the invite box resolves
+  users only), and npm's 2026 restriction bars bypass-2FA tokens from account changes, so
+  the release token cannot run `npm owner add` either. The one org grant the website can
+  make is team package access (org settings, developers team, add existing package), which
+  does not change the public maintainers list. Finishing a transfer takes a recovery code
+  or an npm support request; pin the maintainer assertion in the online truth check only
+  after the flip is observable.
 
 ## Where to look
 

@@ -1,6 +1,25 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-08-31 (1.3.1 published).
+Last updated: 2026-09-01 (npm distribution under the org; maintainership flip owed).
+
+## npm distribution moved under the sylin-org org (2026-09-01)
+
+The owner found the npm package released under the personal account and directed the fix.
+The `sylin-org` npm organization exists, and its `developers` team now holds read-write
+access to `ghostlight`, granted through the organization settings (observed persisting
+across reload and in the org's package list), so the organization can manage and publish
+the package. The maintainer-of-record transfer (`npm owner add sylin-org ghostlight`) is
+owed, not done: npm demands a one-time code for it, the account is passkey-only (npm's
+two-factor page offers security keys and recovery codes, no authenticator app), the
+website has no organization-as-maintainer flow, and npm's August 2026 restriction bars
+bypass-2FA tokens from account changes. The owner directed leaving it at the org-access
+state for now; a recovery code or an npm support request finishes it later. When the flip
+lands: simplify `glama.json` maintainers to `sylin-org` and add the registry-maintainers
+assertion to `check-public-surfaces.ps1 -Online` (both deliberately absent now -- they
+would claim ahead of live truth). The npm launcher package names `sylin-org` as its author
+from the next release. The machine's original npm token was restored after a web-login
+detour; the login token the detour created stays in the account's token list for the owner
+to revoke.
 
 ## 1.3.1 published (2026-08-31)
 
