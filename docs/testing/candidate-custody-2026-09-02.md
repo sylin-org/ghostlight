@@ -1,6 +1,6 @@
 # 1.3.2 candidate custody -- 2026-09-02
 
-Status: HELD. The candidate was assembled, attested, downloaded, and verified from two
+Status: PUBLISHED 2026-09-02. The candidate was assembled, attested, downloaded, and verified from two
 independent local copies. No channel has advanced; publication is owner-gated.
 
 ## Build

@@ -1,6 +1,26 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-02 (ADR-0150 dev-routing override in the tree; publication owner-gated).
+Last updated: 2026-09-02 (1.3.2 published; the ADR-0150 routing fix is on the public npm channel).
+
+## 1.3.2 published (2026-09-02)
+
+Ghostlight 1.3.2 is public: GitHub release
+[`v1.3.2`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.2) (20 files, re-downloaded
+and hash-compared before publication), npm `ghostlight@1.3.2` (tarball SHA-256
+`ecdbedbc4b1cb3907cfed97639830a91f82a5a2dccab609db9c128264509af97`), the MCP Registry record
+`org.sylin/ghostlight 1.3.2`, and the refreshed website, from custody-verified candidate run
+[33643387463](https://github.com/sylin-org/ghostlight/actions/runs/33643387463) at frozen
+revision `45639541` (two verified local copies,
+[candidate-custody-2026-09-02](testing/candidate-custody-2026-09-02.md)). `check-public-surfaces
+-Online` reports GitHub, npm, the Chrome update feed, the MCP Registry, and the website in
+agreement (source 1.3.2, public 1.3.2, public adapter 1.0.0). The public install smoke passed:
+the public npm launcher checksum-verified all three binaries and the real 1.3.2 orchestrator
+answered `doctor --json`, reporting this machine's browsers `owned_elsewhere` with the dev tree
+named. The release carries one fix: ADR-0150, demand-start identity follows the runtime
+override, so a floating launcher entry (Cline's `npx -y ghostlight`) now demand-starts the
+elected authority instead of a second one. The adapter stays 1.1.0 with byte-identical
+candidate bytes; no store action. Scoop and WinGet metadata ride the `package-manager-metadata`
+artifact; their bucket submissions remain owner actions.
 
 ## ADR-0150: the runtime override elects the demand-start authority (2026-09-02)
 
