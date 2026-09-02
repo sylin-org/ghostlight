@@ -13,7 +13,9 @@ import { spawn, spawnSync } from "node:child_process";
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-const runtimeFile = join(repository, `tests/.ghostlight-cli-runtime-${process.pid}.json`);
+// ADR-0150: the runtime override elects the authority directory, so it points inside the
+// build under test rather than at a directory that holds no authority.
+const runtimeFile = join(binDir, `.ghostlight-cli-journey-runtime-${process.pid}.json`);
 const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.jsonl`);
 // The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");

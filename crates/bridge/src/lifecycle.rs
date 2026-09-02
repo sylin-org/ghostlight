@@ -1,4 +1,7 @@
 //! Shared local-process lifecycle for the one Ghostlight engine.
+//!
+//! Demand-start launches the sibling of runtime discovery: beside this executable by default,
+//! or in the directory an explicit `GHOSTLIGHT_RUNTIME_FILE` elects (ADR-0150).
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -9,7 +12,7 @@ use std::time::{Duration, SystemTime};
 
 use fs2::FileExt;
 
-use crate::runtime::runtime_file;
+use crate::runtime::{runtime_discovery, RuntimeDiscovery};
 
 const DEPLOY_LOCK_FILE: &str = "deploy.lock";
 const DEPLOY_LOCK_MAX_AGE: Duration = Duration::from_secs(30 * 60);
@@ -82,19 +85,21 @@ pub enum StartDisposition {
 
 /// Ask the trusted sibling `ghostlight` executable to start its desktop authority.
 ///
-/// Callers invoke this only after a connection attempt fails. The service lease makes concurrent
-/// requests harmless, and a fresh deploy lock suppresses self-heal while binaries are swapped.
+/// Callers invoke this only after a connection attempt fails. The authority is the sibling of
+/// the runtime discovery: beside this executable by default, or in the directory elected by an
+/// explicit `GHOSTLIGHT_RUNTIME_FILE` (ADR-0150). The service lease makes concurrent requests
+/// harmless, and a fresh deploy lock suppresses self-heal while binaries are swapped.
 pub fn request_orchestrator_start() -> io::Result<StartDisposition> {
     let current_executable = env::current_exe()?;
-    request_orchestrator_start_from(&current_executable, &runtime_file(), SystemTime::now())
+    request_orchestrator_start_from(&current_executable, &runtime_discovery(), SystemTime::now())
 }
 
 fn request_orchestrator_start_from(
     current_executable: &Path,
-    runtime_path: &Path,
+    discovery: &RuntimeDiscovery,
     now: SystemTime,
 ) -> io::Result<StartDisposition> {
-    let service_executable = orchestrator_executable(current_executable)?;
+    let service_executable = resolved_orchestrator(current_executable, discovery)?;
     let service_directory = service_executable.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -105,7 +110,7 @@ fn request_orchestrator_start_from(
         return Ok(StartDisposition::DeploymentInProgress);
     }
 
-    let Some(lease) = ServiceLease::try_acquire(runtime_path)? else {
+    let Some(lease) = ServiceLease::try_acquire(&discovery.path)? else {
         return Ok(StartDisposition::AlreadyRunning);
     };
     // The child must acquire the lifetime lease itself. Releasing immediately before spawn leaves
@@ -139,6 +144,20 @@ fn orchestrator_command(executable: &Path, directory: &Path) -> Command {
     command
 }
 
+/// The trusted sibling authority this process demand-starts: the directory elected by an
+/// explicit runtime override when present (ADR-0150), otherwise the directory of this
+/// executable. There is deliberately no fallback between the two: a foreign authority must
+/// never be spawned into an elected slot.
+fn resolved_orchestrator(
+    current_executable: &Path,
+    discovery: &RuntimeDiscovery,
+) -> io::Result<PathBuf> {
+    match &discovery.service_directory {
+        Some(directory) => Ok(directory.join(orchestrator_file_name())),
+        None => orchestrator_executable(current_executable),
+    }
+}
+
 fn orchestrator_executable(current_executable: &Path) -> io::Result<PathBuf> {
     let directory = current_executable.parent().ok_or_else(|| {
         io::Error::new(
@@ -146,11 +165,15 @@ fn orchestrator_executable(current_executable: &Path) -> io::Result<PathBuf> {
             "connector executable has no parent directory",
         )
     })?;
-    Ok(directory.join(if cfg!(windows) {
+    Ok(directory.join(orchestrator_file_name()))
+}
+
+fn orchestrator_file_name() -> &'static str {
+    if cfg!(windows) {
         "ghostlight.exe"
     } else {
         "ghostlight"
-    }))
+    }
 }
 
 fn service_lock_file(runtime_path: &Path) -> PathBuf {
@@ -192,13 +215,15 @@ fn configure_detached(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
     use super::{
         deploy_lock_present, lock_is_fresh, orchestrator_command, orchestrator_executable,
+        orchestrator_file_name, request_orchestrator_start_from, resolved_orchestrator,
         service_lock_file, ServiceLease, DEPLOY_LOCK_FILE, DEPLOY_LOCK_MAX_AGE,
     };
+    use crate::runtime::RuntimeDiscovery;
 
     fn temporary_directory(name: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -254,6 +279,67 @@ mod tests {
             orchestrator_executable(&connector).expect("connector has a parent"),
             expected
         );
+    }
+
+    #[test]
+    fn the_runtime_override_elects_its_directory_for_demand_start() {
+        let connector = Path::new("/installed").join(if cfg!(windows) {
+            "ghostlight-mcp-connector.exe"
+        } else {
+            "ghostlight-mcp-connector"
+        });
+        let discovery = RuntimeDiscovery {
+            path: PathBuf::from("/dev/tree/ghostlight-runtime.json"),
+            service_directory: Some(PathBuf::from("/dev/tree")),
+        };
+        let expected = Path::new("/dev/tree").join(if cfg!(windows) {
+            "ghostlight.exe"
+        } else {
+            "ghostlight"
+        });
+        assert_eq!(
+            resolved_orchestrator(&connector, &discovery).expect("override has a directory"),
+            expected
+        );
+    }
+
+    #[test]
+    fn the_default_resolution_never_elects_a_foreign_directory() {
+        let connector = Path::new("engine").join(if cfg!(windows) {
+            "ghostlight-mcp-connector.exe"
+        } else {
+            "ghostlight-mcp-connector"
+        });
+        let discovery = RuntimeDiscovery {
+            path: PathBuf::from("elsewhere/ghostlight-runtime.json"),
+            service_directory: None,
+        };
+        assert_eq!(
+            resolved_orchestrator(&connector, &discovery).expect("connector has a parent"),
+            orchestrator_executable(&connector).expect("connector has a parent")
+        );
+    }
+
+    #[test]
+    fn demand_start_refuses_an_elected_directory_without_an_authority() {
+        let directory = temporary_directory("override-missing");
+        let discovery = RuntimeDiscovery {
+            path: directory.join("ghostlight-runtime.json"),
+            service_directory: Some(directory.clone()),
+        };
+        let connector = Path::new("engine").join(if cfg!(windows) {
+            "ghostlight-mcp-connector.exe"
+        } else {
+            "ghostlight-mcp-connector"
+        });
+        let error = request_orchestrator_start_from(&connector, &discovery, SystemTime::now())
+            .expect_err("an elected directory without an authority is a loud failure");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            !directory.join(orchestrator_file_name()).exists(),
+            "the foreign sibling must never be spawned into the elected slot"
+        );
+        fs::remove_dir_all(&directory).expect("temporary directory is removed");
     }
 
     #[test]

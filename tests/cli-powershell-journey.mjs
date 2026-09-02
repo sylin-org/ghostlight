@@ -13,7 +13,9 @@ import { spawn } from "node:child_process";
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-const runtimeFile = join(repository, `tests/.ghostlight-ps-runtime-${process.pid}.json`);
+// ADR-0150: the runtime override elects the authority directory, so it points inside the
+// build under test rather than at a directory that holds no authority.
+const runtimeFile = join(binDir, `.ghostlight-ps-journey-runtime-${process.pid}.json`);
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
 const auditFile = join(repository, `tests/.ghostlight-ps-audit-${process.pid}.jsonl`);
 const shotFile = join(repository, `tests/.ghostlight-ps-shot-${process.pid}.jpg`);

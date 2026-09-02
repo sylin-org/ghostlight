@@ -7,7 +7,10 @@ import { createInterface } from "node:readline";
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-const runtimeFile = join(repository, `tests/.ghostlight-runtime-${process.pid}.json`);
+// ADR-0150: the runtime override elects the authority directory, so it points inside the build
+// under test and the deploy.lock beside it keeps quiescing demand-start.
+const runtimeFile = join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
+const runtimeLease = `${runtimeFile.replace(/\.json$/, "")}.lock`;
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
 const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
 const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
@@ -825,4 +828,5 @@ try {
   rmSync(policyFile, { force: true });
   rmSync(diagnosticsDir, { recursive: true, force: true });
   if (createdDeployLock) rmSync(deployLock, { force: true });
+  rmSync(runtimeLease, { force: true });
 }
