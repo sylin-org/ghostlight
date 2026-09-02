@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "0d7b77598bdefed3fdc51c161a06ed741dc3b5bd",
-  "frozen_at_utc": "2026-08-31T04:03:27Z",
+  "revision": "456395414fb86ec59cc7a43a50af57dce8c265cf",
+  "frozen_at_utc": "2026-09-02T14:39:17Z",
   "frozen_by": "onose",
-  "note": "1.3.1 candidate revision: the revision candidate run 33355735166 builds; 71c10f95 predates the freeze declaration and preflight evidence, docs only"
+  "note": "1.3.2 candidate revision: the revision candidate run 33643387463 builds (ADR-0150 demand-start routing)"
 }
