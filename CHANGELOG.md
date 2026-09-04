@@ -1,3 +1,29 @@
+## [1.3.3] - 2026-09-04
+
+The Chrome adapter advances to 1.1.1 for the composed-page capability revisions. Adapter 1.1.1
+covers service 1.3.3; the earlier adapters retain their existing compatibility through service
+1.3.2.
+
+### Added
+
+- **Explicit integration repair (ADR-0154).** A parseable foreign command occupying Ghostlight's
+  key now offers a confirmed per-target `Fix` action in MCP integrations. Fix re-checks the file,
+  creates a byte-exact backup, replaces only the `ghostlight` entry, preserves unrelated content,
+  and refuses stale, repeated, malformed, unreadable, or non-lossless cases. Automatic and
+  aggregate setup still never overwrite foreign entries.
+
+### Changed
+
+- **Full-page reading follows the composed page (ADR-0151).** The shortest `browser_read` call now
+  reads visible text across the top document, open shadow roots, assigned slots, and injected
+  HTTP(S) frames under one global character ceiling. Explicit article reading remains available
+  and falls back to the same full-page behavior when no useful article exists.
+- **Semantic observation and geometry follow the same boundaries (ADR-0152 and ADR-0153).** Find,
+  document inspection, text waits, accessible-name fallback, iframe geometry, point receipts,
+  coordinate drops, and related target operations now cross observable shadow and frame
+  boundaries consistently. Negotiated capability revisions make older adapters refuse these
+  stronger meanings instead of returning incomplete results.
+
 ## [1.3.2] - 2026-09-02
 
 ### Fixed
