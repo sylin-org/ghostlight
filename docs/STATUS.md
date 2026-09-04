@@ -1,7 +1,23 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-04 (ADR-0151 through ADR-0154 are implemented in source and are not
-released).
+Last updated: 2026-09-04 (the 1.3.3 service and 1.1.1 adapter candidate is held; adapter review is
+pending before publication).
+
+## 1.3.3 service and 1.1.1 adapter candidate held (2026-09-04)
+
+Release candidate run
+[33912620937](https://github.com/sylin-org/ghostlight/actions/runs/33912620937) is green at frozen
+source `fe5b9de8`: Linux quality gates, Windows NSIS and Ubuntu Debian builds, Debian 12 and Ubuntu
+24.04 package lifecycle smokes, deterministic adapter packaging, 18-asset assembly, and provenance
+attestation all passed. Two independent custody downloads are byte-identical and pass freeze,
+manifest, checksum, and raw-binary provenance verification; see
+[candidate-custody-2026-09-04](testing/candidate-custody-2026-09-04.md).
+
+The Chrome store still serves adapter 1.0.0. Its approved staged 1.1.0 revision was canceled and
+replaced with the exact custody adapter 1.1.1 ZIP (SHA-256
+`1a955726153884243e86e7845b09a783c97ffe6a3f660628f97f43550bd2d2e7`), submitted with staged
+publication. Review is `PENDING_REVIEW`. Service 1.3.3 publication waits for that matching adapter
+to clear review; GitHub, npm, MCP Registry, website, and public-status surfaces remain at 1.3.2.
 
 ## Explicit integration Fix (ADR-0154, 2026-09-04)
 
