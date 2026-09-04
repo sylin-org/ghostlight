@@ -179,7 +179,8 @@ Linux.
 
 Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md),
 [2026-08-25 frozen-source CachyOS verification](testing/frozen-source-cachyos-verification-2026-08-25.md),
-and [2026-08-25 release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md).
+[2026-08-25 release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md), and the
+[2026-09-04 1.3.3/1.1.1 preflight](testing/release-preflight-2026-09-04.md).
 
 G1 is closed on both operating systems at frozen revision `e7d8986b`. The three runner defects the
 Linux lane surfaced were repaired as release tooling (outside the freeze's product paths) and
