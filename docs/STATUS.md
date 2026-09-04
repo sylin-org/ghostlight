@@ -17,7 +17,9 @@ The Chrome store still serves adapter 1.0.0. Its approved staged 1.1.0 revision 
 replaced with the exact custody adapter 1.1.1 ZIP (SHA-256
 `1a955726153884243e86e7845b09a783c97ffe6a3f660628f97f43550bd2d2e7`), submitted with staged
 publication. Review is `PENDING_REVIEW`. Service 1.3.3 publication waits for that matching adapter
-to clear review; GitHub, npm, MCP Registry, website, and public-status surfaces remain at 1.3.2.
+to clear review. Remote tag `v1.3.3` points at the frozen source, and a private GitHub draft holds
+the exact 20 verified release files. GitHub release, npm, MCP Registry, website, and public-status
+surfaces remain at 1.3.2.
 
 ## Explicit integration Fix (ADR-0154, 2026-09-04)
 

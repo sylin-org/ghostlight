@@ -43,3 +43,10 @@ the owner's publication direction, the stale staged submission was canceled. The
 ZIP above uploaded successfully as adapter 1.1.1 and was submitted with `STAGED_PUBLISH`. The API
 reported `PENDING_REVIEW`; public adapter 1.0.0 remains unchanged until review clears and the
 staged revision is explicitly published.
+
+## Prepared service publication
+
+The lightweight remote tag `v1.3.3` points exactly at frozen source `fe5b9de8`. A private GitHub
+draft contains the candidate's exact 18 assets plus `release-candidate.json` and `SHA256SUMS`; its
+creator verified provenance for all 20 files before upload. npm and MCP Registry publication have
+not run. The GitHub draft remains unpublished while Chrome review is pending.
