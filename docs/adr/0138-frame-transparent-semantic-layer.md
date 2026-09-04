@@ -8,8 +8,8 @@ explicit authorization.
 
 ## Context
 
-Real forms live inside embedded frames: signpath.org renders its application form through a
-HubSpot iframe, and every hosted-form vendor does the same. Ghostlight's content script ran in
+Real forms live inside embedded frames: third-party application forms commonly render through a
+hosted iframe. Ghostlight's content script ran in
 the top frame only (`all_frames: false`), so `browser_inspect`, `browser_find`, and
 `browser_fill_form` were blind to everything inside a cross-origin frame. A model that could
 see the fields in a screenshot had no semantic route to them and fell back to coordinate

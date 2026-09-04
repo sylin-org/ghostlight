@@ -20,8 +20,8 @@ the owner wants, and what this project learned the hard way.
   promise, or make recovery safer. Do not turn restamping, duplicate checklists, optional directory
   submissions, or one giant conductor into release gates.
 - **The artifact trust model is checksums plus keyless GitHub build-provenance attestations.**
-  Ghostlight has no Windows code-signing certificate (the SignPath Foundation application is
-  pending). Chrome API credentials are optional automation; manual Developer Dashboard submission
+  Ghostlight has no Windows code-signing certificate. Chrome API credentials are optional
+  automation; manual Developer Dashboard submission
   is a supported release path. Do not invent either as a readiness gate without a new owner
   decision.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,

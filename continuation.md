@@ -46,7 +46,7 @@ Authoritative task file: docs/tasks/1.0-plus/D2-gif-palette-quality.md. Summary 
 After D2: D3 needs an ADR first (mapping old ADR-0084 attention routing onto the
 plural-browser/ADR-0126 world; several rows may already be satisfied by current means -- record
 that instead of building a second mechanism). Then evidence lanes E1-E5, then owner-action
-externals X1-X3 (parked; never act without the owner naming the action).
+externals X1-X2 (parked; never act without the owner naming the action).
 
 ## Standing owner decisions (do not re-litigate)
 
@@ -59,7 +59,7 @@ externals X1-X3 (parked; never act without the owner naming the action).
 - Never: phone home (ADR-0028), copy from reference/, read /private/, saps/, or local/ contents,
   weaken trust-doc claims, discard docs/ADRs/history, weaken an over-claim guard.
 - Windows releases have no Authenticode signing by design (trust model: checksums + GitHub
-  provenance). SignPath application pending; on acceptance its follow-ups unblock ADR-0105 D3.
+  provenance).
 
 ## Gotchas learned 2026-08-26 (do not rediscover)
 

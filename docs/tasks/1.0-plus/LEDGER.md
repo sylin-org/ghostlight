@@ -21,7 +21,6 @@ Next task: **D2 GIF palette quality**. Task list and rules are in
 | E5 | G4 Ubuntu GNOME Wayland / G5 clean Windows when environments exist | pending, environment-gated |
 | X1 | Scoop bucket submission | parked, owner action (metadata prepared in `.target-pkg-metadata`) |
 | X2 | WinGet manifest submission | parked, owner action |
-| X3 | SignPath acceptance follow-ups | parked, application pending |
 
 ## Log
 

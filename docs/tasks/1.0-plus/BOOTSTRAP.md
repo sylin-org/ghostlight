@@ -21,7 +21,7 @@ the authority on progress; a task file describes intent, the ledger records what
   assertions that pinned the old shape).
 - Evidence lanes run their existing runbooks (`docs/testing/linux-live-lifecycle.md`, the release
   checklist rows); the ledger records results, it does not restate them.
-- Owner-action externals (Scoop, WinGet, SignPath, registry changes, anything public) stay parked
+- Owner-action externals (Scoop, WinGet, registry changes, anything public) stay parked
   until the owner names the action. Draft, then wait.
 - Never phone home; never copy from `reference/`; never weaken a trust-doc claim. The standing
   rules in `AGENTS.md` apply in full.
@@ -36,8 +36,7 @@ the authority on progress; a task file describes intent, the ledger records what
 4. E1 store-adapter install check, E2 npm 0.8-to-1.0 upgrade lane, E3 G8 KDE accessibility half,
    E4 G7 public harnesses, E5 G4/G5 when their environments exist. Each lane authors its own dated
    evidence under `docs/testing/` and ticks its checklist row.
-5. Externals X1 Scoop, X2 WinGet, X3 SignPath acceptance follow-ups: owner actions, recorded here
-   only as state.
+5. Externals X1 Scoop and X2 WinGet: owner actions, recorded here only as state.
 
 RPM and macOS stay outside this batch: RPM waits on a scope decision plus a real lifecycle host,
 macOS on test hardware (ADR-0116). They are recorded as parked in `docs/STATUS.md`.
