@@ -63,7 +63,7 @@
       /** Set up or update every detected MCP target the orchestrator can change safely. */
       setupDetectedHarnesses: () => call("setup_detected_harnesses"),
 
-      /** Set up, update, or remove Ghostlight from one concrete MCP target. */
+      /** Set up, update, fix, or remove Ghostlight from one concrete MCP target. */
       manageHarness: (id, action) => call("manage_harness", { id, action }),
 
       /** Ask the native shell to locate one supported harness executable or settings file. */

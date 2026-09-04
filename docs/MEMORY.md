@@ -122,6 +122,11 @@ the owner wants, and what this project learned the hard way.
   home, the platform config root, or roaming must exist itself, or the product needs independent
   executable evidence. Treating the generic parent as detection makes absent clients actionable
   and causes aggregate setup to overreach.
+- **Foreign-entry safety distinguishes automatic discovery from reviewed repair.** Setup, update,
+  remove, and aggregate setup must not overwrite an uncertain command. A person who sees the
+  bounded evidence and confirms Fix may authorize replacement of that one parseable entry under
+  Ghostlight's own key. Re-check at the writer, preserve siblings, and back up first; malformed
+  whole documents remain manual (ADR-0154).
 
 ## Durable lessons
 

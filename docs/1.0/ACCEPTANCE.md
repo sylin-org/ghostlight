@@ -288,12 +288,15 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    command identifies Ghostlight's connector. One `Set up everything` action adds missing
    registrations and updates Ghostlight-owned registrations for every detected target while
    skipping current and not-detected targets. One target's environmental failure does not prevent
-   independent targets from being attempted, and foreign or malformed entries remain untouched.
+   independent targets from being attempted, and foreign or malformed entries remain untouched by
+   every automatic path. A parseable foreign entry offers one confirmed per-target Fix that
+   replaces only Ghostlight's key after creating a byte-exact backup and re-checking eligibility.
    Windsurf and Devin share one product card but retain their own executable evidence and config
    path, so neither generation can make Ghostlight write the other generation's file.
 9. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
-   install and uninstall. Malformed configuration, unreadable files, and foreign `ghostlight`
-   entries are left untouched with an actionable result.
+   install, uninstall, and Fix. Malformed and unreadable configurations are left untouched with an
+   actionable result. Foreign `ghostlight` entries remain untouched unless the person confirms the
+   dedicated Fix action; repeat or stale Fix refuses without changing bytes.
 10. Harness paths follow the effective Windows or Linux environment. Codex honors `CODEX_HOME`
    before its home-directory fallback. An exact pre-1.0 `ghostlight-relay --role agent` entry in
    the owned versioned install root is updatable; a different command, role, or root remains

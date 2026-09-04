@@ -1,7 +1,30 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-04 (ADR-0151 through ADR-0153 composed-page behavior is implemented in source
-and is not released).
+Last updated: 2026-09-04 (ADR-0151 through ADR-0154 are implemented in source and are not
+released).
+
+## Explicit integration Fix (ADR-0154, 2026-09-04)
+
+The owner asked for an actionable repair on MCP integration cards where a foreign command occupies
+Ghostlight's registration key. [ADR-0154](adr/0154-explicit-foreign-harness-entry-fix.md) adds one
+confirmed per-target `Fix` action. The projection advertises it only for a parseable foreign entry
+that the existing lossless writer can isolate. The writer re-checks that state inside the harness
+mutation lock, replaces only the `ghostlight` entry, preserves unrelated content, creates the
+existing `.ghostlight-backup`, and atomically replaces the file. A stale or repeated Fix refuses
+without changing bytes.
+
+Malformed, unreadable, missing, current, and non-lossless entries do not offer Fix. Ordinary Set
+up, Update, Remove, CLI setup, and `Set up everything` retain the no-foreign-overwrite rule. The
+workbench uses the existing closed `manage_harness` command and confirms the backup before sending
+`fix`; no connector, bridge, extension, browser, or MCP contract changed.
+
+Gates green: formatting, warnings-denied workspace Clippy, all 436 Rust workspace tests, all 171
+extension tests, JavaScript syntax checks, repository integrity, the fresh isolated-target process,
+CLI, PowerShell, npm-launcher, MCPB-launcher, and workbench journeys. The orchestrator was deployed
+through the development loop. Its read-only `doctor --json` projection reports the real Cline CLI
+and Visual Studio Code entries as `needs_attention` with `can_fix: true`; absent Cline targets have
+`can_fix: false`. Diagnostics remain off. No Fix was invoked and no client configuration was
+changed during the live check.
 
 ## Composed full-page reading (ADR-0151, 2026-09-04)
 

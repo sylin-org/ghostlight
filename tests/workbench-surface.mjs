@@ -44,11 +44,19 @@ const node = (id) => ({
   insertBefore() {}, contains: () => false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
 });
 const nodes = new Map(ids.map((id) => [id, node(id)]));
+const confirmAccept = node("confirm-accept");
+confirmAccept.dataset.confirm = "accept";
+confirmAccept.closest = (selector) => selector === "[data-confirm]" ? confirmAccept : null;
+const confirmCancel = node("confirm-cancel");
+nodes.get("confirm-dialog").querySelector = (selector) =>
+  selector === '[data-confirm="accept"]' ? confirmAccept
+    : selector === '[data-confirm="cancel"]' ? confirmCancel : null;
 
 const reported = [];
 let heartbeat = false;
 let snapshots = 0;
 let bulkSetups = 0;
+const managedHarnesses = [];
 
 const snapshot = () => ({
   seq: ++snapshots,
@@ -57,7 +65,7 @@ const snapshot = () => ({
   harnesses: [{
     id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
     detail: "The connector path belongs to an older installation.",
-    can_install: true, can_uninstall: false, can_download: true, can_locate: true,
+    can_install: true, can_fix: false, can_uninstall: false, can_download: true, can_locate: true,
     config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight-mcp-connector",
     manual_setup: "[mcp_servers.ghostlight]"
   }],
@@ -110,13 +118,17 @@ const sandbox = {
   window: {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
     __TAURI__: {
-      core: { invoke: async (cmd) => {
+      core: { invoke: async (cmd, args) => {
         if (cmd === "workbench_snapshot") return snapshot();
         if (cmd === "setup_detected_harnesses") {
           bulkSetups += 1;
           return { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." };
         }
-        if (cmd === "manage_harness") throw new Error("deliberate setup failure");
+        if (cmd === "manage_harness") {
+          managedHarnesses.push(args);
+          if (args.action === "fix") return { changed: true, message: "Fixed Cline." };
+          throw new Error("deliberate setup failure");
+        }
         return [];
       } },
       event: { listen: async () => () => {} }
@@ -280,12 +292,12 @@ view.collections({
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "claude setup" },
     { id: "junie-jetbrains", product_id: "junie", name: "Junie", target: "JetBrains",
       icon: "junie.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
+      can_fix: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "junie setup",
       evidence: "Found `alien-agent --serve` where Ghostlight's connector belongs; Ghostlight maintains `/opt/ghostlight/ghostlight-mcp-connector` there and changed nothing." },
     { id: "cline-cursor", product_id: "cline", name: "Cline", target: "Cursor",
       icon: "cline.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
+      can_fix: false, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
       connector_command: "/opt/ghostlight/ghostlight-mcp-connector", manual_setup: "cursor setup" }
   ]
 }, new Set());
@@ -298,6 +310,29 @@ const rosterCards = [...rosterHtml.matchAll(
   name: html.match(/<h3>([^<]+)<\/h3>/)?.[1] ?? ""
 }));
 const rosterCard = (name) => rosterCards.find((card) => card.name === name);
+
+const fixButton = {
+  disabled: false,
+  dataset: {
+    harness: "cline-cli", harnessOperation: "manage", harnessAction: "fix",
+    harnessName: "Cline", harnessTarget: "CLI"
+  }
+};
+documentHandlers.get("click")({
+  target: {
+    closest: (selector) => selector === "[data-harness-operation]" ? fixButton : null
+  }
+});
+await new Promise((r) => setTimeout(r, 0));
+const fixConfirmationShown = !nodes.get("confirm-dialog").hidden
+  && nodes.get("confirm-title").textContent.includes("Cline")
+  && nodes.get("confirm-title").textContent.includes("CLI")
+  && nodes.get("confirm-detail").textContent.includes("backed up")
+  && confirmAccept.textContent === "Fix";
+documentHandlers.get("click")({ target: confirmAccept });
+await new Promise((r) => setTimeout(r, 0));
+const fixWasManaged = managedHarnesses.some((call) =>
+  call.id === "cline-cli" && call.action === "fix");
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -454,6 +489,15 @@ const checks = [
       && rosterCard("Junie")?.html.includes("changed nothing.")
       && !rosterCard("Cline")?.html.includes("integration-evidence"),
     `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
+  ["only a fixable foreign entry offers the explicit Fix action",
+    rosterCard("Junie")?.html.includes('data-harness-action="fix"')
+      && rosterCard("Junie")?.html.includes(">Fix</button>")
+      && !rosterCard("Cline")?.html.includes('data-harness-action="fix"')
+      && sources.join("\n").includes('view.confirmFix(name, target)'),
+    `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
+  ["Fix confirms the backup before dispatching the closed action",
+    fixConfirmationShown && fixWasManaged,
+    `shown=${fixConfirmationShown} calls=${JSON.stringify(managedHarnesses)}`],
   ["every category keeps visible words and a distinct card tone",
     rosterCard("Cline")?.classes.includes("integration-ready")
       && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')

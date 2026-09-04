@@ -217,8 +217,9 @@ async function handleDiagnosticsAction(button) {
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
   const { harness: id, harnessOperation: operation, harnessAction: action,
-    harnessName: name, product: productId, copyKind: copyKind } = button.dataset;
+    harnessName: name, harnessTarget: target, product: productId, copyKind: copyKind } = button.dataset;
   if (operation === "manage" && action === "uninstall" && !(await view.confirmRemoval(name))) return;
+  if (operation === "manage" && action === "fix" && !(await view.confirmFix(name, target))) return;
   if (operation === "download") {
     try {
       await transport.openHarnessDownload(productId);
@@ -307,7 +308,7 @@ function wire() {
 
   document.addEventListener("click", (event) => {
     const confirmation = event.target.closest("[data-confirm]");
-    if (confirmation && view.answerConfirmation(confirmation.dataset.confirm === "remove")) return;
+    if (confirmation && view.answerConfirmation(confirmation.dataset.confirm === "accept")) return;
     const tab = event.target.closest("[data-view]");
     if (tab) {
       view.navigate(tab.dataset.view);

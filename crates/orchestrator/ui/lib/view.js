@@ -409,7 +409,8 @@
         const waiting = pending.has(harness.id);
         return `<button class="${kind}" type="button" data-harness-operation="manage"`
           + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
-          + ` data-harness-name="${escapeHtml(harness.name)}"${waiting ? " disabled" : ""}>`
+          + ` data-harness-name="${escapeHtml(harness.name)}"`
+          + ` data-harness-target="${escapeHtml(harness.target)}"${waiting ? " disabled" : ""}>`
           + `${waiting ? "Working..." : label}</button>`;
       };
       const utilityButton = (harness, operation, label, extra = "") =>
@@ -432,11 +433,14 @@
           const installed = harness.state === "installed";
           const available = harness.state === "available";
           const updatable = harness.state === "updatable";
+          const needsAttention = harness.state === "needs_attention";
           let primary = "";
           if (installed && harness.can_uninstall) {
             primary = actionButton(harness, "uninstall", "Remove", "danger-button");
           } else if ((available || updatable) && harness.can_install) {
             primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
+          } else if (needsAttention && harness.can_fix) {
+            primary = actionButton(harness, "fix", "Fix");
           }
           const locate = harness.can_locate && harness.state !== "not_detected"
             ? utilityButton(harness, "locate", "Locate") : "";
@@ -1220,10 +1224,12 @@
     const searchFailed = (error) =>
       { el["palette-results"].innerHTML = `<div class="palette-empty">${escapeHtml(String(error))}</div>`; };
 
-    function confirmRemoval(name) {
+    function confirmHarnessChange(title, detail, action) {
       if (confirmation) return Promise.resolve(false);
-      el["confirm-title"].textContent = `Remove Ghostlight from ${name}?`;
-      el["confirm-detail"].textContent = "Only the entry Ghostlight owns will be removed.";
+      el["confirm-title"].textContent = title;
+      el["confirm-detail"].textContent = detail;
+      const accept = el["confirm-dialog"].querySelector('[data-confirm="accept"]');
+      accept.textContent = action;
       return new Promise((resolve) => {
         const finish = (confirmed) => {
           el["confirm-dialog"].hidden = true;
@@ -1238,6 +1244,18 @@
         document.addEventListener("keydown", onKeyDown);
       });
     }
+
+    const confirmRemoval = (name) => confirmHarnessChange(
+      `Remove Ghostlight from ${name}?`,
+      "Only the entry Ghostlight owns will be removed.",
+      "Remove"
+    );
+
+    const confirmFix = (name, target) => confirmHarnessChange(
+      `Replace the incorrect Ghostlight entry for ${name} (${target})?`,
+      "Only the entry under Ghostlight's key will be replaced. The configuration is backed up first.",
+      "Fix"
+    );
 
     const answerConfirmation = (confirmed) => {
       if (!confirmation) return false;
@@ -1299,7 +1317,7 @@
       setPermission, setChoice, setSacred,
       setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
-      confirmRemoval, answerConfirmation,
+      confirmRemoval, confirmFix, answerConfirmation,
       tickElapsed, tickAges, armCard
     });
   }

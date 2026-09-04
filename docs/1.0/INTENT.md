@@ -104,9 +104,11 @@ the Applications entry as interaction routes.
   Running work remains visible, and a fresh desktop process can reconstruct history from audit.
 - MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
   supported MCP clients. `Set up everything` connects or updates every detected target Ghostlight
-  can change safely in one pass. It never installs a third-party product, overwrites a foreign
-  entry, or exposes a generic file editor or command runner. Historical Windsurf and its current
-  Devin successor remain separate configuration targets under one product identity.
+  can change safely in one pass. It never installs a third-party product or overwrites a foreign
+  entry. A separate confirmed per-target Fix may replace one parseable foreign entry under
+  Ghostlight's own key, after showing what was found and making a backup. It never exposes a
+  generic file editor or command runner. Historical Windsurf and its current Devin successor remain
+  separate configuration targets under one product identity.
 - Status explains service, browser, and authority state, tests native notifications, and applies
   the explicit end-session intent through the same governance owner used by browser and MCP flows.
 - Policy names `browser.startup` as `Auto-open browser on request`. When it is off, Ghostlight

@@ -73,7 +73,7 @@ impl HarnessRegistry {
         Ok(summaries)
     }
 
-    /// Apply one explicit check, install, or uninstall action.
+    /// Apply one explicit check, install, fix, or uninstall action.
     pub fn apply(
         &self,
         id: &str,
@@ -94,6 +94,7 @@ impl HarnessRegistry {
                 ),
             },
             HarnessAction::Install => apply_install(&self.inner.context, &definition)?,
+            HarnessAction::Fix => apply_fix(&self.inner.context, &definition)?,
             HarnessAction::Uninstall => apply_uninstall(&self.inner.context, &definition)?,
         };
         let _ = self.refresh();
@@ -229,6 +230,8 @@ pub enum HarnessAction {
     Check,
     /// Add or update Ghostlight's owned registration.
     Install,
+    /// Replace one foreign entry occupying Ghostlight's registration key.
+    Fix,
     /// Remove only Ghostlight's owned registration.
     Uninstall,
 }
@@ -300,6 +303,8 @@ pub struct HarnessSummary {
     pub evidence: Option<String>,
     /// Whether an explicit install can be attempted.
     pub can_install: bool,
+    /// Whether an explicit fix can replace a foreign entry under Ghostlight's key.
+    pub can_fix: bool,
     /// Whether an owned registration can be removed.
     pub can_uninstall: bool,
     /// Whether the product has a closed official download destination on this platform.
@@ -941,6 +946,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     if definition.located_stale {
         detail.push_str(" A previously located path is missing; the normal location is shown.");
     }
+    let can_fix = connector_ready && registration_can_fix(definition, &registration);
     HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -955,6 +961,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
                 state,
                 HarnessState::Available | HarnessState::NotDetected | HarnessState::Updatable
             ),
+        can_fix,
         can_uninstall: state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
         can_locate: true,
@@ -966,6 +973,22 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
                 context.connector.display()
             )
         }),
+    }
+}
+
+fn registration_can_fix(
+    definition: &HarnessDefinition,
+    registration: &Result<RegistrationState, HarnessError>,
+) -> bool {
+    if !matches!(registration, Ok(RegistrationState::Foreign(_))) {
+        return false;
+    }
+    match definition.dialect {
+        ConfigDialect::Yaml(dialect) => fs::read_to_string(&definition.path)
+            .ok()
+            .and_then(|source| owned_yaml_range(&source, dialect).ok().flatten())
+            .is_some(),
+        ConfigDialect::Json(_) | ConfigDialect::CodexToml | ConfigDialect::OpenCode => true,
     }
 }
 
@@ -1137,23 +1160,97 @@ fn apply_uninstall(
     })
 }
 
+fn apply_fix(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<HarnessActionResult, HarnessError> {
+    if !context.connector.is_file() {
+        return Err(HarnessError::ConnectorMissing);
+    }
+    let changed = match definition.dialect {
+        ConfigDialect::CodexToml => fix_toml(&definition.path, &context.connector)?,
+        ConfigDialect::Yaml(dialect) => fix_yaml(&definition.path, &context.connector, dialect)?,
+        ConfigDialect::Json(dialect) => fix_json(&definition.path, &context.connector, dialect)?,
+        ConfigDialect::OpenCode => {
+            let source = read_or_empty(&definition.path)?;
+            let dialect = opencode_dialect(context, &source)?;
+            fix_json(&definition.path, &context.connector, dialect)?
+        }
+    };
+    let summary = inspect(context, definition);
+    Ok(HarnessActionResult {
+        changed,
+        summary,
+        message: format!(
+            "Ghostlight replaced the incorrect entry for {}. Restart or reconnect it to load the tools.",
+            definition.name
+        ),
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RegistrationEdit {
+    Install,
+    Uninstall,
+    Fix,
+}
+
+impl RegistrationEdit {
+    const fn installs(self) -> bool {
+        !matches!(self, Self::Uninstall)
+    }
+
+    const fn replaces_foreign(self) -> bool {
+        matches!(self, Self::Fix)
+    }
+}
+
 fn edit_json(
     path: &Path,
     connector: &Path,
     dialect: JsonDialect,
     install: bool,
 ) -> Result<bool, HarnessError> {
+    edit_json_with(
+        path,
+        connector,
+        dialect,
+        if install {
+            RegistrationEdit::Install
+        } else {
+            RegistrationEdit::Uninstall
+        },
+    )
+}
+
+fn fix_json(path: &Path, connector: &Path, dialect: JsonDialect) -> Result<bool, HarnessError> {
+    edit_json_with(path, connector, dialect, RegistrationEdit::Fix)
+}
+
+fn edit_json_with(
+    path: &Path,
+    connector: &Path,
+    dialect: JsonDialect,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
     let source = read_or_empty(path)?;
     let parsed = parse_jsonc(&source)?;
     let current = json_entry(&parsed, dialect);
     if let Some(entry) = current {
-        if !json_entry_owned(entry, dialect, connector, cfg!(target_os = "windows")) {
+        let foreign = !json_entry_owned(entry, dialect, connector, cfg!(target_os = "windows"));
+        if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
-        if install && entry == &expected_json_entry(connector, dialect) {
+        if !foreign && intent.replaces_foreign() {
+            return Err(HarnessError::NotFixable);
+        }
+        if intent == RegistrationEdit::Install && entry == &expected_json_entry(connector, dialect)
+        {
             return Ok(false);
         }
-    } else if !install {
+    } else if intent.replaces_foreign() {
+        return Err(HarnessError::NotFixable);
+    } else if !intent.installs() {
         return Ok(false);
     }
     let root = CstRootNode::parse(&source, &jsonc_options())
@@ -1161,8 +1258,8 @@ fn edit_json(
     let object = root
         .object_value_or_create()
         .ok_or_else(|| HarnessError::Malformed("configuration root is not an object".into()))?;
-    let collection = json_collection(&object, dialect, install)?;
-    if install {
+    let collection = json_collection(&object, dialect, intent.installs())?;
+    if intent.installs() {
         let collection = collection.ok_or_else(|| {
             HarnessError::Malformed("could not create the harness server collection".into())
         })?;
@@ -1181,6 +1278,26 @@ fn edit_json(
 }
 
 fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, HarnessError> {
+    edit_toml_with(
+        path,
+        connector,
+        if install {
+            RegistrationEdit::Install
+        } else {
+            RegistrationEdit::Uninstall
+        },
+    )
+}
+
+fn fix_toml(path: &Path, connector: &Path) -> Result<bool, HarnessError> {
+    edit_toml_with(path, connector, RegistrationEdit::Fix)
+}
+
+fn edit_toml_with(
+    path: &Path,
+    connector: &Path,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
     let source = read_or_empty(path)?;
     let mut document = source
         .parse::<DocumentMut>()
@@ -1195,15 +1312,19 @@ fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, Harne
             .and_then(Item::as_str)
             .unwrap_or_default();
         let args = toml_entry_args(entry);
-        if !command_owned(
+        let foreign = !command_owned(
             command,
             args.as_deref(),
             connector,
             cfg!(target_os = "windows"),
-        ) {
+        );
+        if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
-        if install
+        if !foreign && intent.replaces_foreign() {
+            return Err(HarnessError::NotFixable);
+        }
+        if intent == RegistrationEdit::Install
             && command == connector.to_string_lossy()
             && entry
                 .get("args")
@@ -1212,10 +1333,12 @@ fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, Harne
         {
             return Ok(false);
         }
-    } else if !install {
+    } else if intent.replaces_foreign() {
+        return Err(HarnessError::NotFixable);
+    } else if !intent.installs() {
         return Ok(false);
     }
-    if install {
+    if intent.installs() {
         if !document.contains_key("mcp_servers") {
             document["mcp_servers"] = Item::Table(Table::new());
         }
@@ -1291,13 +1414,39 @@ fn edit_yaml(
     dialect: YamlDialect,
     install: bool,
 ) -> Result<bool, HarnessError> {
+    edit_yaml_with(
+        path,
+        connector,
+        dialect,
+        if install {
+            RegistrationEdit::Install
+        } else {
+            RegistrationEdit::Uninstall
+        },
+    )
+}
+
+fn fix_yaml(path: &Path, connector: &Path, dialect: YamlDialect) -> Result<bool, HarnessError> {
+    edit_yaml_with(path, connector, dialect, RegistrationEdit::Fix)
+}
+
+fn edit_yaml_with(
+    path: &Path,
+    connector: &Path,
+    dialect: YamlDialect,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
     let original = read_or_empty(path)?;
     let state = inspect_yaml(&original, dialect, connector, cfg!(target_os = "windows"))?;
-    if matches!(state, RegistrationState::Foreign(_)) {
+    let foreign = matches!(state, RegistrationState::Foreign(_));
+    if foreign && !intent.replaces_foreign() {
         return Err(HarnessError::ForeignEntry);
     }
-    if (install && state == RegistrationState::Current)
-        || (!install && state == RegistrationState::Missing)
+    if !foreign && intent.replaces_foreign() {
+        return Err(HarnessError::NotFixable);
+    }
+    if (intent == RegistrationEdit::Install && state == RegistrationState::Current)
+        || (!intent.installs() && state == RegistrationState::Missing)
     {
         return Ok(false);
     }
@@ -1306,7 +1455,7 @@ fn edit_yaml(
             "the Ghostlight YAML entry uses a shape that cannot be edited losslessly".into(),
         ));
     }
-    let rendered = edit_yaml_text(&original, connector, dialect, install)?;
+    let rendered = edit_yaml_text(&original, connector, dialect, intent.installs())?;
     replace_with_backup(path, rendered.as_bytes())?;
     Ok(true)
 }
@@ -2104,6 +2253,11 @@ pub enum HarnessError {
     /// A foreign server uses Ghostlight's registration name.
     #[error("a foreign `ghostlight` entry is present; Ghostlight left it untouched")]
     ForeignEntry,
+    /// The explicit fix no longer points at one foreign entry.
+    #[error(
+        "the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations"
+    )]
+    NotFixable,
     /// A located path is neither a matching configuration nor an executable.
     #[error("the selected path is not a usable harness executable or configuration: {0}")]
     LocatedPathInvalid(PathBuf),
@@ -2126,10 +2280,11 @@ mod tests {
 
     use super::{
         bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
-        edit_yaml, harness_roots, inspect, inspect_json, inspect_toml, inspect_yaml, jsonc_options,
-        manual_json_setup, replace_with_backup, resolve_through_symlink, HarnessAction,
-        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
-        JsonDialect, RegistrationState, YamlDialect, EVIDENCE_MAX_CHARS,
+        edit_yaml, fix_toml, fix_yaml, harness_roots, inspect, inspect_json, inspect_toml,
+        inspect_yaml, jsonc_options, manual_json_setup, replace_with_backup,
+        resolve_through_symlink, HarnessAction, HarnessContext, HarnessError, HarnessRegistry,
+        HarnessRoots, HarnessState, HarnessSummary, JsonDialect, RegistrationState, YamlDialect,
+        EVIDENCE_MAX_CHARS,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2980,7 +3135,8 @@ mod tests {
     fn a_hand_registered_orchestrator_command_stays_foreign() {
         // Pinned against the live 2026-08-27 incident (ADR-0141): ZCode was registered by hand
         // with the orchestrator binary, which has no MCP stdio mode. Ghostlight must report the
-        // entry as foreign evidence, never overwrite or remove it.
+        // entry as foreign evidence. Ordinary install and remove must never overwrite it; only
+        // the separately confirmed Fix action may do that.
         let directory = temporary("zcode-foreign-orchestrator");
         let path = directory.join("config.json");
         let connector = connector(&directory);
@@ -3022,6 +3178,150 @@ mod tests {
         }
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn explicit_fix_replaces_only_the_foreign_entry_and_keeps_a_backup() {
+        let directory = temporary("fix-foreign");
+        let context = context(&directory);
+        let path = context
+            .home
+            .join(".cline/data/settings/cline_mcp_settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = r#"{
+  "keep": true,
+  "mcpServers": {
+    "sibling": {"command": "keep-me"},
+    "ghostlight": {"command": "npx", "args": ["-y", "ghostlight"]}
+  }
+}
+"#;
+        fs::write(&path, source).unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+        let before = registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "cline-cli")
+            .expect("Cline CLI stays in the closed roster");
+        assert_eq!(before.state, HarnessState::NeedsAttention);
+        assert!(before.can_fix);
+        assert!(!before.can_install);
+
+        let result = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
+        assert!(result.changed);
+        assert_eq!(result.summary.state, HarnessState::Installed);
+        assert!(!result.summary.can_fix);
+        assert!(result.message.contains("replaced the incorrect entry"));
+
+        let fixed = fs::read_to_string(&path).unwrap();
+        let parsed = parse_to_serde_value(&fixed, &jsonc_options())
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed["keep"], true);
+        assert_eq!(parsed["mcpServers"]["sibling"]["command"], "keep-me");
+        assert_eq!(
+            inspect_json(
+                &fixed,
+                JsonDialect::McpServers,
+                &context.connector,
+                context.windows
+            )
+            .unwrap(),
+            RegistrationState::Current
+        );
+        assert_eq!(
+            fs::read_to_string(path.with_extension("json.ghostlight-backup")).unwrap(),
+            source
+        );
+
+        let unchanged = fixed.clone();
+        assert!(matches!(
+            registry.apply("cline-cli", HarnessAction::Fix),
+            Err(HarnessError::NotFixable)
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), unchanged);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn explicit_fix_is_lossless_for_toml_and_yaml_dialects() {
+        let directory = temporary("fix-foreign-dialects");
+        let connector = connector(&directory);
+
+        let toml = directory.join("config.toml");
+        let toml_source = "title = \"keep\"\n\n[mcp_servers.sibling]\ncommand = \"keep-me\"\n\n[mcp_servers.ghostlight]\ncommand = \"alien\"\nargs = [\"serve\"]\n";
+        fs::write(&toml, toml_source).unwrap();
+        assert!(fix_toml(&toml, &connector).unwrap());
+        let fixed_toml = fs::read_to_string(&toml).unwrap();
+        assert!(fixed_toml.contains("title = \"keep\""));
+        assert!(fixed_toml.contains("[mcp_servers.sibling]"));
+        assert_eq!(
+            inspect_toml(&fixed_toml, &connector, cfg!(windows)).unwrap(),
+            RegistrationState::Current
+        );
+        assert_eq!(
+            fs::read_to_string(toml.with_extension("toml.ghostlight-backup")).unwrap(),
+            toml_source
+        );
+
+        let yaml_cases = [
+            (
+                YamlDialect::Goose,
+                "provider: keep\nextensions:\n  sibling:\n    cmd: keep-me\n  ghostlight:\n    cmd: alien\n    args: [serve]\n",
+            ),
+            (
+                YamlDialect::Continue,
+                "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Sibling\n    command: keep-me\n  - name: Ghostlight\n    command: alien\n    args: [serve]\n",
+            ),
+        ];
+        for (index, (dialect, source)) in yaml_cases.into_iter().enumerate() {
+            let path = directory.join(format!("config-{index}.yaml"));
+            fs::write(&path, source).unwrap();
+            assert!(fix_yaml(&path, &connector, dialect).unwrap());
+            let fixed = fs::read_to_string(&path).unwrap();
+            assert!(fixed.contains("keep-me"));
+            assert_eq!(
+                inspect_yaml(&fixed, dialect, &connector, cfg!(windows)).unwrap(),
+                RegistrationState::Current
+            );
+            assert_eq!(
+                fs::read_to_string(path.with_extension("yaml.ghostlight-backup")).unwrap(),
+                source
+            );
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn fix_is_not_offered_when_a_foreign_yaml_entry_cannot_be_replaced_losslessly() {
+        let directory = temporary("fix-foreign-yaml-shape");
+        let context = context(&directory);
+        let definition = definitions(&context)
+            .into_iter()
+            .find(|definition| definition.id == "goose")
+            .expect("goose stays in the closed roster");
+        fs::create_dir_all(definition.path.parent().unwrap()).unwrap();
+        let source = "extensions: {ghostlight: {cmd: alien}}\n";
+        fs::write(&definition.path, source).unwrap();
+
+        let summary = inspect(&context, &definition);
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert!(!summary.can_fix);
+        assert!(matches!(
+            HarnessRegistry::with_context(context).apply("goose", HarnessAction::Fix),
+            Err(HarnessError::Malformed(_))
+        ));
+        assert_eq!(fs::read_to_string(&definition.path).unwrap(), source);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn fix_has_one_closed_desktop_action_name() {
+        assert_eq!(
+            serde_json::from_value::<HarnessAction>(serde_json::json!("fix")).unwrap(),
+            HarnessAction::Fix
+        );
+        assert!(serde_json::from_value::<HarnessAction>(serde_json::json!("force")).is_err());
     }
 
     /// A blocked card names what was actually found beside the claim (ADR-0135).
@@ -3085,6 +3385,7 @@ mod tests {
         );
         assert!(evidence.chars().all(|character| !character.is_control()));
         assert!(!summary.can_install);
+        assert!(summary.can_fix);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3107,6 +3408,7 @@ mod tests {
         );
         let evidence = summary.evidence.expect("malformed files carry evidence");
         assert!(evidence.starts_with("The parser reported:"), "{evidence}");
+        assert!(!summary.can_fix);
         fs::remove_dir_all(directory).unwrap();
     }
 
