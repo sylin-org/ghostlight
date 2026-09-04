@@ -474,7 +474,7 @@ impl ApplicationExecutor {
                 lease,
                 value.tab.as_deref(),
                 value.target.as_deref(),
-                value.mode.as_deref(),
+                value.mode,
                 value.max_chars,
             ),
             Operation::InspectPage(value) => self.inspect_page(
@@ -1408,6 +1408,15 @@ impl ApplicationExecutor {
                     before_dispatch: true,
                 },
                 json!({"reason":"deadline","phase":"before_dispatch"}),
+            );
+        }
+        if matches!(error, BrowserError::CapabilityVersion { .. }) {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::BrowserAdapterOutdated,
+                json!({"reason":browser_reason(&error)}),
             );
         }
         let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
@@ -3403,6 +3412,11 @@ mod tests {
             &calls[0],
             BrowserCommand::OpenTab { url, group_title, .. }
                 if url == "https://example.com" && group_title == "Ghostlight - test"
+        ));
+        assert!(matches!(
+            &calls[1],
+            BrowserCommand::ReadDocument { mode, max_chars, .. }
+                if mode == "visible" && *max_chars == 8_000
         ));
     }
 

@@ -1,6 +1,56 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-02 (1.3.2 published; the ADR-0150 routing fix is on the public npm channel).
+Last updated: 2026-09-04 (ADR-0151 through ADR-0153 composed-page behavior is implemented in source
+and is not released).
+
+## Composed full-page reading (ADR-0151, 2026-09-04)
+
+The owner confirmed that the shortest `browser_read` call should match the visible page rather
+than prefer an article heuristic. [ADR-0151](adr/0151-composed-full-page-reading.md) amends
+ADR-0133 and ADR-0138: an omitted mode now selects composed visible reading across the top
+document, open shadow roots, assigned slots, and injected http(s) frames in stable order under one
+global character ceiling. Hidden and editable content stays absent, and closed roots stay closed.
+Explicit `article` mode still probes a useful top-document article and falls back to the same
+composed page read when none exists. Target reads use the same frame-local composed traversal.
+
+The root failure crossed two independent seams: the orchestrator routed an omitted mode through
+the legacy top-frame command, and the content adapter used `innerText`, which stops at a shadow
+boundary. The default is now a closed `ReadMode`, all document reads use `read_document`, and the
+adapter owns one composed-tree collector plus one cross-frame merger. The complete meaning is
+negotiated as `semantic_document` revision 4, so an older extension refuses before dispatch rather
+than returning a narrower result. The browser connector and wire shape remain unchanged.
+
+Focused extension tests cover nested open roots, slots, hidden and editable exclusions, article
+fallback, stable frame order, and one global ceiling. Gates green: formatting, warnings-denied
+workspace Clippy, all 432 Rust workspace tests, all 171 extension tests, JavaScript syntax checks,
+the fresh isolated-target process journey, the PowerShell journey, the npm launcher suite, and
+whole-repo integrity. Extension bytes changed, so this source is newer than the published adapter
+and no store or release action has been taken.
+
+## Composed semantic observation and geometry (ADR-0152 and ADR-0153, 2026-09-04)
+
+The owner asked that the read fix be applied to sibling tools. The audit found the same boundary in
+text waits, find matching, accessible-name fallback, document trees, shadow-hosted iframe geometry,
+point receipts, and coordinate image drops. [ADR-0152](adr/0152-composed-semantic-observation.md)
+makes read, inspect, find, and wait share the composed semantic layer. Rootless document trees now
+include frames under one global 400-node budget. [ADR-0153](adr/0153-composed-frame-geometry.md)
+makes frame boxes shadow-aware and routes points recursively to the deepest observable frame and
+subject, while CDP keeps top-viewport coordinates.
+
+The stronger meanings advance `observation` to revision 2, `pointer_input` to revision 3,
+`capture` to revision 2, and `files` to revision 3. Every semantic-document command now requires
+revision 4. No public command schema, authority class, or audit field changed. Target-less browser
+capture, URL/load/target waits, dialog handling, diagnostics, and script evaluation retain their
+existing document or browser scope because the audit found no composed-page promise there.
+
+The unpacked extension was reloaded and the real MCP journey passed against
+`https://sylin.org/ghostlight/demo/iframe/`: default read returned 146 words spanning the outer
+page and embedded form; document inspect, find, composed text wait, an iframe-target hover and
+screenshot, seven-field semantic fill, submit, completion wait, and completion read all succeeded.
+The live journey now keeps those checks. The sibling website source expands the fixture further by
+placing the iframe in an open shadow root and the completion state in a nested open root; its local
+build, 34-page site check, Browser-plugin structure check, and local form journey passed. Those
+website changes remain local and unpublished.
 
 ## 1.3.2 published (2026-09-02)
 

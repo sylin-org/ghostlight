@@ -321,7 +321,16 @@ async function runAdapter(peer) {
     } else if (command.command === "close_tab") result = { outcome: "tab_closed", tab_id: command.tab_id };
     else if (command.command === "cancel") result = { outcome: "cancelled" };
     else if (command.command === "read_document") {
-      result = { outcome: "text", tab_id: command.tab_id, text: "Article body describing Example Domain and its purpose in depth.", truncated: false, title: "Example Domain", url: "https://example.com/" };
+      result = {
+        outcome: "text",
+        tab_id: command.tab_id,
+        text: command.mode === "article"
+          ? "Article body describing Example Domain and its purpose in depth."
+          : "Example Domain",
+        truncated: false,
+        title: "Example Domain",
+        url: "https://example.com/"
+      };
     } else if (command.command === "inspect_tree") {
       result = { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify({ kind: "container", label: "Example Domain", children: [{ kind: "heading", label: "Example Domain", children: [] }] }), truncated: false };
     } else if (command.command === "query_semantic") {
@@ -423,7 +432,7 @@ try {
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
       "chunked_commands", "adapter_liveness"
-    ].map((name) => ({ name, revision: { script: 2, pointer_input: 2, keyboard_input: 2, semantic_document: 3, navigation: 2, files: 2 }[name] ?? 1 }))
+    ].map((name) => ({ name, revision: { script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
 
@@ -514,6 +523,7 @@ try {
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
   assert.equal(read.summary, "Read 2 words from example.com.");
+  assert.equal(physicalRequests.findLast((command) => command.command === "read_document").mode, "visible");
 
   const foundResponse = await mcp.request("tools/call", {
     name: "browser_find",
@@ -560,7 +570,7 @@ try {
   assert.deepEqual(secondRegionCommand.region, { x: 310, y: 170, width: 50, height: 25 });
   assert.equal(secondRegionCommand.expected_viewport.scope, "region");
 
-  // R4: article-first reading and document-tree snapshots with a diff.
+  // R4: explicit article reading and document-tree snapshots with a diff.
   const article = structured(await mcp.request("tools/call", {
     name: "browser_read",
     arguments: { mode: "article", max_chars: 5000 }

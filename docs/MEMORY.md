@@ -249,6 +249,17 @@ Every one of these cost something to learn.
   URL, take its content-box origin, and compose offsets recursively (ADR-0138). One mechanism for
   same-origin and cross-origin beats a fast path plus a fallback that fails exactly where the
   fallback was for.
+- **Capability coverage does not transfer between sibling observation paths.** Shadow-aware form
+  inspection did not make page reading shadow-aware, and explicit visible reads did not make the
+  shortest read use that path. Trace the default call through decoding, dispatch, negotiation, and
+  the page-local collector. Chromium `innerText` stops at shadow boundaries; a composed read needs
+  an explicit open-root and slot traversal, plus a capability revision so an older adapter cannot
+  answer with narrower semantics (ADR-0151).
+- **A composed page is a shared semantic and geometry boundary.** Fixing full-page text still left
+  waits, find, document trees, point receipts, target capture, and drops on narrower DOM or frame
+  paths. Put open-root traversal, visibility, frame aggregation, and point routing at shared
+  adapter seams, then revision every affected capability family so old adapters refuse instead of
+  returning plausible partial truth (ADR-0152 and ADR-0153).
 - **An anchored effect without a live box renders nowhere.** A zero-size or hidden target resolves
   to the frame origin, and inside an embedded frame the frame boundary clips the effect in half.
   Suppression is the honest rendering of "nothing to point at."

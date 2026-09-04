@@ -73,6 +73,12 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 6. Stale tab and target handles fail before browser dispatch and suggest obtaining current handles.
 7. Lower-capability-model fixtures succeed with every documented shortest call, choose the correct
    sibling among related tools, and recover from deliberately stale and ambiguous handles.
+   The shortest `browser_read` call returns visible text from the composed page: top document, open
+   shadow roots, and http(s) embedded frames in stable order under one global character ceiling.
+   It excludes hidden content, editable values, and closed shadow roots. Explicit article mode
+   returns a useful top-document article or falls back to that same composed page read.
+   Inspect, find, accessible-name fallback, and text wait use the same composed semantics. A
+   rootless document tree includes embedded frames under one 400-node ceiling.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,
    viewport, and zoom still match; stale views fail before pointer or region-capture dispatch. A
    bounded region returns a magnified image and fresh view, and a second region chains from it.
@@ -153,6 +159,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    same landing-governance path as explicit navigation.
 10. Traverse controls inside an open shadow root and perform semantic click, fill, type, hover,
     scroll-to-target, and drag journeys with actionability checked at dispatch time.
+    Repeat target hover, drag, capture, point-subject, and coordinate-drop geometry through an
+    iframe hosted inside an open shadow root.
 11. Capture a screenshot, click and hover through its view handle, magnify a bounded region and
     chain another region from the result, then verify document commit, zoom, and viewport changes
     make the old view stale.

@@ -13,10 +13,95 @@ function contentHarness() {
   const delays = [];
   const windowListeners = new Map();
 
-  class HTMLElement {}
+  function selectorMatches(element, selector) {
+    const tag = String(element.tagName ?? "").toLowerCase();
+    return selector.split(",").map((part) => part.trim()).some((part) => {
+      if (part === "*") return true;
+      if (part === tag || part.startsWith(`${tag}[`)) return true;
+      const attribute = /^\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\]$/.exec(part);
+      if (!attribute) return false;
+      const value = element.getAttribute?.(attribute[1]);
+      return attribute[2] === undefined ? value !== null : value === attribute[2];
+    });
+  }
+
+  function descendantsOf(root, selector) {
+    const found = [];
+    for (const node of root.childNodes ?? []) {
+      if (node.nodeType !== 1) continue;
+      if (selectorMatches(node, selector)) found.push(node);
+      found.push(...descendantsOf(node, selector));
+    }
+    return found;
+  }
+
+  class TextNode {
+    constructor(value) {
+      this.nodeType = 3;
+      this.nodeValue = value;
+      this.parentNode = null;
+      this.rendered = true;
+    }
+  }
+
+  class DocumentFragment {
+    constructor() {
+      this.nodeType = 11;
+      this.childNodes = [];
+    }
+
+    append(...nodes) {
+      for (const node of nodes) {
+        node.parentNode = this;
+        this.childNodes.push(node);
+      }
+    }
+
+    querySelectorAll(selector) { return descendantsOf(this, selector); }
+  }
+
+  class HTMLElement {
+    constructor(tagName = "DIV") {
+      this.nodeType = 1;
+      this.tagName = tagName.toUpperCase();
+      this.childNodes = [];
+      this.children = [];
+      this.attributes = new Map();
+      this.hidden = false;
+      this.isContentEditable = false;
+      this.rendered = true;
+      this.isConnected = true;
+      this.clientLeft = 0;
+      this.clientTop = 0;
+      this.clientWidth = 100;
+      this.clientHeight = 30;
+    }
+
+    append(...nodes) {
+      for (const node of nodes) {
+        node.parentNode = this;
+        this.childNodes.push(node);
+        if (node.nodeType === 1) this.children.push(node);
+      }
+    }
+
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    setAttribute(name, value) { this.attributes.set(name, String(value)); }
+    getClientRects() { return this.hidden || !this.rendered ? [] : [{ width: 1, height: 1 }]; }
+    getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
+    getRootNode() {
+      let node = this;
+      while (node.parentNode) node = node.parentNode;
+      return node;
+    }
+    matches(selector) { return selectorMatches(this, selector); }
+    closest(selector) { return this.matches(selector) ? this : null; }
+    querySelectorAll(selector) { return descendantsOf(this, selector); }
+  }
+
   class HTMLInputElement extends HTMLElement {
     constructor() {
-      super();
+      super("INPUT");
       this.tagName = "INPUT";
       this.type = "file";
       this.id = "upload";
@@ -27,7 +112,6 @@ function contentHarness() {
       this.files = [];
       this.events = [];
       this.value = "";
-      this.attributes = new Map();
     }
 
     getAttribute(name) {
@@ -70,15 +154,37 @@ function contentHarness() {
   }
 
   const input = new HTMLInputElement();
+  const body = new HTMLElement("BODY");
+  body.innerText = "nothing matching";
+  body.append(new TextNode("nothing matching"));
   const document = {
+    nodeType: 9,
     readyState: "complete",
     title: "Fixture",
-    body: { innerText: "nothing matching" },
+    body,
     documentElement: {},
-    querySelectorAll() { return [input]; },
+    querySelectorAll(selector) {
+      const found = descendantsOf(this.body, selector);
+      if (selectorMatches(input, selector) && !found.includes(input)) found.unshift(input);
+      return found;
+    },
+    createRange() {
+      let selected = null;
+      return {
+        selectNodeContents(node) { selected = node; },
+        getClientRects() { return selected?.rendered === false ? [] : [{ width: 1, height: 1 }]; },
+        detach() {}
+      };
+    },
     getElementById() { return null; }
   };
   input.getRootNode = () => document;
+
+  function computedStyle(element) {
+    return element?.hidden
+      ? { display: "none", visibility: "hidden", contentVisibility: "hidden", opacity: "0", paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0" }
+      : { display: "block", visibility: "visible", contentVisibility: "visible", opacity: "1", paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0" };
+  }
 
   const context = {
     chrome: { runtime: { onMessage: { addListener(value) { listener = value; } } } },
@@ -87,6 +193,7 @@ function contentHarness() {
     window: {
       scrollX: 0,
       scrollY: 0,
+      getComputedStyle: computedStyle,
       addEventListener(type, value) { windowListeners.set(type, value); },
       removeEventListener(type, value) {
         if (windowListeners.get(type) === value) windowListeners.delete(type);
@@ -120,11 +227,7 @@ function contentHarness() {
       clock += delay;
       callback();
     },
-    getComputedStyle(element) {
-      return element?.hidden
-        ? { display: "none", visibility: "hidden", opacity: "0" }
-        : { display: "block", visibility: "visible", opacity: "1" };
-    },
+    getComputedStyle: computedStyle,
     innerWidth: 1024,
     innerHeight: 768,
     scrollX: 0,
@@ -169,6 +272,10 @@ function contentHarness() {
     delays,
     document,
     send,
+    element(tagName) { return new HTMLElement(tagName); },
+    fragment() { return new DocumentFragment(); },
+    text(value) { return new TextNode(value); },
+    setBody(value) { document.body = value; },
     setScroll(x, y) {
       context.scrollX = x;
       context.scrollY = y;
@@ -177,6 +284,96 @@ function contentHarness() {
     hasWindowListener(type) { return windowListeners.has(type); }
   };
 }
+
+test("visible reads follow the composed tree without exposing hidden or editable text", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("project-card");
+  const shadow = harness.fragment();
+  const shadowCopy = harness.element("p");
+  shadowCopy.append(harness.text("Open shadow copy"));
+  const nestedHost = harness.element("field-shell");
+  const nestedShadow = harness.fragment();
+  nestedShadow.append(harness.text("Nested shadow label"));
+  nestedHost.shadowRoot = nestedShadow;
+  const slot = harness.element("slot");
+  const assigned = harness.text("Assigned label");
+  slot.assignedNodes = () => [assigned];
+  const editable = harness.element("textarea");
+  editable.append(harness.text("private draft"));
+  const hidden = harness.element("p");
+  hidden.hidden = true;
+  hidden.append(harness.text("hidden copy"));
+  shadow.append(shadowCopy, nestedHost, slot, editable, hidden);
+  host.shadowRoot = shadow;
+  host.append(harness.text("unassigned light copy"));
+  const closedHost = harness.element("sealed-card");
+  const unrenderedText = harness.text("sealed unassigned copy");
+  unrenderedText.rendered = false;
+  const unrenderedLight = harness.element("p");
+  unrenderedLight.rendered = false;
+  unrenderedLight.append(harness.text("closed fallback copy"));
+  closedHost.append(unrenderedText, unrenderedLight);
+  body.append(harness.text("Outer shell"), host, closedHost);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
+
+  assert.equal(read.ok, true);
+  assert.match(read.result.text, /Outer shell/);
+  assert.match(read.result.text, /Open shadow copy/);
+  assert.match(read.result.text, /Nested shadow label/);
+  assert.match(read.result.text, /Assigned label/);
+  assert.doesNotMatch(read.result.text, /unassigned|private draft|hidden copy|closed fallback/);
+  assert.equal(read.result.truncated, false);
+});
+
+test("composed reads apply one exact character ceiling", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  body.append(harness.text("abcdefghij"));
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 5 });
+
+  assert.equal(read.result.text, "abcde");
+  assert.equal(read.result.truncated, true);
+});
+
+test("explicit article reading can select useful prose inside an open shadow root", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("news-shell");
+  const shadow = harness.fragment();
+  const article = harness.element("article");
+  article.append(harness.text("A composed article inside the component contains enough useful prose to satisfy the article threshold without exposing the host's unrendered light children."));
+  shadow.append(article);
+  host.shadowRoot = shadow;
+  body.append(host);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "article", max_chars: 500 });
+
+  assert.equal(read.result.article_found, true);
+  assert.match(read.result.text, /composed article inside the component/);
+  assert.equal(read.result.truncated, false);
+});
+
+test("an absent useful article asks the worker for the full-page fallback", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const article = harness.element("article");
+  article.append(harness.text("Too short."));
+  body.append(article);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "article", max_chars: 500 });
+
+  assert.deepEqual(
+    { text: read.result.text, truncated: read.result.truncated, article_found: read.result.article_found },
+    { text: "", truncated: false, article_found: false }
+  );
+});
 
 test("upload accepts a connected enabled file input even when it is hidden", async () => {
   const harness = contentHarness();
@@ -401,6 +598,86 @@ test("observation polling stops at its physical timeout without overshooting", a
   assert.equal(observed.result.elapsed_ms, 250);
   assert.equal(observed.result.readiness, "complete");
   assert.deepEqual(harness.delays, [100, 100, 50]);
+});
+
+test("text observation sees rendered text inside an open shadow root", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("status-card");
+  const shadow = harness.fragment();
+  shadow.append(harness.text("Shadow task complete"));
+  host.shadowRoot = shadow;
+  body.append(host);
+  harness.setBody(body);
+
+  const observed = await harness.send({
+    kind: "observe",
+    condition: "text_present",
+    value: "Shadow task complete",
+    timeout_ms: 0
+  });
+
+  assert.equal(observed.result.satisfied, true);
+  assert.equal(observed.result.elapsed_ms, 0);
+});
+
+test("find and document trees use composed shadow content", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("task-control");
+  host.setAttribute("role", "button");
+  const shadow = harness.fragment();
+  const label = harness.element("span");
+  label.append(harness.text("Approve garden task"));
+  shadow.append(label);
+  host.shadowRoot = shadow;
+  host.append(harness.text("unassigned decoy"));
+  body.append(host);
+  harness.setBody(body);
+
+  const found = await harness.send({ kind: "find", text: "garden task", find_kind: "control", max_results: 5 });
+  assert.equal(found.ok, true);
+  assert.equal(found.result.targets.length, 1);
+  assert.equal(found.result.targets[0].name, "Approve garden task");
+
+  const inspected = await harness.send({ kind: "inspect_tree", max_depth: 5, max_nodes: 400 });
+  assert.equal(inspected.ok, true);
+  assert.equal(inspected.result.tree.children[0].kind, "control");
+  assert.equal(inspected.result.tree.children[0].label, "Approve garden task");
+  assert.equal(inspected.result.tree.children[0].children[0].label, "Approve garden task");
+  assert.doesNotMatch(JSON.stringify(inspected.result.tree), /unassigned decoy/);
+});
+
+test("frame geometry and point subjects descend through an open shadow root", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("frame-shell");
+  const shadow = harness.fragment();
+  const frame = harness.element("iframe");
+  frame.src = "https://example.test/inside";
+  frame.name = "inside";
+  frame.clientLeft = 2;
+  frame.clientTop = 3;
+  frame.clientWidth = 240;
+  frame.clientHeight = 120;
+  frame.getBoundingClientRect = () => ({ left: 10, top: 20, width: 244, height: 126 });
+  shadow.append(frame);
+  shadow.elementFromPoint = () => frame;
+  host.shadowRoot = shadow;
+  body.append(host);
+  harness.setBody(body);
+  harness.document.elementFromPoint = () => host;
+
+  const boxes = await harness.send({ kind: "frame_boxes" });
+  assert.equal(boxes.result.boxes.length, 1);
+  assert.equal(boxes.result.boxes[0].left, 12);
+  assert.equal(boxes.result.boxes[0].top, 23);
+
+  const point = await harness.send({ kind: "point_context", x: 30, y: 40 });
+  assert.equal(point.result.subject.role, "iframe");
+  assert.equal(point.result.embed.src, "https://example.test/inside");
+  assert.equal(point.result.embed.left, 12);
+  assert.equal(point.result.embed.top, 23);
 });
 
 test("drag observation retains only native lifecycle booleans and cleans up", async () => {

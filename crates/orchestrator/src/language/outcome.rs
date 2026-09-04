@@ -871,6 +871,8 @@ pub enum Refusal {
     CredentialHandoff,
     /// The browser returned a receipt outside the negotiated contract.
     IncompatibleReceipt,
+    /// The browser adapter predates the physical command meaning the service requires.
+    BrowserAdapterOutdated,
     /// The job ran out of time.
     DeadlineExpired {
         /// True when the deadline fired before any dispatch could happen.
@@ -927,6 +929,9 @@ impl Refusal {
             }
             Self::IncompatibleReceipt => {
                 "The browser answered in a form Ghostlight does not recognize."
+            }
+            Self::BrowserAdapterOutdated => {
+                "The Ghostlight extension is older than this browser command."
             }
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
@@ -1009,6 +1014,10 @@ impl Refusal {
                     .into(),
             ],
             Self::IncompatibleReceipt => vec![
+                "Reload or update the Ghostlight extension in that browser, then repeat the call."
+                    .into(),
+            ],
+            Self::BrowserAdapterOutdated => vec![
                 "Reload or update the Ghostlight extension in that browser, then repeat the call."
                     .into(),
             ],
@@ -2064,6 +2073,10 @@ mod tests {
                 "The browser answered in a form Ghostlight does not recognize.",
             ),
             (
+                Refusal::BrowserAdapterOutdated,
+                "The Ghostlight extension is older than this browser command.",
+            ),
+            (
                 Refusal::BrowserStopped { reconnect: false },
                 "The browser disconnected before anything happened.",
             ),
@@ -2127,6 +2140,12 @@ mod tests {
         );
         assert_eq!(
             Refusal::IncompatibleReceipt.next_steps(),
+            vec![
+                "Reload or update the Ghostlight extension in that browser, then repeat the call."
+            ]
+        );
+        assert_eq!(
+            Refusal::BrowserAdapterOutdated.next_steps(),
             vec![
                 "Reload or update the Ghostlight extension in that browser, then repeat the call."
             ]

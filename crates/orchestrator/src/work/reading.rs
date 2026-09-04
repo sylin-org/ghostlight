@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::governance::Capability;
 use crate::language::outcome::{CaptureKind, Outcome, Refusal, TargetNoun};
+use crate::language::ReadMode;
 use crate::workspace::WorkspaceLease;
 
 use super::{
@@ -20,7 +21,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: Option<&str>,
-        mode: Option<&str>,
+        mode: Option<ReadMode>,
         max_chars: usize,
     ) -> Terminal {
         let (selected, locator, _) =
@@ -39,10 +40,10 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        let command = if let Some(document_mode) = mode.filter(|_| target.is_none()) {
+        let command = if target.is_none() {
             BrowserCommand::ReadDocument {
                 tab_id: selected.physical_id,
-                mode: document_mode.to_string(),
+                mode: mode.unwrap_or(ReadMode::Visible).as_str().to_string(),
                 max_chars,
             }
         } else {

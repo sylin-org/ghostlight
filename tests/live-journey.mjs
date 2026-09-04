@@ -67,7 +67,7 @@ try {
 
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",
-    arguments: { url: "https://example.com" }
+    arguments: { url: "https://sylin.org/ghostlight/demo/iframe/" }
   }));
   assert.equal(opened.status, "succeeded", JSON.stringify(opened));
   const tab = opened.facts.tab;
@@ -78,7 +78,100 @@ try {
     arguments: { tab }
   }));
   assert.equal(read.status, "succeeded", JSON.stringify(read));
-  assert.match(read.facts.text, /Example Domain/i);
+  assert.match(read.facts.text, /Apply to the Sylin Foundry/i);
+  assert.match(read.facts.text, /Project name/i);
+  assert.match(read.facts.text, /Submit application/i);
+
+  const inspected = structured(await request("tools/call", {
+    name: "browser_inspect",
+    arguments: { tab, scope: "document", max_depth: 8 }
+  }));
+  assert.equal(inspected.status, "succeeded", JSON.stringify(inspected));
+  assert.ok(inspected.facts.nodes > 0, JSON.stringify(inspected));
+
+  const projectMatches = structured(await request("tools/call", {
+    name: "browser_find",
+    arguments: { tab, text: "Project name", scope: "control", max_results: 5 }
+  }));
+  assert.equal(projectMatches.status, "succeeded", JSON.stringify(projectMatches));
+  assert.ok(projectMatches.facts.matches.length > 0, JSON.stringify(projectMatches));
+  const projectTarget = projectMatches.facts.matches.find((match) => match.role === "textbox")?.target;
+  assert.match(projectTarget, /^target_/);
+
+  const submitMatches = structured(await request("tools/call", {
+    name: "browser_find",
+    arguments: { tab, text: "Submit application", scope: "control", max_results: 5 }
+  }));
+  assert.equal(submitMatches.status, "succeeded", JSON.stringify(submitMatches));
+  const submitTarget = submitMatches.facts.matches.find((match) => match.role === "button")?.target;
+  assert.match(submitTarget, /^target_/);
+
+  const waitedForForm = structured(await request("tools/call", {
+    name: "browser_wait",
+    arguments: { tab, condition: "text_present", value: "Submit application" }
+  }));
+  assert.equal(waitedForForm.status, "succeeded", JSON.stringify(waitedForForm));
+
+  const hovered = structured(await request("tools/call", {
+    name: "browser_hover",
+    arguments: { tab, target: projectTarget }
+  }));
+  assert.equal(hovered.status, "succeeded", JSON.stringify(hovered));
+
+  const targetScreenshotResponse = await request("tools/call", {
+    name: "browser_screenshot",
+    arguments: { tab, target: projectTarget }
+  });
+  const targetScreenshot = structured(targetScreenshotResponse);
+  assert.equal(targetScreenshot.status, "succeeded", JSON.stringify(targetScreenshot));
+  assert.equal(targetScreenshotResponse.result.content[1].type, "image");
+  assert.ok(targetScreenshotResponse.result.content[1].data.length > 100);
+
+  const filled = structured(await request("tools/call", {
+    name: "browser_fill_form",
+    arguments: {
+      tab,
+      fields: [
+        { selector: { name: "Project name", role: "textbox", exact: true }, value: "Composed Lantern" },
+        { selector: { name: "Contact email", role: "textbox", exact: true }, value: "test@example.com" },
+        { selector: { name: "Repository URL", role: "textbox", exact: true }, value: "https://example.com/lantern" },
+        { selector: { name: "Maintainer type", role: "combobox", exact: true }, value: "Individual" },
+        { selector: { name: "Build system", role: "combobox", exact: true }, value: "GitHub Actions" },
+        { selector: { name: "Notes", role: "textbox", exact: true }, value: "Full-page composed fixture" },
+        {
+          selector: {
+            name: "I maintain this project and can answer questions about its releases.",
+            role: "checkbox",
+            exact: true
+          },
+          value: true
+        }
+      ],
+      submit_target: submitTarget,
+      expect: {
+        condition: "text_present",
+        value: "Application received. Nothing left your browser."
+      }
+    }
+  }, 30000));
+  assert.equal(filled.status, "succeeded", JSON.stringify(filled));
+
+  const completed = structured(await request("tools/call", {
+    name: "browser_wait",
+    arguments: {
+      tab,
+      condition: "text_present",
+      value: "Application received. Nothing left your browser."
+    }
+  }));
+  assert.equal(completed.status, "succeeded", JSON.stringify(completed));
+
+  const completedRead = structured(await request("tools/call", {
+    name: "browser_read",
+    arguments: { tab }
+  }));
+  assert.equal(completedRead.status, "succeeded", JSON.stringify(completedRead));
+  assert.match(completedRead.facts.text, /Application received\. Nothing left your browser\./i);
 
   const screenshotResponse = await request("tools/call", {
     name: "browser_screenshot",
@@ -138,7 +231,7 @@ try {
   const preserved = closed.status === "blocked" && closed.facts.reason === "browser_local_interlock";
   assert.ok(closed.status === "succeeded" || preserved, JSON.stringify(closed));
   if (closed.status === "succeeded") assert.equal(closed.facts.closed, true);
-  console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, read: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
+  console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, composed_read: true, composed_inspect: true, composed_find: true, composed_wait: true, framed_hover: true, target_screenshot: true, composed_fill: true, composed_completion: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
 } finally {
   child.stdin.end();
   child.kill();

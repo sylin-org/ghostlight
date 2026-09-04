@@ -11,11 +11,13 @@
   const ADAPTER_PROTOCOL_MAJOR = 2;
   const ADAPTER_CAPABILITY_REVISIONS = Object.freeze({
     script: 2,
-    pointer_input: 2,
+    pointer_input: 3,
     keyboard_input: 2,
-    semantic_document: 3,
+    semantic_document: 4,
+    capture: 2,
     navigation: 2,
-    files: 2
+    files: 3,
+    observation: 2
   });
   const ADAPTER_CAPABILITIES = Object.freeze([
     "tabs",

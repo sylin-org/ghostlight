@@ -266,8 +266,8 @@ client success. Reactions are direct typed function calls over the closed enum, 
 ## Browser primitives
 
 The closed adapter vocabulary is: list tabs, focus tab, atomically open and group a URL, navigate,
-traverse history, reload, close tab, read text, inspect, find, screenshot, screenshot region,
-describe targets,
+traverse history, reload, close tab, read text, read a composed document, inspect, find, screenshot,
+screenshot region, describe targets,
 activate a locator or physical point, scroll, set zoom, resize a window, hover, fill, type text,
 press key, drag, upload supplied bytes, evaluate script, observe condition, inspect dialog, handle
 dialog, start and stop screencast capture, observe bounded console and network entries, cancel, and
@@ -277,6 +277,20 @@ bounded diagnostic entries, control intent, and disconnect.
 
 Ordinary product features compose these primitives only in the orchestrator. A bridge or adapter
 change requires a new physical Chromium capability or a bridge protocol requirement.
+
+The composed semantic layer is the physical page-observation boundary. Inside each injected
+http(s) frame, the extension walks rendered elements and text through open shadow roots and assigned
+slots while excluding hidden content and editable values. Read, inspect, find, fallback accessible
+names, and text waits share that model. The service worker joins text and rootless trees in stable
+frame order under one page-wide character or node ceiling. Explicit article mode probes only the
+top document first and uses the composed full-page read when no useful article exists. Closed
+shadow roots stay closed, and child-frame origins do not become result or audit fields.
+
+Pointer geometry follows the same composed surface. Frame-box discovery reaches embeds inside open
+roots. Point hit testing descends through open roots, then the service worker follows the embed at
+the point through Chromium's parent-frame tree. CDP effects keep top-viewport coordinates while
+DOM-local effects keep the deepest frame-local coordinates. Ambiguous embed ownership refuses
+instead of guessing.
 
 Screenshot receipts include the exact CSS viewport origin, CSS dimensions, device scale, zoom,
 and output scale used for the image. The workspace context turns that physical transform into an

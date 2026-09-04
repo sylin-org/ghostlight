@@ -22,7 +22,8 @@ Ghostlight supports these distinct jobs:
 3. Open a URL in a selected or newly controlled tab.
 4. Navigate an exact controlled tab to a URL, through history, or by reloading it.
 5. Close an exact controlled tab.
-6. Read useful bounded text from a page or target.
+6. Read useful bounded text from the full composed page, including open shadow trees and embedded
+   frames, or from one target; optionally prefer an article when explicitly requested.
 7. Inspect page structure and actionable controls, including open shadow trees.
 8. Find semantic targets and receive short-lived opaque handles.
 9. Capture a viewport, page, target, or magnified current-view region and receive a short-lived

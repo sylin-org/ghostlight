@@ -7,6 +7,13 @@
   // their element lives, because that is what the person should see.
   const IS_TOP = window.self === window.top;
   const ACTIONABLE_SELECTOR = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
+  const TEXT_BLOCK_TAGS = new Set([
+    "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figcaption",
+    "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+    "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tr", "ul"
+  ]);
+  const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
+  const DOCUMENT_TREE_NODE_LIMIT = 400;
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
@@ -65,6 +72,23 @@
     return (rendered || fallback).replace(/\s+/g, " ").trim();
   }
 
+  function isComposedVisible(element) {
+    if (element.hidden || element.getAttribute?.("aria-hidden") === "true") return false;
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.contentVisibility === "hidden" || Number(style.opacity) === 0) return false;
+    const rectangles = element.getClientRects?.();
+    return !rectangles || rectangles.length > 0 || style.display === "contents";
+  }
+
+  function composedChildren(node) {
+    if (String(node.tagName ?? "").toLowerCase() === "slot") {
+      const assigned = node.assignedNodes?.({ flatten: true }) ?? [];
+      if (assigned.length) return assigned;
+    }
+    if (node.shadowRoot) return Array.from(node.shadowRoot.childNodes ?? []);
+    return Array.from(node.childNodes ?? []);
+  }
+
   function accessibleName(element) {
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy) {
@@ -82,7 +106,7 @@
     if (fixed) return shared.bounded(fixed, 500).trim();
     const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
     if (editable) return "";
-    return shared.bounded(renderedText(element), 500);
+    return shared.bounded(composedVisibleText(element, 500).text || renderedText(element), 500);
   }
 
   function roleFor(element) {
@@ -145,8 +169,18 @@
     };
   }
 
+  function deepestElementFromPoint(root, x, y) {
+    let hit = root.elementFromPoint?.(x, y) ?? null;
+    while (hit?.shadowRoot?.elementFromPoint) {
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+
   function subjectAtViewportPoint(x, y) {
-    const hit = document.elementFromPoint?.(x, y);
+    const hit = deepestElementFromPoint(document, x, y);
     if (!hit) return null;
     return actionSubject(closestAcrossBoundaries(hit, ACTIONABLE_SELECTOR) || hit);
   }
@@ -189,6 +223,75 @@
     return Array.from(unique);
   }
 
+  // innerText stops at both iframe and shadow boundaries in Chromium. Frames are folded by
+  // the service worker; this half walks the rendered composed tree inside one frame. An open
+  // shadow root replaces its host's light children, while slots reinsert only assigned nodes.
+  // Closed roots remain closed, and layout-less unslotted light children stay absent.
+  function composedVisibleText(root, maxChars) {
+    const limit = maxChars + 1;
+    const visited = new Set();
+    let output = "";
+    let truncated = false;
+
+    function append(value, separator = " ") {
+      const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+      if (!normalized) return;
+      const joiner = output && !output.endsWith("\n") && !/^[,.;:!?)}\]]/.test(normalized)
+        ? separator
+        : "";
+      const next = `${joiner}${normalized}`;
+      const remaining = limit - output.length;
+      if (remaining <= 0) {
+        truncated = true;
+        return;
+      }
+      output += next.slice(0, remaining);
+      if (next.length > remaining) truncated = true;
+    }
+
+    function lineBreak() {
+      if (!output || output.endsWith("\n")) return;
+      if (output.length >= limit) truncated = true;
+      else output += "\n";
+    }
+
+    function visit(node) {
+      if (!node || visited.has(node) || output.length >= limit) {
+        if (output.length >= limit) truncated = true;
+        return;
+      }
+      visited.add(node);
+      if (node.nodeType === 3) {
+        const range = document.createRange?.();
+        if (range) {
+          range.selectNodeContents(node);
+          const rendered = range.getClientRects().length > 0;
+          range.detach?.();
+          if (!rendered) return;
+        }
+        append(node.nodeValue);
+        return;
+      }
+      if (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11) return;
+      const tag = String(node.tagName ?? "").toLowerCase();
+      if (node.nodeType === 1) {
+        if (!isComposedVisible(node) || TEXT_OMIT_TAGS.has(tag) || node.isContentEditable || node.getAttribute?.("contenteditable") === "true") return;
+        if (tag === "br") {
+          lineBreak();
+          return;
+        }
+      }
+      const block = TEXT_BLOCK_TAGS.has(tag);
+      if (block) lineBreak();
+      for (const child of composedChildren(node)) visit(child);
+      if (block) lineBreak();
+    }
+
+    visit(root);
+    const text = output.trim();
+    return { text: text.slice(0, maxChars), truncated: truncated || text.length > maxChars };
+  }
+
   function candidates(kind) {
     const controls = ACTIONABLE_SELECTOR;
     const structure = "main,nav,header,footer,form,table,ul,ol,h1,h2,h3,h4,h5,h6,section,article";
@@ -205,7 +308,7 @@
     const pool = kind === "control" ? candidates("controls") : queryAll("a,button,input,textarea,select,[role],p,span,li,h1,h2,h3,h4,h5,h6,label");
     const matches = [];
     for (const element of pool.slice(0, 3000)) {
-      const haystack = `${accessibleName(element)} ${element.innerText ?? element.textContent ?? ""}`.toLocaleLowerCase();
+      const haystack = `${accessibleName(element)} ${composedVisibleText(element, 2000).text}`.toLocaleLowerCase();
       const isControl = element.matches("a[href],button,input,textarea,select,summary,[role],[contenteditable='true']");
       if (haystack.includes(needle) && (kind !== "control" || isControl) && (kind !== "text" || !isControl)) {
         matches.push(observation(element));
@@ -241,41 +344,34 @@
     return matches;
   }
 
-  function extractArticle() {
-    const candidates = Array.from(document.querySelectorAll("article, main, [role='main'], [itemprop='articleBody']"));
+  function extractArticle(maxChars) {
+    const candidates = queryAll("article, main, [role='main'], [itemprop='articleBody']");
     for (const element of candidates) {
-      const text = String(element.innerText ?? "").trim();
-      if (text.length >= 80) return text;
+      const result = composedVisibleText(element, maxChars);
+      if (result.text.length >= 80) return { ...result, article_found: true };
     }
-    return String((document.body || document.documentElement)?.innerText ?? "").trim();
+    return { text: "", truncated: false, article_found: false };
   }
 
-  function inspectTree(rootElement, maxDepth) {
+  function inspectTree(rootElement, maxDepth, maximum = DOCUMENT_TREE_NODE_LIMIT) {
     const controlRoles = ["button", "link", "textbox", "checkbox", "radio", "combobox", "tab", "menuitem", "option", "slider"];
     let count = 0;
-    function visible(element) {
-      if (!(element instanceof HTMLElement)) return false;
-      if (element.hidden || element.getAttribute?.("aria-hidden") === "true") return false;
-      const style = window.getComputedStyle(element);
-      return style.display !== "none" && style.visibility !== "hidden";
-    }
     function build(element, depth) {
       count += 1;
       const role = roleFor(element);
       const kind = controlRoles.includes(role) ? "control" : /^h[1-6]$/.test(element.tagName.toLowerCase()) ? "heading" : "container";
       const node = { kind, label: shared.bounded(accessibleName(element), 120), children: [] };
-      if (depth < maxDepth && count < 400) {
-        for (const child of element.children) {
-          if (count >= 400) break;
-          if (!visible(child)) continue;
+      if (depth < maxDepth && count < maximum) {
+        for (const child of composedChildren(element)) {
+          if (count >= maximum) break;
+          if (child.nodeType !== 1 || !isComposedVisible(child)) continue;
           node.children.push(build(child, depth + 1));
         }
-        if (element.shadowRoot && count < 400) node.children.push(build(element.shadowRoot, depth + 1));
       }
       return node;
     }
     const tree = build(rootElement, 1);
-    return { tree, truncated: count >= 400 };
+    return { tree, nodes: count, truncated: count >= maximum };
   }
 
   function setNativeValue(element, value) {
@@ -382,8 +478,8 @@
       let satisfied = false;
       if (message.condition === "load_ready") satisfied = document.readyState === "interactive" || document.readyState === "complete";
       if (message.condition === "url_contains") satisfied = location.href.includes(message.value);
-      if (message.condition === "text_present") satisfied = (document.body?.innerText ?? "").includes(message.value);
-      if (message.condition === "text_absent") satisfied = !(document.body?.innerText ?? "").includes(message.value);
+      if (message.condition === "text_present") satisfied = composedVisibleText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(message.value);
+      if (message.condition === "text_absent") satisfied = !composedVisibleText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(message.value);
       if (message.condition === "target_present") satisfied = Boolean(locators.get(message.locator)?.isConnected);
       if (message.condition === "target_absent") satisfied = !locators.get(message.locator)?.isConnected;
       if (satisfied) return { satisfied: true, elapsed_ms: Math.round(performance.now() - started), readiness: document.readyState === "complete" ? "complete" : "interactive" };
@@ -442,16 +538,16 @@
     }
     Promise.resolve().then(async () => {
       if (message.kind === "read_text") {
-        let whole;
-        if (message.locator) whole = String(resolve(message.locator).innerText ?? "");
-        else if (message.mode === "article") whole = extractArticle();
-        else whole = String((document.body || document.documentElement)?.innerText ?? "");
-        return { text: whole.slice(0, message.max_chars), truncated: whole.length > message.max_chars, title: shared.bounded(document.title, 500), url: location.href };
+        const result = message.locator
+          ? composedVisibleText(resolve(message.locator), message.max_chars)
+          : message.mode === "article"
+            ? extractArticle(message.max_chars)
+            : composedVisibleText(document.body || document.documentElement, message.max_chars);
+        return { ...result, title: shared.bounded(document.title, 500), url: location.href };
       }
       if (message.kind === "inspect_tree") {
         const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
-        const built = inspectTree(root, message.max_depth ?? 6);
-        return { tree: built.tree, truncated: built.truncated };
+        return inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
       }
       if (message.kind === "inspect") return { targets: inspect(message.inspect_kind, message.max_items) };
       if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
@@ -460,7 +556,7 @@
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
       if (message.kind === "clear_focused") { const element = requireActionable(deepestActiveElement(), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "drop_files") {
-        const dropTarget = document.elementFromPoint(message.x, message.y);
+        const dropTarget = deepestElementFromPoint(document, message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");
         const transfer = new DataTransfer();
         for (const file of message.files) transfer.items.add(decodeFile(file));
@@ -473,7 +569,7 @@
         // embeds sit, with the border and padding that separate their box from the child
         // viewport's origin. element.src is absolute, so matching survives relative src.
         const boxes = [];
-        for (const element of document.querySelectorAll("iframe,frame")) {
+        for (const element of queryAll("iframe,frame")) {
           const rect = element.getBoundingClientRect();
           const style = window.getComputedStyle(element);
           boxes.push({
@@ -481,10 +577,29 @@
             name: String(element.name ?? ""),
             left: rect.left + element.clientLeft + (parseFloat(style.paddingLeft) || 0),
             top: rect.top + element.clientTop + (parseFloat(style.paddingTop) || 0),
+            width: element.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0),
+            height: element.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0),
             visible: rect.width > 0 && rect.height > 0
           });
         }
         return { boxes };
+      }
+      if (message.kind === "point_context") {
+        const hit = deepestElementFromPoint(document, message.x, message.y);
+        if (!hit) return { subject: null, embed: null };
+        const tag = String(hit.tagName ?? "").toLowerCase();
+        let embed = null;
+        if (tag === "iframe" || tag === "frame") {
+          const rect = hit.getBoundingClientRect();
+          const style = window.getComputedStyle(hit);
+          embed = {
+            src: String(hit.src ?? ""),
+            name: String(hit.name ?? ""),
+            left: rect.left + hit.clientLeft + (parseFloat(style.paddingLeft) || 0),
+            top: rect.top + hit.clientTop + (parseFloat(style.paddingTop) || 0)
+          };
+        }
+        return { subject: actionSubject(closestAcrossBoundaries(hit, ACTIONABLE_SELECTOR) || hit), embed };
       }
       if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }

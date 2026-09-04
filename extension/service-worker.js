@@ -527,36 +527,22 @@ async function dispatch(request) {
     return { outcome: "targets", tab_id: command.tab_id, targets };
   }
   if (command.command === "read_document") {
-    if (command.mode === "article") {
-      const result = await content(command.tab_id, { kind: "read_text", locator: null, mode: command.mode, max_chars: command.max_chars });
-      return { outcome: "text", tab_id: command.tab_id, ...result };
-    }
-    // Visible text is a page-wide fact once embedded frames exist. Sections join in frame
-    // order; title and url stay the top document's identity.
-    const frameIds = await httpFrameIds(command.tab_id);
-    const settled = await Promise.allSettled(frameIds.map((frameId) =>
-      contentIn(command.tab_id, frameId, { kind: "read_text", locator: null, mode: "visible", max_chars: command.max_chars })));
-    const sections = [];
-    let top = null;
-    let anyTruncated = false;
-    settled.forEach((entry, index) => {
-      if (entry.status !== "fulfilled" || !entry.value) return;
-      if (frameIds[index] === frames.TOP_FRAME_ID) top = entry.value;
-      if (typeof entry.value.text === "string" && entry.value.text.trim()) sections.push(entry.value.text);
-      if (entry.value.truncated) anyTruncated = true;
-    });
-    const combined = sections.join("\n\n");
-    return {
-      outcome: "text",
-      tab_id: command.tab_id,
-      text: combined.slice(0, command.max_chars),
-      truncated: anyTruncated || combined.length > command.max_chars,
-      title: shared.bounded(top?.title, 500),
-      url: top?.url ?? ""
-    };
+    return readDocument(command);
   }
   if (command.command === "inspect_tree") {
-    const result = await content(command.tab_id, { kind: "inspect_tree", locator: command.locator, max_depth: command.max_depth });
+    const result = command.locator
+      ? await content(command.tab_id, { kind: "inspect_tree", locator: command.locator, max_depth: command.max_depth, max_nodes: 400 })
+      : await frames.inspectDocument(
+        await httpFrameIds(command.tab_id),
+        command.max_depth,
+        400,
+        (frameId, maxDepth, maxNodes) => contentIn(command.tab_id, frameId, {
+          kind: "inspect_tree",
+          locator: null,
+          max_depth: maxDepth,
+          max_nodes: maxNodes
+        })
+      );
     return { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify(result.tree), truncated: result.truncated };
   }
   if (command.command === "find") {
@@ -1010,6 +996,26 @@ async function httpFrameIds(tabId) {
   }
 }
 
+async function readDocument(command) {
+  const result = await frames.readDocument(
+    await httpFrameIds(command.tab_id),
+    command.mode,
+    command.max_chars,
+    (frameId, mode, maxChars) => contentIn(command.tab_id, frameId, {
+      kind: "read_text",
+      locator: null,
+      mode,
+      max_chars: maxChars
+    })
+  );
+  return {
+    outcome: "text",
+    tab_id: command.tab_id,
+    ...result,
+    title: shared.bounded(result.title, 500)
+  };
+}
+
 async function contentIn(tabId, frameId, message, optional = false) {
   if (!tabId) {
     if (optional) return { presented: false };
@@ -1072,6 +1078,28 @@ async function frameViewportOffset(tabId, frameId) {
   }
   const ancestor = await frameViewportOffset(tabId, frame.parentFrameId);
   return { x: ancestor.x + owners[0].left, y: ancestor.y + owners[0].top };
+}
+
+// Resolves a tab-viewport point through any open shadow roots and embedded documents.
+// CDP still receives the original top-viewport coordinates; the deepest frame-local
+// coordinates are retained for DOM-local effects such as synthetic file drops.
+async function resolvePointContext(tabId, topX, topY) {
+  const navigationFrames = await chrome.webNavigation.getAllFrames({ tabId });
+  let frameId = frames.TOP_FRAME_ID;
+  let localX = topX;
+  let localY = topY;
+  let subject = null;
+  const visited = new Set();
+  while (!visited.has(frameId)) {
+    visited.add(frameId);
+    const context = await contentIn(tabId, frameId, { kind: "point_context", x: localX, y: localY });
+    subject = context.subject ?? subject;
+    if (!context.embed) break;
+    frameId = frames.childFrameForEmbed(navigationFrames, frameId, context.embed.src).frameId;
+    localX -= context.embed.left;
+    localY -= context.embed.top;
+  }
+  return { x: topX, y: topY, frame_id: frameId, local_x: localX, local_y: localY, subject };
 }
 
 // Broadcasts one message to every http(s) frame and ignores individual failures. Used for
@@ -1508,8 +1536,8 @@ async function dragPoints(correlation, command) {
   await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
-    const start = await content(command.tab_id, { kind: "viewport_point", x: command.start.x, y: command.start.y });
-    const end = await content(command.tab_id, { kind: "viewport_point", x: command.end.x, y: command.end.y });
+    const start = await viewportPoint(command.tab_id, command.start);
+    const end = await viewportPoint(command.tab_id, command.end);
     return await dragWithPoints(correlation, command.tab_id, start, end, start.subject, end.subject);
   } finally {
     await detachDebugger(command.tab_id);
@@ -1660,7 +1688,13 @@ async function validateView(tabId, expected) {
 }
 
 async function pointInViewport(tabId, point) {
-  return content(tabId, { kind: "scroll_point", x: point.x, y: point.y });
+  const top = await contentIn(tabId, frames.TOP_FRAME_ID, { kind: "scroll_point", x: point.x, y: point.y });
+  return resolvePointContext(tabId, top.x, top.y);
+}
+
+async function viewportPoint(tabId, point) {
+  const top = await contentIn(tabId, frames.TOP_FRAME_ID, { kind: "viewport_point", x: point.x, y: point.y });
+  return resolvePointContext(tabId, top.x, top.y);
 }
 
 async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
@@ -1745,10 +1779,12 @@ async function dropImageAt(correlation, command) {
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
-    const result = await content(
-      command.tab_id,
-      { kind: "drop_files", x: point.x, y: point.y, files: [command.file] }
-    );
+    const result = await contentIn(command.tab_id, point.frame_id, {
+      kind: "drop_files",
+      x: point.local_x,
+      y: point.local_y,
+      files: [command.file]
+    });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     void tab;

@@ -37,16 +37,24 @@ pub mod adapter_capability {
     pub const SCRIPT_REVISION_REPL: u16 = 2;
     /// Pointer revision adding held-modifier activation and coordinate wheel input.
     pub const POINTER_INPUT_REVISION_PRECISION: u16 = 2;
+    /// Pointer revision composing target and point geometry through open roots and frames.
+    pub const POINTER_INPUT_REVISION_COMPOSED_GEOMETRY: u16 = 3;
     /// Keyboard revision adding focused-control description and typing.
     pub const KEYBOARD_INPUT_REVISION_FOCUSED: u16 = 2;
     /// Semantic-document revision adding typed semantic-selector queries.
     pub const SEMANTIC_DOCUMENT_REVISION_SELECTOR: u16 = 2;
     /// Semantic-document revision adding article reading and document trees.
     pub const SEMANTIC_DOCUMENT_REVISION_ARTICLE: u16 = 3;
+    /// Semantic-document revision adding composed page-wide reading and discovery.
+    pub const SEMANTIC_DOCUMENT_REVISION_COMPOSED_OBSERVATION: u16 = 4;
+    /// Capture revision composing target geometry through shadow-hosted frames.
+    pub const CAPTURE_REVISION_COMPOSED_GEOMETRY: u16 = 2;
     /// Navigation revision adding guarded beforeunload discard.
     pub const NAVIGATION_REVISION_GUARDED: u16 = 2;
     /// Browser-local condition observation.
     pub const OBSERVATION: &str = "observation";
+    /// Observation revision matching text through the rendered composed page.
+    pub const OBSERVATION_REVISION_COMPOSED_TEXT: u16 = 2;
     /// JavaScript dialog observation and handling.
     pub const DIALOGS: &str = "dialogs";
     /// Duplicate suppression, cancellation, and operation disposition.
@@ -63,6 +71,8 @@ pub mod adapter_capability {
     pub const CHUNKED_COMMANDS: &str = "chunked_commands";
     /// Files revision adding coordinate image drops.
     pub const FILES_REVISION_DROP: u16 = 2;
+    /// Files revision routing coordinate drops through composed frame geometry.
+    pub const FILES_REVISION_COMPOSED_DROP: u16 = 3;
     /// End-to-end adapter availability probes independent of browser work.
     pub const ADAPTER_LIVENESS: &str = "adapter_liveness";
     /// Reported browser-level attention, so bootstrap routing never guesses.
@@ -613,7 +623,7 @@ pub enum BrowserCommand {
         kind: String,
         max_items: usize,
     },
-    /// Read one document with article-first or visible-text extraction.
+    /// Read one composed document with visible-text or explicit article extraction.
     ReadDocument {
         tab_id: u64,
         mode: String,
@@ -898,20 +908,40 @@ impl BrowserCommand {
     /// Return the minimum advertised revision of [`Self::required_capability`]
     /// this command accepts. Families without a stated upgrade remain at 1.
     #[must_use]
-    pub const fn required_revision(&self) -> u16 {
+    pub fn required_revision(&self) -> u16 {
         match self {
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
-            Self::DropImageAt { .. } => adapter_capability::FILES_REVISION_DROP,
+            Self::DropImageAt { .. } => adapter_capability::FILES_REVISION_COMPOSED_DROP,
             Self::NavigateDiscardingBeforeUnload { .. } => {
                 adapter_capability::NAVIGATION_REVISION_GUARDED
             }
-            Self::QuerySemantic { .. } => adapter_capability::SEMANTIC_DOCUMENT_REVISION_SELECTOR,
-            Self::ReadDocument { .. } | Self::InspectTree { .. } => {
-                adapter_capability::SEMANTIC_DOCUMENT_REVISION_ARTICLE
+            Self::ReadText { .. }
+            | Self::ReadDocument { .. }
+            | Self::Inspect { .. }
+            | Self::InspectTree { .. }
+            | Self::Find { .. }
+            | Self::DescribeTargets { .. }
+            | Self::QuerySemantic { .. } => {
+                adapter_capability::SEMANTIC_DOCUMENT_REVISION_COMPOSED_OBSERVATION
             }
-            Self::ActivateModified { .. }
+            Self::Screenshot {
+                locator: Some(_), ..
+            } => adapter_capability::CAPTURE_REVISION_COMPOSED_GEOMETRY,
+            Self::ActivatePoint { .. }
+            | Self::ActivateModified { .. }
             | Self::ActivatePointModified { .. }
-            | Self::WheelAt { .. } => adapter_capability::POINTER_INPUT_REVISION_PRECISION,
+            | Self::WheelAt { .. }
+            | Self::Hover { .. }
+            | Self::HoverPoint { .. }
+            | Self::Drag { .. }
+            | Self::DragPoints { .. } => {
+                adapter_capability::POINTER_INPUT_REVISION_COMPOSED_GEOMETRY
+            }
+            Self::Observe { condition, .. }
+                if condition == "text_present" || condition == "text_absent" =>
+            {
+                adapter_capability::OBSERVATION_REVISION_COMPOSED_TEXT
+            }
             Self::DescribeFocused { .. } | Self::TypeFocused { .. } => {
                 adapter_capability::KEYBOARD_INPUT_REVISION_FOCUSED
             }
@@ -1699,6 +1729,81 @@ mod tests {
             BrowserCommand::Navigate {
                 tab_id: 1,
                 url: "https://example.com/".into(),
+            }
+            .required_revision(),
+            1
+        );
+        assert_eq!(
+            BrowserCommand::ReadDocument {
+                tab_id: 1,
+                mode: "visible".into(),
+                max_chars: 8_000,
+            }
+            .required_revision(),
+            adapter_capability::SEMANTIC_DOCUMENT_REVISION_COMPOSED_OBSERVATION
+        );
+        assert_eq!(
+            BrowserCommand::InspectTree {
+                tab_id: 1,
+                locator: None,
+                max_depth: 6,
+            }
+            .required_revision(),
+            adapter_capability::SEMANTIC_DOCUMENT_REVISION_COMPOSED_OBSERVATION
+        );
+        assert_eq!(
+            BrowserCommand::ReadText {
+                tab_id: 1,
+                locator: Some("0:locator_1".into()),
+                max_chars: 500,
+            }
+            .required_revision(),
+            adapter_capability::SEMANTIC_DOCUMENT_REVISION_COMPOSED_OBSERVATION
+        );
+        assert_eq!(
+            BrowserCommand::Observe {
+                tab_id: 1,
+                condition: "text_present".into(),
+                value: Some("ready".into()),
+                locator: None,
+                timeout_ms: 100,
+            }
+            .required_revision(),
+            adapter_capability::OBSERVATION_REVISION_COMPOSED_TEXT
+        );
+        assert_eq!(
+            BrowserCommand::Observe {
+                tab_id: 1,
+                condition: "load_ready".into(),
+                value: None,
+                locator: None,
+                timeout_ms: 100,
+            }
+            .required_revision(),
+            1
+        );
+        assert_eq!(
+            BrowserCommand::Hover {
+                tab_id: 1,
+                locator: "2:locator_1".into(),
+            }
+            .required_revision(),
+            adapter_capability::POINTER_INPUT_REVISION_COMPOSED_GEOMETRY
+        );
+        assert_eq!(
+            BrowserCommand::Screenshot {
+                tab_id: 1,
+                locator: Some("2:locator_1".into()),
+                full_page: false,
+            }
+            .required_revision(),
+            adapter_capability::CAPTURE_REVISION_COMPOSED_GEOMETRY
+        );
+        assert_eq!(
+            BrowserCommand::Screenshot {
+                tab_id: 1,
+                locator: None,
+                full_page: true,
             }
             .required_revision(),
             1

@@ -54,6 +54,108 @@
     return merged;
   }
 
+  // Folds frame-local visible text into one bounded page result. The caller may stop
+  // collecting once the ceiling is full; `skipped` preserves the truthful truncation bit.
+  function mergeTextSections(perFrame, maximum, skipped = false) {
+    let text = "";
+    let truncated = Boolean(skipped);
+    const frameIds = Object.keys(perFrame).map(Number).sort((left, right) => left - right);
+    for (const frameId of frameIds) {
+      const section = perFrame[frameId] ?? {};
+      const value = String(section.text ?? "").trim();
+      truncated = truncated || Boolean(section.truncated);
+      if (!value) continue;
+      const separator = text ? "\n\n" : "";
+      const remaining = maximum - text.length;
+      if (separator.length >= remaining) {
+        truncated = true;
+        break;
+      }
+      const piece = `${separator}${value}`;
+      if (piece.length > remaining) {
+        text += piece.slice(0, Math.max(0, remaining));
+        truncated = true;
+        break;
+      }
+      text += piece;
+    }
+    return { text, truncated };
+  }
+
+  // Runs one negotiated document read through an injected frame reader. Article mode is
+  // explicitly top-first; when no useful article exists, the same globally bounded visible
+  // read used by the default path becomes its fallback.
+  async function readDocument(frameIds, mode, maximum, readFrame) {
+    const orderedFrameIds = Array.from(new Set([TOP_FRAME_ID, ...frameIds])).sort((left, right) => left - right);
+    let knownTop = null;
+    if (mode === "article") {
+      try {
+        knownTop = await readFrame(TOP_FRAME_ID, "article", maximum);
+      } catch (_error) { /* the visible fallback reports whatever document remains available */ }
+      if (knownTop?.article_found) {
+        const { article_found: _articleFound, ...article } = knownTop;
+        return article;
+      }
+    }
+
+    const perFrame = {};
+    let top = knownTop;
+    let skipped = false;
+    for (let index = 0; index < orderedFrameIds.length; index += 1) {
+      const current = mergeTextSections(perFrame, maximum);
+      const separatorChars = current.text ? 2 : 0;
+      const available = Math.max(1, maximum - current.text.length - separatorChars);
+      const frameId = orderedFrameIds[index];
+      try {
+        const result = await readFrame(frameId, "visible", available);
+        perFrame[frameId] = result;
+        if (frameId === TOP_FRAME_ID) top = result;
+        if (mergeTextSections(perFrame, maximum).truncated) {
+          skipped = index + 1 < orderedFrameIds.length;
+          break;
+        }
+      } catch (_error) { /* a navigating or absent child frame contributes no text */ }
+    }
+    return {
+      ...mergeTextSections(perFrame, maximum, skipped),
+      title: String(top?.title ?? ""),
+      url: String(top?.url ?? "")
+    };
+  }
+
+  // Folds frame-local composed trees into one bounded page tree. The top document stays
+  // the root when available; each embedded document becomes one child in stable frame
+  // order. The caller supplies the remaining node budget to each frame, so the 400-node
+  // ceiling is page-wide rather than multiplied by the number of embeds.
+  async function inspectDocument(frameIds, maxDepth, maximum, readFrame) {
+    const orderedFrameIds = Array.from(new Set([TOP_FRAME_ID, ...frameIds])).sort((left, right) => left - right);
+    let tree = null;
+    let nodes = 0;
+    let truncated = false;
+    for (let index = 0; index < orderedFrameIds.length; index += 1) {
+      if (nodes >= maximum) {
+        truncated = true;
+        break;
+      }
+      const frameId = orderedFrameIds[index];
+      if (tree && maxDepth <= 1) {
+        truncated = true;
+        break;
+      }
+      try {
+        const localDepth = tree ? Math.max(1, maxDepth - 1) : maxDepth;
+        const result = await readFrame(frameId, localDepth, maximum - nodes);
+        if (!result?.tree) continue;
+        if (!tree) tree = result.tree;
+        else tree.children = [...(tree.children ?? []), result.tree];
+        nodes += Number(result.nodes ?? 0);
+        truncated = truncated || Boolean(result.truncated);
+        if (truncated && index + 1 < orderedFrameIds.length) break;
+      } catch (_error) { /* a navigating or absent frame contributes no subtree */ }
+    }
+    return { tree, nodes, truncated };
+  }
+
   // Groups locator-bearing request fields by owning frame, preserving first-appearance
   // order of the frames and, inside a group, the caller's field order. Throws on an
   // unscoped handle rather than silently routing it to the top frame.
@@ -84,6 +186,15 @@
     }
   }
 
+  function childFrameForEmbed(navigationFrames, parentFrameId, embedSrc) {
+    const children = (navigationFrames ?? []).filter((entry) =>
+      entry.parentFrameId === parentFrameId && embedMatches(embedSrc, entry.url)
+    );
+    if (children.length === 0) throw new Error("no child frame matches the embed at the page point");
+    if (children.length > 1) throw new Error("several child frames match the embed at the page point; refusing to guess");
+    return children[0];
+  }
+
   return Object.freeze({
     TOP_FRAME_ID,
     scopedLocator,
@@ -91,7 +202,11 @@
     localOf,
     scopeTargets,
     mergeTargets,
+    mergeTextSections,
+    readDocument,
+    inspectDocument,
     groupLocators,
-    embedMatches
+    embedMatches,
+    childFrameForEmbed
   });
 });

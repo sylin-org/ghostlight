@@ -384,13 +384,34 @@ pub struct ReadPage {
     pub tab: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
-    /// Article-first (default) or visible-text document reading; target reads ignore it.
+    /// Full-page visible text (default) or article extraction; target reads ignore it.
     #[serde(default)]
-    pub mode: Option<String>,
+    pub mode: Option<ReadMode>,
     #[serde(default = "default_max_chars")]
     pub max_chars: usize,
     #[serde(flatten)]
     pub restrictions: RequestRestrictions,
+}
+
+/// The closed document-reading strategy.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadMode {
+    /// Read the composed visible page across open shadow roots and embedded frames.
+    Visible,
+    /// Prefer the top document's article and fall back to the composed visible page.
+    Article,
+}
+
+impl ReadMode {
+    /// Return the stable browser-wire name for this mode.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Visible => "visible",
+            Self::Article => "article",
+        }
+    }
 }
 
 /// Input for semantic inspection.
@@ -962,13 +983,10 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             |value: &ReadPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_optional_handle(value.target.as_deref(), "target_")?;
-                if let Some(mode) = &value.mode {
-                    if value.target.is_some() {
-                        return Err(LanguageError::Invalid(
-                            "mode cannot be combined with target".into(),
-                        ));
-                    }
-                    validate_choice(mode, &["article", "visible"], "mode")?;
+                if value.mode.is_some() && value.target.is_some() {
+                    return Err(LanguageError::Invalid(
+                        "mode cannot be combined with target".into(),
+                    ));
                 }
                 validate_range(value.max_chars, 500, 50_000, "max_chars")?;
                 validate_restrictions(&value.restrictions)
@@ -2483,7 +2501,7 @@ fn default_diagnostic_limit() -> usize {
 mod tests {
     use serde_json::json;
 
-    use super::{catalog, decode, LanguageError, Operation, ReusePolicy};
+    use super::{catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy};
 
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
@@ -2513,6 +2531,13 @@ mod tests {
             panic!("wrong operation")
         };
         assert_eq!(read.max_chars, 8_000);
+        assert_eq!(read.mode, None);
+        let Operation::ReadPage(article) =
+            decode("browser_read", json!({"mode":"article"})).unwrap()
+        else {
+            panic!("wrong operation")
+        };
+        assert_eq!(article.mode, Some(ReadMode::Article));
         let Operation::InspectPage(inspect) = decode("browser_inspect", json!({})).unwrap() else {
             panic!("wrong operation")
         };

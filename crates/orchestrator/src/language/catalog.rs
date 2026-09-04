@@ -44,7 +44,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_read",
             "Read page",
-            "Read bounded useful prose from a page or one target. When the goal is a target_ handle to act on, use browser_inspect or browser_find instead.",
+            "Read bounded visible text from the full composed page by default, including open shadow roots and embedded frames, or read one target. Article extraction is explicit. When the goal is a target_ handle to act on, use browser_inspect or browser_find instead.",
             read_schema(),
             Hints::browser_read(),
         ),
@@ -472,9 +472,9 @@ fn read_schema() -> Value {
                 (
                     "mode",
                     enumeration(
-                        &["article", "visible"],
+                        &["visible", "article"],
                         None,
-                        "Document reading mode; article-first is the default and falls back to visible text. Ignored with target.",
+                        "Document reading mode; visible full-page reading is the default. Explicit article mode prefers the top document's article and falls back to the full page. Ignored with target.",
                     ),
                 ),
                 (

@@ -167,12 +167,15 @@ action, requested dimensions or zoom, and observed geometry.
 
 ### `browser_read`
 
-Read useful bounded prose from a page or target. Use `browser_inspect` or `browser_find` when an
-action target is needed. Shortest call: `{}`.
+Read useful bounded visible text from the full composed page or one target. A full-page read
+includes visible top-document text, open shadow trees, and http(s) embedded frames in stable frame
+order. Closed shadow roots, hidden content, and editable values remain absent. Use
+`browser_inspect` or `browser_find` when an action target is needed. Shortest call: `{}`.
 
-Inputs: optional `tab`; optional `target`; optional `mode` of `article` or `visible` (article text
-first, falling back to visible text; ignored with `target`); optional `max_chars` from 500 to 50000,
-default 8000; optional restrictions. Capability: `read`.
+Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
+the default; explicit `article` prefers a useful article in the top document and falls back to the
+same full-page visible read; ignored with `target`); optional `max_chars` from 500 to 50000, default
+8000; optional restrictions. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 `document_generation`.
@@ -187,14 +190,18 @@ optional `max_items` from 1 to 200, default 80; optional restrictions. Capabilit
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, semantic role,
 bounded accessible name, state, and credential-class flag. Selectors are not exposed. A
-`document` scope returns one bounded structure-only tree, records it under a snapshot handle that
-is superseded per tab, and reports a structural diff against the current prior snapshot when one
-exists. Editable values are never returned; hidden content is excluded.
+`document` scope returns one bounded structure-only composed tree, records it under a snapshot
+handle that is superseded per tab, and reports a structural diff against the current prior
+snapshot when one exists. Without a root, the tree includes open shadow roots, assigned slots, and
+http(s) embedded frames in stable order under one 400-node ceiling. A root limits it to that
+target's composed subtree. Editable values, hidden content, closed roots, and frame identity are
+never returned.
 
 ### `browser_find`
 
-Find current semantic targets by visible or accessible text. Use it when the desired label or text
-is known. Shortest call: `{"text":"Submit"}`.
+Find current semantic targets by visible or accessible text across the composed page, including
+open shadow roots and http(s) embedded frames. Use it when the desired label or text is known.
+Shortest call: `{"text":"Submit"}`.
 
 Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,
 default `any`; optional `max_results` from 1 to 50, default 20; optional restrictions. Capability:
@@ -312,6 +319,9 @@ Inputs use one condition-specific branch: `load_ready` accepts neither value nor
 live page until a control matching it exists; `duration` requires a whole millisecond `value`
 from 0 to 10000 and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`, and
 restrictions. Capability: `read`.
+
+Text conditions match composed visible text across the top document, open shadow roots, assigned
+slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 
