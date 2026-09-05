@@ -1,5 +1,9 @@
 # 1.3.3 candidate custody -- 2026-09-04
 
+Superseded 2026-09-05 by the [1.3.4 publication](candidate-custody-2026-09-05.md), which includes
+the later local-destination fix. The 1.3.3 tag and private draft retain their original artifacts.
+The record below describes the September 4 hold.
+
 Status: HELD. The 1.3.3 service and 1.1.1 adapter candidate was assembled, attested, downloaded,
 and verified from two independent local copies. Service publication waits for Chrome adapter 1.1.1
 to clear staged review.

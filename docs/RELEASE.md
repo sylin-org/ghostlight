@@ -80,7 +80,7 @@ node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
 pwsh -NoProfile -File scripts/check-public-surfaces.ps1
-pwsh -NoProfile -File scripts/check-0.8-recovery.ps1
+pwsh -NoProfile -File scripts/check-repository-integrity.ps1
 pwsh -NoProfile -File scripts/package-extension.ps1
 ```
 
@@ -130,17 +130,17 @@ one locked workspace build. It stages the two connectors as Tauri sidecars,
 inspects every native package for the exact three-executable sibling
 set, builds deterministic portable archives, prepares the checksum-bound npm tarball and
 self-contained MCPB, builds the deterministic extension archive and one pinned CycloneDX SBOM for
-each of the four workspace components, then assembles one 17-artifact candidate unit:
+each of the five workspace components, then assembles one 18-artifact candidate unit:
 
 - two native packages;
 - two portable archives;
 - six versioned raw binaries;
 - the Chromium adapter;
-- four component SBOMs;
+- five component SBOMs, including the audited Windows peer crate;
 - the npm launcher tarball; and
 - the Claude Desktop MCPB.
 
-`release-candidate.json` binds 17 normalized artifact coordinates, exact byte lengths, SHA-256
+`release-candidate.json` binds 18 normalized artifact coordinates, exact byte lengths, SHA-256
 values, the version, the full source revision, and release status. `SHA256SUMS` is independently
 recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
 attestations for every file in the candidate unit. The workflow uploads the unit for fourteen days.

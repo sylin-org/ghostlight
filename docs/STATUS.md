@@ -1,20 +1,32 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-05 (1.3.4 publication is authorized and in preparation; adapter 1.1.1 has
-cleared review and is staged).
+Last updated: 2026-09-05 (service 1.3.4 and Chrome adapter 1.1.1 are published; public channels
+and the website agree).
 
-## 1.3.4 publication in preparation (2026-09-05)
+## 1.3.4 published (2026-09-05)
 
-The owner authorized changelog, commit, push, and publication of the local-destination fix.
-Service 1.3.4 includes that fix and the composed-page and integration-repair work from the
-unpublished 1.3.3 candidate. The existing `v1.3.3` tag and draft retain their original artifacts;
-1.3.4 gets a new frozen source and candidate. Its [release notes](release/notes-v1.3.4.md) cover
-the complete change from public 1.3.2.
+Ghostlight 1.3.4 is public on [GitHub](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.4),
+npm (`ghostlight@1.3.4`, also `latest`), and the MCP Registry (`org.sylin/ghostlight 1.3.4`). Chrome
+adapter 1.1.1 is published and independently observable in the public update feed. The website
+refresh is live at commit `a2d64732f5eeb2fa1467ce5e135abce19523faf5` (asset revision
+`a2d64732f5ee`). `scripts/check-public-surfaces.ps1 -Online` reports all five channels in agreement.
 
-Chrome API V2 reports adapter 1.1.1 `STAGED`, with the existing exact ZIP SHA-256
-`1a955726153884243e86e7845b09a783c97ffe6a3f660628f97f43550bd2d2e7`. No adapter bytes change for
-1.3.4; its compatibility row extends through that service version. GitHub and npm publication
-access are valid. Publication will use the existing candidate and channel verifiers.
+Candidate run [33991341425](https://github.com/sylin-org/ghostlight/actions/runs/33991341425)
+passed all seven jobs at frozen source `768ee7383da1988a2d6b0217812e23d3fe580680`. Both custody
+copies passed the manifest, checksum, and provenance checks. GitHub's publisher verified all 20
+release files and re-downloaded the draft before publication. The public npm tarball matches
+candidate SHA-256 `21334523423ff22a05b6f4468d86b46eae98119ae2f8cbf0b37fc59b67a18817`.
+The public launcher downloaded and verified all three Windows binaries, and its 1.3.4
+`doctor --json` returned with all siblings ready. It preserved the browser registration owned
+by the development tree.
+
+Service 1.3.4 includes the local-destination fix and the composed-page and integration-repair work
+from the unpublished 1.3.3 candidate. Its [release notes](release/notes-v1.3.4.md) cover the complete
+change from public 1.3.2. The existing `v1.3.3` tag and draft retain their original artifacts.
+Adapter 1.1.1 is unchanged; its compatibility row extends through service 1.3.4. The public CRX's
+33 non-manifest payload files match the candidate, and its manifest retains every candidate field
+with Chrome's added update URL. See the [custody and publication record](testing/candidate-custody-2026-09-05.md)
+and [source preflight and live localhost proof](testing/release-preflight-2026-09-05.md).
 
 ## Local browser destinations follow policy (ADR-0155, 2026-09-05)
 
@@ -43,10 +55,13 @@ form and screenshot journey. The browser's preserve-tabs setting retained the fi
 expected. The existing MCP connection also returned the new `policy_explain` projection with no
 configured policy and only the non-HTTP(S) scheme ceiling.
 
-The frozen 1.3.3 candidate at `fe5b9de8` remains unchanged and does not contain this fix. No public
-release or store artifact was changed.
+The frozen 1.3.3 candidate at `fe5b9de8` remains unchanged and does not contain this fix. The fix
+was subsequently published in 1.3.4, as recorded above.
 
 ## 1.3.3 service and 1.1.1 adapter candidate held (2026-09-04)
+
+Superseded on 2026-09-05 by the 1.3.4 publication above. The following paragraphs record the
+September 4 hold; the old tag and draft remain unchanged.
 
 Release candidate run
 [33912620937](https://github.com/sylin-org/ghostlight/actions/runs/33912620937) is green at frozen

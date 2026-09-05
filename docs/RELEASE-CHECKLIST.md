@@ -179,8 +179,9 @@ Linux.
 
 Evidence: [2026-08-24 frozen-revision preflight, Windows half](testing/release-preflight-2026-08-24.md),
 [2026-08-25 frozen-source CachyOS verification](testing/frozen-source-cachyos-verification-2026-08-25.md),
-[2026-08-25 release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md), and the
-[2026-09-04 1.3.3/1.1.1 preflight](testing/release-preflight-2026-09-04.md).
+[2026-08-25 release-tooling repairs](testing/release-tooling-repairs-2026-08-25.md), the
+[2026-09-04 1.3.3/1.1.1 preflight](testing/release-preflight-2026-09-04.md), and the
+[2026-09-05 1.3.4/1.1.1 preflight](testing/release-preflight-2026-09-05.md).
 
 G1 is closed on both operating systems at frozen revision `e7d8986b`. The three runner defects the
 Linux lane surfaced were repaired as release tooling (outside the freeze's product paths) and
@@ -230,6 +231,11 @@ case it must be replaced the same way. It does not close G1, G2, or G3 for an un
   machine-local notes, never here.
 
 Evidence: [2026-08-25 candidate custody](testing/candidate-custody-2026-08-25.md) -- build run 32846030216 at revision 994b6c85, superseded; [2026-08-26 candidate custody](testing/candidate-custody-2026-08-26.md) -- build run 33020313866 at revision `b2c27993a223c220f8828736b125676ae6f9d027`, two verified local copies, provenance green, and the candidate extension ZIP byte-identical to the approved store revision `3570494f`.; [2026-08-31 candidate custody](testing/candidate-custody-2026-08-31.md) -- build run 33355735166 at revision `0d7b7759`, published; [2026-09-02 candidate custody](testing/candidate-custody-2026-09-02.md) -- build run 33643387463 at revision `45639541`, two verified local copies, provenance green, published 2026-09-02; [2026-09-04 candidate custody](testing/candidate-custody-2026-09-04.md) -- build run 33912620937 at revision `fe5b9de8`, two verified byte-identical local copies, provenance green, held pending adapter review
+
+Current patch evidence: [2026-09-05 1.3.4 custody and publication](testing/candidate-custody-2026-09-05.md)
+records run `33991341425` at frozen source `768ee7383da1988a2d6b0217812e23d3fe580680`, two verified
+copies, all 20 provenance-bound release files, and observed publication of service 1.3.4 and
+Chrome adapter 1.1.1.
 
 ### G3. Place the matching adapter where the live lanes can install it
 

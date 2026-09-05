@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.4] - 2026-09-05
 
+Published as GitHub release `v1.3.4`, npm package `ghostlight@1.3.4`, and MCP Registry version
+`org.sylin/ghostlight 1.3.4`. Chrome adapter 1.1.1 is public in the Chrome Web Store.
+
 This release also includes the composed-page behavior and integration repair documented under
 1.3.3, whose candidate remained unpublished. Chrome adapter 1.1.1 is unchanged and covers both
 service versions.
