@@ -1,7 +1,20 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-05 (local HTTP(S) destinations now follow policy; the held 1.3.3 candidate
-predates this change and adapter review is pending before publication).
+Last updated: 2026-09-05 (1.3.4 publication is authorized and in preparation; adapter 1.1.1 has
+cleared review and is staged).
+
+## 1.3.4 publication in preparation (2026-09-05)
+
+The owner authorized changelog, commit, push, and publication of the local-destination fix.
+Service 1.3.4 includes that fix and the composed-page and integration-repair work from the
+unpublished 1.3.3 candidate. The existing `v1.3.3` tag and draft retain their original artifacts;
+1.3.4 gets a new frozen source and candidate. Its [release notes](release/notes-v1.3.4.md) cover
+the complete change from public 1.3.2.
+
+Chrome API V2 reports adapter 1.1.1 `STAGED`, with the existing exact ZIP SHA-256
+`1a955726153884243e86e7845b09a783c97ffe6a3f660628f97f43550bd2d2e7`. No adapter bytes change for
+1.3.4; its compatibility row extends through that service version. GitHub and npm publication
+access are valid. Publication will use the existing candidate and channel verifiers.
 
 ## Local browser destinations follow policy (ADR-0155, 2026-09-05)
 

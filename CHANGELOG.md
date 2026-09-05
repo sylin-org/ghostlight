@@ -1,4 +1,27 @@
+# Changelog
+
+All notable changes to Ghostlight are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.3.4] - 2026-09-05
+
+This release also includes the composed-page behavior and integration repair documented under
+1.3.3, whose candidate remained unpublished. Chrome adapter 1.1.1 is unchanged and covers both
+service versions.
+
+### Fixed
+
+- **Local browser destinations follow policy (ADR-0155).** Removed the built-in localhost,
+  loopback, and link-local restrictions, including IPv4-embedded IPv6 addresses. Agents can test
+  local HTTP(S) development servers without a special setting or exception. Host grants, RAWX
+  capability checks, request restrictions, observe/enforce behavior, and policy-defined
+  never-touch destinations apply normally. Non-HTTP(S) schemes retain their existing boundary.
+
 ## [1.3.3] - 2026-09-04
+
+Unpublished candidate, superseded by 1.3.4. Its frozen tag and draft retain the original artifacts.
 
 The Chrome adapter advances to 1.1.1 for the composed-page capability revisions. Adapter 1.1.1
 covers service 1.3.3; the earlier adapters retain their existing compatibility through service
@@ -36,13 +59,6 @@ covers service 1.3.3; the earlier adapters retain their existing compatibility t
   one, and an elected directory without an authority fails loudly instead of letting a foreign
   binary spawn into the slot. Routing writes and adopts no browser registration; without the
   override, per-installation election beside each executable is unchanged.
-
-# Changelog
-
-All notable changes to Ghostlight are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.3.1] - 2026-08-31
 
