@@ -198,7 +198,7 @@ async function runAdapter(peer) {
     let result;
     if (command.command === "present") result = { outcome: "presented", rendered: true };
     else if (command.command === "open_tab") {
-      tab = { ...tab, title: "Example Domain", url: "https://example.com/", readiness: "complete" };
+      tab = { ...tab, title: "Example Domain", url: new URL(command.url).href, readiness: "complete" };
       result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
     } else if (command.command === "read_text") {
       result = { outcome: "text", tab_id: tab.tab_id, text: "Example Domain", truncated: false, title: tab.title, url: tab.url };
@@ -329,7 +329,7 @@ async function runAdapter(peer) {
           : "Example Domain",
         truncated: false,
         title: "Example Domain",
-        url: "https://example.com/"
+        url: tab.url
       };
     } else if (command.command === "inspect_tree") {
       result = { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify({ kind: "container", label: "Example Domain", children: [{ kind: "heading", label: "Example Domain", children: [] }] }), truncated: false };
@@ -411,7 +411,7 @@ try {
     version: "1",
     grants: [{
       id: "ordinary-web",
-      hosts: { allow: ["*"] },
+      hosts: { allow: ["*"], deny: ["blocked.localhost"] },
       allowed: ["read", "action", "write", "execute"]
     }],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
@@ -484,12 +484,28 @@ try {
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
 
-  const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
+  // Local destinations use the same policy path as remote sites, across the real executables.
+  const deniedLocal = structured(await mcp.request("tools/call", {
+    name: "browser_navigate", arguments: { url: "http://blocked.localhost:3000/" }
+  }));
+  assert.equal(deniedLocal.status, "blocked");
+  assert.equal(deniedLocal.facts.reason, "host_denied");
+  assert.equal(physicalCommands.includes("open_tab"), false);
+
+  const explained = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
+  assert.deepEqual(explained.facts.ceilings, ["Anything that is not an ordinary http or https address."]);
+
+  const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "http://localhost:3000/" } }));
   assert.equal(opened.status, "succeeded");
   const handle = opened.facts.tab;
   assert.match(handle, /^tab_/);
   assert.equal(physicalCommands.filter((command) => command === "open_tab").length, 1);
   assert.equal(physicalCommands.includes("create_tab"), false);
+  const localRead = structured(await mcp.request("tools/call", {
+    name: "browser_read", arguments: { tab: handle }
+  }));
+  assert.equal(localRead.status, "succeeded");
+  assert.equal(localRead.summary, "Read 2 words from localhost.");
 
   const observedDispatch = native.waitFor(
     (frame) => frame.kind === "request" && frame.request.command.command === "observe",

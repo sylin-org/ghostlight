@@ -177,9 +177,9 @@ the extension; ADR-0109 places the GIF encode and its delivery there too.
 
 ### Governance
 
-Owns authority loading, immutable snapshots, request restriction, capabilities, protected-host
-ceiling, admission, landing decisions, runtime controls, holds, and content-minimized audit intent.
-Operation handlers see only the governance facade.
+Owns authority loading, immutable snapshots, request restriction, capabilities, scheme boundaries,
+policy-protected hosts, admission, landing decisions, runtime controls, holds, and content-minimized
+audit intent. Operation handlers see only the governance facade.
 
 ### Browser
 
@@ -345,9 +345,10 @@ decision record.
 
 ## Governance
 
-No policy configured means all four independent RAWX capabilities are open. Browser-internal
-schemes, extension management pages, loopback addresses, and link-local metadata endpoints remain
-an independent protected ceiling.
+No policy configured means all four independent RAWX capabilities are open for HTTP(S), including
+localhost, loopback, and link-local destinations. Host restrictions belong to policy
+(ADR-0155). Non-HTTP(S) schemes, including browser-internal and extension pages, remain outside
+the browser automation contract.
 
 `GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-3 local policy. Ordered grants combine
 host allow and deny patterns with complete independent RAWX sets. Exact hosts outrank longer

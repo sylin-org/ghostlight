@@ -135,10 +135,10 @@ procurement evidence.
 
 ## What it will and will not do
 
-With no policy configured, ordinary remote HTTP(S) browsing is allowed. Loopback addresses,
-link-local metadata endpoints, non-HTTP schemes, credential fields, and stale handles stay
-protected regardless. Optional local and managed policy layers can only take capability away, and
-per-request restrictions narrow things further. Nothing hands access back.
+With no policy configured, HTTP(S) browsing is allowed, including localhost, loopback, and
+link-local destinations. Host restrictions belong to policy. Non-HTTP schemes, credential fields,
+and stale handles stay protected. Optional local and managed policy layers can only take
+capability away, and per-request restrictions narrow things further. Nothing hands access back.
 
 Credential-class fields come to you. Ghostlight does not type secrets.
 

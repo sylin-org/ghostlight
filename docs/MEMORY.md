@@ -34,6 +34,9 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **Host restrictions belong to policy.** The owner removed the built-in localhost, loopback, and
+  link-local ban. All-open includes local HTTP(S) browser work; do not reintroduce a hard-coded
+  address block, a local-access toggle, or an exception flow (ADR-0155).
 - **Refactor authority is standing.** When work touches a weird-shaped seam, the owner has
   authorized refactoring toward a lean domain-driven monolith: fewest but most meaningful moving
   parts, each kind of complexity isolated at exactly one seam. Capture facts where they are

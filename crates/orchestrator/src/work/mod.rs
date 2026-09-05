@@ -3300,7 +3300,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_record",
-            json!({"action":"save","recording":"recording_one"}),
+            json!({"action":"save","recording":"recording_one","restrict_hosts":["example.com"]}),
             None,
             &CancellationToken::default(),
         );
@@ -3666,16 +3666,13 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"http://127.0.0.1/private/record-42?token=secret#detail"}),
+            json!({"url":"http://127.0.0.1/private/record-42?token=secret#detail","restrict_hosts":["example.com"]}),
             None,
             &CancellationToken::default(),
         );
 
         assert_eq!(result.status, Status::Blocked);
-        assert_eq!(
-            result.summary,
-            "Blocked: 127.0.0.1 is protected and is never automated."
-        );
+        assert_eq!(result.summary, "Blocked: 127.0.0.1 is not an allowed host.");
         assert!(browser.calls().is_empty());
 
         let records = audit.0.lock().unwrap();
@@ -4101,7 +4098,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com"}),
+            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
             None,
             &CancellationToken::default(),
         );
@@ -4134,7 +4131,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com"}),
+            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
             None,
             &CancellationToken::default(),
         );
@@ -4164,7 +4161,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com"}),
+            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
             None,
             &CancellationToken::default(),
         );

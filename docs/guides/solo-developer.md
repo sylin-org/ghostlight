@@ -27,8 +27,9 @@ instead of changing your active personal window.
   happened, check health, and see anything that was blocked.
 - Ghostlight never enters credentials. A credential-class target becomes a visible handoff to you.
 
-No policy is required for ordinary remote browsing. Loopback and link-local destinations remain
-protected. If you want narrower personal boundaries, create the small schema-3 file documented in
+No policy is required for HTTP(S) browsing, including a development server on localhost. Local
+and remote destinations use the same policy rules. If you want narrower personal boundaries,
+create the small schema-3 file documented in
 [`governance-configuration.md`](governance-configuration.md) and set `GHOSTLIGHT_POLICY_FILE`
 before launching Ghostlight.
 

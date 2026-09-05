@@ -169,6 +169,8 @@ history live here.
 | [0153](0153-composed-frame-geometry.md) | Point and target geometry follows the composed page: shadow-aware embed boxes, recursive point routing and deepest subjects, child-frame drops, and independent pointer, capture, and file revisions | Accepted (amends [0138](0138-frame-transparent-semantic-layer.md) Decision 6 and [0139](0139-shadow-complete-interaction.md) Decision 2) |
 | [0154](0154-explicit-foreign-harness-entry-fix.md) | Explicit Fix may replace one parseable foreign harness entry: a confirmed per-target action preserves siblings, creates the existing backup, re-checks eligibility at write time, and never joins automatic or aggregate setup | Accepted (amends [0135](0135-blocked-target-evidence.md) Decision 3 and [0146](0146-aggregate-detected-harness-setup.md) Decision 2; builds on [0102](0102-integrated-desktop-workbench.md)/[0117](0117-effective-harness-config-resolution.md)/[0125](0125-recognizable-plural-linux-harness-integrations.md)) |
 
+| [0155](0155-policy-owned-local-destinations.md) | Local browser destinations follow policy: remove the built-in localhost, loopback, and link-local bans; all-open includes local HTTP(S), and existing host authority owns restrictions | Accepted (amends [0121](0121-restore-rawx-policy-and-managed-fetch.md)'s protected-resource scope and [0122](0122-readable-policy-destination-and-authored-user-layer.md) Decision 2) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

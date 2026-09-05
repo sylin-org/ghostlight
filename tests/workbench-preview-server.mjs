@@ -183,9 +183,7 @@ const policyView = {
     }
   ],
   ceilings: [
-    "Anything that is not an ordinary http or https address.",
-    "localhost and any name ending in .localhost.",
-    "Loopback and link-local addresses."
+    "Anything that is not an ordinary http or https address."
   ],
   user_layer: {
     source: "workbench",

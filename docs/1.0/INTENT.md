@@ -175,7 +175,8 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 ## Safety and truth
 
-- No configured policy leaves ordinary browser work open, subject to protected-host ceilings.
+- No configured policy leaves HTTP(S) browser work open, including localhost, loopback, and
+  link-local destinations. Host restrictions belong to policy.
 - Configured schema-3 grants admit complete independent RAWX sets; every authority tier and
   request restriction can only tighten them.
 - Started work uses one immutable authority snapshot. Request restrictions only tighten it.

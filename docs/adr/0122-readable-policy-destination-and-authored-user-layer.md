@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-14
+- Decision 2's local-address ceilings superseded by [ADR-0155](0155-policy-owned-local-destinations.md).
 - Amends: ADR-0102's amended destination list (A3), ADR-0121 Decision 2 (an additive manifest block)
   and its registered setting list
 - Builds on: ADR-0013, ADR-0060, ADR-0079, ADR-0102, ADR-0103, ADR-0119, ADR-0121

@@ -92,8 +92,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Governance gates
 
-1. With no active policy, ordinary remote HTTP(S) browser work is permitted.
-2. Protected schemes, loopback, and link-local metadata remain denied without policy.
+1. With no active policy, local and remote HTTP(S) browser work is permitted, including localhost,
+   its subdomains, loopback, link-local metadata, and IPv4-embedded IPv6 destinations.
+2. Non-HTTP(S) schemes remain denied. Local destinations follow authored host and capability
+   rules, request restrictions, observe/enforce modes, and policy-defined never-touch hosts.
 3. RAWX is independent: each operation uses its complete set, and sequence steps are admitted and
    audited separately. Empty wrapper or local-window operations do not invent authority.
 4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant

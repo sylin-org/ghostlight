@@ -19,8 +19,9 @@ automatically.
 
 Read, Action, Write, and Execute are independent capabilities. Ordered schema-3 grants bind a
 complete requirement set to exact, suffix-wildcard, or universal host patterns. Managed policy,
-local policy, and request restrictions intersect. Protected loopback and link-local destinations
-and configured sacred domains remain hard ceilings.
+local policy, and request restrictions intersect. Localhost, loopback, and link-local HTTP(S)
+destinations follow those policies; they have no built-in address restriction. Non-HTTP(S)
+schemes and configured sacred domains remain hard ceilings.
 
 Observe mode records ordinary would-deny decisions without blocking them; enforce mode blocks.
 Every enforced policy denial receives deterministic attribution to authority, tier, grant, and
@@ -69,4 +70,5 @@ audit of Ghostlight will be published in full, including findings.
 
 See [data-flows.md](data-flows.md) and [supply-chain.md](supply-chain.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org
+Last reviewed: 2026-09-05 against the current source; local-destination policy follows ADR-0155.
+Contact: hello@sylin.org

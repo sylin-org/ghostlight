@@ -1,8 +1,9 @@
 # Configure Ghostlight 1.0 governance
 
 Ghostlight needs no policy for personal use. With no policy configured, ordinary HTTP(S) browser
-work is open. Runtime controls, credential handoff, stale-handle checks, browser-local interlocks,
-and protected loopback or link-local destinations still apply.
+work is open, including localhost, loopback, and link-local destinations. Runtime controls,
+credential handoff, stale-handle checks, browser-local interlocks, and the HTTP(S)-only boundary
+still apply. Host restrictions belong to policy.
 
 A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
 intersect. No lower layer can restore authority removed above it.
@@ -232,9 +233,14 @@ open a direct syslog or HTTP delivery channel. See [`siem-integration.md`](siem-
 
 ## Permanent ceilings
 
-Policy never grants non-HTTP(S) schemes, localhost or its subdomains, loopback addresses, or
-link-local addresses. Committed landings are checked again, so redirects cannot turn an allowed
-request into access to a protected destination.
+Policy never grants non-HTTP(S) schemes. Localhost, its subdomains, loopback, and link-local
+addresses use the ordinary host rules. An exact host such as `localhost` or `127.0.0.1` can be
+allowed or denied by a grant, and `content.security.sacred_domains` can mark a host never-touch
+even in observe mode. No special local-access setting or exception is needed.
+
+Committed landings are checked again before their content is accepted. These checks govern
+browser operations and observed destinations; they do not filter every network request a page
+makes or classify hostnames by their resolved IP address.
 
 The extension's **Preserve controlled tabs** setting is an independent physical interlock. Both
 orchestrator policy and that browser-local choice must allow model-driven close. Manual browser

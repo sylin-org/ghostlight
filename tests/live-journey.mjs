@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { createServer } from "node:http";
 
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
@@ -52,6 +53,12 @@ function structured(response) {
   return response.result.structuredContent;
 }
 
+// Serve only a disposable fixture, never repository or machine files.
+const localFixture = createServer((_request, response) => {
+  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  response.end("<!doctype html><html><head><title>Ghostlight local acceptance</title></head><body><h1>Local development works</h1></body></html>");
+});
+
 try {
   const initialized = await request("initialize", {
     protocolVersion: "2025-11-25",
@@ -65,9 +72,35 @@ try {
   assert.equal(listed.result.tools.length, 24);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
 
+  await new Promise((resolve, reject) => {
+    localFixture.once("error", reject);
+    localFixture.listen(0, "127.0.0.1", resolve);
+  });
+  const localPort = localFixture.address().port;
+  let localTab;
+  for (const host of ["localhost", "127.0.0.1"]) {
+    const localOpened = structured(await request("tools/call", {
+      name: "browser_navigate",
+      arguments: { url: `http://${host}:${localPort}/`, ...(localTab ? { tab: localTab } : {}) }
+    }));
+    assert.equal(localOpened.status, "succeeded", JSON.stringify(localOpened));
+    localTab = localOpened.facts.tab;
+    const localRead = structured(await request("tools/call", {
+      name: "browser_read", arguments: { tab: localTab }
+    }));
+    assert.equal(localRead.status, "succeeded", JSON.stringify(localRead));
+    assert.match(localRead.facts.text, /Local development works/);
+  }
+  const restrictedLocal = structured(await request("tools/call", {
+    name: "browser_read", arguments: { tab: localTab, restrict_hosts: ["example.com"] }
+  }));
+  assert.equal(restrictedLocal.status, "blocked", JSON.stringify(restrictedLocal));
+  assert.equal(restrictedLocal.facts.reason, "host_denied");
+  console.log(JSON.stringify({ localhost: true, loopback: true, local_policy_denial: true }));
+
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",
-    arguments: { url: "https://sylin.org/ghostlight/demo/iframe/" }
+    arguments: { tab: localTab, url: "https://sylin.org/ghostlight/demo/iframe/" }
   }));
   assert.equal(opened.status, "succeeded", JSON.stringify(opened));
   const tab = opened.facts.tab;
@@ -235,4 +268,6 @@ try {
 } finally {
   child.stdin.end();
   child.kill();
+  localFixture.closeAllConnections();
+  if (localFixture.listening) await new Promise((resolve) => localFixture.close(resolve));
 }

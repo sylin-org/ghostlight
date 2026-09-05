@@ -1,7 +1,37 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-04 (the 1.3.3 service and 1.1.1 adapter candidate is held; adapter review is
-pending before publication).
+Last updated: 2026-09-05 (local HTTP(S) destinations now follow policy; the held 1.3.3 candidate
+predates this change and adapter review is pending before publication).
+
+## Local browser destinations follow policy (ADR-0155, 2026-09-05)
+
+The owner removed the built-in localhost, loopback, and link-local destination restrictions.
+[ADR-0155](adr/0155-policy-owned-local-destinations.md) makes local HTTP(S) browser work use the
+same host grants, RAWX capability checks, request restrictions, observe/enforce behavior, and
+policy-defined never-touch destinations as remote work. No local-access toggle, special grant,
+or exception flow replaces the ban. Non-HTTP(S) schemes retain their existing boundary.
+
+The orchestrator's address classifier and IPv4-embedded IPv6 helper are removed. Its compiled
+policy projection, model explanation, workbench fixtures, README, active contracts, and guides
+state the remaining boundaries. Older ADRs retain the original decision with superseding links.
+Connector, bridge, and extension contracts are unchanged.
+
+Gates green: formatting, warnings-denied workspace Clippy, all 437 Rust tests, all 171 extension
+tests, changed JavaScript syntax, repository integrity, the workbench surface, and the fresh
+isolated-target process journey. Governance tests cover all-open local-address access and
+authored restrictions. Executor tests now declare the host restrictions used by redirect
+compensation, recording export, and audit checks.
+
+The orchestrator was deployed through `scripts/dev-loop.ps1` and hash-matched to its isolated
+release build. Existing connectors reconnected without replacement. The live browser journey
+opened and read a disposable HTTP fixture through both `localhost` and `127.0.0.1`, proved an
+explicit request host restriction still refused its content, then passed the existing composed
+form and screenshot journey. The browser's preserve-tabs setting retained the final demo tab as
+expected. The existing MCP connection also returned the new `policy_explain` projection with no
+configured policy and only the non-HTTP(S) scheme ceiling.
+
+The frozen 1.3.3 candidate at `fe5b9de8` remains unchanged and does not contain this fix. No public
+release or store artifact was changed.
 
 ## 1.3.3 service and 1.1.1 adapter candidate held (2026-09-04)
 

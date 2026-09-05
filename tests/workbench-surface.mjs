@@ -231,7 +231,7 @@ const compiled = (editable) => ({
       settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
       path: "state/user-policy.json", document: '{"schema": 3}' }
   ],
-  ceilings: ["localhost and any name ending in .localhost.", "Loopback and link-local addresses."],
+  ceilings: ["Anything that is not an ordinary http or https address."],
   user_layer: {
     source: "workbench",
     authoring_allowed: editable,
@@ -580,7 +580,8 @@ const checks = [
       && board.includes("Example Org does not allow it anywhere"),
     `board: ${JSON.stringify(board)}`],
   ["the permanent boundaries are shown",
-    nodes.get("policy-ceilings").innerHTML.includes(".localhost")],
+    nodes.get("policy-ceilings").innerHTML.includes("not an ordinary http or https address")
+      && !nodes.get("policy-ceilings").innerHTML.includes("localhost")],
   ["the organization is named in its own words, with somewhere to ask",
     organization.includes("Example Org")
       && organization.includes("Ask the service desk")

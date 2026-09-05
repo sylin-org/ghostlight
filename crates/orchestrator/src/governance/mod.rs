@@ -12,7 +12,6 @@ use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -512,7 +511,9 @@ impl AuthoritySnapshot {
         let Ok(parsed) = Url::parse(url) else {
             return Decision::deny(ReasonCode::HostDenied);
         };
-        if protected_url(&parsed) || protected_by_policy(&parsed, &self.sacred_hosts) {
+        if !matches!(parsed.scheme(), "http" | "https")
+            || protected_by_policy(&parsed, &self.sacred_hosts)
+        {
             return Decision::deny(ReasonCode::ProtectedHost);
         }
         let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
@@ -1842,55 +1843,6 @@ fn hex_prefix(bytes: &[u8], count: usize) -> String {
     output
 }
 
-fn protected_url(url: &Url) -> bool {
-    if !matches!(url.scheme(), "http" | "https") {
-        return true;
-    }
-    // `url()` gives the typed host directly. The alternative -- `host_str()` then
-    // `IpAddr::from_str` -- looked equivalent but was not: `host_str()` keeps the enclosing `[ ]`
-    // brackets for an IPv6 host (`"[::1]"`), which `IpAddr::from_str` refuses to parse, so the
-    // string round trip silently failed for every IPv6 literal, not only the mapped/compatible
-    // forms this function was already missing. This is the one boundary documented as holding
-    // unconditionally in every configuration; it must not depend on a string format nobody checked.
-    match url.host() {
-        Some(url::Host::Domain(host)) => {
-            let host = host.to_ascii_lowercase();
-            host == "localhost" || host.ends_with(".localhost")
-        }
-        Some(url::Host::Ipv4(value)) => value.is_loopback() || value.is_link_local(),
-        Some(url::Host::Ipv6(value)) => {
-            value.is_loopback()
-                || (value.segments()[0] & 0xffc0) == 0xfe80
-                || embedded_ipv4(value).is_some_and(|v4| v4.is_loopback() || v4.is_link_local())
-        }
-        None => true,
-    }
-}
-
-/// Recover the IPv4 address embedded in an IPv6 address carrying one, if any.
-///
-/// `Ipv6Addr::is_loopback()` only matches the literal `::1`; it does not unwrap an IPv4-mapped
-/// (`::ffff:a.b.c.d`) or IPv4-compatible (`::a.b.c.d`) address, both of which are ordinary,
-/// browser-parseable IPv6 literals naming a real IPv4 destination. Without this, a boundary
-/// documented as holding unconditionally in every configuration -- including all-open, and while
-/// ordinary policy observes -- would let `https://[::ffff:127.0.0.1]/` or a link-local
-/// cloud-metadata address in mapped form through with no protection at all.
-fn embedded_ipv4(v6: Ipv6Addr) -> Option<Ipv4Addr> {
-    if let Some(v4) = v6.to_ipv4_mapped() {
-        return Some(v4);
-    }
-    let segments = v6.segments();
-    if segments[..6] == [0, 0, 0, 0, 0, 0] && (segments[6] != 0 || segments[7] != 0) {
-        return Some(Ipv4Addr::new(
-            (segments[6] >> 8) as u8,
-            segments[6] as u8,
-            (segments[7] >> 8) as u8,
-            segments[7] as u8,
-        ));
-    }
-    None
-}
-
 fn host_matches(host: &str, pattern: &str) -> bool {
     let pattern = pattern.trim().to_ascii_lowercase();
     if pattern == "*" {
@@ -2228,56 +2180,89 @@ mod tests {
     }
 
     #[test]
-    fn no_policy_allows_remote_browser_work_but_protected_hosts_remain_denied() {
+    fn no_policy_allows_local_and_remote_http_destinations() {
         let facade = GovernanceFacade::new(None, None);
         let snapshot = facade.snapshot(&RequestRestrictions::default());
         assert!(snapshot.preserves_target_names());
         assert!(snapshot.authorize_tab_close().allowed);
-        assert!(
-            snapshot
-                .authorize_landing(Capability::Action, "https://example.com")
-                .allowed
-        );
-        assert_eq!(
-            snapshot
-                .authorize_landing(Capability::Action, "http://127.0.0.1:3000")
-                .reason,
-            ReasonCode::ProtectedHost
-        );
-        assert_eq!(
-            snapshot
-                .authorize_landing(Capability::Read, "http://169.254.169.254/latest")
-                .reason,
-            ReasonCode::ProtectedHost
-        );
-    }
-
-    #[test]
-    fn the_loopback_and_link_local_ceiling_holds_for_ipv4_embedded_in_ipv6() {
-        // These are ordinary, browser-parseable literals naming the same protected destinations
-        // as their plain IPv4 form. A ceiling that only recognized ::1 would let all of these
-        // through untouched, in every configuration including all-open.
-        let facade = GovernanceFacade::new(None, None);
-        let snapshot = facade.snapshot(&RequestRestrictions::default());
         for url in [
+            "https://example.com/",
+            "http://localhost:3000/",
+            "https://app.localhost:8443/",
+            "http://127.0.0.1:5173/",
+            "http://127.1.2.3/",
+            "http://169.254.169.254/latest/",
             "https://[::1]/",
+            "http://[fe80::1]/",
             "https://[::ffff:127.0.0.1]:9200/",
             "https://[::ffff:169.254.169.254]/latest/meta-data/",
             "https://[::127.0.0.1]/",
+            "https://[::ffff:8.8.8.8]/",
+        ] {
+            for capability in Capability::ALL {
+                assert!(
+                    snapshot.authorize_landing(capability, url).allowed,
+                    "{capability:?} at {url} needs no policy exception"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_http_schemes_still_refuse_without_policy() {
+        let snapshot = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        for url in [
+            "chrome://extensions/",
+            "chrome-extension://example/options.html",
+            "file:///tmp/example.html",
+            "data:text/html,example",
+            "javascript:void(0)",
+            "about:blank",
+            "ftp://localhost/",
         ] {
             assert_eq!(
                 snapshot.authorize_landing(Capability::Read, url).reason,
                 ReasonCode::ProtectedHost,
-                "{url} must be protected"
+                "{url} is outside the browser HTTP(S) contract"
             );
         }
-        // An ordinary global IPv6 address embedding neither loopback nor link-local octets must
-        // not be swept up by the same check.
-        assert!(
-            snapshot
-                .authorize_landing(Capability::Read, "https://[::ffff:8.8.8.8]/")
-                .allowed
+    }
+
+    #[test]
+    fn local_destinations_follow_authored_host_and_capability_rules() {
+        let snapshot = snapshot_for(
+            "local-destinations",
+            policy(
+                "local destinations",
+                r#"[{"id":"development","hosts":{"allow":["localhost","*.localhost","127.0.0.1","169.254.169.254"],"deny":["admin.localhost","169.254.169.254"]},"allowed":["read","action"]}]"#,
+                "[]",
+            ),
         );
+        for url in [
+            "http://localhost:3000/",
+            "https://app.localhost/",
+            "http://127.0.0.1/",
+        ] {
+            assert!(snapshot.authorize_landing(Capability::Read, url).allowed);
+            assert!(snapshot.authorize_landing(Capability::Action, url).allowed);
+            let denied = snapshot.authorize_landing(Capability::Execute, url);
+            assert!(!denied.allowed);
+            assert_eq!(denied.reason, ReasonCode::CapabilityDenied);
+            assert_eq!(
+                snapshot.attribution(denied),
+                Some(("user", Some("development")))
+            );
+        }
+        for url in [
+            "http://admin.localhost/",
+            "http://169.254.169.254/latest/",
+            "http://127.0.0.2/",
+        ] {
+            let denied = snapshot.authorize_landing(Capability::Read, url);
+            assert!(!denied.allowed);
+            assert_eq!(denied.reason, ReasonCode::HostDenied);
+            assert!(denied.denial_id().is_some());
+        }
     }
 
     #[test]
@@ -2391,6 +2376,18 @@ mod tests {
                 .reason,
             ReasonCode::HostDenied
         );
+        for url in [
+            "http://localhost:3000/",
+            "http://127.0.0.1/",
+            "http://[::1]/",
+            "http://169.254.169.254/",
+        ] {
+            assert_eq!(
+                snapshot.authorize_landing(Capability::Read, url).reason,
+                ReasonCode::HostDenied,
+                "request restrictions still narrow {url}"
+            );
+        }
     }
 
     #[test]
@@ -2559,24 +2556,31 @@ mod tests {
             "observe",
             r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
         );
-        let ordinary = snapshot.authorize_landing(Capability::Read, "https://example.com");
-        assert!(ordinary.allowed);
-        assert!(ordinary.observed);
-        assert_eq!(ordinary.reason, ReasonCode::HostDenied);
-        assert!(ordinary.denial_id().is_some());
+        for url in [
+            "https://example.com",
+            "http://localhost:3000",
+            "http://127.0.0.1",
+            "http://169.254.169.254",
+        ] {
+            let ordinary = snapshot.authorize_landing(Capability::Read, url);
+            assert!(ordinary.allowed);
+            assert!(ordinary.observed);
+            assert_eq!(ordinary.reason, ReasonCode::HostDenied);
+            assert!(ordinary.denial_id().is_some());
+        }
 
-        let protected = snapshot.authorize_landing(Capability::Read, "http://127.0.0.1");
+        let protected = snapshot.authorize_landing(Capability::Read, "chrome://extensions");
         assert!(!protected.allowed);
         assert!(!protected.observed);
         assert_eq!(protected.reason, ReasonCode::ProtectedHost);
 
         let sacred = snapshot_for(
             "observe-sacred",
-            r#"{"schema":3,"name":"observe sacred","version":"1","mode":"observe","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["example.com"],"level":"mandatory"}]}"#,
+            r#"{"schema":3,"name":"observe sacred","version":"1","mode":"observe","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["localhost"],"level":"mandatory"}]}"#,
         );
         assert!(
             !sacred
-                .authorize_landing(Capability::Read, "https://example.com")
+                .authorize_landing(Capability::Read, "http://localhost:3000")
                 .allowed
         );
     }

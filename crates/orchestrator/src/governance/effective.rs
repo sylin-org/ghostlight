@@ -711,11 +711,7 @@ fn pattern_covers(broad: &str, narrow: &str) -> bool {
 }
 
 fn ceilings(sacred: &[String]) -> Vec<String> {
-    let mut lines = vec![
-        "Anything that is not an ordinary http or https address.".to_owned(),
-        "localhost and any name ending in .localhost.".to_owned(),
-        "Loopback and link-local addresses.".to_owned(),
-    ];
+    let mut lines = vec!["Anything that is not an ordinary http or https address.".to_owned()];
     for host in sacred {
         lines.push(format!("{host}, marked never-touch by policy."));
     }
@@ -826,9 +822,22 @@ mod tests {
             .capabilities
             .iter()
             .all(|line| line.state == CapabilityState::Available && line.decided_by.is_empty()));
-        assert_eq!(view.ceilings.len(), 3);
+        assert_eq!(
+            view.ceilings,
+            ["Anything that is not an ordinary http or https address."]
+        );
         assert!(view.layers.is_empty());
         assert!(view.user_layer.editable);
+
+        let mut restricted = inputs(None, None);
+        restricted.sacred_hosts.push("localhost".into());
+        assert_eq!(
+            compile(&restricted).ceilings,
+            [
+                "Anything that is not an ordinary http or https address.",
+                "localhost, marked never-touch by policy."
+            ]
+        );
     }
 
     #[test]

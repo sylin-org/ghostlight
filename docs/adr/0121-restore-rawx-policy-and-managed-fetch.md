@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-14
+- Local-address protected-resource scope superseded by [ADR-0155](0155-policy-owned-local-destinations.md).
 - Amends: ADR-0013, ADR-0022 through ADR-0025, ADR-0055, ADR-0060, ADR-0079,
   ADR-0096, ADR-0102, and ADR-0107 Decision 2
 - Supersedes: the clean-room 1.0 flat version-1 policy implementation and the standing deferral of

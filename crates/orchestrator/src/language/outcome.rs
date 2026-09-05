@@ -2177,6 +2177,7 @@ mod tests {
             ]
         );
 
+        // Localhost is protected only when an authored policy marks it never-touch.
         let refusal = Refusal::AuthorityBlocked {
             reason: BlockedReason::ProtectedHost,
             host: Some("localhost".into()),
