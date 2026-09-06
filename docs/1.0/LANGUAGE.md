@@ -400,6 +400,10 @@ Any argument value may be an explicit reference object,
 result envelope by JSON Pointer before the ordinary child decoder runs on the substituted
 arguments. A reference that does not resolve fails its step without effect.
 
+With `on_error: stop`, a child execution, argument-decoding, or reference-resolution failure ends
+the flow before the next step. Effects from earlier steps remain applied; stopping does not roll
+them back. Explicit `continue` permits later independent steps to run.
+
 `dry_run:true` decodes and classifies every step without dispatching anything. Captured per-step
 envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
 terminal aggregate; the aggregate reports applied, partial, or unknown effects. A flow with failed

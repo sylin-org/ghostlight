@@ -114,6 +114,7 @@ impl ApplicationExecutor {
                     rows.push(json!({"id":step.id,"error":error.to_string()}));
                     if value.on_error == "stop" {
                         stopped = true;
+                        break;
                     }
                     continue;
                 }
@@ -144,6 +145,7 @@ impl ApplicationExecutor {
             envelopes.insert(step.id.clone(), envelope);
             if terminal.result.status != Status::Succeeded && value.on_error == "stop" {
                 stopped = true;
+                break;
             }
         }
         let effect = if saw_unknown {

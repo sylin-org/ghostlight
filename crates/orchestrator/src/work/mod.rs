@@ -2616,6 +2616,105 @@ mod tests {
     }
 
     #[test]
+    fn flow_stops_after_a_refused_child_without_reverting_prior_effects() {
+        let (executor, browser, _workspaces, workspace, _) = fixture();
+        for id in [7, 8] {
+            browser.push(Ok(BrowserOutcome::TabOpened {
+                reused: false,
+                tab: tab(id, "https://example.com/"),
+                committed_urls: vec!["https://example.com/".into()],
+            }));
+        }
+
+        let result = executor.execute(
+            &workspace,
+            "browser_flow",
+            json!({
+                "restrict_capabilities":["read"],
+                "steps":[
+                    {"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
+                    {"id":"denied","tool":"browser_execute","arguments":{"script":"42"}},
+                    {"id":"after","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
+                ]
+            }),
+            None,
+            &CancellationToken::default(),
+        );
+
+        let calls = browser.calls();
+        assert_eq!(calls.len(), 1, "neither refused nor later work dispatches");
+        assert!(matches!(calls[0], BrowserCommand::OpenTab { .. }));
+        assert_eq!(result.facts["stopped"], true);
+        assert_eq!(result.facts["completed"], 2);
+        assert_eq!(result.facts["total"], 3);
+        let steps = result.facts["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["result"]["status"], "succeeded");
+        assert_eq!(steps[0]["result"]["effect"], "applied");
+        assert_eq!(steps[1]["result"]["status"], "blocked");
+        assert_eq!(steps[1]["result"]["effect"], "none");
+        assert_eq!(result.effect, Effect::Partial);
+        assert!(!result.repeat_safe);
+    }
+
+    #[test]
+    fn flow_error_policy_controls_runtime_argument_failures() {
+        // A tab handle resolves but is not a numeric read limit. A missing field fails
+        // reference resolution instead. Both failures must honor the same error policy.
+        for pointer in ["/facts/tab", "/facts/missing"] {
+            for on_error in ["stop", "continue"] {
+                let (executor, browser, _workspaces, workspace, _) = fixture();
+                for id in [7, 8] {
+                    browser.push(Ok(BrowserOutcome::TabOpened {
+                        reused: false,
+                        tab: tab(id, "https://example.com/"),
+                        committed_urls: vec!["https://example.com/".into()],
+                    }));
+                }
+
+                let result = executor.execute(
+                    &workspace,
+                    "browser_flow",
+                    json!({
+                        "on_error":on_error,
+                        "steps":[
+                            {"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
+                            {"id":"invalid","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"open","pointer":pointer}}}},
+                            {"id":"after","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
+                        ]
+                    }),
+                    None,
+                    &CancellationToken::default(),
+                );
+
+                let should_stop = on_error == "stop";
+                let calls = browser.calls();
+                assert_eq!(
+                    calls.len(),
+                    if should_stop { 1 } else { 2 },
+                    "{on_error} after {pointer}: {}",
+                    result.summary
+                );
+                assert!(calls
+                    .iter()
+                    .all(|call| matches!(call, BrowserCommand::OpenTab { .. })));
+                assert_eq!(result.facts["stopped"], should_stop);
+                let steps = result.facts["steps"].as_array().unwrap();
+                assert_eq!(steps.len(), if should_stop { 2 } else { 3 });
+                assert_eq!(steps[0]["result"]["effect"], "applied");
+                assert!(steps[1]["error"].is_string());
+                assert!(!result.repeat_safe);
+                if should_stop {
+                    assert_eq!(result.effect, Effect::Partial);
+                } else {
+                    assert_eq!(steps[2]["id"], "after");
+                    assert_eq!(steps[2]["result"]["status"], "succeeded");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn focused_typing_names_the_control_it_described_and_settles() {
         let (executor, browser, _workspaces, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
