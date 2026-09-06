@@ -172,6 +172,13 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     missing, directory, oversized, and changed-after-read inputs before any browser effect.
 14. Run an explicitly authorized script, return a bounded serializable value, govern any committed
     landing, and never audit source or result.
+    - A runtime exception containing `Illegal return statement` and a runtime-thrown `SyntaxError`
+      each follow one synthetic effect; neither repeats it or reports a known no-effect failure.
+    - Supported bare returns, top-level await, repeated REPL declarations, and resource
+      declarations retain their useful results. Invalid syntax sends no page evaluation.
+    - `tests/script-browser-journey.mjs` verifies the evaluator in real Chromium and its receipts
+      through the real relays, service, and MCP edge. Its native framing is a test adapter; it
+      does not substitute for installed-extension/native-host acceptance.
 15. Open a child tab from a controlled page, adopt it into the same workspace, and preserve
     ownership after moving the tab group to another window.
 16. Resize a controlled tab's window within the documented bounds, observe the resulting geometry,

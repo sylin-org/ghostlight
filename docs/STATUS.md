@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-06 (H3 implementation in progress; flow-stop fix committed locally;
+Last updated: 2026-09-06 (H3 implemented and verified locally; flow-stop fix committed;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Security-hardening epic (2026-09-06)
@@ -34,9 +34,21 @@ workspace tests, extension tests, and the fresh-build process journey passed bef
 The owner accepted [H3 script effect truth](tasks/security-hardening/h3-script-effect-truth.md)
 as the next implementation cycle: avoid unsafe script replay and false no-effect reports while
 preserving supported script behavior. ADR-0133's September 6 amendment records that decision.
-Implementation and validation are now in progress under the owner's execution instruction;
-H3's separate commit and final evidence are pending. H1's audit
-correction, H2b aggregate reporting, child receipts, runtime scope/timing, audit health, and local
+H3 now parses source locally with pinned packaged Acorn, selects the bare-return form before
+execution, and sends one effectful evaluation. Runtime exceptions and lost replies retain effect
+uncertainty through the existing MCP completion path. Local syntax rejection sends no evaluation.
+The awaited wrapper also fixes the returned-promise behavior exposed by real Chromium.
+
+All 20 evaluator tests, all 183 extension tests, formatting, workspace Clippy/tests, changed
+JavaScript syntax, and the fresh-build process journey pass. The isolated Chromium/MCP journey
+passes 19 cases on Windows/Chrome 152.0.7977.82, including both original defects, a failing
+await/return form, repeated REPL declarations, resource declarations, hashbangs, and syntax refusal.
+Packaging includes the parser/license with source-matching bytes; repository integrity passes.
+This is real evaluator/CDP and real process/MCP evidence with test native framing. It is not an
+installed MV3/native-host or cross-platform browser test. H3 is not deployed or published.
+
+Next is H1 ideation. H1's audit correction, H2b aggregate reporting, child receipts, runtime
+scope/timing, audit health, and local
 bounds go through their ideation sessions before implementation. Expected partial website effects
 remain distinct from Ghostlight's extra copies or execution. No publication has been made for
 the epic.

@@ -147,6 +147,11 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **Mocked debugger replies do not prove JavaScript completion semantics.** H3's real Chromium
+  lane found that `awaitPromise` plus `replMode` returned an async wrapper's promise as `{}`;
+  explicitly awaiting the selected wrapper produced its intended value. Preserve real engine
+  evidence when changing parsing, execution, or effect classification (ADR-0133's H3 follow-up).
+
 - **A launcher channel re-verifies its download on every launch, so a hand-staged binary at its
   versioned cache path never runs.** `npx -y ghostlight` checksum-validates
   `~/.ghostlight/bin/<version>/` against the published manifest before each spawn and

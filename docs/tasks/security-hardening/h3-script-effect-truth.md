@@ -1,8 +1,53 @@
 # H3: Execute supported scripts without unsafe replay
 
-Status: Implementation and validation in progress; its separate commit is pending. The owner
-accepted the proposed script-correctness work while requesting the epic, then directed execution.
-See the [ledger](LEDGER.md) for current progress.
+Status: Implemented and verified locally, not deployed or published. This evidence accompanies
+the implementation commit `fix(script): select script form before page execution`. The owner
+accepted the work while requesting the epic, then directed execution. The [ledger](LEDGER.md)
+owns remaining epic work.
+
+## Execution record (2026-09-06)
+
+The explore workflow mapped the evaluator, worker error forwarding, operation journal,
+`BrowserFrame::Error`, browser error mapping, `work/forms.rs::run_script`, and the single terminal
+path. Existing effect uncertainty and packaging seams were sufficient. No new wire type, policy
+decision, connector behavior, or Rust production code was needed. The optional constants catalog
+under `.agentic/` is absent; current files and types supplied the authority.
+
+The implementation removes exception-text retry and exception-class no-effect classification.
+Pinned Acorn 8.18.0 parses an async function body without executing it. Exact AST boundaries
+reject wrapper escapes. Returns outside nested functions select the explicitly awaited wrapper;
+ordinary source keeps its REPL scope. Syntax errors name coordinates in the supplied source and
+send no evaluation. After the sole effectful evaluation, browser exceptions and transport loss
+remain uncertain. The operation engine preserves that uncertainty after recovery.
+
+The real Chromium lane exposed an additional defect in the old mock expectations: an async
+wrapper's promise was returned as `{}` through the REPL completion envelope. Explicitly awaiting
+the selected wrapper restores the intended returned value. Await/resource syntax and hashbangs
+are accounted for in local parsing without changing unwrapped source.
+
+| Evidence | Result |
+| --- | --- |
+| New SA-04 regressions before the production change | Both failed: two mutations from the marker exception; false no-effect certainty after a runtime `SyntaxError`. |
+| `node --test extension/tests/evaluate.test.js` | All 20 evaluator tests passed, including real synthetic effects, wrapper escapes, nested returns, source coordinates, import order, and operation-engine recovery. |
+| `npm test --prefix extension` | All 183 extension tests passed. |
+| `cargo fmt --all -- --check` | Passed. |
+| `cargo clippy --workspace --all-targets --target-dir .target-ghostlight-1.0 -- -D warnings` | Passed. |
+| `cargo test --workspace --target-dir .target-ghostlight-1.0` | Passed, including all 362 orchestrator library tests and the other workspace suites. |
+| `cargo build --workspace --target-dir .target-ghostlight-1.0` and `node tests/process-journey.mjs` | Fresh executables; process reconnect and composed-operation journey passed. |
+| `node tests/script-browser-journey.mjs` | All 19 cases passed on Windows with Chrome 152.0.7977.82. Actual DOM mutations and receipts cross the real relays/orchestrator and MCP edge. |
+| Changed JavaScript syntax and `git diff --check` | Passed. |
+| Extension packaging | The archive includes the parser, MIT license, provenance, evaluator, and worker; their extracted bytes match source. |
+| Repository integrity | ASCII, local links, existing version alignment, permission justifications, and capability evidence checks passed. |
+
+The Chromium lane starts a separate headless profile and synthetic local site. It uses the
+shipped evaluator with real CDP and a test native-framing adapter. It does not prove an installed
+MV3 service worker or machine native-host registration, and it does not deploy or reload the
+owner's extension. No Linux/macOS browser lane was run. Published versions remain unchanged.
+The vendored parser's license, exact archive integrity, transformation, and source digest live in
+[its provenance record](../../../extension/vendor/acorn.PROVENANCE.md).
+
+The original task and acceptance below remain the record of the approved scope. H2a is a separate
+commit, `8103c69b`; H1 and H2b remain ideation items and are not completed by this fix.
 
 ## Problem and accepted behavior
 

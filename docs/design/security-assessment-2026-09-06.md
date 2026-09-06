@@ -476,3 +476,14 @@ their implementation cycle. ADR-0133 and ADR-0151 record the script and frame de
 
 The ledger remains the authority on actual fixes and evidence. Creating the epic does not change
 the assessment's reproduction limits or establish that H3 or frame enforcement is implemented.
+
+## Follow-up: H3 implementation evidence (2026-09-06)
+
+The owner's execution instruction led to the H3 correction in
+[script-evaluator.js](../../extension/lib/script-evaluator.js): source is parsed locally before
+one effectful evaluation, and browser exceptions no longer authorize replay or a known no-effect
+claim. The two new SA-04 regressions failed before the fix and now pass. The
+[execution record](../tasks/security-hardening/h3-script-effect-truth.md) records full workspace
+gates, 183 extension tests, and 19 real Chromium/MCP cases with explicit test-adapter limitations.
+H2a is committed separately as `8103c69b`. Neither fix is deployed or published, and the other
+assessment findings remain open under the epic's ideation process.

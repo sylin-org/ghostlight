@@ -154,6 +154,21 @@ orchestrator or changes harness configuration.
 
 ## Live browser validation
 
+For the isolated script-correctness lane, use Node 22 or newer and a Chromium executable:
+
+```powershell
+cargo build --workspace --target-dir .target-ghostlight-1.0
+node tests/script-browser-journey.mjs
+```
+
+`GHOSTLIGHT_TEST_BROWSER` can name the browser executable; `GHOSTLIGHT_BIN_DIR` can name a
+different fresh build directory. The lane creates its own headless profile and HTTP fixture,
+executes the shipped evaluator through Chromium CDP, and carries results through the real browser
+connector, orchestrator, and MCP connector. It checks effect counts, uncertain failures, and REPL
+compatibility. Native framing is a test adapter: this is not an installed MV3/native-host journey.
+It isolates runtime, audit, policy, diagnostics, and registration paths, then removes its own
+fixtures. It neither reloads an existing extension nor changes a person's browser profile.
+
 Build all three executables side by side and ensure the platform native-messaging manifest points
 to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it after every
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not

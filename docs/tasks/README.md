@@ -25,7 +25,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
-| [security-hardening](security-hardening/EPIC.md) | Dependable governance for delightful browser work: assessment, decisions, bounded cycles, and ideation for unresolved choices | H2a committed as 8103c69b; H3 in progress; provenance and frame policy direction agreed; other cycles await their ideation decisions | 2026-09-06 |
+| [security-hardening](security-hardening/EPIC.md) | Dependable governance for delightful browser work: assessment, decisions, bounded cycles, and ideation for unresolved choices | H2a committed as 8103c69b; H3 implemented and verified with 19 Chromium/MCP cases; no deployment; next H1 ideation | 2026-09-06 |
 | [process-diagnostics](process-diagnostics/) | ADR-0145: one shared local diagnostics directory all three executables write bounded, content-free operational logs into; watch-driven marker, CLI, popup, and workbench surfaces | D1-D10 complete | 2026-08-29 |
 | [public-distribution](public-distribution/) | ADR-0144: Ghostlight as an installable plugin member (twin manifests, one-address catalogs, bundled skill) and drafted external submissions | P1-P3, X1, D1 complete | 2026-08-29 |
 | [1.0-plus](1.0-plus/) | Post-publication batch: deferred debt (simplest to most complex), the release-evidence lanes left open at publication, and owner-action externals | D1 complete; D2 next | 2026-08-26 |

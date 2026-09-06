@@ -23,7 +23,7 @@ and history accurately explains what happened without becoming an unexpected con
 - [Assessment](../../design/security-assessment-2026-09-06.md): dated source findings and isolated
   reproductions. Findings are evidence, not automatic approval of every proposed remedy.
 - [H2a](h2a-flow-stop.md): existing local flow-stopping fix and its regression evidence.
-- [H3](h3-script-effect-truth.md): the next agreed implementation package.
+- [H3](h3-script-effect-truth.md): script-correctness scope and completion evidence.
 - [H6](h6-frame-coverage-ux.md): agreed frame policy choices and remaining detailed UX proposals.
 
 ADRs own architecture decisions. The current source, tests, and 1.0 contracts govern code.
@@ -51,8 +51,8 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 
 | Package | Intended outcome | Dependencies and decision work |
 | --- | --- | --- |
-| H2a: Flow stopping | A failed child under stop prevents subsequent dispatch and preserves earlier effects. | Existing local fix; finish required commit evidence. Broader aggregate behavior is H2b. |
-| H3: Script effect truth | A runtime exception cannot cause automatic duplicate execution or a false no-effect result. | Next agreed cycle; preserve script compatibility, prove the mechanism in Chromium. |
+| H2a: Flow stopping | A failed child under stop prevents subsequent dispatch and preserves earlier effects. | Separate implementation record; broader aggregate behavior is H2b. |
+| H3: Script effect truth | A runtime exception cannot cause automatic duplicate execution or a false no-effect result. | Selected first new cycle; preserve script compatibility and prove the mechanism in Chromium. |
 | H1: Audit confidentiality | Operation metadata stays useful without copying page results, values, scripts, or arbitrary errors into durable audit. | Ideation I1 settles the proposed correction and priorities; preserve the existing bounded-name exception. |
 | H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | Ideation I2; build on H2a and coordinate effect semantics with H3. |
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | Ideation I3; safe projection from H1 and agreed aggregate semantics from H2b. |
@@ -76,7 +76,8 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
    identity proof. H8 adds focused resilience work justified by its investigation.
 5. Reconcile active claims and run the composed acceptance journey across delivered packages.
 
-H3 is the selected next cycle. The order after H3 remains a working recommendation and may be
+H3 was selected as the first new cycle; the ledger records its completion evidence. The order
+after H3 remains a working recommendation and may be
 revised during ideation based on evidence and dependencies. An undecided package holds its own
 implementation; independent agreed work need not wait for every epic discussion to finish.
 

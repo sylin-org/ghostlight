@@ -5,7 +5,8 @@ It is independent of any event or submission. The [epic](EPIC.md) records the pu
 work breakdown, decision index, dependencies, and acceptance. The [ledger](LEDGER.md) distinguishes
 agreed direction, conditional work, proposals, and completed implementation; it owns progress.
 The owner selected H3 as the next implementation cycle and requires ideation before any cycle
-whose product decisions remain unresolved. The current deliverable is the complete epic plan.
+whose product decisions remain unresolved. H3's first cycle is complete locally; read the ledger
+for current readiness before implementing any further package.
 
 ## Read first
 

@@ -365,6 +365,11 @@ Inputs: required non-empty `script` up to 20000 characters; optional `tab`; opti
 `max_result_chars` from 100 to 20000, default 8000; optional `timeout_ms`; optional restrictions.
 Capability: `execute`.
 
+The adapter parses the source before dispatch and selects the async form for a top-level return.
+Ordinary scripts retain REPL scope, including top-level await and repeated declarations. A local
+syntax rejection sends no page evaluation. Browser evaluation is sent once; a runtime exception
+or lost reply remains uncertain regardless of its text or exception class.
+
 Facts: `tab`, `value`, `truncated`, and any governed committed landing. Script source and result
 never enter audit or presentation.
 

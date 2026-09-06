@@ -31,15 +31,16 @@ traffic. An installed copy keeps working offline indefinitely. This is the Conti
 
 ## Vendored third-party code
 
-One dependency ships inside the browser extension rather than through a package manager, because
-the extension never loads remote code:
+These dependencies ship inside the browser extension because it never loads remote code:
 
 | File | Component | License |
 |---|---|---|
 | `extension/vendor/gifenc.js` | [gifenc](https://github.com/mattdesl/gifenc) 1.0.3, a JavaScript animated GIF encoder | MIT ([text](extension/vendor/gifenc.LICENSE.md)) |
+| `extension/vendor/acorn.js` | [Acorn](https://github.com/acornjs/acorn) 8.18.0, a JavaScript parser for script form selection | MIT ([text](extension/vendor/acorn.LICENSE.md), [provenance](extension/vendor/acorn.PROVENANCE.md)) |
 
-It is pinned to an exact version and reviewed like any other dependency
-([ADR-0109](docs/adr/0109-browser-owned-gif-encoding.md)). Rust dependencies are declared in
+Each is pinned to an exact version and reviewed like any other dependency
+([ADR-0109](docs/adr/0109-browser-owned-gif-encoding.md),
+[ADR-0133 amendment](docs/adr/0133-behavioral-capability-restoration.md)). Rust dependencies are declared in
 `Cargo.toml` and resolved normally.
 
 ## Commitments

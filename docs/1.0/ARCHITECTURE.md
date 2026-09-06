@@ -452,6 +452,14 @@ may resume. Dispatched, completed-without-an-in-memory-receipt, and uncertain wo
 instead of repeating. Terminal records remain until the service acknowledges receipt, which keeps
 normal operation bounded without evicting an unacknowledged effect.
 
+The script evaluator parses source locally with pinned, packaged Acorn before any page evaluation.
+It uses an async-body grammar for REPL syntax, verifies the parsed wrapper's exact body boundaries,
+and selects the explicitly awaited function form only for returns outside nested functions.
+Other scripts retain their original REPL source and scope. Local preparation failure is known
+to precede evaluation; after dispatch, exceptions and transport failures retain uncertainty.
+Exception descriptions and classes cannot initiate a second execution. The existing typed error
+receipt carries that uncertainty through the orchestrator's single completion path.
+
 Presentation is a document-local state machine. Signals carry only opaque ids, a closed event
 kind, a closed Ghostlight activity treatment, fixed Ghostlight-authored phase and detail text,
 and an optional physical locator. One small renderer implements the established sky-blue visual

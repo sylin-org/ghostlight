@@ -1,6 +1,6 @@
 # ADR-0133: Restore published browser capabilities through the 1.0 language
 
-- Status: Accepted (2026-09-06 script-correctness amendment accepted; implementation pending)
+- Status: Accepted (2026-09-06 script-correctness amendment implemented and verified locally; not deployed)
 - Date: 2026-08-22
 - Amends: ADR-0107 Decisions 1, 2, 4, and 7 and the active 1.0 language contract
 - Builds on: ADR-0035, ADR-0036, ADR-0037, ADR-0050, ADR-0078, ADR-0080, ADR-0101,
@@ -222,6 +222,31 @@ policy into the browser adapter or model-facing outcome authorship out of the or
 The [H3 brief](../tasks/security-hardening/h3-script-effect-truth.md) specifies regression and
 real Chromium evidence; the [ledger](../tasks/security-hardening/LEDGER.md) owns progress. This
 is an accepted correction, not a claim that the existing evaluator is fixed.
+
+### Implementation follow-up 2026-09-06
+
+H3 now implements the amendment using pinned Acorn 8.18.0 in the extension's existing vendor
+directory, with its MIT license and reproducible provenance. The worker parses a complete async
+body locally and verifies the wrapper's AST boundaries before considering a top-level return.
+This permits await/resource syntax without executing a probe and rejects attempts to escape the
+wrapper. Returns in nested functions, methods, strings, comments, and regex literals do not
+select the function form. Scripts without a top-level return retain their original REPL source.
+
+The selected function form is explicitly awaited. Real Chromium showed that merely enabling
+`awaitPromise` with `replMode` did not unwrap the promise nested in the REPL completion envelope;
+the old mock tests incorrectly treated that combination as returning the bare value.
+
+Local preparation failures send no evaluation and report no effect. There is one effectful
+`Runtime.evaluate`; after it is sent, any browser exception or lost reply is uncertain. Neither
+the exception class nor its description influences replay or effect certainty. Existing bridge
+and orchestrator contracts already carry that distinction, so they do not change.
+
+The implementation reuses the existing vendored-library packaging seam, creates no runtime fetch
+or build-time package install requirement, and preserves the public tool signature. Parser updates
+must retain the demonstrated REPL compatibility. The [task evidence](../tasks/security-hardening/h3-script-effect-truth.md)
+records regression, real Chromium/MCP, packaging, and repository checks and their limits. The old
+Decision 6 and initial amendment above remain the historical record; this follow-up records the
+implemented mechanism. It is not yet deployed or published.
 
 ## Consequences
 
