@@ -34,6 +34,14 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **Delight is the purpose; dependable boundaries support it.** Ghostlight makes integrated
+  tooling useful and natural for end users. Governance lets individuals and organizations choose
+  reliable boundaries that work consistently whenever work passes through Ghostlight. Ordinary
+  permitted work should stay easy, and limits and outcomes should be understandable when they
+  matter. This purpose guides the security-hardening epic; it is not a claim of host containment.
+  For that epic, the owner requires an ideation session before implementing a package with
+  unresolved product decisions. Preserve accepted decisions and proceed with independent agreed
+  work; the epic's IDEATION and LEDGER separate the two.
 - **Host restrictions belong to policy.** The owner removed the built-in localhost, loopback, and
   link-local ban. All-open includes local HTTP(S) browser work; do not reintroduce a hard-coded
   address block, a local-access toggle, or an exception flow (ADR-0155).
@@ -69,12 +77,16 @@ the owner wants, and what this project learned the hard way.
 - **Ghostlight owns mechanism, not the user's larger intent.** It understands canonical browser
   operations, authority, lifecycle, observable browser state, and effect truth. It does not infer
   that a generic click or write means booking, buying, sending, or another task-level consequence.
-- **Human runtime control is authoritative.** This is the reference-experience epic's intent, not
-  current behavior: today a hold refuses at the final boundary rather than holding a caller, and the
-  stop directive does not exist in the tree. The intended contract is that pause prevents the next
-  browser effect, and that stop is terminal and tells the controller
-  `The user asked to interrupt the process. Wait for further instructions.` The exact value is
-  pinned in `docs/tasks/reference-experience/PINS.md` and owned by that epic's S5.
+- **Human runtime control is authoritative.** ADR-0126 decides that pause refuses the next effect
+  instead of suspending a caller, and stop is terminal with a pinned directive. Both directives
+  already live in `crates/orchestrator/src/language/outcome.rs`; the reference-experience S5
+  records their implementation. Preserve those decisions when testing effect-boundary timing
+  and scope. Do not rebuild missing language from an older memory entry.
+- **Client provenance has a bounded purpose.** Ghostlight governs its invocation route and assumes
+  host integrity; it does not contain independent desktop automation. Record claimed and observed
+  identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving
+  Ghostlight's connector does not prove its upstream MCP application. ADR-0105's September 6
+  amendment records the agreed staging; the security-hardening ledger owns progress.
 - **One desktop authority startup.** Connectors, CLI demand-start, and direct execution all launch
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
   the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
@@ -313,5 +325,9 @@ Every one of these cost something to learn.
 | Build, restart, deploy, validate | [`DEV-LOOP.md`](DEV-LOOP.md) |
 | Task-oriented guides for people | [`guides/README.md`](guides/README.md) |
 | Design notes, living and dated | [`design/README.md`](design/README.md) |
+| Dated security assessment and evidence | [`design/security-assessment-2026-09-06.md`](design/security-assessment-2026-09-06.md) |
+| Security-hardening epic, decisions, dependencies, and acceptance | [`tasks/security-hardening/EPIC.md`](tasks/security-hardening/EPIC.md) |
+| Unresolved hardening choices for ideation before implementation | [`tasks/security-hardening/IDEATION.md`](tasks/security-hardening/IDEATION.md) |
+| Agreed security-hardening scope and current progress | [`tasks/security-hardening/LEDGER.md`](tasks/security-hardening/LEDGER.md) |
 | What each task batch was, and where it stopped | [`tasks/README.md`](tasks/README.md) |
 | The source licensing boundary | [`../LICENSING.md`](../LICENSING.md) |

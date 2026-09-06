@@ -1,7 +1,59 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-05 (service 1.3.4 and Chrome adapter 1.1.1 are published; public channels
-and the website agree).
+Last updated: 2026-09-06 (H3 implementation in progress; flow-stop fix committed locally;
+service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+
+## Security-hardening epic (2026-09-06)
+
+The owner requested a complete [security-hardening epic](tasks/security-hardening/EPIC.md)
+covering the assessment and subsequent decisions. It includes the work breakdown, decision
+index, dependencies, implementation cycles, and acceptance evidence. The
+[ideation agenda](tasks/security-hardening/IDEATION.md) lists unresolved choices by package;
+the owner requires those discussions before the affected implementation cycle. Accepted decisions
+remain accepted, and independent agreed work need not wait for every discussion to finish.
+
+The [dated security assessment](design/security-assessment-2026-09-06.md) records the review of
+`48ef29ec` independently of any event or submission. Isolated probes reproduced flow execution
+after a reported stop, missing child audit records, page content in failed-flow audit, script
+re-evaluation and false effect certainty, and denial attention crossing workspace boundaries.
+Frame-policy coverage, audit-write failures, and pause timing have separately labeled source
+findings or open verification work. Existing tests passed: 360 orchestrator library tests and
+171 extension tests. No live browser or full workspace assessment lane was run.
+
+The [security-hardening ledger](tasks/security-hardening/LEDGER.md) now records the agreed host
+boundary and client-provenance direction: accurate reporting first, optional signer/hash admission
+for concrete verifiable direct peers, and proof of upstream identity binding before claiming to
+admit particular MCP applications. The September 6 amendment to ADR-0105 records that decision.
+The owner accepted flow stopping as a bug to fix. [H2a](tasks/security-hardening/h2a-flow-stop.md)
+adds the two missing loop exits for child-decode and execution failures under stop. Regression
+tests first reproduced the extra browser command and now prove stop behavior, retained earlier
+effects, and explicit continue. All 362 orchestrator library tests, formatting, and diff whitespace
+checks pass. The fix is committed as `8103c69b`, not deployed. Formatting, workspace Clippy,
+workspace tests, extension tests, and the fresh-build process journey passed before its commit.
+
+The owner accepted [H3 script effect truth](tasks/security-hardening/h3-script-effect-truth.md)
+as the next implementation cycle: avoid unsafe script replay and false no-effect reports while
+preserving supported script behavior. ADR-0133's September 6 amendment records that decision.
+Implementation and validation are now in progress under the owner's execution instruction;
+H3's separate commit and final evidence are pending. H1's audit
+correction, H2b aggregate reporting, child receipts, runtime scope/timing, audit health, and local
+bounds go through their ideation sessions before implementation. Expected partial website effects
+remain distinct from Ghostlight's extra copies or execution. No publication has been made for
+the epic.
+
+The owner has framed the epic around delight in integrated tooling and dependable boundaries
+chosen by individuals and organizations. The ledger now contains proposed answers under that
+focus, including partial-effect reporting, metadata-only audit, logging failure behavior, frame
+coverage, and scoped controls. The owner has also agreed that host authority applies to the
+document actually accessed, including embeds; ADR-0151 now records that H6 principle. Its
+[frame policy design](tasks/security-hardening/h6-frame-coverage-ux.md) addresses useful
+permitted content, explicit coverage limits, scoped negative answers, quiet human notices, and
+capture restrictions. The owner has accepted three exclusion-handling choices (permitted
+content, complete operation access, or complete page access) and separate notice preferences
+(on demand, when work is affected, or whenever content is excluded). The starting profile uses
+permitted content and notices when work is affected. Existing access grants and truthful coverage
+remain authoritative. ADR-0151 records the accepted direction; exact schema, detailed UI, and
+capture handling remain open. H6 is not implemented.
 
 ## 1.3.4 published (2026-09-05)
 

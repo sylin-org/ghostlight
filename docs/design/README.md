@@ -24,6 +24,7 @@ commitments, and they were not rewritten as the product moved.
 
 | Note | Date |
 | --- | --- |
+| [security-assessment-2026-09-06.md](security-assessment-2026-09-06.md) | Security boundaries, reproduced defects, and proposed hardening priorities |
 | [mcp-spec-currency-2026-07.md](mcp-spec-currency-2026-07.md) | MCP spec currency against the tree |
 | [developer-first-entry-2026-07.md](developer-first-entry-2026-07.md) | Repository and installation entry review |
 | [non-author-experience-review-2026-07.md](non-author-experience-review-2026-07.md) | Retrospective non-author experience review |

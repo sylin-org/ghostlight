@@ -11,11 +11,10 @@ It is a map, not a source of truth: where this table and a ledger disagree, the 
 ## Read the dates before the descriptions
 
 Ghostlight's internals were rebuilt clean-room on 2026-08-10 in `bf4f4724`, which removed the old
-root binary, core, transport, lightbox, and extension mechanisms. **Every batch below except
-`reference-experience`, `outcome-language`, and `executor-split` was authored and executed against
-those removed internals.** Their file paths,
-module names, and code excerpts describe an implementation that no longer exists in the working
-tree, though it remains in Git history.
+root binary, core, transport, lightbox, and extension mechanisms. This index now includes batches
+from both sides of that rebuild. Check each bootstrap and ledger's source baseline: older file
+paths, module names, and code excerpts can describe an implementation that exists only in Git
+history. The `security-hardening` epic is scoped against the current 1.3.4 source.
 
 That does not make them worthless, and none of them are going anywhere. They are the evidence of
 why the product evolved the way it did, and their ADRs remain in force unless a later ADR supersedes
@@ -26,6 +25,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
+| [security-hardening](security-hardening/EPIC.md) | Dependable governance for delightful browser work: assessment, decisions, bounded cycles, and ideation for unresolved choices | H2a committed as 8103c69b; H3 in progress; provenance and frame policy direction agreed; other cycles await their ideation decisions | 2026-09-06 |
 | [process-diagnostics](process-diagnostics/) | ADR-0145: one shared local diagnostics directory all three executables write bounded, content-free operational logs into; watch-driven marker, CLI, popup, and workbench surfaces | D1-D10 complete | 2026-08-29 |
 | [public-distribution](public-distribution/) | ADR-0144: Ghostlight as an installable plugin member (twin manifests, one-address catalogs, bundled skill) and drafted external submissions | P1-P3, X1, D1 complete | 2026-08-29 |
 | [1.0-plus](1.0-plus/) | Post-publication batch: deferred debt (simplest to most complex), the release-evidence lanes left open at publication, and owner-action externals | D1 complete; D2 next | 2026-08-26 |

@@ -1,6 +1,6 @@
 # ADR-0133: Restore published browser capabilities through the 1.0 language
 
-- Status: Accepted
+- Status: Accepted (2026-09-06 script-correctness amendment accepted; implementation pending)
 - Date: 2026-08-22
 - Amends: ADR-0107 Decisions 1, 2, 4, and 7 and the active 1.0 language contract
 - Builds on: ADR-0035, ADR-0036, ADR-0037, ADR-0050, ADR-0078, ADR-0080, ADR-0101,
@@ -196,6 +196,33 @@ Any extension change makes the currently pending Chrome Store draft stale. Only 
 may the deterministic 1.0 ZIP and release evidence be rebuilt. Uploading, resubmitting, publishing,
 or mutating any public channel still requires a separate explicit owner confirmation.
 
+## Amendment 2026-09-06 (script form selection and effect truth)
+
+The security assessment reproduced two violations in Decision 6's implementation. A running
+script can emit an exception containing `Illegal return statement`, causing Ghostlight to run
+its effects again inside the fallback wrapper. It can also change state and throw `SyntaxError`,
+which the evaluator mistakes for evidence that parsing failed before execution. The owner has
+accepted H3 as the next implementation cycle in the security-hardening epic.
+
+This amends Decision 6's fallback mechanism while retaining its supported script behavior:
+
+1. Determine a supported script form without executing possibly effectful code twice. Preserve
+   expressions, supported bare-return inputs, top-level await, and REPL behavior.
+2. Exception text and exception class are not evidence of safe retry or a parse-only failure.
+   Do not use them to replay a script or declare a known no-effect result.
+3. If execution may have begun, retain effect uncertainty unless independent evidence establishes
+   what happened. Genuine pre-execution failure can claim no effects only with that evidence.
+4. Preserve earlier effects; this correction introduces no browser transaction or rollback.
+
+The implementation mechanism is not selected by this amendment. Choosing a compatible browser
+mechanism is part of H3's authorized work. A proposed change to supported script behavior or the
+public tool signature requires the epic's ideation session before implementation. Do not move
+policy into the browser adapter or model-facing outcome authorship out of the orchestrator.
+
+The [H3 brief](../tasks/security-hardening/h3-script-effect-truth.md) specifies regression and
+real Chromium evidence; the [ledger](../tasks/security-hardening/LEDGER.md) owns progress. This
+is an accepted correction, not a claim that the existing evaluator is fixed.
+
 ## Consequences
 
 - A capable model regains the published browser jobs without learning a second Ghostlight dialect.
@@ -230,4 +257,3 @@ step authority and effect truth depend on a recursive client boundary.
 
 Rejected because the extension should not gain a second pixel-retention lifecycle. One bounded
 workspace asset is enough to bridge an explicit capture to an explicit upload.
-

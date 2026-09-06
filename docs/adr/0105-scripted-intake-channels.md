@@ -169,6 +169,48 @@ the integration cost is real -- a hand-rolled `WinVerifyTrust` call kept refusin
 with `TRUST_E_PROVIDER_UNKNOWN` while platform tooling verified the same binary -- and was
 withdrawn rather than half-shipped; its working notes live in the batch ledger only.
 
+## Amendment 2026-09-06 (provenance first; admission needs a verifiable subject)
+
+The owner accepted this direction during the security-hardening scope discussion and requested
+that it be recorded in the [epic ledger](../tasks/security-hardening/LEDGER.md). It extends the
+admission proposal without claiming that the previously deferred verifier has been implemented.
+
+Ghostlight governs operations submitted through it. It assumes host integrity and does not
+contain an actor who can independently operate the user's desktop or browser. Stronger client
+provenance does not create endpoint-wide policy or audit coverage.
+
+**Record evidence before enforcing a stronger identity.** Preserve claimed application identity
+separately from the observed connecting executable, verified signer identity, executable digest,
+and verification result. Absent evidence stays unknown. Observing a new certificate does not
+approve it. Fields and policy spelling remain implementation design work; the current audit
+record does not yet contain this complete account.
+
+**Optional admission may use an approved signer or an exact executable SHA-256.** A signer rule
+requires verification of the executable's signature, not just extraction of a certificate.
+Hash admission can explicitly approve an unsigned artifact, with a policy update for each changed
+build. Neither mechanism raises browser capability ceilings. Absent admission restrictions remain
+all-open; managed and local restrictions intersect; required but unverifiable identity refuses.
+Every equivalent invocation path must honor the applicable restriction. Verification remains
+offline, and its revocation limitations must be visible and accurate.
+
+**Verify the actual subject.** The ordinary MCP socket peer is Ghostlight's connector. Verifying
+that executable establishes connector provenance, not which upstream application or model drives
+it. The same limitation applies to signed interpreters and the scripts they run. Claimed names,
+supplied certificates, and parent-process observations remain insufficient authorization.
+
+Start admission enforcement with a concrete direct integration whose connection and artifact can
+be verified and tested. If the intended feature names existing upstream MCP applications, first
+prove identity binding to their actual connection. A direct signed integration or an enrolled
+integration credential are possibilities, not selected new protocols. A credential proves
+possession rather than executable provenance and needs participating clients.
+
+This refines the August 24 reopening condition: a concrete verifiable integration is the
+prerequisite, rather than procurement of Ghostlight's own signing certificate as a general release
+gate. The accepting signature-verification branch still requires real signed-subject evidence;
+a hash-pinned unsigned fixture proves only hash admission. No verifier, platform expansion,
+credential system, or public service-bridge contract is shipped by this agreement. The ledger
+owns staging and progress; all earlier historical text remains intact.
+
 ## Consequences
 
 - Governance is not bypassed. Every channel crosses the same executor, workspace aggregate,

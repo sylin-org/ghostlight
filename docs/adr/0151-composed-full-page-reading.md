@@ -1,6 +1,6 @@
 # ADR-0151: Composed full-page reading is the default
 
-- Status: Accepted (implemented in this revision)
+- Status: Accepted (original composed reading implemented; 2026-09-06 authority and policy-choice amendments not yet implemented)
 - Date: 2026-09-04
 - Amends: ADR-0133 Decision 5 and ADR-0138 Decisions 3 and 5
 - Builds on: ADR-0050, ADR-0078, ADR-0093, ADR-0133, ADR-0138, and ADR-0139
@@ -55,6 +55,52 @@ roots, disclosing editable values, or widening governance and audit data.
 7. **No new authority or disclosure surface is created.** The extension still makes only
    page-local observation decisions. Embedded-frame origins remain absent from results and audit.
    The orchestrator still owns the default, bounds, governance, completion sentence, and facts.
+
+## Amendment 2026-09-06 (authority follows the accessed document)
+
+During the security-hardening discussion the owner agreed that the chosen governance boundary
+applies to the document actually accessed, including embedded documents. Authorization of the
+top-level document alone must not be treated as authorization of all embedded documents. This
+supplements Decisions 3 and 7: composed-page usefulness remains the goal, while frame transparency
+does not erase a document's distinct policy subject.
+
+This is an accepted principle, not an implemented coverage claim. The existing collector still
+merges frames without the new per-document decision. The [security-hardening ledger](../tasks/security-hardening/LEDGER.md)
+owns H6's progress and the [UX proposal](../tasks/security-hardening/h6-frame-coverage-ux.md)
+records the open choices around partial observations, client completeness, person-facing notices,
+and capture. Showing bounded embedded hosts in explanations, changing result schemas, and
+introducing a stricter whole-page eligibility rule have not been decided by this amendment.
+
+The orchestrator remains the policy and product-language owner. Browser adapters supply the
+physical document evidence needed for that decision, and model-facing calls retain opaque
+handles. This does not grant a new page-content disclosure permission or promise to control every
+request the website itself makes. Existing historical text remains the record of the original
+composed-reading decision.
+
+## Follow-up amendment 2026-09-06 (policy chooses exclusion handling and notice intensity)
+
+After the document-authority amendment, the owner accepted configurable handling of excluded
+embedded content and asked that the choices be recorded in the hardening ledger. This resolves
+the earlier amendment's open question about offering stricter operation/page eligibility.
+
+1. Offer three handling choices: use permitted content; require complete access for the
+   operation; or require complete access for the page. The second is scoped to the operation's
+   required documents; the third also refuses otherwise permitted content work when the page
+   contains an embedded document denied for the relevant capability.
+2. Offer human notice preferences separately: on demand, when work is affected, or whenever
+   content is excluded. Notice intensity may be managed. Quiet presentation does not remove
+   truthful structured coverage or permit a result to claim omitted content was inspected.
+3. Start with use permitted content and notices when work is affected.
+4. Existing host/RAWX grants and observe/enforce semantics decide access. Read and Write remain
+   independent permissions. A lower layer cannot weaken a mandatory organizational requirement;
+   the effective choice and deciding layer are visible through the existing policy destination.
+   All-open behavior stays unchanged when no access is excluded.
+
+This is accepted direction, not implementation. Exact setting keys, result schema, detailed UI,
+embedded-host disclosure, and reliable capture handling remain open in the
+[H6 design](../tasks/security-hardening/h6-frame-coverage-ux.md). The browser adapter supplies
+facts and filtering mechanisms; the orchestrator owns policy and language. No browser-wide
+network filtering or atomicity promise follows from these choices.
 
 ## Consequences
 
