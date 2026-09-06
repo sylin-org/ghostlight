@@ -37,6 +37,7 @@ The ledger owns progress; this epic is the plan, not another status store.
 | Host trust | Govern Ghostlight's invocation route; assume host integrity. Independent desktop automation is outside that guarantee. Local execution alone does not prove the upstream application's identity. | [ADR-0105 amendment](../../adr/0105-scripted-intake-channels.md), ledger C1-C3 |
 | Provenance | Separate claims from verified observations. Report first; allow optional signer/hash admission only with a verifiable subject and connection binding. Unknown remains unknown, verification stays offline, and no certificate is automatically trusted. | ADR-0105 amendment, ledger C1-C3 |
 | Non-atomic effects | Preserve effects that already happened. No general browser rollback or atomic transaction requirement follows from the discussion. | Ledger H1-H3, [ADR-0133](../../adr/0133-behavioral-capability-restoration.md) |
+| Readable audit | Readable bounded history, details on demand, and existing target-name controls. Display detail does not authorize more retention. New profiles and richer capture deferred. | [ADR-0103 amendment](../../adr/0103-language-owned-outcome-voice.md), [H1](h1-readable-audit.md) |
 | Flow stopping | Stop on the configured failure boundary; do not run later steps after reporting a stop. | ADR-0133 Decision 9, H2a |
 | Script execution | Determine a supported form without replaying possibly effectful code; exception text/class is not evidence of safe retry or no effects. Preserve supported REPL behavior and report uncertainty honestly. | ADR-0133 September 6 amendment, H3 |
 | Embedded subjects | Apply authored host/RAWX authority to the document actually accessed. A parent's authorization alone does not authorize its embeds. | [ADR-0151 amendments](../../adr/0151-composed-full-page-reading.md), H6 |
@@ -53,7 +54,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | --- | --- | --- |
 | H2a: Flow stopping | A failed child under stop prevents subsequent dispatch and preserves earlier effects. | Separate implementation record; broader aggregate behavior is H2b. |
 | H3: Script effect truth | A runtime exception cannot cause automatic duplicate execution or a false no-effect result. | Selected first new cycle; preserve script compatibility and prove the mechanism in Chromium. |
-| H1: Audit confidentiality | Operation metadata stays useful without copying page results, values, scripts, or arbitrary errors into durable audit. | Ideation I1 settles the proposed correction and priorities; preserve the existing bounded-name exception. |
+| H1: Audit confidentiality | Operation metadata stays useful without copying page results, values, scripts, or arbitrary errors into durable audit. | I1 accepted: readable bounded history and existing name control; profiles and richer capture deferred. See [H1](h1-readable-audit.md). |
 | H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | Ideation I2; build on H2a and coordinate effect semantics with H3. |
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | Ideation I3; safe projection from H1 and agreed aggregate semantics from H2b. |
 | H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | Ideation I4 for unresolved details; existing pause/stop decisions remain authoritative. Direct scope proof can precede H4; composed proof follows it. |
@@ -68,7 +69,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 
 1. Finish the existing H2a checkpoint and implement H3 as the first new cycle. Recheck the tree,
    preserve the separate logical changes, and prove script compatibility alongside the defects.
-2. Settle H1 and H2b in ideation, then implement the chosen audit and aggregate behavior. H4
+2. H1 is accepted and complete locally. Settle H2b in ideation, then implement aggregate behavior. H4
    follows their shared completion semantics. These packages establish safe evidence for later work.
 3. Run targeted ideation for H5-H7 and implement bounded tasks. H6's agreed choices shape its
    evidence contract; do not build a generic policy framework while details remain unresolved.

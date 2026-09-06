@@ -6,9 +6,7 @@ use serde_json::{json, Value};
 use crate::browser::BrowserError;
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet, Decision};
-use crate::language::outcome::{
-    page_recovered_summary, tab_already_closed_summary, Outcome, Refusal,
-};
+use crate::language::outcome::{Outcome, Refusal};
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
@@ -365,11 +363,11 @@ impl ApplicationExecutor {
                 );
                 if terminal.result.status == Status::Succeeded {
                     terminal.result.repeat_safe = false;
-                    if let Some(host) = terminal.observed.host.as_deref() {
-                        terminal.result.summary = page_recovered_summary(Some(host));
-                    } else {
-                        terminal.result.summary = page_recovered_summary(None);
-                    }
+                    let outcome = Outcome::PageRecovered {
+                        host: terminal.observed.host.clone(),
+                    };
+                    terminal.result.summary = outcome.summary();
+                    terminal.audit = outcome.audit();
                     if let Some(facts) = terminal.result.facts.as_object_mut() {
                         facts.insert("recovered".into(), json!("new_tab"));
                     }
@@ -609,13 +607,14 @@ impl ApplicationExecutor {
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    tab_already_closed_summary().as_str(),
+                    Outcome::TabAlreadyClosed.summary().as_str(),
                     json!({"tab":requested,"closed":false,"already_gone":true}),
                     vec![],
                 ),
                 decision,
                 physical_id: None,
                 observed: Default::default(),
+                audit: Outcome::TabAlreadyClosed.audit(),
             };
         }
         let selected = match lease.select_tab(Some(requested)) {

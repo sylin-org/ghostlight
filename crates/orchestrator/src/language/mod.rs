@@ -1,5 +1,6 @@
 //! The complete model-facing catalog, typo-closed decoding, and executable defaults.
 
+pub mod audit;
 pub mod capability_map;
 pub mod environment;
 pub mod outcome;

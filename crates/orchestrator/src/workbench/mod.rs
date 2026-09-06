@@ -1576,7 +1576,11 @@ mod tests {
             Decision::permitted(),
             "succeeded",
             "none",
-            "Read 1,240 words from example.com.",
+            &crate::language::outcome::Outcome::TextRead {
+                words: 1240,
+                host: Some("example.com".into()),
+            }
+            .audit(),
             1200,
         )
         .with_observation(Observed {
@@ -1626,7 +1630,11 @@ mod tests {
                 Decision::permitted(),
                 "succeeded",
                 "wrote",
-                "Page text read.",
+                &crate::language::outcome::Outcome::TextRead {
+                    words: 3,
+                    host: None,
+                }
+                .audit(),
                 1200,
             ))
             .unwrap();
@@ -1679,7 +1687,13 @@ mod tests {
                     Decision::permitted(),
                     "succeeded",
                     "applied",
-                    "Clicked the \"Save\" button on example.com.",
+                    &crate::language::outcome::Outcome::TargetClicked {
+                        host: Some("example.com".into()),
+                        subject: crate::language::outcome::ActionSubject::from_page(
+                            "button", "Save", true,
+                        ),
+                    }
+                    .audit(),
                     140,
                 )
                 .with_observation(Observed {
@@ -1796,7 +1810,7 @@ mod tests {
                         Decision::permitted(),
                         "succeeded",
                         "applied",
-                        "did the thing",
+                        &crate::language::outcome::Outcome::ScriptEvaluated { host: None }.audit(),
                         1,
                     )
                     .with_observation(Observed {

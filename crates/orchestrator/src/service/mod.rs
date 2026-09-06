@@ -808,11 +808,10 @@ impl BrowserEventSink for ServiceBrowserEvents {
                         "blocked"
                     },
                     "applied",
-                    if decision.allowed {
-                        "The browser landed on a new page and its landing was governed."
-                    } else {
-                        "Authority blocked the page the browser landed on."
-                    },
+                    &crate::language::outcome::Outcome::BrowserLanding {
+                        allowed: decision.allowed,
+                    }
+                    .audit(),
                     0,
                 )
                 .with_policy(&snapshot, decision);

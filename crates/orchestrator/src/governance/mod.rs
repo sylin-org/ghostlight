@@ -25,6 +25,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
+use crate::language::audit::{AuditProjection, AuditRefusal};
 use crate::language::{outcome::Observed, RequestRestrictions};
 
 const RUNTIME_ACTIVE: u8 = 0;
@@ -1916,11 +1917,13 @@ pub struct AuditRecord {
     /// Ghostlight-authored sentence naming what happened, with an optional governed target name.
     #[serde(default)]
     pub summary: String,
-    /// Bounded language-authored refusal facts, present only when the terminal was not a
-    /// success. These are mechanism facts such as reason codes and browser handles, never page
-    /// content.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refusal_facts: Option<serde_json::Value>,
+    /// Closed language-authored failure metadata. Legacy arbitrary facts are discarded on read.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::language::audit::read_refusal"
+    )]
+    pub refusal_facts: Option<AuditRefusal>,
     /// How long the invocation took, from decode to terminal outcome.
     ///
     /// For a navigation this is the time to a governed, settled landing.
@@ -1949,13 +1952,13 @@ impl AuditRecord {
     pub fn now(
         invocation: &str,
         workspace: &str,
-        tool: &str,
+        tool: &'static str,
         capabilities: impl Into<CapabilitySet>,
         authority: &str,
         decision: Decision,
         status: &str,
         effect: &str,
-        summary: &str,
+        language: &AuditProjection,
         duration_ms: u64,
     ) -> Self {
         Self {
@@ -1977,8 +1980,8 @@ impl AuditRecord {
             grant_id: None,
             status: status.into(),
             effect: effect.into(),
-            summary: summary.into(),
-            refusal_facts: None,
+            summary: language.summary().chars().take(500).collect(),
+            refusal_facts: language.refusal().cloned(),
             duration_ms,
             observed: Observed::default(),
             channel: None,
@@ -2026,13 +2029,6 @@ impl AuditRecord {
     #[must_use]
     pub fn with_observation(mut self, observed: Observed) -> Self {
         self.observed = observed;
-        self
-    }
-
-    /// Attach bounded language-authored refusal facts for a terminal that was not a success.
-    #[must_use]
-    pub fn with_refusal_facts(mut self, facts: Option<serde_json::Value>) -> Self {
-        self.refusal_facts = facts;
         self
     }
 }
@@ -2528,7 +2524,11 @@ mod tests {
             first,
             "blocked",
             "none",
-            "Authority blocked the action.",
+            &crate::language::outcome::Refusal::AuthorityBlocked {
+                reason: crate::language::outcome::BlockedReason::Capability,
+                host: None,
+            }
+            .audit(),
             0,
         )
         .with_policy(&snapshot, first);
@@ -2954,7 +2954,11 @@ mod tests {
             Decision::permitted(),
             "succeeded",
             "applied",
-            "Page text read.",
+            &crate::language::outcome::Outcome::TextRead {
+                words: 3,
+                host: None,
+            }
+            .audit(),
             1200,
         )
     }
@@ -3033,6 +3037,62 @@ mod tests {
         }))
         .expect("historical audit record remains readable");
         assert_eq!(historical.requirements(), CapabilitySet::READ);
+    }
+
+    #[test]
+    fn audit_reads_legacy_failure_payloads_without_reemitting_them() {
+        for legacy in [
+            serde_json::json!({"reason":"browser_primitive_failed","detail":"PRIVATE_EXCEPTION"}),
+            serde_json::json!({"steps":[{"result":{"text":"PRIVATE_READ"}}]}),
+            serde_json::json!({"reason":"PRIVATE_REASON"}),
+            serde_json::json!(["PRIVATE_ARRAY"]),
+        ] {
+            let mut encoded = serde_json::to_value(sample_record()).unwrap();
+            encoded["refusal_facts"] = legacy;
+            let record: AuditRecord =
+                serde_json::from_value(encoded).expect("old history stays readable");
+            assert!(!serde_json::to_string(&record).unwrap().contains("PRIVATE_"));
+            assert_eq!(record.invocation, "invocation_x");
+            assert_eq!(
+                record.requirements(),
+                CapabilitySet::READ.union(CapabilitySet::WRITE)
+            );
+        }
+    }
+
+    #[test]
+    fn typed_audit_failures_round_trip_with_policy_and_measurements() {
+        use crate::language::outcome::Refusal;
+        let record = AuditRecord::now(
+            "invocation_failure",
+            "workspace_failure",
+            "browser_execute",
+            Capability::Execute,
+            "authority_failure",
+            Decision::permitted(),
+            "unknown",
+            "unknown",
+            &Refusal::DeadlineExpired {
+                before_dispatch: false,
+            }
+            .audit(),
+            123,
+        )
+        .with_observation(Observed {
+            host: Some("example.com".into()),
+            ..Observed::default()
+        });
+        let encoded = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AuditRecord>(&encoded).unwrap(),
+            record
+        );
+        assert_eq!(
+            record.refusal_facts,
+            Some(crate::language::audit::AuditRefusal::DeadlineExpired {
+                before_dispatch: false
+            })
+        );
     }
 
     /// The record has exactly one URL-shaped field and it is a host.

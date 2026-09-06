@@ -75,6 +75,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id: None,
                 observed: Outcome::FlowDecoded { steps: total }.observed(),
+                audit: Outcome::FlowDecoded { steps: total }.audit(),
             };
         }
         let mut envelopes: HashMap<String, Value> = HashMap::new();
@@ -189,6 +190,12 @@ impl ApplicationExecutor {
             ),
             decision,
             physical_id: None,
+            audit: Outcome::FlowRan {
+                completed,
+                total,
+                stopped,
+            }
+            .audit(),
             observed: Outcome::FlowRan {
                 completed,
                 total,

@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-06 (H3 implemented and verified locally; flow-stop fix committed;
+Last updated: 2026-09-06 (H1 and H3 implemented and verified locally; flow-stop fix committed;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Security-hardening epic (2026-09-06)
@@ -47,10 +47,23 @@ Packaging includes the parser/license with source-matching bytes; repository int
 This is real evaluator/CDP and real process/MCP evidence with test native framing. It is not an
 installed MV3/native-host or cross-platform browser test. H3 is not deployed or published.
 
-Next is H1 ideation. H1's audit correction, H2b aggregate reporting, child receipts, runtime
-scope/timing, audit health, and local
-bounds go through their ideation sessions before implementation. Expected partial website effects
-remain distinct from Ghostlight's extra copies or execution. No publication has been made for
+The owner accepted [H1 readable bounded audit](tasks/security-hardening/h1-readable-audit.md)
+after ideation. It is implemented locally: every terminal supplies a language-owned typed audit
+projection; arbitrary failed-result facts and browser error descriptions stay out of new audit.
+Readable explanations, policy attribution, measurements, and governed target names remain. The
+reader preserves historical records while dropping arbitrary legacy failure facts, without
+rewriting files or claiming to sanitize old summaries. No profile selector or richer capture mode
+was added; those remain deferred. ADR-0103 records the accepted experience and architecture.
+
+All 447 Rust tests (370 orchestrator library), all 183 extension tests, formatting, and workspace
+Clippy pass. The fresh-build process journey now verifies the actual JSONL file after a failed
+Read/script flow and a primitive browser error: permitted client details survive while audit
+excludes them. This is a synthetic adapter through real MCP/relay/service processes, not a live
+browser or installed-MV3 lane. H1 is not deployed or published.
+
+Next is H2b ideation for aggregate outcomes and recovery. Child receipts, runtime scope/timing,
+audit health, and local bounds also require their ideation sessions before implementation.
+Expected partial website effects remain distinct from Ghostlight's extra copies or execution. No publication has been made for
 the epic.
 
 The owner has framed the epic around delight in integrated tooling and dependable boundaries

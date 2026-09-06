@@ -48,6 +48,11 @@ does not contain paths, queries, fragments, arbitrary page text, selectors, targ
 values, scripts, screenshots, recordings, or credentials. Retention and deletion are customer
 controls.
 
+The September 6 H1 source correction enforces this boundary for failed-flow results and arbitrary
+browser error text. Earlier versions could retain those values. Existing files are not rewritten;
+see the [H1 implementation record](../tasks/security-hardening/h1-readable-audit.md) for verification
+and publication state. The correction must be deployed before relying on it for new records.
+
 See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).

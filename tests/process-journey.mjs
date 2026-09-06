@@ -12,6 +12,9 @@ const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghost
 const runtimeFile = join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
 const runtimeLease = `${runtimeFile.replace(/\.json$/, "")}.lock`;
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
+const auditFailureScript = "throw new Error('PRIVATE_AUDIT_EXCEPTION')";
+const auditInvalidScript = "PRIVATE_INVALID_SCRIPT";
+const auditException = "PRIVATE_AUDIT_EXCEPTION";
 const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
 const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
 const nativeHostDir = join(repository, `tests/.ghostlight-native-host-${process.pid}`);
@@ -209,6 +212,11 @@ async function runAdapter(peer) {
         targets: [{ locator: "heading-1", role: "heading", name: "Example Domain", state: [], credential_class: false }]
       };
     } else if (command.command === "evaluate_script") {
+      if (command.script === auditFailureScript || command.script === auditInvalidScript) {
+        peer.send({ kind: "error", correlation: request.correlation, code: "primitive_failed",
+          message: auditException, effect_unknown: command.script === auditFailureScript });
+        continue;
+      }
       result = {
         outcome: "script_evaluated",
         tab,
@@ -712,6 +720,26 @@ try {
   assert.equal(flow.facts.completed, 3);
   assert.match(textual(flowResponse), /Completed 3 flow steps\./);
 
+  // H1: a failed composition still returns permitted child content to its caller, while
+  // the actual durable file below must contain neither that content nor the browser error.
+  const failedFlowResponse = await mcp.request("tools/call", {
+    name: "browser_flow",
+    arguments: { steps: [
+      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
+      { id: "fail", tool: "browser_execute", arguments: { script: auditFailureScript } }
+    ] }
+  });
+  const failedFlow = structured(failedFlowResponse);
+  assert.equal(failedFlow.status, "unknown");
+  assert.equal(failedFlow.facts.steps[0].result.facts.text, "Example Domain");
+  assert.equal(failedFlow.facts.steps[1].result.facts.detail, auditException);
+  assert.equal(textual(failedFlowResponse).includes(auditException), true);
+  const primitiveFailure = structured(await mcp.request("tools/call", {
+    name: "browser_execute", arguments: { script: auditInvalidScript }
+  }));
+  assert.equal(primitiveFailure.status, "failed");
+  assert.equal(primitiveFailure.facts.detail, auditException);
+
   const startedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
     arguments: { action: "start", tab: restartedHandle }
@@ -779,6 +807,14 @@ try {
   assert.equal(openRecord.observed.host, "example.com");
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
+  assert.equal(records.some((record) => JSON.stringify(record).includes("PRIVATE_")), false);
+  const flowFailureRecord = records.find((record) => record.invocation === failedFlow.invocation);
+  assert.equal(flowFailureRecord.status, "unknown");
+  assert.equal(flowFailureRecord.summary, failedFlow.summary);
+  assert.equal(flowFailureRecord.refusal_facts, undefined);
+  const primitiveRecord = records.find((record) => record.invocation === primitiveFailure.invocation);
+  assert.equal(primitiveRecord.summary, "The browser could not complete this operation.");
+  assert.deepEqual(primitiveRecord.refusal_facts, { reason: "browser_primitive_failed" });
 
   // ADR-0145: the explicit layer pinned every process at birth, so all three wrote bounded,
   // content-free operational logs into the one journey directory.

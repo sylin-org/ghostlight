@@ -715,6 +715,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id: Some(selected.physical_id),
                 observed: outcome.observed(),
+                audit: outcome.audit(),
             };
         }
         // Waiting on what the page calls a control: polled executor-side through the same
@@ -804,6 +805,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id: Some(selected.physical_id),
                 observed: outcome.observed(),
+                audit: outcome.audit(),
             };
         }
         match self.dispatch(
@@ -856,6 +858,7 @@ impl ApplicationExecutor {
                     decision,
                     physical_id: Some(tab_id),
                     observed: outcome_observed,
+                    audit: outcome.audit(),
                 }
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),

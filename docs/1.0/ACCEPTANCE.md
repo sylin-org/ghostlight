@@ -112,6 +112,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    screenshot, recording frame or GIF, dialog text, console text, request URL, header, body, or
    diagnostic entry. A successful action may retain one governed, normalized, bounded target name
    in its Ghostlight-authored summary.
+   Failed flows also exclude earlier successful child results. Arbitrary exceptions cannot enter
+   retained summary text. Synthetic input, path, script-result, and exception sentinels remain
+   visible in permitted client results where applicable and absent from serialized audit.
+   Historical records remain readable without re-emitting their arbitrary failure-facts payloads;
+   the original files remain unchanged.
 11. Audit carries the complete RAWX set, authority, mode, tier, grant, rule, deterministic denial
     id, and managed sequence without policy payloads.
 12. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.

@@ -49,7 +49,7 @@ its bounded History view from the same file.
 | --- | --- |
 | `timestamp_ms` | Local observation time as Unix milliseconds. |
 | `invocation`, `workspace` | Opaque correlation handles. |
-| `tool` | Exact 1.0 catalog tool name. |
+| `tool` | Catalog tool name, `unknown_tool` for an unrecognized request name, or the service's `browser_landing` event. |
 | `capabilities` | Complete independent RAWX requirement set. Empty is valid. |
 | `authority` | Opaque immutable authority snapshot id. |
 | `policy_seq` | Signed managed publish sequence, when active. |
@@ -60,12 +60,26 @@ its bounded History view from the same file.
 | `denial_id` | Deterministic `D-` correlation id for an authored denial. |
 | `status`, `effect` | Terminal result and physical-effect class. |
 | `summary` | Bounded Ghostlight-authored sentence. |
+| `refusal_facts` | Optional closed refusal category and typed context; never a copy of client result facts. |
 | `duration_ms` | Decode-to-terminal elapsed time. |
 | `observed` | Closed governed landing and measurement facts. |
 | `channel` | `mcp` or `cli`; attribution, not authority. |
 
 The optional singular `capability` field exists only so 1.0 can read historical pre-ADR-0121
 records. New records write `capabilities`.
+
+The H1 source correction replaces arbitrary failure-facts retention with typed metadata. For
+example, a primitive browser error records `{"reason":"browser_primitive_failed"}` while its
+arbitrary error description stays in the permitted client result. Deadline metadata can retain
+`before_dispatch`; workspace and recovery failures can retain a closed `cause`. Query the top-level
+policy fields for rule attribution and `status`/`effect` for the terminal outcome. A missing
+`refusal_facts` is not a success signal: composed and measured outcomes have their own summaries.
+
+Older versions could retain page content in failed-flow records and browser text in failure
+summaries. This correction does not rewrite old files. The reader ignores legacy arbitrary
+failure-facts content while preserving the historical record. Historical summary text remains
+historical text. See [H1 source and verification state](../tasks/security-hardening/h1-readable-audit.md)
+before assuming an installed version includes the correction.
 
 `observed` has exactly five fields:
 

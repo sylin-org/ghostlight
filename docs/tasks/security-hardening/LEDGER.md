@@ -9,7 +9,7 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 ## RESUME HERE
 
 The owner requested a complete epic covering the assessment and all subsequent decisions, and
-accepted H3 as the next implementation cycle. The [epic](EPIC.md), [bootstrap](BOOTSTRAP.md), and
+accepted H3 as the first implementation cycle. The [epic](EPIC.md), [bootstrap](BOOTSTRAP.md), and
 [ideation agenda](IDEATION.md) now organize that work. Undecided packages require an ideation
 session before their implementation cycle; do not silently adopt the earlier recommendations.
 
@@ -17,17 +17,18 @@ session before their implementation cycle; do not silently adopt the earlier rec
 record accompanies `fix(script): select script form before page execution`; use Git for the
 commit hash. Both SA-04 defects have regressions, all 183 extension tests and workspace gates
 pass, and 19 Chromium/MCP cases prove effects and compatibility. It is not deployed or published.
-The next work is [ideation I1](IDEATION.md) for H1, then I2 for H2b before their implementation
-cycles. Do not repeat the completed H3 cycle or implement undecided remedies silently.
+The owner accepted I1 and directed implementation of [H1 readable bounded audit](h1-readable-audit.md).
+H1 is implemented and verified locally. Next is I2 for H2b before its implementation cycle.
+Do not repeat completed cycles or implement undecided remedies silently.
 
 The owner identified flow stopping as a bug to fix. [H2a](h2a-flow-stop.md) now fixes the two
 missing loop exits in the working tree, with regression evidence and 362 passing orchestrator
 library tests. It is committed as `8103c69b`, with full workspace gates and the process journey
 now passing; it is not deployed. Broader H2 aggregate reporting remains proposed.
 
-H1's proposed local-audit correction and H2b's aggregate behavior go to ideation before their
-cycles. H3's distinction from expected partial effects is now accepted. No transactional rollback
-requirement has been added, and no deployment or publication has been made for this epic.
+H1's local-audit correction is accepted. H2b's aggregate behavior still requires ideation. H3's
+distinction from expected partial effects is accepted. No transactional rollback requirement has
+been added, and no deployment or publication has been made for this epic.
 
 Client provenance remains reporting-first, with signer/hash admission conditional on a concrete
 integration and verifiable subject. ADR-0105 records that direction. C1's detailed fields and
@@ -50,7 +51,7 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 | --- | --- | --- |
 | H2a | Fixed and committed as `8103c69b`; not deployed | Required gates and process journey pass. |
 | H3 | IMPLEMENTED and verified locally; not deployed | Complete evidence is in its task record; no remaining H3 implementation task. |
-| H1 | Included; remedy/priorities still proposed | Ideation I1. |
+| H1 | IMPLEMENTED and verified locally; not deployed | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
 | H2b | Included; aggregate semantics still proposed | Ideation I2; H2a remains accepted. |
 | H4 | Included; receipt design still proposed | Ideation I3; depends on H1 safe projection and H2b semantics. |
 | H5 | Included; existing human-control contract retained | Ideation I4 for scope/recovery details and timing evidence. |
@@ -128,14 +129,14 @@ protocol, client credential system, or product-wide certificate requirement is s
 P0 means a demonstrated violation of an existing effect or confidentiality promise. P1 restores
 complete enforcement and evidence or resolves a source finding with substantial possible impact.
 P2 is focused hardening or further assurance after the demonstrated defects. These are scheduling
-priorities, not CVSS scores. H3's selected cycle is complete locally. H2a is committed, and
-provenance/H6 have agreed direction. The order after H3 remains a recommendation to settle with
+priorities, not CVSS scores. H1 and H3 are complete locally. H2a is committed, and provenance/H6
+have agreed direction. The remaining order is a recommendation to settle with
 the relevant ideation session and dependencies.
 
 | Order | ID | Priority | Work package | Evidence and reason |
 | --- | --- | --- | --- | --- |
 | 1 | H3 | P0 | Prevent script re-evaluation and false no-effect reports | Implemented; 20 evaluator tests and 19 real Chromium/MCP cases prove the correction and compatibility. Not deployed. |
-| 2 | H1 | P0 | Keep payloads out of audit | Reproduced SA-03: a failed flow persists earlier Read content. Ideation before implementing the proposed correction. |
+| 2 | H1 | P0 | Keep payloads out of audit | SA-03 corrected after I1: typed audit projection; failure, legacy-read, and actual JSONL checks pass. Not deployed. |
 | 3 | H2 | P0 | Make flow stopping and aggregate effects truthful | H2a stop fix agreed and verified locally; H2b aggregate reporting awaits ideation. |
 | 4 | H4 | P1 | Complete child operation receipts | SA-02: flow reproduction and sequence source evidence. Policy checks happen, but terminal child records are missing. |
 | 5 | H5 | P1 | Correct workspace attention and prove human-control timing | Reproduced SA-05 cross-workspace attention; SA-08 pause race still needs a controlled test. |
@@ -145,10 +146,14 @@ the relevant ideation session and dependencies.
 
 ### H1: Audit confidentiality
 
+I1 accepted: readable history by default, details on demand, existing target-name policy retained.
+Minimal/Descriptive profiles and richer capture are deferred. The [H1 task](h1-readable-audit.md)
+records the bounded implementation and evidence; ADR-0103 records the decision.
+
 Discussion clarification: partial input already received by the website is an expected effect of
 a non-atomic browser operation. SA-03 concerns a different destination: Ghostlight copies an
-earlier Read result into its local audit after a later child fails. Its priority remains under
-discussion. The proposed correction does not remove prior website effects or promise rollback.
+earlier Read result into its local audit after a later child fails. The owner accepted its
+correction after I1. The correction preserves prior website effects and promises no rollback.
 
 Replace unrestricted `facts` copying with a closed audit projection at its owning seam. Review
 summary text and raw browser exceptions as well as structured facts. Pin permitted fields and
@@ -157,7 +162,7 @@ ordinary and composite success/failure and serialization. Keep the existing boun
 exception and its monotonic privacy setting explicit.
 
 Exit evidence: forbidden sentinels appear in intended tool results where applicable and are absent
-from every corresponding serialized audit record. No whole-result JSON reaches audit by default.
+from every corresponding serialized audit record. No whole-result JSON reaches new audit records.
 Do not erase existing audit files as part of the fix; any historical-data cleanup is separate work.
 
 ### H2: Flow control and aggregate truth
@@ -279,8 +284,8 @@ workspace or live-browser success is never inferred from the earlier assessment'
 
 The owner asked how the product focus changes the answers to the earlier questions. The following
 recommendations turn it into expected behavior. The existing accepted scope and H2a fix remain
-as recorded above. H3's correction and H6's policy/notice choices were subsequently accepted; other additional
-design choices remain proposed unless explicitly recorded otherwise.
+as recorded above. H1/H3 corrections and H6's policy/notice choices were subsequently accepted;
+other additional design choices remain proposed unless explicitly recorded otherwise.
 
 | Open issue | Recommended answer | Intended user experience |
 | --- | --- | --- |
@@ -300,15 +305,14 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H3's selected implementation cycle is complete locally. The recommended subsequent grouping is audit
-confidentiality and aggregate truth, then composition, frame boundaries, workspace control, audit
+H1 and H3 are complete locally. The recommended subsequent grouping is aggregate truth, then
+composition, frame boundaries, workspace control, audit
 health, and local resilience. Honest provenance reporting uses the repaired receipt seam;
 conditional signer admission follows a concrete integration. The epic maps those dependencies.
 Run the affected package's ideation session before implementing its undecided choices.
 
 ## Decisions still open
 
-- H1's proposed local-audit correction and the task order after the completed local H3 cycle.
 - Broader H2 aggregation and other implementation tasks beyond the completed local H2a fix.
 - Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
   verification caching, and supported-platform behavior.
@@ -320,7 +324,7 @@ Run the affected package's ideation session before implementing its undecided ch
 - Audit-write failure behavior and any configurable strictness after a failed append.
 
 The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H4/H5/H8. H3's correction, existing pause/stop semantics, provenance boundaries, and
+including H4/H5/H8. H1/H3 corrections, existing pause/stop semantics, provenance boundaries, and
 H6's selected modes remain accepted context rather than unresolved questions.
 
 ## Activity record
@@ -336,6 +340,7 @@ H6's selected modes remain accepted context rather than unresolved questions.
 | 2026-09-06 | Owner challenged fixed partial-result behavior and proposed policy flags for delight | H6 revised around selectable exclusion handling and separate notice preferences, composed through existing authority. Defaults and schema remain open; no production change. |
 | 2026-09-06 | Owner accepted the policy choices and requested a ledger entry and current inventory | H6 handling modes, separate notice choices, and the use-permitted-content/notice-when-affected starting profile recorded as agreed. Detailed contracts and implementation remain outstanding. |
 | 2026-09-06 | Owner accepted H3 next and requested one epic containing all discussion and decisions, with ideation before undecided cycles | EPIC, IDEATION, and the H3 task brief created; bootstrap, decision index, and readiness states reconciled. ADR-0133 amended for script correctness. No new production implementation or test run in this planning turn. |
+| 2026-09-06 | Owner accepted H1 ideation and directed implementation | Readable bounded history; concise recovery language; display and retention separate. Profiles and richer capture deferred. H1 completed locally: 447 Rust tests, 183 extension tests, and actual JSONL checks through the process journey pass. Not deployed. |
 | 2026-09-06 | Owner directed implementation | H2a committed separately as 8103c69b; assessment and epic preserved as a0310637. H3 implemented with local parsing and one effectful evaluation; full gates, 183 extension tests, and 19 Chromium/MCP cases pass. No deployment. Next: H1 ideation. |
 
 ## H2a execution record (2026-09-06)

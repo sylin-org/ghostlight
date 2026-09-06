@@ -119,3 +119,25 @@ successful outcomes; the executor does not construct an independent audit accoun
 5. The browser-seam test proves counts are absent while host/readiness remain.
 6. Executor tests prove completion merges seam and outcome observations without page-payload leak.
 7. A source guard proves the workbench renders the sentence and has no `measured()` inference.
+
+## Amendment: readable bounded audit (2026-09-06)
+
+The owner accepted H1 after ideation. Readable history stays the default, with details on demand
+and policy controlling retained information. Keep the existing governed target-name exception and
+its monotonic removal setting. A new Minimal/Descriptive selector and richer diagnostic capture
+are deferred. Displaying additional existing detail does not authorize additional retention.
+
+The completion seam currently copies arbitrary failed-result facts, which can contain successful
+child Read results, and copies summaries containing arbitrary browser error text. Replace those
+copies with a language-owned typed audit projection. Every terminal must supply that projection;
+client result facts cannot be substituted for it. Retained failure metadata has a closed vocabulary.
+Summary text comes from the same outcome/refusal owner, with browser-authored details reserved for
+the permitted client result. Successes, failures, and composition obey the same content boundary.
+
+Keep explanations concise. Extra prose must support a useful next action. The accepted sentence
+"Script failed during partial execution." requires evidence that execution began and failed; a
+lost reply alone cannot establish that fact. Structured effect uncertainty remains independent.
+
+Historical files remain untouched and readable. Their earlier content is not retroactively made
+safe by this correction. H2b owns aggregate outcome semantics; H4 owns child-history expansion.
+The implementation and evidence live in the security-hardening H1 task record.

@@ -214,6 +214,7 @@ impl ApplicationExecutor {
                 decision: last_decision,
                 physical_id: terminal.physical_id,
                 observed,
+                audit: outcome.audit(),
             };
         }
         self.succeeded(context, last_decision, Some(selected.physical_id), if applied_any { Effect::Applied } else { Effect::None }, readiness(selected.readiness), !applied_any, Outcome::SequenceRan { completed, total: value.steps.len() }, json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}))

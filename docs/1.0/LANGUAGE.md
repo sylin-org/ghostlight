@@ -91,6 +91,12 @@ say `Clicked the "Save" button on example.com.` Governance may remove all target
 never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
 unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
+The same language owner supplies a separate typed audit projection. Readable explanations,
+measurements, and governed target names survive; arbitrary browser details and result facts do
+not enter retained history. A permitted client result may still contain those details. Expanding
+existing history does not authorize more capture. Additional retention profiles and richer
+diagnostic capture remain deferred (ADR-0103 H1 amendment).
+
 When no browser is connected and startup is left to the person -- because `browser.startup` is
 `manual`, or because more than one installed browser could serve and Ghostlight does not choose
 where to direct attention -- the refusal addresses the MCP model: ask the user to open one of the

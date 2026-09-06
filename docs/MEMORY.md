@@ -203,6 +203,11 @@ Every one of these cost something to learn.
   native host, an extension reload, and a browser reconnect for nothing.
 - **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
   executor is correct and the surface is repetitive.
+- **History helps people resume work.** Readable history is the default, with detail on demand
+  and policy controlling retention. State what happened plainly; explain uncertainty when it
+  changes the next step. Displaying more existing detail never authorizes capturing more content.
+  Additional retention profiles and richer diagnostic capture need a concrete user benefit
+  and a separate decision (ADR-0103 H1 amendment).
 - **Audit is metadata-only.** Never persist page content, results, screenshots, form values,
   scripts, paths, or file bytes. Governed attempted or landed hosts and normalized bounded names of
   action targets are the deliberate exceptions: they answer where the agent went and which visible

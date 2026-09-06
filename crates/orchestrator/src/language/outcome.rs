@@ -162,7 +162,8 @@ impl ActionSubject {
 ///
 /// This mirrors the governance reason code rather than importing it, so the model-facing voice
 /// stays independent of the governance module it reports on.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BlockedReason {
     /// The host was not granted by every authority layer.
     Host,
@@ -227,6 +228,12 @@ pub enum Outcome {
     PageOpened { host: Option<String> },
     /// An existing unbound same-host tab was adopted for the requested page (ADR-0137).
     PageReused { host: Option<String> },
+    /// A manually closed page was restored in a new controlled tab.
+    PageRecovered { host: Option<String> },
+    /// The requested controlled tab was already absent.
+    TabAlreadyClosed,
+    /// An asynchronous browser landing crossed the service's governance boundary.
+    BrowserLanding { allowed: bool },
     /// An existing controlled page was navigated.
     PageNavigated { host: Option<String> },
     /// Browser history was traversed.
@@ -415,6 +422,14 @@ impl Outcome {
                 Some(host) => format!("Reused the {host} tab."),
                 None => "Reused the existing tab.".to_string(),
             },
+            Self::PageRecovered { host } => page_recovered_summary(host.as_deref()),
+            Self::TabAlreadyClosed => tab_already_closed_summary(),
+            Self::BrowserLanding { allowed } => if *allowed {
+                "The browser landed on a new page and its landing was governed."
+            } else {
+                "Authority blocked the page the browser landed on."
+            }
+            .into(),
             Self::PageNavigated { host } => {
                 format!("Navigated to {}.", place(host, "the requested page"))
             }
@@ -800,6 +815,7 @@ impl Outcome {
             Self::TabActivated { host }
             | Self::PageOpened { host }
             | Self::PageReused { host }
+            | Self::PageRecovered { host }
             | Self::PageNavigated { host }
             | Self::HistoryTraversed { host, .. }
             | Self::PageReloaded { host }
@@ -817,6 +833,8 @@ impl Outcome {
                 ..Observed::default()
             },
             Self::TabClosed
+            | Self::TabAlreadyClosed
+            | Self::BrowserLanding { .. }
             | Self::DialogHandled { .. }
             | Self::DialogObserved { .. }
             | Self::RecordingDiscarded => Observed::default(),
@@ -825,7 +843,8 @@ impl Outcome {
 }
 
 /// Closed product-language reason for a browser-readiness recovery failure.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BrowserRecoveryReason {
     /// No supported browser installation was found.
     BrowserAbsent,
@@ -1107,7 +1126,8 @@ impl Refusal {
 }
 
 /// Stable language reason for an unusable workspace resource.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkspaceReason {
     /// No current unambiguous controlled tab matched.
     TabUnavailable,

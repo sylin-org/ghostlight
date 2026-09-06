@@ -389,6 +389,12 @@ authority version, managed sequence, mode, deciding tier, grant, rule, denial id
 status, effect class, and reason code. They exclude request and page payloads except the governed
 host and optional bounded target name described by the active privacy setting.
 
+Every terminal supplies a language-owned `AuditProjection` alongside its client result. Audit
+accepts this projection rather than a raw summary or result JSON. Refusal metadata is a closed
+type; arbitrary browser error text stays in the permitted client result. The workbench renders
+the retained sentence. Historical failure payloads are discarded when read, without editing the
+historical file or claiming to sanitize its old summary text (ADR-0103 H1 amendment).
+
 ## Failure and recovery
 
 Disconnect before a physical request has no effect. Disconnect after dispatch without a decisive

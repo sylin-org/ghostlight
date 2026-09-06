@@ -25,6 +25,9 @@ or a new tool signature would change that scope and must be discussed first.
 
 ## I1: H1 audit confidentiality
 
+Accepted 2026-09-06. See [H1](h1-readable-audit.md) and the ADR-0103 amendment for the decision.
+The questions below are the preserved agenda, not remaining blockers.
+
 - Confirm the proposed correction and its priority using a concrete pair: page content already
   received by a website versus an additional copy persisted in Ghostlight's local audit.
 - Settle the permitted failed-operation projection and useful diagnostic detail while preserving

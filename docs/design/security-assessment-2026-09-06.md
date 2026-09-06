@@ -487,3 +487,14 @@ claim. The two new SA-04 regressions failed before the fix and now pass. The
 gates, 183 extension tests, and 19 real Chromium/MCP cases with explicit test-adapter limitations.
 H2a is committed separately as `8103c69b`. Neither fix is deployed or published, and the other
 assessment findings remain open under the epic's ideation process.
+
+## Follow-up: H1 readable audit correction (2026-09-06)
+
+After ideation, the owner accepted readable bounded history with the existing target-name policy,
+separate display and retention concerns, and no new profile selector or diagnostic capture mode.
+The [H1 record](../tasks/security-hardening/h1-readable-audit.md) documents the implemented typed
+audit projection, regressions that reproduced SA-03 before the fix, and actual JSONL verification
+through the MCP/process journey. All 447 Rust tests and 183 extension tests pass. Browser error text
+also stays out of new retained summaries. Earlier records remain untouched and may contain the
+historical content; this is a local source correction, not a deployment or publication claim.
+Other findings, including aggregate truth and missing child receipts, retain their open scope.

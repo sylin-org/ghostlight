@@ -42,6 +42,7 @@ use crate::governance::{
 };
 use crate::language::{
     self,
+    audit::AuditProjection,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
         TargetRole, WorkspaceReason,
@@ -219,6 +220,7 @@ impl ApplicationExecutor {
                     decision,
                     physical_id: None,
                     observed: Observed::default(),
+                    audit: refusal.audit(),
                 };
                 return self.finish(
                     &gate,
@@ -302,6 +304,7 @@ impl ApplicationExecutor {
                 decision: Decision::permitted(),
                 physical_id: None,
                 observed: Observed::default(),
+                audit: refusal.audit(),
             }
         } else if Instant::now() >= deadline {
             let refusal = Refusal::DeadlineBeforeStart;
@@ -320,6 +323,7 @@ impl ApplicationExecutor {
                 decision: Decision::permitted(),
                 physical_id: None,
                 observed: Observed::default(),
+                audit: refusal.audit(),
             }
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
@@ -354,6 +358,7 @@ impl ApplicationExecutor {
             channel,
             peer_image,
         } = completion;
+        let tool = language::audit::tool_name(tool);
         let denial_attention = terminal.result.status == Status::Blocked
             && self
                 .governance
@@ -428,16 +433,13 @@ impl ApplicationExecutor {
             terminal.decision,
             &status,
             &effect,
-            &terminal.result.summary,
+            &terminal.audit,
             duration_ms,
         )
         .from_channel(channel)
         .with_peer_image(peer_image)
         .with_policy(snapshot, terminal.decision)
-        .with_observation(observed)
-        // Refusal facts are mechanism metadata authored by the language layer; success facts
-        // can carry page-derived values and stay out of the content-minimized audit.
-        .with_refusal_facts((status != "succeeded").then(|| terminal.result.facts.clone()));
+        .with_observation(observed);
         let _ = self.audit.record(&record);
         gate.complete(terminal.result)
             .expect("single executor completion path");
@@ -569,6 +571,7 @@ impl ApplicationExecutor {
             decision,
             physical_id: Some(selected.physical_id),
             observed: Observed::default(),
+            audit: refusal.audit(),
         }
     }
 
@@ -769,6 +772,7 @@ impl ApplicationExecutor {
                             decision,
                             physical_id: Some(selected.physical_id),
                             observed: outcome.observed(),
+                            audit: outcome.audit(),
                         };
                     }
                 }
@@ -853,6 +857,7 @@ impl ApplicationExecutor {
                         decision: read_decision,
                         physical_id: Some(selected.physical_id),
                         observed: outcome.observed(),
+                        audit: outcome.audit(),
                     });
                 }
                 let observed = &targets[0];
@@ -1180,6 +1185,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             observed,
+            audit: outcome.audit(),
         }
     }
 
@@ -1235,6 +1241,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             observed,
+            audit: refusal.audit(),
         }
     }
 
@@ -1282,6 +1289,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             observed: Observed::default(),
+            audit: refusal.audit(),
         }
     }
 
@@ -1308,6 +1316,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             observed: Observed::default(),
+            audit: refusal.audit(),
         }
     }
 
@@ -1350,6 +1359,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 observed: Observed::default(),
+                audit: refusal.audit(),
             };
         }
         // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
@@ -1371,6 +1381,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 observed: Observed::default(),
+                audit: refusal.audit(),
             };
         }
         if error.effect_unknown() {
@@ -1442,6 +1453,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             observed: Observed::default(),
+            audit: refusal.audit(),
         }
     }
 
@@ -1480,6 +1492,7 @@ impl ApplicationExecutor {
             },
             physical_id: None,
             observed: Observed::default(),
+            audit: refusal.audit(),
         }
     }
 
@@ -1567,6 +1580,7 @@ struct Terminal {
     decision: Decision,
     physical_id: Option<u64>,
     observed: Observed,
+    audit: AuditProjection,
 }
 
 enum ResolvedLocation {
@@ -2495,8 +2509,154 @@ mod tests {
         );
     }
 
-    /// The audit carries bounded refusal facts for non-successes and stays free of them on
-    /// successes, whose facts can carry page-derived values.
+    #[test]
+    fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(
+                7,
+                "https://example.com/PRIVATE_PATH?PRIVATE_QUERY#PRIVATE_FRAGMENT",
+            ),
+            committed_urls: vec![
+                "https://example.com/PRIVATE_PATH?PRIVATE_QUERY#PRIVATE_FRAGMENT".into(),
+            ],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        browser.push(Ok(BrowserOutcome::Text {
+            tab_id: 7,
+            text: "PRIVATE_PAGE_SENTINEL".into(),
+            truncated: false,
+            title: "PRIVATE_TITLE_SENTINEL".into(),
+            url: "https://example.com/PRIVATE_PATH?PRIVATE_QUERY#PRIVATE_FRAGMENT".into(),
+        }));
+        browser.push(Err(BrowserError::EffectUnknown(
+            "PRIVATE_EXCEPTION_SENTINEL".into(),
+        )));
+        let result = executor.execute(&workspace, "browser_flow", json!({"steps":[
+            {"id":"PRIVATE_STEP_ID", "tool":"browser_read", "arguments":{}},
+            {"id":"execute", "tool":"browser_execute", "arguments":{"script":"throw 'PRIVATE_SCRIPT_SENTINEL'"}}
+        ]}), None, &CancellationToken::default());
+        assert_ne!(result.status, Status::Succeeded);
+        let client = serde_json::to_string(&result).unwrap();
+        assert!(client.contains("PRIVATE_PAGE_SENTINEL"));
+        assert!(client.contains("PRIVATE_EXCEPTION_SENTINEL"));
+        let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(
+            !encoded.contains("PRIVATE_"),
+            "audit copied a flow payload: {encoded}"
+        );
+    }
+
+    #[test]
+    fn audit_excludes_primitive_exception_text_and_unknown_tool_names() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Err(BrowserError::Primitive(
+            "PRIVATE_EXCEPTION_SENTINEL".into(),
+        )));
+        let result = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert!(serde_json::to_string(&result)
+            .unwrap()
+            .contains("PRIVATE_EXCEPTION_SENTINEL"));
+        executor.execute(
+            &workspace,
+            "PRIVATE_TOOL_SENTINEL",
+            json!({"PRIVATE_KEY":"PRIVATE_VALUE"}),
+            None,
+            &CancellationToken::default(),
+        );
+        let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(
+            !encoded.contains("PRIVATE_"),
+            "audit copied caller/browser text: {encoded}"
+        );
+    }
+
+    #[test]
+    fn audit_excludes_script_results_and_invalid_input_context() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        let tab_handle = opened.facts["tab"].as_str().unwrap();
+        browser.push(Ok(BrowserOutcome::ScriptEvaluated {
+            tab: tab(7, "https://example.com/"),
+            value: json!({"PRIVATE_RESULT_KEY":"PRIVATE_RESULT_VALUE"}).to_string(),
+            truncated: false,
+            committed_urls: vec![],
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_execute",
+            json!({"script":"'PRIVATE_SCRIPT'"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{result:?}");
+        assert_eq!(
+            result.facts["value"]["PRIVATE_RESULT_KEY"],
+            "PRIVATE_RESULT_VALUE"
+        );
+
+        for (tool, arguments) in [
+            (
+                "browser_fill_form",
+                json!({"fields":[{"target":"PRIVATE_TARGET_HANDLE","value":"PRIVATE_TYPED_VALUE"}]}),
+            ),
+            (
+                "browser_upload",
+                json!({"target":"PRIVATE_TARGET_HANDLE","paths":["C:/PRIVATE_FILE_PATH"]}),
+            ),
+            (
+                "browser_click",
+                json!({"selector":{"name":"PRIVATE_SELECTOR","PRIVATE_KEY":"PRIVATE_VALUE"}}),
+            ),
+            (
+                "browser_wait",
+                json!({"condition":"PRIVATE_CONDITION","value":"PRIVATE_WAIT_VALUE"}),
+            ),
+        ] {
+            let result = executor.execute(
+                &workspace,
+                tool,
+                arguments,
+                None,
+                &CancellationToken::default(),
+            );
+            assert_ne!(result.status, Status::Succeeded, "{result:?}");
+        }
+        let records = audit.0.lock().unwrap();
+        let encoded = serde_json::to_string(&*records).unwrap();
+        assert!(
+            !encoded.contains("PRIVATE_"),
+            "audit copied input/result context: {encoded}"
+        );
+        assert!(!encoded.contains(tab_handle));
+        assert_eq!(records[1].summary, "Executed JavaScript on example.com.");
+    }
+
+    /// Audit retains a closed failure category; browser-authored details belong to the client.
     #[test]
     fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() {
         let (executor, browser, _workspaces, workspace, audit) = fixture();
@@ -2534,8 +2694,14 @@ mod tests {
             .refusal_facts
             .as_ref()
             .expect("failure carries facts");
-        assert_eq!(facts["reason"], "browser_primitive_failed");
-        assert_eq!(facts["detail"], "target is not visible for focus");
+        assert_eq!(
+            facts,
+            &crate::language::audit::AuditRefusal::BrowserPrimitiveFailed
+        );
+        assert_eq!(
+            failure.summary,
+            "The browser could not complete this operation."
+        );
         let success = &records[1];
         assert_eq!(success.status, "succeeded");
         assert!(success.refusal_facts.is_none());
