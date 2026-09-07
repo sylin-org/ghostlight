@@ -169,7 +169,7 @@ async function runAdapter(peer) {
   let tab = { tab_id: 41, title: "", url: "about:blank", active: true, readiness: "complete" };
   const recordings = new Map();
   function selectedRecording(request) {
-    const requested = request.command.recording_id;
+    const requested = (request.command.primitive ?? request.command).recording_id;
     if (requested) return recordings.get(requested)?.workspace === request.workspace ? recordings.get(requested) : null;
     const owned = Array.from(recordings.values()).filter((recording) => recording.workspace === request.workspace);
     return owned.length === 1 ? owned[0] : null;
@@ -185,7 +185,7 @@ async function runAdapter(peer) {
       ...(recording.state === "recording"
         ? { hard_expires_unix_ms: Date.now() + 120000 }
         : { retention_expires_unix_ms: Date.now() + 300000, stop_reason: "explicit" }),
-      source_urls: [tab.url]
+      source_urls: [tab.url], source_urls_complete: true
     };
   }
   for (;;) {
@@ -196,7 +196,18 @@ async function runAdapter(peer) {
     }
     if (frame.kind !== "request") continue;
     const request = frame.request;
-    const command = request.command;
+    const scope = request.command.command === "in_documents" ? request.command.scope : null;
+    const command = scope ? request.command.primitive : request.command;
+    if (command.command === "describe_documents") {
+      peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: {
+        outcome: "documents", tab_id: command.tab_id, inventory: {
+          documents: [{ id: "process-document", url: tab.url, parent: null, supported: true }],
+          subjects: command.locators.length || command.points.length || command.focused ? ["process-document"] : [],
+          unresolved: false, incomplete: false
+        }
+      } } });
+      continue;
+    }
     physicalCommands.push(command.command);
     physicalRequests.push(command);
     let result;
@@ -278,7 +289,12 @@ async function runAdapter(peer) {
         }
       };
     } else if (command.command === "observe") {
-      setTimeout(() => peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" } } }), 1000);
+      setTimeout(() => {
+        let observed = { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" };
+        if (scope) observed = { outcome: "in_documents", result: observed,
+          observation: { visited: scope.allowed, unavailable: [], limited_by_size: false, masked_regions: 0 } };
+        peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: observed } });
+      }, 1000);
       continue;
     } else if (command.command === "start_recording") {
       const recording = { id: `recording_${recordings.size + 1}`, workspace: request.workspace, state: "recording", frames: [] };
@@ -375,6 +391,9 @@ async function runAdapter(peer) {
       result = { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: files.length, uploaded_bytes: files.reduce((sum, file) => sum + file.size, 0), subject: null };
     }
     else throw new Error(`Unexpected physical primitive ${command.command}`);
+    if (scope) result = { outcome: "in_documents", result, observation: {
+      visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated), masked_regions: 0
+    } };
     peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   }
 }
@@ -448,7 +467,7 @@ try {
     browser_id: PROCESS_BROWSER,
     adapter_epoch: "adapter_processjourney",
     capabilities: [
-      "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
+      "document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
       "chunked_commands", "adapter_liveness"
@@ -528,7 +547,7 @@ try {
   assert.equal(localRead.summary, "Read 2 words from localhost.");
 
   const observedDispatch = native.waitFor(
-    (frame) => frame.kind === "request" && frame.request.command.command === "observe",
+    (frame) => frame.kind === "request" && (frame.request.command.primitive ?? frame.request.command).command === "observe",
     10000
   );
   const interrupted = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: handle, condition: "load_ready" } });
@@ -837,7 +856,7 @@ try {
   assert.equal(discardedRecording.status, "succeeded");
 
   // A receipt must reach disk before a later, still-running child lets the parent finish.
-  const childWaitDispatch = native.waitFor((frame) => frame.kind === "request" && frame.request.command.command === "observe");
+  const childWaitDispatch = native.waitFor((frame) => frame.kind === "request" && (frame.request.command.primitive ?? frame.request.command).command === "observe");
   const incrementalRequest = mcp.beginRequest("tools/call", { name: "browser_flow", arguments: { steps: [
     { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
     { id: "wait", tool: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } }
@@ -850,7 +869,7 @@ try {
   assert.equal(during.some((record) => record.invocation === firstReceipt.invocation && !record.step), false);
   const incremental = structured(await incrementalRequest.promise);
   assert.equal(incremental.invocation, firstReceipt.invocation);
-  assert.equal(incremental.status, "succeeded");
+  assert.equal(incremental.status, "succeeded", JSON.stringify(incremental));
 
   const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));

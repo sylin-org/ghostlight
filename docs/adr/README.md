@@ -171,6 +171,7 @@ history live here.
 | [0155](0155-policy-owned-local-destinations.md) | Local browser destinations follow policy: remove the built-in localhost, loopback, and link-local bans; all-open includes local HTTP(S), and existing host authority owns restrictions | Accepted (amends [0121](0121-restore-rawx-policy-and-managed-fetch.md)'s protected-resource scope and [0122](0122-readable-policy-destination-and-authored-user-layer.md) Decision 2) |
 | [0156](0156-grouped-composition-history.md) | Grouped incremental child receipts and permission explanations for allowed and refused work | Accepted; implemented and verified locally; not deployed |
 | [0157](0157-session-attention-and-dispatch-control.md) | Session-local attention, reviewed recovery, enforcing request restrictions, and runtime checks at dispatch | Accepted; implemented and verified locally; not deployed |
+| [0158](0158-document-access-and-coverage.md) | Document-specific authority, policy-selectable coverage, human-only host details, masked captures, and recording/script boundaries | Accepted; implemented and verified locally; not deployed |
 
 ## Conventions
 

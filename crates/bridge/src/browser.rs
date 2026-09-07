@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod documents;
+
 /// Adapter protocol major negotiated end to end by the extension and orchestrator.
 pub const ADAPTER_PROTOCOL_MAJOR: u16 = 2;
 
@@ -14,6 +16,8 @@ pub const COMMAND_TRANSFER_MAX_CHUNKS: u16 = 64;
 
 /// Stable names for independently negotiable physical browser capabilities.
 pub mod adapter_capability {
+    /// Document inventory and execution bound to exact browser document identities.
+    pub const DOCUMENT_SCOPE: &str = "document_scope";
     /// Physical tab, window, grouping, and zoom mechanisms.
     pub const TABS: &str = "tabs";
     /// Atomic creation, navigation, and grouping of a new physical tab.
@@ -317,6 +321,8 @@ pub enum RecordingState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStopReason {
+    /// The physical document scope changed before further imagery could be admitted.
+    DocumentBoundary,
     /// The caller explicitly stopped capture.
     Explicit,
     /// The extension-owned absolute deadline elapsed.
@@ -360,6 +366,9 @@ pub struct PhysicalRecordingSummary {
     pub stop_reason: Option<RecordingStopReason>,
     /// Bounded HTTP(S) document URLs encountered during capture for disclosure authorization.
     pub source_urls: Vec<String>,
+    /// Whether the bounded source set covers every captured document, including embeds.
+    #[serde(default)]
+    pub source_urls_complete: bool,
 }
 
 /// Output budget for a recording GIF that never leaves the browser.
@@ -580,6 +589,18 @@ pub enum PresentationKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum BrowserCommand {
+    /// Observe document identity and routing without extracting page content.
+    DescribeDocuments {
+        tab_id: u64,
+        locators: Vec<String>,
+        points: Vec<PhysicalPoint>,
+        focused: bool,
+    },
+    /// Run one primitive inside an application-selected physical document scope.
+    InDocuments {
+        scope: documents::DocumentScope,
+        primitive: Box<BrowserCommand>,
+    },
     /// List physical tabs visible to the adapter.
     ListTabs,
     /// Bring a physical tab and its window into view.
@@ -852,11 +873,22 @@ pub enum BrowserCommand {
 }
 
 impl BrowserCommand {
+    /// Read the physical primitive carried by a single document execution constraint.
+    #[must_use]
+    pub fn primitive(&self) -> &Self {
+        if let Self::InDocuments { primitive, .. } = self {
+            primitive
+        } else {
+            self
+        }
+    }
+
     /// Return the physical adapter capability required to dispatch this command.
     #[must_use]
     pub const fn required_capability(&self) -> &'static str {
         use adapter_capability as capability;
         match self {
+            Self::DescribeDocuments { .. } | Self::InDocuments { .. } => capability::DOCUMENT_SCOPE,
             Self::ListTabs
             | Self::FocusTab { .. }
             | Self::CloseTab { .. }
@@ -966,6 +998,16 @@ pub struct BrowserRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum BrowserOutcome {
+    /// Content-free current document and subject evidence.
+    Documents {
+        tab_id: u64,
+        inventory: documents::DocumentInventory,
+    },
+    /// A primitive receipt accompanied by factual document coverage.
+    InDocuments {
+        observation: documents::DocumentObservation,
+        result: Box<BrowserOutcome>,
+    },
     /// Physical tab list.
     Tabs { tabs: Vec<PhysicalTab> },
     /// A physical tab and its window were focused.
@@ -1611,6 +1653,7 @@ mod tests {
                             retention_expires_unix_ms: Some(10_000),
                             stop_reason: Some(RecordingStopReason::HardTimeout),
                             source_urls: vec!["https://example.com/path".into()],
+                            source_urls_complete: true,
                         },
                         encoded: EncodedRecording {
                             frame_count: 1,

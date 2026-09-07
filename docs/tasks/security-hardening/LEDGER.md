@@ -26,8 +26,9 @@ from `target/release`; H1, H2a/H2b, H4, and H5 are deployed locally. Doctor repo
 the existing MCP connection passes authority and live tab-list calls. H3's unpacked extension
 reload remains pending because browser security policy blocked `chrome://extensions` access.
 See the [current deployment record](../../STATUS.md#local-deployment-2026-09-07).
-Next: H6 ideation I5 for the remaining frame-coverage contracts. H1-H5 have no remaining
-implementation task; the installed-MV3 and cross-platform runtime lanes remain untested.
+H6 is implemented and verified locally under ADR-0158, including 29 Sylin MV3 browser checks.
+See [H6 verification](h6-verification.md). It is not deployed or published. Next: H7 ideation I6.
+Installed native-host transport and cross-platform runtime lanes remain untested for H6.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
 
@@ -53,7 +54,8 @@ The owner agreed that host authority applies to the document actually accessed (
 boundary), then accepted policy-selectable exclusion handling and separate human notice
 preferences. The agreed choices and starting profile are recorded under H6 below and in the
 [H6 design](h6-frame-coverage-ux.md). Existing grants decide access; coverage remains truthful.
-Exact schema, UI details, and capture handling remain open. H6 is not implemented.
+ADR-0158 now records the accepted schema, human-only hosts, mask/capture handling, and script
+refusal. H6 is implemented locally; the H6 verification record owns its evidence and limits.
 
 ## Cycle readiness
 
@@ -65,7 +67,7 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 | H2b | IMPLEMENTED and verified locally; deployed locally | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
 | H4 | IMPLEMENTED and verified locally; deployed locally | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
 | H5 | IMPLEMENTED and verified locally; deployed locally | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
-| H6 | Policy direction AGREED; details open; not implemented | Ideation I5 for scope evidence, schema, disclosure, notices, and capture. |
+| H6 | IMPLEMENTED and verified locally; not deployed | I5 accepted; ADR-0158, 478 Rust/192 extension tests, process checks, and 29 Sylin browser cases. |
 | H7 | Included; behavior still proposed | Ideation I6 for visible failure, strict policy, and recovery. |
 | H8 | Included; investigation still proposed | Ideation I7 for bounded cases and evidence-driven controls. |
 | C1 | Reporting direction AGREED; details open | Ideation I8 and a safe audit projection before adding durable fields. |
@@ -139,8 +141,8 @@ protocol, client credential system, or product-wide certificate requirement is s
 P0 means a demonstrated violation of an existing effect or confidentiality promise. P1 restores
 complete enforcement and evidence or resolves a source finding with substantial possible impact.
 P2 is focused hardening or further assurance after the demonstrated defects. These are scheduling
-priorities, not CVSS scores. H1, H2b, and H3 are complete locally. H2a is committed, and provenance/H6
-have agreed direction. The remaining order is a recommendation to settle with
+priorities, not CVSS scores. H1-H6 are complete locally. Provenance has agreed direction.
+The remaining order is a recommendation to settle with
 the relevant ideation session and dependencies.
 
 | Order | ID | Priority | Work package | Evidence and reason |
@@ -150,7 +152,7 @@ the relevant ideation session and dependencies.
 | 3 | H2 | P0 | Make flow stopping and aggregate effects truthful | H2a and H2b implemented and verified locally; counts, partial effects, recovery, and actual MCP/JSONL agree. |
 | 4 | H4 | P1 | Complete child operation receipts | SA-02: flow reproduction and sequence source evidence. Policy checks happen, but terminal child records are missing. |
 | 5 | H5 | P1 | Correct workspace attention and prove human-control timing | Reproduced SA-05 cross-workspace attention; SA-08 pause race still needs a controlled test. |
-| 6 | H6 | P1 | Define and enforce composed-frame policy subjects | Per-document authority, selectable exclusion handling, and notice choices agreed; not implemented. Browser proof and detailed contracts remain outstanding. |
+| 6 | H6 | P1 | Enforce composed-frame policy subjects | Implemented and verified locally under ADR-0158; 29 Sylin MV3 checks and full workspace gates. |
 | 7 | H7 | P1 | Expose audit failure and define recovery | SA-07 source finding. Completion ignores append errors and UI history can outlive durable recording success. |
 | 8 | H8 | P2 | Verify local admission and resource bounds | Review file permissions, unauthenticated idle connections, framing, cancellation, and simultaneous callers with bounded process tests. No exhaustion exploit is established. |
 
@@ -264,19 +266,23 @@ direction. The owner requested that these choices be added to the ledger:
 - All-open remains straightforward. These choices neither prevent website network activity nor
   make multi-step browser operations atomic.
 
-This direction is agreed, not implemented. Exact setting keys, result schemas, detailed UI,
-bounded host disclosure, and reliable capture exclusions remain open in
-[h6-frame-coverage-ux.md](h6-frame-coverage-ux.md).
+On September 7 the owner chose human-only host details, masked excluded screenshot regions,
+recording stops at the boundary, and script refusal when excluded access cannot be bounded.
+ADR-0158 records the implementation contract. `content.frames.handling` and
+`content.frames.notice` are registered choices. The executor admits actual documents before
+extraction; the adapter binds content access to Chrome document identities. Bounded coverage
+crosses results/audit, while host details remain volatile and human-only.
 
-Start with a permitted-parent/denied-child fixture and verify exactly which observation and
-interaction routes cross the child's host boundary. Settle the policy subject for text, semantic
-targets, and screenshots before choosing the contract. Browser adapters report frame facts and
-perform physical filtering; the orchestrator makes the policy decision. Do not accidentally claim
-browser-wide network filtering, DLP, or semantic transaction authorization.
+The [verification record](h6-verification.md) covers fresh process boundaries, the actual Sylin
+iframe demo, and its form content served on distinct local hosts. All three modes and notices,
+mixed RAWX grants, batch preflight, stale locators, truthful negatives, image masking/cleanup,
+recording stops and source-aware export, script refusal, and audit privacy pass. Restricted
+recordings stop on any admitted document-set change; a new recording requires fresh admission.
+Nothing prevents the website's own network activity or supplies semantic transaction authority.
 
-Exit evidence: a real composed-frame journey proves the selected policy contract and all-open
-still observes the complete supported page. This source finding may move up in priority if the
-probe establishes broader disclosure than the currently demonstrated defects.
+H6 is complete locally with 478 Rust tests, 192 extension tests, and 29 Chrome/MV3 Sylin checks.
+The test replaces native-port discovery with a loopback pipe to the real browser connector;
+installed native-host registration and other platforms remain separate, untested lanes.
 
 ### H7: Durable audit health
 
@@ -332,32 +338,29 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H1, H2b, H3, H4, and H5 are complete locally. H6 ideation I5 is next. The remaining grouping covers
-workspace control, frame boundaries, audit
-health, and local resilience. Honest provenance reporting uses the repaired receipt seam;
+H1-H6 are complete locally. H7 ideation I6 is next. Remaining work covers audit
+health, local resilience, and provenance. Honest provenance reporting uses the repaired receipt seam;
 conditional signer admission follows a concrete integration. The epic maps those dependencies.
 Run the affected package's ideation session before implementing its undecided choices.
 
 ## Decisions still open
 
-- H6 detailed frame coverage and the other undecided implementation packages in the ideation agenda.
+- H7 audit availability and H8 local resilience in the ideation agenda.
 - Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
   verification caching, and supported-platform behavior.
 - Which concrete integration justifies C2; whether C3 is needed and which participating client
   can prove it. No client-private-key or handshake design has been selected.
-- H6's exact setting keys, detailed tier resolution and scope evidence, result schemas, notice
-  rendering, scoped negative answers, host disclosure, and capture exclusions. The three handling
-  choices, three notice choices, starting profile, and no-weaker-lower-tier rule are agreed.
 - Audit-write failure behavior and any configurable strictness after a failed append.
 
 The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H6/H8. H1/H2b/H3/H4/H5 corrections, existing pause/stop semantics, provenance boundaries, and
-H6's selected modes remain accepted context rather than unresolved questions.
+including H7/H8. H1-H6 corrections, existing pause/stop semantics, and provenance boundaries
+remain accepted context rather than unresolved questions.
 
 ## Activity record
 
 | Date | Work | Result |
 | --- | --- | --- |
+| 2026-09-07 | Owner settled H6 choices and directed full testing with Sylin content | ADR-0158 and H6 implemented; 478 Rust/192 extension tests, real process checks, and 29 Chrome/MV3 Sylin cases. Not deployed or published. See h6-verification.md. |
 | 2026-09-06 | Preserved the architecture/security review independently of events | Dated assessment with isolated reproductions and source-only findings; no production change. |
 | 2026-09-06 | Discussed host control and client provenance; owner agreed and requested ledger entry | C1-C3 scope recorded; ADR-0105 amended with accepted direction and explicit deferrals. |
 | 2026-09-06 | Ranked remaining work and checked current human-control contract | H1-H8 proposed. Corrected stale MEMORY wording: pause/stop directives already exist under ADR-0126; H5 concerns enforcement timing and scope. |

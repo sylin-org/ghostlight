@@ -2,7 +2,8 @@
 
 use ghostlight_bridge::browser::{
     BrowserCommand, BrowserOutcome, EncodedRecording, PhysicalRecordingSummary, RecordingDelivery,
-    RecordingDestination, RecordingState, RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
+    RecordingDestination, RecordingState, RecordingStopReason, RECORDING_LOCAL_MAX_BYTES,
+    RECORDING_TRANSFER_MAX_BYTES,
 };
 use ghostlight_bridge::service::ServiceContent;
 use serde_json::json;
@@ -251,6 +252,62 @@ impl ApplicationExecutor {
         value: &Record,
         stopped: &PhysicalRecordingSummary,
     ) -> Result<(RecordingDestination, Decision, Option<u64>, usize), Box<Terminal>> {
+        if !stopped.source_urls_complete
+            && !context
+                .snapshot
+                .permits_any_document(Capability::Read.into())
+        {
+            self.retain_coverage(
+                context,
+                crate::language::coverage::Coverage {
+                    unavailable_documents: 1,
+                    ..Default::default()
+                },
+                vec![],
+            );
+            return Err(Box::new(self.browser_failure(
+                context,
+                permitted(),
+                super::BrowserError::DocumentUnavailable,
+                Some(stopped.tab_id),
+            )));
+        }
+        // Every destination discloses the captured documents, including a browser file input.
+        let denied = stopped.source_urls.iter().find_map(|url| {
+            let decision = context.snapshot.authorize_landing(Capability::Read, url);
+            (!decision.allowed).then_some(decision)
+        });
+        let decision = denied.unwrap_or_else(permitted);
+        if !decision.allowed {
+            let hosts: Vec<String> = stopped
+                .source_urls
+                .iter()
+                .filter(|url| {
+                    !context
+                        .snapshot
+                        .authorize_landing(Capability::Read, url)
+                        .allowed
+                })
+                .filter_map(|url| observed_host(url))
+                .collect();
+            self.retain_coverage(
+                context,
+                crate::language::coverage::Coverage {
+                    excluded_documents: hosts.len(),
+                    page_excluded_documents: hosts.len(),
+                    ..Default::default()
+                },
+                hosts,
+            );
+            return Err(Box::new(self.blocked(
+                context,
+                decision,
+                Some(stopped.tab_id),
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            )));
+        }
         if let Some(requested_target) = value.target.as_deref() {
             let lease = lease.expect("recording target save holds the workspace lease");
             let (selected, target) =
@@ -313,23 +370,6 @@ impl ApplicationExecutor {
             ));
         }
 
-        // A download stays in the browser, but the recording still pictures pages the caller
-        // must be allowed to read, so both remaining destinations are authorized the same way.
-        let denied = stopped.source_urls.iter().find_map(|url| {
-            let decision = context.snapshot.authorize_landing(Capability::Read, url);
-            (!decision.allowed).then_some(decision)
-        });
-        let decision = denied.unwrap_or_else(permitted);
-        if !decision.allowed {
-            return Err(Box::new(self.blocked(
-                context,
-                decision,
-                Some(stopped.tab_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            )));
-        }
         if value.download {
             return Ok((
                 RecordingDestination::Download {
@@ -464,9 +504,15 @@ impl ApplicationExecutor {
             Effect::None,
             Readiness::NotApplicable,
             true,
-            Outcome::RecordingObserved {
-                frames: summary.frame_count,
-                duration_ms: summary.duration_ms,
+            if summary.stop_reason == Some(RecordingStopReason::DocumentBoundary) {
+                Outcome::RecordingBoundary {
+                    duration_ms: summary.duration_ms,
+                }
+            } else {
+                Outcome::RecordingObserved {
+                    frames: summary.frame_count,
+                    duration_ms: summary.duration_ms,
+                }
             },
             recording_facts(summary),
         )

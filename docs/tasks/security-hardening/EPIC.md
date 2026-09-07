@@ -27,7 +27,8 @@ and history accurately explains what happened without becoming an unexpected con
 - [H1](h1-readable-audit.md): readable bounded audit and retention evidence.
 - [H4](h4-grouped-history.md): incremental grouped receipts and actual permission explanations.
 - [H3](h3-script-effect-truth.md): script-correctness scope and completion evidence.
-- [H6](h6-frame-coverage-ux.md): agreed frame policy choices and remaining detailed UX proposals.
+- [H6](h6-frame-coverage-ux.md): implemented frame policy, coverage, masking, and script boundaries;
+  [verification](h6-verification.md) records the evidence and limits.
 
 ADRs own architecture decisions. The current source, tests, and 1.0 contracts govern code.
 The ledger owns progress; this epic is the plan, not another status store.
@@ -64,7 +65,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | I2 accepted and implemented locally; shared flow/sequence progress and recovery. See H2b. |
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | I3 accepted and implemented locally; H1 retention and H2b progress preserved. See H4. |
 | H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | I4 accepted and implemented locally under ADR-0157. See H5 for scope, recovery, and timing evidence. |
-| H6: Embedded-document policy | Chosen exclusion handling and notice preferences work consistently across supported observations and actions. | Ideation I5 settles remaining schema, scope, disclosure, and capture choices; agreed modes are not reopened. |
+| H6: Embedded-document policy | Chosen exclusion handling and notice preferences work across supported observations and actions. | Implemented and verified locally under accepted I5 and ADR-0158; not deployed. |
 | H7: Audit availability | A recording failure has truthful visibility, recovery, and any explicitly chosen admission consequence. | Ideation I6; coordinate with H1/H4 for consistent records and prior effects. |
 | H8: Local resilience | Malformed or abandoned clients cannot consume unbounded local resources or silently strand unrelated work. | Ideation I7 chooses bounded evidence and response; do not infer a demonstrated exploit. |
 | C1: Provenance reporting | Claimed client identity and observed/verified peer evidence remain distinct and useful. | Ideation I8 for field/privacy/platform details; safe audit projection before extending durable records. |
@@ -76,9 +77,9 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 1. Finish the existing H2a checkpoint and implement H3 as the first new cycle. Recheck the tree,
    preserve the separate logical changes, and prove script compatibility alongside the defects.
 2. H1, H2b, H4, and H5 are accepted and complete locally. Their common completion semantics and
-   bounded evidence support the subsequent packages. H6 ideation I5 is next.
-3. Run targeted ideation for H6-H7 and implement bounded tasks. H6's agreed choices shape its
-   evidence contract; do not build a generic policy framework while details remain unresolved.
+   bounded evidence support the subsequent packages. H6 is also implemented and verified locally.
+3. Run targeted ideation for H7 before implementation. H6's evidence contract and source checks
+   remain the shared document boundary; do not reopen its accepted product choices.
 4. Complete C1 after safe durable reporting is available. C2/C3 follow only the agreed concrete
    identity proof. H8 adds focused resilience work justified by its investigation.
 5. Reconcile active claims and run the composed acceptance journey across delivered packages.

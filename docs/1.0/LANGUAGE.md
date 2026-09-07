@@ -532,3 +532,17 @@ Continue; recovery permits new requests and never replays prior steps.
 Pause and Stop keep their fixed directives at the final dispatch check. A late refusal preserves
 already acknowledged effects, including when it prevents a separate postcondition observation.
 No-effect claims apply only to work that has not dispatched; lost effectful replies remain unknown.
+
+## Document coverage (ADR-0158)
+
+Scoped results carry `facts.coverage`: targeted versus whole-page scope, inspected/excluded/page
+excluded/unavailable document counts, `limited_by_size`, and `masked_regions`. Counts retain
+observed maxima across physical preparation and execution, not repeated-read sums. Policy
+exclusions, unavailable content, and size ceilings have separate qualifications. Negative findings
+are limited to inspected content; absence across unseen content is never established.
+
+Human notice preferences do not remove coverage from model results. Excluded document hosts,
+identities, URLs, labels, values, and locators are not copied into the model/audit coverage.
+The workbench keeps bounded excluded host names only in volatile human details. A mask says
+`Excluded by policy`. Unverifiable document access and recording stops at the document boundary
+have language-owned outcomes. No script scanner or retry is treated as document containment.

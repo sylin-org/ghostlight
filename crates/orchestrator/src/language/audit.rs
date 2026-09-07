@@ -11,6 +11,7 @@ use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, Wor
 /// result envelope, arbitrary summary, or JSON. Measurements remain in `Observed`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditProjection {
+    coverage: Option<super::coverage::Coverage>,
     summary: String,
     refusal: Option<AuditRefusal>,
     composition: Option<CompositionProgress>,
@@ -18,6 +19,18 @@ pub struct AuditProjection {
 }
 
 impl AuditProjection {
+    /// Qualify retained language with closed coverage facts, never arbitrary browser text.
+    pub fn with_coverage(mut self, coverage: &super::coverage::Coverage) -> Self {
+        self.summary = super::coverage::qualify(&self.summary, coverage);
+        self.coverage = Some(coverage.clone());
+        self
+    }
+
+    /// Read bounded document coverage without volatile human-only host details.
+    #[must_use]
+    pub fn coverage(&self) -> Option<&super::coverage::Coverage> {
+        self.coverage.as_ref()
+    }
     /// Read the language-authored retained sentence.
     #[must_use]
     pub fn summary(&self) -> &str {
@@ -69,6 +82,7 @@ pub enum AuditRefusal {
     BrowserAdapterOutdated,
     DeadlineExpired { before_dispatch: bool },
     BrowserPrimitiveFailed,
+    DocumentUnavailable,
     BrowserStopped { reconnect: bool },
     BrowserAmbiguous,
     BrowserUnknown,
@@ -92,6 +106,7 @@ impl Outcome {
     #[must_use]
     pub fn audit(&self) -> AuditProjection {
         AuditProjection {
+            coverage: None,
             summary: self.summary(),
             refusal: None,
             tools: vec![],
@@ -123,6 +138,7 @@ impl Refusal {
                 before_dispatch: *before_dispatch,
             },
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
+            Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
             Self::BrowserStopped { reconnect } => AuditRefusal::BrowserStopped {
                 reconnect: *reconnect,
             },
@@ -147,6 +163,7 @@ impl Refusal {
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,
         };
         AuditProjection {
+            coverage: None,
             summary: match self {
                 Self::BrowserPrimitive { .. } => {
                     "The browser could not complete this operation.".into()

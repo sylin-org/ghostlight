@@ -368,6 +368,9 @@ const permissionsOnLoad = nodes.get("setting-groups").innerHTML;
 const authoredOnLoad = JSON.parse(view.draftDocument()).config;
 view.setChoice("browser.startup", "manual");
 const authoredAfterStartup = JSON.parse(view.draftDocument()).config;
+view.setChoice("content.frames.handling", "complete_operation");
+view.setChoice("content.frames.notice", "on_demand");
+const authoredCoverage = JSON.parse(view.draftDocument()).config;
 view.setPermission("channels.mcp.enabled", false);
 view.setSacred("vault.example.test, *.finance.example.test");
 const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
@@ -387,6 +390,11 @@ startupPinned.browser_startup = {
 };
 view.policy(startupPinned);
 const pinnedStartupControl = nodes.get("setting-groups").innerHTML;
+const pinnedCoverage = compiled(true);
+pinnedCoverage.documents = { handling: "complete_operation", notice: "when_excluded", handling_source: "organization", notice_source: "organization",
+  organization_handling: "complete_operation", organization_notice: "when_excluded" };
+view.policy(pinnedCoverage);
+const pinnedCoverageControl = nodes.get("setting-groups").innerHTML;
 
 view.policy(compiled(false));
 const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
@@ -463,6 +471,12 @@ const historyChecks = [];
 }
 
 const checks = [
+  ["coverage handling and notices author separate closed choices",
+    authoredCoverage.some((item) => item.key === "content.frames.handling" && item.value === "complete_operation")
+      && authoredCoverage.some((item) => item.key === "content.frames.notice" && item.value === "on_demand")],
+  ["organization coverage requirements disable weaker choices and name the author",
+    /value="permitted_content"[^>]*disabled/.test(pinnedCoverageControl)
+      && /value="on_demand"[^>]*disabled/.test(pinnedCoverageControl) && pinnedCoverageControl.includes("Example Org")],
   ...historyChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],

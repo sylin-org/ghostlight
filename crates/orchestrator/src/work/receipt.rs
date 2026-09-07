@@ -32,6 +32,12 @@ impl ApplicationExecutor {
             channel,
             peer_image,
         } = completion;
+        if let Some(coverage) = self.take_coverage(&terminal.result.invocation) {
+            terminal.result.summary =
+                language::coverage::qualify(&terminal.result.summary, &coverage);
+            terminal.audit = terminal.audit.with_coverage(&coverage);
+            terminal.result.facts["coverage"] = json!(coverage);
+        }
         let tool = language::audit::tool_name(tool);
         let denial_attention = terminal.audit.composition().is_none()
             && terminal.result.status == Status::Blocked
@@ -141,7 +147,11 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let _ = self.take_permissions(context.invocation);
         let started = Instant::now();
-        let terminal = self.run(context, lease, operation);
+        let context = InvocationContext {
+            requirements: language::capability_map::requirements(operation),
+            ..*context
+        };
+        let terminal = self.run(&context, lease, operation);
         self.complete_terminal(
             &CompletionGate::default(),
             terminal,

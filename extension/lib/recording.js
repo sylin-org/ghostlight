@@ -112,7 +112,8 @@
         hard_expires_unix_ms: state.state === "recording" ? state.hardExpiresAt : undefined,
         retention_expires_unix_ms: state.state === "recording" ? undefined : state.retentionExpiresAt,
         stop_reason: state.stopReason ?? undefined,
-        source_urls: Array.from(state.sourceUrls)
+        source_urls: Array.from(state.sourceUrls),
+        source_urls_complete: state.sourceUrlsComplete
       };
     }
 
@@ -227,10 +228,10 @@
         id, workspace, tabId, state: "recording", frames: [], bytesHeld: 0,
         startedAt: current, stoppedAt: null, hardExpiresAt: current + HARD_DURATION_MS,
         retentionExpiresAt: null, stopReason: null, lastSampleAt: null, finalizing: false,
-        sourceUrls: new Set(), timer: null
+        sourceUrls: new Set(), sourceUrlsComplete: true, timer: null
       };
       const url = sanitizeSourceUrl(sourceUrl);
-      if (url) state.sourceUrls.add(url);
+      if (url) state.sourceUrls.add(url); else state.sourceUrlsComplete = false;
       recordings.set(id, state);
       activeByTab.set(tabId, id);
       arm(state);
@@ -299,8 +300,10 @@
     function noteUrl(tabId, value) {
       const state = activeForTab(tabId);
       const url = sanitizeSourceUrl(value);
-      if (!state || !url || state.sourceUrls.has(url)) return;
-      if (state.sourceUrls.size === MAX_SOURCE_URLS) state.sourceUrls.delete(state.sourceUrls.values().next().value);
+      if (!state) return;
+      if (!url) { state.sourceUrlsComplete = false; return; }
+      if (state.sourceUrls.has(url)) return;
+      if (state.sourceUrls.size === MAX_SOURCE_URLS) { state.sourceUrlsComplete = false; return; }
       state.sourceUrls.add(url);
     }
 

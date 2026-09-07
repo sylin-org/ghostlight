@@ -61,6 +61,7 @@ function attempt(what, step) {
 const store = globalThis.GhostlightStore.create({ announce: (kind, detail) => draw(kind, detail) });
 const view = globalThis.GhostlightView.create({
   sessionFor: (workspace) => store.sessionFor(workspace),
+  coverageFor: (invocation) => store.snapshot()?.document_coverage?.find((item) => item.invocation === invocation),
   onFailure: reportFailure
 });
 

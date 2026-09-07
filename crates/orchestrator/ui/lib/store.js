@@ -219,6 +219,14 @@
         state.seq = event.seq;
         const change = event.change;
         switch (change.kind) {
+          case "document_coverage_changed": {
+            if (state.snapshot) {
+              state.snapshot.document_coverage = [change.details, ...(state.snapshot.document_coverage ?? []).filter((item) => item.invocation !== change.details.invocation)].slice(0, FEED_LIMIT);
+            }
+            const entry = state.feed.find((item) => item.invocation === change.details.invocation);
+            if (entry) emit(state.feed[0] === entry ? CHANGE.Hero : CHANGE.Row, { entry });
+            break;
+          }
           case "operation_started": touch(); started(change.operation); break;
           case "operation_changed": touch(); changed(change.operation); break;
           case "operation_settled": touch(); settled(change.record); break;

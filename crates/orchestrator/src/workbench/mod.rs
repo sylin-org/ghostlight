@@ -69,6 +69,7 @@ pub struct WorkbenchProjection {
 
 #[derive(Default)]
 struct ProjectionState {
+    document_coverage: VecDeque<crate::language::coverage::HumanCoverage>,
     operations: HashMap<String, OperationState>,
     history: VecDeque<HistoryItem>,
     notified: HashSet<(String, NotificationKind)>,
@@ -96,6 +97,33 @@ struct OperationState {
 }
 
 impl WorkbenchProjection {
+    /// Retain bounded volatile document details exclusively for the local human surface.
+    pub fn document_coverage(&self, mut details: crate::language::coverage::HumanCoverage) {
+        {
+            let mut state = self.lock();
+            if let Some(previous) = state
+                .document_coverage
+                .iter()
+                .find(|item| item.invocation == details.invocation)
+            {
+                details.coverage.include(&previous.coverage);
+                details.summary = crate::language::coverage::human_summary(&details.coverage);
+                details.proactive |= previous.proactive;
+                for host in &previous.excluded_hosts {
+                    if details.excluded_hosts.len() < 256 && !details.excluded_hosts.contains(host)
+                    {
+                        details.excluded_hosts.push(host.clone());
+                    }
+                }
+            }
+            state
+                .document_coverage
+                .retain(|item| item.invocation != details.invocation);
+            state.document_coverage.push_front(details.clone());
+            state.document_coverage.truncate(HISTORY_LIMIT);
+        }
+        self.publish(WorkbenchChange::DocumentCoverageChanged { details });
+    }
     /// Restore bounded content-minimized history from the orchestrator-owned audit file.
     pub fn load_history(&self, path: &Path) -> io::Result<()> {
         let file = match File::open(path) {
@@ -453,6 +481,13 @@ impl WorkbenchFacade {
             readiness.detail = crate::language::control::sessions_needing_review(attention_count);
         }
         WorkbenchSnapshot {
+            document_coverage: self
+                .projection
+                .lock()
+                .document_coverage
+                .iter()
+                .cloned()
+                .collect(),
             seq,
             generated_at_ms: unix_ms(),
             service: ServiceSummary {
@@ -902,6 +937,10 @@ pub struct WorkbenchEvent {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkbenchChange {
+    /// Volatile document details available only to the local human.
+    DocumentCoverageChanged {
+        details: crate::language::coverage::HumanCoverage,
+    },
     /// A session entered human review or its current review was explicitly cleared.
     SessionAttentionChanged {
         workspace: String,
@@ -981,6 +1020,8 @@ pub enum WorkbenchError {
 /// Complete immutable workbench read model.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WorkbenchSnapshot {
+    /// Volatile human-only embedded-host explanations, absent from model and audit surfaces.
+    pub document_coverage: Vec<crate::language::coverage::HumanCoverage>,
     /// Projection sequence this snapshot reflects.
     ///
     /// A surface applies a later change only when its sequence follows this one.

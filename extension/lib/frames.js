@@ -16,10 +16,10 @@
   "use strict";
 
   const TOP_FRAME_ID = 0;
-  const SCOPED_LOCATOR = /^(0|[1-9][0-9]*):(locator_.+)$/;
+  const SCOPED_LOCATOR = /^(0|[1-9][0-9]*):(?:(doc_[A-Za-z0-9-]+):)?(locator_.+)$/;
 
-  function scopedLocator(frameId, local) {
-    return `${frameId}:${local}`;
+  function scopedLocator(frameId, local, documentId) {
+    return `${frameId}:${documentId ? `doc_${documentId}:` : ""}${local}`;
   }
 
   // Returns the owning frame id, or null when the handle predates frame scoping or is not
@@ -32,7 +32,11 @@
 
   function localOf(handle) {
     const match = SCOPED_LOCATOR.exec(String(handle ?? ""));
-    return match ? match[2] : String(handle ?? "");
+    return match ? match[3] : String(handle ?? "");
+  }
+
+  function documentOf(handle) {
+    return SCOPED_LOCATOR.exec(String(handle ?? ""))?.[2]?.slice(4) ?? null;
   }
 
   // Stamps every observed target in a fulfilled per-frame result with its minting frame.
@@ -203,6 +207,7 @@
     scopeTargets,
     mergeTargets,
     mergeTextSections,
+    documentOf,
     readDocument,
     inspectDocument,
     groupLocators,

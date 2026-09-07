@@ -71,6 +71,11 @@ No cooldown, extra setting, automatic replay, or replacement of the fixed human 
 
 ## I5: H6 detailed frame coverage
 
+Accepted and implemented on 2026-09-07. The owner chose human-only host details, masking excluded
+screenshot regions, stopping recordings at the boundary, and refusing unbounded scripts in
+excluded cases. ADR-0158 resolves the agenda below. [H6 verification](h6-verification.md) records
+the selected contract and actual evidence. These questions are retained as the session's agenda.
+
 - Select policy keys, tier resolution details, and what complete operation/page scope requires
   when frames are nested, navigating, unavailable, or outside supported observation mechanisms.
 - Choose result coverage fields and authored wording for read, inspect, find, and waits. Separate

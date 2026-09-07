@@ -1,6 +1,7 @@
 //! Invocation lifecycle, cancellation, deadlines, the one executor, and the one completion path.
 
 mod composition;
+mod documents;
 mod flow;
 mod forms;
 mod navigation;
@@ -92,6 +93,7 @@ pub struct ApplicationExecutor {
     observations: ObservationRegistry,
     stale_candidates: StaleCandidateRegistry,
     permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
+    coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
 }
 
 /// Current immutable invocation snapshots used only to govern asynchronous browser events.
@@ -175,6 +177,7 @@ impl ApplicationExecutor {
             observations: Arc::new(Mutex::new(HashMap::new())),
             stale_candidates: Arc::new(Mutex::new(HashMap::new())),
             permissions: Mutex::new(HashMap::new()),
+            coverage: Mutex::new(HashMap::new()),
         }
     }
 
@@ -263,6 +266,7 @@ impl ApplicationExecutor {
         };
         let snapshot = self.governance.snapshot(operation.restrictions());
         let context = InvocationContext {
+            requirements,
             invocation: &invocation,
             workspace,
             requested_browser: operation_browser(&operation),
@@ -982,6 +986,23 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
+        let outcome = match self.dispatch_documents(context, command) {
+            Ok(BrowserOutcome::EffectUnknown { reason }) => {
+                Err(BrowserError::EffectUnknown(reason))
+            }
+            outcome => outcome,
+        };
+        if let Ok(outcome) = &outcome {
+            self.observe(context.invocation, observed_from(outcome));
+        }
+        outcome
+    }
+
+    fn dispatch_physical(
+        &self,
+        context: &InvocationContext<'_>,
+        command: BrowserCommand,
+    ) -> Result<BrowserOutcome, BrowserError> {
         let browser = self.target_browser(context)?;
         let admit = || self.admit_dispatch(context);
         let outcome = self.browser.call_guarded(
@@ -997,16 +1018,12 @@ impl ApplicationExecutor {
         // An adapter that reports effect-unknown has answered honestly. Route it through the
         // truthful unknown rendering instead of letting per-family receipt matching mistake it
         // for an incompatible receipt.
-        let outcome = match outcome {
+        match outcome {
             Ok(BrowserOutcome::EffectUnknown { reason }) => {
                 Err(BrowserError::EffectUnknown(reason))
             }
             outcome => outcome,
-        };
-        if let Ok(outcome) = &outcome {
-            self.observe(context.invocation, observed_from(outcome));
         }
-        outcome
     }
 
     /// Decide which browser this invocation belongs to, and bind the workspace to it.
@@ -1325,6 +1342,25 @@ impl ApplicationExecutor {
         error: BrowserError,
         physical_id: Option<u64>,
     ) -> Terminal {
+        if let BrowserError::DocumentAccess(decision) = error {
+            return self.blocked(
+                context,
+                decision,
+                physical_id,
+                Effect::None,
+                false,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
+        if error == BrowserError::DocumentUnavailable {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::DocumentUnavailable,
+                json!({"reason":"document_unavailable"}),
+            );
+        }
         if let BrowserError::RuntimeControl(reason) = error {
             return self.blocked(
                 context,
@@ -1559,7 +1595,9 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+#[derive(Clone, Copy)]
 struct InvocationContext<'a> {
+    requirements: CapabilitySet,
     invocation: &'a str,
     workspace: &'a WorkspaceId,
     /// The browser this call named, when it named one.
@@ -1657,6 +1695,7 @@ const fn recording_state_name(state: RecordingState) -> &'static str {
 
 const fn recording_stop_reason_name(reason: RecordingStopReason) -> &'static str {
     match reason {
+        RecordingStopReason::DocumentBoundary => "document_boundary",
         RecordingStopReason::Explicit => "explicit",
         RecordingStopReason::HardTimeout => "hard_timeout",
         RecordingStopReason::MemoryLimit => "memory_limit",
@@ -1970,6 +2009,8 @@ fn readiness_name(value: Readiness) -> &'static str {
 /// host and readiness that every browser-crossing result should receive without per-tool memory.
 fn observed_from(outcome: &BrowserOutcome) -> Observed {
     match outcome {
+        BrowserOutcome::Documents { .. } => Observed::default(),
+        BrowserOutcome::InDocuments { result, .. } => observed_from(result),
         BrowserOutcome::TabOpened { tab, .. }
         | BrowserOutcome::Navigated { tab, .. }
         | BrowserOutcome::Activated { tab, .. }
@@ -2049,6 +2090,8 @@ fn bounded(value: &str, maximum: usize) -> String {
 
 fn browser_reason(error: &BrowserError) -> &'static str {
     match error {
+        BrowserError::DocumentAccess(_) => "document_access_denied",
+        BrowserError::DocumentUnavailable => "document_unavailable",
         BrowserError::RuntimeControl(reason) => reason.as_str(),
         BrowserError::DisconnectedBeforeDispatch => "browser_disconnected",
         BrowserError::CancelledBeforeDispatch => "cancelled",
@@ -2066,6 +2109,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod control;
+    mod documents;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -2708,6 +2752,7 @@ mod tests {
             stop_reason: (state != RecordingState::Recording)
                 .then_some(RecordingStopReason::Explicit),
             source_urls: vec![source_url.into()],
+            source_urls_complete: true,
         }
     }
 

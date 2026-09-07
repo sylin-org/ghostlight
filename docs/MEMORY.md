@@ -92,6 +92,11 @@ the owner wants, and what this project learned the hard way.
   identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving
   Ghostlight's connector does not prove its upstream MCP application. ADR-0105's September 6
   amendment records the agreed staging; the security-hardening ledger owns progress.
+- **Embedded authority follows the document.** H6/ADR-0158 bind access to Chrome document identity,
+  not reusable frame ids. Handling and notice preferences are separate. Excluded hosts belong
+  only in volatile human details; model/audit coverage stays content-free. Screenshots mask before
+  capture, unverifiable captures refuse, restricted recordings stop at document-set changes, and
+  replay export checks every captured source. Scripts have no inferred containment mechanism.
 - **One desktop authority startup.** Connectors, CLI demand-start, and direct execution all launch
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
   the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray

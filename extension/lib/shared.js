@@ -20,6 +20,7 @@
     observation: 2
   });
   const ADAPTER_CAPABILITIES = Object.freeze([
+    "document_scope",
     "tabs",
     "atomic_tab_open",
     "navigation",

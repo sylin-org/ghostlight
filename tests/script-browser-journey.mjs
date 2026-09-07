@@ -127,11 +127,16 @@ try {
     if (frame.kind === "hello_accepted") { ready = true; return; }
     if (frame.kind === "heartbeat") { writeNative({ kind: "heartbeat_ack", sequence: frame.sequence }); return; }
     if (frame.kind !== "request") return;
-    const { correlation, command } = frame.request;
+    const { correlation } = frame.request;
+    const scope = frame.request.command.command === "in_documents" ? frame.request.command.scope : null;
+    const command = scope ? frame.request.command.primitive : frame.request.command;
     commands.push(command.command);
     try {
       let result;
-      if (command.command === "present") result = { outcome: "presented", rendered: true };
+      if (command.command === "describe_documents") result = { outcome: "documents", tab_id: 41, inventory: {
+        documents: [{ id: "script-document", url, parent: null, supported: true }], subjects: [], unresolved: false, incomplete: false
+      } };
+      else if (command.command === "present") result = { outcome: "presented", rendered: true };
       else if (command.command === "open_tab") {
         assert.equal(command.url, url);
         await send("Page.navigate", { url });
@@ -146,6 +151,9 @@ try {
         result = { outcome: "script_evaluated", tab, value: serialized.slice(0, command.max_result_chars),
           truncated: serialized.length > command.max_result_chars, committed_urls: [] };
       } else throw new Error(`Unexpected physical command: ${command.command}`);
+      if (scope) result = { outcome: "in_documents", result, observation: {
+        visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated), masked_regions: 0
+      } };
       writeNative({ kind: "receipt", receipt: { correlation, result } });
     } catch (error) {
       writeNative({ kind: "error", correlation, code: error.code || "primitive_failed",
@@ -166,7 +174,7 @@ try {
   writeNative({ kind: "hello", major: 2,
     adapter_version: JSON.parse(readFileSync(join(repository, "extension/manifest.json"), "utf8")).version,
     browser_id: "browser_scriptjourney",
-    adapter_epoch: "adapter_scriptjourney", capabilities: ["tabs", "atomic_tab_open", "navigation", "script",
+    adapter_epoch: "adapter_scriptjourney", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "script",
       "operation_recovery", "presentation", "adapter_liveness"].map((name) => ({ name,
       revision: name === "script" || name === "navigation" ? 2 : 1 })) });
   await until(() => ready, "browser relay negotiation");

@@ -527,3 +527,17 @@ effect facts, including acknowledged actions whose separate postcondition check 
 Completed landings are still checked against policy after dispatch. A later runtime control
 change does not create a permanent policy hold on an otherwise permitted tab; the next command
 checks the live control again. Recovery tests prove the same tab remains usable after Resume.
+
+## Document authority and coverage (ADR-0158)
+
+The common executor browser boundary obtains a bounded document inventory and exact request
+subjects before extraction. Governance admits actual documents through the immutable snapshot;
+the negotiated `document_scope` mechanism carries exact identities and permitted scope. The
+extension uses Chrome document-targeted messaging and supplies physical coverage. Its locator
+mechanism binds frame routing to document identity. Neither relay interprets policy.
+
+Language owns the content-free coverage qualification. Completion adds bounded coverage to
+model results and audit. Volatile workbench details hold excluded host names for the human only.
+Screenshots mask before capture, verify afterward, restore styles, and expire abandoned masks.
+Restricted recordings stop when their admitted document set changes. Every replay destination
+rechecks recorded embedded sources; incomplete provenance cannot pass restricted disclosure.

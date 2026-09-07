@@ -120,7 +120,7 @@ UI and isolated Chromium checks prove history review after Clear view, scoped re
 scroll/focus, and the supported narrow layout. No installed Tauri/MV3 or Linux runtime proof is
 claimed by those tests. H5 is now deployed locally, not published; see the deployment record above.
 
-Next is H6 ideation I5 for remaining frame-coverage contracts. Audit health and local bounds also
+Next is H7 ideation I6 for durable audit health. Audit health and local bounds
 require their ideation sessions. Expected partial website effects remain distinct from Ghostlight's
 extra copies or execution. No publication has been made for this epic.
 
@@ -135,8 +135,15 @@ capture restrictions. The owner has accepted three exclusion-handling choices (p
 content, complete operation access, or complete page access) and separate notice preferences
 (on demand, when work is affected, or whenever content is excluded). The starting profile uses
 permitted content and notices when work is affected. Existing access grants and truthful coverage
-remain authoritative. ADR-0151 records the accepted direction; exact schema, detailed UI, and
-capture handling remain open. H6 is not implemented.
+remain authoritative. H6 is now implemented and verified locally under
+[ADR-0158](adr/0158-document-access-and-coverage.md): human-only host details, masked screenshots,
+restricted recordings stopped at document-set changes, source reauthorization for every replay
+destination, and refusal of scripts whose document access cannot be bounded. The
+[H6 verification record](tasks/security-hardening/h6-verification.md) records 478 passing Rust tests,
+192 extension tests, process/UI regressions, and 29 Chrome/MV3 checks with actual Sylin demo
+content and a mixed-host copy. The native-port shim is test-only; installed native-host transport
+and other platforms remain untested. H6 is not deployed or published; the earlier local deployment
+record still describes the running service and pending extension reload.
 
 ## 1.3.4 published (2026-09-05)
 

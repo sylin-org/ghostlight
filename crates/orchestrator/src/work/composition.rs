@@ -397,6 +397,7 @@ mod tests {
                 token.cancel();
             }
             let context = InvocationContext {
+                requirements: crate::governance::CapabilitySet::READ,
                 invocation: "parent",
                 workspace: &workspace,
                 requested_browser: None,

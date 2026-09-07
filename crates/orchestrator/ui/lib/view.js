@@ -23,7 +23,7 @@
 
   const TOAST_MS = 4200;
 
-  function create({ sessionFor = () => null, onFailure = () => {} } = {}) {
+  function create({ sessionFor = () => null, coverageFor = () => null, onFailure = () => {} } = {}) {
     /*
      * Every element with an id, looked up once.
      *
@@ -172,7 +172,7 @@
     }
 
     function compositionMarkup(entry) {
-      if (!entry.steps?.length) return permissionMarkup(entry, `${entry.invocation}:permission`);
+      if (!entry.steps?.length) return permissionMarkup(entry, `${entry.invocation}:permission`) + coverageMarkup(entry);
       const rows = entry.steps.map((step) => {
         const receipt = step.record;
         const state = receipt?.status ?? step.state;
@@ -186,7 +186,16 @@
           + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
           + detail + "</li>";
       }).join("");
-      return historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details");
+      return historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + coverageMarkup(entry);
+    }
+
+    function coverageMarkup(entry) {
+      const details = coverageFor(entry.invocation);
+      if (!details || (!details.coverage.page_excluded_documents && !details.coverage.unavailable_documents && !details.coverage.limited_by_size)) return "";
+      const hosts = details.excluded_hosts.map((host) => `<li>${escapeHtml(host)}</li>`).join("");
+      const indication = details.proactive ? `<p class="coverage-note">${escapeHtml(details.summary)}</p>` : "";
+      return indication + historyDetails(`${entry.invocation}:coverage`, "Coverage details",
+        `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : ""));
     }
 
     function heroMarkup(entry) {
@@ -749,7 +758,7 @@
 
     /** No opinion on anything, which is what an absent setting means. */
     function emptySettings() {
-      return { restricted: new Set(), sacred: "", startup: null };
+      return { restricted: new Set(), sacred: "", startup: null, choices: {} };
     }
 
     /**
@@ -771,6 +780,8 @@
           } catch (error) {
             // The orchestrator validates the document. A malformed projected value stays absent.
           }
+        } else if (SETTING_GROUPS.some((group) => group.items.some((item) => item.key === setting.key && item.kind === "choice"))) {
+          try { settings.choices[setting.key] = JSON.parse(setting.value); } catch (_) { /* invalid authored choice remains absent */ }
         } else if (setting.value === "false") {
           settings.restricted.add(setting.key);
         }
@@ -833,6 +844,7 @@
 
     /** Render the first closed string setting without turning it into a free-form field. */
     function choiceRow(item) {
+      if (item.key !== "browser.startup") return documentChoiceRow(item);
       const ceiling = applied?.browser_startup?.organization_ceiling;
       const forcedBy = ceiling === "manual"
         ? applied?.organization?.name ?? "Your organization"
@@ -855,12 +867,21 @@
         + `<span class="setting-detail">${detail}</span></div></div>`;
     }
 
-    /**
-     * Whether an organization has already turned this off, and if so who to name.
-     *
-     * A user's own switch cannot undo this, so it renders off and disabled rather than editable:
-     * ADR-0122 A3's ceiling rule applied to settings the same way it already applies to capabilities.
-     */
+    // Closed choices share the effective policy's authored source and organization floor.
+    function documentChoiceRow(item) {
+      const authority = applied?.documents;
+      const ceiling = authority?.[`organization_${item.field}`];
+      const minimum = Math.max(0, item.choices.findIndex((choice) => choice.value === ceiling));
+      const desired = draft.settings.choices[item.key] ?? authority?.[item.field] ?? item.default;
+      const selected = item.choices[Math.max(minimum, item.choices.findIndex((choice) => choice.value === desired))];
+      const options = item.choices.map((choice, index) => `<option value="${escapeHtml(choice.value)}"${choice === selected ? " selected" : ""}${index < minimum ? " disabled" : ""}>${escapeHtml(choice.label)}</option>`).join("");
+      const source = authority?.[`${item.field}_source`];
+      const author = source === "organization" ? applied?.organization?.name ?? "Your organization" : source === "user" ? "Your rules" : "Ghostlight default";
+      return `<div class="setting-row"><div class="setting-body"><label class="setting-name">${escapeHtml(item.name)}`
+        + `<select class="setting-choice" data-setting-choice="${escapeHtml(item.key)}">${options}</select></label>`
+        + `<span class="setting-detail">${escapeHtml(selected.detail)} ${escapeHtml(author)}.</span></div></div>`;
+    }
+
     function organizationForces(key) {
       const organization = applied?.layers?.find((layer) => layer.kind === "organization");
       const setting = organization?.settings.find((entry) => entry.key === key);
@@ -897,9 +918,10 @@
 
     /** Select one value from a closed string setting. */
     function setChoice(key, value) {
-      if (!draft || key !== "browser.startup") return;
-      if (value !== "on_demand" && value !== "manual") return;
-      draft.settings.startup = value;
+      const item = SETTING_GROUPS.flatMap((group) => group.items).find((item) => item.key === key && item.kind === "choice");
+      if (!draft || !item?.choices.some((choice) => choice.value === value)) return;
+      if (key === "browser.startup") draft.settings.startup = value;
+      else draft.settings.choices[key] = value;
       draft.dirty = true;
       renderSettings();
       editorReady();
@@ -1128,6 +1150,7 @@
       if (draft.settings.startup) {
         entries.push({ key: "browser.startup", value: draft.settings.startup, level: "mandatory" });
       }
+      for (const [key, value] of Object.entries(draft.settings.choices)) entries.push({ key, value, level: "mandatory" });
       const sacred = splitHosts(draft.settings.sacred);
       if (sacred.length) entries.push({ key: SACRED_KEY, value: sacred, level: "mandatory" });
       return entries;

@@ -1,9 +1,10 @@
 # H6: Useful work with explicit policy exclusions
 
-Status: Policy direction agreed, not implemented. The owner accepted document-specific
-authority, the three exclusion-handling choices, separate human notice choices, and the starting
-profile below. Detailed result, capture, and presentation recommendations remain open. The
-[ledger](LEDGER.md) owns progress, and ADR-0151's September 6 amendments record the decisions.
+Status: Implemented and verified locally under [ADR-0158](../../adr/0158-document-access-and-coverage.md).
+The owner selected human-only host details, masked excluded screenshot regions, recording stops
+at the document boundary, and refusal of unbounded scripts. The [ledger](LEDGER.md) owns progress;
+[verification](h6-verification.md) records the implementation, 29 Sylin browser checks, and limits.
+The discussion below preserves the product rationale; ADR-0158 resolves its earlier proposals.
 
 ## Policy chooses the response to exclusions
 
@@ -34,8 +35,8 @@ new admission check. A quiet display can keep structured result coverage. Every 
 describe its actual scope truthfully; none of these modes allows omitted content to be represented
 as inspected. Repeated prose warnings are a presentation choice, not the definition of correctness.
 
-Exact policy keys, detailed scoping, notice rendering, and composition details remain open. The
-existing schema is strict; these illustrative labels are not accepted configuration today.
+The strict schema registers `content.frames.handling` and `content.frames.notice`. ADR-0158
+records their closed values, tier resolution, coverage facts, and volatile human presentation.
 
 ## Agreed starting profile
 
@@ -154,10 +155,10 @@ Acceptance fixtures should prove:
 8. Notice preferences change human interruption without changing access or result coverage.
    Read-permitted/Write-denied fixtures distinguish readable fields from forbidden edits.
 
-The current code does not provide this proof. `httpFrameIds` drops frame URLs before collection,
-semantic results merge frames, and reads primarily report content plus a truncation bit. This
-work needs a typed, revision-negotiated browser evidence contract and deliberate amendments to
-the frame-transparency decisions in ADR-0151/0152, not a warning string added after collection.
+The implementation uses the negotiated `document_scope` mechanism before collection. Browser
+receipts retain visited/unavailable document identities only inside the application boundary;
+the common completion projects bounded coverage. ADR-0158 amends the earlier transparency
+decisions. The verification record separates synthetic, real browser, and installation evidence.
 
 ## Scope of stricter choices
 
@@ -166,7 +167,5 @@ refuses more work, including otherwise permitted targets. Neither choice establi
 Ghostlight prevented an embed from loading, guarantees support for every browser document, or
 makes multi-step effects atomic. Availability failures and size limits retain their own meanings.
 
-Do not infer either stricter choice from an ordinary denied host. The precise coverage schema,
-host disclosure, notice placement, and reliable capture exclusion remain open. The policy
-choices and starting profile are agreed; neither that agreement nor the acceptance fixtures
-above establishes an implemented guarantee.
+Do not infer either stricter choice from an ordinary denied host. ADR-0158 and the verification
+record specify what is now implemented and where physical uncertainty still causes refusal.

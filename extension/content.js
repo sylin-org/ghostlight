@@ -14,10 +14,79 @@
   ]);
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
+  const CAPTURE_MASK_TTL_MS = 10_000;
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
   let dragObservation = null;
+  let captureMask = null;
+
+  function clearCaptureMask() {
+    const state = captureMask;
+    captureMask = null;
+    if (!state) return { cleared: true };
+    clearTimeout(state.timer);
+    state.observer.disconnect();
+    for (const item of state.items) {
+      item.mask.remove();
+      for (const [name, value, priority, applied] of item.styles) {
+        if (item.element.style.getPropertyValue(name) !== applied) continue;
+        if (value) item.element.style.setProperty(name, value, priority);
+        else item.element.style.removeProperty(name);
+      }
+    }
+    return { cleared: true };
+  }
+
+  function installCaptureMask(message) {
+    clearCaptureMask();
+    const state = { items: [], dirty: false, observer: null };
+    const normalize = (value) => new URL(value, location.href).href.split("#")[0];
+    const urls = new Set(message.urls.map(normalize));
+    const found = new Set();
+    try {
+      for (const element of queryAll("iframe,frame")) {
+        const source = normalize(element.src || "about:blank");
+        if (!urls.has(source)) continue;
+        found.add(source);
+        const rectangle = element.getBoundingClientRect();
+        if (![rectangle.left, rectangle.top, rectangle.width, rectangle.height].every(Number.isFinite)) throw new Error("unverifiable capture geometry");
+        const mask = document.createElement("div");
+        mask.style.cssText = `all:initial!important;position:absolute!important;left:${rectangle.left + scrollX}px!important;top:${rectangle.top + scrollY}px!important;width:${rectangle.width}px!important;height:${rectangle.height}px!important;background:#20242b!important;color:#ffffff!important;z-index:2147483647!important;pointer-events:none!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;opacity:1!important;visibility:visible!important;font:14px sans-serif!important;`;
+        const shadow = mask.attachShadow({ mode: "closed" });
+        const label = document.createElement("span");
+        label.textContent = String(message.label ?? "").slice(0, 80);
+        shadow.append(label);
+        document.documentElement.append(mask);
+        const styles = [["transition", "none"], ["animation", "none"], ["visibility", "hidden"], ["opacity", "0"]].map(([name, applied]) => {
+          const previous = [name, element.style.getPropertyValue(name), element.style.getPropertyPriority(name), applied];
+          element.style.setProperty(name, applied, "important");
+          return previous;
+        });
+        state.items.push({ element, mask, styles });
+      }
+      if (found.size !== urls.size) throw new Error("capture cannot locate every excluded document");
+      state.observer = new MutationObserver(() => { state.dirty = true; });
+      for (const root of roots()) state.observer.observe(root, { subtree: true, attributes: true, childList: true, characterData: true });
+      captureMask = state;
+      state.timer = setTimeout(clearCaptureMask, CAPTURE_MASK_TTL_MS);
+      return { masked: state.items.length };
+    } catch (error) {
+      state.observer ??= { disconnect() {} };
+      captureMask = state;
+      clearCaptureMask();
+      throw error;
+    }
+  }
+
+  function verifyCaptureMask() {
+    const state = captureMask;
+    if (!state || state.dirty || state.observer.takeRecords().length) return { valid: false };
+    return { valid: state.items.every(({ element, mask }) => {
+      const style = window.getComputedStyle(element);
+      return element.isConnected && mask.isConnected && style.visibility === "hidden" && Number(style.opacity) === 0;
+    }) };
+  }
 
   function finishDragObservation() {
     if (!dragObservation) return { started: false, cancelled: false };
@@ -300,7 +369,8 @@
   }
 
   function inspect(kind, maximum) {
-    return candidates(kind).filter((element) => element.isConnected).slice(0, maximum).map(observation);
+    const pool = candidates(kind).filter((element) => element.isConnected);
+    return { targets: pool.slice(0, maximum).map(observation), truncated: pool.length > maximum };
   }
 
   function findTargets(text, kind, maximum) {
@@ -312,10 +382,10 @@
       const isControl = element.matches("a[href],button,input,textarea,select,summary,[role],[contenteditable='true']");
       if (haystack.includes(needle) && (kind !== "control" || isControl) && (kind !== "text" || !isControl)) {
         matches.push(observation(element));
-        if (matches.length >= maximum) break;
+        if (matches.length > maximum) break;
       }
     }
-    return matches;
+    return { targets: matches.slice(0, maximum), truncated: matches.length > maximum || pool.length > 3000 };
   }
 
   function matchesSemanticSelector(element, message) {
@@ -334,14 +404,15 @@
 
   function querySemanticTargets(message) {
     const matches = [];
-    for (const element of candidates("controls").slice(0, 3000)) {
+    const pool = candidates("controls");
+    for (const element of pool.slice(0, 3000)) {
       if (!element.isConnected) continue;
       if (matchesSemanticSelector(element, message)) {
         matches.push(observation(element));
-        if (matches.length >= 8) break;
+        if (matches.length > 8) break;
       }
     }
-    return matches;
+    return { targets: matches.slice(0, 8), truncated: matches.length > 8 || pool.length > 3000 };
   }
 
   function extractArticle(maxChars) {
@@ -537,6 +608,22 @@
       return false;
     }
     Promise.resolve().then(async () => {
+      if (message.kind === "capture_mask") return installCaptureMask(message);
+      if (message.kind === "capture_mask_check") return verifyCaptureMask();
+      if (message.kind === "capture_mask_clear") return clearCaptureMask();
+      if (message.kind === "document_route") {
+        if (message.focused) {
+          const element = deepestActiveElement();
+          return { focused: document.hasFocus() && !["iframe", "frame"].includes(String(element?.tagName ?? "").toLowerCase()) };
+        }
+        const x = message.page_x - (message.viewport ? 0 : scrollX);
+        const y = message.page_y - (message.viewport ? 0 : scrollY);
+        const element = deepestElementFromPoint(document, x, y);
+        if (!element) throw new Error("point has no current document subject");
+        const embed = ["iframe", "frame"].includes(String(element.tagName ?? "").toLowerCase());
+        const rectangle = embed ? element.getBoundingClientRect() : null;
+        return { x, y, embed: embed ? { src: String(element.src), left: rectangle.left + element.clientLeft, top: rectangle.top + element.clientTop } : null };
+      }
       if (message.kind === "read_text") {
         const result = message.locator
           ? composedVisibleText(resolve(message.locator), message.max_chars)
@@ -549,10 +636,10 @@
         const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
         return inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
       }
-      if (message.kind === "inspect") return { targets: inspect(message.inspect_kind, message.max_items) };
-      if (message.kind === "find") return { targets: findTargets(message.text, message.find_kind, message.max_results) };
+      if (message.kind === "inspect") return inspect(message.inspect_kind, message.max_items);
+      if (message.kind === "find") return findTargets(message.text, message.find_kind, message.max_results);
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
-      if (message.kind === "query_semantic") return { targets: querySemanticTargets(message) };
+      if (message.kind === "query_semantic") return querySemanticTargets(message);
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
       if (message.kind === "clear_focused") { const element = requireActionable(deepestActiveElement(), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
       if (message.kind === "drop_files") {

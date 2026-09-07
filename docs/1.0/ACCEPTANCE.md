@@ -405,3 +405,24 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with
    fake/synthetic browser adapters. The isolated Chromium history journey exercises bundled UI.
    These do not establish installed Tauri/MV3, physical input timing, or Linux runtime evidence.
+
+## Document boundary evidence (ADR-0158)
+
+1. Admit each supported document for actual RAWX requirements before extracting content. A denied
+   child contributes no text, labels, values, or target handles. Frame-id reuse cannot revive a
+   stale document-bound target. Known denied batch targets refuse before the first effect.
+2. All three handling and notice choices compose monotonically with authored organization floors.
+   Unrelated permitted targets remain usable under permitted-content and complete-operation modes.
+3. Distinguish unavailable content, policy exclusions, and size limits; negatives describe only
+   inspected content. Durable coverage excludes observed origins and payloads; human host details
+   are volatile. Preserve limitations across physical preparation and action receipts.
+4. Full, viewport, target, and magnified screenshots share verified masking and cleanup. A changed
+   mask discards the image; masked coordinates cannot authorize access. Restricted recordings stop
+   at document-set changes, and their prior frames remain subject to current source authority on
+   every export destination. Source-bound overflow is explicit rather than silent eviction.
+5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
+   All-open scripts keep browser behavior without an inferred sandbox or website network filter.
+6. `tests/frame-browser-journey.mjs` passes 29 Chrome/MV3 checks using the live Sylin iframe demo
+   and its form content on distinct local hosts, with real orchestrator and connector processes.
+   Native-port discovery alone is a test pipe; installed registration and other platforms are
+   separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.

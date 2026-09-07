@@ -1,8 +1,24 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
 const frames = globalThis.GhostlightFrames;
+const documents = globalThis.GhostlightDocuments.create({
+  getFrames: (tabId) => chrome.webNavigation.getAllFrames({ tabId }),
+  sendDocument: async (tabId, documentId, message) => {
+    const response = await chrome.tabs.sendMessage(tabId, message, { documentId });
+    if (!response?.ok) throw new Error(response?.error || "document primitive failed");
+    return response.result;
+  },
+  frames
+});
+
+async function sendDebugger(target, method, params) {
+  if (method.startsWith("Input.") || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
+    await documents.input(target.tabId, method, params);
+  }
+  return chrome.debugger.sendCommand(target, method, params);
+}
 const screenshotApi = globalThis.GhostlightScreenshot;
 const scriptEvaluator = globalThis.GhostlightScriptEvaluator;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
@@ -15,6 +31,7 @@ const operationEngine = globalThis.GhostlightOperationEngine.create({
 const debuggerLifecycle = globalThis.GhostlightDebuggerLifecycle.create(chrome.debugger);
 const diagnostics = globalThis.GhostlightDiagnostics.create({
   onExpired: (tabId) => {
+    diagnosticDocuments.delete(tabId);
     disableDiagnosticCapture([tabId]).catch(() => {});
   }
 });
@@ -27,6 +44,8 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
   }
 });
 const navigationWatchers = new Map();
+const recordingDocuments = new Map();
+const diagnosticDocuments = new Map();
 const dragInterceptions = new Map();
 const cancelled = new Set();
 // The per-frame semantic match cap lives in the content script; this is the same ceiling
@@ -54,7 +73,8 @@ let liveState = {
 
 const recording = globalThis.GhostlightRecording.create({
   onStop: (tabId) => {
-    chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast").catch(() => {});
+    recordingDocuments.delete(tabId);
+    sendDebugger({ tabId }, "Page.stopScreencast").catch(() => {});
     setRecordingPresentation(tabId, false).catch(() => {});
     publishUiState();
   }
@@ -207,12 +227,21 @@ chrome.runtime.onStartup.addListener(connectNative);
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "ghostlight-reconnect") connectNative(); });
 
 chrome.webNavigation.onCommitted.addListener((details) => {
+  if (recordingDocuments.has(details.tabId)) recording.interruptTab(details.tabId, "document_boundary");
   if (details.frameId !== 0) return;
   cancelDragInterception(details.tabId);
   recording.noteUrl(details.tabId, details.url);
   const watcher = navigationWatchers.get(details.tabId);
   watcher?.commits.push(details.url);
   send(shared.browserEventFrame({ event: "document_committed", tab_id: details.tabId, url: details.url, correlation: watcher?.correlation }));
+});
+
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (recordingDocuments.has(details.tabId)) recording.interruptTab(details.tabId, "document_boundary");
+  if (diagnosticDocuments.delete(details.tabId)) {
+    diagnostics.forget(details.tabId);
+    disableDiagnosticCapture([details.tabId]).catch(() => {});
+  }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -274,6 +303,7 @@ chrome.tabs.onAttached.addListener((tabId) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   const activeRecording = recording.interruptTab(tabId, "browser_detached");
   diagnostics.forget(tabId);
+  diagnosticDocuments.delete(tabId);
   debuggerLifecycle.forget(tabId);
   cancelDragInterception(tabId);
   topology.forget(tabId).catch(() => {});
@@ -288,7 +318,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
   if (method === "Page.javascriptDialogOpening") {
     if (beforeUnloadAcceptors.get(source.tabId) && params.type === "beforeunload") {
-      chrome.debugger.sendCommand({ tabId: source.tabId }, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
+      sendDebugger({ tabId: source.tabId }, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
     }
     return;
   }
@@ -347,6 +377,7 @@ chrome.debugger.onDetach.addListener((source) => {
   if (!source.tabId) return;
   const activeRecording = recording.interruptTab(source.tabId, "browser_detached");
   diagnostics.forget(source.tabId);
+  diagnosticDocuments.delete(source.tabId);
   debuggerLifecycle.detached(source.tabId);
   cancelDragInterception(source.tabId);
   publishUiState();
@@ -354,11 +385,25 @@ chrome.debugger.onDetach.addListener((source) => {
 
 async function handleScreencastFrame(tabId, params) {
   try {
-    await chrome.debugger.sendCommand({ tabId }, "Page.screencastFrameAck", { sessionId: params.sessionId });
+    await sendDebugger({ tabId }, "Page.screencastFrameAck", { sessionId: params.sessionId });
   } catch (_error) {
     // A detached target has no compositor flow left to unblock.
   }
-  recording.append(tabId, params.data, "screencast", Date.now());
+  if (await recordingScopeCurrent(tabId)) recording.append(tabId, params.data, "screencast", Date.now());
+}
+
+async function recordingScopeCurrent(tabId) {
+  if (!recording.activeForTab(tabId)) return false;
+  const admitted = recordingDocuments.get(tabId);
+  try {
+    const current = (await documents.current(tabId)).documents;
+    if (!admitted || globalThis.GhostlightDocuments.same(admitted, current)) {
+      for (const document of current) recording.noteUrl(tabId, document.url);
+      return true;
+    }
+  } catch (_) { /* uncertainty ends retention at the last verified document scope */ }
+  recording.interruptTab(tabId, "document_boundary");
+  return false;
 }
 
 async function disableDiagnosticCapture(tabIds) {
@@ -370,11 +415,18 @@ async function settleServiceBoundaryState() {
   commandChunks.clear();
   await interruptAllRecordings("service_disconnected");
   await disableDiagnosticCapture(diagnostics.clearAll());
+  diagnosticDocuments.clear();
 }
 
 async function readDiagnostics(command) {
   if (!Number.isSafeInteger(command.limit) || command.limit < 1 || command.limit > 200) {
     throw new RangeError("diagnostic limit must be from 1 through 200");
+  }
+  const currentDocuments = documents.context(command.tab_id)?.documents;
+  if (currentDocuments && !globalThis.GhostlightDocuments.same(diagnosticDocuments.get(command.tab_id), currentDocuments)) {
+    diagnostics.forget(command.tab_id);
+    await disableDiagnosticCapture([command.tab_id]);
+    diagnosticDocuments.set(command.tab_id, currentDocuments);
   }
   const captureStarted = diagnostics.enable(command.tab_id);
   let sourceStarted = false;
@@ -392,6 +444,7 @@ async function readDiagnostics(command) {
     }
     throw error;
   }
+  await documents.verify(command.tab_id);
   const result = diagnostics.read(command.tab_id, {
     source: command.source,
     detail: command.detail,
@@ -404,6 +457,7 @@ async function readDiagnostics(command) {
 }
 
 async function clearDiagnostics(command) {
+  for (const tabId of command.tab_ids) diagnosticDocuments.delete(tabId);
   const clearedCount = diagnostics.forgetMany(command.tab_ids);
   await disableDiagnosticCapture(command.tab_ids);
   return { outcome: "diagnostics_cleared", cleared_count: clearedCount };
@@ -489,6 +543,15 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
 
 async function dispatch(request) {
   const command = request.command;
+  if (command.command === "describe_documents") {
+    return { outcome: "documents", tab_id: command.tab_id, inventory: await documents.describe(command) };
+  }
+  if (command.command === "in_documents") {
+    const primitive = command.primitive;
+    if (primitive.command === "in_documents" || primitive.command === "describe_documents") throw globalThis.GhostlightDocuments.changed();
+    const tabId = primitive.tab_id ?? primitive.destination?.tab_id;
+    return documents.run(tabId, command.scope, () => dispatch({ ...request, command: primitive }));
+  }
   if (command.command === "cancel") {
     cancelled.add(command.correlation);
     return { outcome: "cancelled" };
@@ -555,7 +618,7 @@ async function dispatch(request) {
     for (const [frameId, entries] of groups) {
       const result = await contentIn(command.tab_id, frameId, { kind: "describe", locators: entries.map((entry) => entry.local) });
       for (const target of result.targets ?? []) {
-        targets.push({ ...target, locator: frames.scopedLocator(frameId, target.locator) });
+        targets.push({ ...target, locator: documents.locator(command.tab_id, frameId, target.locator) });
       }
     }
     return { outcome: "targets_described", tab_id: command.tab_id, targets };
@@ -753,15 +816,16 @@ async function resizeWindow(command) {
 async function interruptAllRecordings(reason) {
   const summaries = recording.interruptAll(reason);
   await Promise.all(summaries.map((summary) =>
-    chrome.debugger.sendCommand({ tabId: summary.tab_id }, "Page.stopScreencast").catch(() => {})));
+    sendDebugger({ tabId: summary.tab_id }, "Page.stopScreencast").catch(() => {})));
   publishUiState();
 }
 
 async function captureRecordingFrame(state, frameKind) {
+  if (!await recordingScopeCurrent(state.tabId)) return false;
   await ensureDebugger(state.tabId);
   await contentAll(state.tabId, { kind: "presentation_visibility", hidden: true });
   try {
-    const metrics = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.getLayoutMetrics");
+    const metrics = await sendDebugger({ tabId: state.tabId }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
     const clip = {
       x: visual.pageX ?? 0,
@@ -770,7 +834,7 @@ async function captureRecordingFrame(state, frameKind) {
       height: Math.max(1, visual.clientHeight),
       scale: Math.max(0.05, Math.min(1, globalThis.GhostlightRecording.MAX_WIDTH / visual.clientWidth, globalThis.GhostlightRecording.MAX_HEIGHT / visual.clientHeight))
     };
-    const capture = await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.captureScreenshot", {
+    const capture = await sendDebugger({ tabId: state.tabId }, "Page.captureScreenshot", {
       format: "jpeg",
       quality: globalThis.GhostlightRecording.JPEG_QUALITY,
       clip,
@@ -781,7 +845,7 @@ async function captureRecordingFrame(state, frameKind) {
     if (dimensions.width > globalThis.GhostlightRecording.MAX_WIDTH || dimensions.height > globalThis.GhostlightRecording.MAX_HEIGHT) {
       throw new Error("recording frame exceeded its negotiated dimensions");
     }
-    return recording.append(state.tabId, capture.data, frameKind, Date.now());
+    return await recordingScopeCurrent(state.tabId) && recording.append(state.tabId, capture.data, frameKind, Date.now());
   } finally {
     await contentAll(state.tabId, { kind: "presentation_visibility", hidden: false });
     await detachDebugger(state.tabId);
@@ -794,13 +858,15 @@ async function startRecording(workspace, command) {
   await setRecordingPresentation(command.tab_id, true);
   if (started.existing) return { outcome: "recording_started", summary: started.existing, existing: true };
   const state = recording.activeForTab(command.tab_id);
+  const scope = documents.context(command.tab_id)?.scope;
+  if (scope?.watch_changes) recordingDocuments.set(command.tab_id, scope.documents);
   let screencastAttempted = false;
   try {
     await captureRecordingFrame(state, "seed").catch(() => false);
     if (!recording.activeForTab(command.tab_id)) throw new Error("recording ended during startup");
     await debuggerLifecycle.enableDomain(command.tab_id, "Page");
     screencastAttempted = true;
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.startScreencast", {
+    await sendDebugger({ tabId: command.tab_id }, "Page.startScreencast", {
       format: "jpeg",
       quality: globalThis.GhostlightRecording.JPEG_QUALITY,
       maxWidth: globalThis.GhostlightRecording.MAX_WIDTH,
@@ -811,7 +877,7 @@ async function startRecording(workspace, command) {
     return { outcome: "recording_started", summary: recording.status(workspace, state.id).summary, existing: false };
   } catch (error) {
     recording.discard(workspace, state.id);
-    if (screencastAttempted) chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.stopScreencast").catch(() => {});
+    if (screencastAttempted) sendDebugger({ tabId: command.tab_id }, "Page.stopScreencast").catch(() => {});
     publishUiState();
     throw error;
   }
@@ -832,13 +898,13 @@ async function stopRecording(workspace, command) {
   }
   try {
     await captureRecordingFrame(state, "final").catch(() => false);
-    await chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.stopScreencast");
+    await sendDebugger({ tabId: state.tabId }, "Page.stopScreencast");
     const summary = recording.finishStop(state, "explicit");
     publishUiState();
     return { outcome: "recording_stopped", summary, changed: true };
   } catch (error) {
     recording.interruptTab(state.tabId, "browser_detached");
-    chrome.debugger.sendCommand({ tabId: state.tabId }, "Page.stopScreencast").catch(() => {});
+    sendDebugger({ tabId: state.tabId }, "Page.stopScreencast").catch(() => {});
     publishUiState();
     throw error;
   }
@@ -848,7 +914,7 @@ async function discardRecording(workspace, command) {
   const result = recording.discard(workspace, command.recording_id);
   if (result.notFound || result.ambiguous) return recordingResult("recording_discarded", result);
   if (result.active) {
-    await chrome.debugger.sendCommand({ tabId: result.tabId }, "Page.stopScreencast").catch(() => {});
+    await sendDebugger({ tabId: result.tabId }, "Page.stopScreencast").catch(() => {});
   }
   publishUiState();
   return { outcome: "recording_discarded", recording_id: result.recordingId, released_bytes: result.releasedBytes };
@@ -985,6 +1051,8 @@ async function exportRecording(workspace, command) {
 // back into the one document the model sees. Locator-bearing commands route to the owning
 // frame; document-wide reads broadcast in stable frame order.
 async function httpFrameIds(tabId) {
+  const selected = documents.frameIds(tabId);
+  if (selected) return selected;
   try {
     const all = await chrome.webNavigation.getAllFrames({ tabId });
     return (all ?? [])
@@ -1022,9 +1090,11 @@ async function contentIn(tabId, frameId, message, optional = false) {
     throw new Error("browser primitive requires a tab");
   }
   try {
-    const response = await chrome.tabs.sendMessage(tabId, message, { frameId });
-    if (!response?.ok) throw new Error(response?.error || "content primitive failed");
-    return response.result;
+    return await documents.route(tabId, frameId, message, async () => {
+      const response = await chrome.tabs.sendMessage(tabId, message, { frameId });
+      if (!response?.ok) throw new Error(response?.error || "content primitive failed");
+      return response.result;
+    });
   } catch (error) {
     if (optional) return { presented: false };
     throw error;
@@ -1041,17 +1111,18 @@ async function content(tabId, message, optional = false) {
 }
 
 // Sends one read-only message to every http(s) frame and merges fulfilled target lists in
-// stable frame order under the caller's ceiling. A frame that is mid-navigation or gone
-// simply contributes nothing, exactly like an empty document would.
+// stable frame order under the caller's ceiling. Document receipts distinguish an
+// unavailable frame from a successfully inspected empty document.
 async function collectTargets(tabId, message, maximum) {
   const frameIds = await httpFrameIds(tabId);
   const settled = await Promise.allSettled(frameIds.map((frameId) => contentIn(tabId, frameId, message)));
   const perFrame = {};
   settled.forEach((entry, index) => {
     if (entry.status === "fulfilled" && Array.isArray(entry.value?.targets)) {
-      perFrame[frameIds[index]] = frames.scopeTargets(frameIds[index], entry.value.targets);
+      perFrame[frameIds[index]] = entry.value.targets.map((target) => ({ ...target, locator: documents.locator(tabId, frameIds[index], target.locator) }));
     }
   });
+  if (Object.values(perFrame).reduce((count, targets) => count + targets.length, 0) > maximum) documents.limit(tabId);
   return frames.mergeTargets(perFrame, maximum);
 }
 
@@ -1220,7 +1291,7 @@ async function navigateDiscardingBeforeUnload(correlation, command) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.enable");
+    await sendDebugger({ tabId: command.tab_id }, "Page.enable");
     beforeUnloadAcceptors.set(command.tab_id, true);
     await chrome.tabs.update(command.tab_id, { url: command.url, active: true });
     const tab = await waitForReady(command.tab_id, correlation);
@@ -1275,11 +1346,16 @@ async function reload(correlation, command) {
 // Browser focus lives in exactly one frame but nothing cheap names it from outside, so
 // focused-control primitives probe frames in stable order and take the first answer.
 async function firstFrameAnswer(tabId, message) {
-  const frameIds = await httpFrameIds(tabId);
+  const context = documents.context(tabId);
+  const frameIds = context?.scope.subjects.length
+    ? context.raw.filter((frame) => context.scope.subjects.includes(frame.documentId)).map((frame) => frame.frameId)
+    : await httpFrameIds(tabId);
   let lastError = null;
   for (const frameId of frameIds) {
     try {
-      return await contentIn(tabId, frameId, message);
+      const result = await contentIn(tabId, frameId, message);
+      if (result.targets) result.targets = result.targets.map((target) => ({ ...target, locator: documents.locator(tabId, frameId, target.locator) }));
+      return result;
     } catch (error) {
       lastError = error;
     }
@@ -1379,7 +1455,7 @@ async function typeText(correlation, command) {
     const target = await content(command.tab_id, { kind: command.clear_first ? "clear" : "focus", locator: command.locator });
     if (command.clear_first) await content(command.tab_id, { kind: "focus", locator: command.locator });
     await ensureDebugger(command.tab_id);
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
+    await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: target.subject, committed_urls: commits };
@@ -1403,36 +1479,36 @@ async function dispatchDrag(tabId, start, end) {
   await contentAll(tabId, { kind: "drag_observation_arm" });
   try {
     try {
-      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: true });
+      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: true });
       interceptEnabled = true;
     } catch (_unsupported) {
       cancelDragInterception(tabId);
     }
 
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[0]);
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[1]);
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[0]);
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[1]);
     pressed = true;
 
     if (interceptEnabled) {
       for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
-        await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+        await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
         const observed = await dragObservationStatus(tabId);
         if (!observed.started) continue;
         nextHeldPacket += 1;
-        await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
+        await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false });
         interceptEnabled = false;
         if (!observed.cancelled) {
           const dragData = await waitForDragInterception(interception);
           if (dragData) {
             for (const type of ["dragEnter", "dragOver", "drop"]) {
-              await chrome.debugger.sendCommand({ tabId }, "Input.dispatchDragEvent", {
+              await sendDebugger({ tabId }, "Input.dispatchDragEvent", {
                 type,
                 x: end.x,
                 y: end.y,
                 data: dragData
               });
             }
-            await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+            await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket);
             released = true;
             return;
           }
@@ -1442,23 +1518,23 @@ async function dispatchDrag(tabId, start, end) {
     }
 
     if (interceptEnabled) {
-      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false });
+      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false });
       interceptEnabled = false;
     }
     for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
-      await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+      await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
     }
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket);
     released = true;
   } finally {
     cancelDragInterception(tabId);
     await contentAll(tabId, { kind: "drag_observation_finish" });
     if (interceptEnabled) {
-      await chrome.debugger.sendCommand({ tabId }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
+      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
     }
     if (pressed && !released) {
-      await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", finalPacket).catch(() => {});
-      await chrome.debugger.sendCommand({ tabId }, "Input.cancelDragging").catch(() => {});
+      await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket).catch(() => {});
+      await sendDebugger({ tabId }, "Input.cancelDragging").catch(() => {});
     }
   }
 }
@@ -1550,7 +1626,7 @@ async function evaluateScript(correlation, command) {
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
-  const send = (method, params) => chrome.debugger.sendCommand({ tabId: command.tab_id }, method, params);
+  const send = (method, params) => sendDebugger({ tabId: command.tab_id }, method, params);
   try {
     const value = await scriptEvaluator.evaluate(send, command.script, command.max_result_chars);
     const serialized = JSON.stringify(value ?? null);
@@ -1576,11 +1652,50 @@ async function detachDebugger(tabId) {
   await debuggerLifecycle.release(tabId);
 }
 
+async function prepareCaptureMasks(tabId) {
+  const context = documents.context(tabId);
+  const maskedParents = [];
+  const clear = async () => {
+    for (const frameId of maskedParents) await contentIn(tabId, frameId, { kind: "capture_mask_clear" }, true);
+  };
+  try {
+    if (context?.scope.mask) {
+      const excluded = context.documents.filter((document) => !context.scope.allowed.includes(document.id));
+      const groups = new Map();
+      for (const document of excluded) {
+        // An excluded ancestor already hides every document nested beneath it.
+        if (excluded.some((ancestor) => ancestor.id === document.parent)) continue;
+        if (!document.parent) throw globalThis.GhostlightDocuments.changed();
+        const parent = context.raw.find((frame) => frame.documentId === document.parent);
+        if (!parent) throw globalThis.GhostlightDocuments.changed();
+        if (!groups.has(parent.frameId)) groups.set(parent.frameId, []);
+        groups.get(parent.frameId).push(document.url);
+      }
+      for (const [frameId, urls] of groups) {
+        const result = await contentIn(tabId, frameId, { kind: "capture_mask", urls, label: context.scope.mask });
+        maskedParents.push(frameId);
+        context.masked += result.masked;
+      }
+    }
+    return {
+      clear,
+      verify: async () => {
+        await documents.verify(tabId);
+        for (const frameId of maskedParents) {
+          const result = await contentIn(tabId, frameId, { kind: "capture_mask_check" });
+          if (!result.valid) throw globalThis.GhostlightDocuments.changed();
+        }
+      }
+    };
+  } catch (error) { await clear(); throw error; }
+}
+
 async function screenshot(command) {
   await ensureDebugger(command.tab_id);
   await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
+  let masks;
   try {
-    const metrics = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.getLayoutMetrics");
+    const metrics = await sendDebugger({ tabId: command.tab_id }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
     let clip;
     let scope;
@@ -1606,9 +1721,12 @@ async function screenshot(command) {
       clip = screenshotApi.ordinaryClip(visual.pageX ?? 0, visual.pageY ?? 0, Math.max(1, visual.clientWidth), Math.max(1, visual.clientHeight));
       scope = "viewport";
     }
-    let capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
-    if (capture.data.length > screenshotApi.MAX_BASE64_CHARS) capture = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.FALLBACK_JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
-    const ratio = await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
+    masks = await prepareCaptureMasks(command.tab_id);
+    await masks.verify();
+    let capture = await sendDebugger({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
+    if (capture.data.length > screenshotApi.MAX_BASE64_CHARS) capture = await sendDebugger({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.FALLBACK_JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
+    await masks.verify();
+    const ratio = await sendDebugger({ tabId: command.tab_id }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
     const dimensions = await imageDimensions(capture.data, clip);
     return {
       outcome: "screenshot",
@@ -1633,6 +1751,7 @@ async function screenshot(command) {
       }
     };
   } finally {
+    await masks?.clear();
     await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false });
     await detachDebugger(command.tab_id);
   }
@@ -1665,9 +1784,9 @@ function near(left, right, tolerance = 1) {
 }
 
 async function validateView(tabId, expected) {
-  const metrics = await chrome.debugger.sendCommand({ tabId }, "Page.getLayoutMetrics");
+  const metrics = await sendDebugger({ tabId }, "Page.getLayoutMetrics");
   const visual = metrics.cssVisualViewport || metrics.visualViewport;
-  const ratio = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
+  const ratio = await sendDebugger({ tabId }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
   const zoom = await chrome.tabs.getZoom(tabId);
   const current = {
     visual_page_x: visual.pageX ?? 0,
@@ -1701,9 +1820,9 @@ async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
   const name = button === "middle" ? "middle" : button === "secondary" ? "right" : "left";
   const modifiers = modifierFlags ?? 0;
   for (let count = 1; count <= clickCount; count += 1) {
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, button: name, modifiers });
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
-    await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, button: name, modifiers });
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
+    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
   }
 }
 
@@ -1733,7 +1852,7 @@ async function hoverLocator(command) {
   const offset = await frameViewportOffset(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID);
   await ensureDebugger(command.tab_id);
   try {
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", {
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x: geometry.rectangle.left + geometry.rectangle.width / 2 + offset.x,
       y: geometry.rectangle.top + geometry.rectangle.height / 2 + offset.y
@@ -1749,7 +1868,7 @@ async function hoverPoint(command) {
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     return { outcome: "hovered", tab_id: command.tab_id, subject: point.subject };
   } finally {
     await detachDebugger(command.tab_id);
@@ -1764,9 +1883,9 @@ async function pressKey(correlation, command) {
   try {
     const modifiers = shared.modifierMask(command.modifiers);
     const descriptor = shared.keyDescriptor(command.key);
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor, modifiers });
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor, modifiers });
     const { text: _text, ...keyUp } = descriptor;
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers });
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };
@@ -1800,7 +1919,7 @@ async function wheelAt(correlation, command) {  await ensureDebugger(command.tab
     const deltaY = command.direction === "up" ? -120 : 120;
     for (let tick = 0; tick < command.ticks; tick += 1) {
       if (cancelled.has(correlation)) throw Object.assign(new Error("cancelled during wheel"), { effectUnknown: true });
-      await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY });
+      await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY });
     }
     await new Promise((resolve) => setTimeout(resolve, 120));
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -1816,7 +1935,7 @@ async function typeFocused(correlation, command) {
   try {
     if (command.clear_first) await firstFrameAnswer(command.tab_id, { kind: "clear_focused" });
     await ensureDebugger(command.tab_id);
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
+    await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: null, committed_urls: commits };
@@ -1841,7 +1960,7 @@ async function handleDialog(command) {
   await ensureDebugger(command.tab_id);
   const type = debuggerLifecycle.currentDialog(command.tab_id)?.type || "unknown";
   try {
-    await chrome.debugger.sendCommand({ tabId: command.tab_id }, "Page.handleJavaScriptDialog", { accept: command.accept, promptText: command.text });
+    await sendDebugger({ tabId: command.tab_id }, "Page.handleJavaScriptDialog", { accept: command.accept, promptText: command.text });
     await debuggerLifecycle.closeDialog(command.tab_id);
     return { outcome: "dialog_handled", tab_id: command.tab_id, dialog_type: type, accepted: command.accept };
   } catch (error) {

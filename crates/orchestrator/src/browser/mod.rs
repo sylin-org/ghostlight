@@ -642,6 +642,29 @@ impl RelayBrowserPort {
                     advertised,
                 });
             }
+            if let BrowserCommand::InDocuments { primitive, .. } = &command {
+                if matches!(
+                    **primitive,
+                    BrowserCommand::InDocuments { .. } | BrowserCommand::DescribeDocuments { .. }
+                ) {
+                    return Err(BrowserError::Protocol(
+                        "nested document execution is invalid".into(),
+                    ));
+                }
+                let capability = primitive.required_capability();
+                let advertised = connection
+                    .capabilities
+                    .get(capability)
+                    .copied()
+                    .unwrap_or_default();
+                if advertised < primitive.required_revision() {
+                    return Err(BrowserError::CapabilityVersion {
+                        capability: capability.into(),
+                        required: primitive.required_revision(),
+                        advertised,
+                    });
+                }
+            }
             (
                 Arc::clone(&connection.writer),
                 Arc::clone(&connection.pending),
@@ -1058,6 +1081,8 @@ fn adapter_error(code: &str, message: String, effect_unknown: bool) -> BrowserEr
         BrowserError::EffectUnknown(message)
     } else if code == "local_interlock" {
         BrowserError::LocalInterlock(message)
+    } else if code == "document_scope_changed" {
+        BrowserError::DocumentUnavailable
     } else {
         BrowserError::Primitive(message)
     }
@@ -1112,6 +1137,12 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Truth-preserving physical-browser failure classes.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum BrowserError {
+    /// The authority refused the actual embedded-document subject before access.
+    #[error("document access denied: {0:?}")]
+    DocumentAccess(crate::governance::Decision),
+    /// Current document scope could not be established before access.
+    #[error("document scope unavailable before access")]
+    DocumentUnavailable,
     /// Application control refused before this physical dispatch began.
     #[error("runtime control refused browser dispatch: {0:?}")]
     RuntimeControl(crate::governance::ReasonCode),
@@ -1334,6 +1365,26 @@ mod contract_tests {
         let port =
             RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
         port.attach(stream).unwrap();
+
+        assert_eq!(
+            port.call(
+                TEST_BROWSER,
+                "workspace_test",
+                BrowserCommand::DescribeDocuments {
+                    tab_id: 1,
+                    locators: vec![],
+                    points: vec![],
+                    focused: false
+                },
+                Instant::now() + Duration::from_millis(200),
+                &AtomicBool::new(false)
+            ),
+            Err(BrowserError::CapabilityVersion {
+                capability: adapter_capability::DOCUMENT_SCOPE.into(),
+                required: 1,
+                advertised: 0
+            })
+        );
 
         assert_eq!(
             port.call(
@@ -1786,6 +1837,13 @@ pub(crate) mod testing {
     /// Deterministic browser port for executor contract tests.
     #[derive(Debug)]
     pub struct FakeBrowser {
+        documents: Mutex<
+            std::collections::HashMap<
+                u64,
+                ghostlight_bridge::browser::documents::DocumentInventory,
+            >,
+        >,
+        scopes: Mutex<Vec<ghostlight_bridge::browser::documents::DocumentScope>>,
         calls: Mutex<Vec<BrowserCommand>>,
         routed: Mutex<Vec<String>>,
         outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
@@ -1796,6 +1854,8 @@ pub(crate) mod testing {
     impl Default for FakeBrowser {
         fn default() -> Self {
             Self {
+                documents: Mutex::default(),
+                scopes: Mutex::default(),
                 calls: Mutex::default(),
                 routed: Mutex::default(),
                 outcomes: Mutex::default(),
@@ -1816,6 +1876,18 @@ pub(crate) mod testing {
     }
 
     impl FakeBrowser {
+        /// Supply explicit document evidence for a governed executor fixture.
+        pub fn set_documents(
+            &self,
+            tab: u64,
+            inventory: ghostlight_bridge::browser::documents::DocumentInventory,
+        ) {
+            lock(&self.documents).insert(tab, inventory);
+        }
+        /// Document constraints sent to this browser, separate from physical operation calls.
+        pub fn scopes(&self) -> Vec<ghostlight_bridge::browser::documents::DocumentScope> {
+            lock(&self.scopes).clone()
+        }
         pub fn push(&self, outcome: Result<BrowserOutcome, BrowserError>) {
             lock(&self.outcomes).push_back(outcome);
         }
@@ -1844,11 +1916,69 @@ pub(crate) mod testing {
             _deadline: Instant,
             _cancelled: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
+            use ghostlight_bridge::browser::documents::{
+                DocumentInventory, DocumentObservation, PhysicalDocument,
+            };
+            if let BrowserCommand::DescribeDocuments {
+                tab_id,
+                locators,
+                points,
+                focused,
+            } = &command
+            {
+                let mut inventory = lock(&self.documents)
+                    .get(tab_id)
+                    .cloned()
+                    .unwrap_or_default();
+                if locators.is_empty() && points.is_empty() && !focused {
+                    inventory.subjects.clear();
+                } else if inventory.subjects.is_empty() {
+                    inventory.subjects = inventory
+                        .documents
+                        .first()
+                        .map(|document| vec![document.id.clone()])
+                        .unwrap_or_default();
+                }
+                return Ok(BrowserOutcome::Documents {
+                    tab_id: *tab_id,
+                    inventory,
+                });
+            }
+            if let BrowserCommand::InDocuments { scope, primitive } = command {
+                lock(&self.scopes).push(scope.clone());
+                return self
+                    .call(browser, _workspace, *primitive, _deadline, _cancelled)
+                    .map(|result| BrowserOutcome::InDocuments {
+                        observation: DocumentObservation {
+                            visited: scope.allowed,
+                            ..DocumentObservation::default()
+                        },
+                        result: Box::new(result),
+                    });
+            }
             lock(&self.routed).push(browser.into());
             lock(&self.calls).push(command);
-            lock(&self.outcomes)
+            let result = lock(&self.outcomes)
                 .pop_front()
-                .unwrap_or_else(|| Err(BrowserError::Primitive("no fake outcome".into())))
+                .unwrap_or_else(|| Err(BrowserError::Primitive("no fake outcome".into())));
+            if let Ok(
+                BrowserOutcome::TabOpened { tab, .. } | BrowserOutcome::Navigated { tab, .. },
+            ) = &result
+            {
+                lock(&self.documents).insert(
+                    tab.tab_id,
+                    DocumentInventory {
+                        documents: vec![PhysicalDocument {
+                            id: format!("document_{}", tab.tab_id),
+                            url: tab.url.clone(),
+                            parent: None,
+                            supported: true,
+                        }],
+                        ..DocumentInventory::default()
+                    },
+                );
+            }
+            result
         }
 
         fn browsers(&self) -> Vec<BrowserSummary> {

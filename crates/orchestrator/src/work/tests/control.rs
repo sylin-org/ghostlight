@@ -257,7 +257,7 @@ impl BrowserPort for ControlledBrowser {
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
         let prepare = matches!(
-            command,
+            command.primitive(),
             BrowserCommand::DescribeFocused { .. } | BrowserCommand::EvaluateScript { .. }
         );
         let result = self
@@ -277,7 +277,7 @@ impl BrowserPort for ControlledBrowser {
     ) -> Result<BrowserOutcome, BrowserError> {
         if self.before
             && matches!(
-                command,
+                command.primitive(),
                 BrowserCommand::TypeFocused { .. } | BrowserCommand::Observe { .. }
             )
         {
@@ -407,7 +407,7 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
             command: BrowserCommand,
             d: BrowserDispatch<'_>,
         ) -> Result<BrowserOutcome, BrowserError> {
-            if matches!(command, BrowserCommand::Observe { .. }) {
+            if matches!(command.primitive(), BrowserCommand::Observe { .. }) {
                 self.0
                     .governance
                     .apply_runtime_intent(RuntimeControlIntent::Hold);

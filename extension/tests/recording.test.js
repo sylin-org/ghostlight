@@ -26,6 +26,23 @@ function harness() {
 
 const FRAME = "AA==";
 
+test("source bounds never silently forget previously captured documents", () => {
+  const h = harness();
+  const recording = h.recording.start("workspace_a", 7, "https://original.test/").started.recording_id;
+  for (let index = 0; index < 40; index++) h.recording.noteUrl(7, `https://source${index}.test/`);
+  const summary = h.recording.status("workspace_a", recording).summary;
+  assert.equal(summary.source_urls_complete, false);
+  assert.ok(summary.source_urls.includes("https://original.test/"));
+  assert.equal(summary.source_urls.length, 32);
+});
+
+test("unsupported captured sources cannot become complete source evidence", () => {
+  const h = harness();
+  const recording = h.recording.start("workspace_a", 7, "https://original.test/").started.recording_id;
+  h.recording.noteUrl(7, "about:blank");
+  assert.equal(h.recording.status("workspace_a", recording).summary.source_urls_complete, false);
+});
+
 test("the registry owns plural recording identities and tab-local capture", () => {
   const h = harness();
   const first = h.recording.start("workspace_a", 7, "https://example.com/path?secret=1").started;

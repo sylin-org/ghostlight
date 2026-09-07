@@ -2,6 +2,7 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
+pub mod documents;
 pub mod effective;
 pub mod evidence;
 pub mod inspection;
@@ -1937,6 +1938,9 @@ fn unix_ms() -> u64 {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecord {
+    /// Closed document coverage facts, excluding human-only embedded host names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<crate::language::coverage::Coverage>,
     /// Wall-clock time in Unix milliseconds.
     pub timestamp_ms: u64,
     /// Opaque invocation handle.
@@ -2063,6 +2067,7 @@ impl AuditRecord {
             summary: language.summary().chars().take(500).collect(),
             refusal_facts: language.refusal().cloned(),
             composition: language.composition(),
+            coverage: language.coverage().cloned(),
             step: None,
             composition_tools: language.tools().to_vec(),
             permissions: evidence::PermissionTrace::default(),

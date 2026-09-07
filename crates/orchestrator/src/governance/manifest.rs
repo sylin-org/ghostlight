@@ -542,6 +542,34 @@ fn validate_patterns(patterns: &[String], source: &str, path: &str) -> Result<()
 fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<(), ManifestError> {
     let path = format!("config[{index}].value");
     match entry.key.as_str() {
+        super::documents::HANDLING_KEY => {
+            if entry
+                .value
+                .as_str()
+                .and_then(super::documents::Handling::parse)
+                .is_none()
+            {
+                return field(
+                    source,
+                    &path,
+                    "must be permitted_content, complete_operation, or complete_page",
+                );
+            }
+        }
+        super::documents::NOTICE_KEY => {
+            if entry
+                .value
+                .as_str()
+                .and_then(super::documents::Notice::parse)
+                .is_none()
+            {
+                return field(
+                    source,
+                    &path,
+                    "must be on_demand, when_affected, or when_excluded",
+                );
+            }
+        }
         "browser.tabs.allow_close"
         | "privacy.preserve_target_names"
         | "channels.mcp.enabled"

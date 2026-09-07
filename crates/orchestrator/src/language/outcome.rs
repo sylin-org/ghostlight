@@ -352,6 +352,8 @@ pub enum Outcome {
     RecordingObserved { frames: usize, duration_ms: u64 },
     /// An active memory-only recording stopped.
     RecordingStopped { duration_ms: u64 },
+    /// Recording ended when its admitted document scope could no longer be verified.
+    RecordingBoundary { duration_ms: u64 },
     /// A recording was encoded as an animated GIF and delivered.
     RecordingSaved {
         /// How long the replay plays.
@@ -390,7 +392,8 @@ impl Outcome {
             }
             Self::SelectorUnresolved { matched } => {
                 if *matched == 0 {
-                    "No visible control matched the semantic selector.".into()
+                    "No visible control matched the semantic selector in the inspected content."
+                        .into()
                 } else {
                     format!(
                         "{matched} visible controls matched the semantic selector; none was chosen."
@@ -661,6 +664,10 @@ impl Outcome {
             Self::RecordingStopped { duration_ms } => {
                 format!("Stopped recording after {}.", spanned(*duration_ms))
             }
+            Self::RecordingBoundary { duration_ms } => format!(
+                "Recording stopped at the document boundary after {}. The captured portion is available.",
+                spanned(*duration_ms)
+            ),
             Self::RecordingSaved {
                 duration_ms,
                 delivery,
@@ -786,6 +793,9 @@ impl Outcome {
             Self::RecordingStopped {
                 duration_ms: measure,
             }
+            | Self::RecordingBoundary {
+                duration_ms: measure,
+            }
             | Self::RecordingSaved {
                 duration_ms: measure,
                 ..
@@ -882,6 +892,8 @@ pub enum Refusal {
     },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
+    /// A required browser document could not be bound to current authority.
+    DocumentUnavailable,
     /// The browser stopped before a physical effect.
     BrowserStopped { reconnect: bool },
     /// Several browsers are connected and the call did not say which one it meant.
@@ -942,6 +954,7 @@ impl Refusal {
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
             }
+            Self::DocumentUnavailable => "Document access could not be verified.",
             Self::DeadlineExpired { before_dispatch } => {
                 if *before_dispatch {
                     "The job ran out of time before reaching the browser."
@@ -1035,6 +1048,7 @@ impl Refusal {
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
+            Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
             Self::DeadlineExpired { .. } => vec![
                 "Repeat with a longer timeout_ms when the page genuinely needs more time."
                     .into(),

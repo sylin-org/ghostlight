@@ -206,6 +206,8 @@ pub struct UserLayer {
 /// The complete compiled answer.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EffectiveAuthority {
+    /// Effective document coverage choices and their deciding policy layers.
+    pub documents: super::documents::DocumentPolicy,
     /// Which layers are in force.
     pub situation: Situation,
     /// One sentence stating the situation, naming the organization when there is one.
@@ -368,6 +370,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         ));
     }
     EffectiveAuthority {
+        documents: super::documents::DocumentPolicy::resolve(inputs.organization, inputs.user),
         situation,
         headline,
         organization,
