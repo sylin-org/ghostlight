@@ -27,6 +27,7 @@ pub(super) struct Composition {
     readiness: Readiness,
     physical_id: Option<u64>,
     all_repeat_safe: bool,
+    unconfirmed_history_steps: u32,
 }
 
 impl Composition {
@@ -50,6 +51,7 @@ impl Composition {
             readiness,
             physical_id,
             all_repeat_safe: true,
+            unconfirmed_history_steps: 0,
         }
     }
 
@@ -69,6 +71,13 @@ impl Composition {
         cause.is_some()
     }
 
+    /// Count an unconfirmed preparation receipt without inventing a browser attempt.
+    pub fn record_storage(&mut self, storage: crate::language::audit_health::Storage) {
+        if storage == crate::language::audit_health::Storage::Unconfirmed {
+            self.unconfirmed_history_steps += 1;
+        }
+    }
+
     /// Record an input failure that never entered the child executor.
     pub fn not_started(&mut self, step: usize, cause: StepCause) {
         self.progress.counts.not_run -= 1;
@@ -79,6 +88,9 @@ impl Composition {
     /// Retain a child's status, effects, and closed recovery cause.
     pub fn record(&mut self, step: usize, terminal: &Terminal) -> Option<StepCause> {
         let result = &terminal.result;
+        if result.history_storage == crate::language::audit_health::Storage::Unconfirmed {
+            self.unconfirmed_history_steps += 1;
+        }
         let counts = &mut self.progress.counts;
         counts.not_run -= 1;
         match result.status {
@@ -159,6 +171,7 @@ impl Composition {
         let status = self.status();
         let effect = self.effect();
         facts["progress"] = json!(self.progress);
+        facts["unconfirmed_history_steps"] = json!(self.unconfirmed_history_steps);
         let outcome = Outcome::CompositionRan(self.progress);
         Terminal {
             result: InvocationResult::new(
@@ -174,7 +187,9 @@ impl Composition {
             decision: self.decision,
             physical_id: self.physical_id,
             observed: outcome.observed(),
-            audit: outcome.audit(),
+            audit: outcome
+                .audit()
+                .with_unconfirmed_history(self.unconfirmed_history_steps),
         }
     }
 }
@@ -182,7 +197,7 @@ impl Composition {
 /// Keep recovery metadata outside the optional, budgeted child result payload.
 pub(super) fn terminal_row(step: usize, terminal: &Terminal, cause: Option<StepCause>) -> Value {
     json!({"step":step,"status":terminal.result.status,"effect":terminal.result.effect,
-        "repeat_safe":terminal.result.repeat_safe,"cause":cause})
+        "repeat_safe":terminal.result.repeat_safe,"cause":cause,"history_storage":terminal.result.history_storage})
 }
 
 /// Identify an unexecuted step without assigning it an invocation or a terminal status.
@@ -193,6 +208,9 @@ pub(super) fn unexecuted_row(step: usize, status: UnexecutedStatus) -> Value {
 fn child_cause(terminal: &Terminal) -> Option<StepCause> {
     use AuditRefusal as A;
     Some(match terminal.audit.refusal() {
+        Some(A::AuthorityBlocked {
+            cause: BlockedReason::AuditUnavailable,
+        }) => StepCause::AuditUnavailable,
         Some(
             A::AuthorityBlocked {
                 cause: BlockedReason::Hold,

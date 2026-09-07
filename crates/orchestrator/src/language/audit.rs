@@ -11,6 +11,7 @@ use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, Wor
 /// result envelope, arbitrary summary, or JSON. Measurements remain in `Observed`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditProjection {
+    unconfirmed_history_steps: u32,
     coverage: Option<super::coverage::Coverage>,
     summary: String,
     refusal: Option<AuditRefusal>,
@@ -19,6 +20,16 @@ pub struct AuditProjection {
 }
 
 impl AuditProjection {
+    /// Retain child storage gaps without copying child payloads.
+    pub fn with_unconfirmed_history(mut self, steps: u32) -> Self {
+        self.unconfirmed_history_steps = steps;
+        self
+    }
+    /// Number of child receipts whose storage was not confirmed.
+    #[must_use]
+    pub const fn unconfirmed_history_steps(&self) -> u32 {
+        self.unconfirmed_history_steps
+    }
     /// Qualify retained language with closed coverage facts, never arbitrary browser text.
     pub fn with_coverage(mut self, coverage: &super::coverage::Coverage) -> Self {
         self.summary = super::coverage::qualify(&self.summary, coverage);
@@ -106,6 +117,7 @@ impl Outcome {
     #[must_use]
     pub fn audit(&self) -> AuditProjection {
         AuditProjection {
+            unconfirmed_history_steps: 0,
             coverage: None,
             summary: self.summary(),
             refusal: None,
@@ -163,6 +175,7 @@ impl Refusal {
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,
         };
         AuditProjection {
+            unconfirmed_history_steps: 0,
             coverage: None,
             summary: match self {
                 Self::BrowserPrimitive { .. } => {

@@ -470,7 +470,28 @@ const historyChecks = [];
   historyChecks.push(["a restored missing completion never fabricates running work", restored.hero().settled]);
 }
 
+
+// H7: an existing health surface stays quiet when healthy and keeps failed storage explicit.
+const healthSnapshot = snapshot();
+healthSnapshot.audit_notice = "History cannot be saved. Browser work can continue. Ghostlight checks automatically.";
+view.collections(healthSnapshot, new Set());
+const auditNoticeVisible = nodes.get("audit-health").hidden === false && nodes.get("audit-health").textContent === healthSnapshot.audit_notice;
+healthSnapshot.audit_notice = "History is saving. 2 earlier receipts were not confirmed saved.";
+view.collections(healthSnapshot, new Set());
+const recoveredGapVisible = nodes.get("audit-health").textContent.includes("2 earlier receipts");
+healthSnapshot.audit_notice = "";
+view.collections(healthSnapshot, new Set());
+const healthyAuditQuiet = nodes.get("audit-health").hidden;
+view.policy(compiled(true));
+view.setChoice("audit.availability", "require_audit");
+const authoredAudit = JSON.parse(view.draftDocument()).config;
+const auditPinned = compiled(true);
+auditPinned.audit = { mode: "require_audit", source: "organization", organization_mode: "require_audit" };
+view.policy(auditPinned);
+const auditPinnedMarkup = nodes.get("setting-groups").innerHTML;
 const checks = [
+  ["audit health stays visible through recovery gaps and quiet when healthy", auditNoticeVisible && recoveredGapVisible && healthyAuditQuiet],
+  ["audit policy authors a closed choice and organization requirement disables relaxation", authoredAudit.some((item) => item.key === "audit.availability" && item.value === "require_audit") && /value="keep_working"[^>]*disabled/.test(auditPinnedMarkup)],
   ["coverage handling and notices author separate closed choices",
     authoredCoverage.some((item) => item.key === "content.frames.handling" && item.value === "complete_operation")
       && authoredCoverage.some((item) => item.key === "content.frames.notice" && item.value === "on_demand")],

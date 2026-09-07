@@ -32,6 +32,29 @@ pub(super) fn merge(
     record: &AuditRecord,
     live: bool,
 ) -> HistoryItem {
+    merge_stored(
+        history,
+        record,
+        live,
+        crate::language::audit_health::Storage::Saved,
+    )
+}
+
+/// Preserve each child's storage confirmation when the parent later completes or saving recovers.
+pub(super) fn merge_stored(
+    history: &mut VecDeque<HistoryItem>,
+    record: &AuditRecord,
+    live: bool,
+    storage: crate::language::audit_health::Storage,
+) -> HistoryItem {
+    let stored_item = || {
+        let mut item = HistoryItem::from(record.clone());
+        item.storage = storage;
+        if storage == crate::language::audit_health::Storage::Unconfirmed {
+            item.storage_detail = storage.detail().into();
+        }
+        item
+    };
     let index = history
         .iter()
         .position(|item| item.invocation == record.invocation);
@@ -68,7 +91,7 @@ pub(super) fn merge(
             } else {
                 StepHistoryState::Recorded
             };
-            row.record = Some(Box::new(HistoryItem::from(record.clone())));
+            row.record = Some(Box::new(stored_item()));
         }
         if !item.complete {
             let completed = item
@@ -92,7 +115,7 @@ pub(super) fn merge(
         }
         item
     } else {
-        let mut item = HistoryItem::from(record.clone());
+        let mut item = stored_item();
         if let Some(old) = old {
             item.steps = old.steps;
         }
@@ -281,7 +304,7 @@ mod tests {
             capabilities: CapabilitySet::EMPTY,
         });
         let receipt = child(1);
-        projection.record(&receipt);
+        projection.record(&receipt, crate::language::audit_health::Storage::Saved);
         assert_eq!(projection.operations().len(), 1);
         assert_eq!(projection.history().len(), 1);
         assert!(projection.lock().notified.is_empty());
@@ -315,5 +338,24 @@ mod tests {
         assert_eq!(history.len(), super::super::HISTORY_LIMIT);
         assert_eq!(history.front().unwrap().invocation, "parent-1");
         assert!(history.iter().all(|item| item.steps.len() == 4));
+    }
+
+    #[test]
+    fn saved_parent_never_upgrades_an_unconfirmed_child_receipt() {
+        use crate::language::audit_health::Storage;
+        let mut history = VecDeque::new();
+        let first = child(1);
+        merge_stored(&mut history, &first, true, Storage::Unconfirmed);
+        let mut parent = first.clone();
+        parent.step = None;
+        parent.tool = "browser_flow".into();
+        parent.unconfirmed_history_steps = 1;
+        let item = merge_stored(&mut history, &parent, false, Storage::Saved);
+        assert_eq!(item.storage, Storage::Saved);
+        assert!(item.storage_detail.contains("Some step history"));
+        let child = item.steps[0].record.as_ref().unwrap();
+        assert_eq!(child.storage, Storage::Unconfirmed);
+        assert_eq!(child.status, "succeeded");
+        assert!(child.storage_detail.contains("storage was not confirmed"));
     }
 }

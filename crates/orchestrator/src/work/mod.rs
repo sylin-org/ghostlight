@@ -40,8 +40,8 @@ use crate::events::{DenialPresentation, DomainEvent};
 use ghostlight_bridge::service::IntakeChannel;
 
 use crate::governance::{
-    AuditRecord, AuditSink, AuthoritySnapshot, Capability, CapabilitySet, Decision,
-    GovernanceFacade, ReasonCode,
+    AuditRecord, AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade,
+    ReasonCode,
 };
 use crate::language::{
     self,
@@ -87,7 +87,7 @@ pub struct ApplicationExecutor {
     recovery: BrowserRecovery,
     presentation: PresentationReactor,
     workbench: WorkbenchProjection,
-    audit: Arc<dyn AuditSink>,
+    audit: Arc<crate::audit::AuditRecorder>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     active_authority: ActiveAuthorityRegistry,
     observations: ObservationRegistry,
@@ -160,7 +160,7 @@ impl ApplicationExecutor {
         browser: Arc<dyn BrowserPort>,
         presentation: PresentationReactor,
         workbench: WorkbenchProjection,
-        audit: Arc<dyn AuditSink>,
+        audit: Arc<crate::audit::AuditRecorder>,
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         let recovery = BrowserRecovery::discover(governance.clone(), Arc::clone(&browser));
@@ -357,6 +357,11 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         operation: &Operation,
     ) -> Terminal {
+        if !matches!(operation, Operation::ExplainPolicy(_)) {
+            if let Some(terminal) = self.audit_preflight(context) {
+                return terminal;
+            }
+        }
         match operation {
             Operation::ListTabs(_) => self.list_tabs(context, lease),
             Operation::ActivateTab(value) => self.activate_tab(context, lease, &value.tab),
@@ -436,6 +441,11 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         operation: &Operation,
     ) -> Terminal {
+        if !matches!(operation, Operation::ExplainPolicy(_)) {
+            if let Some(terminal) = self.audit_preflight(context) {
+                return terminal;
+            }
+        }
         match operation {
             Operation::Record(value) => self.perform_record(context, None, value),
             Operation::ExplainPolicy(_) => self.explain_policy(context),
@@ -842,8 +852,45 @@ impl ApplicationExecutor {
             .session_decision(self.workspaces.attention(context.workspace).is_some())
     }
 
+    fn audit_decision(&self, context: &InvocationContext<'_>) -> Decision {
+        if !context.snapshot.requires_audit() {
+            return Decision::permitted();
+        }
+        context
+            .snapshot
+            .authorize_audit(!self.audit.health().unavailable())
+    }
+
+    fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
+        // Existing human-control paths keep their precedence and language.
+        if !self.runtime_decision(context).allowed {
+            return None;
+        }
+        let decision = self.audit_decision(context);
+        if decision.allowed {
+            return None;
+        }
+        self.retain_permission(
+            context,
+            context
+                .snapshot
+                .decision_evidence(context.requirements, None, decision),
+        );
+        Some(self.blocked(
+            context,
+            decision,
+            None,
+            Effect::None,
+            true,
+            json!({"reason": decision.reason.as_str()}),
+        ))
+    }
+
     fn admit_dispatch(&self, context: &InvocationContext<'_>) -> Result<(), BrowserError> {
-        let decision = self.runtime_decision(context);
+        let mut decision = self.runtime_decision(context);
+        if decision.allowed {
+            decision = self.audit_decision(context);
+        }
         if decision.allowed {
             Ok(())
         } else {
@@ -1003,6 +1050,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
+        self.admit_dispatch(context)?;
         let browser = self.target_browser(context)?;
         let admit = || self.admit_dispatch(context);
         let outcome = self.browser.call_guarded(
@@ -1894,6 +1942,7 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::RuntimeHold => BlockedReason::Hold,
         ReasonCode::SessionEnded => BlockedReason::SessionEnded,
         ReasonCode::ChannelDenied => BlockedReason::Channel,
+        ReasonCode::AuditUnavailable => BlockedReason::AuditUnavailable,
         ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::RuntimeAttention => {
             BlockedReason::Unspecified
         }
@@ -2108,6 +2157,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    mod audit_health;
     mod control;
     mod documents;
     use std::fs;
@@ -2775,7 +2825,10 @@ mod tests {
             browser.clone(),
             PresentationReactor::new(Arc::new(NoPresentation)),
             WorkbenchProjection::default(),
-            audit.clone(),
+            Arc::new(crate::audit::AuditRecorder::new(
+                audit.clone(),
+                WorkbenchProjection::default(),
+            )),
             crate::diagnostics::DiagnosticsHub::for_tests(),
         );
         executor

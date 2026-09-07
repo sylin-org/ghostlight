@@ -2,7 +2,9 @@
 
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
+pub mod audit;
 pub mod documents;
+pub use crate::audit::{AuditSink, JsonlAuditSink};
 pub mod effective;
 pub mod evidence;
 pub mod inspection;
@@ -12,8 +14,8 @@ pub mod paths;
 
 use std::collections::VecDeque;
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -223,6 +225,8 @@ pub enum ReasonCode {
     SessionEnded,
     /// An authority layer does not admit this intake channel.
     ChannelDenied,
+    /// Policy requires working audit storage at the next browser boundary.
+    AuditUnavailable,
 }
 
 impl ReasonCode {
@@ -241,6 +245,7 @@ impl ReasonCode {
             Self::RuntimeAttention => "runtime_attention",
             Self::SessionEnded => "session_ended",
             Self::ChannelDenied => "channel_denied",
+            Self::AuditUnavailable => "audit_unavailable",
         }
     }
 }
@@ -248,6 +253,8 @@ impl ReasonCode {
 /// Stable policy rule names used for attribution and denial ids.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyRule {
+    /// A configured requirement prevents browser work while storage is unavailable.
+    AuditAvailability,
     /// No grant covers the governed host.
     UnmatchedHost,
     /// A grant explicitly carves the host out.
@@ -270,6 +277,7 @@ impl PolicyRule {
             Self::Capability => "capability",
             Self::TabClose => "tab_close",
             Self::Channel => "channel",
+            Self::AuditAvailability => "audit_availability",
         }
     }
 }
@@ -1938,6 +1946,9 @@ fn unix_ms() -> u64 {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecord {
+    /// Child receipts whose storage could not be confirmed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub unconfirmed_history_steps: u32,
     /// Closed document coverage facts, excluding human-only embedded host names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<crate::language::coverage::Coverage>,
@@ -2029,6 +2040,10 @@ pub struct AuditRecord {
     pub peer_image: Option<String>,
 }
 
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 impl AuditRecord {
     /// Construct a content-minimized audit record at the current time.
     #[allow(clippy::too_many_arguments)]
@@ -2046,6 +2061,7 @@ impl AuditRecord {
         duration_ms: u64,
     ) -> Self {
         Self {
+            unconfirmed_history_steps: language.unconfirmed_history_steps(),
             timestamp_ms: unix_ms(),
             invocation: invocation.into(),
             workspace: workspace.into(),
@@ -2119,43 +2135,6 @@ impl AuditRecord {
     pub fn with_observation(mut self, observed: Observed) -> Self {
         self.observed = observed;
         self
-    }
-}
-
-/// Separate content-minimized audit output port.
-pub trait AuditSink: Send + Sync {
-    /// Append one terminal record.
-    fn record(&self, record: &AuditRecord) -> io::Result<()>;
-}
-
-/// JSONL audit sink guarded for concurrent service invocations.
-#[derive(Debug)]
-pub struct JsonlAuditSink {
-    file: Mutex<std::fs::File>,
-}
-
-impl JsonlAuditSink {
-    /// Open or create a local append-only audit file.
-    pub fn open(path: &Path) -> io::Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
-        Ok(Self {
-            file: Mutex::new(file),
-        })
-    }
-}
-
-impl AuditSink for JsonlAuditSink {
-    fn record(&self, record: &AuditRecord) -> io::Result<()> {
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|_| io::Error::other("audit lock poisoned"))?;
-        serde_json::to_writer(&mut *file, record).map_err(io::Error::other)?;
-        file.write_all(b"\n")?;
-        file.flush()
     }
 }
 

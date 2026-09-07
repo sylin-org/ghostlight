@@ -126,7 +126,9 @@ async function resync({ rebuildFeed = false, quiet = true } = {}) {
 
 function receiveChange(event) {
   // A gap means this cache can no longer be trusted. Rebuild rather than guess.
-  if (store.applyChange(event) === "gap") resync({ rebuildFeed: true });
+  const change = store.applyChange(event);
+  if (change === "gap") resync({ rebuildFeed: true });
+  else if (change === "refresh") resync();
   else if (event.change.kind === "session_attention_changed") resync();
 }
 

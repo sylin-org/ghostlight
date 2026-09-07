@@ -5,7 +5,7 @@ pub use history::{HistoryStep, StepHistoryState};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -20,7 +20,7 @@ use crate::browser::{BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{
-    AuditRecord, AuditSink, AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
+    AuditRecord, AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
 };
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessError, HarnessRegistry,
@@ -69,6 +69,7 @@ pub struct WorkbenchProjection {
 
 #[derive(Default)]
 struct ProjectionState {
+    audit_health: crate::language::audit_health::AuditHealth,
     document_coverage: VecDeque<crate::language::coverage::HumanCoverage>,
     operations: HashMap<String, OperationState>,
     history: VecDeque<HistoryItem>,
@@ -97,6 +98,23 @@ struct OperationState {
 }
 
 impl WorkbenchProjection {
+    /// Read current persistence health independently of browser activity.
+    #[must_use]
+    pub fn audit_health(&self) -> crate::language::audit_health::AuditHealth {
+        self.lock().audit_health.clone()
+    }
+
+    /// Publish only changed health, without notifications or changes to human runtime controls.
+    pub fn audit_health_changed(&self, health: crate::language::audit_health::AuditHealth) {
+        {
+            let mut state = self.lock();
+            if state.audit_health == health {
+                return;
+            }
+            state.audit_health = health.clone();
+        }
+        self.publish(WorkbenchChange::AuditHealthChanged { health });
+    }
     /// Retain bounded volatile document details exclusively for the local human surface.
     pub fn document_coverage(&self, mut details: crate::language::coverage::HumanCoverage) {
         {
@@ -126,22 +144,42 @@ impl WorkbenchProjection {
     }
     /// Restore bounded content-minimized history from the orchestrator-owned audit file.
     pub fn load_history(&self, path: &Path) -> io::Result<()> {
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
         let mut restored = VecDeque::new();
-        for line in BufReader::new(file).lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
+        let mut health = crate::language::audit_health::AuditHealth::default();
+        let result = (|| {
+            let file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error),
+            };
+            let mut reader = BufReader::new(file);
+            let mut last_gap = String::new();
+            while let Some(line) = crate::audit::read_line(&mut reader)? {
+                match line {
+                    crate::audit::AuditLine::Receipt(record) => {
+                        history::merge(&mut restored, &record, false);
+                    }
+                    crate::audit::AuditLine::Gap(gap) => {
+                        // A failed sync may have written the marker before a retry wrote it again.
+                        if last_gap != gap.id {
+                            health.unconfirmed_receipts = health
+                                .unconfirmed_receipts
+                                .saturating_add(gap.unconfirmed_receipts);
+                            last_gap = gap.id;
+                        }
+                    }
+                    crate::audit::AuditLine::Unreadable => {
+                        health.unreadable_entries = health.unreadable_entries.saturating_add(1);
+                    }
+                    crate::audit::AuditLine::Empty => {}
+                }
             }
-            let record: AuditRecord = serde_json::from_str(&line).map_err(io::Error::other)?;
-            history::merge(&mut restored, &record, false);
-        }
+            Ok(())
+        })();
+        health.history_unavailable = result.is_err();
         self.lock().history = restored;
-        Ok(())
+        self.audit_health_changed(health);
+        result
     }
 
     /// Attach or replace the best-effort operating-system presentation adapter.
@@ -275,7 +313,11 @@ impl WorkbenchProjection {
         });
     }
 
-    fn record(&self, record: &AuditRecord) {
+    pub(crate) fn record(
+        &self,
+        record: &AuditRecord,
+        storage: crate::language::audit_health::Storage,
+    ) {
         let child = record.step.is_some();
         let item = {
             let mut state = self.lock();
@@ -286,7 +328,7 @@ impl WorkbenchProjection {
                     .notified
                     .retain(|(invocation, _)| invocation != &record.invocation);
             }
-            history::merge(&mut state.history, record, live)
+            history::merge_stored(&mut state.history, record, live, storage)
         };
         self.publish(if child {
             WorkbenchChange::CompositionChanged {
@@ -316,31 +358,6 @@ impl WorkbenchProjection {
 
     fn lock(&self) -> MutexGuard<'_, ProjectionState> {
         lock(&self.inner)
-    }
-}
-
-/// Audit decorator that keeps the durable log and workbench projection synchronized.
-pub struct ProjectingAuditSink {
-    durable: Arc<dyn AuditSink>,
-    projection: WorkbenchProjection,
-}
-
-impl ProjectingAuditSink {
-    /// Wrap one durable audit sink.
-    #[must_use]
-    pub fn new(durable: Arc<dyn AuditSink>, projection: WorkbenchProjection) -> Self {
-        Self {
-            durable,
-            projection,
-        }
-    }
-}
-
-impl AuditSink for ProjectingAuditSink {
-    fn record(&self, record: &AuditRecord) -> io::Result<()> {
-        let durable = self.durable.record(record);
-        self.projection.record(record);
-        durable
     }
 }
 
@@ -468,7 +485,13 @@ impl WorkbenchFacade {
             .iter()
             .filter(|session| session.attention.is_some())
             .count();
+        let audit_health = self.projection.audit_health();
+        let required = self
+            .governance
+            .snapshot(&crate::language::RequestRestrictions::default())
+            .requires_audit();
         let mut readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
+            audit_required_unavailable: required && audit_health.unavailable(),
             browser_connected: !browsers.is_empty(),
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
@@ -480,7 +503,18 @@ impl WorkbenchFacade {
         {
             readiness.detail = crate::language::control::sessions_needing_review(attention_count);
         }
+        diagnostics.push(if audit_health.quiet() {
+            DiagnosticItem::passing("audit", "History", &audit_health.detail(required))
+        } else {
+            DiagnosticItem::warning("audit", "History", &audit_health.detail(required))
+        });
         WorkbenchSnapshot {
+            audit_notice: if audit_health.quiet() {
+                String::new()
+            } else {
+                audit_health.detail(required)
+            },
+            audit_health,
             document_coverage: self
                 .projection
                 .lock()
@@ -937,6 +971,10 @@ pub struct WorkbenchEvent {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkbenchChange {
+    /// Saving health changed independently of browser execution.
+    AuditHealthChanged {
+        health: crate::language::audit_health::AuditHealth,
+    },
     /// Volatile document details available only to the local human.
     DocumentCoverageChanged {
         details: crate::language::coverage::HumanCoverage,
@@ -1020,6 +1058,10 @@ pub enum WorkbenchError {
 /// Complete immutable workbench read model.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WorkbenchSnapshot {
+    /// Current storage health and explicit historical gaps.
+    pub audit_health: crate::language::audit_health::AuditHealth,
+    /// Persistent human notice, empty during ordinary healthy operation.
+    pub audit_notice: String,
     /// Volatile human-only embedded-host explanations, absent from model and audit surfaces.
     pub document_coverage: Vec<crate::language::coverage::HumanCoverage>,
     /// Projection sequence this snapshot reflects.
@@ -1210,6 +1252,10 @@ pub struct BrowserInstanceSummary {
 /// One content-minimized terminal history record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HistoryItem {
+    /// Storage confirmation is separate from execution and receipt presence.
+    pub storage: crate::language::audit_health::Storage,
+    /// Authored human explanation for unconfirmed storage.
+    pub storage_detail: String,
     /// Completion time.
     pub timestamp_ms: u64,
     /// Opaque invocation identity.
@@ -1270,6 +1316,12 @@ impl From<AuditRecord> for HistoryItem {
             .map(crate::language::history::permission)
             .collect();
         Self {
+            storage: crate::language::audit_health::Storage::Saved,
+            storage_detail: if value.unconfirmed_history_steps > 0 {
+                "Some step history could not be saved.".into()
+            } else {
+                String::new()
+            },
             complete: true,
             composition: value.composition,
             steps: vec![],
@@ -1639,6 +1691,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::audit::AuditRecorder;
     use std::io;
     use std::sync::{Arc, Mutex};
 
@@ -1651,8 +1704,8 @@ mod tests {
     use crate::language::outcome::Observed;
 
     use super::{
-        HistoryItem, NotificationKind, ProjectingAuditSink, WorkbenchChange, WorkbenchEvent,
-        WorkbenchEventSink, WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort,
+        HistoryItem, NotificationKind, WorkbenchChange, WorkbenchEvent, WorkbenchEventSink,
+        WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort,
         WorkbenchProjection,
     };
 
@@ -1705,7 +1758,7 @@ mod tests {
         assert_eq!(projection.operations().len(), 1);
 
         let durable = Arc::new(MemoryAudit::default());
-        let sink = ProjectingAuditSink::new(durable.clone(), projection.clone());
+        let sink = AuditRecorder::new(durable.clone(), projection.clone());
         let governance = GovernanceFacade::new(None, None);
         let snapshot = governance.snapshot(&Default::default());
         let record = AuditRecord::now(
@@ -1729,7 +1782,10 @@ mod tests {
             count: Some(1240),
             ..Observed::default()
         });
-        sink.record(&record).unwrap();
+        assert_eq!(
+            sink.record(&record),
+            crate::language::audit_health::Storage::Saved
+        );
 
         assert!(projection.operations().is_empty());
         assert_eq!(projection.history()[0].tool, "browser_read");
@@ -1761,8 +1817,8 @@ mod tests {
         });
         let governance = GovernanceFacade::new(None, None);
         let authority = governance.snapshot(&Default::default());
-        ProjectingAuditSink::new(Arc::new(MemoryAudit::default()), projection.clone())
-            .record(&AuditRecord::now(
+        AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone()).record(
+            &AuditRecord::now(
                 "invocation_1",
                 "workspace_1",
                 "browser_fill_form",
@@ -1777,8 +1833,8 @@ mod tests {
                 }
                 .audit(),
                 1200,
-            ))
-            .unwrap();
+            ),
+        );
 
         let published = events.0.lock().unwrap();
         assert_eq!(
@@ -1933,33 +1989,31 @@ mod tests {
     #[test]
     fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
         let projection = WorkbenchProjection::default();
-        let audit = ProjectingAuditSink::new(Arc::new(MemoryAudit::default()), projection.clone());
+        let audit = AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone());
         for (invocation, tool, host, capability) in [
             ("i1", "browser_read", "example.com", Capability::Read),
             ("i2", "browser_read", "example.com", Capability::Read),
             ("i3", "browser_execute", "example.com", Capability::Execute),
             ("i4", "browser_read", "elsewhere.test", Capability::Read),
         ] {
-            audit
-                .record(
-                    &AuditRecord::now(
-                        invocation,
-                        "workspace_1",
-                        tool,
-                        CapabilitySet::one(capability),
-                        "authority",
-                        Decision::permitted(),
-                        "succeeded",
-                        "applied",
-                        &crate::language::outcome::Outcome::ScriptEvaluated { host: None }.audit(),
-                        1,
-                    )
-                    .with_observation(Observed {
-                        host: Some(host.into()),
-                        ..Observed::default()
-                    }),
+            audit.record(
+                &AuditRecord::now(
+                    invocation,
+                    "workspace_1",
+                    tool,
+                    CapabilitySet::one(capability),
+                    "authority",
+                    Decision::permitted(),
+                    "succeeded",
+                    "applied",
+                    &crate::language::outcome::Outcome::ScriptEvaluated { host: None }.audit(),
+                    1,
                 )
-                .unwrap();
+                .with_observation(Observed {
+                    host: Some(host.into()),
+                    ..Observed::default()
+                }),
+            );
         }
 
         let facade = WorkbenchFacade::new(

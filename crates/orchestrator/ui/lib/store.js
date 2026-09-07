@@ -219,6 +219,7 @@
         state.seq = event.seq;
         const change = event.change;
         switch (change.kind) {
+          case "audit_health_changed": return "refresh";
           case "document_coverage_changed": {
             if (state.snapshot) {
               state.snapshot.document_coverage = [change.details, ...(state.snapshot.document_coverage ?? []).filter((item) => item.invocation !== change.details.invocation)].slice(0, FEED_LIMIT);

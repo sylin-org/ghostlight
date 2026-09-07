@@ -171,22 +171,26 @@
       return historyDetails(key, "Permission details", `<ul>${rows}</ul>${limited}`);
     }
 
+    function storageMarkup(entry) {
+      return entry.storage_detail ? `<p class="coverage-note">${escapeHtml(entry.storage_detail)}</p>` : "";
+    }
+
     function compositionMarkup(entry) {
-      if (!entry.steps?.length) return permissionMarkup(entry, `${entry.invocation}:permission`) + coverageMarkup(entry);
+      if (!entry.steps?.length) return storageMarkup(entry) + permissionMarkup(entry, `${entry.invocation}:permission`) + coverageMarkup(entry);
       const rows = entry.steps.map((step) => {
         const receipt = step.record;
         const state = receipt?.status ?? step.state;
         const labels = { succeeded: "Completed", not_started: "Could not start", not_run: "Not run", pending: "Pending", unconfirmed: "Receipt unavailable" };
         const label = labels[state] ?? words(state);
-        const problem = !["succeeded", "not_run", "pending"].includes(state);
+        const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
         const title = receipt?.summary ?? step.tool ?? `Step ${step.position}`;
-        const detail = receipt ? permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
+        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
         return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
           + `<span class="step-number">${step.position}</span><span>${escapeHtml(title)}</span><span class="step-status">${escapeHtml(label)}</span></div>`
           + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
           + detail + "</li>";
       }).join("");
-      return historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + coverageMarkup(entry);
+      return storageMarkup(entry) + historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + coverageMarkup(entry);
     }
 
     function coverageMarkup(entry) {
@@ -869,13 +873,13 @@
 
     // Closed choices share the effective policy's authored source and organization floor.
     function documentChoiceRow(item) {
-      const authority = applied?.documents;
+      const authority = applied?.[item.authority ?? "documents"];
       const ceiling = authority?.[`organization_${item.field}`];
       const minimum = Math.max(0, item.choices.findIndex((choice) => choice.value === ceiling));
       const desired = draft.settings.choices[item.key] ?? authority?.[item.field] ?? item.default;
       const selected = item.choices[Math.max(minimum, item.choices.findIndex((choice) => choice.value === desired))];
       const options = item.choices.map((choice, index) => `<option value="${escapeHtml(choice.value)}"${choice === selected ? " selected" : ""}${index < minimum ? " disabled" : ""}>${escapeHtml(choice.label)}</option>`).join("");
-      const source = authority?.[`${item.field}_source`];
+      const source = authority?.[item.source ?? `${item.field}_source`];
       const author = source === "organization" ? applied?.organization?.name ?? "Your organization" : source === "user" ? "Your rules" : "Ghostlight default";
       return `<div class="setting-row"><div class="setting-body"><label class="setting-name">${escapeHtml(item.name)}`
         + `<select class="setting-choice" data-setting-choice="${escapeHtml(item.key)}">${options}</select></label>`
@@ -1279,6 +1283,10 @@
     /** Repaint a section only when its own facts changed, so a safety pull never rewrites a
      * surface the user is pointing at. */
     function collections(snapshot, pending) {
+      attempt("painting history health", () => {
+        el["audit-health"].textContent = snapshot.audit_notice ?? "";
+        el["audit-health"].hidden = !snapshot.audit_notice;
+      });
       passport = snapshot.configuration?.managed_policy ?? null;
       ifChanged("connections", [snapshot.sessions, snapshot.browsers], () => connections(snapshot));
       ifChanged("about", [snapshot.service, snapshot.sessions.length, snapshot.browsers.length, snapshot.history.length], () => about(snapshot));

@@ -3,12 +3,12 @@
 //! Deterministic local policy validation, explanation, and audit-free simulation.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-use super::{managed, manifest, AuditRecord, CapabilitySet, GovernanceFacade};
+use super::{managed, manifest, CapabilitySet, GovernanceFacade};
 use crate::language::{capability_map, RequestRestrictions};
 
 /// One local policy inspection command.
@@ -149,13 +149,26 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
     let file = fs::File::open(audit).with_context(|| format!("read audit {}", audit.display()))?;
     let mut records = 0_u64;
     let mut denied = 0_u64;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.with_context(|| format!("read audit line {}", index + 1))?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let record: AuditRecord = serde_json::from_str(&line)
-            .with_context(|| format!("decode audit line {}", index + 1))?;
+    let mut reader = BufReader::new(file);
+    let mut index = 0;
+    while let Some(line) = crate::audit::read_line(&mut reader)? {
+        index += 1;
+        let record = match line {
+            crate::audit::AuditLine::Receipt(record) => record,
+            crate::audit::AuditLine::Gap(gap) => {
+                writeln!(
+                    out,
+                    "History gap: {} receipts were not confirmed saved.",
+                    gap.unconfirmed_receipts
+                )?;
+                continue;
+            }
+            crate::audit::AuditLine::Unreadable => {
+                writeln!(out, "Unreadable history entry at line {index}; skipped.")?;
+                continue;
+            }
+            crate::audit::AuditLine::Empty => continue,
+        };
         records += 1;
         let requirements = record.requirements();
         let decision = decide_record(&snapshot, requirements, record.observed.host.as_deref());
@@ -165,7 +178,7 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
             writeln!(
                 out,
                 "Would deny line {}: {} [{}] on {} -- {}{}",
-                index + 1,
+                index,
                 record.tool,
                 requirements.label(),
                 host,

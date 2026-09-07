@@ -23,6 +23,8 @@ pub enum Readiness {
     Paused,
     /// Authority stopped work in a way that needs a person.
     NeedsYou,
+    /// Policy requires saving history and the destination is currently unavailable.
+    HistoryUnavailable,
     /// Work is running right now.
     Working,
     /// Connected, unpaused, and idle.
@@ -36,6 +38,7 @@ impl Readiness {
         Readiness::SessionEnded,
         Readiness::Paused,
         Readiness::NeedsYou,
+        Readiness::HistoryUnavailable,
         Readiness::Working,
         Readiness::Ready,
     ];
@@ -48,6 +51,7 @@ impl Readiness {
             Readiness::SessionEnded => "Session ended",
             Readiness::Paused => "Paused",
             Readiness::NeedsYou => "Needs you",
+            Readiness::HistoryUnavailable => "History unavailable",
             Readiness::Working => "Working",
             Readiness::Ready => "Ready",
         }
@@ -65,6 +69,7 @@ impl Readiness {
             }
             Readiness::Paused => "Browser work is paused. Resume when you are ready.",
             Readiness::NeedsYou => "Ghostlight stopped and is waiting for you to decide what happens next.",
+            Readiness::HistoryUnavailable => "Policy requires saved history. Ghostlight checks storage automatically before new browser work can proceed.",
             Readiness::Working => "An agent is working in your browser right now.",
             Readiness::Ready => "Connected and idle. Agents can work when they ask.",
         }
@@ -76,7 +81,7 @@ impl Readiness {
         match self {
             Readiness::NotConnected => "offline",
             Readiness::SessionEnded | Readiness::Paused => "held",
-            Readiness::NeedsYou => "attention",
+            Readiness::NeedsYou | Readiness::HistoryUnavailable => "attention",
             Readiness::Working => "working",
             Readiness::Ready => "quiet",
         }
@@ -92,6 +97,8 @@ impl Readiness {
 /// The content-free facts the answer is derived from.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReadinessFacts {
+    /// Strict audit policy currently prevents browser dispatch.
+    pub audit_required_unavailable: bool,
     /// Whether at least one browser adapter is connected.
     pub browser_connected: bool,
     /// Whether a person ended the session.
@@ -118,6 +125,9 @@ pub const fn resolve(facts: &ReadinessFacts) -> Readiness {
     }
     if facts.needs_attention {
         return Readiness::NeedsYou;
+    }
+    if facts.audit_required_unavailable {
+        return Readiness::HistoryUnavailable;
     }
     if facts.working {
         return Readiness::Working;
@@ -150,6 +160,7 @@ mod tests {
     #[test]
     fn disconnection_outranks_every_other_answer() {
         let facts = ReadinessFacts {
+            audit_required_unavailable: false,
             browser_connected: false,
             session_ended: true,
             paused: true,

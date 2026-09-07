@@ -27,7 +27,11 @@ the existing MCP connection passes authority and live tab-list calls. H3's unpac
 reload remains pending because browser security policy blocked `chrome://extensions` access.
 See the [current deployment record](../../STATUS.md#local-deployment-2026-09-07).
 H6 is implemented and verified locally under ADR-0158, including 29 Sylin MV3 browser checks.
-See [H6 verification](h6-verification.md). It is not deployed or published. Next: H7 ideation I6.
+See [H6 verification](h6-verification.md). It is not deployed or published.
+H7 I6 is accepted and H7 is implemented and verified locally under ADR-0159.
+See [H7 verification](h7-audit-health.md): 488 Rust/192 extension tests, real-process failure and
+recovery, workbench checks, and 29 Sylin/MV3 regressions pass. H7 is not deployed or published.
+Next: H8 ideation I7, then C1 reporting details I8.
 Installed native-host transport and cross-platform runtime lanes remain untested for H6.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
@@ -68,7 +72,7 @@ refusal. H6 is implemented locally; the H6 verification record owns its evidence
 | H4 | IMPLEMENTED and verified locally; deployed locally | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
 | H5 | IMPLEMENTED and verified locally; deployed locally | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
 | H6 | IMPLEMENTED and verified locally; not deployed | I5 accepted; ADR-0158, 478 Rust/192 extension tests, process checks, and 29 Sylin browser cases. |
-| H7 | Included; behavior still proposed | Ideation I6 for visible failure, strict policy, and recovery. |
+| H7 | IMPLEMENTED and verified locally; not deployed | I6 accepted; 488 Rust/192 extension tests, real-process and UI checks, plus 29 Sylin regressions. ADR-0159 and H7. |
 | H8 | Included; investigation still proposed | Ideation I7 for bounded cases and evidence-driven controls. |
 | C1 | Reporting direction AGREED; details open | Ideation I8 and a safe audit projection before adding durable fields. |
 | C2/C3 | Admission direction CONDITIONAL; mechanism open | Ideation I9 chooses a concrete integration and connection proof. |
@@ -286,6 +290,11 @@ installed native-host registration and other platforms remain separate, untested
 
 ### H7: Durable audit health
 
+I6 accepted on 2026-09-07. The owner directed implementation of Keep working by default, optional
+Require audit, persistent health, storage truth separate from browser effects, and bounded recovery
+without replay. [ADR-0159](../../adr/0159-audit-health-and-recovery.md) and [H7](h7-audit-health.md)
+own the contract and verification.
+
 Inject a failing sink and verify what the tool result, workbench, and durable file actually say.
 Define visible health and recovery, including whether a configured strict policy affects later
 admission. Failure after an effect cannot be reported as if that effect never occurred. Coordinate
@@ -418,3 +427,20 @@ Status: implemented and committed as `8103c69b`; not deployed.
   the deterministic fake-browser regression rather than claiming a live flow experiment.
 - H1, H3, H4, and the broader H2 aggregate account remain unresolved. This entry completes the
   specific continuation bug, not the full hardening package.
+
+
+## H7 execution record (2026-09-07)
+
+The owner accepted I6 and directed implementation. One recorder now owns safe audit persistence,
+health, and recovery. Keep working remains the default; Require audit is monotonic and attributed
+to the original policy layer. Strict failures stop subsequent browser work and compositions,
+including under Continue and observe policy, without revising earlier effects. Each result and
+history receipt reports storage independently. A saved parent does not upgrade unconfirmed children.
+Human controls and policy explanation remain available; health uses existing surfaces without
+repeated native notifications. Automatic storage recovery is bounded and never replays or backfills.
+
+All required gates pass: 488 Rust tests, 192 extension tests, formatting, Clippy, changed JS syntax,
+ASCII, and diff whitespace. Fresh real-process failure/repair/cold-start checks, bundled UI in
+Chromium, and all 29 Sylin/MV3 regressions pass. [H7 verification](h7-audit-health.md) records
+mechanisms, artifacts, lane boundaries, and limits. No deployment, push, or publication. Commit:
+`feat(audit): expose storage health and enforce audit requirements`; use Git for its hash.

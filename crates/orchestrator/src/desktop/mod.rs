@@ -873,6 +873,8 @@ mod tests {
             phase: OperationPhase::Running,
         };
         let record = HistoryItem {
+            storage: crate::language::audit_health::Storage::Saved,
+            storage_detail: String::new(),
             complete: true,
             composition: None,
             steps: vec![],

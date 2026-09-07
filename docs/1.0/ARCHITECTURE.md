@@ -541,3 +541,25 @@ model results and audit. Volatile workbench details hold excluded host names for
 Screenshots mask before capture, verify afterward, restore styles, and expire abandoned masks.
 Restricted recordings stop when their admitted document set changes. Every replay destination
 rechecks recorded embedded sources; incomplete provenance cannot pass restricted disclosure.
+
+## Audit availability (ADR-0159)
+
+`audit.rs` owns one shared serialized recorder for completion and browser-event receipts. It
+replaces the workbench's projecting-sink decorator. It retains bounded health/gap state, writes
+through the existing safe audit record port, and publishes storage-qualified history and health
+through the workbench projection. The JSONL sink reopens the destination and synchronizes writes.
+Recovery probes run under the service lifetime, at most once per five seconds while unavailable.
+There is no receipt backlog, delayed backfill, or browser-action replay.
+
+Governance owns the monotonic `audit.availability` setting and attributes its strict refusal to
+the immutable policy layer. The executor reads current storage health before browser preparation
+and at the final dispatch callback after writer queuing. Already-admitted effects remain truthful.
+Human controls, diagnostics, and policy explanation remain reachable. Storage health does not
+mutate human runtime control or session attention. The extension and both connectors remain free
+of audit policy and health semantics.
+
+Startup tolerates unreadable history or a failed destination, with explicit human health.
+History and policy simulation use a bounded line reader, preserve valid adjacent receipts, and
+report malformed/oversized omissions. Recovery markers are separate content-free JSONL entries,
+not operation receipts. A failed sync can leave bytes behind, and a crash during an outage can lose
+volatile gap counts; no atomic website/disk coupling or tamper-proof guarantee is made.

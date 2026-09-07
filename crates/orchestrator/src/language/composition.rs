@@ -33,6 +33,7 @@ pub struct EffectCounts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepCause {
+    AuditUnavailable,
     InvalidArguments,
     MissingReference,
     PolicyBlocked,
@@ -52,7 +53,8 @@ impl StepCause {
     pub fn stops_execution(self) -> bool {
         matches!(
             self,
-            Self::Paused
+            Self::AuditUnavailable
+                | Self::Paused
                 | Self::SessionEnded
                 | Self::AttentionRequired
                 | Self::Deadline
@@ -64,7 +66,9 @@ impl StepCause {
     pub(crate) fn priority(self) -> u8 {
         match self {
             Self::SessionEnded | Self::Paused => 4,
-            Self::AttentionRequired | Self::Cancelled | Self::Deadline => 3,
+            Self::AuditUnavailable | Self::AttentionRequired | Self::Cancelled | Self::Deadline => {
+                3
+            }
             Self::ConnectionLost | Self::Unconfirmed => 2,
             _ => 1,
         }
@@ -113,6 +117,9 @@ impl CompositionProgress {
                     StepCause::InvalidArguments | StepCause::MissingReference => {
                         format!("Step {step} could not start.")
                     }
+                    StepCause::AuditUnavailable => {
+                        format!("Step {step} stopped because policy requires saved history.")
+                    }
                     StepCause::PolicyBlocked => format!("Step {step} blocked by policy."),
                     StepCause::AttentionRequired => format!("Step {step} needs your attention."),
                     StepCause::Failed => format!("Step {step} failed."),
@@ -158,6 +165,9 @@ impl CompositionProgress {
             return vec![
                 "Wait for the user to resolve the attention request before continuing.".into(),
             ];
+        }
+        if cause == Some(StepCause::AuditUnavailable) {
+            return vec!["Wait for history saving to recover, then prepare only unfinished work. Keep confirmed changes.".into()];
         }
         let mut steps = Vec::new();
         if self.effects.unknown > 0 || self.counts.unknown > 0 {

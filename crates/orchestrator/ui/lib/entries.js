@@ -43,6 +43,8 @@
       status: record.status,
       effect: record.effect,
       summary: record.summary,
+      storage: record.storage,
+      storage_detail: record.storage_detail,
       steps: record.steps ?? [],
       composition: record.composition ?? null,
       permissions: record.permissions ?? { checks: [], truncated: false },

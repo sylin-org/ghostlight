@@ -23,6 +23,22 @@ Reload of the unpacked Ghostlight extension. Browser security policy blocked age
 Nothing was pushed or published. The earlier implementation records below describe their
 pre-deployment validation; this section owns the current deployment state.
 
+## H7 audit health (2026-09-07)
+
+The owner accepted I6 and directed implementation. H7 now separates browser outcomes from
+history-storage confirmation, defaults to Keep working, and supports monotonic Require audit.
+The shared recorder exposes failures, preserves bounded live receipts, and attempts storage
+recovery without replay or backfill. The existing history, Status, Policy, and readiness surfaces
+report health and gaps. Cold storage failure no longer prevents service startup.
+
+[ADR-0159](adr/0159-audit-health-and-recovery.md) owns the decision;
+[H7 verification](tasks/security-hardening/h7-audit-health.md) owns the current evidence.
+All 488 Rust tests, 192 extension tests, formatting, Clippy, JavaScript syntax, the real-process
+failure/repair/cold-start journey, workbench checks, and 29 Sylin/MV3 regression checks pass.
+H7 is not deployed or published. H6 also
+remains undeployed; its installed native-host transport proof remains outstanding. Next ideation:
+H8 local-service resilience (I7), followed by C1 provenance details (I8).
+
 ## Security-hardening epic (2026-09-06)
 
 The owner requested a complete [security-hardening epic](tasks/security-hardening/EPIC.md)

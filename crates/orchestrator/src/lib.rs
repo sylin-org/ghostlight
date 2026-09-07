@@ -3,6 +3,7 @@
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 compile_error!("Ghostlight supports Windows and Linux only.");
 
+pub mod audit;
 pub mod browser;
 pub mod cli;
 pub mod desktop;

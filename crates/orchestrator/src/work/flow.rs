@@ -103,7 +103,7 @@ impl ApplicationExecutor {
                 Ok(operation) => operation,
                 Err((cause, error)) => {
                     progress.not_started(position, cause);
-                    self.record_preparation(
+                    let storage = self.record_preparation(
                         context,
                         &step.tool,
                         StepReceipt {
@@ -113,7 +113,9 @@ impl ApplicationExecutor {
                             preparation_failed: true,
                         },
                     );
+                    progress.record_storage(storage);
                     let mut row = unexecuted_row(position, UnexecutedStatus::NotStarted);
+                    row["history_storage"] = json!(storage);
                     row["id"] = json!(step.id);
                     row["cause"] = json!(cause);
                     row["error"] = json!(error);

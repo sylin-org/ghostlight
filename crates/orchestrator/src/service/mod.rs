@@ -22,15 +22,14 @@ use ghostlight_bridge::service::{
 };
 use uuid::Uuid;
 
+use crate::audit::AuditRecorder;
 use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
-use crate::governance::{AuditRecord, AuditSink, Capability, GovernanceFacade, JsonlAuditSink};
+use crate::governance::{AuditRecord, Capability, GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
-use crate::workbench::{
-    ProjectingAuditSink, ReadinessSummary, WorkbenchFacade, WorkbenchProjection,
-};
+use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
@@ -114,13 +113,9 @@ impl ServiceHost {
             .map(PathBuf::from)
             .unwrap_or_else(|| path.with_file_name("audit.jsonl"));
         let projection = WorkbenchProjection::default();
-        projection
-            .load_history(&audit_path)
-            .context("restore content-minimized workbench history")?;
-        let durable_audit =
-            Arc::new(JsonlAuditSink::open(&audit_path).context("open content-minimized audit")?);
-        let audit: Arc<dyn AuditSink> =
-            Arc::new(ProjectingAuditSink::new(durable_audit, projection.clone()));
+        let _ = projection.load_history(&audit_path);
+        let durable_audit = Arc::new(JsonlAuditSink::new(&audit_path));
+        let audit = Arc::new(AuditRecorder::new(durable_audit, projection.clone()));
         let workbench = WorkbenchFacade::new(
             projection.clone(),
             workspaces.clone(),
@@ -141,13 +136,20 @@ impl ServiceHost {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
             active: executor.active_authority(),
-            audit,
+            audit: audit.clone(),
             browser: browser_port.clone(),
             diagnostics: Arc::clone(&diagnostics),
         }));
 
         write_runtime(path, &endpoint).context("publish runtime endpoint")?;
         let stop = Arc::new(AtomicBool::new(false));
+        let audit_stop = stop.clone();
+        let audit_thread = std::thread::spawn(move || {
+            while !audit_stop.load(Ordering::SeqCst) {
+                audit.recover_if_due();
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
         let service_thread = spawn_service_listener(
             service_listener,
             Arc::clone(&stop),
@@ -170,7 +172,7 @@ impl ServiceHost {
             workbench,
             diagnostics,
             stop,
-            threads: vec![service_thread, browser_thread],
+            threads: vec![service_thread, browser_thread, audit_thread],
             runtime_path: path.into(),
             _lease: lease,
         })
@@ -755,7 +757,7 @@ struct ServiceBrowserEvents {
     governance: GovernanceFacade,
     workspaces: WorkspaceStore,
     active: ActiveAuthorityRegistry,
-    audit: Arc<dyn AuditSink>,
+    audit: Arc<AuditRecorder>,
     browser: Arc<dyn BrowserPort>,
     diagnostics: Arc<DiagnosticsHub>,
 }

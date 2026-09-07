@@ -175,6 +175,14 @@
    * are the seams that translate those controls back into the closed schema.
    */
   const SETTING_GROUPS = [
+    { title: "History", items: [{
+      key: "audit.availability", name: "When history cannot be saved", kind: "choice",
+      authority: "audit", field: "mode", source: "source", default: "keep_working",
+      choices: [
+        { value: "keep_working", label: "Keep working", detail: "Continue browser work and show which history could not be saved." },
+        { value: "require_audit", label: "Require audit", detail: "Stop new browser work during a known saving failure. Check storage automatically." }
+      ]
+    }] },
     {
       title: "Where agents may connect",
       items: [

@@ -116,7 +116,7 @@ recordings, dialog text, policy payloads, credentials, or model prompts.
 
 ## Collect and query
 
-Configure the endpoint collector to tail the file and parse one JSON object per line. Track file
+Configure the endpoint collector to tail the file and parse one JSON object per nonblank line. Track file
 identity and offsets so rotation or replacement does not duplicate evidence. Apply filesystem
 access controls appropriate to operational metadata.
 
@@ -133,3 +133,27 @@ Useful signals include:
 
 Do not join opaque ids to page content or add full-URL collection to Ghostlight. Content capture,
 if required, is a separate system with its own consent and retention decision.
+
+## Saving failures and recovery markers (H7)
+
+A terminal result's `history_storage` is `saved` or `unconfirmed`, independently of `status`,
+`effect`, and `repeat_safe`. Saved means the writer acknowledged append and synchronization;
+unconfirmed means it did not, even if some bytes reached the file. Browser effects are not rolled
+back. The current workbench can hold receipts whose durable storage was not confirmed.
+
+When saving recovers, a separate JSONL entry has this shape:
+
+```json
+{"audit_gap":{"id":"gap_example","started_at_ms":1,"recovered_at_ms":2,"unconfirmed_receipts":3}}
+```
+
+This is a gap marker, not an operation. Its counter covers direct, child, preparation, and
+asynchronous receipts. Deduplicate markers by `audit_gap.id`: a sync failure can leave a marker
+on disk before its retry. A parent may also carry `unconfirmed_history_steps`; saving it does not
+confirm the missing child receipts. Do not count gaps as operations, denials, or successful writes.
+
+Recovery retains no failed receipt queue and performs no delayed backfill. Malformed and oversized
+history lines are skipped with explicit omission counts in the human surface and policy simulation.
+A crash while storage is unavailable can lose volatile receipts and gap counts before a marker is
+saved. This file is neither an atomic record of website effects nor tamper-proof storage.
+See [H7 verification](../tasks/security-hardening/h7-audit-health.md) for deployment limits.

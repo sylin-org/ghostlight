@@ -66,7 +66,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | I3 accepted and implemented locally; H1 retention and H2b progress preserved. See H4. |
 | H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | I4 accepted and implemented locally under ADR-0157. See H5 for scope, recovery, and timing evidence. |
 | H6: Embedded-document policy | Chosen exclusion handling and notice preferences work across supported observations and actions. | Implemented and verified locally under accepted I5 and ADR-0158; not deployed. |
-| H7: Audit availability | A recording failure has truthful visibility, recovery, and any explicitly chosen admission consequence. | Ideation I6; coordinate with H1/H4 for consistent records and prior effects. |
+| H7: Audit availability | A recording failure has truthful visibility, recovery, and any explicitly chosen admission consequence. | I6 accepted; implemented and verified locally under ADR-0159. Keep working / Require audit, storage truth, and bounded recovery. |
 | H8: Local resilience | Malformed or abandoned clients cannot consume unbounded local resources or silently strand unrelated work. | Ideation I7 chooses bounded evidence and response; do not infer a demonstrated exploit. |
 | C1: Provenance reporting | Claimed client identity and observed/verified peer evidence remain distinct and useful. | Ideation I8 for field/privacy/platform details; safe audit projection before extending durable records. |
 | C2: Direct-peer admission | Optional signer/hash rules work for an actual verifiable connecting subject. | C1 and ideation I9 selecting a real integration and verification contract. |
@@ -78,7 +78,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
    preserve the separate logical changes, and prove script compatibility alongside the defects.
 2. H1, H2b, H4, and H5 are accepted and complete locally. Their common completion semantics and
    bounded evidence support the subsequent packages. H6 is also implemented and verified locally.
-3. Run targeted ideation for H7 before implementation. H6's evidence contract and source checks
+3. H7 I6 is accepted and H7 is implemented and verified locally. H6's evidence contract and source checks
    remain the shared document boundary; do not reopen its accepted product choices.
 4. Complete C1 after safe durable reporting is available. C2/C3 follow only the agreed concrete
    identity proof. H8 adds focused resilience work justified by its investigation.

@@ -59,6 +59,9 @@ pub enum Readiness {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InvocationResult {
+    /// Storage confirmation for this receipt, independent of browser effects.
+    #[serde(default)]
+    pub history_storage: crate::language::audit_health::Storage,
     /// Opaque invocation correlation handle.
     pub invocation: String,
     /// Terminal product status.
@@ -96,6 +99,7 @@ impl InvocationResult {
     ) -> Self {
         next_steps.truncate(2);
         Self {
+            history_storage: crate::language::audit_health::Storage::Saved,
             invocation: invocation.into(),
             status,
             effect,

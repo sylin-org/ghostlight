@@ -146,6 +146,37 @@ try {
   await until(() => evaluate("!document.querySelector('[data-resume-session]')"), "scoped recovery");
   assert.deepEqual(await evaluate("window.__GHOSTLIGHT_RESUMED__"), { workspace: "workspace_codex", incident: "attention_test" });
   assert.equal(await evaluate("window.__GHOSTLIGHT_PREVIEW__.service.runtime_state"), "active");
+
+  // H7 uses the actual bundled UI with a synthetic storage-failure projection.
+  await evaluate(`(() => {
+    const snapshot = window.__GHOSTLIGHT_PREVIEW__;
+    snapshot.audit_notice = 'History cannot be saved. Browser work can continue. Ghostlight checks automatically.';
+    snapshot.audit_health = { failure: 'write', unconfirmed_receipts: 1, unreadable_entries: 0, history_unavailable: false };
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
+  })()`);
+  await until(() => evaluate("!document.querySelector('#audit-health').hidden"), "audit health notice");
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  await evaluate(`(() => {
+    const record = structuredClone(window.__GHOSTLIGHT_HISTORY_FIXTURE__);
+    record.storage = 'saved';
+    record.storage_detail = 'Some step history could not be saved.';
+    record.steps[0].record.storage = 'unconfirmed';
+    record.steps[0].record.storage_detail = 'History could not be saved. Storage was not confirmed.';
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'composition_changed', record });
+  })()`);
+  await until(() => evaluate("document.querySelector('.history-step')?.textContent.includes('Storage was not confirmed')"), "child storage notice");
+  assert.equal(await evaluate("document.querySelector('.composition-details').open"), true);
+  await capture("audit-unavailable");
+  await evaluate(`(() => {
+    const snapshot = window.__GHOSTLIGHT_PREVIEW__;
+    snapshot.audit_notice = 'History is saving. 1 earlier receipt was not confirmed saved.';
+    snapshot.audit_health.failure = null;
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
+  })()`);
+  await until(() => evaluate("document.querySelector('#audit-health').textContent.includes('1 earlier receipt')"), "recovery gap notice");
+  assert.equal(await evaluate("document.querySelector('.history-step').textContent.includes('Storage was not confirmed')"), true);
+  await capture("audit-recovered");
+  console.log("H7 browser history: persistent health, independent child storage, recovery gap, preserved expansion, and narrow layout passed.");
   console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {

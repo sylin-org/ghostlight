@@ -546,3 +546,17 @@ identities, URLs, labels, values, and locators are not copied into the model/aud
 The workbench keeps bounded excluded host names only in volatile human details. A mask says
 `Excluded by policy`. Unverifiable document access and recording stops at the document boundary
 have language-owned outcomes. No script scanner or retry is treated as document containment.
+
+## History storage (ADR-0159)
+
+Every terminal envelope also carries `history_storage`: `saved` or `unconfirmed`. This describes
+receipt storage, independently of status, effect, readiness, and repeat safety. An unconfirmed
+receipt adds "History could not be saved." to the action's actual outcome. Composition facts and
+safe parent audit metadata retain `unconfirmed_history_steps`; a saved parent cannot confirm its
+children's storage. No audit error offers automatic replay.
+
+`policy_explain` includes the effective `audit` choice and content-free `audit_health`. It remains
+available during an audit outage. Filesystem paths and raw operating-system errors are excluded.
+Require audit uses `audit_unavailable` with authored policy attribution and refuses new browser
+work during a known failure. The same typed cause stops a composition under Continue, preserves
+prior effects, and directs the client to prepare only unfinished work after recovery.

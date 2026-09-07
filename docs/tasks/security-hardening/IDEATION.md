@@ -91,15 +91,14 @@ The document boundary, three handling modes, three notice preferences, and start
 already agreed. Use [H6's design](h6-frame-coverage-ux.md) as the discussion artifact. Do not
 automatically remove frames, change grants, or treat a presence restriction as network blocking.
 
-## I6: H7 audit availability
+## I6: H7 audit availability -- accepted (2026-09-07)
 
-- Choose behavior when an audit append fails: how is the failure shown, and can later work run?
-- Decide whether policy can require working durable audit, its default, scope, and recovery rule.
-- Agree bounded recovery and history wording when the UI has a record that durable storage lacks.
-
-Starting recommendation: visible degradation with continued work by default; explicitly required
-audit can refuse later browser work during a known failure. Preserve prior effects and keep
-diagnostics/human controls reachable. This recommendation is not yet an accepted policy.
+The owner accepted the proposed two-mode behavior and directed implementation. Keep working is
+preferred by default; Require audit stops subsequent browser work during a known storage failure.
+Both preserve actual outcomes, show persistent health and affected receipts without repeated
+popups, recover automatically with bounded attempts, and leave gaps explicit without replay.
+[ADR-0159](../../adr/0159-audit-health-and-recovery.md) owns the decision;
+[H7](h7-audit-health.md) owns implementation evidence. No remaining I6 product choice.
 
 ## I7: H8 local resilience
 

@@ -542,6 +542,16 @@ fn validate_patterns(patterns: &[String], source: &str, path: &str) -> Result<()
 fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<(), ManifestError> {
     let path = format!("config[{index}].value");
     match entry.key.as_str() {
+        super::audit::MODE_KEY => {
+            if entry
+                .value
+                .as_str()
+                .and_then(super::audit::AuditMode::parse)
+                .is_none()
+            {
+                return field(source, &path, "must be keep_working or require_audit");
+            }
+        }
         super::documents::HANDLING_KEY => {
             if entry
                 .value

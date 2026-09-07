@@ -426,3 +426,23 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    and its form content on distinct local hosts, with real orchestrator and connector processes.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
    separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.
+
+## Audit health evidence (ADR-0159)
+
+1. A failed append or sync leaves the actual outcome, effect, and repeat safety intact. Results
+   and human history distinguish confirmed storage from a volatile receipt. A saved parent does
+   not upgrade children whose storage was unconfirmed.
+2. Keep working is the default. Either policy layer can require audit; a lower layer and grant
+   observe mode cannot relax the requirement. Known failure refuses browser work before startup
+   recovery and at the final dispatch callback, including later children under Continue.
+3. Storage recovery is bounded and serialized with writes. It reopens the repaired destination,
+   synchronizes a content-free gap marker, and permits new requests without replay or backfill.
+4. Cold storage failure keeps the service, workbench, diagnostics, and human controls reachable.
+   Damaged and oversized history entries do not erase readable neighbors or grow line buffers
+   without bound. Unreadable historical portions and surviving gap counts remain explicit.
+5. At a glance shows one persistent health indication; Status reports health; Policy authors the
+   closed choice and respects organization floors. Saved and unconfirmed steps remain distinct
+   through updates and recovery. Audit refusal does not emit repeated native notifications.
+6. Rust sink/executor/history tests, the real-process journey with a synthetic browser adapter,
+   and the bundled workbench in isolated Chromium own these checks. Installed native transport,
+   active Tauri deployment, Linux runtime, and storage power-loss behavior remain separate lanes.

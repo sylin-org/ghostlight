@@ -65,6 +65,7 @@ Supported settings are:
 | `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
 | `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
 | `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
+| `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it; observe mode does not relax it. |
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 | `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
@@ -245,3 +246,21 @@ makes or classify hostnames by their resolved IP address.
 The extension's **Preserve controlled tabs** setting is an independent physical interlock. Both
 orchestrator policy and that browser-local choice must allow model-driven close. Manual browser
 closure always remains the user's action.
+
+## When history cannot be saved
+
+The H7 source supports `audit.availability` in the existing schema-3 `config` array:
+
+```json
+{"key":"audit.availability","value":"require_audit","level":"mandatory"}
+```
+
+Keep working is the default. Require audit refuses subsequent browser work during a known
+storage failure. It preserves previous effects and keeps policy explanation, diagnostics, and
+human controls available. The Policy destination offers both choices; an organization requirement
+cannot be relaxed by the user layer. Each invocation retains its original policy snapshot.
+
+Ghostlight checks a failed destination automatically at most once per five seconds. Recovery
+allows new requests; it never repeats browser actions or backfills missing receipts. At a glance
+and Status show saving health and explicit gaps. See [H7 verification](../tasks/security-hardening/h7-audit-health.md)
+for source, installed-version, and platform evidence before relying on this setting in a fleet.

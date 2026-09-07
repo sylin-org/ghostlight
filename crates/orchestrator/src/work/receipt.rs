@@ -63,12 +63,14 @@ impl ApplicationExecutor {
             }
         } else {
             match terminal.result.status {
-                Status::Blocked => DomainEvent::WorkBlocked {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                    presentation: denial_presentation(tool, &terminal.result),
-                },
+                Status::Blocked if terminal.decision.reason != ReasonCode::AuditUnavailable => {
+                    DomainEvent::WorkBlocked {
+                        invocation: terminal.result.invocation.clone(),
+                        workspace: workspace.as_str().into(),
+                        physical_id: terminal.physical_id,
+                        presentation: denial_presentation(tool, &terminal.result),
+                    }
+                }
                 Status::AttentionRequired => DomainEvent::AttentionRequired {
                     invocation: terminal.result.invocation.clone(),
                     workspace: workspace.as_str().into(),
@@ -130,7 +132,16 @@ impl ApplicationExecutor {
         .with_observation(observed);
         record.step = step;
         record.permissions = self.take_permissions(&terminal.result.invocation);
-        let _ = self.audit.record(&record);
+        let storage = self.audit.record(&record);
+        terminal.result.summary = if storage == language::audit_health::Storage::Saved {
+            language::audit_health::qualify_children(
+                &terminal.result.summary,
+                terminal.audit.unconfirmed_history_steps(),
+            )
+        } else {
+            storage.qualify(&terminal.result.summary)
+        };
+        terminal.result.history_storage = storage;
         gate.complete(terminal.result)
             .expect("single executor completion path");
         terminal.result = gate.take().expect("completion committed");
@@ -174,7 +185,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         tool: &str,
         step: StepReceipt,
-    ) {
+    ) -> language::audit_health::Storage {
         let mut record = AuditRecord::now(
             context.invocation,
             context.workspace.as_str(),
@@ -189,7 +200,7 @@ impl ApplicationExecutor {
         )
         .from_channel(self.workspaces.channel(context.workspace).ok());
         record.step = Some(step);
-        let _ = self.audit.record(&record);
+        self.audit.record(&record)
     }
 
     /// Retain the bounded evidence for the operation currently using this invocation.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, renameSync, rmdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -11,6 +11,7 @@ const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghost
 // under test and the deploy.lock beside it keeps quiescing demand-start.
 const runtimeFile = join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
 const runtimeLease = `${runtimeFile.replace(/\.json$/, "")}.lock`;
+const auditBackup = join(repository, `tests/.ghostlight-audit-backup-${process.pid}.jsonl`);
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
 const auditFailureScript = "throw new Error('PRIVATE_AUDIT_EXCEPTION')";
 const auditInvalidScript = "PRIVATE_INVALID_SCRIPT";
@@ -29,6 +30,9 @@ const environment = {
   // (ADR-0149 makes recovery repair owned registrations toward the running tree).
   GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
 };
+for (const generated of [auditFile, auditBackup, nativeHostDir, diagnosticsDir]) {
+  assert.equal(dirname(resolve(generated)), join(repository, "tests"));
+}
 const children = [];
 const physicalCommands = [];
 let queryCount = 0;
@@ -442,7 +446,8 @@ async function waitForNoBrowsers(mcp, timeoutMs = 5000) {
 
 try {
   rmSync(runtimeFile, { force: true });
-  rmSync(auditFile, { force: true });
+  rmSync(auditFile, { force: true, recursive: true });
+  rmSync(auditBackup, { force: true });
   rmSync(policyFile, { force: true });
   writeFileSync(policyFile, JSON.stringify({
     schema: 3,
@@ -862,7 +867,7 @@ try {
     { id: "wait", tool: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } }
   ] } });
   await childWaitDispatch;
-  const during = readFileSync(auditFile, "utf8").trim().split("\n").map(JSON.parse);
+  const during = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
   const firstReceipt = during.at(-1);
   assert.equal(firstReceipt.step.position, 1);
   assert.equal(firstReceipt.tool, "browser_read");
@@ -891,7 +896,7 @@ try {
   assert.equal(existsSync(auditFile), true);
 
   // The real executable's audit file, not a fixture: what an action did, and none of what it saw.
-  const records = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const records = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const readRecord = records.findLast((record) => record.tool === "browser_read" && !record.step);
   assert.equal(readRecord.observed.host, "example.com");
   // The last direct read is the article-mode read. Composed reads now have separate receipts.
@@ -995,7 +1000,7 @@ try {
   await resumeState;
   const stillAttention = structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
   assert.equal(stillAttention.status, "attention_required", "global Resume cannot clear a session review");
-  const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+  const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
     .filter((record) => record.invocation === attention.invocation);
   assert.equal(attentionRecords.filter((record) => record.step).length, 3);
   assert.equal(attentionRecords.find((record) => !record.step).status, "attention_required");
@@ -1017,6 +1022,60 @@ try {
   await unpaused;
   assert.equal(structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: controlTab.facts.tab } })).status, "succeeded", "a permitted landing during Pause must not strand the resumed tab");
   await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: controlTab.facts.tab } });
+
+
+  // H7: the real service sees a repaired path, never replays browser work, and keeps gap evidence.
+  renameSync(auditFile, auditBackup);
+  mkdirSync(auditFile);
+  const unrecorded = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/h7", new_tab: true } }));
+  assert.equal(unrecorded.status, "succeeded");
+  assert.equal(unrecorded.effect, "applied");
+  assert.equal(unrecorded.repeat_safe, false);
+  assert.equal(unrecorded.history_storage, "unconfirmed");
+  assert.match(unrecorded.summary, /History could not be saved\.$/);
+  const unrecordedRead = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
+  assert.equal(unrecordedRead.status, "succeeded", "default policy keeps useful work available");
+  const requireAuditPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
+  requireAuditPolicy.mode = "observe";
+  requireAuditPolicy.config.push({ key: "audit.availability", value: "require_audit", level: "mandatory" });
+  writeFileSync(policyFile, JSON.stringify(requireAuditPolicy));
+  const explainedHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
+  assert.equal(explainedHealth.status, "succeeded");
+  assert.equal(explainedHealth.facts.audit.mode, "require_audit");
+  assert.notEqual(explainedHealth.facts.audit_health.failure, null);
+  const commandsBeforeAuditBlock = physicalCommands.length;
+  const auditBlocked = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/h7-blocked", new_tab: true } }));
+  assert.equal(auditBlocked.status, "blocked");
+  assert.equal(auditBlocked.effect, "none");
+  assert.equal(auditBlocked.facts.reason, "audit_unavailable");
+  assert.equal(physicalCommands.slice(commandsBeforeAuditBlock).filter((command) => command !== "present").length, 0);
+  const auditHeld = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "held");
+  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
+  await auditHeld;
+  const auditResumed = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
+  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
+  await auditResumed;
+  rmdirSync(auditFile);
+  renameSync(auditBackup, auditFile);
+  let recoveredHealth;
+  const recoveryDeadline = Date.now() + 15000;
+  do {
+    await new Promise((done) => setTimeout(done, 250));
+    recoveredHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
+  } while (recoveredHealth.facts.audit_health.failure !== null && Date.now() < recoveryDeadline);
+  assert.equal(recoveredHealth.facts.audit_health.failure, null);
+  assert.equal(recoveredHealth.history_storage, "saved");
+  assert.ok(recoveredHealth.facts.audit_health.unconfirmed_receipts >= 4);
+  assert.equal(physicalCommands.slice(commandsBeforeAuditBlock).filter((command) => command !== "present").length, 0, "repair must never repeat browser work");
+  const afterRepair = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
+  assert.equal(afterRepair.status, "succeeded");
+  assert.equal(afterRepair.history_storage, "saved");
+  const repairedRecords = readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse);
+  assert.ok(repairedRecords.some((record) => record.audit_gap?.unconfirmed_receipts >= 4));
+  assert.equal(repairedRecords.some((record) => record.invocation === unrecorded.invocation), false, "no delayed receipt backfill");
+  assert.equal(JSON.stringify(repairedRecords.filter((record) => record.audit_gap)).includes("example.com"), false);
+  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: unrecorded.facts.tab } });
+  console.log("audit health ok: real write failure -> default continuation -> strict stop in observe mode -> human controls -> automatic repair -> explicit gap, no replay");
 
   // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
   // disconnects, recovery must preserve the profile binding and stop before repair, launch, or
@@ -1040,6 +1099,29 @@ try {
   assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
   assert.equal(disconnected.next_steps.length, 1);
 
+
+  // A cold audit failure must not prevent service startup or access to human/diagnostic controls.
+  service.kill();
+  await waitForExit(service);
+  rmSync(runtimeFile, { force: true });
+  renameSync(auditFile, auditBackup);
+  mkdirSync(auditFile);
+  service = start(executable("ghostlight"));
+  await waitForFile(runtimeFile);
+  const coldConnector = start(executable("ghostlight-mcp-connector"));
+  const coldMcp = new McpPeer(coldConnector);
+  await coldMcp.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H7 cold failure", version: "1" } });
+  coldMcp.notify("notifications/initialized");
+  const cold = structured(await coldMcp.request("tools/call", { name: "policy_explain", arguments: {} }));
+  assert.equal(cold.status, "succeeded");
+  assert.notEqual(cold.facts.audit_health.failure, null);
+  assert.equal(cold.facts.audit_health.history_unavailable, true);
+  const coldBlocked = structured(await coldMcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/cold", new_tab: true } }));
+  assert.equal(coldBlocked.facts.reason, "audit_unavailable");
+  assert.equal(coldBlocked.effect, "none");
+  rmdirSync(auditFile);
+  renameSync(auditBackup, auditFile);
+  console.log("audit cold start ok: service and policy explanation remain available, browser work stops before recovery or launch");
   console.log("process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
 } finally {
   for (const child of children.reverse()) {
@@ -1047,7 +1129,8 @@ try {
   }
   rmSync(runtimeFile, { force: true });
   rmSync(nativeHostDir, { force: true, recursive: true });
-  rmSync(auditFile, { force: true });
+  rmSync(auditFile, { force: true, recursive: true });
+  rmSync(auditBackup, { force: true });
   rmSync(policyFile, { force: true });
   rmSync(diagnosticsDir, { recursive: true, force: true });
   if (createdDeployLock) rmSync(deployLock, { force: true });

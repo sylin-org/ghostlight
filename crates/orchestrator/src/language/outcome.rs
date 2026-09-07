@@ -165,6 +165,8 @@ impl ActionSubject {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedReason {
+    /// Saving history is unavailable while policy requires it.
+    AuditUnavailable,
     /// The host was not granted by every authority layer.
     Host,
     /// The host or scheme is independently protected.
@@ -1305,6 +1307,7 @@ fn place<'a>(host: &'a Option<String>, fallback: &'static str) -> &'a str {
 /// to the person reading it. The reason code and the attempted host were both already on hand.
 fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
     match (reason, host.as_deref()) {
+        (BlockedReason::AuditUnavailable, _) => "Browser work stopped because policy requires saved history. Ghostlight will check storage automatically; no action will be replayed.".into(),
         (BlockedReason::Host, Some(host)) => format!("Blocked: {host} is not an allowed host."),
         (BlockedReason::Host, None) => "Blocked: that host is not allowed.".into(),
         (BlockedReason::ProtectedHost, Some(host)) => {

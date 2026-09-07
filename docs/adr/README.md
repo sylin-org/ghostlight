@@ -173,6 +173,8 @@ history live here.
 | [0157](0157-session-attention-and-dispatch-control.md) | Session-local attention, reviewed recovery, enforcing request restrictions, and runtime checks at dispatch | Accepted; implemented and verified locally; not deployed |
 | [0158](0158-document-access-and-coverage.md) | Document-specific authority, policy-selectable coverage, human-only host details, masked captures, and recording/script boundaries | Accepted; implemented and verified locally; not deployed |
 
+| [0159](0159-audit-health-and-recovery.md) | Audit health, optional strict admission, explicit storage gaps, and bounded recovery without replay | Accepted; implemented and verified locally; not deployed |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

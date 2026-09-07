@@ -92,6 +92,10 @@ the owner wants, and what this project learned the hard way.
   identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving
   Ghostlight's connector does not prove its upstream MCP application. ADR-0105's September 6
   amendment records the agreed staging; the security-hardening ledger owns progress.
+- **Saving history and doing browser work have separate outcomes.** Keep working is the default;
+  optional Require audit stops new browser work during known storage failure. Recovery is bounded,
+  replays neither actions nor receipts, and leaves gaps explicit. A saved parent does not confirm
+  its children. Human controls remain independent (ADR-0159).
 - **Embedded authority follows the document.** H6/ADR-0158 bind access to Chrome document identity,
   not reusable frame ids. Handling and notice preferences are separate. Excluded hosts belong
   only in volatile human details; model/audit coverage stays content-free. Screenshots mask before

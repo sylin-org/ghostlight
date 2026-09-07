@@ -206,6 +206,8 @@ pub struct UserLayer {
 /// The complete compiled answer.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EffectiveAuthority {
+    /// Effective requirement for saving audit receipts.
+    pub audit: super::audit::AuditPolicy,
     /// Effective document coverage choices and their deciding policy layers.
     pub documents: super::documents::DocumentPolicy,
     /// Which layers are in force.
@@ -370,6 +372,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         ));
     }
     EffectiveAuthority {
+        audit: super::audit::AuditPolicy::resolve(inputs.organization, inputs.user),
         documents: super::documents::DocumentPolicy::resolve(inputs.organization, inputs.user),
         situation,
         headline,
