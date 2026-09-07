@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::composition::CompositionProgress;
 use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, WorkspaceReason};
 
 /// The explicitly permitted language projection of one terminal result.
@@ -12,6 +13,7 @@ use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, Wor
 pub struct AuditProjection {
     summary: String,
     refusal: Option<AuditRefusal>,
+    composition: Option<CompositionProgress>,
 }
 
 impl AuditProjection {
@@ -19,6 +21,12 @@ impl AuditProjection {
     #[must_use]
     pub fn summary(&self) -> &str {
         &self.summary
+    }
+
+    /// Read the payload-free composition account, when this is a flow or sequence.
+    #[must_use]
+    pub fn composition(&self) -> Option<CompositionProgress> {
+        self.composition
     }
 
     /// Read the closed refusal metadata, when this outcome is a refusal.
@@ -49,6 +57,8 @@ pub enum AuditRefusal {
     BrowserPinned,
     BrowserStartupManual,
     BrowserRecoveryFailed { cause: BrowserRecoveryReason },
+    ConnectionLost,
+    CancelledAfterDispatch,
     EffectUnknown,
     LandingDeniedUnknown,
     WorkspaceUnusable { cause: WorkspaceReason },
@@ -66,6 +76,10 @@ impl Outcome {
         AuditProjection {
             summary: self.summary(),
             refusal: None,
+            composition: match self {
+                Self::CompositionRan(progress) => Some(*progress),
+                _ => None,
+            },
         }
     }
 }
@@ -100,6 +114,8 @@ impl Refusal {
             Self::BrowserRecoveryFailed { reason } => {
                 AuditRefusal::BrowserRecoveryFailed { cause: *reason }
             }
+            Self::ConnectionLost => AuditRefusal::ConnectionLost,
+            Self::CancelledAfterDispatch => AuditRefusal::CancelledAfterDispatch,
             Self::EffectUnknown => AuditRefusal::EffectUnknown,
             Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => {
@@ -119,6 +135,7 @@ impl Refusal {
                 _ => self.summary(),
             },
             refusal: Some(refusal),
+            composition: None,
         }
     }
 }

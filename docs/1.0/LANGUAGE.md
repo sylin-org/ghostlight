@@ -387,12 +387,14 @@ Run two to eight fully specified steps on one controlled tab. Shortest useful ca
 Inputs: required `steps`; optional `tab`; optional `timeout_ms`; optional restrictions. A step is a
 typo-closed discriminated object. Allowed actions are `click`, `fill`, `type_text`, `press_key`,
 `scroll`, `hover`, and `wait`; other catalog operations are not silently accepted. The sequence
-wrapper requires no RAWX capability. Every step is classified, admitted, and audited independently
-through the same executor path as a direct call.
+wrapper requires no RAWX capability. Every step is classified and admitted independently through
+the same executor path as a direct call. Current audit has one parent record; individual child
+receipts remain H4 work in the security-hardening epic.
 
 Direct and sequence steps use the same operation executor and browser port. Facts: `tab`,
-`completed_steps`, `total_steps`, and bounded per-step statuses. Execution stops at the first
-non-success. Partial sequences are never repeat-safe.
+`completed_steps`, `total_steps`, `progress`, and bounded per-step status/effect metadata.
+Completed counts successes. Execution stops at the first non-success; later steps are `not_run`.
+Partial sequences are never repeat-safe. Flow and sequence share the progress contract below.
 
 ### `browser_flow`
 
@@ -403,8 +405,9 @@ Inputs: required `steps` array of 1 to 20 uniquely named objects, each with a re
 `id`, a required `tool` naming one current advertised non-composite Ghostlight tool, and an
 optional `arguments` object; optional `on_error` of `stop` or `continue`, default `stop`; optional
 `dry_run`, default `false`; optional `tab`, `timeout_ms`, and restrictions. The wrapper requires no
-RAWX capability; every child step classifies, admits, and audits independently under the same
-immutable invocation snapshot. Steps carry no restriction fields of their own.
+RAWX capability; every child step classifies and admits independently under the same immutable
+invocation snapshot. Current audit has one parent record, with individual child receipts deferred
+to H4. Steps carry no restriction fields of their own.
 
 Any argument value may be an explicit reference object,
 `{"flow_ref":{"step":"earlier_id","pointer":"/facts/..."}}`, resolved from that step's canonical
@@ -413,13 +416,41 @@ arguments. A reference that does not resolve fails its step without effect.
 
 With `on_error: stop`, a child execution, argument-decoding, or reference-resolution failure ends
 the flow before the next step. Effects from earlier steps remain applied; stopping does not roll
-them back. Explicit `continue` permits later independent steps to run.
+them back. Explicit `continue` permits later independent steps to run and still reports a
+non-success when any child fails. Human pause/stop, attention, cancellation, and deadlines end
+execution even under Continue.
 
 `dry_run:true` decodes and classifies every step without dispatching anything. Captured per-step
 envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
-terminal aggregate; the aggregate reports applied, partial, or unknown effects. A flow with failed
-or unknown work is never repeat-safe. Facts: `completed`, `total`, `stopped`, and bounded per-step
-rows with each step's envelope where the budget allowed.
+terminal aggregate. Facts: `completed`, `total`, `stopped`, `progress`, and bounded per-step rows
+with each step's envelope where the budget allowed. `completed` counts successes. References still
+resolve against the full volatile envelope when its client payload is omitted.
+
+Flow and sequence share this progress contract:
+
+- `progress.counts`: `total`, `succeeded`, `failed`, `blocked`, `cancelled`, `attention_required`,
+  `unknown`, `not_started`, and `not_run`. The categories are disjoint and sum to `total`.
+  `not_started` means runtime reference resolution or decoding prevented entering a child;
+  `not_run` means execution never reached it. Neither fabricates a failed child invocation.
+- `progress.effects`: counts of entered children with `none`, `applied`, `partial`, and `unknown`
+  effects. A later unknown never removes earlier known applied or partial effects.
+- `progress.stopped` says execution ended at a stopping boundary. `progress.issue`, when present,
+  names a one-based step and closed cause relevant to recovery. Human directives take precedence
+  over attention/invocation limits, then uncertainty, then ordinary failures.
+- Every step row keeps its one-based position, status, effect, and repeat safety. Entered rows
+  carry their closed cause when relevant; unresolved inputs also retain their client error.
+  Omitted payloads cannot remove this metadata. Not-run rows contain no invented child result.
+- Aggregate status remains in the ordinary vocabulary. Unknown effects/status take precedence,
+  then attention, cancellation, blocks, and failure. Success requires every step to succeed.
+  Aggregate effect is unknown if any effect is unknown; otherwise a partial child or applied
+  effect with incomplete work is partial. Fully successful applied work remains applied.
+- Repetition is safe only when every child succeeded, every child permits repetition, and there
+  were no effects. Recovery respects confirmed changes and never suggests replaying the whole
+  composition. Pinned human pause/stop directives remain intact.
+
+Examples: `Completed all 5 steps.`, `Completed 3 of 5 steps. 2 failed.`, and
+`Completed 2 of 5 steps. Step 3 could not start.` H1 audit may retain the same payload-free
+progress as `composition`, without child ids, results, target handles, or error text.
 
 ### `browser_record`
 

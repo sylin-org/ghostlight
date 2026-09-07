@@ -282,3 +282,19 @@ step authority and effect truth depend on a recursive client boundary.
 
 Rejected because the extension should not gain a second pixel-retention lifecycle. One bounded
 workspace asset is enough to bridge an explicit capture to an explicit upload.
+
+## Amendment: accurate composition outcomes (2026-09-06, H2b)
+
+The owner accepted the H2b ideation in the security-hardening epic. Completed steps are successful
+steps. Continue allows later independent work but never changes failed work into overall success.
+Flow and sequence share one typed progress account and one outcome accumulator under the existing
+parent lease and authority snapshot. Counts distinguish terminal statuses, steps unable to start,
+and steps never reached. Per-step status/effect metadata survives result-payload omission.
+
+Known partial effects remain partial. Unknown effects do not erase previously known applied or
+partial effects. Recovery uses that evidence and never recommends replaying the whole composition.
+Human pause/stop directives and cancellation/deadlines take precedence over Continue. No new policy
+setting is introduced. H1's closed audit projection may retain this payload-free progress account;
+child receipts, expandable history, and resume UI remain H4/future work.
+
+See [H2b](../tasks/security-hardening/h2b-aggregate-outcomes.md) for the bounded contract and evidence.

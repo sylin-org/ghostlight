@@ -208,6 +208,10 @@ Every one of these cost something to learn.
   changes the next step. Displaying more existing detail never authorizes capturing more content.
   Additional retention profiles and richer diagnostic capture need a concrete user benefit
   and a separate decision (ADR-0103 H1 amendment).
+- **Completed means succeeded.** Flow and sequence keep unsuccessful and unreached work distinct.
+  Continue permits later work, never a false overall success. Known partial progress stays known;
+  recovery respects confirmed changes and never proposes replaying the entire composition.
+  Human controls and invocation limits take precedence (ADR-0133 H2b amendment).
 - **Audit is metadata-only.** Never persist page content, results, screenshots, form values,
   scripts, paths, or file bytes. Governed attempted or landed hosts and normalized bounded names of
   action targets are the deliberate exceptions: they answer where the agent went and which visible

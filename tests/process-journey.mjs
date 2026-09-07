@@ -718,7 +718,7 @@ try {
   if (flow.status !== "succeeded") console.log("FLOW", JSON.stringify(flow));
   assert.equal(flow.status, "succeeded");
   assert.equal(flow.facts.completed, 3);
-  assert.match(textual(flowResponse), /Completed 3 flow steps\./);
+  assert.match(textual(flowResponse), /Completed all 3 steps\./);
 
   // H1: a failed composition still returns permitted child content to its caller, while
   // the actual durable file below must contain neither that content nor the browser error.
@@ -739,6 +739,54 @@ try {
   }));
   assert.equal(primitiveFailure.status, "failed");
   assert.equal(primitiveFailure.facts.detail, auditException);
+
+  // H2b: Continue preserves success at later work and still signals an MCP error.
+  const mixedResponse = await mcp.request("tools/call", {
+    name: "browser_flow",
+    arguments: { on_error: "continue", steps: [
+      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
+      { id: "fail", tool: "browser_execute", arguments: { script: auditInvalidScript } },
+      { id: "later", tool: "browser_read", arguments: { max_chars: 500 } }
+    ] }
+  });
+  const mixed = structured(mixedResponse);
+  assert.equal(mixedResponse.result.isError, true);
+  assert.equal(mixed.status, "failed");
+  assert.equal(mixed.effect, "none");
+  assert.equal(mixed.facts.completed, 2);
+  assert.equal(mixed.facts.stopped, false);
+  assert.equal(mixed.summary, "Completed 2 of 3 steps. 1 failed.");
+  assert.equal(mixed.facts.steps[2].status, "succeeded");
+  assert.equal(mixed.repeat_safe, false);
+
+  const blockedResponse = await mcp.request("tools/call", {
+    name: "browser_flow", arguments: { restrict_capabilities: ["read"], steps: [
+      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
+      { id: "blocked", tool: "browser_execute", arguments: { script: "PRIVATE_BLOCKED_SCRIPT" } },
+      { id: "unreached", tool: "browser_read", arguments: { max_chars: 500 } }
+    ] }
+  });
+  const blockedFlow = structured(blockedResponse);
+  assert.equal(blockedResponse.result.isError, true);
+  assert.equal(blockedFlow.status, "blocked");
+  assert.equal(blockedFlow.facts.completed, 1);
+  assert.equal(blockedFlow.facts.steps[2].status, "not_run");
+  assert.equal(blockedFlow.summary, "Completed 1 of 3 steps. Step 2 blocked by policy.");
+
+  const invalidResponse = await mcp.request("tools/call", {
+    name: "browser_flow", arguments: { steps: [
+      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
+      { id: "invalid", tool: "browser_read", arguments: { max_chars: { flow_ref: { step: "read", pointer: "/facts/text" } } } },
+      { id: "unreached", tool: "browser_read", arguments: { max_chars: 500 } }
+    ] }
+  });
+  const invalidFlow = structured(invalidResponse);
+  assert.equal(invalidResponse.result.isError, true);
+  assert.equal(invalidFlow.status, "failed");
+  assert.equal(invalidFlow.facts.steps[1].status, "not_started");
+  assert.equal(invalidFlow.facts.steps[1].cause, "invalid_arguments");
+  assert.equal(invalidFlow.facts.steps[2].status, "not_run");
+  assert.equal(invalidFlow.summary, "Completed 1 of 3 steps. Step 2 could not start.");
 
   const startedRecording = structured(await mcp.request("tools/call", {
     name: "browser_record",
@@ -812,6 +860,12 @@ try {
   assert.equal(flowFailureRecord.status, "unknown");
   assert.equal(flowFailureRecord.summary, failedFlow.summary);
   assert.equal(flowFailureRecord.refusal_facts, undefined);
+  for (const result of [flow, failedFlow, mixed, blockedFlow, invalidFlow]) {
+    const record = records.find((item) => item.invocation === result.invocation);
+    assert.deepEqual(record.composition, result.facts.progress);
+    assert.equal(record.observed.count, result.facts.completed);
+  }
+  assert.equal(records.find((item) => item.invocation === blockedFlow.invocation).allowed, false);
   const primitiveRecord = records.find((record) => record.invocation === primitiveFailure.invocation);
   assert.equal(primitiveRecord.summary, "The browser could not complete this operation.");
   assert.deepEqual(primitiveRecord.refusal_facts, { reason: "browser_primitive_failed" });

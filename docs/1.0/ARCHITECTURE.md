@@ -229,7 +229,7 @@ failure ends the desktop authority instead of leaving an invisible process.
 
 ## Chokepoints and unit of work
 
-Every direct call and sequence enters `ApplicationExecutor::execute`. One invocation owns one
+Every direct call, flow, and sequence enters `ApplicationExecutor::execute`. One invocation owns one
 unit of work until exactly one completion is committed.
 
 The synchronous path is:
@@ -246,6 +246,13 @@ The synchronous path is:
 
 An operation handler cannot mutate another context directly, call a transport, bypass
 governance, or construct a client result around `CompletionGate`.
+
+Flow and sequence retain the parent's lease and immutable authority snapshot. Their ordinary
+child executors feed one accumulator in `work/composition.rs`; language owns its closed progress,
+summary, and recovery in `language/composition.rs`, through `Outcome::CompositionRan`. One safe
+projection carries that account into the parent audit record. Child payloads remain separate,
+and per-step status/effect metadata survives flow-result omission. Child audit rows remain H4
+work; current child execution does not independently enter the completion gate.
 
 ## Closed domain events
 

@@ -1,19 +1,21 @@
 //! Governed result-aware flow composition over ordinary decoded operations.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use serde_json::{json, Map, Value};
 
 use crate::governance::{Capability, CapabilitySet};
+use crate::language::composition::StepCause;
 use crate::language::outcome::Outcome;
 use crate::language::RunFlow;
 use crate::workspace::WorkspaceLease;
 
 use super::{
-    result::Readiness, status_name, ApplicationExecutor, Effect, InvocationContext,
-    InvocationResult, Status, Terminal,
+    result::Readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, Status,
+    Terminal,
 };
+
+use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
 
 const FLOW_RESULT_BUDGET_BYTES: usize = 100_000;
 
@@ -80,129 +82,67 @@ impl ApplicationExecutor {
         }
         let mut envelopes: HashMap<String, Value> = HashMap::new();
         let mut rows = Vec::with_capacity(total);
-        let mut completed = 0usize;
+        let mut progress = Composition::new(total, decision, Readiness::NotApplicable, None);
         let mut budget_used = 0usize;
-        let mut stopped = false;
-        let mut saw_unknown = false;
-        let mut saw_effect = false;
-        for step in &value.steps {
-            if context.cancellation.is_cancelled() || Instant::now() >= context.deadline {
-                stopped = true;
+        for (index, step) in value.steps.iter().enumerate() {
+            let position = index + 1;
+            if progress.stop_at_boundary(context, position) {
                 break;
             }
-            let substituted = match substitute_references(&step.arguments, &envelopes) {
-                Ok(Some(arguments)) => arguments,
-                Ok(None) => {
-                    rows.push(json!({"id":step.id,"error":"a result reference did not resolve"}));
-                    if value.on_error == "stop" {
-                        stopped = true;
-                        break;
-                    }
-                    continue;
-                }
-                Err(reason) => {
-                    rows.push(json!({"id":step.id,"error":reason}));
-                    if value.on_error == "stop" {
-                        stopped = true;
-                        break;
-                    }
-                    continue;
-                }
-            };
-            let decoded = match crate::language::decode(&step.tool, substituted) {
+            let prepared = substitute_references(&step.arguments, &envelopes)
+                .and_then(|arguments| {
+                    arguments.ok_or_else(|| "a result reference did not resolve".into())
+                })
+                .map_err(|error| (StepCause::MissingReference, error))
+                .and_then(|arguments| {
+                    crate::language::decode(&step.tool, arguments)
+                        .map_err(|error| (StepCause::InvalidArguments, error.to_string()))
+                });
+            let decoded = match prepared {
                 Ok(operation) => operation,
-                Err(error) => {
-                    rows.push(json!({"id":step.id,"error":error.to_string()}));
+                Err((cause, error)) => {
+                    progress.not_started(position, cause);
+                    let mut row = unexecuted_row(position, UnexecutedStatus::NotStarted);
+                    row["id"] = json!(step.id);
+                    row["cause"] = json!(cause);
+                    row["error"] = json!(error);
+                    rows.push(row);
                     if value.on_error == "stop" {
-                        stopped = true;
+                        progress.progress.stopped = true;
                         break;
                     }
                     continue;
                 }
             };
             let terminal = self.run(context, lease, &decoded);
-            completed += 1;
-            match terminal.result.effect {
-                Effect::Unknown => saw_unknown = true,
-                Effect::Applied | Effect::Partial => saw_effect = true,
-                Effect::None => {}
-            }
+            let cause = progress.record(position, &terminal);
+            let mut row = terminal_row(position, &terminal, cause);
+            row["id"] = json!(step.id);
             let envelope = serde_json::to_value(&terminal.result).unwrap_or(Value::Null);
             budget_used = budget_used
                 .saturating_add(serde_json::to_string(&envelope).unwrap_or_default().len());
-            let omitted = budget_used > FLOW_RESULT_BUDGET_BYTES;
-            if omitted {
-                rows.push(json!({
-                    "id":step.id,
-                    "status":status_name(terminal.result.status),
-                    "omitted":true,
-                }));
+            if budget_used > FLOW_RESULT_BUDGET_BYTES {
+                row["omitted"] = json!(true);
             } else {
-                rows.push(json!({
-                    "id":step.id,
-                    "result":envelope,
-                }));
+                row["result"] = envelope.clone();
             }
+            rows.push(row);
             envelopes.insert(step.id.clone(), envelope);
-            if terminal.result.status != Status::Succeeded && value.on_error == "stop" {
-                stopped = true;
+            if cause.is_some_and(StepCause::stops_execution)
+                || (terminal.result.status != Status::Succeeded && value.on_error == "stop")
+            {
+                progress.progress.stopped = true;
                 break;
             }
         }
-        let effect = if saw_unknown {
-            Effect::Unknown
-        } else if completed < total && saw_effect {
-            Effect::Partial
-        } else if saw_effect {
-            Effect::Applied
-        } else {
-            Effect::None
-        };
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                if stopped || saw_unknown {
-                    if saw_effect || saw_unknown {
-                        Status::Unknown
-                    } else {
-                        Status::Failed
-                    }
-                } else {
-                    Status::Succeeded
-                },
-                effect,
-                Readiness::NotApplicable,
-                false,
-                Outcome::FlowRan {
-                    completed,
-                    total,
-                    stopped,
-                }
-                .summary()
-                .as_str(),
-                json!({"completed":completed,"total":total,"stopped":stopped,"steps":rows}),
-                Outcome::FlowRan {
-                    completed,
-                    total,
-                    stopped,
-                }
-                .next_steps(),
-            ),
-            decision,
-            physical_id: None,
-            audit: Outcome::FlowRan {
-                completed,
-                total,
-                stopped,
-            }
-            .audit(),
-            observed: Outcome::FlowRan {
-                completed,
-                total,
-                stopped,
-            }
-            .observed(),
+        for (index, step) in value.steps.iter().enumerate().skip(rows.len()) {
+            let mut row = unexecuted_row(index + 1, UnexecutedStatus::NotRun);
+            row["id"] = json!(step.id);
+            rows.push(row);
         }
+        let facts = json!({"completed":progress.progress.counts.succeeded,"total":total,
+            "stopped":progress.progress.stopped,"steps":rows});
+        progress.finish(context, facts)
     }
 }
 
@@ -220,7 +160,7 @@ fn capability_names(requirements: &CapabilitySet) -> Vec<&'static str> {
 }
 
 /// Substitute every embedded `{"flow_ref":{...}}` with the referenced value.
-/// Returns `Ok(false)` when a reference does not resolve.
+/// Missing referenced steps or pointers return an error before child decoding.
 fn substitute_references(
     input: &Value,
     envelopes: &HashMap<String, Value>,

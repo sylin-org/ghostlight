@@ -15,10 +15,11 @@ use crate::language::{
 };
 use crate::workspace::WorkspaceLease;
 
-use super::result::{Effect, InvocationResult, Status};
+use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
+use super::result::{Effect, Status};
 use super::{
-    observed_host, permitted, readiness, status_name, step_activity, ApplicationExecutor,
-    InvocationContext, Terminal,
+    observed_host, permitted, readiness, step_activity, ApplicationExecutor, InvocationContext,
+    Terminal,
 };
 
 impl ApplicationExecutor {
@@ -32,11 +33,18 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let mut completed = 0_usize;
-        let mut applied_any = false;
-        let mut statuses = Vec::with_capacity(value.steps.len());
-        let mut last_decision = permitted();
-        for step in &value.steps {
+        let total = value.steps.len();
+        let mut progress = Composition::new(
+            total,
+            permitted(),
+            readiness(selected.readiness),
+            Some(selected.physical_id),
+        );
+        let mut statuses = Vec::with_capacity(total);
+        for (index, step) in value.steps.iter().enumerate() {
+            if progress.stop_at_boundary(context, index + 1) {
+                break;
+            }
             self.emit(DomainEvent::WorkPhaseStarted {
                 invocation: context.invocation.into(),
                 workspace: context.workspace.as_str().into(),
@@ -173,51 +181,19 @@ impl ApplicationExecutor {
                     },
                 ),
             };
-            last_decision = terminal.decision;
-            statuses.push(
-                json!({"step":statuses.len() + 1,"status":status_name(terminal.result.status)}),
-            );
-            if terminal.result.status == Status::Succeeded {
-                completed += 1;
-                applied_any |= terminal.result.effect == Effect::Applied;
-                continue;
+            let cause = progress.record(index + 1, &terminal);
+            statuses.push(terminal_row(index + 1, &terminal, cause));
+            if terminal.result.status != Status::Succeeded {
+                progress.progress.stopped = true;
+                break;
             }
-            let effect = if terminal.result.effect == Effect::Unknown {
-                Effect::Unknown
-            } else if applied_any || terminal.result.effect == Effect::Applied {
-                Effect::Partial
-            } else {
-                Effect::None
-            };
-            let status = if effect == Effect::Unknown {
-                Status::Unknown
-            } else {
-                terminal.result.status
-            };
-            let outcome = Outcome::SequenceRan {
-                completed,
-                total: value.steps.len(),
-            };
-            let summary = outcome.summary();
-            let observed = outcome.observed();
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    status,
-                    effect,
-                    terminal.result.readiness,
-                    effect == Effect::None,
-                    &summary,
-                    json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}),
-                    outcome.next_steps(),
-                ),
-                decision: last_decision,
-                physical_id: terminal.physical_id,
-                observed,
-                audit: outcome.audit(),
-            };
         }
-        self.succeeded(context, last_decision, Some(selected.physical_id), if applied_any { Effect::Applied } else { Effect::None }, readiness(selected.readiness), !applied_any, Outcome::SequenceRan { completed, total: value.steps.len() }, json!({"tab":selected.handle.as_str(),"completed_steps":completed,"total_steps":value.steps.len(),"steps":statuses}))
+        for index in statuses.len()..total {
+            statuses.push(unexecuted_row(index + 1, UnexecutedStatus::NotRun));
+        }
+        let facts = json!({"tab":selected.handle.as_str(),"completed_steps":progress.progress.counts.succeeded,
+            "total_steps":total,"steps":statuses});
+        progress.finish(context, facts)
     }
 
     pub(super) fn handle_dialog(

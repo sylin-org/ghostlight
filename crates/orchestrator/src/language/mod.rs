@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod capability_map;
+pub mod composition;
 pub mod environment;
 pub mod outcome;
 pub mod readiness;

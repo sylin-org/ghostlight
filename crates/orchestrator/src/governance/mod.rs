@@ -1924,6 +1924,9 @@ pub struct AuditRecord {
         deserialize_with = "crate::language::audit::read_refusal"
     )]
     pub refusal_facts: Option<AuditRefusal>,
+    /// Payload-free counts and recovery cause for a flow or sequence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<crate::language::composition::CompositionProgress>,
     /// How long the invocation took, from decode to terminal outcome.
     ///
     /// For a navigation this is the time to a governed, settled landing.
@@ -1982,6 +1985,7 @@ impl AuditRecord {
             effect: effect.into(),
             summary: language.summary().chars().take(500).collect(),
             refusal_facts: language.refusal().cloned(),
+            composition: language.composition(),
             duration_ms,
             observed: Observed::default(),
             channel: None,

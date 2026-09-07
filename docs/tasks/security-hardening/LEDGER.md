@@ -18,15 +18,16 @@ record accompanies `fix(script): select script form before page execution`; use 
 commit hash. Both SA-04 defects have regressions, all 183 extension tests and workspace gates
 pass, and 19 Chromium/MCP cases prove effects and compatibility. It is not deployed or published.
 The owner accepted I1 and directed implementation of [H1 readable bounded audit](h1-readable-audit.md).
-H1 is implemented and verified locally. Next is I2 for H2b before its implementation cycle.
+H1 is implemented and verified locally. I2 is accepted; H2b is implemented and verified locally. Next is H4 ideation I3.
+See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
 
 The owner identified flow stopping as a bug to fix. [H2a](h2a-flow-stop.md) now fixes the two
 missing loop exits in the working tree, with regression evidence and 362 passing orchestrator
 library tests. It is committed as `8103c69b`, with full workspace gates and the process journey
-now passing; it is not deployed. Broader H2 aggregate reporting remains proposed.
+now passing; it is not deployed. H2b aggregate reporting is implemented and verified locally.
 
-H1's local-audit correction is accepted. H2b's aggregate behavior still requires ideation. H3's
+H1's local-audit correction and H2b's aggregate behavior are accepted. H3's
 distinction from expected partial effects is accepted. No transactional rollback requirement has
 been added, and no deployment or publication has been made for this epic.
 
@@ -52,7 +53,7 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 | H2a | Fixed and committed as `8103c69b`; not deployed | Required gates and process journey pass. |
 | H3 | IMPLEMENTED and verified locally; not deployed | Complete evidence is in its task record; no remaining H3 implementation task. |
 | H1 | IMPLEMENTED and verified locally; not deployed | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
-| H2b | Included; aggregate semantics still proposed | Ideation I2; H2a remains accepted. |
+| H2b | IMPLEMENTED and verified locally; not deployed | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
 | H4 | Included; receipt design still proposed | Ideation I3; depends on H1 safe projection and H2b semantics. |
 | H5 | Included; existing human-control contract retained | Ideation I4 for scope/recovery details and timing evidence. |
 | H6 | Policy direction AGREED; details open; not implemented | Ideation I5 for scope evidence, schema, disclosure, notices, and capture. |
@@ -129,7 +130,7 @@ protocol, client credential system, or product-wide certificate requirement is s
 P0 means a demonstrated violation of an existing effect or confidentiality promise. P1 restores
 complete enforcement and evidence or resolves a source finding with substantial possible impact.
 P2 is focused hardening or further assurance after the demonstrated defects. These are scheduling
-priorities, not CVSS scores. H1 and H3 are complete locally. H2a is committed, and provenance/H6
+priorities, not CVSS scores. H1, H2b, and H3 are complete locally. H2a is committed, and provenance/H6
 have agreed direction. The remaining order is a recommendation to settle with
 the relevant ideation session and dependencies.
 
@@ -137,7 +138,7 @@ the relevant ideation session and dependencies.
 | --- | --- | --- | --- | --- |
 | 1 | H3 | P0 | Prevent script re-evaluation and false no-effect reports | Implemented; 20 evaluator tests and 19 real Chromium/MCP cases prove the correction and compatibility. Not deployed. |
 | 2 | H1 | P0 | Keep payloads out of audit | SA-03 corrected after I1: typed audit projection; failure, legacy-read, and actual JSONL checks pass. Not deployed. |
-| 3 | H2 | P0 | Make flow stopping and aggregate effects truthful | H2a stop fix agreed and verified locally; H2b aggregate reporting awaits ideation. |
+| 3 | H2 | P0 | Make flow stopping and aggregate effects truthful | H2a and H2b implemented and verified locally; counts, partial effects, recovery, and actual MCP/JSONL agree. |
 | 4 | H4 | P1 | Complete child operation receipts | SA-02: flow reproduction and sequence source evidence. Policy checks happen, but terminal child records are missing. |
 | 5 | H5 | P1 | Correct workspace attention and prove human-control timing | Reproduced SA-05 cross-workspace attention; SA-08 pause race still needs a controlled test. |
 | 6 | H6 | P1 | Define and enforce composed-frame policy subjects | Per-document authority, selectable exclusion handling, and notice choices agreed; not implemented. Browser proof and detailed contracts remain outstanding. |
@@ -167,8 +168,11 @@ Do not erase existing audit files as part of the fix; any historical-data cleanu
 
 ### H2: Flow control and aggregate truth
 
-H2a is agreed and verified locally; see its execution record below. The remaining aggregate
-status/count/wording work is H2b, has not been implemented, and goes through ideation I2.
+H2a and H2b are implemented and verified locally. I2 was accepted on September 6; see
+[H2b](h2b-aggregate-outcomes.md) and the ADR-0133 amendment. Completed means succeeded. One
+accumulator now preserves status/effect counts and current-state recovery for flow and sequence.
+Human directives and invocation limits override Continue. Safe progress metadata survives result
+omission and enters H1's parent audit projection. Child receipts and resume UI remain later work.
 
 Cover a governed refusal, a decoded-operation error, and a reference error followed by independent
 work. Under stop, no later step dispatches. Under continue, the result still truthfully reports
@@ -176,7 +180,7 @@ which children failed and which effects happened. A denied child must remain den
 applied effect must not be erased from the aggregate account.
 
 Exit evidence: command logs, child statuses, completed counts, and aggregate status/effect agree
-for all cases. Remove the current flag-only stop behavior and inconsistent aggregation rules.
+for all cases. The flag-only stop behavior and inconsistent aggregation rules have been replaced.
 
 ### H3: Script effect truth
 
@@ -284,7 +288,7 @@ workspace or live-browser success is never inferred from the earlier assessment'
 
 The owner asked how the product focus changes the answers to the earlier questions. The following
 recommendations turn it into expected behavior. The existing accepted scope and H2a fix remain
-as recorded above. H1/H3 corrections and H6's policy/notice choices were subsequently accepted;
+as recorded above. H1/H2b/H3 corrections and H6's policy/notice choices were subsequently accepted;
 other additional design choices remain proposed unless explicitly recorded otherwise.
 
 | Open issue | Recommended answer | Intended user experience |
@@ -305,15 +309,15 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H1 and H3 are complete locally. The recommended subsequent grouping is aggregate truth, then
-composition, frame boundaries, workspace control, audit
+H1, H2b, and H3 are complete locally. The recommended subsequent grouping is child
+receipts, frame boundaries, workspace control, audit
 health, and local resilience. Honest provenance reporting uses the repaired receipt seam;
 conditional signer admission follows a concrete integration. The epic maps those dependencies.
 Run the affected package's ideation session before implementing its undecided choices.
 
 ## Decisions still open
 
-- Broader H2 aggregation and other implementation tasks beyond the completed local H2a fix.
+- H4 child receipts and the other undecided implementation packages in the ideation agenda.
 - Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
   verification caching, and supported-platform behavior.
 - Which concrete integration justifies C2; whether C3 is needed and which participating client
@@ -324,7 +328,7 @@ Run the affected package's ideation session before implementing its undecided ch
 - Audit-write failure behavior and any configurable strictness after a failed append.
 
 The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H4/H5/H8. H1/H3 corrections, existing pause/stop semantics, provenance boundaries, and
+including H4/H5/H8. H1/H2b/H3 corrections, existing pause/stop semantics, provenance boundaries, and
 H6's selected modes remain accepted context rather than unresolved questions.
 
 ## Activity record
@@ -342,6 +346,8 @@ H6's selected modes remain accepted context rather than unresolved questions.
 | 2026-09-06 | Owner accepted H3 next and requested one epic containing all discussion and decisions, with ideation before undecided cycles | EPIC, IDEATION, and the H3 task brief created; bootstrap, decision index, and readiness states reconciled. ADR-0133 amended for script correctness. No new production implementation or test run in this planning turn. |
 | 2026-09-06 | Owner accepted H1 ideation and directed implementation | Readable bounded history; concise recovery language; display and retention separate. Profiles and richer capture deferred. H1 completed locally: 447 Rust tests, 183 extension tests, and actual JSONL checks through the process journey pass. Not deployed. |
 | 2026-09-06 | Owner directed implementation | H2a committed separately as 8103c69b; assessment and epic preserved as a0310637. H3 implemented with local parsing and one effectful evaluation; full gates, 183 extension tests, and 19 Chromium/MCP cases pass. No deployment. Next: H1 ideation. |
+
+| 2026-09-06 | Owner accepted H2b ideation and directed implementation | Shared progress and recovery implemented; completed counts successes, Continue retains failures, known partial effects remain known, and metadata survives omission. 455 Rust/183 extension tests and fresh-build MCP/JSONL checks pass. No deployment. Next: H4 ideation I3. |
 
 ## H2a execution record (2026-09-06)
 

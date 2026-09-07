@@ -39,6 +39,9 @@ rollback and deletion of historical audit files are not part of that remedy.
 
 ## I2: H2b aggregate outcomes and recovery
 
+Accepted 2026-09-06. See [H2b](h2b-aggregate-outcomes.md) and the ADR-0133 amendment.
+The questions below are preserved context, not implementation blockers.
+
 - What should the client see when continue completes later steps after an earlier failure?
 - How should counts distinguish attempted, successful, failed, and unattempted children?
 - How should earlier applied effects, later uncertainty, and safe next steps compose?

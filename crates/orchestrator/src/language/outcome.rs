@@ -208,12 +208,8 @@ pub enum Outcome {
     PolicyExplained { capabilities: usize, layers: usize },
     /// A semantic selector matched zero or several visible controls.
     SelectorUnresolved { matched: usize },
-    /// One governed result-aware flow finished.
-    FlowRan {
-        completed: usize,
-        total: usize,
-        stopped: bool,
-    },
+    /// One governed flow or sequence finished with an explicit progress account.
+    CompositionRan(super::composition::CompositionProgress),
     /// One flow decoded and classified without dispatching.
     FlowDecoded { steps: usize },
     /// One bounded document-tree observation was recorded.
@@ -332,8 +328,6 @@ pub enum Outcome {
         satisfied: bool,
         host: Option<String>,
     },
-    /// A short sequence ran until completion or its first non-success.
-    SequenceRan { completed: usize, total: usize },
     /// A browser dialog was resolved.
     DialogHandled { accepted: bool },
     /// Current JavaScript-dialog state was observed.
@@ -378,17 +372,7 @@ impl Outcome {
                     format!("Recorded the document tree: {counted}.")
                 }
             }
-            Self::FlowRan {
-                completed,
-                total,
-                stopped,
-            } => {
-                if *stopped {
-                    format!("Stopped at step {completed} of {total}.")
-                } else {
-                    format!("Completed {total} flow steps.")
-                }
-            }
+            Self::CompositionRan(progress) => progress.summary(),
             Self::FlowDecoded { steps } => {
                 format!("Decoded {steps} flow steps; nothing was dispatched.")
             }
@@ -629,12 +613,6 @@ impl Outcome {
                 satisfied,
                 host,
             } => waited(condition, *elapsed_ms, *satisfied, host),
-            Self::SequenceRan { completed, total } if completed == total => {
-                format!("Ran {}.", counted(*total, "step", "steps"))
-            }
-            Self::SequenceRan { completed, total } => {
-                format!("Stopped at step {} of {total}.", completed + 1)
-            }
             Self::DialogHandled { accepted: true } => "Accepted the browser dialog.".into(),
             Self::DialogHandled { accepted: false } => "Dismissed the browser dialog.".into(),
             Self::DialogObserved { present: true } => {
@@ -696,18 +674,7 @@ impl Outcome {
             Self::SelectorUnresolved { .. } => vec![
                 "Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact.".into(),
             ],
-            Self::FlowRan {
-                completed,
-                total,
-                ..
-            } if completed < total => vec![
-                "Use the per-step results to find what went wrong, fix that step, and run the flow again."
-                    .into(),
-            ],
-            Self::SequenceRan { completed, total } if completed < total => vec![
-                "Find the step that stopped the sequence in the results, fix it, and run the sequence again."
-                    .into(),
-            ],
+            Self::CompositionRan(progress) => progress.next_steps(),
             Self::Waited {
                 satisfied: false, ..
             } => vec![
@@ -730,10 +697,7 @@ impl Outcome {
     #[must_use]
     pub fn observed(&self) -> Observed {
         match self {
-            Self::TabsListed { count }
-            | Self::SequenceRan {
-                completed: count, ..
-            } => Observed {
+            Self::TabsListed { count } => Observed {
                 count: measured(*count),
                 ..Observed::default()
             },
@@ -748,7 +712,11 @@ impl Outcome {
                 count: measured(*nodes),
                 ..Observed::default()
             },
-            Self::FlowRan { completed, .. } | Self::FlowDecoded { steps: completed } => Observed {
+            Self::CompositionRan(progress) => Observed {
+                count: measured(progress.counts.succeeded),
+                ..Observed::default()
+            },
+            Self::FlowDecoded { steps: completed } => Observed {
                 count: measured(*completed),
                 ..Observed::default()
             },
@@ -912,6 +880,10 @@ pub enum Refusal {
     BrowserStartupManual { browsers: Vec<String> },
     /// Automatic readiness recovery failed before any browser effect.
     BrowserRecoveryFailed { reason: BrowserRecoveryReason },
+    /// The connection was lost after dispatch, before a completion receipt.
+    ConnectionLost,
+    /// Cancellation arrived after dispatch, before a completion receipt.
+    CancelledAfterDispatch,
     /// A dispatched effect cannot be determined.
     EffectUnknown,
     /// A denied new-tab landing has an unknown final state.
@@ -1000,7 +972,8 @@ impl Refusal {
                     "The browser started, but its Ghostlight adapter did not connect in time."
                 }
             },
-            Self::EffectUnknown => "Sent, but the browser never confirmed what happened.",
+            Self::ConnectionLost => "Connection lost before the browser confirmed completion.",
+            Self::EffectUnknown | Self::CancelledAfterDispatch => "Sent, but the browser never confirmed what happened.",
             Self::LandingDeniedUnknown => {
                 "Blocked the landing, but the new tab's final state is unknown."
             }
@@ -1102,7 +1075,7 @@ impl Refusal {
                 "Inspect recording status, then discard it or start a shorter recording."
                     .into(),
             ],
-            Self::EffectUnknown => vec![
+            Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch => vec![
                 "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly."
                     .into(),
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
@@ -1441,6 +1414,26 @@ fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    fn composition(completed: usize, total: usize) -> super::Outcome {
+        use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
+        let incomplete = completed < total;
+        super::Outcome::CompositionRan(CompositionProgress {
+            counts: StepCounts {
+                total,
+                succeeded: completed,
+                failed: usize::from(incomplete),
+                not_run: total - completed - usize::from(incomplete),
+                ..StepCounts::default()
+            },
+            stopped: incomplete,
+            issue: incomplete.then_some(StepIssue {
+                step: completed + 1,
+                cause: StepCause::Failed,
+            }),
+            ..CompositionProgress::default()
+        })
+    }
+
     use serde_json::json;
 
     use super::{
@@ -1682,20 +1675,8 @@ mod tests {
                 },
                 "Executed JavaScript on example.com.",
             ),
-            (
-                Outcome::SequenceRan {
-                    completed: 2,
-                    total: 5,
-                },
-                "Stopped at step 3 of 5.",
-            ),
-            (
-                Outcome::SequenceRan {
-                    completed: 5,
-                    total: 5,
-                },
-                "Ran 5 steps.",
-            ),
+            (composition(2, 5), "Completed 2 of 5 steps. Step 3 failed."),
+            (composition(5, 5), "Completed all 5 steps."),
             (
                 Outcome::Waited {
                     condition: "load_ready".into(),
@@ -1971,11 +1952,8 @@ mod tests {
             assert_eq!(outcome.observed().count, Some(expected));
         }
 
-        let sequence = Outcome::SequenceRan {
-            completed: 3,
-            total: 5,
-        };
-        assert_eq!(sequence.summary(), "Stopped at step 4 of 5.");
+        let sequence = composition(3, 5);
+        assert_eq!(sequence.summary(), "Completed 3 of 5 steps. Step 4 failed.");
         assert_eq!(sequence.observed().count, Some(3));
 
         let capture = Outcome::Captured {
@@ -2267,28 +2245,15 @@ mod tests {
             vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
         );
         assert_eq!(
-            Outcome::FlowRan {
-                completed: 2,
-                total: 5,
-                stopped: true,
-            }
+            composition(2, 5)
             .next_steps(),
-            vec!["Use the per-step results to find what went wrong, fix that step, and run the flow again."]
+            vec!["Use the per-step results to prepare only unfinished work with current page references."]
         );
-        assert!(Outcome::FlowRan {
-            completed: 5,
-            total: 5,
-            stopped: false,
-        }
-        .next_steps()
-        .is_empty());
+        assert!(composition(5, 5).next_steps().is_empty());
         assert_eq!(
-            Outcome::SequenceRan {
-                completed: 2,
-                total: 5,
-            }
+            composition(2, 5)
             .next_steps(),
-            vec!["Find the step that stopped the sequence in the results, fix it, and run the sequence again."]
+            vec!["Use the per-step results to prepare only unfinished work with current page references."]
         );
         assert_eq!(
             Outcome::Waited {

@@ -1,5 +1,6 @@
 //! Invocation lifecycle, cancellation, deadlines, the one executor, and the one completion path.
 
+mod composition;
 mod flow;
 mod forms;
 mod navigation;
@@ -1399,8 +1400,12 @@ impl ApplicationExecutor {
                     },
                     json!({"reason":"deadline","phase":"after_dispatch"}),
                 ),
-                BrowserError::DisconnectedAfterDispatch | BrowserError::CancelledAfterDispatch => (
-                    Refusal::EffectUnknown,
+                BrowserError::DisconnectedAfterDispatch => (
+                    Refusal::ConnectionLost,
+                    json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
+                ),
+                BrowserError::CancelledAfterDispatch => (
+                    Refusal::CancelledAfterDispatch,
                     json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
                 ),
                 _ => (
@@ -2048,17 +2053,6 @@ fn word_count(text: &str) -> usize {
 
 fn bounded(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
-}
-
-fn status_name(status: Status) -> &'static str {
-    match status {
-        Status::Succeeded => "succeeded",
-        Status::Blocked => "blocked",
-        Status::Failed => "failed",
-        Status::Cancelled => "cancelled",
-        Status::AttentionRequired => "attention_required",
-        Status::Unknown => "unknown",
-    }
 }
 
 fn browser_reason(error: &BrowserError) -> &'static str {
@@ -2811,10 +2805,12 @@ mod tests {
         assert_eq!(calls.len(), 1, "neither refused nor later work dispatches");
         assert!(matches!(calls[0], BrowserCommand::OpenTab { .. }));
         assert_eq!(result.facts["stopped"], true);
-        assert_eq!(result.facts["completed"], 2);
+        assert_eq!(result.facts["completed"], 1);
         assert_eq!(result.facts["total"], 3);
         let steps = result.facts["steps"].as_array().unwrap();
-        assert_eq!(steps.len(), 2);
+        assert_eq!(steps.len(), 3);
+        assert_eq!(result.status, Status::Blocked);
+        assert_eq!(steps[2]["status"], "not_run");
         assert_eq!(steps[0]["result"]["status"], "succeeded");
         assert_eq!(steps[0]["result"]["effect"], "applied");
         assert_eq!(steps[1]["result"]["status"], "blocked");
@@ -2866,7 +2862,11 @@ mod tests {
                     .all(|call| matches!(call, BrowserCommand::OpenTab { .. })));
                 assert_eq!(result.facts["stopped"], should_stop);
                 let steps = result.facts["steps"].as_array().unwrap();
-                assert_eq!(steps.len(), if should_stop { 2 } else { 3 });
+                assert_eq!(steps.len(), 3);
+                assert_eq!(result.status, Status::Failed);
+                assert_eq!(result.facts["completed"], if should_stop { 1 } else { 2 });
+                assert_eq!(result.effect, Effect::Partial);
+                assert_eq!(result.facts["progress"]["counts"]["not_started"], 1);
                 assert_eq!(steps[0]["result"]["effect"], "applied");
                 assert!(steps[1]["error"].is_string());
                 assert!(!result.repeat_safe);
@@ -2877,6 +2877,193 @@ mod tests {
                     assert_eq!(steps[2]["result"]["status"], "succeeded");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn continue_reports_policy_denial_after_later_independent_success() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        for id in [7, 8] {
+            browser.push(Ok(BrowserOutcome::TabOpened {
+                reused: false,
+                tab: tab(id, "https://example.com/"),
+                committed_urls: vec!["https://example.com/".into()],
+            }));
+        }
+        let result = executor.execute(&workspace, "browser_flow", json!({
+            "on_error":"continue", "restrict_capabilities":["read"], "steps":[
+                {"id":"first","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
+                {"id":"denied","tool":"browser_execute","arguments":{"script":"PRIVATE_SCRIPT"}},
+                {"id":"last","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
+            ]
+        }), None, &CancellationToken::default());
+        assert_eq!(browser.calls().len(), 2);
+        assert_eq!(result.status, Status::Blocked);
+        assert_eq!(result.effect, Effect::Partial);
+        assert_eq!(result.summary, "Completed 2 of 3 steps. 1 blocked.");
+        assert_eq!(result.facts["completed"], 2);
+        assert_eq!(result.facts["stopped"], false);
+        assert_eq!(result.facts["progress"]["counts"]["blocked"], 1);
+        assert!(!result.repeat_safe);
+        let records = audit.0.lock().unwrap();
+        let record = records.last().unwrap();
+        assert!(
+            !record.allowed,
+            "later admission cannot erase the child's policy denial"
+        );
+        assert_eq!(
+            serde_json::to_value(record.composition).unwrap(),
+            result.facts["progress"]
+        );
+        assert!(!serde_json::to_string(record).unwrap().contains("PRIVATE_"));
+    }
+
+    #[test]
+    fn flow_result_budget_preserves_step_metadata_and_reference_values() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        browser.push(Ok(BrowserOutcome::ScriptEvaluated {
+            tab: tab(7, "https://example.com/"),
+            value: json!({"PRIVATE_PAYLOAD":"x".repeat(110_000),"limit":500}).to_string(),
+            truncated: false,
+            committed_urls: vec![],
+        }));
+        browser.push(Ok(BrowserOutcome::Text {
+            tab_id: 7,
+            text: "visible".into(),
+            truncated: false,
+            title: "Example".into(),
+            url: "https://example.com/".into(),
+        }));
+        let result = executor.execute(&workspace, "browser_flow", json!({"steps":[
+            {"id":"large","tool":"browser_execute","arguments":{"script":"({limit:500})"}},
+            {"id":"read","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"large","pointer":"/facts/value/limit"}}}}
+        ]}), None, &CancellationToken::default());
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(result.facts["completed"], 2);
+        for row in result.facts["steps"].as_array().unwrap() {
+            assert_eq!(row["omitted"], true);
+            assert_eq!(row["status"], "succeeded");
+            assert!(row["effect"].is_string());
+            assert!(row["repeat_safe"].is_boolean());
+            assert!(row.get("result").is_none());
+        }
+        assert_eq!(result.facts["steps"][0]["effect"], "applied");
+        assert_eq!(result.facts["steps"][1]["effect"], "none");
+        assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
+            .unwrap()
+            .contains("PRIVATE_"));
+    }
+
+    #[test]
+    fn read_only_compositions_are_repeat_safe_only_when_fully_successful() {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        for fail_last in [false, true] {
+            for index in 0..2 {
+                browser.push(if fail_last && index == 1 {
+                    Err(BrowserError::Primitive("PRIVATE_ERROR".into()))
+                } else {
+                    Ok(BrowserOutcome::Text {
+                        tab_id: 7,
+                        text: "read".into(),
+                        truncated: false,
+                        title: "Example".into(),
+                        url: "https://example.com/".into(),
+                    })
+                });
+            }
+            let result = executor.execute(
+                &workspace,
+                "browser_flow",
+                json!({"steps":[
+                    {"id":"one","tool":"browser_read","arguments":{}},
+                    {"id":"two","tool":"browser_read","arguments":{}}
+                ]}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(
+                result.status,
+                if fail_last {
+                    Status::Failed
+                } else {
+                    Status::Succeeded
+                }
+            );
+            assert_eq!(result.effect, Effect::None);
+            assert_eq!(result.repeat_safe, !fail_last);
+            assert_eq!(result.facts["completed"], if fail_last { 1 } else { 2 });
+        }
+    }
+
+    #[test]
+    fn continue_honors_human_attention_and_invocation_limits() {
+        for (error, cause, status, effect) in [
+            (
+                BrowserError::LocalInterlock("PRIVATE_INTERLOCK".into()),
+                "attention_required",
+                Status::Blocked,
+                Effect::None,
+            ),
+            (
+                BrowserError::CancelledBeforeDispatch,
+                "cancelled",
+                Status::Cancelled,
+                Effect::None,
+            ),
+            (
+                BrowserError::CancelledAfterDispatch,
+                "cancelled",
+                Status::Unknown,
+                Effect::Unknown,
+            ),
+            (
+                BrowserError::DeadlineBeforeDispatch,
+                "deadline",
+                Status::Failed,
+                Effect::None,
+            ),
+            (
+                BrowserError::DeadlineAfterDispatch,
+                "deadline",
+                Status::Unknown,
+                Effect::Unknown,
+            ),
+        ] {
+            let (executor, browser, _, workspace, _) = fixture();
+            browser.push(Err(error));
+            let result = executor.execute(&workspace, "browser_flow", json!({"on_error":"continue","steps":[
+                {"id":"first","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
+                {"id":"later","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
+            ]}), None, &CancellationToken::default());
+            assert_eq!(browser.calls().len(), 1, "{cause}: {}", result.summary);
+            assert_eq!(result.status, status);
+            assert_eq!(result.effect, effect);
+            assert_eq!(result.facts["progress"]["issue"]["cause"], cause);
+            assert_eq!(result.facts["steps"][1]["status"], "not_run");
         }
     }
 
@@ -4285,6 +4472,67 @@ mod tests {
                 .count(),
             1
         );
+        for unknown in [false, true] {
+            for tool in ["browser_sequence", "browser_flow"] {
+                browser.push(Ok(BrowserOutcome::Activated {
+                    tab: tab(7, "https://example.com/"),
+                    committed_urls: vec![],
+                    subject: None,
+                }));
+                browser.push(Err(if unknown {
+                    BrowserError::DisconnectedAfterDispatch
+                } else {
+                    BrowserError::Primitive("PRIVATE_WAIT_FAILURE".into())
+                }));
+                let before = browser.calls().len();
+                let arguments = if tool == "browser_sequence" {
+                    json!({"tab":tab_handle,"steps":[
+                        {"action":"click","target":target},
+                        {"action":"wait","condition":"load_ready"},
+                        {"action":"click","target":target}
+                    ]})
+                } else {
+                    json!({"steps":[
+                        {"id":"click","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}},
+                        {"id":"wait","tool":"browser_wait","arguments":{"tab":tab_handle,"condition":"load_ready"}},
+                        {"id":"later","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}}
+                    ]})
+                };
+                let result = executor.execute(
+                    &workspace,
+                    tool,
+                    arguments,
+                    None,
+                    &CancellationToken::default(),
+                );
+                assert_eq!(browser.calls().len() - before, 2, "{tool}");
+                assert_eq!(
+                    result.status,
+                    if unknown {
+                        Status::Unknown
+                    } else {
+                        Status::Failed
+                    }
+                );
+                assert_eq!(
+                    result.effect,
+                    if unknown {
+                        Effect::Unknown
+                    } else {
+                        Effect::Partial
+                    }
+                );
+                assert_eq!(result.facts["progress"]["counts"]["succeeded"], 1);
+                assert_eq!(result.facts["progress"]["effects"]["applied"], 1);
+                assert_eq!(result.facts["steps"][2]["status"], "not_run");
+                assert!(!result.repeat_safe);
+                assert!(result.summary.contains(if unknown {
+                    "Connection lost during step 2."
+                } else {
+                    "Step 2 failed."
+                }));
+            }
+        }
     }
 
     #[test]

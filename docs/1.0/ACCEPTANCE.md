@@ -65,11 +65,16 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Executor and truth gates
 
-1. Direct operations and sequence steps pass through the same executor and completion gate.
+1. Direct operations and composition steps use the same operation executor. The parent completes
+   once; independent child completion receipts remain H4 work.
 2. One invocation can commit only one terminal outcome.
 3. Deadline or cancellation before dispatch reports no effect and is repeat-safe when the job is.
 4. Disconnect or cancellation after uncertain dispatch reports unknown effect and no replay advice.
-5. A partial sequence reports completed steps and no replay advice.
+5. Flow and sequence count successful steps as completed. Mixed Continue remains non-success.
+   Known partial effects stay partial; later uncertainty preserves prior known effect counts.
+   Unable-to-start and never-run steps remain distinct. Result omission preserves status/effect
+   metadata. Recovery respects completed work; human directives and invocation limits beat Continue.
+   Safe repetition requires every step to succeed without effects and permit repetition.
 6. Stale tab and target handles fail before browser dispatch and suggest obtaining current handles.
 7. Lower-capability-model fixtures succeed with every documented shortest call, choose the correct
    sibling among related tools, and recover from deliberately stale and ambiguous handles.
@@ -96,8 +101,9 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    its subdomains, loopback, link-local metadata, and IPv4-embedded IPv6 destinations.
 2. Non-HTTP(S) schemes remain denied. Local destinations follow authored host and capability
    rules, request restrictions, observe/enforce modes, and policy-defined never-touch hosts.
-3. RAWX is independent: each operation uses its complete set, and sequence steps are admitted and
-   audited separately. Empty wrapper or local-window operations do not invent authority.
+3. RAWX is independent: each operation uses its complete set, and composition steps are admitted
+   separately. Empty wrapper or local-window operations do not invent authority. Current audit has
+   one parent composition record; separate child receipts remain the H4 acceptance gap.
 4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
    deny, observe/enforce, and layer-intersection rules from ADR-0121.
 5. Request restrictions never add a host or capability. Started work keeps one immutable authority

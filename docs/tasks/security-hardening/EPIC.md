@@ -23,6 +23,8 @@ and history accurately explains what happened without becoming an unexpected con
 - [Assessment](../../design/security-assessment-2026-09-06.md): dated source findings and isolated
   reproductions. Findings are evidence, not automatic approval of every proposed remedy.
 - [H2a](h2a-flow-stop.md): existing local flow-stopping fix and its regression evidence.
+- [H2b](h2b-aggregate-outcomes.md): accurate aggregate progress and contextual recovery.
+- [H1](h1-readable-audit.md): readable bounded audit and retention evidence.
 - [H3](h3-script-effect-truth.md): script-correctness scope and completion evidence.
 - [H6](h6-frame-coverage-ux.md): agreed frame policy choices and remaining detailed UX proposals.
 
@@ -38,6 +40,7 @@ The ledger owns progress; this epic is the plan, not another status store.
 | Provenance | Separate claims from verified observations. Report first; allow optional signer/hash admission only with a verifiable subject and connection binding. Unknown remains unknown, verification stays offline, and no certificate is automatically trusted. | ADR-0105 amendment, ledger C1-C3 |
 | Non-atomic effects | Preserve effects that already happened. No general browser rollback or atomic transaction requirement follows from the discussion. | Ledger H1-H3, [ADR-0133](../../adr/0133-behavioral-capability-restoration.md) |
 | Readable audit | Readable bounded history, details on demand, and existing target-name controls. Display detail does not authorize more retention. New profiles and richer capture deferred. | [ADR-0103 amendment](../../adr/0103-language-owned-outcome-voice.md), [H1](h1-readable-audit.md) |
+| Aggregate recovery | Completed means succeeded. Continue preserves failures, known effects remain known, and recovery respects completed work. | ADR-0133 H2b amendment, [H2b](h2b-aggregate-outcomes.md) |
 | Flow stopping | Stop on the configured failure boundary; do not run later steps after reporting a stop. | ADR-0133 Decision 9, H2a |
 | Script execution | Determine a supported form without replaying possibly effectful code; exception text/class is not evidence of safe retry or no effects. Preserve supported REPL behavior and report uncertainty honestly. | ADR-0133 September 6 amendment, H3 |
 | Embedded subjects | Apply authored host/RAWX authority to the document actually accessed. A parent's authorization alone does not authorize its embeds. | [ADR-0151 amendments](../../adr/0151-composed-full-page-reading.md), H6 |
@@ -55,7 +58,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | H2a: Flow stopping | A failed child under stop prevents subsequent dispatch and preserves earlier effects. | Separate implementation record; broader aggregate behavior is H2b. |
 | H3: Script effect truth | A runtime exception cannot cause automatic duplicate execution or a false no-effect result. | Selected first new cycle; preserve script compatibility and prove the mechanism in Chromium. |
 | H1: Audit confidentiality | Operation metadata stays useful without copying page results, values, scripts, or arbitrary errors into durable audit. | I1 accepted: readable bounded history and existing name control; profiles and richer capture deferred. See [H1](h1-readable-audit.md). |
-| H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | Ideation I2; build on H2a and coordinate effect semantics with H3. |
+| H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | I2 accepted and implemented locally; shared flow/sequence progress and recovery. See H2b. |
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | Ideation I3; safe projection from H1 and agreed aggregate semantics from H2b. |
 | H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | Ideation I4 for unresolved details; existing pause/stop decisions remain authoritative. Direct scope proof can precede H4; composed proof follows it. |
 | H6: Embedded-document policy | Chosen exclusion handling and notice preferences work consistently across supported observations and actions. | Ideation I5 settles remaining schema, scope, disclosure, and capture choices; agreed modes are not reopened. |
@@ -69,7 +72,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 
 1. Finish the existing H2a checkpoint and implement H3 as the first new cycle. Recheck the tree,
    preserve the separate logical changes, and prove script compatibility alongside the defects.
-2. H1 is accepted and complete locally. Settle H2b in ideation, then implement aggregate behavior. H4
+2. H1 and H2b are accepted and complete locally. H4 ideation
    follows their shared completion semantics. These packages establish safe evidence for later work.
 3. Run targeted ideation for H5-H7 and implement bounded tasks. H6's agreed choices shape its
    evidence contract; do not build a generic policy framework while details remain unresolved.

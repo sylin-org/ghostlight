@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-06 (H1 and H3 implemented and verified locally; flow-stop fix committed;
+Last updated: 2026-09-06 (H1, H2b, and H3 implemented and verified locally; flow-stop fix committed;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Security-hardening epic (2026-09-06)
@@ -61,7 +61,17 @@ Read/script flow and a primitive browser error: permitted client details survive
 excludes them. This is a synthetic adapter through real MCP/relay/service processes, not a live
 browser or installed-MV3 lane. H1 is not deployed or published.
 
-Next is H2b ideation for aggregate outcomes and recovery. Child receipts, runtime scope/timing,
+The owner accepted [H2b aggregate outcomes and recovery](tasks/security-hardening/h2b-aggregate-outcomes.md).
+It is implemented locally: flow and sequence share progress accounting, completed counts successes,
+Continue retains failures, known partial effects remain known, and recovery respects existing work.
+Step status/effect metadata survives omitted payloads; H1 audit retains only safe typed progress.
+Human directives, attention, cancellation, and deadlines override Continue. ADR-0133 records the
+decision. All 455 Rust tests (378 orchestrator library), 183 extension tests, formatting, Clippy,
+and the fresh-build process journey pass. Actual MCP error flags and JSONL progress match the
+results. These are fake-browser and synthetic-adapter process lanes, not installed MV3 or live
+Chromium timing proof. H2b is not deployed or published.
+
+Next is H4 ideation for child receipts. Runtime scope/timing,
 audit health, and local bounds also require their ideation sessions before implementation.
 Expected partial website effects remain distinct from Ghostlight's extra copies or execution. No publication has been made for
 the epic.
