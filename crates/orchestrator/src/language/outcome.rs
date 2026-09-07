@@ -210,6 +210,13 @@ pub enum Outcome {
     SelectorUnresolved { matched: usize },
     /// One governed flow or sequence finished with an explicit progress account.
     CompositionRan(super::composition::CompositionProgress),
+    /// Confirmed children while the parent is still active.
+    CompositionProgress { completed: usize, total: usize },
+    /// A restored group has child evidence but no parent completion record.
+    CompositionUnrecorded,
+    /// Invalid child inputs prevented entering the ordinary executor.
+    StepNotStarted,
+
     /// One flow decoded and classified without dispatching.
     FlowDecoded { steps: usize },
     /// One bounded document-tree observation was recorded.
@@ -373,6 +380,11 @@ impl Outcome {
                 }
             }
             Self::CompositionRan(progress) => progress.summary(),
+            Self::CompositionProgress { completed, total } => {
+                format!("Completed {completed} of {total} steps.")
+            }
+            Self::CompositionUnrecorded => "Completion was not recorded.".into(),
+            Self::StepNotStarted => "This step could not start.".into(),
             Self::FlowDecoded { steps } => {
                 format!("Decoded {steps} flow steps; nothing was dispatched.")
             }
@@ -716,7 +728,8 @@ impl Outcome {
                 count: measured(progress.counts.succeeded),
                 ..Observed::default()
             },
-            Self::FlowDecoded { steps: completed } => Observed {
+            Self::CompositionProgress { completed, .. }
+            | Self::FlowDecoded { steps: completed } => Observed {
                 count: measured(*completed),
                 ..Observed::default()
             },
@@ -805,6 +818,8 @@ impl Outcome {
             | Self::BrowserLanding { .. }
             | Self::DialogHandled { .. }
             | Self::DialogObserved { .. }
+            | Self::CompositionUnrecorded
+            | Self::StepNotStarted
             | Self::RecordingDiscarded => Observed::default(),
         }
     }

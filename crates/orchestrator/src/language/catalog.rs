@@ -1156,7 +1156,7 @@ fn flow_schema() -> Value {
             vec![
                 (
                     "steps",
-                    json!({"type":"array","minItems":1,"maxItems":20,"description":"Uniquely named steps executed in order.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Unique step id within this flow."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["id","tool"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Uniquely named steps executed in order.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Unique step id within this flow."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["id","tool"]}}),
                 ),
                 (
                     "on_error",

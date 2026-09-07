@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-06 (H1, H2b, and H3 implemented and verified locally; flow-stop fix committed;
+Last updated: 2026-09-06 (H1, H2b, H3, and H4 implemented and verified locally; flow-stop fix committed;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Security-hardening epic (2026-09-06)
@@ -71,7 +71,24 @@ and the fresh-build process journey pass. Actual MCP error flags and JSONL progr
 results. These are fake-browser and synthetic-adapter process lanes, not installed MV3 or live
 Chromium timing proof. H2b is not deployed or published.
 
-Next is H4 ideation for child receipts. Runtime scope/timing,
+The owner accepted [H4 grouped history and permission explanations](tasks/security-hardening/h4-grouped-history.md).
+It is implemented locally under ADR-0156. Attempted children write bounded receipts as they finish,
+using the parent lease/snapshot and common completion seam. History groups them in one collapsed
+entry with detail on demand; missing completion remains explicit. Permission explanations retain
+actual layer/grant evidence for admission as well as refusal. Request restrictions distinguish
+presence from evaluation. Policy previews use children; aggregate wrappers do not repeat denials.
+
+All 463 Rust tests (386 orchestrator library), 183 extension tests, formatting, Clippy, and fresh-build
+process checks pass. The process journey checks actual incremental JSONL and content exclusion.
+The bundled UI passes surface tests and isolated Chromium checks for expansion, first-problem
+scrolling, focus/scroll preservation, and the supported minimum width. This is synthetic projection
+and adapter evidence, not an installed Tauri/MV3 deployment. H4 is not deployed or published.
+
+The permission review also reproduces an existing evaluator gap: observe-mode admission can
+return before a stricter request restriction. H4 records that omission honestly; the ledger
+tracks the required admission-order repair and missing direct/composed dispatch proof.
+
+Next is H5 ideation I4 for runtime scope, enforcement timing, and that admission gap. Runtime scope/timing,
 audit health, and local bounds also require their ideation sessions before implementation.
 Expected partial website effects remain distinct from Ghostlight's extra copies or execution. No publication has been made for
 the epic.

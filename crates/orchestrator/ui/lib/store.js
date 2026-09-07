@@ -82,10 +82,11 @@
 
     function seed(snapshot) {
       const live = snapshot.operations.map(entryFromOperation);
-      const settled = snapshot.history.map((record) => entryFromRecord(record, null));
       const byInvocation = new Map();
-      for (const entry of [...live, ...settled]) {
-        if (!byInvocation.has(entry.invocation)) byInvocation.set(entry.invocation, entry);
+      for (const entry of live) byInvocation.set(entry.invocation, entry);
+      for (const record of snapshot.history) {
+        const existing = byInvocation.get(record.invocation);
+        byInvocation.set(record.invocation, entryFromRecord(record, existing));
       }
       state.feed = [...byInvocation.values()]
         .filter((entry) => !state.hidden.has(entry.invocation))
@@ -200,6 +201,7 @@
           case "operation_started": touch(); started(change.operation); break;
           case "operation_changed": touch(); changed(change.operation); break;
           case "operation_settled": touch(); settled(change.record); break;
+          case "composition_changed": touch(); settled(change.record); break;
           case "runtime_changed": state.runtime = change.runtime_state; break;
           default: return "ignored";
         }

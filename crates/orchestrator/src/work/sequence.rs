@@ -8,10 +8,11 @@ use ghostlight_bridge::browser::{
 
 use crate::events::DomainEvent;
 use crate::governance::Capability;
+use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::outcome::{Outcome, Refusal};
 use crate::language::{
-    Click, Diagnose, FillForm, FormField, HandleDialog, Hover, PressKey, RunSequence, ScrollPage,
-    SequenceStep, TypeText, Wait,
+    Click, Diagnose, FillForm, FormField, HandleDialog, Hover, Operation, PressKey, RunSequence,
+    ScrollPage, SequenceStep, TypeText, Wait,
 };
 use crate::workspace::WorkspaceLease;
 
@@ -41,6 +42,7 @@ impl ApplicationExecutor {
             Some(selected.physical_id),
         );
         let mut statuses = Vec::with_capacity(total);
+        let tools: Vec<_> = value.steps.iter().map(sequence_tool).collect();
         for (index, step) in value.steps.iter().enumerate() {
             if progress.stop_at_boundary(context, index + 1) {
                 break;
@@ -51,136 +53,119 @@ impl ApplicationExecutor {
                 physical_id: Some(selected.physical_id),
                 activity: step_activity(step),
             });
-            let terminal = match step {
+            let operation = match step {
                 SequenceStep::Click {
                     target,
                     button,
                     click_count,
-                } => self.perform_click(
-                    context,
-                    lease,
-                    &Click {
-                        target: Some(target.clone()),
-                        selector: None,
-                        view: None,
-                        x: None,
-                        y: None,
-                        tab: Some(selected.handle.as_str().into()),
-                        button: button.clone(),
-                        click_count: *click_count,
-                        expect: None,
-                        modifiers: Vec::new(),
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::Click(Click {
+                    target: Some(target.clone()),
+                    selector: None,
+                    view: None,
+                    x: None,
+                    y: None,
+                    tab: Some(selected.handle.as_str().into()),
+                    button: button.clone(),
+                    click_count: *click_count,
+                    expect: None,
+                    modifiers: Vec::new(),
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
                 SequenceStep::TypeText {
                     target,
                     text,
                     clear_first,
-                } => self.perform_type_text(
-                    context,
-                    lease,
-                    &TypeText {
-                        target: target.clone(),
-                        focused: false,
-                        selector: None,
-                        text: text.clone(),
-                        tab: Some(selected.handle.as_str().into()),
-                        clear_first: *clear_first,
-                        expect: None,
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::TypeText(TypeText {
+                    target: target.clone(),
+                    focused: false,
+                    selector: None,
+                    text: text.clone(),
+                    tab: Some(selected.handle.as_str().into()),
+                    clear_first: *clear_first,
+                    expect: None,
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
                 SequenceStep::Fill {
                     target,
                     value: field_value,
-                } => self.perform_fill(
-                    context,
-                    lease,
-                    &FillForm {
-                        fields: vec![FormField {
-                            target: Some(target.clone()),
-                            selector: None,
-                            value: crate::language::FormFieldValue::Text(field_value.clone()),
-                        }],
-                        tab: Some(selected.handle.as_str().into()),
-                        submit_target: None,
-                        expect: None,
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::FillForm(FillForm {
+                    fields: vec![FormField {
+                        target: Some(target.clone()),
+                        selector: None,
+                        value: crate::language::FormFieldValue::Text(field_value.clone()),
+                    }],
+                    tab: Some(selected.handle.as_str().into()),
+                    submit_target: None,
+                    expect: None,
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
                 SequenceStep::PressKey {
                     key,
                     target,
                     modifiers,
-                } => self.perform_key(
-                    context,
-                    lease,
-                    &PressKey {
-                        key: key.clone(),
-                        strokes: Vec::new(),
-                        repeat: 1,
-                        tab: Some(selected.handle.as_str().into()),
-                        target: target.clone(),
-                        modifiers: modifiers.clone(),
-                        expect: None,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::PressKey(PressKey {
+                    key: key.clone(),
+                    strokes: Vec::new(),
+                    repeat: 1,
+                    tab: Some(selected.handle.as_str().into()),
+                    target: target.clone(),
+                    modifiers: modifiers.clone(),
+                    expect: None,
+                    restrictions: value.restrictions.clone(),
+                }),
                 SequenceStep::Scroll {
                     target,
                     direction,
                     amount,
-                } => self.perform_scroll(
-                    context,
-                    lease,
-                    &ScrollPage {
-                        tab: Some(selected.handle.as_str().into()),
-                        target: target.clone(),
-                        direction: direction.clone(),
-                        amount: amount.clone(),
-                        view: None,
-                        x: None,
-                        y: None,
-                        ticks: None,
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
-                SequenceStep::Hover { target } => self.perform_hover(
-                    context,
-                    lease,
-                    &Hover {
-                        target: Some(target.clone()),
-                        view: None,
-                        x: None,
-                        y: None,
-                        tab: Some(selected.handle.as_str().into()),
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::ScrollPage(ScrollPage {
+                    tab: Some(selected.handle.as_str().into()),
+                    target: target.clone(),
+                    direction: direction.clone(),
+                    amount: amount.clone(),
+                    view: None,
+                    x: None,
+                    y: None,
+                    ticks: None,
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
+                SequenceStep::Hover { target } => Operation::Hover(Hover {
+                    target: Some(target.clone()),
+                    view: None,
+                    x: None,
+                    y: None,
+                    tab: Some(selected.handle.as_str().into()),
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
                 SequenceStep::Wait {
                     condition,
                     value: condition_value,
                     target,
-                } => self.perform_wait(
-                    context,
-                    lease,
-                    &Wait {
-                        condition: condition.clone(),
-                        tab: Some(selected.handle.as_str().into()),
-                        value: condition_value.clone(),
-                        target: target.clone(),
-                        selector: None,
-                        timeout_ms: value.timeout_ms,
-                        restrictions: value.restrictions.clone(),
-                    },
-                ),
+                } => Operation::Wait(Wait {
+                    condition: condition.clone(),
+                    tab: Some(selected.handle.as_str().into()),
+                    value: condition_value.clone(),
+                    target: target.clone(),
+                    selector: None,
+                    timeout_ms: value.timeout_ms,
+                    restrictions: value.restrictions.clone(),
+                }),
             };
+            let terminal = self.run_child(
+                context,
+                lease,
+                &operation,
+                StepReceipt {
+                    parent: CompositionKind::Sequence,
+                    position: index + 1,
+                    total,
+                    preparation_failed: false,
+                },
+            );
             let cause = progress.record(index + 1, &terminal);
             statuses.push(terminal_row(index + 1, &terminal, cause));
             if terminal.result.status != Status::Succeeded {
@@ -193,7 +178,9 @@ impl ApplicationExecutor {
         }
         let facts = json!({"tab":selected.handle.as_str(),"completed_steps":progress.progress.counts.succeeded,
             "total_steps":total,"steps":statuses});
-        progress.finish(context, facts)
+        let mut terminal = progress.finish(context, facts);
+        terminal.audit = terminal.audit.with_tools(tools);
+        terminal
     }
 
     pub(super) fn handle_dialog(
@@ -365,5 +352,17 @@ impl ApplicationExecutor {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         }
+    }
+}
+
+fn sequence_tool(step: &SequenceStep) -> &'static str {
+    match step {
+        SequenceStep::Click { .. } => "browser_click",
+        SequenceStep::TypeText { .. } => "browser_type_text",
+        SequenceStep::Fill { .. } => "browser_fill_form",
+        SequenceStep::PressKey { .. } => "browser_press_key",
+        SequenceStep::Scroll { .. } => "browser_scroll",
+        SequenceStep::Hover { .. } => "browser_hover",
+        SequenceStep::Wait { .. } => "browser_wait",
     }
 }

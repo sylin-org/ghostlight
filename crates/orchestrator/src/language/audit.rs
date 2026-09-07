@@ -14,6 +14,7 @@ pub struct AuditProjection {
     summary: String,
     refusal: Option<AuditRefusal>,
     composition: Option<CompositionProgress>,
+    tools: Vec<String>,
 }
 
 impl AuditProjection {
@@ -27,6 +28,23 @@ impl AuditProjection {
     #[must_use]
     pub fn composition(&self) -> Option<CompositionProgress> {
         self.composition
+    }
+
+    /// Attach only canonical catalog names, bounded by the composition contract.
+    #[must_use]
+    pub fn with_tools(mut self, tools: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.tools = tools
+            .into_iter()
+            .take(super::history::COMPOSITION_STEP_LIMIT)
+            .map(|name| tool_name(name.as_ref()).into())
+            .collect();
+        self
+    }
+
+    /// Read the retained composition plan, without caller step labels or arguments.
+    #[must_use]
+    pub fn tools(&self) -> &[String] {
+        &self.tools
     }
 
     /// Read the closed refusal metadata, when this outcome is a refusal.
@@ -76,6 +94,7 @@ impl Outcome {
         AuditProjection {
             summary: self.summary(),
             refusal: None,
+            tools: vec![],
             composition: match self {
                 Self::CompositionRan(progress) => Some(*progress),
                 _ => None,
@@ -135,6 +154,7 @@ impl Refusal {
                 _ => self.summary(),
             },
             refusal: Some(refusal),
+            tools: vec![],
             composition: None,
         }
     }

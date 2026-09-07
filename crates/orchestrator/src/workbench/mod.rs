@@ -1,5 +1,8 @@
 //! Orchestrator-owned desktop read model, user intents, and operating-system presentation port.
 
+mod history;
+pub use history::{HistoryStep, StepHistoryState};
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -107,7 +110,7 @@ impl WorkbenchProjection {
                 continue;
             }
             let record: AuditRecord = serde_json::from_str(&line).map_err(io::Error::other)?;
-            push_bounded(&mut restored, HistoryItem::from(record));
+            history::merge(&mut restored, &record, false);
         }
         self.lock().history = restored;
         Ok(())
@@ -227,17 +230,26 @@ impl WorkbenchProjection {
     }
 
     fn record(&self, record: &AuditRecord) {
-        let item = HistoryItem::from(record.clone());
-        {
+        let child = record.step.is_some();
+        let item = {
             let mut state = self.lock();
-            state.operations.remove(&record.invocation);
-            state
-                .notified
-                .retain(|(invocation, _)| invocation != &record.invocation);
-            push_bounded(&mut state.history, item.clone());
-        }
-        self.publish(WorkbenchChange::OperationSettled {
-            record: Box::new(item),
+            let live = state.operations.contains_key(&record.invocation);
+            if !child {
+                state.operations.remove(&record.invocation);
+                state
+                    .notified
+                    .retain(|(invocation, _)| invocation != &record.invocation);
+            }
+            history::merge(&mut state.history, record, live)
+        };
+        self.publish(if child {
+            WorkbenchChange::CompositionChanged {
+                record: Box::new(item),
+            }
+        } else {
+            WorkbenchChange::OperationSettled {
+                record: Box::new(item),
+            }
         });
     }
 
@@ -630,6 +642,7 @@ impl WorkbenchFacade {
             .map_err(|error| error.to_string())?;
         let snapshot = &candidate.snapshot;
         let history = self.projection.history();
+        let history = history::operations(&history);
         let considered = history.iter().filter(|item| item.allowed).count();
         let mut refused: Vec<PreviewRefusal> = Vec::new();
         for item in history.iter().filter(|item| item.allowed) {
@@ -854,6 +867,8 @@ pub enum WorkbenchChange {
         /// published JSON is unchanged: a box serializes as the value it holds.
         record: Box<HistoryItem>,
     },
+    /// A child receipt updated an existing composition without settling its parent.
+    CompositionChanged { record: Box<HistoryItem> },
     /// Authoritative runtime control state changed.
     RuntimeChanged {
         /// The new runtime control state.
@@ -1127,13 +1142,34 @@ pub struct HistoryItem {
     pub observed: Observed,
     /// Which intake the work arrived on, when the workspace was still known.
     pub channel: Option<IntakeChannel>,
+    /// Whether a terminal parent/direct receipt was recorded.
+    pub complete: bool,
+    /// The same safe composition account retained in audit.
+    pub composition: Option<crate::language::composition::CompositionProgress>,
+    /// One bounded level of step detail; missing records stay explicit.
+    pub steps: Vec<HistoryStep>,
+    /// Actual authority evidence, never reconstructed using current policy.
+    pub permissions: crate::governance::evidence::PermissionTrace,
+    /// Language-owned explanations for the captured checks.
+    pub permission_explanations: Vec<String>,
 }
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
         let requirements = value.requirements();
         let capability = requirements.label();
+        let permission_explanations = value
+            .permissions
+            .checks
+            .iter()
+            .map(crate::language::history::permission)
+            .collect();
         Self {
+            complete: true,
+            composition: value.composition,
+            steps: vec![],
+            permissions: value.permissions,
+            permission_explanations,
             requirements,
             timestamp_ms: value.timestamp_ms,
             invocation: value.invocation,

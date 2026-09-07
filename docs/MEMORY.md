@@ -208,6 +208,11 @@ Every one of these cost something to learn.
   changes the next step. Displaying more existing detail never authorizes capturing more content.
   Additional retention profiles and richer diagnostic capture need a concrete user benefit
   and a separate decision (ADR-0103 H1 amendment).
+- **Composition history is one expandable account.** Retain safe receipts as children finish,
+  with the parent's snapshot and positional correlation. Missing completion is missing evidence,
+  never proof that work did not run. Explain allowance from the actual evaluated grants as well
+  as refusal. Expanded details stay open without extra alerts; wrappers never repeat action or
+  denial counts. Automatic resumption needs a separate decision (ADR-0156).
 - **Completed means succeeded.** Flow and sequence keep unsuccessful and unreached work distinct.
   Continue permits later work, never a false overall success. Known partial progress stays known;
   recovery respects confirmed changes and never proposes replaying the entire composition.

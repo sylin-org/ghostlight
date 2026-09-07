@@ -33,7 +33,7 @@
       capability: record.capability,
       startedAt: existing?.startedAt,
       endedAt: record.timestamp_ms,
-      phase: record.allowed ? "completed" : "blocked",
+      phase: record.complete === false && existing && !existing.settled ? existing.phase : record.allowed ? "completed" : "blocked",
       allowed: record.allowed,
       reason: record.reason,
       // Kept so a refusal can name the rule that caused it rather than only that it happened.
@@ -43,10 +43,14 @@
       status: record.status,
       effect: record.effect,
       summary: record.summary,
+      steps: record.steps ?? [],
+      composition: record.composition ?? null,
+      permissions: record.permissions ?? { checks: [], truncated: false },
+      permissionExplanations: record.permission_explanations ?? [],
       durationMs: record.duration_ms,
       observed: record.observed ?? null,
       channel: record.channel ?? null,
-      settled: true
+      settled: record.complete !== false || !existing || existing.settled
     };
   }
 

@@ -863,6 +863,11 @@ mod tests {
             phase: OperationPhase::Running,
         };
         let record = HistoryItem {
+            complete: true,
+            composition: None,
+            steps: vec![],
+            permissions: Default::default(),
+            permission_explanations: vec![],
             timestamp_ms: 0,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
@@ -1439,7 +1444,21 @@ mod tests {
             })
             .map(|(body, _)| body)
             .expect("the surface still builds rows");
-        let cells = markup.matches("<div class=\"").count();
+        let spanning = markup.matches("<div class=\"row-history\"").count();
+        if spanning > 0 {
+            let span = styles
+                .split_once(".row-history {")
+                .unwrap()
+                .1
+                .split_once('}')
+                .unwrap()
+                .0;
+            assert!(
+                span.contains("grid-column: 2 / -1"),
+                "history detail must span the row below its cells"
+            );
+        }
+        let cells = markup.matches("<div class=\"").count() - spanning;
         assert!(cells >= 6, "expected a row of cells, saw {cells}");
 
         fn tracks(block: &str) -> usize {
@@ -1471,7 +1490,10 @@ mod tests {
                 .lines()
                 .filter(|line| line.contains("display: none"))
                 .flat_map(|line| line.split(','))
-                .filter(|selector| selector.trim_start().starts_with(".row-"))
+                .filter(|selector| {
+                    selector.trim_start().starts_with(".row-")
+                        && !selector.split('{').next().unwrap_or("").contains(':')
+                })
                 .count();
             let Some((_, rest)) = section.split_once(".row {") else {
                 continue;

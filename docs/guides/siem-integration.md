@@ -61,8 +61,12 @@ its bounded History view from the same file.
 | `status`, `effect` | Terminal result and physical-effect class. |
 | `summary` | Bounded Ghostlight-authored sentence. |
 | `refusal_facts` | Optional closed refusal category and typed context; never a copy of client result facts. |
-| `duration_ms` | Decode-to-terminal elapsed time. |
+| `duration_ms` | Direct decode-to-terminal or child dispatch-to-terminal elapsed time. |
 | `observed` | Closed governed landing and measurement facts. |
+| `step` | Optional child correlation: `parent` form, one-based `position`, `total`, and `preparation_failed`. `invocation` remains the parent id. |
+| `composition` | Optional safe parent progress. Aggregate wrappers do not represent another attempted child. |
+| `composition_tools` | Optional bounded canonical tool plan. Caller labels and arguments are excluded. |
+| `permissions` | Bounded actual evaluation checks and a `truncated` flag; includes allowed work as well as refusals. |
 | `channel` | `mcp` or `cli`; attribution, not authority. |
 
 The optional singular `capability` field exists only so 1.0 can read historical pre-ADR-0121
@@ -74,6 +78,20 @@ arbitrary error description stays in the permitted client result. Deadline metad
 `before_dispatch`; workspace and recovery failures can retain a closed `cause`. Query the top-level
 policy fields for rule attribution and `status`/`effect` for the terminal outcome. A missing
 `refusal_facts` is not a success signal: composed and measured outcomes have their own summaries.
+
+H4 adds incremental child records, grouped under one history entry in the workbench. Count actual
+operations using child records where `step.preparation_failed` is false, plus ordinary records
+without `step` or `composition`. Exclude aggregate wrappers and preparation facts from operation
+and denial totals. A missing receipt does not establish that work did not run. Parent completion
+can establish an unattempted suffix; a missing parent leaves completion unconfirmed.
+
+Permission checks retain complete requirements, normalized host, verdict, reason, and each
+evaluated layer's bounded grant identities and mode. `request_restricted` records restriction
+presence; `request_evaluated` says whether this decision reached those checks. A trace can omit
+checks after its bound, disclosed by `truncated`; it is never permission for omitted work. This
+evidence comes from the original immutable-snapshot evaluation. See [H4 source and verification
+state](../tasks/security-hardening/h4-grouped-history.md) before assuming an installed version
+writes these fields.
 
 Older versions could retain page content in failed-flow records and browser text in failure
 summaries. This correction does not rewrite old files. The reader ignores legacy arbitrary

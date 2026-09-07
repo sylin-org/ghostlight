@@ -18,7 +18,9 @@ record accompanies `fix(script): select script form before page execution`; use 
 commit hash. Both SA-04 defects have regressions, all 183 extension tests and workspace gates
 pass, and 19 Chromium/MCP cases prove effects and compatibility. It is not deployed or published.
 The owner accepted I1 and directed implementation of [H1 readable bounded audit](h1-readable-audit.md).
-H1 is implemented and verified locally. I2 is accepted; H2b is implemented and verified locally. Next is H4 ideation I3.
+H1, H2b, and [H4](h4-grouped-history.md) are implemented and verified locally. I1-I3 are accepted.
+Next: H5 ideation I4 for runtime scope/timing and the newly reproduced request-restriction
+admission gap below. H4 has no remaining implementation task.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
 
@@ -54,7 +56,7 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 | H3 | IMPLEMENTED and verified locally; not deployed | Complete evidence is in its task record; no remaining H3 implementation task. |
 | H1 | IMPLEMENTED and verified locally; not deployed | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
 | H2b | IMPLEMENTED and verified locally; not deployed | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
-| H4 | Included; receipt design still proposed | Ideation I3; depends on H1 safe projection and H2b semantics. |
+| H4 | IMPLEMENTED and verified locally; not deployed | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
 | H5 | Included; existing human-control contract retained | Ideation I4 for scope/recovery details and timing evidence. |
 | H6 | Policy direction AGREED; details open; not implemented | Ideation I5 for scope evidence, schema, disclosure, notices, and capture. |
 | H7 | Included; behavior still proposed | Ideation I6 for visible failure, strict policy, and recovery. |
@@ -172,7 +174,7 @@ H2a and H2b are implemented and verified locally. I2 was accepted on September 6
 [H2b](h2b-aggregate-outcomes.md) and the ADR-0133 amendment. Completed means succeeded. One
 accumulator now preserves status/effect counts and current-state recovery for flow and sequence.
 Human directives and invocation limits override Continue. Safe progress metadata survives result
-omission and enters H1's parent audit projection. Child receipts and resume UI remain later work.
+omission and enters H1's parent audit projection. H4 now supplies grouped child receipts; automatic resumption remains a separate decision.
 
 Cover a governed refusal, a decoded-operation error, and a reference error followed by independent
 work. Under stop, no later step dispatches. Under continue, the result still truthfully reports
@@ -201,6 +203,9 @@ Add an actual Chromium CDP lane after focused evaluator tests; label each lane s
 
 ### H4: Composition completion and receipts
 
+I3 accepted; implemented and verified locally. [H4](h4-grouped-history.md) records the delivered
+experience, evidence lanes, limits, and commit reference. ADR-0156 owns the decision.
+
 Depends on H1 for safe projection and H2 for stable flow semantics. Route ordinary and composed
 children through one completion seam under the parent's snapshot and lease. Capture child
 identity/order, actual RAWX requirements, policy decision, and terminal effect. Define aggregate
@@ -212,6 +217,14 @@ safe terminal receipts; each attempted child completes once; unattempted later s
 reported as executed. No recursive top-level execution reacquires the lease or changes authority.
 
 ### H5: Runtime control and workspace scope
+
+New evidence from H4 permission review: with an observe-mode layer that would deny Write and
+an explicit Read-only request restriction, `authorize_with_evidence(WRITE, ...)` returns observed
+allowance before reaching the request restriction. The evaluator test records that current
+behavior and `request_evaluated: false`; no browser dispatch proof was run for this case. The
+existing request-tightening contract requires a follow-up admission-order repair and both direct
+and composed negative controls. H4 does not silently change evaluation order. Include this
+concrete gap in the next ideation/prioritization session; it is not a new proposed policy model.
 
 Keep deliberately global human controls separate from workspace-local automatic attention.
 Verify two workspaces through the shared executor/facade, then cover composed denials after H4.
@@ -309,15 +322,15 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H1, H2b, and H3 are complete locally. The recommended subsequent grouping is child
-receipts, frame boundaries, workspace control, audit
+H1, H2b, H3, and H4 are complete locally. H5 ideation is next. The remaining grouping covers
+workspace control, frame boundaries, audit
 health, and local resilience. Honest provenance reporting uses the repaired receipt seam;
 conditional signer admission follows a concrete integration. The epic maps those dependencies.
 Run the affected package's ideation session before implementing its undecided choices.
 
 ## Decisions still open
 
-- H4 child receipts and the other undecided implementation packages in the ideation agenda.
+- H5 runtime scope/timing and the other undecided implementation packages in the ideation agenda.
 - Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
   verification caching, and supported-platform behavior.
 - Which concrete integration justifies C2; whether C3 is needed and which participating client
@@ -328,7 +341,7 @@ Run the affected package's ideation session before implementing its undecided ch
 - Audit-write failure behavior and any configurable strictness after a failed append.
 
 The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H4/H5/H8. H1/H2b/H3 corrections, existing pause/stop semantics, provenance boundaries, and
+including H5/H8. H1/H2b/H3/H4 corrections, existing pause/stop semantics, provenance boundaries, and
 H6's selected modes remain accepted context rather than unresolved questions.
 
 ## Activity record
@@ -346,8 +359,8 @@ H6's selected modes remain accepted context rather than unresolved questions.
 | 2026-09-06 | Owner accepted H3 next and requested one epic containing all discussion and decisions, with ideation before undecided cycles | EPIC, IDEATION, and the H3 task brief created; bootstrap, decision index, and readiness states reconciled. ADR-0133 amended for script correctness. No new production implementation or test run in this planning turn. |
 | 2026-09-06 | Owner accepted H1 ideation and directed implementation | Readable bounded history; concise recovery language; display and retention separate. Profiles and richer capture deferred. H1 completed locally: 447 Rust tests, 183 extension tests, and actual JSONL checks through the process journey pass. Not deployed. |
 | 2026-09-06 | Owner directed implementation | H2a committed separately as 8103c69b; assessment and epic preserved as a0310637. H3 implemented with local parsing and one effectful evaluation; full gates, 183 extension tests, and 19 Chromium/MCP cases pass. No deployment. Next: H1 ideation. |
-
 | 2026-09-06 | Owner accepted H2b ideation and directed implementation | Shared progress and recovery implemented; completed counts successes, Continue retains failures, known partial effects remain known, and metadata survives omission. 455 Rust/183 extension tests and fresh-build MCP/JSONL checks pass. No deployment. Next: H4 ideation I3. |
+| 2026-09-06 | Owner accepted I3 and directed H4 implementation | Incremental bounded child receipts, grouped history, and actual permission explanations. 463 Rust/183 extension tests, fresh-build process/JSONL, surface, and isolated Chromium history checks pass. No deployment. Next: H5 ideation I4. |
 
 ## H2a execution record (2026-09-06)
 

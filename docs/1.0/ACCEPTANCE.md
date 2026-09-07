@@ -66,7 +66,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 ## Executor and truth gates
 
 1. Direct operations and composition steps use the same operation executor. The parent completes
-   once; independent child completion receipts remain H4 work.
+   once. Each attempted child records exactly one safe receipt before parent completion under the
+   same lease and snapshot. Preparation failures and unconfirmed receipts never fabricate execution.
 2. One invocation can commit only one terminal outcome.
 3. Deadline or cancellation before dispatch reports no effect and is repeat-safe when the job is.
 4. Disconnect or cancellation after uncertain dispatch reports unknown effect and no replay advice.
@@ -103,7 +104,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    rules, request restrictions, observe/enforce modes, and policy-defined never-touch hosts.
 3. RAWX is independent: each operation uses its complete set, and composition steps are admitted
    separately. Empty wrapper or local-window operations do not invent authority. Current audit has
-   one parent composition record; separate child receipts remain the H4 acceptance gap.
+   one parent composition record plus safe incremental child receipts. Grouped history and policy
+   previews use the child evidence without double-counting the aggregate (ADR-0156).
 4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
    deny, observe/enforce, and layer-intersection rules from ADR-0121.
 5. Request restrictions never add a host or capability. Started work keeps one immutable authority
@@ -368,3 +370,20 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     version-checks, removes, reinstalls, and purges in Debian 12 and Ubuntu 24.04 containers before
     candidate assembly. Those virtual-display package smokes do not replace the Ubuntu GNOME
     Wayland L1-L9 lifecycle.
+
+## Grouped history evidence (ADR-0156)
+
+1. Equivalent direct and composed work retains equivalent decisions, requirements, effects,
+   measurements, and safe summaries. Caller labels, results, and arbitrary errors stay out.
+2. Actual policy evaluation records all evaluated layers and distinguishes all-open, granted,
+   refused, and observe-mode admission. Request restrictions identify whether evaluation reached
+   them. Permission traces are bounded and disclose omission.
+3. The workbench keeps the parent active as child receipts arrive; restored incomplete groups
+   state that completion was not recorded. Missing evidence never becomes a no-effect claim.
+4. Groups start collapsed. Opening brings the first problem into view; updates preserve expansion,
+   scroll, and keyboard focus. No routine child notifications. History retains at most 500 whole
+   groups, and policy previews count actual recorded child operations.
+5. `tests/process-journey.mjs` checks real JSONL during parent execution and after completion.
+   `tests/workbench-surface.mjs` checks projection updates and escaping. The isolated Chromium
+   `tests/workbench-history-browser.mjs` checks the bundled UI at 1280 and 720 pixels using synthetic
+   events. These do not establish installed Tauri/MV3 deployment or H5 timing guarantees.

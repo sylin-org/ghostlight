@@ -4,6 +4,7 @@ pub mod audit;
 pub mod capability_map;
 pub mod composition;
 pub mod environment;
+pub mod history;
 pub mod outcome;
 pub mod readiness;
 #[path = "catalog.rs"]
@@ -1567,12 +1568,16 @@ fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
 
 /// Composite tools a flow step may never name.
 const FLOW_FORBIDDEN_TOOLS: &[&str] = &["browser_flow", "browser_sequence"];
-const FLOW_STEP_LIMIT: usize = 20;
 const FLOW_REF_POINTER_LIMIT: usize = 512;
 const FLOW_REF_DEPTH_LIMIT: usize = 32;
 
 fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
-    validate_range(value.steps.len(), 1, FLOW_STEP_LIMIT, "steps")?;
+    validate_range(
+        value.steps.len(),
+        1,
+        history::COMPOSITION_STEP_LIMIT,
+        "steps",
+    )?;
     validate_choice(&value.on_error, &["stop", "continue"], "on_error")?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;

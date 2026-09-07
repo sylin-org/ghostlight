@@ -742,3 +742,20 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 #sacred-hosts:focus { outline: 0; border-color: rgba(var(--argb), .5); }
 .settings li { margin: 4px 0; }
 .settings .owner { margin-left: 8px; }
+
+/* One quiet composition row, with receipt and permission detail on demand. */
+.row-history { grid-column: 2 / -1; min-width: 0; }
+.row-history:empty { display: none; }
+.composition-details, .permission-details { margin-top: 10px; font-size: 13px; line-height: 1.5; }
+.composition-details > summary, .permission-details > summary { cursor: pointer; color: var(--sky, #38bdf8); width: fit-content; }
+.history-steps { list-style: none; padding: 0; margin: 12px 0 0; max-height: 360px; overflow-y: auto; }
+.history-step { padding: 10px 0; border-top: 1px solid rgba(234, 246, 255, .1); }
+.step-line { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.step-line > span { overflow-wrap: anywhere; }
+.step-number, .step-meta { opacity: .7; }
+.step-meta { margin-left: 32px; font-size: 12px; }
+.step-status { font-size: 12px; }
+.permission-details ul { padding-left: 20px; }
+.permission-details li p { margin: 3px 0 8px; overflow-wrap: anywhere; }
+.history-step > .permission-details { margin-left: 32px; }
+@media (max-width: 820px) { .row-history { grid-column: 1 / -1; } .step-line { grid-template-columns: 20px minmax(0, 1fr); } .step-status { grid-column: 2; } }

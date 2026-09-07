@@ -7,6 +7,7 @@ mod navigation;
 mod pointer;
 mod policy;
 mod reading;
+mod receipt;
 mod recording;
 pub mod result;
 mod sequence;
@@ -90,6 +91,7 @@ pub struct ApplicationExecutor {
     active_authority: ActiveAuthorityRegistry,
     observations: ObservationRegistry,
     stale_candidates: StaleCandidateRegistry,
+    permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
 }
 
 /// Current immutable invocation snapshots used only to govern asynchronous browser events.
@@ -172,6 +174,7 @@ impl ApplicationExecutor {
             active_authority: Arc::new(Mutex::new(HashMap::new())),
             observations: Arc::new(Mutex::new(HashMap::new())),
             stale_candidates: Arc::new(Mutex::new(HashMap::new())),
+            permissions: Mutex::new(HashMap::new()),
         }
     }
 
@@ -342,109 +345,6 @@ impl ApplicationExecutor {
                 peer_image: self.workspaces.peer_image(workspace).ok().flatten(),
             },
         )
-    }
-
-    fn finish(
-        &self,
-        gate: &CompletionGate,
-        terminal: Terminal,
-        completion: Completion<'_>,
-    ) -> InvocationResult {
-        let Completion {
-            workspace,
-            tool,
-            requirements,
-            snapshot,
-            duration_ms,
-            channel,
-            peer_image,
-        } = completion;
-        let tool = language::audit::tool_name(tool);
-        let denial_attention = terminal.result.status == Status::Blocked
-            && self
-                .governance
-                .record_denial_attention(workspace.as_str(), terminal.decision);
-        if denial_attention {
-            self.governance.controls().require_attention();
-            let _ = self
-                .browser
-                .publish_control_state(self.governance.runtime_state());
-        }
-        let event = if denial_attention {
-            DomainEvent::AttentionRequired {
-                invocation: terminal.result.invocation.clone(),
-                workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
-            }
-        } else {
-            match terminal.result.status {
-                Status::Blocked => DomainEvent::WorkBlocked {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                    presentation: denial_presentation(tool, &terminal.result),
-                },
-                Status::AttentionRequired => DomainEvent::AttentionRequired {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                },
-                _ => DomainEvent::WorkCompleted {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                },
-            }
-        };
-        self.emit(event);
-        let status = serde_json::to_value(terminal.result.status)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
-        let effect = serde_json::to_value(terminal.result.effect)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
-        self.diagnostics.sink().emit(
-            if terminal.result.status == Status::Failed {
-                ghostlight_bridge::diagnostics::event::OPERATION_FAILED
-            } else {
-                ghostlight_bridge::diagnostics::event::OPERATION_COMPLETED
-            },
-            if terminal.result.status == Status::Failed {
-                ghostlight_bridge::diagnostics::Level::Warn
-            } else {
-                ghostlight_bridge::diagnostics::Level::Info
-            },
-            Some(terminal.result.invocation.as_str()),
-            &format!("{tool} {status} {effect} {}ms", duration_ms),
-        );
-        let observed = self
-            .take_observation(&terminal.result.invocation)
-            .merged(terminal.observed.clone());
-        // Unconsumed candidate sets belong only to stale-target failures; drop strays here so
-        // nothing leaks across invocations.
-        let _ = self.take_stale_candidates(&terminal.result.invocation);
-        let record = AuditRecord::now(
-            &terminal.result.invocation,
-            workspace.as_str(),
-            tool,
-            requirements,
-            snapshot.id(),
-            terminal.decision,
-            &status,
-            &effect,
-            &terminal.audit,
-            duration_ms,
-        )
-        .from_channel(channel)
-        .with_peer_image(peer_image)
-        .with_policy(snapshot, terminal.decision)
-        .with_observation(observed);
-        let _ = self.audit.record(&record);
-        gate.complete(terminal.result)
-            .expect("single executor completion path");
-        gate.take().expect("completion committed")
     }
 
     fn run(
@@ -940,13 +840,18 @@ impl ApplicationExecutor {
         let _ = self
             .browser
             .publish_control_state(self.governance.runtime_state());
-        if !runtime.allowed {
-            return runtime;
-        }
-        url.map_or_else(
-            || context.snapshot.authorize_requirements(requirements),
-            |url| context.snapshot.authorize_landing(requirements, url),
-        )
+        let (decision, evidence) = if runtime.allowed {
+            context.snapshot.authorize_with_evidence(requirements, url)
+        } else {
+            (
+                runtime,
+                context
+                    .snapshot
+                    .decision_evidence(requirements, url, runtime),
+            )
+        };
+        self.retain_permission(context, evidence);
+        decision
     }
 
     fn authorize_commits(
@@ -962,11 +867,20 @@ impl ApplicationExecutor {
             .browser
             .publish_control_state(self.governance.runtime_state());
         if !runtime.allowed {
+            self.retain_permission(
+                context,
+                context
+                    .snapshot
+                    .decision_evidence(requirements, Some(&tab.url), runtime),
+            );
             return runtime;
         }
         let mut observed = None;
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
-            let decision = context.snapshot.authorize_landing(requirements, url);
+            let (decision, evidence) = context
+                .snapshot
+                .authorize_with_evidence(requirements, Some(url));
+            self.retain_permission(context, evidence);
             if !decision.allowed {
                 return decision;
             }
@@ -978,18 +892,19 @@ impl ApplicationExecutor {
     }
 
     fn authorize_tab_close(&self, context: &InvocationContext<'_>) -> Decision {
-        let runtime = self.governance.runtime_decision();
-        let _ = self
-            .browser
-            .publish_control_state(self.governance.runtime_state());
-        if !runtime.allowed {
-            return runtime;
-        }
-        let action = context.snapshot.authorize_capability(Capability::Action);
+        let action = self.authorize(context, Capability::Action, None);
         if !action.allowed {
             return action;
         }
         let close = context.snapshot.authorize_tab_close();
+        if !close.allowed || close.observed {
+            self.retain_permission(
+                context,
+                context
+                    .snapshot
+                    .decision_evidence(CapabilitySet::ACTION, None, close),
+            );
+        }
         if !close.allowed || close.observed {
             close
         } else {
@@ -3401,6 +3316,124 @@ mod tests {
         );
         assert_eq!(gone.status, Status::Succeeded);
         assert_eq!(gone.facts["tabs"], json!([]));
+    }
+
+    #[test]
+    fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        for composed in [false, true] {
+            browser.push(Ok(BrowserOutcome::Text {
+                tab_id: 7,
+                text: "PRIVATE_PAGE_CONTENT".into(),
+                truncated: false,
+                title: "PRIVATE_TITLE".into(),
+                url: "https://example.com/PRIVATE_PATH".into(),
+            }));
+            let (tool, arguments) = if composed {
+                (
+                    "browser_flow",
+                    json!({"steps":[{"id":"PRIVATE_LABEL","tool":"browser_read","arguments":{}}]}),
+                )
+            } else {
+                ("browser_read", json!({}))
+            };
+            let result = executor.execute(
+                &workspace,
+                tool,
+                arguments,
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(result.status, Status::Succeeded);
+            assert!(serde_json::to_string(&result)
+                .unwrap()
+                .contains("PRIVATE_PAGE_CONTENT"));
+        }
+        let records = audit.0.lock().unwrap();
+        assert_eq!(records.len(), 4);
+        assert!(records[1].step.is_none());
+        assert_eq!(records[2].step.unwrap().position, 1);
+        let safe = |record: &AuditRecord| {
+            json!({
+                "tool":record.tool,"requirements":record.requirements(),"status":record.status,
+                "effect":record.effect,"summary":record.summary,"observed":record.observed,
+                "permissions":record.permissions,"reason":record.reason
+            })
+        };
+        assert_eq!(safe(&records[1]), safe(&records[2]));
+        assert!(!serde_json::to_string(&*records)
+            .unwrap()
+            .contains("PRIVATE_"));
+    }
+
+    #[test]
+    fn child_receipts_share_authority_and_count_denials_once() {
+        let path = temporary_policy("h4-denials");
+        fs::write(
+            &path,
+            r#"{"schema":3,"name":"deny","version":"1","grants":[]}"#,
+        )
+        .unwrap();
+        let governance = GovernanceFacade::new(Some(path.clone()), None);
+        let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
+        let result = executor.execute(
+            &workspace,
+            "browser_flow",
+            json!({"on_error":"continue","steps":[
+                {"id":"PRIVATE_LABEL_ONE","tool":"browser_tabs","arguments":{"action":"list"}},
+                {"id":"PRIVATE_LABEL_TWO","tool":"browser_tabs","arguments":{"action":"list"}}
+            ]}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked);
+        assert!(browser.calls().is_empty());
+        assert_eq!(
+            governance.runtime_state(),
+            RuntimeControlState::Active,
+            "parent cannot count either child twice"
+        );
+        {
+            let records = audit.0.lock().unwrap();
+            assert_eq!(records.len(), 3);
+            assert_eq!(records[0].step.unwrap().position, 1);
+            assert_eq!(records[1].step.unwrap().position, 2);
+            assert!(records[2].step.is_none());
+            assert!(records
+                .iter()
+                .all(|record| record.authority == records[0].authority));
+            assert!(records[..2]
+                .iter()
+                .all(|record| record.requirements() == crate::governance::CapabilitySet::READ));
+            assert!(!serde_json::to_string(&*records)
+                .unwrap()
+                .contains("PRIVATE_"));
+        }
+        executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            governance.runtime_state(),
+            RuntimeControlState::Attention,
+            "the next direct denial is exactly the third"
+        );
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

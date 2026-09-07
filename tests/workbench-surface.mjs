@@ -430,7 +430,40 @@ view.collections({
   harnesses: []
 }, []);
 
+const historyChecks = [];
+{
+  const receipt = { invocation: "group", workspace: "w", tool: "browser_read", capability: "read",
+    status: "succeeded", effect: "none", allowed: true, summary: "Read 5 words.", complete: true,
+    permissions: { checks: [{ requirements: ["read"], host: "example.com" }], truncated: false },
+    permission_explanations: ['Allowed: local policy (<script>never executable</script>).'] };
+  const group = { ...receipt, tool: "browser_flow", complete: false,
+    summary: "Completed 1 of 3 steps.", steps: [
+      { position: 1, state: "recorded", record: receipt },
+      { position: 2, state: "unconfirmed", tool: "browser_execute", record: null },
+      { position: 3, state: "pending", record: null }
+    ] };
+  const store = sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
+  const operation = { invocation: "group", workspace: "w", tool: "browser_flow", activity: "Working", phase: "running" };
+  store.applySnapshot({ seq: 0, service: { runtime_state: "active" }, operations: [operation], history: [group], sessions: [] }, true);
+  historyChecks.push(["snapshot merges live composition with its child history", store.feed().length === 1 && !store.hero().settled && store.hero().steps.length === 3]);
+  view.hero(store.hero(), false);
+  const collapsed = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["composition details begin collapsed and escape retained explanations", collapsed.includes('data-history-details="group:steps"') && !collapsed.includes('data-history-details="group:steps" open') && collapsed.includes('&lt;script&gt;') && !collapsed.includes('<script>never')]);
+  let scrolled = 0;
+  documentHandlers.get("toggle")({ target: { dataset: { historyDetails: "group:steps" }, open: true,
+    classList: { contains: () => true }, querySelector: () => ({ scrollIntoView: () => scrolled++ }) } });
+  store.applyChange({ seq: 1, change: { kind: "composition_changed", record: { ...group, summary: "Completed 2 of 3 steps." } } });
+  view.hero(store.hero(), false);
+  historyChecks.push(["incremental receipts preserve expansion without settling or repeated scrolling", !store.hero().settled && nodes.get("hero-body").innerHTML.includes('data-history-details="group:steps" open') && scrolled === 1]);
+  store.applyChange({ seq: 2, change: { kind: "operation_settled", record: { ...group, complete: true } } });
+  historyChecks.push(["only the final parent receipt settles the composition", store.hero().settled && store.feed().length === 1]);
+  const restored = sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
+  restored.applySnapshot({ seq: 0, service: { runtime_state: "active" }, operations: [], history: [group], sessions: [] }, true);
+  historyChecks.push(["a restored missing completion never fabricates running work", restored.hero().settled]);
+}
+
 const checks = [
+  ...historyChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
   ["surface wired", listeners.some((l) => l.startsWith("document:click"))],

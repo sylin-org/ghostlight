@@ -6,6 +6,7 @@ use serde_json::{json, Map, Value};
 
 use crate::governance::{Capability, CapabilitySet};
 use crate::language::composition::StepCause;
+use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::outcome::Outcome;
 use crate::language::RunFlow;
 use crate::workspace::WorkspaceLease;
@@ -102,6 +103,16 @@ impl ApplicationExecutor {
                 Ok(operation) => operation,
                 Err((cause, error)) => {
                     progress.not_started(position, cause);
+                    self.record_preparation(
+                        context,
+                        &step.tool,
+                        StepReceipt {
+                            parent: CompositionKind::Flow,
+                            position,
+                            total,
+                            preparation_failed: true,
+                        },
+                    );
                     let mut row = unexecuted_row(position, UnexecutedStatus::NotStarted);
                     row["id"] = json!(step.id);
                     row["cause"] = json!(cause);
@@ -114,7 +125,17 @@ impl ApplicationExecutor {
                     continue;
                 }
             };
-            let terminal = self.run(context, lease, &decoded);
+            let terminal = self.run_child(
+                context,
+                lease,
+                &decoded,
+                StepReceipt {
+                    parent: CompositionKind::Flow,
+                    position,
+                    total,
+                    preparation_failed: false,
+                },
+            );
             let cause = progress.record(position, &terminal);
             let mut row = terminal_row(position, &terminal, cause);
             row["id"] = json!(step.id);
@@ -142,7 +163,11 @@ impl ApplicationExecutor {
         }
         let facts = json!({"completed":progress.progress.counts.succeeded,"total":total,
             "stopped":progress.progress.stopped,"steps":rows});
-        progress.finish(context, facts)
+        let mut terminal = progress.finish(context, facts);
+        terminal.audit = terminal
+            .audit
+            .with_tools(value.steps.iter().map(|step| &step.tool));
+        terminal
     }
 }
 

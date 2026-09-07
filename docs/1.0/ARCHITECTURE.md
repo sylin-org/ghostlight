@@ -251,8 +251,20 @@ Flow and sequence retain the parent's lease and immutable authority snapshot. Th
 child executors feed one accumulator in `work/composition.rs`; language owns its closed progress,
 summary, and recovery in `language/composition.rs`, through `Outcome::CompositionRan`. One safe
 projection carries that account into the parent audit record. Child payloads remain separate,
-and per-step status/effect metadata survives flow-result omission. Child audit rows remain H4
-work; current child execution does not independently enter the completion gate.
+and per-step status/effect metadata survives flow-result omission. Direct operations and child
+terminals enter `work/receipt.rs`; each child gets its own completion gate without reacquiring the
+parent lease or snapshot. The same safe audit sink records children incrementally, identified by
+parent invocation and position. Only the parent settles the lifecycle. Actual child denials count
+once; aggregate wrappers do not repeat them.
+
+`governance/evidence.rs` captures bounded permission checks from the admission evaluator, including
+positive grant identities for each evaluated layer and whether request restrictions were reached.
+`language/history.rs` owns the readable explanations. `workbench/history.rs` projects and restores
+whole groups, at most 500 with at most 20 children each. Missing receipts stay unconfirmed; only
+parent evidence establishes a never-run suffix. A composition-change projection updates the
+existing feed without settling the parent or sending extra completion notifications. Expanded
+view state remains disposable. Policy previews consider recorded children, not empty wrappers
+(ADR-0156).
 
 ## Closed domain events
 

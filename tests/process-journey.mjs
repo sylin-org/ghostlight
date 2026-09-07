@@ -824,6 +824,22 @@ try {
   }));
   assert.equal(discardedRecording.status, "succeeded");
 
+  // A receipt must reach disk before a later, still-running child lets the parent finish.
+  const childWaitDispatch = native.waitFor((frame) => frame.kind === "request" && frame.request.command.command === "observe");
+  const incrementalRequest = mcp.beginRequest("tools/call", { name: "browser_flow", arguments: { steps: [
+    { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
+    { id: "wait", tool: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } }
+  ] } });
+  await childWaitDispatch;
+  const during = readFileSync(auditFile, "utf8").trim().split("\n").map(JSON.parse);
+  const firstReceipt = during.at(-1);
+  assert.equal(firstReceipt.step.position, 1);
+  assert.equal(firstReceipt.tool, "browser_read");
+  assert.equal(during.some((record) => record.invocation === firstReceipt.invocation && !record.step), false);
+  const incremental = structured(await incrementalRequest.promise);
+  assert.equal(incremental.invocation, firstReceipt.invocation);
+  assert.equal(incremental.status, "succeeded");
+
   const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
   mcp.notify("notifications/cancelled", { requestId: delayed.id, reason: "acceptance cancellation" });
@@ -845,10 +861,9 @@ try {
 
   // The real executable's audit file, not a fixture: what an action did, and none of what it saw.
   const records = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  const readRecord = records.findLast((record) => record.tool === "browser_read");
+  const readRecord = records.findLast((record) => record.tool === "browser_read" && !record.step);
   assert.equal(readRecord.observed.host, "example.com");
-  // Flow children share one invocation audit row; the last read on file is the
-  // journey's article-mode read.
+  // The last direct read is the article-mode read. Composed reads now have separate receipts.
   assert.equal(readRecord.observed.count, 10);
   assert.equal(readRecord.observed.readiness, null);
   const openRecord = records.findLast((record) => record.tool === "browser_navigate");
@@ -856,16 +871,32 @@ try {
   assert.equal(openRecord.observed.readiness, "complete");
   assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
   assert.equal(records.some((record) => JSON.stringify(record).includes("PRIVATE_")), false);
-  const flowFailureRecord = records.find((record) => record.invocation === failedFlow.invocation);
+  const flowFailureRecord = records.find((record) => record.invocation === failedFlow.invocation && !record.step);
   assert.equal(flowFailureRecord.status, "unknown");
   assert.equal(flowFailureRecord.summary, failedFlow.summary);
   assert.equal(flowFailureRecord.refusal_facts, undefined);
   for (const result of [flow, failedFlow, mixed, blockedFlow, invalidFlow]) {
-    const record = records.find((item) => item.invocation === result.invocation);
+    const record = records.find((item) => item.invocation === result.invocation && !item.step);
     assert.deepEqual(record.composition, result.facts.progress);
     assert.equal(record.observed.count, result.facts.completed);
   }
-  assert.equal(records.find((item) => item.invocation === blockedFlow.invocation).allowed, false);
+  assert.equal(records.find((item) => item.invocation === blockedFlow.invocation && !item.step).allowed, false);
+  // H4: child receipts precede the parent and carry their own actual permission evidence.
+  for (const [result, count] of [[flow, 3], [failedFlow, 2], [mixed, 3], [blockedFlow, 2], [invalidFlow, 2]]) {
+    const group = records.filter((item) => item.invocation === result.invocation);
+    assert.equal(group.length, count + 1);
+    assert.equal(group.at(-1).step, undefined);
+    assert.deepEqual(group.slice(0, -1).map((item) => item.step.position), Array.from({ length: count }, (_, index) => index + 1));
+    assert.equal(group.every((item) => item.authority === group[0].authority), true);
+    for (const item of group.slice(0, -1).filter((item) => !item.step.preparation_failed)) {
+      assert.equal(item.permissions.checks.length > 0, true);
+      assert.equal(item.capabilities.length > 0, true);
+    }
+  }
+  const prepared = records.find((item) => item.invocation === invalidFlow.invocation && item.step?.position === 2);
+  assert.equal(prepared.status, "not_started");
+  assert.equal(prepared.step.preparation_failed, true);
+  assert.deepEqual(prepared.capabilities, []);
   const primitiveRecord = records.find((record) => record.invocation === primitiveFailure.invocation);
   assert.equal(primitiveRecord.summary, "The browser could not complete this operation.");
   assert.deepEqual(primitiveRecord.refusal_facts, { reason: "browser_primitive_failed" });

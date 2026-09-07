@@ -3,6 +3,7 @@
 //! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
 
 pub mod effective;
+pub mod evidence;
 pub mod inspection;
 pub mod managed;
 pub mod manifest;
@@ -417,8 +418,9 @@ struct RawDenial {
     grant: Option<u16>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct LayerOutcome {
+    grants: Vec<u16>,
     denial: Option<RawDenial>,
     mode: manifest::PolicyMode,
 }
@@ -445,11 +447,18 @@ impl AuthoritySnapshot {
     /// Decide a complete independent capability requirement set at its final boundary.
     #[must_use]
     pub fn authorize_requirements(&self, requirements: CapabilitySet) -> Decision {
+        self.decide_requirements(requirements).0
+    }
+
+    fn decide_requirements(
+        &self,
+        requirements: CapabilitySet,
+    ) -> (Decision, Vec<LayerOutcome>, bool) {
         if !self.valid {
-            return Decision::deny(ReasonCode::InvalidAuthority);
+            return (Decision::deny(ReasonCode::InvalidAuthority), vec![], false);
         }
         if requirements.is_empty() {
-            return Decision::allow();
+            return (Decision::allow(), vec![], false);
         }
         let outcomes: Vec<_> = self
             .layers
@@ -457,15 +466,19 @@ impl AuthoritySnapshot {
             .map(|layer| decide_resource_less(layer, requirements))
             .collect();
         if let Some(decision) = self.resolve_outcomes(&outcomes) {
-            return decision;
+            return (decision, outcomes, false);
         }
         if self
             .request_capabilities
             .is_some_and(|allowed| !requirements.is_subset_of(allowed))
         {
-            return self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability);
+            return (
+                self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability),
+                outcomes,
+                true,
+            );
         }
-        Decision::allow()
+        (Decision::allow(), outcomes, true)
     }
 
     /// Decide whether model-driven tab closure is admitted by every authority layer.
@@ -505,23 +518,30 @@ impl AuthoritySnapshot {
     /// Decide an observed or requested landing at its final boundary.
     #[must_use]
     pub fn authorize_landing(&self, requirements: impl Into<CapabilitySet>, url: &str) -> Decision {
-        let requirements = requirements.into();
+        self.decide_landing(requirements.into(), url).0
+    }
+
+    fn decide_landing(
+        &self,
+        requirements: CapabilitySet,
+        url: &str,
+    ) -> (Decision, Vec<LayerOutcome>, bool) {
         if !self.valid {
-            return Decision::deny(ReasonCode::InvalidAuthority);
+            return (Decision::deny(ReasonCode::InvalidAuthority), vec![], false);
         }
         let Ok(parsed) = Url::parse(url) else {
-            return Decision::deny(ReasonCode::HostDenied);
+            return (Decision::deny(ReasonCode::HostDenied), vec![], false);
         };
         if !matches!(parsed.scheme(), "http" | "https")
             || protected_by_policy(&parsed, &self.sacred_hosts)
         {
-            return Decision::deny(ReasonCode::ProtectedHost);
+            return (Decision::deny(ReasonCode::ProtectedHost), vec![], false);
         }
         let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
-            return Decision::deny(ReasonCode::HostDenied);
+            return (Decision::deny(ReasonCode::HostDenied), vec![], false);
         };
         if requirements.is_empty() {
-            return Decision::allow();
+            return (Decision::allow(), vec![], false);
         }
         let outcomes: Vec<_> = self
             .layers
@@ -529,22 +549,30 @@ impl AuthoritySnapshot {
             .map(|layer| decide_for_host(layer, requirements, &host))
             .collect();
         if let Some(decision) = self.resolve_outcomes(&outcomes) {
-            return decision;
+            return (decision, outcomes, false);
         }
         if self
             .request_capabilities
             .is_some_and(|allowed| !requirements.is_subset_of(allowed))
         {
-            return self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability);
+            return (
+                self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability),
+                outcomes,
+                true,
+            );
         }
         if self
             .request_hosts
             .as_ref()
             .is_some_and(|patterns| !patterns.iter().any(|pattern| host_matches(&host, pattern)))
         {
-            return self.session_denial(ReasonCode::HostDenied, PolicyRule::UnmatchedHost);
+            return (
+                self.session_denial(ReasonCode::HostDenied, PolicyRule::UnmatchedHost),
+                outcomes,
+                true,
+            );
         }
-        Decision::allow()
+        (Decision::allow(), outcomes, true)
     }
 
     /// Whether policy-aware discovery can prove that some host-scoped variant may proceed.
@@ -646,11 +674,13 @@ fn decide_potential_host(layer: &PolicyLayer, requirements: CapabilitySet) -> La
         requirements.is_subset_of(grant.allowed_set()) && grant_has_possible_host(grant)
     }) {
         return LayerOutcome {
+            grants: vec![],
             denial: None,
             mode: grant.mode.or(layer.manifest.mode).unwrap_or_default(),
         };
     }
     LayerOutcome {
+        grants: vec![],
         denial: Some(RawDenial {
             reason: ReasonCode::CapabilityDenied,
             rule: PolicyRule::Capability,
@@ -690,9 +720,21 @@ fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> Lay
         .reduce(manifest::PolicyMode::strictest)
         .unwrap_or_else(|| layer.manifest.mode.unwrap_or_default());
     if requirements.is_subset_of(allowed) {
-        return LayerOutcome { denial: None, mode };
+        return LayerOutcome {
+            grants: layer
+                .manifest
+                .grants
+                .iter()
+                .enumerate()
+                .filter(|(_, grant)| grant.allowed_set().intersects(requirements))
+                .map(|(index, _)| u16::try_from(index).expect("bounded grants"))
+                .collect(),
+            denial: None,
+            mode,
+        };
     }
     LayerOutcome {
+        grants: vec![],
         denial: Some(RawDenial {
             reason: if layer.manifest.grants.is_empty() {
                 ReasonCode::HostDenied
@@ -719,7 +761,11 @@ fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str)
         match evaluate_host(host, &grant.hosts) {
             HostOutcome::Allowed => {
                 if requirements.is_subset_of(grant.allowed_set()) {
-                    return LayerOutcome { denial: None, mode };
+                    return LayerOutcome {
+                        grants: vec![grant_index],
+                        denial: None,
+                        mode,
+                    };
                 }
                 if first_denial.is_none() {
                     first_denial = Some(RawDenial {
@@ -742,6 +788,7 @@ fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str)
         }
     }
     LayerOutcome {
+        grants: vec![],
         denial: Some(first_denial.unwrap_or(RawDenial {
             reason: ReasonCode::HostDenied,
             rule: PolicyRule::UnmatchedHost,
@@ -1927,6 +1974,15 @@ pub struct AuditRecord {
     /// Payload-free counts and recovery cause for a flow or sequence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<crate::language::composition::CompositionProgress>,
+    /// Child correlation; absence identifies a direct operation or parent aggregate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<crate::language::history::StepReceipt>,
+    /// Canonical child tools, without caller-supplied labels or arguments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub composition_tools: Vec<String>,
+    /// Evidence from actual permission evaluations under this invocation's snapshot.
+    #[serde(default)]
+    pub permissions: evidence::PermissionTrace,
     /// How long the invocation took, from decode to terminal outcome.
     ///
     /// For a navigation this is the time to a governed, settled landing.
@@ -1986,6 +2042,9 @@ impl AuditRecord {
             summary: language.summary().chars().take(500).collect(),
             refusal_facts: language.refusal().cloned(),
             composition: language.composition(),
+            step: None,
+            composition_tools: language.tools().to_vec(),
+            permissions: evidence::PermissionTrace::default(),
             duration_ms,
             observed: Observed::default(),
             channel: None,

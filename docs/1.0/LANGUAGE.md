@@ -388,8 +388,8 @@ Inputs: required `steps`; optional `tab`; optional `timeout_ms`; optional restri
 typo-closed discriminated object. Allowed actions are `click`, `fill`, `type_text`, `press_key`,
 `scroll`, `hover`, and `wait`; other catalog operations are not silently accepted. The sequence
 wrapper requires no RAWX capability. Every step is classified and admitted independently through
-the same executor path as a direct call. Current audit has one parent record; individual child
-receipts remain H4 work in the security-hardening epic.
+the same executor and completion path as a direct call. Each attempted child records a safe
+receipt as it finishes, correlated by parent invocation and position (ADR-0156).
 
 Direct and sequence steps use the same operation executor and browser port. Facts: `tab`,
 `completed_steps`, `total_steps`, `progress`, and bounded per-step status/effect metadata.
@@ -406,8 +406,10 @@ Inputs: required `steps` array of 1 to 20 uniquely named objects, each with a re
 optional `arguments` object; optional `on_error` of `stop` or `continue`, default `stop`; optional
 `dry_run`, default `false`; optional `tab`, `timeout_ms`, and restrictions. The wrapper requires no
 RAWX capability; every child step classifies and admits independently under the same immutable
-invocation snapshot. Current audit has one parent record, with individual child receipts deferred
-to H4. Steps carry no restriction fields of their own.
+invocation snapshot. Each attempted child records a safe receipt before parent completion.
+History groups these under one expandable parent, with distinct input-preparation and missing
+receipt states. Permission details retain actual evaluation evidence; payloads and caller labels
+stay out of audit. Steps carry no restriction fields of their own (ADR-0156).
 
 Any argument value may be an explicit reference object,
 `{"flow_ref":{"step":"earlier_id","pointer":"/facts/..."}}`, resolved from that step's canonical

@@ -212,6 +212,20 @@ const script = [
   { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Executed JavaScript on example.com.", observed: { host: "example.com", readiness: "complete" } }
 ];
 
+// A stable H4 scenario exercises the real bundled view with bounded synthetic receipts.
+const historyScenario = process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h4";
+if (historyScenario) {
+  const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, observed: false, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed, mode: "enforce" }], request_restricted: false, request_evaluated: false }], truncated: false });
+  const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
+  snapshot.operations = [];
+  snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: Date.now(), duration_ms: 920, observed: {}, steps: [
+    { position: 1, state: "recorded", tool: "browser_navigate", record: child("browser_navigate", "Opened example.com.", "succeeded", "applied", "read") },
+    { position: 2, state: "recorded", tool: "browser_fill_form", record: child("browser_fill_form", "Filled 3 fields on example.com.", "succeeded", "applied", "read + write") },
+    { position: 3, state: "recorded", tool: "browser_execute", record: child("browser_execute", "Policy blocked JavaScript execution on example.com.", "blocked", "none", "execute") },
+    { position: 4, state: "not_run", tool: "browser_read", record: null }
+  ] });
+}
+
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
 (() => {
@@ -308,14 +322,15 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     }
   };
 
-  setTimeout(runOne, 1200);
+  if (!${historyScenario}) setTimeout(runOne, 1200);
+  window.__GHOSTLIGHT_PUBLISH__ = publish;
 })();`;
 
 const types = {
   ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".svg": "image/svg+xml"
 };
 
-createServer(async (request, response) => {
+const server = createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
     if (pathname === "/fixture.js") {
@@ -343,4 +358,5 @@ createServer(async (request, response) => {
     response.writeHead(500, { "content-type": "text/plain" });
     response.end(String(error));
   }
-}).listen(port, "127.0.0.1", () => console.log(`http://127.0.0.1:${port}`));
+});
+server.listen(port, "127.0.0.1", () => console.log(`http://127.0.0.1:${server.address().port}`));

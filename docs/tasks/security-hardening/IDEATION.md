@@ -50,17 +50,19 @@ Bring concrete stop/continue result examples, including a decode failure before 
 governed refusal after a prior success, and a runtime exception after an effect. H2a's actual
 stop behavior and the lack of transactional rollback are already settled.
 
-## I3: H4 child operation history
+## I3: H4 grouped history and permission explanations
 
-- What is the useful default parent summary, and what child detail appears on expansion?
-- Which child/parent correlation and positive grant attribution belong in the bounded receipt?
-- How do refused children and unattempted steps appear without fabricating executed operations?
-
-Starting recommendation: one receipt per attempted child, grouped under the parent, through the
-same safe completion seam. Decide after H1/I1 and coordinate with H2b/I2.
+ACCEPTED and implemented locally on 2026-09-06. See [H4](h4-grouped-history.md) and
+[ADR-0156](../../adr/0156-grouped-composition-history.md). One collapsed parent groups safe
+incremental child receipts. Expansion finds the first problem and preserves view state on updates.
+Actual evaluation explains allowed and refused work. Missing receipts stay unconfirmed; wrappers
+do not double-count. H1 retention remains intact. Automatic resumption stays a separate decision.
 
 ## I4: H5 runtime control and workspace scope
 
+- Include the H4 evaluator finding: observe admission can return before a stricter request
+  restriction. The request-tightening contract is already decided; choose its bounded repair
+  and direct/composed evidence alongside runtime controls. See the ledger's H5 evidence.
 - Confirm the scope repair and user-visible recovery from automatic attention in one workspace.
 - Agree the observable outcome of a pause arriving between target observation and effect dispatch,
   including work already dispatched and therefore potentially uncertain.

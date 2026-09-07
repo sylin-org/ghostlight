@@ -73,8 +73,8 @@
      * the host the action landed on.
      */
     function sentence(entry) {
-      if (!entry.settled) return entry.activity;
       if (entry.summary) return entry.summary;
+      if (!entry.settled) return entry.activity;
       if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
       return EFFECT_STORY[entry.effect] || (entry.status ? words(entry.status) : "completed");
     }
@@ -111,6 +111,72 @@
 
     /* -------------------------------- monitor ----------------------------- */
 
+    // Expansion is disposable view state; new receipts never force a panel open.
+    const expandedHistory = new Set();
+    document.addEventListener("toggle", (event) => {
+      const details = event.target;
+      const key = details?.dataset?.historyDetails;
+      if (!key || details.isConnected === false) return;
+      const wasOpen = expandedHistory.has(key);
+      if (details.open) expandedHistory.add(key); else expandedHistory.delete(key);
+      if (details.open && !wasOpen && details.classList.contains("composition-details")) {
+        details.querySelector('[data-step-problem="true"]')?.scrollIntoView({ block: "nearest" });
+      }
+    }, true);
+
+    function replaceHistoryMarkup(node, markup) {
+      const scroll = new Map([...node.querySelectorAll(".history-steps")].map((list) =>
+        [list.closest("details")?.dataset.historyDetails, list.scrollTop]));
+      const active = document.activeElement;
+      const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
+        ? active.closest("details")?.dataset.historyDetails : null;
+      node.innerHTML = markup;
+      for (const list of node.querySelectorAll(".history-steps")) {
+        const key = list.closest("details")?.dataset.historyDetails;
+        if (scroll.has(key)) list.scrollTop = scroll.get(key);
+      }
+      if (focusKey) {
+        [...node.querySelectorAll("details")].find((details) => details.dataset.historyDetails === focusKey)
+          ?.querySelector("summary")?.focus({ preventScroll: true });
+      }
+    }
+
+    function historyDetails(key, title, body, className = "permission-details") {
+      return `<details class="${className}" data-history-details="${escapeHtml(key)}"${expandedHistory.has(key) ? " open" : ""}>`
+        + `<summary>${escapeHtml(title)}</summary>${body}</details>`;
+    }
+
+    function permissionMarkup(entry, key) {
+      const explanations = entry.permissionExplanations ?? entry.permission_explanations ?? [];
+      const checks = entry.permissions?.checks ?? [];
+      if (!explanations.length) return "";
+      const rows = explanations.map((explanation, index) => {
+        const check = checks[index];
+        const context = check ? `${(check.requirements ?? []).join(" + ")}${check.host ? ` on ${check.host}` : ""}` : "";
+        return `<li><span>${escapeHtml(context)}</span><p>${escapeHtml(explanation)}</p></li>`;
+      }).join("");
+      const limited = entry.permissions?.truncated ? '<p>Additional permission checks were omitted.</p>' : "";
+      return historyDetails(key, "Permission details", `<ul>${rows}</ul>${limited}`);
+    }
+
+    function compositionMarkup(entry) {
+      if (!entry.steps?.length) return permissionMarkup(entry, `${entry.invocation}:permission`);
+      const rows = entry.steps.map((step) => {
+        const receipt = step.record;
+        const state = receipt?.status ?? step.state;
+        const labels = { succeeded: "Completed", not_started: "Could not start", not_run: "Not run", pending: "Pending", unconfirmed: "Receipt unavailable" };
+        const label = labels[state] ?? words(state);
+        const problem = !["succeeded", "not_run", "pending"].includes(state);
+        const title = receipt?.summary ?? step.tool ?? `Step ${step.position}`;
+        const detail = receipt ? permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
+        return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
+          + `<span class="step-number">${step.position}</span><span>${escapeHtml(title)}</span><span class="step-status">${escapeHtml(label)}</span></div>`
+          + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
+          + detail + "</li>";
+      }).join("");
+      return historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details");
+    }
+
     function heroMarkup(entry) {
       // The sentence names the host itself now, so the hero carries no host chip: it would say the
       // same thing twice. Readiness is the one observed fact no sentence states.
@@ -120,7 +186,7 @@
       if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
       // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
       if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
-      if (entry.capability) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
+      if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
       if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
       if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
@@ -129,9 +195,10 @@
         ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
         : "";
 
-      return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.capability ?? "read")}</span></div>`
+      return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
         + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
+        + compositionMarkup(entry)
         + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
     }
 
@@ -190,7 +257,7 @@
       if (isRunning(entry)) el.hero.classList.add("live");
       if (isBlocked(entry)) el.hero.classList.add("blocked");
       el["hero-med"].innerHTML = glyphFor(entry);
-      el["hero-body"].innerHTML = heroMarkup(entry);
+      replaceHistoryMarkup(el["hero-body"], heroMarkup(entry));
       el["hero-right"].innerHTML = heroRightMarkup(entry);
       if (animate) {
         for (const node of [el["hero-med"], el["hero-body"], el["hero-right"]]) {
@@ -213,7 +280,8 @@
         + `<div class="row-client">${escapeHtml(clientFor(entry.workspace))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
-        + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`;
+        + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
+        + `<div class="row-history">${compositionMarkup(entry)}</div>`;
     }
 
     function rowClass(entry) {
@@ -238,12 +306,15 @@
       const node = rowNodes.get(entry.invocation);
       if (!node) return;
       node.className = rowClass(entry);
-      node.innerHTML = rowMarkup(entry);
+      replaceHistoryMarkup(node, rowMarkup(entry));
     }
 
     function drop(entry) {
       rowNodes.get(entry.invocation)?.remove();
       rowNodes.delete(entry.invocation);
+      for (const key of expandedHistory) {
+        if (key.startsWith(`${entry.invocation}:`)) expandedHistory.delete(key);
+      }
     }
 
     function queueCount(feed) {
@@ -256,6 +327,9 @@
     function rebuildFeed(feed) {
       el.queue.replaceChildren();
       rowNodes.clear();
+      for (const key of expandedHistory) {
+        if (!feed.some((entry) => key.startsWith(`${entry.invocation}:`))) expandedHistory.delete(key);
+      }
       hero(feed[0], false);
       const rows = document.createDocumentFragment();
       for (const entry of feed.slice(1)) rows.append(buildRow(entry, false));
