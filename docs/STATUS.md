@@ -1,7 +1,27 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (H1, H2b, H3, H4, and H5 implemented and verified locally; flow-stop fix committed;
+Last updated: 2026-09-07 (orchestrator through H5 deployed locally; H3 extension reload pending;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+
+## Local deployment (2026-09-07)
+
+The owner authorized local deployment. `scripts/dev-loop.ps1 -Action Deploy` built the
+orchestrator at `93976733` in `.target-dev-loop/release` and replaced only
+`target/release/ghostlight.exe`. Both files have SHA-256
+`720adda0c9b08a68faac42f48faa0d4af1ab160633bfdfa31327c1329be9b0da`.
+The new exact-path process is running. Existing MCP and browser connector processes survived;
+their executable hashes are unchanged. The deployment lock was removed.
+
+`doctor --json` reports Ready after the swap, and this session's existing MCP connection
+successfully called `policy_explain` and live `browser_tabs list`. The browser had been
+disconnected before deployment and is now connected. This is installation/reconnection evidence;
+installed-browser H5 Pause/Stop timing and Linux runtime checks remain untested.
+
+H1, H2a/H2b, H4, and H5 are deployed locally. H3's extension changes still require an explicit
+Reload of the unpacked Ghostlight extension. Browser security policy blocked agent access to
+`chrome://extensions`, so no extension reload or current extension-source claim was made.
+Nothing was pushed or published. The earlier implementation records below describe their
+pre-deployment validation; this section owns the current deployment state.
 
 ## Security-hardening epic (2026-09-06)
 
@@ -28,7 +48,7 @@ The owner accepted flow stopping as a bug to fix. [H2a](tasks/security-hardening
 adds the two missing loop exits for child-decode and execution failures under stop. Regression
 tests first reproduced the extra browser command and now prove stop behavior, retained earlier
 effects, and explicit continue. All 362 orchestrator library tests, formatting, and diff whitespace
-checks pass. The fix is committed as `8103c69b`, not deployed. Formatting, workspace Clippy,
+checks pass. The fix is committed as `8103c69b` and now deployed locally. Formatting, workspace Clippy,
 workspace tests, extension tests, and the fresh-build process journey passed before its commit.
 
 The owner accepted [H3 script effect truth](tasks/security-hardening/h3-script-effect-truth.md)
@@ -59,7 +79,7 @@ All 447 Rust tests (370 orchestrator library), all 183 extension tests, formatti
 Clippy pass. The fresh-build process journey now verifies the actual JSONL file after a failed
 Read/script flow and a primitive browser error: permitted client details survive while audit
 excludes them. This is a synthetic adapter through real MCP/relay/service processes, not a live
-browser or installed-MV3 lane. H1 is not deployed or published.
+browser or installed-MV3 lane. H1 is now deployed locally, not published.
 
 The owner accepted [H2b aggregate outcomes and recovery](tasks/security-hardening/h2b-aggregate-outcomes.md).
 It is implemented locally: flow and sequence share progress accounting, completed counts successes,
@@ -69,7 +89,7 @@ Human directives, attention, cancellation, and deadlines override Continue. ADR-
 decision. All 455 Rust tests (378 orchestrator library), 183 extension tests, formatting, Clippy,
 and the fresh-build process journey pass. Actual MCP error flags and JSONL progress match the
 results. These are fake-browser and synthetic-adapter process lanes, not installed MV3 or live
-Chromium timing proof. H2b is not deployed or published.
+Chromium timing proof. H2b is now deployed locally, not published.
 
 The owner accepted [H4 grouped history and permission explanations](tasks/security-hardening/h4-grouped-history.md).
 It is implemented locally under ADR-0156. Attempted children write bounded receipts as they finish,
@@ -82,7 +102,7 @@ All 463 Rust tests (386 orchestrator library), 183 extension tests, formatting, 
 process checks pass. The process journey checks actual incremental JSONL and content exclusion.
 The bundled UI passes surface tests and isolated Chromium checks for expansion, first-problem
 scrolling, focus/scroll preservation, and the supported minimum width. This is synthetic projection
-and adapter evidence, not an installed Tauri/MV3 deployment. H4 is not deployed or published.
+and adapter evidence. H4 is now deployed locally, not published; see the deployment record above.
 
 [H5 session attention and runtime control](tasks/security-hardening/h5-runtime-controls.md) is
 implemented locally under the owner's accepted I4 decision and [ADR-0157](adr/0157-session-attention-and-dispatch-control.md).
@@ -98,7 +118,7 @@ tests, changed JavaScript syntax, and the fresh-build process journey pass. The 
 MCP/JSONL session isolation and Pause after target preparation through a synthetic adapter. Bundled
 UI and isolated Chromium checks prove history review after Clear view, scoped recovery, preserved
 scroll/focus, and the supported narrow layout. No installed Tauri/MV3 or Linux runtime proof is
-claimed. H5 is not deployed or published.
+claimed by those tests. H5 is now deployed locally, not published; see the deployment record above.
 
 Next is H6 ideation I5 for remaining frame-coverage contracts. Audit health and local bounds also
 require their ideation sessions. Expected partial website effects remain distinct from Ghostlight's

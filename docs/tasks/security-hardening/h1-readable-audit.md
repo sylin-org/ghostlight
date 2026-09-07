@@ -1,6 +1,7 @@
 # H1: Readable bounded audit
 
-Status: implemented and verified locally; not deployed or published. Owner decision: 2026-09-06.
+Status: implemented and verified locally; deployed locally on 2026-09-07, not published.
+Owner decision: 2026-09-06. See the [deployment record](../../STATUS.md#local-deployment-2026-09-07).
 
 ## Accepted experience
 

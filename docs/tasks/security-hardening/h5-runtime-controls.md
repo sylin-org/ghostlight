@@ -1,6 +1,8 @@
 # H5: Session recovery and dependable runtime control
 
-Status: implemented and verified locally on 2026-09-07; not deployed. Owner approval: 2026-09-06.
+Status: implemented, verified, and deployed locally on 2026-09-07. Owner approval: 2026-09-06.
+The [deployment record](../../STATUS.md#local-deployment-2026-09-07) records the exact binary
+and live reconnection checks. Installed-browser control timing remains untested.
 
 ## Accepted behavior
 
@@ -50,7 +52,8 @@ for later explicit review instead of resurrecting older snapshot data.
 Commit: `fix(control): isolate session attention and guard browser dispatch` (use Git for hash).
 Next: H6 ideation I5; do not implement its unresolved contracts without that discussion.
 
-No deployment, push, publication, or local-machine notes access is authorized by this task.
+The owner separately authorized local deployment on 2026-09-07. No push, publication, or
+local-machine notes access was authorized or performed.
 
 Completed landings are still checked against policy after dispatch. A later runtime control
 change does not create a permanent policy hold on an otherwise permitted tab; the next command

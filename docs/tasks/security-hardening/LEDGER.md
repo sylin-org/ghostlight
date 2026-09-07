@@ -21,6 +21,11 @@ The owner accepted I1 and directed implementation of [H1 readable bounded audit]
 H1, H2b, and [H4](h4-grouped-history.md) are implemented and verified locally. I1-I3 are accepted.
 [H5](h5-runtime-controls.md) is implemented and verified locally under accepted I4 and ADR-0157.
 It repairs the request-restriction gap, isolates attention, and checks controls at dispatch.
+The owner then authorized local deployment on 2026-09-07. Orchestrator `93976733` is running
+from `target/release`; H1, H2a/H2b, H4, and H5 are deployed locally. Doctor reports Ready and
+the existing MCP connection passes authority and live tab-list calls. H3's unpacked extension
+reload remains pending because browser security policy blocked `chrome://extensions` access.
+See the [current deployment record](../../STATUS.md#local-deployment-2026-09-07).
 Next: H6 ideation I5 for the remaining frame-coverage contracts. H1-H5 have no remaining
 implementation task; the installed-MV3 and cross-platform runtime lanes remain untested.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
@@ -29,11 +34,11 @@ Do not repeat completed cycles or implement undecided remedies silently.
 The owner identified flow stopping as a bug to fix. [H2a](h2a-flow-stop.md) now fixes the two
 missing loop exits in the working tree, with regression evidence and 362 passing orchestrator
 library tests. It is committed as `8103c69b`, with full workspace gates and the process journey
-now passing; it is not deployed. H2b aggregate reporting is implemented and verified locally.
+now passing; it is now deployed locally. H2b aggregate reporting is implemented and verified locally.
 
 H1's local-audit correction and H2b's aggregate behavior are accepted. H3's
 distinction from expected partial effects is accepted. No transactional rollback requirement has
-been added, and no deployment or publication has been made for this epic.
+been added. The orchestrator is deployed locally; nothing from this epic has been published.
 
 Client provenance remains reporting-first, with signer/hash admission conditional on a concrete
 integration and verifiable subject. ADR-0105 records that direction. C1's detailed fields and
@@ -54,12 +59,12 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 
 | Package | Current disposition | Before its implementation cycle |
 | --- | --- | --- |
-| H2a | Fixed and committed as `8103c69b`; not deployed | Required gates and process journey pass. |
+| H2a | Fixed and committed as `8103c69b`; deployed locally | Required gates and process journey pass. |
 | H3 | IMPLEMENTED and verified locally; not deployed | Complete evidence is in its task record; no remaining H3 implementation task. |
-| H1 | IMPLEMENTED and verified locally; not deployed | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
-| H2b | IMPLEMENTED and verified locally; not deployed | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
-| H4 | IMPLEMENTED and verified locally; not deployed | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
-| H5 | IMPLEMENTED and verified locally; not deployed | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
+| H1 | IMPLEMENTED and verified locally; deployed locally | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
+| H2b | IMPLEMENTED and verified locally; deployed locally | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
+| H4 | IMPLEMENTED and verified locally; deployed locally | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
+| H5 | IMPLEMENTED and verified locally; deployed locally | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
 | H6 | Policy direction AGREED; details open; not implemented | Ideation I5 for scope evidence, schema, disclosure, notices, and capture. |
 | H7 | Included; behavior still proposed | Ideation I6 for visible failure, strict policy, and recovery. |
 | H8 | Included; investigation still proposed | Ideation I7 for bounded cases and evidence-driven controls. |
@@ -239,8 +244,8 @@ when a later control prevents their dispatch. Already dispatched uncertainty rem
 Workbench notices identify the affected session; Review history restores the current receipt even
 after Clear view, and Resume this session passes the exact incident to the human-only facade.
 
-The H5 task records the full test lanes and their limits. No installed Tauri/MV3 or Linux runtime
-proof, deployment, or publication is claimed.
+The H5 task records the full test lanes and their limits. The orchestrator is now deployed
+locally. Installed Tauri/MV3 control timing and Linux runtime proof remain open; no publication.
 
 ### H6: Frame/site coverage
 
@@ -368,6 +373,13 @@ H6's selected modes remain accepted context rather than unresolved questions.
 | 2026-09-06 | Owner accepted I3 and directed H4 implementation | Incremental bounded child receipts, grouped history, and actual permission explanations. 463 Rust/183 extension tests, fresh-build process/JSONL, surface, and isolated Chromium history checks pass. No deployment. Next: H5 ideation I4. |
 
 ## H5 execution record (2026-09-07)
+
+After the implementation commit, the owner requested local deployment. The dev-loop swapped
+only the orchestrator at `93976733`; the isolated build and live binary hashes match. Existing
+connector processes and binaries were preserved. Doctor reports Ready, and the existing MCP
+session passes authority and live tab-list calls. The [deployment record](../../STATUS.md#local-deployment-2026-09-07)
+retains the hash and the pending H3 extension reload. The implementation evidence below predates
+that deployment and remains separate from installed-browser control timing.
 
 The prior working tree contained the approved H5 patch and ADR. Continued exploration completed
 its runtime, recovery, and UI paths. Formatting, workspace Clippy, all 469 Rust tests (392

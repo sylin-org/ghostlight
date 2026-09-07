@@ -1,7 +1,8 @@
 # H2a: Stop a flow when its error policy requires it
 
 Status: implemented and committed as `8103c69b`; required gates and the process journey pass;
-not deployed. The ledger retains both the original failing regressions and completion evidence.
+deployed locally on 2026-09-07. See the [deployment record](../../STATUS.md#local-deployment-2026-09-07).
+The ledger retains both the original failing regressions and completion evidence.
 
 Owner direction: "Flow stopping - that's simply a bug. we need to fix."
 The [ledger](LEDGER.md) records execution. This task fixes SA-01's continuation defect under
