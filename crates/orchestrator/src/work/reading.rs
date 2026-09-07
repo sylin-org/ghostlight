@@ -61,7 +61,7 @@ impl ApplicationExecutor {
                 title,
                 url,
             }) if tab_id == selected.physical_id => {
-                let landing = self.authorize(context, Capability::Read, Some(&url));
+                let landing = self.authorize_landing(context, Capability::Read, &url);
                 if !landing.allowed {
                     let _ = lease.hold_tab(&selected.handle);
                     return self.blocked_at(context, landing, Some(tab_id), Effect::None, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), observed_host(&url));

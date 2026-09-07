@@ -189,15 +189,7 @@ impl WorkbenchProjection {
                 }
                 DomainEvent::AttentionRequired { invocation, .. } => {
                     let change = state.set_phase(invocation, OperationPhase::Attention);
-                    let notification = state
-                        .notified
-                        .insert((invocation.clone(), NotificationKind::Attention))
-                        .then(|| WorkbenchNotification {
-                            kind: NotificationKind::Attention,
-                            title: "Ghostlight needs your attention".into(),
-                            body: "A browser operation is waiting for you.".into(),
-                        });
-                    (notification, change)
+                    (None, change)
                 }
                 DomainEvent::WorkBlocked { invocation, .. } => {
                     let change = state.set_phase(invocation, OperationPhase::Blocked);
@@ -227,6 +219,32 @@ impl WorkbenchProjection {
         if let Some(change) = change {
             self.publish(change);
         }
+    }
+
+    /// Publish one actual session transition; refused follow-up requests create no extra notice.
+    pub fn session_attention_changed(
+        &self,
+        workspace: &str,
+        label: &str,
+        attention: Option<crate::workspace::SessionAttention>,
+    ) {
+        let message = attention
+            .as_ref()
+            .map(|value| crate::language::control::attention(value.reason).to_owned());
+        if let Some(body) = &message {
+            if let Some(port) = lock(&self.presentation).clone() {
+                let _ = port.notify(WorkbenchNotification {
+                    kind: NotificationKind::Attention,
+                    title: format!("{label} needs your attention"),
+                    body: body.clone(),
+                });
+            }
+        }
+        self.publish(WorkbenchChange::SessionAttentionChanged {
+            workspace: workspace.into(),
+            attention,
+            message,
+        });
     }
 
     fn record(&self, record: &AuditRecord) {
@@ -357,23 +375,27 @@ impl WorkbenchFacade {
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
         let operations = self.projection.operations();
-        let sessions = self
-            .workspaces
-            .summaries()
-            .into_iter()
-            .map(|workspace| SessionSummary {
-                active_operations: operations
-                    .iter()
-                    .filter(|operation| operation.workspace == workspace.id)
-                    .count(),
-                id: workspace.id,
-                client_label: workspace.client_label,
-                channel: workspace.channel,
-                leased: workspace.leased,
-                tab_count: workspace.tab_count,
-                held_tab_count: workspace.held_tab_count,
-            })
-            .collect::<Vec<_>>();
+        let sessions =
+            self.workspaces
+                .summaries()
+                .into_iter()
+                .map(|workspace| SessionSummary {
+                    active_operations: operations
+                        .iter()
+                        .filter(|operation| operation.workspace == workspace.id)
+                        .count(),
+                    attention_message: workspace.attention.as_ref().map(|attention| {
+                        crate::language::control::attention(attention.reason).into()
+                    }),
+                    attention: workspace.attention,
+                    id: workspace.id,
+                    client_label: workspace.client_label,
+                    channel: workspace.channel,
+                    leased: workspace.leased,
+                    tab_count: workspace.tab_count,
+                    held_tab_count: workspace.held_tab_count,
+                })
+                .collect::<Vec<_>>();
         let browsers = self.browser_summary().into_iter().collect::<Vec<_>>();
         let governance = self.governance.diagnostics();
         let mut diagnostics = vec![DiagnosticItem::passing(
@@ -414,6 +436,22 @@ impl WorkbenchFacade {
         // A change published mid-assembly is re-delivered and applied idempotently by key.
         let seq = self.projection.current_seq();
         let runtime_state = self.governance.runtime_state();
+        let attention_count = sessions
+            .iter()
+            .filter(|session| session.attention.is_some())
+            .count();
+        let mut readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
+            browser_connected: !browsers.is_empty(),
+            session_ended: runtime_state == RuntimeControlState::Ended,
+            paused: runtime_state == RuntimeControlState::Held,
+            needs_attention: runtime_state == RuntimeControlState::Attention || attention_count > 0,
+            working: !operations.is_empty(),
+        });
+        if readiness.state == readiness::Readiness::NeedsYou
+            && runtime_state != RuntimeControlState::Attention
+        {
+            readiness.detail = crate::language::control::sessions_needing_review(attention_count);
+        }
         WorkbenchSnapshot {
             seq,
             generated_at_ms: unix_ms(),
@@ -422,13 +460,7 @@ impl WorkbenchFacade {
                 started_at_ms: self.started_at_ms,
                 runtime_state,
             },
-            readiness: ReadinessSummary::resolve(&readiness::ReadinessFacts {
-                browser_connected: !browsers.is_empty(),
-                session_ended: runtime_state == RuntimeControlState::Ended,
-                paused: runtime_state == RuntimeControlState::Held,
-                needs_attention: runtime_state == RuntimeControlState::Attention,
-                working: !operations.is_empty(),
-            }),
+            readiness,
             overview: OverviewSummary {
                 active_sessions: sessions.len(),
                 active_operations: operations.len(),
@@ -454,6 +486,28 @@ impl WorkbenchFacade {
                 managed_policy: governance.managed_policy,
                 policy: self.governance.policy_chip(),
             },
+        }
+    }
+
+    /// Resume only the session incident explicitly reviewed by the human surface.
+    pub fn resume_session(&self, workspace: &str, incident: &str) -> WorkbenchIntentResult {
+        let state = self.governance.runtime_state();
+        let result = self.workspaces.resume_attention(workspace, incident);
+        let accepted = matches!(result, Ok(true));
+        if accepted {
+            self.projection
+                .session_attention_changed(workspace, "", None);
+        }
+        WorkbenchIntentResult {
+            accepted,
+            runtime_state: state,
+            browser_notified: false,
+            message: match result {
+                Ok(true) => crate::language::control::resumed(state),
+                Ok(false) => crate::language::control::STALE_REVIEW,
+                Err(_) => crate::language::control::SESSION_GONE,
+            }
+            .into(),
         }
     }
 
@@ -848,6 +902,12 @@ pub struct WorkbenchEvent {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkbenchChange {
+    /// A session entered human review or its current review was explicitly cleared.
+    SessionAttentionChanged {
+        workspace: String,
+        attention: Option<crate::workspace::SessionAttention>,
+        message: Option<String>,
+    },
     /// One operation entered the live set.
     OperationStarted {
         /// The newly tracked operation.
@@ -1014,6 +1074,10 @@ pub struct OverviewSummary {
 pub struct SessionSummary {
     /// Opaque workspace identity.
     pub id: String,
+    /// Session-local review state; global controls do not replace it.
+    pub attention: Option<crate::workspace::SessionAttention>,
+    /// Authored explanation displayed beside recovery.
+    pub attention_message: Option<String>,
     /// Presentation-only client label.
     pub client_label: String,
     /// Which intake admitted this session, so live work can be attributed before it settles.

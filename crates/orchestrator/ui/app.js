@@ -126,6 +126,7 @@ async function resync({ rebuildFeed = false, quiet = true } = {}) {
 function receiveChange(event) {
   // A gap means this cache can no longer be trusted. Rebuild rather than guess.
   if (store.applyChange(event) === "gap") resync({ rebuildFeed: true });
+  else if (event.change.kind === "session_attention_changed") resync();
 }
 
 /* --------------------------------- policy ------------------------------- */
@@ -285,7 +286,7 @@ async function withButton(event, work, done) {
   button.disabled = true;
   try {
     await work();
-    view.toast(done);
+    if (done) view.toast(done);
   } catch (error) {
     view.toast(String(error), true);
   } finally {
@@ -323,6 +324,24 @@ function wire() {
     // they may. An action inside an open rule is handled above and must not close it again.
     const toggle = event.target.closest("[data-rule-toggle]");
     if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
+    const reviewSession = event.target.closest("[data-review-session]");
+    if (reviewSession) {
+      const invocation = reviewSession.dataset.reviewInvocation;
+      withButton({ currentTarget: reviewSession }, async () => {
+        await resync();
+        view.reviewSession(store.revealHistory(invocation));
+      }).catch((error) => view.toast(String(error), true));
+      return;
+    }
+    const resumeSession = event.target.closest("[data-resume-session]");
+    if (resumeSession && !resumeSession.disabled) {
+      withButton({ currentTarget: resumeSession }, async () => {
+        const result = await transport.resumeSession(resumeSession.dataset.resumeSession, resumeSession.dataset.resumeIncident);
+        view.toast(result.message, !result.accepted);
+        await resync();
+      }).catch((error) => view.toast(String(error), true));
+      return;
+    }
     const intent = event.target.closest("[data-intent]");
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");

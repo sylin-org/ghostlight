@@ -508,3 +508,22 @@ For the narrow compatibility question consulted from the archived public develop
 Chromium loads `extension/` directly with id `cjcmhepmagomefjggkcohdbfemacojoa`, connects through
 `org.sylin.ghostlight`, and reloads explicitly after changes. Repo-built shores remain under
 `target/release`. No prior implementation code was reused.
+
+## Session attention and final dispatch (ADR-0157)
+
+Workspace lifetime owns automatic attention, its closed cause, opaque incident id, and triggering
+invocation. Governance owns the denial thresholds and composes that fact with independent global
+human controls. WorkbenchFacade owns reviewed incident recovery; the allowlisted Tauri action is
+unavailable through model tools. Recovery changes no grants and replays no invocation. The WebView
+renders the session notice and opens its current history group, even after a disposable Clear view.
+
+Observe-mode policy allowance still evaluates and enforces request restrictions. Permission
+receipts retain the final decision and actual evaluated layers. The executor supplies a live
+admission callback to the common browser port; the relay invokes it after writer acquisition and
+before transmission. The same check guards compensating close. Control authority is not locked
+while waiting for a browser receipt. Already dispatched work retains acknowledged and uncertain
+effect facts, including acknowledged actions whose separate postcondition check was interrupted.
+
+Completed landings are still checked against policy after dispatch. A later runtime control
+change does not create a permanent policy hold on an otherwise permitted tab; the next command
+checks the live control again. Recovery tests prove the same tab remains usable after Resume.

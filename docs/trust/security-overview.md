@@ -24,9 +24,14 @@ destinations follow those policies; they have no built-in address restriction. N
 schemes and configured sacred domains remain hard ceilings.
 
 Observe mode records ordinary would-deny decisions without blocking them; enforce mode blocks.
+Explicit request restrictions still enforce under observe policy.
 Every enforced policy denial receives deterministic attribution to authority, tier, grant, and
-rule. Repeated denials pause the affected workspace for human attention. Runtime pause, resume,
-resume quietly, and end-session remain locally controlled.
+rule. Repeated enforced denials require review in the affected session. Explicit session resume
+permits new work without replay or permission changes. Global Pause/Stop remain independent;
+global Resume does not clear session attention. Controls are rechecked at browser transmission,
+while already dispatched work retains its actual effect evidence. ADR-0157 and the
+[H5 evidence](../tasks/security-hardening/h5-runtime-controls.md) describe the locally verified
+implementation and the installed-browser/platform lanes that remain untested.
 
 Audit is a local append-only JSONL flight recorder. It carries the complete RAWX requirement set,
 decision attribution, managed sequence, governed host, and bounded outcome measurements. It does

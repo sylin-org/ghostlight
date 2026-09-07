@@ -520,3 +520,15 @@ Read-only, never dispatches a browser, holds no workspace lease, and writes noth
 The result carries the orchestrator's compiled projection -- the same compilation the workbench
 Policy destination renders -- with layer document texts and filesystem paths withheld from model
 results. The summary names its measurement: capability areas explained over layers in force.
+
+## Session attention and human control (ADR-0157)
+
+Request restrictions remain enforcing under observe policy. A denial that reaches its session's
+attention threshold retains the actual policy explanation and returns `attention_required`.
+Further work in that session requires explicit human review/resume in the workbench; global Resume
+leaves it intact. Model tools cannot resume attention. The triggering composition stops even under
+Continue; recovery permits new requests and never replays prior steps.
+
+Pause and Stop keep their fixed directives at the final dispatch check. A late refusal preserves
+already acknowledged effects, including when it prevents a separate postcondition observation.
+No-effect claims apply only to work that has not dispatched; lost effectful replies remain unknown.

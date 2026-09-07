@@ -32,6 +32,7 @@ const environment = {
 const children = [];
 const physicalCommands = [];
 let queryCount = 0;
+let pauseBeforeFocusedReceipt = false;
 const physicalRequests = [];
 let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
@@ -345,6 +346,17 @@ async function runAdapter(peer) {
       queryCount += 1;
       const one = [{ locator: `locator_${queryCount}`, role: "link", name: "More information...", state: [], credential_class: false }];
       result = { outcome: "targets", tab_id: command.tab_id, targets: queryCount === 2 ? [...one, { ...one[0], locator: `${one[0].locator}b` }] : one };
+    } else if (command.command === "list_tabs") {
+      result = { outcome: "tabs", tabs: [] };
+    } else if (command.command === "describe_focused") {
+      if (pauseBeforeFocusedReceipt) {
+        pauseBeforeFocusedReceipt = false;
+        const held = peer.waitFor((frame) => frame.kind === "control_state" && frame.state === "held");
+        peer.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
+        await held;
+        peer.send({ kind: "event", event: { event: "document_committed", tab_id: command.tab_id, url: "https://example.com/" } });
+      }
+      result = { outcome: "targets_described", tab_id: command.tab_id, targets: [{ locator: "focused", role: "textbox", name: "Notes", state: [], credential_class: false }] };
     } else if (command.command === "describe_targets") {
       result = { outcome: "targets_described", tab_id: command.tab_id, targets: command.locators.map((locator) => ({ locator, role: "textbox", name: "Notes", state: [], credential_class: false })) };
     } else if (command.command === "activate" || command.command === "activate_modified") {
@@ -941,6 +953,51 @@ try {
   assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), true, "on creates the marker");
   await runDiagnosticsCli(["off"]);
   assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), false, "off removes the marker");
+
+  // H5: one actual MCP session reaches attention while another keeps using the same adapter.
+  const troubledConnector = start(executable("ghostlight-mcp-connector"));
+  const troubled = new McpPeer(troubledConnector);
+  await troubled.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H5 isolated session", version: "1" } });
+  troubled.notify("notifications/initialized");
+  const beforeAttention = physicalCommands.length;
+  const attentionResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
+    restrict_capabilities: ["action"], on_error: "continue", steps: Array.from({ length: 4 }, (_, index) => ({
+      id: `denied_${index}`, tool: "browser_tabs", arguments: { action: "list" }
+    }))
+  }});
+  const attention = structured(attentionResponse);
+  assert.equal(attentionResponse.result.isError, true);
+  assert.equal(attention.status, "attention_required");
+  assert.equal(attention.facts.steps[3].status, "not_run");
+  assert.equal(physicalCommands.length, beforeAttention);
+  assert.equal(structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
+  const resumeState = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
+  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
+  await resumeState;
+  const stillAttention = structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
+  assert.equal(stillAttention.status, "attention_required", "global Resume cannot clear a session review");
+  const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+    .filter((record) => record.invocation === attention.invocation);
+  assert.equal(attentionRecords.filter((record) => record.step).length, 3);
+  assert.equal(attentionRecords.find((record) => !record.step).status, "attention_required");
+  troubledConnector.kill();
+  await waitForExit(troubledConnector);
+
+  const controlTab = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/", new_tab: true } }));
+  pauseBeforeFocusedReceipt = true;
+  const beforeTyping = physicalCommands.length;
+  const pausedTypingResponse = await mcp.request("tools/call", { name: "browser_type_text", arguments: { tab: controlTab.facts.tab, focused: true, text: "PRIVATE_NOT_SENT" } });
+  const pausedTyping = structured(pausedTypingResponse);
+  assert.equal(pausedTypingResponse.result.isError, true);
+  assert.equal(pausedTyping.status, "blocked");
+  assert.equal(pausedTyping.effect, "none");
+  assert.equal(pausedTyping.summary, "The user paused Ghostlight. Wait for further instructions.");
+  assert.deepEqual(physicalCommands.slice(beforeTyping).filter((command) => command !== "present"), ["describe_focused"], "only the preparation may dispatch");
+  const unpaused = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
+  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
+  await unpaused;
+  assert.equal(structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: controlTab.facts.tab } })).status, "succeeded", "a permitted landing during Pause must not strand the resumed tab");
+  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: controlTab.facts.tab } });
 
   // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
   // disconnects, recovery must preserve the profile binding and stop before repair, launch, or

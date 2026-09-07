@@ -39,12 +39,17 @@ impl ApplicationExecutor {
                 .governance
                 .record_denial_attention(workspace.as_str(), terminal.decision);
         if denial_attention {
-            self.governance.controls().require_attention();
-            let _ = self
-                .browser
-                .publish_control_state(self.governance.runtime_state());
+            self.require_session_attention(
+                workspace,
+                &terminal.result.invocation,
+                crate::workspace::AttentionReason::RepeatedDenials,
+            );
+            // End this invocation even if a person resumes the session before its next child.
+            // The policy explanation and permission evidence still identify the actual refusal.
+            terminal.result.status = Status::AttentionRequired;
+            terminal.result.repeat_safe = false;
         }
-        let event = if denial_attention {
+        let event = if self.workspaces.attention(workspace).is_some() {
             DomainEvent::AttentionRequired {
                 invocation: terminal.result.invocation.clone(),
                 workspace: workspace.as_str().into(),

@@ -60,16 +60,14 @@ do not double-count. H1 retention remains intact. Automatic resumption stays a s
 
 ## I4: H5 runtime control and workspace scope
 
-- Include the H4 evaluator finding: observe admission can return before a stricter request
-  restriction. The request-tightening contract is already decided; choose its bounded repair
-  and direct/composed evidence alongside runtime controls. See the ledger's H5 evidence.
-- Confirm the scope repair and user-visible recovery from automatic attention in one workspace.
-- Agree the observable outcome of a pause arriving between target observation and effect dispatch,
-  including work already dispatched and therefore potentially uncertain.
-- Specify whether existing denial thresholds/reset behavior suffice before adding any settings.
-
-ADR-0126 already decides that pause refuses subsequent effects and stop is terminal. Its fixed
-directives exist. Those decisions are context, not open votes on a new suspended-caller design.
+ACCEPTED on 2026-09-06; implemented locally on 2026-09-07. See
+[H5](h5-runtime-controls.md) and [ADR-0157](../../adr/0157-session-attention-and-dispatch-control.md).
+Request restrictions enforce even when policy observes. Automatic attention belongs to its session;
+three matching enforced denials in 60 seconds or five in 120 seconds retain the existing thresholds.
+One notice identifies the session and offers history review and explicit scoped recovery. Global
+Resume preserves session attention; recovery permits new requests without replay or expanded grants.
+Pause/Stop are checked after preparation and writer wait. Already dispatched work retains its facts.
+No cooldown, extra setting, automatic replay, or replacement of the fixed human directives.
 
 ## I5: H6 detailed frame coverage
 

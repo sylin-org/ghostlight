@@ -465,7 +465,8 @@ impl AuthoritySnapshot {
             .iter()
             .map(|layer| decide_resource_less(layer, requirements))
             .collect();
-        if let Some(decision) = self.resolve_outcomes(&outcomes) {
+        let policy_decision = self.resolve_outcomes(&outcomes);
+        if let Some(decision) = policy_decision.filter(|decision| !decision.allowed) {
             return (decision, outcomes, false);
         }
         if self
@@ -478,7 +479,11 @@ impl AuthoritySnapshot {
                 true,
             );
         }
-        (Decision::allow(), outcomes, true)
+        (
+            policy_decision.unwrap_or_else(Decision::allow),
+            outcomes,
+            true,
+        )
     }
 
     /// Decide whether model-driven tab closure is admitted by every authority layer.
@@ -548,7 +553,8 @@ impl AuthoritySnapshot {
             .iter()
             .map(|layer| decide_for_host(layer, requirements, &host))
             .collect();
-        if let Some(decision) = self.resolve_outcomes(&outcomes) {
+        let policy_decision = self.resolve_outcomes(&outcomes);
+        if let Some(decision) = policy_decision.filter(|decision| !decision.allowed) {
             return (decision, outcomes, false);
         }
         if self
@@ -572,7 +578,11 @@ impl AuthoritySnapshot {
                 true,
             );
         }
-        (Decision::allow(), outcomes, true)
+        (
+            policy_decision.unwrap_or_else(Decision::allow),
+            outcomes,
+            true,
+        )
     }
 
     /// Whether policy-aware discovery can prove that some host-scoped variant may proceed.
@@ -1816,6 +1826,17 @@ fn assemble(
 }
 
 impl GovernanceFacade {
+    /// Combine independent global human control with the workspace's review requirement.
+    #[must_use]
+    pub fn session_decision(&self, needs_attention: bool) -> Decision {
+        let global = self.runtime_decision();
+        if global.allowed && needs_attention {
+            Decision::refused(ReasonCode::RuntimeAttention)
+        } else {
+            global
+        }
+    }
+
     /// Check live runtime control at an effect boundary.
     #[must_use]
     pub fn runtime_decision(&self) -> Decision {

@@ -43,6 +43,7 @@ The ledger owns progress; this epic is the plan, not another status store.
 | Readable audit | Readable bounded history, details on demand, and existing target-name controls. Display detail does not authorize more retention. New profiles and richer capture deferred. | [ADR-0103 amendment](../../adr/0103-language-owned-outcome-voice.md), [H1](h1-readable-audit.md) |
 | Aggregate recovery | Completed means succeeded. Continue preserves failures, known effects remain known, and recovery respects completed work. | ADR-0133 H2b amendment, [H2b](h2b-aggregate-outcomes.md) |
 | Grouped history | One collapsed parent, incremental safe child receipts, truthful missing evidence, and actual permission explanations. No duplicate counts or extra routine notifications. | [ADR-0156](../../adr/0156-grouped-composition-history.md), [H4](h4-grouped-history.md) |
+| Session attention and runtime dispatch | Scoped incidents, explicit review/resume, enforcing request restrictions, and final dispatch checks. | [ADR-0157](../../adr/0157-session-attention-and-dispatch-control.md), [H5](h5-runtime-controls.md) |
 | Flow stopping | Stop on the configured failure boundary; do not run later steps after reporting a stop. | ADR-0133 Decision 9, H2a |
 | Script execution | Determine a supported form without replaying possibly effectful code; exception text/class is not evidence of safe retry or no effects. Preserve supported REPL behavior and report uncertainty honestly. | ADR-0133 September 6 amendment, H3 |
 | Embedded subjects | Apply authored host/RAWX authority to the document actually accessed. A parent's authorization alone does not authorize its embeds. | [ADR-0151 amendments](../../adr/0151-composed-full-page-reading.md), H6 |
@@ -62,7 +63,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | H1: Audit confidentiality | Operation metadata stays useful without copying page results, values, scripts, or arbitrary errors into durable audit. | I1 accepted: readable bounded history and existing name control; profiles and richer capture deferred. See [H1](h1-readable-audit.md). |
 | H2b: Aggregate reporting | Completed, failed, unattempted, and uncertain work has one truthful aggregate account. | I2 accepted and implemented locally; shared flow/sequence progress and recovery. See H2b. |
 | H4: Child receipts | Each attempted child gets a safe receipt grouped under its parent. | I3 accepted and implemented locally; H1 retention and H2b progress preserved. See H4. |
-| H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | Ideation I4 for unresolved details; existing pause/stop decisions remain authoritative. Direct scope proof can precede H4; composed proof follows it. |
+| H5: Runtime control | Automatic attention belongs to its workspace; explicit human controls act at the intended boundary. | I4 accepted and implemented locally under ADR-0157. See H5 for scope, recovery, and timing evidence. |
 | H6: Embedded-document policy | Chosen exclusion handling and notice preferences work consistently across supported observations and actions. | Ideation I5 settles remaining schema, scope, disclosure, and capture choices; agreed modes are not reopened. |
 | H7: Audit availability | A recording failure has truthful visibility, recovery, and any explicitly chosen admission consequence. | Ideation I6; coordinate with H1/H4 for consistent records and prior effects. |
 | H8: Local resilience | Malformed or abandoned clients cannot consume unbounded local resources or silently strand unrelated work. | Ideation I7 chooses bounded evidence and response; do not infer a demonstrated exploit. |
@@ -74,9 +75,9 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 
 1. Finish the existing H2a checkpoint and implement H3 as the first new cycle. Recheck the tree,
    preserve the separate logical changes, and prove script compatibility alongside the defects.
-2. H1, H2b, and H4 are accepted and complete locally. Their common completion semantics and
-   bounded evidence support the subsequent packages. H5 ideation is next.
-3. Run targeted ideation for H5-H7 and implement bounded tasks. H6's agreed choices shape its
+2. H1, H2b, H4, and H5 are accepted and complete locally. Their common completion semantics and
+   bounded evidence support the subsequent packages. H6 ideation I5 is next.
+3. Run targeted ideation for H6-H7 and implement bounded tasks. H6's agreed choices shape its
    evidence contract; do not build a generic policy framework while details remain unresolved.
 4. Complete C1 after safe durable reporting is available. C2/C3 follow only the agreed concrete
    identity proof. H8 adds focused resilience work justified by its investigation.

@@ -19,8 +19,10 @@ commit hash. Both SA-04 defects have regressions, all 183 extension tests and wo
 pass, and 19 Chromium/MCP cases prove effects and compatibility. It is not deployed or published.
 The owner accepted I1 and directed implementation of [H1 readable bounded audit](h1-readable-audit.md).
 H1, H2b, and [H4](h4-grouped-history.md) are implemented and verified locally. I1-I3 are accepted.
-Next: H5 ideation I4 for runtime scope/timing and the newly reproduced request-restriction
-admission gap below. H4 has no remaining implementation task.
+[H5](h5-runtime-controls.md) is implemented and verified locally under accepted I4 and ADR-0157.
+It repairs the request-restriction gap, isolates attention, and checks controls at dispatch.
+Next: H6 ideation I5 for the remaining frame-coverage contracts. H1-H5 have no remaining
+implementation task; the installed-MV3 and cross-platform runtime lanes remain untested.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
 
@@ -57,7 +59,7 @@ Exact schema, UI details, and capture handling remain open. H6 is not implemente
 | H1 | IMPLEMENTED and verified locally; not deployed | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
 | H2b | IMPLEMENTED and verified locally; not deployed | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
 | H4 | IMPLEMENTED and verified locally; not deployed | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
-| H5 | Included; existing human-control contract retained | Ideation I4 for scope/recovery details and timing evidence. |
+| H5 | IMPLEMENTED and verified locally; not deployed | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
 | H6 | Policy direction AGREED; details open; not implemented | Ideation I5 for scope evidence, schema, disclosure, notices, and capture. |
 | H7 | Included; behavior still proposed | Ideation I6 for visible failure, strict policy, and recovery. |
 | H8 | Included; investigation still proposed | Ideation I7 for bounded cases and evidence-driven controls. |
@@ -218,24 +220,27 @@ reported as executed. No recursive top-level execution reacquires the lease or c
 
 ### H5: Runtime control and workspace scope
 
-New evidence from H4 permission review: with an observe-mode layer that would deny Write and
-an explicit Read-only request restriction, `authorize_with_evidence(WRITE, ...)` returns observed
-allowance before reaching the request restriction. The evaluator test records that current
-behavior and `request_evaluated: false`; no browser dispatch proof was run for this case. The
-existing request-tightening contract requires a follow-up admission-order repair and both direct
-and composed negative controls. H4 does not silently change evaluation order. Include this
-concrete gap in the next ideation/prioritization session; it is not a new proposed policy model.
+I4 was approved on 2026-09-06. [H5](h5-runtime-controls.md) is implemented and verified locally
+on 2026-09-07 under [ADR-0157](../../adr/0157-session-attention-and-dispatch-control.md).
+H4 reproduced observe-mode admission skipping a stricter request restriction. The evaluator now
+checks request limits before returning observed allowance; direct and composed negative controls
+prove that denied work sends no browser command and retains the actual permission decision.
 
-Keep deliberately global human controls separate from workspace-local automatic attention.
-Verify two workspaces through the shared executor/facade, then cover composed denials after H4.
-Use a gated browser port to trigger pause/end after target observation but before effect dispatch;
-verify cancellation and already-dispatched effects retain their correct terminal account.
+Automatic denial and credential attention live in the workspace. The first incident links to
+its triggering history group, and an independent incident id prevents stale recovery from clearing
+newer attention. Three matching enforced denials in 60 seconds or five in 120 seconds retain the
+existing thresholds. Observed findings do not count. The triggering child ends its composition
+even if human recovery races completion. Global Resume preserves scoped attention. Human scoped
+resume permits new requests, changes no grant, and replays no work.
 
-ADR-0126 already decides refusal on pause and the fixed stop directive. Both directive constants
-exist in current `language/outcome.rs`; rebuilding those features is not this package's purpose.
+The browser port checks runtime controls after waiting for the writer and before transmission,
+including bounded close compensation. Post-action observations retain the acknowledged effect
+when a later control prevents their dispatch. Already dispatched uncertainty remains uncertain.
+Workbench notices identify the affected session; Review history restores the current receipt even
+after Clear view, and Resume this session passes the exact incident to the human-only facade.
 
-Exit evidence: A's denial threshold does not stop B; human controls have their intended scope;
-the controlled timing test establishes what can dispatch and preserves truthful prior effects.
+The H5 task records the full test lanes and their limits. No installed Tauri/MV3 or Linux runtime
+proof, deployment, or publication is claimed.
 
 ### H6: Frame/site coverage
 
@@ -322,7 +327,7 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H1, H2b, H3, and H4 are complete locally. H5 ideation is next. The remaining grouping covers
+H1, H2b, H3, H4, and H5 are complete locally. H6 ideation I5 is next. The remaining grouping covers
 workspace control, frame boundaries, audit
 health, and local resilience. Honest provenance reporting uses the repaired receipt seam;
 conditional signer admission follows a concrete integration. The epic maps those dependencies.
@@ -330,7 +335,7 @@ Run the affected package's ideation session before implementing its undecided ch
 
 ## Decisions still open
 
-- H5 runtime scope/timing and the other undecided implementation packages in the ideation agenda.
+- H6 detailed frame coverage and the other undecided implementation packages in the ideation agenda.
 - Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
   verification caching, and supported-platform behavior.
 - Which concrete integration justifies C2; whether C3 is needed and which participating client
@@ -341,7 +346,7 @@ Run the affected package's ideation session before implementing its undecided ch
 - Audit-write failure behavior and any configurable strictness after a failed append.
 
 The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H5/H8. H1/H2b/H3/H4 corrections, existing pause/stop semantics, provenance boundaries, and
+including H6/H8. H1/H2b/H3/H4/H5 corrections, existing pause/stop semantics, provenance boundaries, and
 H6's selected modes remain accepted context rather than unresolved questions.
 
 ## Activity record
@@ -361,6 +366,20 @@ H6's selected modes remain accepted context rather than unresolved questions.
 | 2026-09-06 | Owner directed implementation | H2a committed separately as 8103c69b; assessment and epic preserved as a0310637. H3 implemented with local parsing and one effectful evaluation; full gates, 183 extension tests, and 19 Chromium/MCP cases pass. No deployment. Next: H1 ideation. |
 | 2026-09-06 | Owner accepted H2b ideation and directed implementation | Shared progress and recovery implemented; completed counts successes, Continue retains failures, known partial effects remain known, and metadata survives omission. 455 Rust/183 extension tests and fresh-build MCP/JSONL checks pass. No deployment. Next: H4 ideation I3. |
 | 2026-09-06 | Owner accepted I3 and directed H4 implementation | Incremental bounded child receipts, grouped history, and actual permission explanations. 463 Rust/183 extension tests, fresh-build process/JSONL, surface, and isolated Chromium history checks pass. No deployment. Next: H5 ideation I4. |
+
+## H5 execution record (2026-09-07)
+
+The prior working tree contained the approved H5 patch and ADR. Continued exploration completed
+its runtime, recovery, and UI paths. Formatting, workspace Clippy, all 469 Rust tests (392
+orchestrator library), and 183 extension tests pass. Six new Rust regressions cover request
+restriction enforcement, session isolation/recovery, writer queuing, preparation timing,
+postcondition effects, and already-dispatched uncertainty. The process journey proves actual MCP
+error flags, three child JSONL receipts, an unaffected second session, global Resume preserving
+attention, and Pause between the synthetic adapter's describe receipt and the input command.
+The bundled surface and isolated Chromium history journey pass, including cleared-history review,
+first-problem scrolling, scoped recovery, and the 720-pixel layout. See H5 for evidence limits.
+Local commit: `fix(control): isolate session attention and guard browser dispatch`; use Git for
+its hash. No deployment, push, publication, or machine-local notes access.
 
 ## H2a execution record (2026-09-06)
 

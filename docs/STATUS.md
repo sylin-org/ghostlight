@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-06 (H1, H2b, H3, and H4 implemented and verified locally; flow-stop fix committed;
+Last updated: 2026-09-07 (H1, H2b, H3, H4, and H5 implemented and verified locally; flow-stop fix committed;
 service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Security-hardening epic (2026-09-06)
@@ -84,14 +84,25 @@ The bundled UI passes surface tests and isolated Chromium checks for expansion, 
 scrolling, focus/scroll preservation, and the supported minimum width. This is synthetic projection
 and adapter evidence, not an installed Tauri/MV3 deployment. H4 is not deployed or published.
 
-The permission review also reproduces an existing evaluator gap: observe-mode admission can
-return before a stricter request restriction. H4 records that omission honestly; the ledger
-tracks the required admission-order repair and missing direct/composed dispatch proof.
+[H5 session attention and runtime control](tasks/security-hardening/h5-runtime-controls.md) is
+implemented locally under the owner's accepted I4 decision and [ADR-0157](adr/0157-session-attention-and-dispatch-control.md).
+Request restrictions now enforce under observe policy. Repeated denials and credential handoffs
+require review only in the affected session. Its notice links to current grouped history; explicit
+session resume changes no policy and replays nothing. Global Resume leaves session attention intact.
+A stale incident cannot clear a newer one, and a triggering child stops its composition.
 
-Next is H5 ideation I4 for runtime scope, enforcement timing, and that admission gap. Runtime scope/timing,
-audit health, and local bounds also require their ideation sessions before implementation.
-Expected partial website effects remain distinct from Ghostlight's extra copies or execution. No publication has been made for
-the epic.
+The real relay checks controls after waiting for its writer and immediately before transmission.
+A late control cannot erase an acknowledged effect, including when it prevents a post-action
+observation. Formatting, workspace Clippy, 469 Rust tests (392 orchestrator library), 183 extension
+tests, changed JavaScript syntax, and the fresh-build process journey pass. The process lane proves
+MCP/JSONL session isolation and Pause after target preparation through a synthetic adapter. Bundled
+UI and isolated Chromium checks prove history review after Clear view, scoped recovery, preserved
+scroll/focus, and the supported narrow layout. No installed Tauri/MV3 or Linux runtime proof is
+claimed. H5 is not deployed or published.
+
+Next is H6 ideation I5 for remaining frame-coverage contracts. Audit health and local bounds also
+require their ideation sessions. Expected partial website effects remain distinct from Ghostlight's
+extra copies or execution. No publication has been made for this epic.
 
 The owner has framed the epic around delight in integrated tooling and dependable boundaries
 chosen by individuals and organizations. The ledger now contains proposed answers under that

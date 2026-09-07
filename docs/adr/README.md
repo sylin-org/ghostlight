@@ -170,6 +170,7 @@ history live here.
 | [0154](0154-explicit-foreign-harness-entry-fix.md) | Explicit Fix may replace one parseable foreign harness entry: a confirmed per-target action preserves siblings, creates the existing backup, re-checks eligibility at write time, and never joins automatic or aggregate setup | Accepted (amends [0135](0135-blocked-target-evidence.md) Decision 3 and [0146](0146-aggregate-detected-harness-setup.md) Decision 2; builds on [0102](0102-integrated-desktop-workbench.md)/[0117](0117-effective-harness-config-resolution.md)/[0125](0125-recognizable-plural-linux-harness-integrations.md)) |
 | [0155](0155-policy-owned-local-destinations.md) | Local browser destinations follow policy: remove the built-in localhost, loopback, and link-local bans; all-open includes local HTTP(S), and existing host authority owns restrictions | Accepted (amends [0121](0121-restore-rawx-policy-and-managed-fetch.md)'s protected-resource scope and [0122](0122-readable-policy-destination-and-authored-user-layer.md) Decision 2) |
 | [0156](0156-grouped-composition-history.md) | Grouped incremental child receipts and permission explanations for allowed and refused work | Accepted; implemented and verified locally; not deployed |
+| [0157](0157-session-attention-and-dispatch-control.md) | Session-local attention, reviewed recovery, enforcing request restrictions, and runtime checks at dispatch | Accepted; implemented and verified locally; not deployed |
 
 ## Conventions
 

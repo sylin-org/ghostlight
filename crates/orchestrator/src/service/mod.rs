@@ -780,12 +780,9 @@ impl BrowserEventSink for ServiceBrowserEvents {
                     .and_then(|entries| entries.last())
                     .map(|(_, snapshot)| snapshot.clone())
                     .unwrap_or_else(|| self.governance.snapshot(&RequestRestrictions::default()));
-                let runtime = self.governance.runtime_decision();
-                let decision = if runtime.allowed {
-                    snapshot.authorize_landing(Capability::Action, &url)
-                } else {
-                    runtime
-                };
+                // A committed document is evidence from work already admitted (or from the
+                // human). Runtime control gates future commands; only policy holds this tab.
+                let decision = snapshot.authorize_landing(Capability::Action, &url);
                 let event_id = format!("browser_event_{}", Uuid::new_v4().simple());
                 if correlation.is_none() || !decision.allowed {
                     let _ = self.workspaces.apply_browser_landing(

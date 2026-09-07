@@ -3,6 +3,7 @@
 pub mod audit;
 pub mod capability_map;
 pub mod composition;
+pub mod control;
 pub mod environment;
 pub mod history;
 pub mod outcome;

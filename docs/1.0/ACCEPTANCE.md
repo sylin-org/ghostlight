@@ -387,3 +387,21 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    `tests/workbench-surface.mjs` checks projection updates and escaping. The isolated Chromium
    `tests/workbench-history-browser.mjs` checks the bundled UI at 1280 and 720 pixels using synthetic
    events. These do not establish installed Tauri/MV3 deployment or H5 timing guarantees.
+
+## Session control evidence (ADR-0157)
+
+1. Direct and composed request restrictions refuse dispatch under observe policy; permitted
+   observe work remains useful and cannot trip enforced-denial attention.
+2. Session A's third matching denial opens one review notice and stops its composition. Session B
+   can continue through the same browser. Global Resume leaves A's attention intact.
+3. Explicit recovery targets the current incident, changes no policy, and replays no work. Global
+   Pause/Stop remain effective after recovery; stale or ended-session recovery refuses.
+4. Control arriving after preparation or during writer queuing prevents the next command. Queued
+   cancellation/deadline also sends no command and leaves no pending receipt. Applied and uncertain
+   receipts keep their facts when controls change after dispatch; postcondition refusal preserves
+   the previously acknowledged action.
+5. Review history restores the current receipt after Clear view, expands its first problem, and
+   preserves narrow-layout usability. Incremental updates retain expansion, scroll, and focus.
+6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with
+   fake/synthetic browser adapters. The isolated Chromium history journey exercises bundled UI.
+   These do not establish installed Tauri/MV3, physical input timing, or Linux runtime evidence.

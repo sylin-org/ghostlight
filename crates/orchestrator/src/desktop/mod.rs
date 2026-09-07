@@ -133,6 +133,7 @@ pub fn run() -> Result<()> {
             apply_user_policy,
             remove_user_policy,
             apply_runtime_intent,
+            resume_session,
             toggle_diagnostics,
             reveal_diagnostics,
             refresh_harnesses,
@@ -525,6 +526,15 @@ fn validate_policy_document(document: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[tauri::command]
+fn resume_session(
+    workspace: String,
+    incident: String,
+    state: State<'_, DesktopState>,
+) -> WorkbenchIntentResult {
+    state.workbench.resume_session(&workspace, &incident)
 }
 
 #[tauri::command]

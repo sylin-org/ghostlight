@@ -1,5 +1,8 @@
 //! The workspace aggregate, opaque handles, ownership, document generations, and leases.
 
+mod attention;
+pub use attention::{AttentionReason, SessionAttention};
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -20,6 +23,8 @@ pub struct WorkspaceSummary {
     pub id: String,
     /// Presentation-only client label, claimed by the edge.
     pub client_label: String,
+    /// Current session-local human review requirement.
+    pub attention: Option<SessionAttention>,
     /// Which intake admitted this workspace. Attribution only (ADR-0105).
     pub channel: IntakeChannel,
     /// Whether one invocation currently owns the workspace lease.
@@ -260,6 +265,7 @@ struct TabState {
 
 #[derive(Debug)]
 struct WorkspaceState {
+    attention: Option<SessionAttention>,
     client_label: String,
     channel: IntakeChannel,
     /// The observed peer executable's file name, when the OS could answer (ADR-0105 stage 2).
@@ -308,6 +314,7 @@ impl WorkspaceStore {
             .map(|(id, workspace)| WorkspaceSummary {
                 id: id.as_str().into(),
                 client_label: workspace.client_label.clone(),
+                attention: workspace.attention.clone(),
                 channel: workspace.channel,
                 leased: workspace.leased,
                 tab_count: workspace.tabs.len(),
@@ -416,6 +423,7 @@ impl WorkspaceStore {
         self.lock().workspaces.insert(
             id.clone(),
             WorkspaceState {
+                attention: None,
                 client_label,
                 channel,
                 peer_image,

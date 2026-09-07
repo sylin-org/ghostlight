@@ -31,6 +31,9 @@
       /** Hold, resume, end or start the runtime session. */
       applyIntent: (intent) => call("apply_runtime_intent", { intent }),
 
+      /** Resume the exact session incident a person reviewed, without replay. */
+      resumeSession: (workspace, incident) => call("resume_session", { workspace, incident }),
+
       /** Flip the shared process-diagnostics marker; returns the resulting state. */
       toggleDiagnostics: () => call("toggle_diagnostics"),
 

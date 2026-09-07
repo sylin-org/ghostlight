@@ -84,16 +84,17 @@ mod tests {
         });
         let (decision, observed) =
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
-        // Record the existing early return honestly. The stricter READ-only request was not
-        // reached; its admission-order repair is tracked separately in the hardening ledger.
-        assert!(decision.allowed && decision.observed);
+        assert!(!decision.allowed && !decision.observed);
         assert!(!observed.layers[0].allowed);
-        assert!(observed.request_restricted && !observed.request_evaluated);
+        assert!(observed.request_restricted && observed.request_evaluated);
         assert!(crate::language::history::permission(&observed)
-            .contains("request restrictions were not evaluated"));
-        assert!(
-            crate::language::history::permission(&observed).starts_with("Allowed in observe mode")
-        );
+            .contains("request restrictions refused"));
+        let (decision, allowed_observe) =
+            snapshot.authorize_with_evidence(CapabilitySet::READ, Some("https://example.com/"));
+        assert!(decision.allowed && decision.observed);
+        assert!(allowed_observe.request_evaluated);
+        assert!(crate::language::history::permission(&allowed_observe)
+            .starts_with("Allowed in observe mode"));
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
         assert!(!decision.allowed && !decision.observed);

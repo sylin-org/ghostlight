@@ -48,6 +48,16 @@ impl Default for HeartbeatSettings {
     }
 }
 
+/// A live application-owned admission check used at the actual transmission boundary.
+pub struct BrowserDispatch<'a> {
+    /// Invocation deadline, checked again after waiting for the writer.
+    pub deadline: Instant,
+    /// Live cancellation state for this invocation.
+    pub cancelled: &'a AtomicBool,
+    /// Product-owned runtime control decision; never held across a receipt wait.
+    pub admit: &'a dyn Fn() -> Result<(), BrowserError>,
+}
+
 /// A synchronous physical primitive port used only by the orchestrator executor.
 pub trait BrowserPort: Send + Sync {
     /// Dispatch one primitive to one exact browser and await a decisive receipt, cancellation,
@@ -64,6 +74,24 @@ pub trait BrowserPort: Send + Sync {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError>;
+
+    /// Recheck live controls immediately before dispatch; real relays do this after writer wait.
+    fn call_guarded(
+        &self,
+        browser: &str,
+        workspace: &str,
+        command: BrowserCommand,
+        dispatch: BrowserDispatch<'_>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        (dispatch.admit)()?;
+        self.call(
+            browser,
+            workspace,
+            command,
+            dispatch.deadline,
+            dispatch.cancelled,
+        )
+    }
 
     /// Every connected browser, most recently attended first.
     fn browsers(&self) -> Vec<BrowserSummary>;
@@ -576,9 +604,13 @@ impl RelayBrowserPort {
         browser: &str,
         workspace: &str,
         command: BrowserCommand,
-        deadline: Instant,
-        cancelled: &AtomicBool,
+        dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
+        let BrowserDispatch {
+            deadline,
+            cancelled,
+            admit,
+        } = dispatch;
         if cancelled.load(Ordering::SeqCst) {
             return Err(BrowserError::CancelledBeforeDispatch);
         }
@@ -641,11 +673,18 @@ impl RelayBrowserPort {
                 "adapter does not support chunked command transfers".into(),
             ));
         }
+        let mut output = lock(&writer);
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(BrowserError::CancelledBeforeDispatch);
+        }
+        if Instant::now() >= deadline {
+            return Err(BrowserError::DeadlineBeforeDispatch);
+        }
+        admit()?;
         lock(&pending).insert(correlation.clone(), sender);
         let probe = liveness
             .as_ref()
             .map(|liveness| lock(liveness).begin_probe());
-        let mut output = lock(&writer);
         if write_request_payload(&mut *output, &payload, &correlation).is_err() {
             lock(&pending).remove(&correlation);
             mark_stale(&liveness);
@@ -680,7 +719,26 @@ impl BrowserPort for RelayBrowserPort {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.call_inner(browser, workspace, command, deadline, cancelled)
+        self.call_inner(
+            browser,
+            workspace,
+            command,
+            BrowserDispatch {
+                deadline,
+                cancelled,
+                admit: &|| Ok(()),
+            },
+        )
+    }
+
+    fn call_guarded(
+        &self,
+        browser: &str,
+        workspace: &str,
+        command: BrowserCommand,
+        dispatch: BrowserDispatch<'_>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        self.call_inner(browser, workspace, command, dispatch)
     }
 
     fn browsers(&self) -> Vec<BrowserSummary> {
@@ -1054,6 +1112,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Truth-preserving physical-browser failure classes.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum BrowserError {
+    /// Application control refused before this physical dispatch began.
+    #[error("runtime control refused browser dispatch: {0:?}")]
+    RuntimeControl(crate::governance::ReasonCode),
     /// No adapter existed before dispatch.
     #[error("browser adapter is disconnected before dispatch")]
     DisconnectedBeforeDispatch,
@@ -1143,6 +1204,7 @@ impl BrowserError {
 
 #[cfg(test)]
 mod contract_tests {
+    mod controls;
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;

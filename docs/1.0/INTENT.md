@@ -225,3 +225,13 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - **Authority snapshot:** the immutable effective permission for one invocation.
 - **Landing:** the final committed document observed after navigation.
 - **Hold:** a state that prevents further effects until runtime authority permits them.
+
+## Session review and recovery (ADR-0157)
+
+Repeated enforced denials and credential handoff require attention only in their owning session.
+Other sessions can continue. The existing three-matching-in-60-seconds or five-in-120-seconds
+thresholds remain; observe findings do not count. One session notice offers Review history and
+Resume this session. Review restores the current grouped receipt even after Clear view. Explicit
+resume permits new requests under the same policy, with no replay or permission expansion.
+Global Resume does not clear this attention, and session recovery does not clear global Pause/Stop.
+A stale review cannot clear a newer incident. The child that triggers attention ends its composition.

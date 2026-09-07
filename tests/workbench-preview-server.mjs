@@ -213,7 +213,7 @@ const script = [
 ];
 
 // A stable H4 scenario exercises the real bundled view with bounded synthetic receipts.
-const historyScenario = process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h4";
+const historyScenario = ["h4", "h5"].includes(process.env.GHOSTLIGHT_PREVIEW_SCENARIO);
 if (historyScenario) {
   const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, observed: false, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed, mode: "enforce" }], request_restricted: false, request_evaluated: false }], truncated: false });
   const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
@@ -224,6 +224,12 @@ if (historyScenario) {
     { position: 3, state: "recorded", tool: "browser_execute", record: child("browser_execute", "Policy blocked JavaScript execution on example.com.", "blocked", "none", "execute") },
     { position: 4, state: "not_run", tool: "browser_read", record: null }
   ] });
+}
+
+if (process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h5") {
+  const session = snapshot.sessions.find((item) => item.id === "workspace_codex");
+  session.attention = { id: "attention_test", invocation: "history_example", reason: "repeated_denials" };
+  session.attention_message = "This session needs your attention after repeated policy refusals.";
 }
 
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
@@ -303,6 +309,18 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         }
         if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are applied: Your rules 2026-08-14." };
         if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are removed." };
+        if (command === "resume_session") {
+          window.__GHOSTLIGHT_RESUMED__ = args;
+          const session = preview.sessions.find((item) => item.id === args.workspace);
+          const accepted = session?.attention?.id === args.incident;
+          if (accepted) {
+            session.attention = null;
+            session.attention_message = null;
+            publish({ kind: "session_attention_changed", workspace: args.workspace, attention: null, message: null });
+          }
+          return { accepted, runtime_state: preview.service.runtime_state, browser_notified: false,
+            message: accepted ? "Session resumed. New requests can proceed under its policy." : "This attention request is no longer current." };
+        }
         if (command === "apply_runtime_intent") {
           const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";
           preview.service.runtime_state = state;

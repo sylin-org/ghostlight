@@ -141,6 +141,18 @@
       }
     }
 
+    function reviewSession(entry) {
+      navigate("monitor");
+      if (!entry) { toast("This receipt is no longer in the current view.", true); return; }
+      const invocation = entry.invocation;
+      if (entry.steps?.length) expandedHistory.add(`${invocation}:steps`);
+      const node = rowNodes.get(invocation);
+      if (node) row(entry); else hero(entry, false);
+      const target = node ?? el["hero-body"];
+      target?.scrollIntoView({ block: "nearest" });
+      target?.querySelector('[data-step-problem="true"]')?.scrollIntoView({ block: "nearest" });
+    }
+
     function historyDetails(key, title, body, className = "permission-details") {
       return `<details class="${className}" data-history-details="${escapeHtml(key)}"${expandedHistory.has(key) ? " open" : ""}>`
         + `<summary>${escapeHtml(title)}</summary>${body}</details>`;
@@ -429,7 +441,15 @@
       if (!chips.length) {
         chips.push('<span class="chip"><span class="dot"></span>Waiting for a client or a browser</span>');
       }
-      el.connections.innerHTML = chips.join("");
+      const attention = snapshot.sessions.filter((session) => session.attention).map((session) => {
+        const id = escapeHtml(session.id);
+        const invocation = escapeHtml(session.attention.invocation);
+        return `<div class="session-attention"><strong>${escapeHtml(session.client_label)}</strong>`
+          + `<span>${escapeHtml(session.attention_message ?? "")}</span>`
+          + `<button class="link-button" data-review-session="${id}" data-review-invocation="${invocation}">Review history</button>`
+          + `<button class="link-button" data-resume-session="${id}" data-resume-incident="${escapeHtml(session.attention.id)}">Resume this session</button></div>`;
+      });
+      el.connections.innerHTML = chips.join("") + attention.join("");
     }
 
     function links() {
@@ -1384,7 +1404,7 @@
     }
 
     return Object.freeze({
-      el, attempt,
+      el, attempt, reviewSession,
       hero, row, drop, promote, rebuildFeed, queueCount,
       band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,

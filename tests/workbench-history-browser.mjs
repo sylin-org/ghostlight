@@ -38,7 +38,7 @@ let socket;
 let send;
 try {
   const server = start(process.execPath, ["tests/workbench-preview-server.mjs"], {
-    ...process.env, GHOSTLIGHT_PREVIEW_SCENARIO: "h4", GHOSTLIGHT_PREVIEW_PORT: "0"
+    ...process.env, GHOSTLIGHT_PREVIEW_SCENARIO: "h5", GHOSTLIGHT_PREVIEW_PORT: "0"
   });
   let address = "";
   server.stdout.on("data", (data) => { address += data; });
@@ -93,8 +93,9 @@ try {
   await evaluate("document.querySelector('.history-step .permission-details > summary').click()");
   await capture("expanded");
   // Exercise an overflowing group; follow-up receipts must preserve both focus and scroll.
+  await evaluate("window.__GHOSTLIGHT_HISTORY_FIXTURE__ = structuredClone(window.__GHOSTLIGHT_PREVIEW__.history[0])");
   await evaluate(`(() => {
-    const record = structuredClone(window.__GHOSTLIGHT_PREVIEW__.history[0]);
+    const record = structuredClone(window.__GHOSTLIGHT_HISTORY_FIXTURE__);
     record.steps = Array.from({ length: 20 }, (_, index) => ({ ...record.steps[index === 16 ? 2 : 0], position: index + 1 }));
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'composition_changed', record });
   })()`);
@@ -115,7 +116,7 @@ try {
   })()`);
   assert.ok(scroll > 0);
   await evaluate(`(() => {
-    const record = structuredClone(window.__GHOSTLIGHT_PREVIEW__.history[0]);
+    const record = structuredClone(window.__GHOSTLIGHT_HISTORY_FIXTURE__);
     record.steps = Array.from({ length: 20 }, (_, index) => ({ ...record.steps[index === 16 ? 2 : 0], position: index + 1 }));
     record.summary = 'Completed 3 of 20 steps.';
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'composition_changed', record });
@@ -128,7 +129,24 @@ try {
   await delay(80);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
   await capture("narrow");
-  console.log("H4 browser history: collapsed groups, expansion, permission details, incremental scroll/focus, and narrow layout passed.");
+  // Session review restores an explicitly cleared group, expands its problem, and recovers
+  // only the incident handed to the UI. No browser job or global Resume is dispatched.
+  await evaluate("document.querySelector('#clear-monitor').click()");
+  await evaluate("document.querySelector('[data-review-session]').click()");
+  await until(() => evaluate("!!document.querySelector('.composition-details')?.open"), "review restored group");
+  assert.equal(await evaluate("document.querySelectorAll('.history-step').length"), 20);
+  assert.equal(await evaluate(`(() => {
+    const list = document.querySelector('.history-steps').getBoundingClientRect();
+    const problem = document.querySelector('[data-step-problem="true"]').getBoundingClientRect();
+    return problem.top >= list.top && problem.bottom <= list.bottom;
+  })()`), true);
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  await capture("session-review");
+  await evaluate("document.querySelector('[data-resume-session]').click()");
+  await until(() => evaluate("!document.querySelector('[data-resume-session]')"), "scoped recovery");
+  assert.deepEqual(await evaluate("window.__GHOSTLIGHT_RESUMED__"), { workspace: "workspace_codex", incident: "attention_test" });
+  assert.equal(await evaluate("window.__GHOSTLIGHT_PREVIEW__.service.runtime_state"), "active");
+  console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }

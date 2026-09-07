@@ -82,6 +82,11 @@ the owner wants, and what this project learned the hard way.
   already live in `crates/orchestrator/src/language/outcome.rs`; the reference-experience S5
   records their implementation. Preserve those decisions when testing effect-boundary timing
   and scope. Do not rebuild missing language from an older memory entry.
+- **Automatic attention belongs to its session.** Global human controls stay independent.
+  Explicit session recovery uses the exact incident, permits new requests without replay, and
+  changes no permission. A composition that triggered attention stops even if recovery races its
+  completion. Dispatch checks happen after writer wait; a refused follow-up observation cannot
+  erase an acknowledged action (ADR-0157).
 - **Client provenance has a bounded purpose.** Ghostlight governs its invocation route and assumes
   host integrity; it does not contain independent desktop automation. Record claimed and observed
   identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving

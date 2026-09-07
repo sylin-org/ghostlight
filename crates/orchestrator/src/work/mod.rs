@@ -447,10 +447,11 @@ impl ApplicationExecutor {
         decision: Decision,
         selected: &SelectedTab,
     ) -> Terminal {
-        self.governance.controls().require_attention();
-        let _ = self
-            .browser
-            .publish_control_state(self.governance.runtime_state());
+        self.require_session_attention(
+            context.workspace,
+            context.invocation,
+            crate::workspace::AttentionReason::CredentialHandoff,
+        );
         self.emit(DomainEvent::AttentionRequired {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
@@ -638,6 +639,21 @@ impl ApplicationExecutor {
         facts: Value,
         expect: Option<&crate::language::Postcondition>,
     ) -> Terminal {
+        // Govern and retain the landed action before attempting a separate observation.
+        let applied = self.action_success(
+            context,
+            lease,
+            decision,
+            landing_requirements,
+            selected,
+            physical,
+            commits,
+            outcome,
+            facts,
+        );
+        if applied.result.status != Status::Succeeded {
+            return applied;
+        }
         if let Some(expectation) = expect {
             let remaining = context.deadline.saturating_duration_since(Instant::now());
             let budget = remaining
@@ -655,7 +671,7 @@ impl ApplicationExecutor {
             ) {
                 Ok(BrowserOutcome::Observed { satisfied, .. }) => {
                     if !satisfied {
-                        let mut steps = outcome.next_steps();
+                        let mut steps = applied.result.next_steps.clone();
                         steps.push(
                             "The effect was applied, but the expected condition did not hold. Inspect the page before repeating.".into(),
                         );
@@ -666,41 +682,42 @@ impl ApplicationExecutor {
                                 Effect::Applied,
                                 readiness(selected.readiness),
                                 false,
-                                outcome.summary().as_str(),
-                                facts,
+                                &applied.result.summary,
+                                applied.result.facts,
                                 steps,
                             ),
                             decision,
                             physical_id: Some(selected.physical_id),
-                            observed: outcome.observed(),
-                            audit: outcome.audit(),
+                            observed: applied.observed,
+                            audit: applied.audit,
                         };
                     }
                 }
                 Ok(_) => {
-                    return self.protocol_failure(context, decision, Some(selected.physical_id))
+                    let mut failed =
+                        self.protocol_failure(context, decision, Some(selected.physical_id));
+                    failed.result.effect = Effect::Applied;
+                    failed.result.repeat_safe = false;
+                    failed.result.next_steps =
+                        vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
+                    return failed;
                 }
                 Err(error) => {
-                    return self.browser_failure(
-                        context,
-                        decision,
-                        error,
-                        Some(selected.physical_id),
-                    )
+                    let human_control = matches!(error, BrowserError::RuntimeControl(_));
+                    let mut failed =
+                        self.browser_failure(context, decision, error, Some(selected.physical_id));
+                    // Observation failure cannot erase the acknowledged action.
+                    failed.result.effect = Effect::Applied;
+                    failed.result.repeat_safe = false;
+                    if !human_control {
+                        failed.result.next_steps =
+                            vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
+                    }
+                    return failed;
                 }
             }
         }
-        self.action_success(
-            context,
-            lease,
-            decision,
-            landing_requirements,
-            selected,
-            physical,
-            commits,
-            outcome,
-            facts,
-        )
+        applied
     }
 
     #[allow(clippy::result_large_err)]
@@ -815,8 +832,52 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Authorize one operation, checked against a real destination whenever it names one.
-    ///
+    /// Resolve independent global human control and this session's review requirement.
+    fn runtime_decision(&self, context: &InvocationContext<'_>) -> Decision {
+        self.governance
+            .session_decision(self.workspaces.attention(context.workspace).is_some())
+    }
+
+    fn admit_dispatch(&self, context: &InvocationContext<'_>) -> Result<(), BrowserError> {
+        let decision = self.runtime_decision(context);
+        if decision.allowed {
+            Ok(())
+        } else {
+            self.retain_permission(
+                context,
+                context
+                    .snapshot
+                    .decision_evidence(CapabilitySet::EMPTY, None, decision),
+            );
+            Err(BrowserError::RuntimeControl(decision.reason))
+        }
+    }
+
+    fn require_session_attention(
+        &self,
+        workspace: &WorkspaceId,
+        invocation: &str,
+        reason: crate::workspace::AttentionReason,
+    ) {
+        let attention = crate::workspace::SessionAttention {
+            id: format!("attention_{}", Uuid::new_v4().simple()),
+            invocation: invocation.into(),
+            reason,
+        };
+        if self
+            .workspaces
+            .require_attention(workspace, attention.clone())
+        {
+            let label = self
+                .workspaces
+                .client_label(workspace)
+                .unwrap_or_else(|_| "Session".into());
+            self.workbench
+                .session_attention_changed(workspace.as_str(), &label, Some(attention));
+        }
+    }
+
+    /// Authorize one operation against its real destination whenever it names one.
     /// `url: None` means this operation has no tab in play at all -- `list_tabs` is the only
     /// caller, since listing needs no destination to check. Every operation that names a tab
     /// must pass `Some(&tab.url)`, the tab's raw string as tracked right now, **even when that
@@ -836,7 +897,7 @@ impl ApplicationExecutor {
         url: Option<&str>,
     ) -> Decision {
         let requirements = requirements.into();
-        let runtime = self.governance.runtime_decision();
+        let runtime = self.runtime_decision(context);
         let _ = self
             .browser
             .publish_control_state(self.governance.runtime_state());
@@ -862,25 +923,9 @@ impl ApplicationExecutor {
         commits: &[String],
     ) -> Decision {
         let requirements = requirements.into();
-        let runtime = self.governance.runtime_decision();
-        let _ = self
-            .browser
-            .publish_control_state(self.governance.runtime_state());
-        if !runtime.allowed {
-            self.retain_permission(
-                context,
-                context
-                    .snapshot
-                    .decision_evidence(requirements, Some(&tab.url), runtime),
-            );
-            return runtime;
-        }
         let mut observed = None;
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
-            let (decision, evidence) = context
-                .snapshot
-                .authorize_with_evidence(requirements, Some(url));
-            self.retain_permission(context, evidence);
+            let decision = self.authorize_landing(context, requirements, url);
             if !decision.allowed {
                 return decision;
             }
@@ -889,6 +934,21 @@ impl ApplicationExecutor {
             }
         }
         observed.unwrap_or_else(Decision::permitted)
+    }
+
+    /// Govern a completed observation's destination. Runtime controls guard the next dispatch;
+    /// they cannot turn an already admitted receipt into a permanent policy hold on the tab.
+    fn authorize_landing(
+        &self,
+        context: &InvocationContext<'_>,
+        requirements: impl Into<CapabilitySet>,
+        url: &str,
+    ) -> Decision {
+        let (decision, evidence) = context
+            .snapshot
+            .authorize_with_evidence(requirements.into(), Some(url));
+        self.retain_permission(context, evidence);
+        decision
     }
 
     fn authorize_tab_close(&self, context: &InvocationContext<'_>) -> Decision {
@@ -923,12 +983,16 @@ impl ApplicationExecutor {
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         let browser = self.target_browser(context)?;
-        let outcome = self.browser.call(
+        let admit = || self.admit_dispatch(context);
+        let outcome = self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
             command,
-            context.deadline,
-            context.cancellation.flag(),
+            crate::browser::BrowserDispatch {
+                deadline: context.deadline,
+                cancelled: context.cancellation.flag(),
+                admit: &admit,
+            },
         );
         // An adapter that reports effect-unknown has answered honestly. Route it through the
         // truthful unknown rendering instead of letting per-family receipt matching mistake it
@@ -1050,15 +1114,18 @@ impl ApplicationExecutor {
         let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) else {
             return CloseCompensation::Unknown;
         };
-        match self.browser.call(
+        match self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
             BrowserCommand::CloseTab {
                 tab_id: tab.physical_id,
                 released: false,
             },
-            deadline,
-            &cancelled,
+            crate::browser::BrowserDispatch {
+                deadline,
+                cancelled: &cancelled,
+                admit: &|| self.admit_dispatch(context),
+            },
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == tab.physical_id => {
                 if lease.confirm_tab_closed(&tab.handle).is_ok() {
@@ -1258,6 +1325,16 @@ impl ApplicationExecutor {
         error: BrowserError,
         physical_id: Option<u64>,
     ) -> Terminal {
+        if let BrowserError::RuntimeControl(reason) = error {
+            return self.blocked(
+                context,
+                Decision::refused(reason),
+                physical_id,
+                Effect::None,
+                false,
+                json!({"reason":reason.as_str()}),
+            );
+        }
         if matches!(&error, BrowserError::LocalInterlock(_)) {
             let refusal = Refusal::LocalInterlock;
             let summary = refusal.summary();
@@ -1972,6 +2049,7 @@ fn bounded(value: &str, maximum: usize) -> String {
 
 fn browser_reason(error: &BrowserError) -> &'static str {
     match error {
+        BrowserError::RuntimeControl(reason) => reason.as_str(),
         BrowserError::DisconnectedBeforeDispatch => "browser_disconnected",
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
@@ -1987,6 +2065,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    mod control;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -3430,9 +3509,10 @@ mod tests {
         );
         assert_eq!(
             governance.runtime_state(),
-            RuntimeControlState::Attention,
+            RuntimeControlState::Active,
             "the next direct denial is exactly the third"
         );
+        assert!(executor.workspaces.attention(&workspace).is_some());
         fs::remove_file(path).unwrap();
     }
 
@@ -3447,7 +3527,7 @@ mod tests {
         let governance = GovernanceFacade::new(Some(policy.clone()), None);
         let (executor, browser, _, workspace, _) = fixture_with_governance(governance.clone());
 
-        for _ in 0..3 {
+        for index in 0..3 {
             let denied = executor.execute(
                 &workspace,
                 "browser_tabs",
@@ -3455,12 +3535,19 @@ mod tests {
                 None,
                 &CancellationToken::default(),
             );
-            assert_eq!(denied.status, Status::Blocked);
+            assert_eq!(
+                denied.status,
+                if index == 2 {
+                    Status::AttentionRequired
+                } else {
+                    Status::Blocked
+                }
+            );
         }
-        assert_eq!(governance.runtime_state(), RuntimeControlState::Attention);
+        assert_eq!(governance.runtime_state(), RuntimeControlState::Active);
         assert_eq!(
             browser.control_states().last(),
-            Some(&RuntimeControlState::Attention)
+            Some(&RuntimeControlState::Active)
         );
 
         let paused = executor.execute(
@@ -3476,6 +3563,15 @@ mod tests {
             governance.apply_runtime_intent(RuntimeControlIntent::Resume),
             RuntimeControlState::Active
         );
+        assert!(
+            executor.workspaces.attention(&workspace).is_some(),
+            "global resume cannot clear session review"
+        );
+        let incident = executor.workspaces.attention(&workspace).unwrap();
+        assert!(executor
+            .workspaces
+            .resume_attention(workspace.as_str(), &incident.id)
+            .unwrap());
         let denied_again = executor.execute(
             &workspace,
             "browser_tabs",
@@ -4618,10 +4714,11 @@ mod tests {
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::AttentionRequired);
+        assert!(executor.workspaces.attention(&workspace).is_some());
         assert_eq!(result.facts["values_sent"], false);
         assert_eq!(
             browser.control_states().last(),
-            Some(&ghostlight_bridge::browser::RuntimeControlState::Attention)
+            Some(&ghostlight_bridge::browser::RuntimeControlState::Active)
         );
         assert!(!browser
             .calls()
