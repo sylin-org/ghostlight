@@ -9,6 +9,7 @@ pub mod coverage;
 pub mod environment;
 pub mod history;
 pub mod outcome;
+pub mod provenance;
 pub mod readiness;
 #[path = "catalog.rs"]
 mod tool_catalog;

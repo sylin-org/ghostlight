@@ -1,4 +1,4 @@
-//! `GetExtendedTcpTable` walk that resolves a connection quadruple to its owning process.
+//! `GetExtendedTcpTable` walk that resolves a connection's remote endpoint to its owning process.
 //!
 //! ADR-0105 stage 2. The kernel's answer for who owns a connection is not forgeable by the
 //! caller, unlike every field of the hello it sent.
@@ -40,12 +40,14 @@ pub(super) fn identify(stream: &TcpStream) -> Option<super::PeerIdentity> {
     identify_addresses(local, peer)
 }
 
-/// Resolve the owning process from an already-captured connection quadruple.
+/// Resolve the remote endpoint's owning process from the observer's connection addresses.
 pub(super) fn identify_addresses(
     local: SocketAddr,
     peer: SocketAddr,
 ) -> Option<super::PeerIdentity> {
-    let row = find_row(local, peer)?;
+    // Each loopback endpoint has its own row and owning PID. The observer's local row names
+    // the observer itself; the peer's row reverses both addresses and both ports.
+    let row = find_row(peer, local)?;
     let image_path = super::image::full_image_path(row.dw_owning_pid)?;
     let image_name = super::image::bounded_name(&image_path)?;
     Some(super::PeerIdentity {

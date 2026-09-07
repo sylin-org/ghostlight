@@ -95,18 +95,22 @@
     /**
      * Which intake drove this action.
      *
-     * A settled row carries it on the record. A running one has no record yet, so it resolves
-     * through the session that admitted it, which is still connected while the work is in flight.
+     * New work carries its own connection evidence. Older records must not borrow attribution
+     * from a later connection that happens to share their workspace.
      */
     function channelFor(entry) {
       if (entry.channel) return entry.channel;
+      if (entry.provenance?.channel) return entry.provenance.channel;
+      if (entry.settled) return "";
       return sessionFor(entry.workspace)?.channel ?? "";
     }
 
-    /** The client that asked, resolved through the current sessions when it is still connected. */
-    function clientFor(workspace) {
-      const session = sessionFor(workspace);
-      return session ? session.client_label : shortId(workspace);
+    /** Attribution belongs to the action's connection, including after disconnect or restart. */
+    function clientFor(entry) {
+      const evidence = entry.provenance;
+      if (evidence) return evidence.reported_application ?? evidence.observed_executable ?? shortId(entry.workspace);
+      if (entry.settled) return shortId(entry.workspace);
+      return sessionFor(entry.workspace)?.client_label ?? shortId(entry.workspace);
     }
 
     /* -------------------------------- monitor ----------------------------- */
@@ -175,8 +179,30 @@
       return entry.storage_detail ? `<p class="coverage-note">${escapeHtml(entry.storage_detail)}</p>` : "";
     }
 
+    /** Render authored connection evidence without treating a claim or an observation as trust. */
+    function connectionFields(evidence, historical) {
+      const fields = [
+        ["Reported application", evidence.reported_application ?? (historical ? "Not retained in history" : "Not reported")],
+        ["Observed executable", evidence.observed_executable ?? evidence.observation],
+        ["Signature", evidence.signature],
+        ["Intake", evidence.channel]
+      ];
+      if (evidence.connection_id) fields.push(["Connection", shortId(evidence.connection_id)]);
+      return '<dl class="connection-facts">' + fields.map(([label, value]) =>
+        `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")
+        + `</dl><p class="connection-explanation">${escapeHtml(evidence.explanation)}</p>`;
+    }
+
+    function connectionMarkup(entry, key) {
+      if (!entry.provenance && !entry.settled && entry.complete !== true) return "";
+      const body = entry.provenance ? connectionFields(entry.provenance, true)
+        : '<p class="connection-explanation">Connection details were not recorded.</p>';
+      return historyDetails(key, "Connection details", body, "connection-details");
+    }
+
     function compositionMarkup(entry) {
-      if (!entry.steps?.length) return storageMarkup(entry) + permissionMarkup(entry, `${entry.invocation}:permission`) + coverageMarkup(entry);
+      const connection = connectionMarkup(entry, `${entry.invocation}:connection`);
+      if (!entry.steps?.length) return storageMarkup(entry) + permissionMarkup(entry, `${entry.invocation}:permission`) + connection + coverageMarkup(entry);
       const rows = entry.steps.map((step) => {
         const receipt = step.record;
         const state = receipt?.status ?? step.state;
@@ -184,13 +210,14 @@
         const label = labels[state] ?? words(state);
         const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
         const title = receipt?.summary ?? step.tool ?? `Step ${step.position}`;
-        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
+        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`)
+          + connectionMarkup(receipt, `${entry.invocation}:step:${step.position}:connection`) : "";
         return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
           + `<span class="step-number">${step.position}</span><span>${escapeHtml(title)}</span><span class="step-status">${escapeHtml(label)}</span></div>`
           + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
           + detail + "</li>";
       }).join("");
-      return storageMarkup(entry) + historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + coverageMarkup(entry);
+      return storageMarkup(entry) + historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + connection + coverageMarkup(entry);
     }
 
     function coverageMarkup(entry) {
@@ -208,7 +235,7 @@
       const observed = entry.settled ? entry.observed : null;
       const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
       const meta = [];
-      if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry.workspace))}</span>`);
+      if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry))}</span>`);
       // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
       if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
       if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
@@ -302,7 +329,7 @@
         + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
         + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
-        + `<div class="row-client">${escapeHtml(clientFor(entry.workspace))}</div>`
+        + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
@@ -462,7 +489,10 @@
           + `<button class="link-button" data-review-session="${id}" data-review-invocation="${invocation}">Review history</button>`
           + `<button class="link-button" data-resume-session="${id}" data-resume-incident="${escapeHtml(session.attention.id)}">Resume this session</button></div>`;
       });
-      el.connections.innerHTML = chips.join("") + attention.join("");
+      const records = snapshot.sessions.flatMap(session => session.connections ?? []).map(evidence =>
+        `<div class="connection-record">${connectionFields(evidence, false)}</div>`).join("");
+      const details = records ? historyDetails("sessions:connections", "Connection details", records, "connection-details session-connections") : "";
+      replaceHistoryMarkup(el.connections, chips.join("") + details + attention.join(""));
     }
 
     function links() {

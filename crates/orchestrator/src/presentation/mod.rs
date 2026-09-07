@@ -319,6 +319,7 @@ mod tests {
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
         reactor.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
             tool: "browser_read".into(),
@@ -396,6 +397,7 @@ mod tests {
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
         reactor.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
             tool: "browser_tabs".into(),

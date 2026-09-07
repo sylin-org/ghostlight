@@ -120,6 +120,16 @@ the same completion/audit path. Sustained waits appear in the existing workbench
 Runtime discovery is published from a new private file; Windows creation uses the existing audited
 FFI boundary. ADR-0160 records exact bounds and the limits of this local resilience guarantee.
 
+Connection evidence is immutable at service admission (ADR-0161). Every prepared invocation keeps
+its own evidence across queue waits, workspace sharing, composed children, preparation failure,
+and refusal. The workspace lists active connections independently; closing one removes only its
+live details. Receipt storage receives a bounded attribution projection with no reported application
+text, while the bounded live human projection receives that claim separately. Restored history
+never borrows a current session's identity. Windows observes the remote TCP endpoint owner; Linux
+reports this observation as unsupported. Signatures remain unchecked and provenance grants no
+additional authority. Historical basenames from the earlier endpoint lookup are not promoted into
+remote-peer evidence.
+
 The service edge bridge uses versioned newline-delimited JSON on an authenticated loopback
 connection. The browser relay and adapter protocol use Chromium's four-byte little-endian length
 prefix end to end, so the native host can forward bounded adapter frames without decoding them.

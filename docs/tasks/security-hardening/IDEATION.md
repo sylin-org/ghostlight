@@ -118,12 +118,30 @@ isolated fixtures; do not make the owner's active clients the load-test target.
 
 ## I8: C1 provenance reporting details
 
-- Select claimed versus observed fields, verification result vocabulary, and human explanation.
-- Decide which details belong in volatile diagnostics versus minimized durable audit.
-- Define supported-platform unknown/unavailable behavior and trustworthy cache invalidation.
+Option A accepted on 2026-09-07; reporting foundation is implemented and verified locally under
+[ADR-0161](../../adr/0161-connection-bound-provenance.md). See the
+[C1 task record](c1-reporting-foundation.md). Every action retains its original connection's
+evidence. Familiar labels stay as bounded transient claims; durable records keep only narrow
+observed attribution. Plural session connections and action/child details remain quiet and
+expandable. Windows corrects its observer's TCP endpoint direction; unsupported and unavailable
+evidence remain explicit. Legacy basenames cannot establish the remote executable and are shown
+as Not recorded without changing historical files.
+Every new connection gets fresh evidence. Signature remains Not checked; no verifier or cache
+is added in this cycle. These choices settle the reporting foundation, not all of C1.
+
+The preserved agenda follows. Signature/hash verification fields and result vocabulary, a concrete
+verification subject, offline limitations, and trustworthy cache invalidation remain for the next
+C1 ideation. They are not blockers for the accepted foundation.
+
+For the remaining verification cycle:
+
+- Select concrete digest/signer evidence, verification result vocabulary, and human explanation.
+- Decide which additional verified details belong in transient human views and minimized audit.
+  Enabled process diagnostics write to disk; they are not a volatile details surface.
+- Select the verifiable subject, supported-platform behavior, and trustworthy cache invalidation.
 
 Reporting first, offline verification, honest uncertainty, and the connector/upstream distinction
-are settled in ADR-0105. Extra durable fields depend on the safe audit projection.
+are settled in ADR-0105. H1/H4/H7 supply the safe audit projection used by this foundation.
 
 ## I9: C2/C3 admission integration and lifecycle
 

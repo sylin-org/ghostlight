@@ -96,6 +96,9 @@ the owner wants, and what this project learned the hard way.
   identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving
   Ghostlight's connector does not prove its upstream MCP application. ADR-0105's September 6
   amendment records the agreed staging; the security-hardening ledger owns progress.
+  Evidence belongs to the connection that submitted each action, independently of shared workspace
+  continuity (ADR-0161). A socket-owner test needs different processes at its endpoints: a
+  same-process loopback test cannot reveal an observer that selects its own socket owner.
 - **Saving history and doing browser work have separate outcomes.** Keep working is the default;
   optional Require audit stops new browser work during known storage failure. Recovery is bounded,
   replays neither actions nor receipts, and leaves gaps explicit. A saved parent does not confirm

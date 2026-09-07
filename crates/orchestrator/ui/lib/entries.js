@@ -15,6 +15,8 @@
       tool: operation.tool,
       activity: operation.activity,
       capability: operation.capability,
+      provenance: operation.provenance ?? null,
+      channel: operation.provenance?.channel ?? null,
       startedAt: operation.started_at_ms ?? Date.now(),
       phase: operation.phase,
       settled: false
@@ -51,6 +53,7 @@
       permissionExplanations: record.permission_explanations ?? [],
       durationMs: record.duration_ms,
       observed: record.observed ?? null,
+      provenance: record.provenance ?? null,
       channel: record.channel ?? null,
       settled: record.complete !== false || !existing || existing.settled
     };

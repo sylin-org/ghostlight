@@ -34,7 +34,10 @@ recovery, workbench checks, and 29 Sylin/MV3 regressions pass. H7 is not deploye
 H8 I7 is accepted; H8 is implemented and verified locally under ADR-0160.
 See [H8 continuity](h8-local-continuity.md): 498 Rust/192 extension tests, process/CLI/UI checks,
 Windows private runtime replacement, and 29 Sylin/MV3 regressions pass. H8 is not deployed.
-Next ideation: C1 reporting details I8.
+C1 I8 option A is accepted: the reporting foundation is implemented and verified locally under ADR-0161. It preserves
+immutable per-connection action attribution, transient claims, narrow durable observations, and
+quiet plural connection/history details. See [C1 foundation](c1-reporting-foundation.md).
+Signature/hash verification remains deferred to a later C1 cycle; full C1 is incomplete.
 Installed native-host transport and cross-platform runtime lanes remain untested for H6.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
@@ -49,8 +52,9 @@ distinction from expected partial effects is accepted. No transactional rollback
 been added. The orchestrator is deployed locally; nothing from this epic has been published.
 
 Client provenance remains reporting-first, with signer/hash admission conditional on a concrete
-integration and verifiable subject. ADR-0105 records that direction. C1's detailed fields and
-C2/C3's integration decisions are ideation items, not reasons to infer an upstream identity.
+integration and verifiable subject. ADR-0105 records that direction; ADR-0161 settles the accepted
+reporting foundation. Remaining verification and C2/C3 integration decisions require ideation,
+not an inferred upstream identity.
 
 The owner then established the product focus: Ghostlight enables delight through integrated
 tooling, and governance supplies dependable boundaries chosen by individuals and organizations.
@@ -77,7 +81,7 @@ refusal. H6 is implemented locally; the H6 verification record owns its evidence
 | H6 | IMPLEMENTED and verified locally; not deployed | I5 accepted; ADR-0158, 478 Rust/192 extension tests, process checks, and 29 Sylin browser cases. |
 | H7 | IMPLEMENTED and verified locally; not deployed | I6 accepted; 488 Rust/192 extension tests, real-process and UI checks, plus 29 Sylin regressions. ADR-0159 and H7. |
 | H8 | IMPLEMENTED and verified locally; not deployed | I7 accepted. Continuity, bounded queues/exchanges, private discovery, and quiet controls. ADR-0160 and H8. |
-| C1 | Reporting direction AGREED; details open | Ideation I8 and a safe audit projection before adding durable fields. |
+| C1 | Option A foundation IMPLEMENTED and verified locally; full C1 incomplete | ADR-0161 settles immutable attribution and quiet reporting. Signature/hash verification remains deferred to another C1 ideation. |
 | C2/C3 | Admission direction CONDITIONAL; mechanism open | Ideation I9 chooses a concrete integration and connection proof. |
 
 Ideation can proceed alongside independent agreed work. Inclusion in the epic does not imply
@@ -134,7 +138,7 @@ certificate-based client admission. This is product scope, not evidence of imple
 
 | ID | Work package | State | Acceptance evidence |
 | --- | --- | --- | --- |
-| C1 | Accurate client-provenance reporting | AGREED DIRECTION; not implemented | Claimed and observed identities remain distinct through admission, workspace, and content-minimized audit. An ordinary MCP connection identifies the connector honestly. Unknown and failed verification have explicit outcomes. |
+| C1 | Accurate client-provenance reporting | Option A foundation IMPLEMENTED and verified locally; verification deferred | Original connection evidence survives queueing, composition, refusal, and shared sessions. Bounded claims remain transient; narrow observations persist. Signature stays Not checked. Full C1 remains incomplete. |
 | C2 | Optional signer/hash admission for direct peers | AGREED, CONDITIONAL; not implemented | A concrete allowed peer and negative controls for a different signer/hash, tampering, unavailable evidence, and alternate invocation paths. Layer intersection and all-open remain intact. |
 | C3 | Upstream MCP identity binding | AGREED PREREQUISITE if application-specific enforcement is pursued; mechanism open | A real supported client connection demonstrates an identity bound to that connection. The proof distinguishes application identity from connector, launcher, interpreter, and credential identity. |
 
@@ -143,12 +147,45 @@ concrete verification subject. C3 is a prerequisite for advertising upstream app
 not a prerequisite for honest reporting of a direct peer. No additional process, published service
 protocol, client credential system, or product-wide certificate requirement is selected here.
 
+### C1 foundation completion (2026-09-07)
+
+The accepted option A foundation is implemented and verified locally under ADR-0161. The
+[C1 record](c1-reporting-foundation.md) records the two root fixes (mutable workspace attribution
+and reversed Windows endpoint observation), transient claims, durable evidence, and quiet details.
+All gates pass: 508 Rust/192 extension tests, 66 UI checks, C1/process/CLI/continuity journeys,
+Chromium history, and 29 Sylin/MV3 checks. No deployment or publication occurred. This record
+accompanies `fix(provenance): preserve each action's connection evidence`; Git owns its hash.
+Full C1 verification remains open and needs its next ideation before implementation.
+
+### C1 reporting foundation accepted (2026-09-07)
+
+The owner accepted option A and directed implementation. Fix the demonstrated shared-session
+attribution overwrite, retain each action's originating connection evidence, and add quiet details
+to sessions and action history. H1/H4/H7 already supply the safe audit projection prerequisite.
+
+The accepted foundation separates the bounded live application claim from durable connection ID,
+observation time, declared intake, observed basename or explicit unavailable state, and the
+`not_checked` signature state. Raw claims stay in memory, including bounded live history, and are
+omitted from durable audit and process diagnostics. No path, PID, command line, or certificate dump
+is added. Windows corrects its socket observer's TCP endpoint direction; Linux reports unsupported
+observation. Reconnect always captures new evidence. Older records cannot borrow a newer
+connection's identity, and legacy `peer_image` values are shown as Not recorded because the former
+observer selected the service-owned row. Original historical files remain untouched.
+
+The workbench keeps familiar names and exposes plural connections, parent receipts, and recorded
+children through collapsed details. Unchecked or unavailable provenance creates no routine popup,
+trust badge, or admission consequence. [ADR-0161](../../adr/0161-connection-bound-provenance.md)
+owns the decision; [C1 foundation](c1-reporting-foundation.md) owns evidence and remaining work.
+
+Signature/hash verification is explicitly deferred to another C1 cycle. C2/C3 remain conditional
+on a concrete subject and connection proof; full C1 is not complete when this foundation lands.
+
 ## Work packages and priority
 
 P0 means a demonstrated violation of an existing effect or confidentiality promise. P1 restores
 complete enforcement and evidence or resolves a source finding with substantial possible impact.
 P2 is focused hardening or further assurance after the demonstrated defects. These are scheduling
-priorities, not CVSS scores. H1-H6 are complete locally. Provenance has agreed direction.
+priorities, not CVSS scores. H1-H8 are complete locally. C1's reporting foundation is accepted.
 The remaining order is a recommendation to settle with
 the relevant ideation session and dependencies.
 
@@ -359,28 +396,29 @@ Mechanism capabilities remain RAWX; Ghostlight does not infer whether a generic 
 buying, sending, or another business action. No general intent classifier or per-action approval
 ritual is introduced by this focus.
 
-H1-H6 are complete locally. H7 ideation I6 is next. Remaining work covers audit
-health, local resilience, and provenance. Honest provenance reporting uses the repaired receipt seam;
-conditional signer admission follows a concrete integration. The epic maps those dependencies.
+H1-H8 are complete locally. The accepted C1 reporting foundation is implemented and verified locally using the repaired
+receipt seam. Remaining verification and conditional signer admission follow a concrete integration.
+The epic maps those dependencies.
 Run the affected package's ideation session before implementing its undecided choices.
 
 ## Decisions still open
 
-- H7 audit availability and H8 local resilience in the ideation agenda.
-- Exact provenance fields, verification status vocabulary, signer pin representation, rotation,
-  verification caching, and supported-platform behavior.
+- The later C1 signature/hash verification subject, result vocabulary, offline limitations,
+  additional platform support, and cache invalidation.
+- C2 signer pin and exact-hash representation, rotation, and admission lifecycle.
 - Which concrete integration justifies C2; whether C3 is needed and which participating client
   can prove it. No client-private-key or handshake design has been selected.
-- Audit-write failure behavior and any configurable strictness after a failed append.
 
-The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions,
-including H7/H8. H1-H6 corrections, existing pause/stop semantics, and provenance boundaries
-remain accepted context rather than unresolved questions.
+The [ideation agenda](IDEATION.md) expands these questions into package-specific sessions.
+H1-H8 behavior, existing pause/stop semantics, and C1's reporting foundation remain accepted
+context rather than unresolved questions.
 
 ## Activity record
 
 | Date | Work | Result |
 | --- | --- | --- |
+| 2026-09-07 | Owner accepted C1 option A and directed implementation | Reporting foundation in progress under ADR-0161: immutable action attribution, transient claims, narrow durable evidence, and quiet details. Signature/hash verification deferred; full C1 incomplete. No deployment. |
+| 2026-09-07 | Completed accepted C1 reporting foundation | Two attribution root fixes, quiet human details, and private claims verified by all gates, 508 Rust/192 extension/66 UI checks, C1/process/CLI/continuity journeys and 29 Sylin/MV3 checks. Source only; remaining C1 verification needs ideation. |
 | 2026-09-07 | Owner settled H6 choices and directed full testing with Sylin content | ADR-0158 and H6 implemented; 478 Rust/192 extension tests, real process checks, and 29 Chrome/MV3 Sylin cases. Not deployed or published. See h6-verification.md. |
 | 2026-09-06 | Preserved the architecture/security review independently of events | Dated assessment with isolated reproductions and source-only findings; no production change. |
 | 2026-09-06 | Discussed host control and client provenance; owner agreed and requested ledger entry | C1-C3 scope recorded; ADR-0105 amended with accepted direction and explicit deferrals. |

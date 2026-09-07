@@ -192,6 +192,43 @@ try {
     invocation: 'h8-waiting', workspace: 'workspace_codex', tool: 'browser_read', capability: 'read',
     activity: 'Reading', phase: 'running', started_at_ms: Date.now() } })`);
   await until(() => evaluate("!document.body.textContent.includes('Waiting for earlier browser work')"), "waiting operation started");
+  // C1: a later connection cannot relabel a receipt, and details remain usable across refresh.
+  await evaluate(`(() => {
+    const provenance = structuredClone(window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0]);
+    const record = { invocation: 'c1-receipt', workspace: 'workspace_codex', tool: 'browser_read',
+      capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
+      complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance };
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
+  })()`);
+  const receiptDetails = '[data-history-details="c1-receipt:connection"]';
+  await until(() => evaluate(`!!document.querySelector('${receiptDetails}')`), "recorded connection details");
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), false);
+  await evaluate(`document.querySelector('${receiptDetails} > summary').click()`);
+  await evaluate("document.querySelector('.session-connections > summary').click()");
+  await evaluate("document.querySelector('.session-connections > summary').focus({ preventScroll: true })");
+  await evaluate(`(() => {
+    const snapshot = window.__GHOSTLIGHT_PREVIEW__;
+    snapshot.sessions[0].client_label = 'Later application';
+    snapshot.sessions[0].connections = [
+      { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',
+        reported_application: 'Later application', observed_executable: 'later-peer.exe' },
+      { ...snapshot.sessions[0].connections[0], connection_id: 'connection_unavailable',
+        reported_application: 'Another application', observed_executable: null,
+        observation: 'Could not identify this connection' }
+    ];
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
+  })()`);
+  await until(() => evaluate("document.querySelector('.session-connections').textContent.includes('later-peer.exe')"), "refreshed connection evidence");
+  assert.equal(await evaluate("document.activeElement.matches('.session-connections > summary')"), true);
+  assert.equal(await evaluate("document.querySelector('.session-connections').open"), true);
+  assert.equal(await evaluate("document.querySelector('.session-connections').textContent.includes('Could not identify this connection')"), true);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), true);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('ghostlight-mcp-connector.exe')`), true);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Later application')`), false);
+  assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  await capture("connection-details");
+  console.log("C1 browser history: immutable action attribution, plural connection evidence, quiet details, focus retention, and narrow layout passed.");
   console.log("H8 browser history: waiting stays live beneath running work, then promotes without duplication.");
   console.log("H7 browser history: persistent health, independent child storage, recovery gap, preserved expansion, and narrow layout passed.");
   console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");

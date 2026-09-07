@@ -29,8 +29,7 @@ impl ApplicationExecutor {
             requirements,
             snapshot,
             duration_ms,
-            channel,
-            peer_image,
+            provenance,
         } = completion;
         if let Some(coverage) = self.take_coverage(&terminal.result.invocation) {
             terminal.result.summary =
@@ -133,13 +132,12 @@ impl ApplicationExecutor {
             &terminal.audit,
             duration_ms,
         )
-        .from_channel(channel)
-        .with_peer_image(peer_image)
+        .with_provenance(provenance.map(ConnectionEvidence::attribution))
         .with_policy(snapshot, terminal.decision)
         .with_observation(observed);
         record.step = step;
         record.permissions = self.take_permissions(&terminal.result.invocation);
-        let storage = self.audit.record(&record);
+        let storage = self.audit.record_with_provenance(&record, provenance);
         terminal.result.summary = if storage == language::audit_health::Storage::Saved {
             language::audit_health::qualify_children(
                 &terminal.result.summary,
@@ -179,8 +177,7 @@ impl ApplicationExecutor {
                 requirements: language::capability_map::requirements(operation),
                 snapshot: context.snapshot,
                 duration_ms: elapsed_ms(started),
-                channel: self.workspaces.channel(context.workspace).ok(),
-                peer_image: self.workspaces.peer_image(context.workspace).ok().flatten(),
+                provenance: context.provenance,
             },
             Some(step),
         )
@@ -205,9 +202,10 @@ impl ApplicationExecutor {
             &Outcome::StepNotStarted.audit(),
             0,
         )
-        .from_channel(self.workspaces.channel(context.workspace).ok());
+        .with_provenance(context.provenance.map(ConnectionEvidence::attribution));
         record.step = Some(step);
-        self.audit.record(&record)
+        self.audit
+            .record_with_provenance(&record, context.provenance)
     }
 
     /// Retain the bounded evidence for the operation currently using this invocation.

@@ -69,6 +69,8 @@ The suite has three useful layers:
   interruption and proves they renegotiate without replaying the interrupted effect. The journey
   looks for the executables in that directory; if you built somewhere else, say so with
   `GHOSTLIGHT_BIN_DIR`, or it will pass against stale binaries and tell you nothing.
+  `node tests/provenance-journey.mjs` uses the same binary directory and proves cross-process
+  attribution, shared-session continuity, and claim confidentiality. Both run in platform CI.
 
 Visible browser journeys and native tray/notification smoke tests remain release gates because a
 green unit suite cannot substitute for the user's actual desktop and browser.

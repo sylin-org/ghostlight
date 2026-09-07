@@ -958,7 +958,10 @@ try {
   assert.equal(typeof readOperation.op, "string");
   assert.match(readOperation.detail, /browser_read succeeded/);
   assert.equal(diagnosticRecords.some((record) => JSON.stringify(record).includes("Example Domain")), false);
-  assert.equal(diagnosticRecords.some((record) => record.event === "harness_attached" && record.detail.includes("acceptance")), true);
+  const attached = diagnosticRecords.filter((record) => record.event === "harness_attached");
+  assert.ok(attached.length > 0);
+  for (const record of attached) assert.match(record.detail, /^connection_[a-f0-9]{32} via mcp$/);
+  assert.equal(diagnosticRecords.some((record) => JSON.stringify(record).includes("acceptance")), false);
   assert.equal(diagnosticRecords.some((record) => record.event === "adapter_attached" && record.detail.includes(PROCESS_BROWSER)), true);
   assert.equal(diagnosticRecords.some((record) => record.component === "mcp-connector" && record.event === "service_connected"), true);
   assert.equal(diagnosticRecords.some((record) => record.component === "browser-connector" && record.event === "service_connected"), true);

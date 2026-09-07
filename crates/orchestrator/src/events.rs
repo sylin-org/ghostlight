@@ -25,6 +25,7 @@ pub enum DomainEvent {
         tool: String,
         activity: PresentationActivity,
         capabilities: CapabilitySet,
+        provenance: Option<crate::provenance::ConnectionDetails>,
     },
     /// One unit of work started.
     WorkStarted {
@@ -33,6 +34,7 @@ pub enum DomainEvent {
         tool: String,
         activity: PresentationActivity,
         capabilities: CapabilitySet,
+        provenance: Option<crate::provenance::ConnectionDetails>,
     },
     /// A controlled tab was created.
     TabCreated {

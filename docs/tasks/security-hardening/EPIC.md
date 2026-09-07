@@ -29,6 +29,8 @@ and history accurately explains what happened without becoming an unexpected con
 - [H3](h3-script-effect-truth.md): script-correctness scope and completion evidence.
 - [H6](h6-frame-coverage-ux.md): implemented frame policy, coverage, masking, and script boundaries;
   [verification](h6-verification.md) records the evidence and limits.
+- [C1 foundation](c1-reporting-foundation.md): accepted immutable attribution and quiet connection
+  details; signature/hash verification remains a later cycle.
 
 ADRs own architecture decisions. The current source, tests, and 1.0 contracts govern code.
 The ledger owns progress; this epic is the plan, not another status store.
@@ -40,6 +42,7 @@ The ledger owns progress; this epic is the plan, not another status store.
 | Product purpose | Delight through useful integration and dependable chosen boundaries. | [MEMORY](../../MEMORY.md), this charter |
 | Host trust | Govern Ghostlight's invocation route; assume host integrity. Independent desktop automation is outside that guarantee. Local execution alone does not prove the upstream application's identity. | [ADR-0105 amendment](../../adr/0105-scripted-intake-channels.md), ledger C1-C3 |
 | Provenance | Separate claims from verified observations. Report first; allow optional signer/hash admission only with a verifiable subject and connection binding. Unknown remains unknown, verification stays offline, and no certificate is automatically trusted. | ADR-0105 amendment, ledger C1-C3 |
+| Reporting foundation | Each action retains its connection's evidence. Claims stay transient; narrow observations persist. Quiet details expose plural connections and preserve historical attribution. Signature remains unchecked. | [ADR-0161](../../adr/0161-connection-bound-provenance.md), [C1 foundation](c1-reporting-foundation.md) |
 | Non-atomic effects | Preserve effects that already happened. No general browser rollback or atomic transaction requirement follows from the discussion. | Ledger H1-H3, [ADR-0133](../../adr/0133-behavioral-capability-restoration.md) |
 | Readable audit | Readable bounded history, details on demand, and existing target-name controls. Display detail does not authorize more retention. New profiles and richer capture deferred. | [ADR-0103 amendment](../../adr/0103-language-owned-outcome-voice.md), [H1](h1-readable-audit.md) |
 | Aggregate recovery | Completed means succeeded. Continue preserves failures, known effects remain known, and recovery respects completed work. | ADR-0133 H2b amendment, [H2b](h2b-aggregate-outcomes.md) |
@@ -68,7 +71,7 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
 | H6: Embedded-document policy | Chosen exclusion handling and notice preferences work across supported observations and actions. | Implemented and verified locally under accepted I5 and ADR-0158; not deployed. |
 | H7: Audit availability | A recording failure has truthful visibility, recovery, and any explicitly chosen admission consequence. | I6 accepted; implemented and verified locally under ADR-0159. Keep working / Require audit, storage truth, and bounded recovery. |
 | H8: Local resilience | Ordinary bursts complete; stalled peers are cleaned up while other sessions and controls remain usable. | I7 accepted; implemented and verified locally under ADR-0160. Fixed admission and exchange bounds, quiet waiting/recovery, private runtime publication. |
-| C1: Provenance reporting | Claimed client identity and observed/verified peer evidence remain distinct and useful. | Ideation I8 for field/privacy/platform details; safe audit projection before extending durable records. |
+| C1: Provenance reporting | Claimed client identity and observed/verified peer evidence remain distinct and useful. | I8 option A accepted; reporting foundation implemented and verified locally under ADR-0161. Signature/hash verification deferred to another C1 cycle; full C1 remains incomplete. |
 | C2: Direct-peer admission | Optional signer/hash rules work for an actual verifiable connecting subject. | C1 and ideation I9 selecting a real integration and verification contract. |
 | C3: Upstream identity binding | Application-specific admission rests on evidence bound to the real connection. | Conditional on pursuing that admission. I9 chooses the integration and proof before enforcement claims. |
 
@@ -80,8 +83,9 @@ semantics. The ledger labels agreement, conditions, evidence, and actual complet
    bounded evidence support the subsequent packages. H6 is also implemented and verified locally.
 3. H7 I6 is accepted and H7 is implemented and verified locally. H6's evidence contract and source checks
    remain the shared document boundary; do not reopen its accepted product choices.
-4. Complete C1 after safe durable reporting is available. C2/C3 follow only the agreed concrete
-   identity proof. H8 adds focused resilience work justified by its investigation.
+4. H8 and the accepted C1 reporting foundation are complete locally. Return to ideation for
+   signature/hash verification; C2/C3 follow only the agreed concrete
+   identity proof.
 5. Reconcile active claims and run the composed acceptance journey across delivered packages.
 
 H3 was selected as the first new cycle; the ledger records its completion evidence. The order

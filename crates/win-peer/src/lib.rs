@@ -9,18 +9,19 @@
 //! a security-sensitive path: every foreign function is declared by hand below against system
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
-//! Socket-peer observation: [`identify_connection`] resolves the owning process of an accepted
-//! loopback connection through `GetExtendedTcpTable`, and [`PeerIdentity`] carries that process
+//! Socket-peer observation: [`identify_connection`] resolves the owning process of the remote
+//! endpoint of a loopback connection through `GetExtendedTcpTable`, and [`PeerIdentity`] carries its
 //! id with the executable's bounded lowercase file name. The name only -- never the path -- is
 //! what may reach audit or presentation surfaces (ADR-0105 Decision 2).
 //!
 //! Signer-gated admission (ADR-0105 stage 3) stays deferred and this crate deliberately contains
-//! no signature-verification code: revisit it when Ghostlight's first signed artifact exists to
-//! verify against. Non-Windows targets compile the same surface returning `None`, so callers
-//! stay branch-free. ADR-0160 adds Windows-only creation of owner-private runtime files in
-//! `private_file`, keeping creation-time security attributes inside this same FFI boundary.
+//! no signature-verification code. The September 6 amendment requires a concrete verifiable
+//! integration and real signed-subject evidence, without requiring Ghostlight's own certificate.
+//! Non-Windows targets compile the same surface returning `None`. ADR-0160 adds Windows-only
+//! creation of owner-private runtime files in `private_file`, keeping creation-time security
+//! attributes inside this same FFI boundary.
 
-/// The process observed to own one side of a local connection.
+/// The process observed to own the remote endpoint of a local connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerIdentity {
     /// The operating-system process id that owns the socket.
@@ -43,7 +44,7 @@ pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::F
     private_file::create(path)
 }
 
-/// Identify the process that owns the peer end of an accepted local connection.
+/// Identify the process that owns the remote endpoint of a local connection.
 ///
 /// Returns `None` where the platform cannot answer, the socket is gone before the table walk
 /// finishes, or the peer does not appear in the connection table.
@@ -58,11 +59,12 @@ pub fn identify_connection(stream: &std::net::TcpStream) -> Option<PeerIdentity>
     }
 }
 
-/// Identify the owning process from one connection's address quadruple directly.
+/// Identify the remote endpoint's owning process from the observer's connection addresses.
 ///
 /// A caller whose socket has already been moved into another structure can capture
 /// [`std::net::TcpStream::local_addr`] and [`std::net::TcpStream::peer_addr`] first and call this
-/// instead of [`identify_connection`].
+/// instead of [`identify_connection`]. Pass the observer's local address first and its peer
+/// address second; the returned identity belongs to the peer, never the observer's local row.
 #[must_use]
 pub fn identify_addresses(
     local: std::net::SocketAddr,
@@ -88,8 +90,8 @@ mod tests {
         use crate::identify_connection;
 
         // The table walk must resolve an exact connection quadruple to its owning process id.
-        // An in-process loopback pair pins the mechanics deterministically; the cross-process
-        // case is what the CLI journey proves through real connector processes.
+        // An in-process pair checks lookup mechanics but cannot prove which endpoint was read.
+        // tests/provenance-journey.mjs proves direction with distinct executable processes.
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let mut stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         stream.write_all(&[1]).unwrap();

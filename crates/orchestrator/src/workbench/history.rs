@@ -37,6 +37,7 @@ pub(super) fn merge(
         record,
         live,
         crate::language::audit_health::Storage::Saved,
+        None,
     )
 }
 
@@ -46,10 +47,14 @@ pub(super) fn merge_stored(
     record: &AuditRecord,
     live: bool,
     storage: crate::language::audit_health::Storage,
+    provenance: Option<crate::provenance::ConnectionDetails>,
 ) -> HistoryItem {
     let stored_item = || {
         let mut item = HistoryItem::from(record.clone());
         item.storage = storage;
+        if let Some(provenance) = &provenance {
+            item.provenance = Some(provenance.clone());
+        }
         if storage == crate::language::audit_health::Storage::Unconfirmed {
             item.storage_detail = storage.detail().into();
         }
@@ -61,7 +66,7 @@ pub(super) fn merge_stored(
     let old = index.map(|index| history[index].clone());
     let mut item = if let Some(step) = record.step {
         let mut item = old.unwrap_or_else(|| {
-            let mut parent = HistoryItem::from(record.clone());
+            let mut parent = stored_item();
             parent.tool = step.parent.tool().into();
             parent.capability = CapabilitySet::EMPTY.label();
             parent.requirements = CapabilitySet::EMPTY;
@@ -224,6 +229,84 @@ mod tests {
     }
 
     #[test]
+    fn live_group_claims_stay_in_memory_while_restored_receipts_keep_observed_evidence() {
+        use crate::provenance::{ConnectionEvidence, PeerObservation};
+        use crate::workbench::WorkbenchProjection;
+        use ghostlight_bridge::service::IntakeChannel;
+        let connection = ConnectionEvidence::with_peer(
+            "PRIVATE_REPORTED_APPLICATION",
+            IntakeChannel::Mcp,
+            PeerObservation::Observed {
+                executable: "connector.exe".into(),
+            },
+        );
+        let first = child(1).with_provenance(Some(connection.attribution()));
+        let mut parent = first.clone();
+        parent.step = None;
+        parent.tool = "browser_flow".into();
+        let projection = WorkbenchProjection::default();
+        projection.record_with_provenance(
+            &first,
+            crate::language::audit_health::Storage::Saved,
+            Some(connection.details()),
+        );
+        projection.record_with_provenance(
+            &parent,
+            crate::language::audit_health::Storage::Saved,
+            Some(connection.details()),
+        );
+        let live = projection.history();
+        assert_eq!(
+            live[0]
+                .provenance
+                .as_ref()
+                .unwrap()
+                .reported_application
+                .as_deref(),
+            Some("PRIVATE_REPORTED_APPLICATION")
+        );
+        assert_eq!(
+            live[0].steps[0].record.as_ref().unwrap().provenance,
+            live[0].provenance
+        );
+        let bytes = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&first).unwrap(),
+            serde_json::to_string(&parent).unwrap()
+        );
+        assert!(!bytes.contains("PRIVATE_REPORTED_APPLICATION"));
+        let path = std::env::temp_dir().join(format!(
+            "ghostlight-c1-history-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        let restored = WorkbenchProjection::default();
+        let loaded = restored.load_history(&path);
+        std::fs::remove_file(&path).unwrap();
+        loaded.unwrap();
+        let history = restored.history();
+        let details = history[0].provenance.as_ref().unwrap();
+        assert_eq!(details.reported_application, None);
+        assert_eq!(
+            details.observed_executable.as_deref(),
+            Some("connector.exe")
+        );
+        assert_eq!(
+            details.connection_id,
+            connection.attribution().connection_id
+        );
+        assert_eq!(
+            history[0].steps[0]
+                .record
+                .as_ref()
+                .unwrap()
+                .provenance
+                .as_ref(),
+            Some(details)
+        );
+    }
+
+    #[test]
     fn groups_preserve_incremental_evidence_and_never_guess_missing_execution() {
         let mut history = VecDeque::new();
         let record = child(1);
@@ -297,6 +380,7 @@ mod tests {
     fn child_receipt_updates_do_not_settle_parent_or_notify_and_reload_equally() {
         let projection = super::super::WorkbenchProjection::default();
         projection.react(&crate::events::DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "parent".into(),
             workspace: "workspace".into(),
             tool: "browser_flow".into(),
@@ -345,12 +429,12 @@ mod tests {
         use crate::language::audit_health::Storage;
         let mut history = VecDeque::new();
         let first = child(1);
-        merge_stored(&mut history, &first, true, Storage::Unconfirmed);
+        merge_stored(&mut history, &first, true, Storage::Unconfirmed, None);
         let mut parent = first.clone();
         parent.step = None;
         parent.tool = "browser_flow".into();
         parent.unconfirmed_history_steps = 1;
-        let item = merge_stored(&mut history, &parent, false, Storage::Saved);
+        let item = merge_stored(&mut history, &parent, false, Storage::Saved, None);
         assert_eq!(item.storage, Storage::Saved);
         assert!(item.storage_detail.contains("Some step history"));
         let child = item.steps[0].record.as_ref().unwrap();

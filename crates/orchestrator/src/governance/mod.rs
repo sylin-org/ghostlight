@@ -2038,6 +2038,9 @@ pub struct AuditRecord {
     /// file name only, never the path, and it is never an authority input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_image: Option<String>,
+    /// Bounded original-connection evidence; claimed labels never enter this durable type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::provenance::Attribution>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -2091,6 +2094,7 @@ impl AuditRecord {
             observed: Observed::default(),
             channel: None,
             peer_image: None,
+            provenance: None,
         }
     }
 
@@ -2105,6 +2109,17 @@ impl AuditRecord {
     #[must_use]
     pub fn with_peer_image(mut self, peer_image: Option<String>) -> Self {
         self.peer_image = peer_image;
+        self
+    }
+
+    /// Attach one immutable connection snapshot and align the legacy attribution fields.
+    #[must_use]
+    pub fn with_provenance(mut self, provenance: Option<&crate::provenance::Attribution>) -> Self {
+        self.provenance = provenance.cloned();
+        self.channel = provenance.map(|value| value.channel);
+        self.peer_image = provenance
+            .and_then(|value| value.observed_executable())
+            .map(str::to_owned);
         self
     }
 

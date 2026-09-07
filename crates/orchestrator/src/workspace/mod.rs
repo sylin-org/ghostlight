@@ -12,6 +12,7 @@ use ghostlight_bridge::browser::{
 };
 
 use crate::language::outcome::TargetRole;
+use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 use thiserror::Error;
 use uuid::Uuid;
@@ -23,6 +24,8 @@ pub struct WorkspaceSummary {
     pub id: String,
     /// Presentation-only client label, claimed by the edge.
     pub client_label: String,
+    /// Current connections, each with its own immutable observed and claimed evidence.
+    pub connections: Vec<ConnectionDetails>,
     /// Current session-local human review requirement.
     pub attention: Option<SessionAttention>,
     /// Which intake admitted this workspace. Attribution only (ADR-0105).
@@ -268,11 +271,7 @@ struct WorkspaceState {
     attention: Option<SessionAttention>,
     client_label: String,
     channel: IntakeChannel,
-    /// The observed peer executable's file name, when the OS could answer (ADR-0105 stage 2).
-    ///
-    /// Attribution only, and only the bounded lowercase name -- never the path, never an
-    /// authorization input.
-    peer_image: Option<String>,
+    connections: HashMap<String, Arc<ConnectionEvidence>>,
     /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
     session: Option<SessionMarker>,
     /// Which browser this workspace works in, once its first work chose one.
@@ -314,6 +313,15 @@ impl WorkspaceStore {
             .map(|(id, workspace)| WorkspaceSummary {
                 id: id.as_str().into(),
                 client_label: workspace.client_label.clone(),
+                connections: {
+                    let mut details: Vec<_> = workspace
+                        .connections
+                        .values()
+                        .map(|connection| connection.details())
+                        .collect();
+                    details.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+                    details
+                },
                 attention: workspace.attention.clone(),
                 channel: workspace.channel,
                 leased: workspace.leased,
@@ -325,44 +333,100 @@ impl WorkspaceStore {
         summaries
     }
 
-    /// Admit one edge connection as an isolated workspace bound to that connection.
-    pub fn admit(
+    /// Attach one actual connection, resuming only workspace continuity when an owner is supplied.
+    /// The connection's evidence stays independent of every other connection in that workspace.
+    pub fn connect(
         &self,
-        client_label: String,
-        channel: IntakeChannel,
-        peer_image: Option<String>,
+        connection: Arc<ConnectionEvidence>,
+        session: Option<SessionMarker>,
     ) -> WorkspaceId {
-        self.open(client_label, channel, None, peer_image)
-    }
-
-    /// Resume the workspace this session already owns, or open one for it.
-    ///
-    /// Two calls from the same caller reach the same tabs. That is the whole point: handles belong
-    /// to a session, and a session is the caller rather than the socket.
-    pub fn resume_or_admit(
-        &self,
-        client_label: String,
-        channel: IntakeChannel,
-        marker: SessionMarker,
-        peer_image: Option<String>,
-    ) -> WorkspaceId {
-        let key = marker.key();
-        let existing = self
-            .lock()
-            .workspaces
-            .iter_mut()
-            .find(|(_, state)| {
+        let mut aggregate = self.lock();
+        let key = session.as_ref().map(SessionMarker::key);
+        let existing = key.and_then(|key| {
+            aggregate.workspaces.iter_mut().find(|(_, state)| {
                 state
                     .session
                     .as_ref()
                     .is_some_and(|owner| owner.key() == key)
             })
-            .map(|(id, state)| {
-                // The latest observation wins: this connection is the live one now.
-                state.peer_image = peer_image.clone();
-                id.clone()
-            });
-        existing.unwrap_or_else(|| self.open(client_label, channel, Some(marker), peer_image))
+        });
+        let connection_id = connection
+            .attribution()
+            .connection_id
+            .clone()
+            .expect("a new connection has an id");
+        if let Some((id, state)) = existing {
+            state.connections.insert(connection_id, connection);
+            return id.clone();
+        }
+        let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));
+        aggregate.workspaces.insert(
+            id.clone(),
+            WorkspaceState {
+                attention: None,
+                client_label: connection.reported_application().into(),
+                channel: connection.attribution().channel,
+                connections: HashMap::from([(connection_id, connection)]),
+                session,
+                browser: None,
+                leased: false,
+                tabs: HashMap::new(),
+                targets: HashMap::new(),
+                views: HashMap::new(),
+                snapshots: HashMap::new(),
+                images: HashMap::new(),
+            },
+        );
+        id
+    }
+
+    /// Remove only the closing connection's live details; receipts retain their own snapshots.
+    pub fn disconnect(&self, workspace: &WorkspaceId, connection_id: &str) {
+        if let Some(state) = self.lock().workspaces.get_mut(workspace) {
+            state.connections.remove(connection_id);
+        }
+    }
+
+    /// Return evidence only when an in-process caller has exactly one possible connection.
+    pub fn single_connection(&self, workspace: &WorkspaceId) -> Option<Arc<ConnectionEvidence>> {
+        let state = self.lock();
+        let connections = &state.workspaces.get(workspace)?.connections;
+        (connections.len() == 1).then(|| connections.values().next().unwrap().clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn admit(
+        &self,
+        label: String,
+        channel: IntakeChannel,
+        peer_image: Option<String>,
+    ) -> WorkspaceId {
+        let peer = peer_image.map_or(
+            crate::provenance::PeerObservation::NotRecorded,
+            |executable| crate::provenance::PeerObservation::Observed { executable },
+        );
+        self.connect(
+            Arc::new(ConnectionEvidence::with_peer(&label, channel, peer)),
+            None,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resume_or_admit(
+        &self,
+        label: String,
+        channel: IntakeChannel,
+        marker: SessionMarker,
+        peer_image: Option<String>,
+    ) -> WorkspaceId {
+        let peer = peer_image.map_or(
+            crate::provenance::PeerObservation::NotRecorded,
+            |executable| crate::provenance::PeerObservation::Observed { executable },
+        );
+        self.connect(
+            Arc::new(ConnectionEvidence::with_peer(&label, channel, peer)),
+            Some(marker),
+        )
     }
 
     /// Workspaces whose owner is gone, with the physical tabs they still hold.
@@ -412,34 +476,6 @@ impl WorkspaceStore {
             .is_some_and(|state| state.session.is_some())
     }
 
-    fn open(
-        &self,
-        client_label: String,
-        channel: IntakeChannel,
-        session: Option<SessionMarker>,
-        peer_image: Option<String>,
-    ) -> WorkspaceId {
-        let id = WorkspaceId(format!("workspace_{}", Uuid::new_v4().simple()));
-        self.lock().workspaces.insert(
-            id.clone(),
-            WorkspaceState {
-                attention: None,
-                client_label,
-                channel,
-                peer_image,
-                session,
-                browser: None,
-                leased: false,
-                tabs: HashMap::new(),
-                targets: HashMap::new(),
-                views: HashMap::new(),
-                snapshots: HashMap::new(),
-                images: HashMap::new(),
-            },
-        );
-        id
-    }
-
     /// Release an MCP workspace and return the physical tabs it owned.
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
         self.lock()
@@ -481,15 +517,6 @@ impl WorkspaceStore {
             .workspaces
             .get(workspace)
             .map(|state| state.channel)
-            .ok_or(WorkspaceError::UnknownWorkspace)
-    }
-
-    /// The observed peer image name for attribution at completion (ADR-0105 stage 2).
-    pub fn peer_image(&self, workspace: &WorkspaceId) -> Result<Option<String>, WorkspaceError> {
-        self.lock()
-            .workspaces
-            .get(workspace)
-            .map(|state| state.peer_image.clone())
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
@@ -1481,6 +1508,43 @@ mod tests {
             started_at,
             name: "pwsh.exe".into(),
         }
+    }
+
+    #[test]
+    fn connection_details_stay_plural_and_detach_only_the_closing_peer() {
+        use crate::provenance::{ConnectionEvidence, PeerObservation};
+        use std::sync::Arc;
+        let store = WorkspaceStore::default();
+        let first = Arc::new(ConnectionEvidence::with_peer(
+            "first",
+            IntakeChannel::Mcp,
+            PeerObservation::Unavailable,
+        ));
+        let second = Arc::new(ConnectionEvidence::with_peer(
+            "second",
+            IntakeChannel::Cli,
+            PeerObservation::UnsupportedPlatform,
+        ));
+        let owner = SessionMarker::Declared {
+            key: "shared".into(),
+        };
+        let workspace = store.connect(first.clone(), Some(owner.clone()));
+        assert_eq!(store.connect(second.clone(), Some(owner)), workspace);
+        assert_eq!(store.summaries()[0].connections.len(), 2);
+        assert!(store.single_connection(&workspace).is_none());
+        store.disconnect(
+            &workspace,
+            first.attribution().connection_id.as_deref().unwrap(),
+        );
+        assert_eq!(store.summaries()[0].connections, vec![second.details()]);
+        assert_eq!(
+            store.single_connection(&workspace).unwrap().attribution(),
+            second.attribution()
+        );
+        assert_eq!(
+            first.details().reported_application.as_deref(),
+            Some("first")
+        );
     }
 
     #[test]

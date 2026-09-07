@@ -136,6 +136,10 @@ jobs:
       - if: runner.os == 'Windows'
         run: node tests/process-journey.mjs
       - if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/provenance-journey.mjs
+      - if: runner.os == 'Windows'
+        run: node tests/provenance-journey.mjs
+      - if: runner.os == 'Linux'
         run: xvfb-run -a node tests/cli-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/cli-journey.mjs

@@ -23,6 +23,31 @@ Reload of the unpacked Ghostlight extension. Browser security policy blocked age
 Nothing was pushed or published. The earlier implementation records below describe their
 pre-deployment validation; this section owns the current deployment state.
 
+## C1 provenance reporting foundation (2026-09-07)
+
+The owner accepted option A and directed implementation. Each action now keeps immutable evidence
+from its original connection through queue waits, shared sessions, composed steps, preparation
+failure, and refusal. Sessions expose plural active connections; quiet expandable history details
+retain the action's own attribution. Raw application claims stay in bounded live human details and
+are excluded from durable audit and service/MCP connector diagnostics.
+
+The new real-process fixture caught a second bug: Windows looked up the service-owned TCP row
+instead of the connecting process. The corrected observer now identifies Node, a differently named
+Node executable, and the actual MCP connector. Older audit basenames cannot establish the remote
+executable; their human details show Not recorded, without rewriting historical files.
+
+[ADR-0161](adr/0161-connection-bound-provenance.md) owns the decision and the
+[C1 record](tasks/security-hardening/c1-reporting-foundation.md) owns evidence. All required gates,
+508 Rust tests, 192 extension tests, 66 UI surface checks, the C1/process/CLI/continuity journeys,
+the isolated Chromium history journey, and all 29 Sylin/MV3 checks pass. This record accompanies
+`fix(provenance): preserve each action's connection evidence`; Git owns the commit hash.
+
+This completes the accepted reporting foundation. Full C1 remains incomplete: signature/hash
+verification and its concrete subject remain for ideation, with C2/C3 admission still conditional.
+Linux observation is explicitly unsupported at this seam; Linux runtime checks remain untested.
+H6, H7, H8, and this C1 foundation are not deployed or published. The installed state above is
+unchanged. No deployment, push, or external publication occurred in this cycle.
+
 ## H8 local continuity (2026-09-07)
 
 The owner approved the continuity-focused H8 profile and directed implementation. Ordinary bursts
@@ -42,7 +67,7 @@ gates, 498 Rust tests, 192 extension tests, real-process reconnect/audit, CLI, t
 journey, workbench checks, and 29 Sylin/MV3 regressions pass. H8 is committed locally with
 `fix(service): absorb bursts and bound local exchanges`; Git owns the hash. H6, H7, and H8 are not
 deployed or published. Linux runtime and cross-user impersonation remain untested in this session.
-Next ideation: C1 client-provenance reporting details (I8).
+C1 reporting foundation is now complete; remaining verification details need ideation (I8).
 
 ## H7 audit health (2026-09-07)
 
@@ -58,7 +83,7 @@ All 488 Rust tests, 192 extension tests, formatting, Clippy, JavaScript syntax, 
 failure/repair/cold-start journey, workbench checks, and 29 Sylin/MV3 regression checks pass.
 H7 is not deployed or published. H6 also
 remains undeployed; its installed native-host transport proof remains outstanding. H8 source
-validation is recorded above. Next ideation: C1 provenance details (I8).
+validation is recorded above. C1 reporting foundation is now complete; remaining verification details need ideation (I8).
 
 ## Security-hardening epic (2026-09-06)
 

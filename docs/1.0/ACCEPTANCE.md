@@ -453,3 +453,22 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 6. Rust sink/executor/history tests, the real-process journey with a synthetic browser adapter,
    and the bundled workbench in isolated Chromium own these checks. Installed native transport,
    active Tauri deployment, Linux runtime, and storage power-loss behavior remain separate lanes.
+
+## Connection reporting (ADR-0161)
+
+- A real Windows cross-process fixture identifies the remote connecting executable, including two
+  different peers sharing one workspace and the actual MCP connector. A same-process loopback
+  pair alone cannot prove endpoint direction.
+- Active, queued, composed, preparation-failed, cancelled, capacity-refused, and invalid work keep
+  their original connection evidence. A later peer or released workspace cannot rewrite it.
+- Each reconnect gets new evidence. Session details retain plural active connections and remove
+  only the closed one. Action details remain associated with their original connection.
+- Raw reported application names remain in bounded live human details only. Serialized audit and
+  enabled service/connector diagnostics exclude unique claim sentinels. Durable history retains
+  bounded evidence after restart; earlier basenames do not establish a remote executable.
+- Human details distinguish reported application, observed executable, and unchecked signatures.
+  Unavailable, unsupported, and missing historical evidence stay explicit. Details are quiet by
+  default, escape claims, preserve expansion/focus on refresh, and fit a narrow workbench.
+
+This foundation adds no signature/hash verifier or identity admission. Linux observation remains
+unsupported; source portability does not replace a live Linux runtime check.

@@ -95,6 +95,7 @@ struct OperationState {
     capabilities: CapabilitySet,
     started_at_ms: u64,
     phase: OperationPhase,
+    provenance: Option<crate::provenance::ConnectionDetails>,
 }
 
 impl WorkbenchProjection {
@@ -221,6 +222,7 @@ impl WorkbenchProjection {
                     tool,
                     activity,
                     capabilities,
+                    provenance,
                 }
                 | DomainEvent::WorkStarted {
                     invocation,
@@ -228,6 +230,7 @@ impl WorkbenchProjection {
                     tool,
                     activity,
                     capabilities,
+                    provenance,
                 } => {
                     let operation = OperationState {
                         invocation: invocation.clone(),
@@ -235,6 +238,7 @@ impl WorkbenchProjection {
                         tool: tool.clone(),
                         activity: *activity,
                         capabilities: *capabilities,
+                        provenance: provenance.clone(),
                         started_at_ms: unix_ms(),
                         phase: if matches!(event, DomainEvent::WorkWaiting { .. }) {
                             OperationPhase::Waiting
@@ -324,10 +328,20 @@ impl WorkbenchProjection {
         });
     }
 
+    #[cfg(test)]
     pub(crate) fn record(
         &self,
         record: &AuditRecord,
         storage: crate::language::audit_health::Storage,
+    ) {
+        self.record_with_provenance(record, storage, None);
+    }
+
+    pub(crate) fn record_with_provenance(
+        &self,
+        record: &AuditRecord,
+        storage: crate::language::audit_health::Storage,
+        provenance: Option<crate::provenance::ConnectionDetails>,
     ) {
         let child = record.step.is_some();
         let item = {
@@ -339,7 +353,7 @@ impl WorkbenchProjection {
                     .notified
                     .retain(|(invocation, _)| invocation != &record.invocation);
             }
-            history::merge_stored(&mut state.history, record, live, storage)
+            history::merge_stored(&mut state.history, record, live, storage, provenance)
         };
         self.publish(if child {
             WorkbenchChange::CompositionChanged {
@@ -446,6 +460,7 @@ impl WorkbenchFacade {
                     attention: workspace.attention,
                     id: workspace.id,
                     client_label: workspace.client_label,
+                    connections: workspace.connections,
                     channel: workspace.channel,
                     leased: workspace.leased,
                     tab_count: workspace.tab_count,
@@ -1174,6 +1189,8 @@ pub struct SessionSummary {
     pub attention_message: Option<String>,
     /// Presentation-only client label.
     pub client_label: String,
+    /// Each current connection has its own observations and reported application.
+    pub connections: Vec<crate::provenance::ConnectionDetails>,
     /// Which intake admitted this session, so live work can be attributed before it settles.
     pub channel: IntakeChannel,
     /// Whether one invocation currently owns the workspace.
@@ -1203,6 +1220,8 @@ pub struct OperationSummary {
     pub started_at_ms: Option<u64>,
     /// Current semantic phase.
     pub phase: OperationPhase,
+    /// Evidence captured for this operation at intake.
+    pub provenance: Option<crate::provenance::ConnectionDetails>,
 }
 
 impl From<&OperationState> for OperationSummary {
@@ -1219,6 +1238,7 @@ impl From<&OperationState> for OperationSummary {
             capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
+            provenance: value.provenance.clone(),
         }
     }
 }
@@ -1311,6 +1331,8 @@ pub struct HistoryItem {
     pub observed: Observed,
     /// Which intake the work arrived on, when the workspace was still known.
     pub channel: Option<IntakeChannel>,
+    /// Original connection evidence; claimed names are retained only in bounded live history.
+    pub provenance: Option<crate::provenance::ConnectionDetails>,
     /// Whether a terminal parent/direct receipt was recorded.
     pub complete: bool,
     /// The same safe composition account retained in audit.
@@ -1325,6 +1347,16 @@ pub struct HistoryItem {
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
+        let provenance = value
+            .provenance
+            .as_ref()
+            .map(|evidence| evidence.details())
+            .or_else(|| {
+                value.channel.map(|channel| {
+                    crate::provenance::Attribution::legacy(channel, value.peer_image.as_deref())
+                        .details()
+                })
+            });
         let requirements = value.requirements();
         let capability = requirements.label();
         let permission_explanations = value
@@ -1362,6 +1394,7 @@ impl From<AuditRecord> for HistoryItem {
             duration_ms: value.duration_ms,
             observed: value.observed,
             channel: value.channel,
+            provenance,
         }
     }
 }
@@ -1769,6 +1802,7 @@ mod tests {
         let notifications = Arc::new(Notifications::default());
         projection.attach_presentation(notifications.clone());
         projection.react(&DomainEvent::WorkWaiting {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
@@ -1785,6 +1819,7 @@ mod tests {
         );
         assert!(notifications.0.lock().unwrap().is_empty());
         projection.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
@@ -1844,6 +1879,7 @@ mod tests {
         projection.attach_events(events.clone());
 
         projection.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_fill_form".into(),
@@ -1906,6 +1942,7 @@ mod tests {
         let events = Arc::new(Events::default());
         projection.attach_events(events.clone());
         projection.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_execute".into(),
@@ -1961,6 +1998,7 @@ mod tests {
     fn a_projection_without_a_sink_publishes_nothing_and_stays_at_zero() {
         let projection = WorkbenchProjection::default();
         projection.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
@@ -2017,6 +2055,7 @@ mod tests {
             physical_id: None,
         });
         projection.react(&DomainEvent::WorkStarted {
+            provenance: None,
             invocation: "invocation_2".into(),
             workspace: "workspace_1".into(),
             tool: "browser_tabs".into(),

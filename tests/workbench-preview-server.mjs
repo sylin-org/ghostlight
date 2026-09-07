@@ -232,6 +232,22 @@ if (process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h5") {
   session.attention_message = "This session needs your attention after repeated policy refusals.";
 }
 
+// C1 fixtures carry connection evidence separately from the workspace's familiar label.
+for (const session of snapshot.sessions) {
+  session.connections = [{
+    connection_id: `connection_${session.id}`, reported_application: session.client_label,
+    channel: session.channel, observed_executable: session.channel === "cli" ? "ghostlight.exe" : "ghostlight-mcp-connector.exe",
+    observation: "Observed locally", signature: "Not checked",
+    explanation: "This identifies the executable connected to Ghostlight. It does not verify the reported application."
+  }];
+}
+const retainConnection = (record) => {
+  record.provenance = structuredClone(snapshot.sessions.find(session => session.id === record.workspace)?.connections[0] ?? null);
+  for (const step of record.steps ?? []) if (step.record) retainConnection(step.record);
+};
+snapshot.operations.forEach(retainConnection);
+snapshot.history.forEach(retainConnection);
+
 const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
 (() => {

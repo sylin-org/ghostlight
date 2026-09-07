@@ -37,7 +37,6 @@ use crate::browser::recovery::{
 };
 use crate::browser::{choose_browser, BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
-use ghostlight_bridge::service::IntakeChannel;
 
 use crate::governance::{
     AuditRecord, AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade,
@@ -53,6 +52,7 @@ use crate::language::{
     Operation, Record, SequenceStep, TakeScreenshot,
 };
 use crate::presentation::PresentationReactor;
+use crate::provenance::ConnectionEvidence;
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
     SelectedTab, SelectedTarget, SelectedView, WorkspaceError, WorkspaceId, WorkspaceLease,
@@ -83,6 +83,7 @@ impl CancellationToken {
 pub(crate) struct PreparedInvocation {
     pub(crate) invocation: String,
     pub(crate) tool: String,
+    provenance: Option<Arc<ConnectionEvidence>>,
     started: Instant,
     deadline: Instant,
     decoded: Result<Operation, language::LanguageError>,
@@ -102,7 +103,12 @@ impl PreparedInvocation {
     }
 
     /// Decode and start the deadline before any queue wait.
-    pub(crate) fn new(tool: &str, input: Value, caller_deadline_ms: Option<u64>) -> Self {
+    pub(crate) fn new(
+        tool: &str,
+        input: Value,
+        caller_deadline_ms: Option<u64>,
+        provenance: Option<Arc<ConnectionEvidence>>,
+    ) -> Self {
         let started = Instant::now();
         let decoded = language::decode(tool, input);
         let timeout = caller_deadline_ms
@@ -111,6 +117,7 @@ impl PreparedInvocation {
         Self {
             invocation: format!("invocation_{}", Uuid::new_v4().simple()),
             tool: tool.into(),
+            provenance,
             started,
             deadline: started + Duration::from_millis(timeout),
             decoded,
@@ -243,7 +250,12 @@ impl ApplicationExecutor {
         caller_deadline_ms: Option<u64>,
         cancellation: &CancellationToken,
     ) -> InvocationResult {
-        let prepared = PreparedInvocation::new(tool, input, caller_deadline_ms);
+        let prepared = PreparedInvocation::new(
+            tool,
+            input,
+            caller_deadline_ms,
+            self.workspaces.single_connection(workspace),
+        );
         self.execute_prepared(workspace, &prepared, cancellation, false)
     }
 
@@ -269,6 +281,10 @@ impl ApplicationExecutor {
             tool: prepared.tool.clone(),
             activity: operation_activity(operation),
             capabilities: language::capability_map::requirements(operation),
+            provenance: prepared
+                .provenance
+                .as_ref()
+                .map(|connection| connection.details()),
         });
     }
 
@@ -322,8 +338,7 @@ impl ApplicationExecutor {
                         requirements: CapabilitySet::READ,
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
-                        channel: self.workspaces.channel(workspace).ok(),
-                        peer_image: self.workspaces.peer_image(workspace).ok().flatten(),
+                        provenance: prepared.provenance.as_deref(),
                     },
                 );
             }
@@ -352,6 +367,7 @@ impl ApplicationExecutor {
         let snapshot = self.governance.snapshot(operation.restrictions());
         let context = InvocationContext {
             requirements,
+            provenance: prepared.provenance.as_deref(),
             invocation: &invocation,
             workspace,
             requested_browser: operation_browser(operation),
@@ -393,6 +409,10 @@ impl ApplicationExecutor {
                 tool: tool.into(),
                 activity: operation_activity(operation),
                 capabilities: requirements,
+                provenance: prepared
+                    .provenance
+                    .as_ref()
+                    .map(|connection| connection.details()),
             });
             register_active_authority(
                 &self.active_authority,
@@ -462,8 +482,7 @@ impl ApplicationExecutor {
                 requirements,
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
-                channel: self.workspaces.channel(workspace).ok(),
-                peer_image: self.workspaces.peer_image(workspace).ok().flatten(),
+                provenance: prepared.provenance.as_deref(),
             },
         )
     }
@@ -1749,10 +1768,8 @@ struct Completion<'a> {
     snapshot: &'a AuthoritySnapshot,
     /// Measured span from decode to terminal outcome. For a navigation this is time to settle.
     duration_ms: u64,
-    /// Which intake admitted the workspace this work arrived on.
-    channel: Option<IntakeChannel>,
-    /// The observed peer image beside that channel (ADR-0105 stage 2).
-    peer_image: Option<String>,
+    /// Immutable evidence from this operation's original connection.
+    provenance: Option<&'a ConnectionEvidence>,
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -1763,6 +1780,7 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
 #[derive(Clone, Copy)]
 struct InvocationContext<'a> {
     requirements: CapabilitySet,
+    provenance: Option<&'a ConnectionEvidence>,
     invocation: &'a str,
     workspace: &'a WorkspaceId,
     /// The browser this call named, when it named one.
@@ -2277,6 +2295,7 @@ mod tests {
     mod audit_health;
     mod control;
     mod documents;
+    mod provenance;
     use std::fs;
     use std::io;
     use std::path::PathBuf;

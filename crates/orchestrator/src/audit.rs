@@ -153,6 +153,15 @@ impl AuditRecorder {
 
     /// Append once, retain the actual outcome in the live view, and report storage independently.
     pub fn record(&self, record: &AuditRecord) -> Storage {
+        self.record_with_provenance(record, None)
+    }
+
+    /// Save only bounded audit evidence; keep the original claimed name in the live view alone.
+    pub fn record_with_provenance(
+        &self,
+        record: &AuditRecord,
+        provenance: Option<&crate::provenance::ConnectionEvidence>,
+    ) -> Storage {
         let mut state = self
             .state
             .lock()
@@ -173,7 +182,11 @@ impl AuditRecorder {
         }
         // Publish under the writer lock so concurrent completions cannot reorder health or receipts.
         self.projection.audit_health_changed(state.health.clone());
-        self.projection.record(record, storage);
+        self.projection.record_with_provenance(
+            record,
+            storage,
+            provenance.map(|value| value.details()),
+        );
         storage
     }
 

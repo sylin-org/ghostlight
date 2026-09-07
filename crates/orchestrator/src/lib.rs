@@ -13,6 +13,7 @@ pub mod governance;
 pub mod install;
 pub mod language;
 pub mod presentation;
+pub mod provenance;
 pub mod service;
 pub mod work;
 pub mod workbench;

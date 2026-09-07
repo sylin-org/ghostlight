@@ -481,6 +481,60 @@ const historyChecks = [];
   historyChecks.push(["a restored missing completion never fabricates running work", restored.hero().settled]);
 }
 
+// C1: each action keeps its connection's evidence, independent of the current session label.
+const provenanceChecks = [];
+{
+  const evidence = {
+    connection_id: "connection_original", reported_application: "Original <script>claim</script>",
+    channel: "mcp", observed_executable: "original-peer.exe", observation: "Observed locally",
+    signature: "Not checked", explanation: "Only this connection's executable was observed; the application remains unverified."
+  };
+  const laterSession = { id: "shared-workspace", client_label: "Later application", channel: "cli" };
+  const connectionView = sandbox.globalThis.GhostlightView.create({ sessionFor: () => laterSession });
+  const entries = sandbox.globalThis.GhostlightEntries;
+  const operation = { invocation: "provenance-work", workspace: laterSession.id, tool: "browser_read",
+    phase: "running", activity: "Reading", provenance: evidence };
+  const record = { ...operation, complete: true, summary: "Read 5 words.", status: "succeeded",
+    allowed: true, effect: "none", channel: "mcp", provenance: evidence };
+  connectionView.hero(entries.entryFromOperation(operation), false);
+  let html = nodes.get("hero-body").innerHTML;
+  provenanceChecks.push(["live action attribution uses its own connection and escapes the claim",
+    html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("original-peer.exe")
+      && !html.includes("Later application") && !html.includes("<script>claim")]);
+  const restored = { ...record, provenance: { ...evidence, reported_application: null } };
+  connectionView.hero(entries.entryFromRecord(restored), false);
+  html = nodes.get("hero-body").innerHTML;
+  provenanceChecks.push(["restored history keeps observed attribution without borrowing a current claim",
+    html.includes("Not retained in history") && html.includes('<div class="hero-meta"><span>original-peer.exe</span>')
+      && !html.includes("Later application") && html.includes("Not checked")]);
+  connectionView.hero(entries.entryFromRecord({ ...record, provenance: null, channel: null }), false);
+  html = nodes.get("hero-body").innerHTML;
+  provenanceChecks.push(["legacy history names missing evidence without borrowing current-session identity",
+    html.includes("Connection details were not recorded.") && !html.includes("Later application") && !html.includes("via cli")]);
+  const group = { ...record, tool: "browser_flow", steps: [{ position: 1, state: "recorded", record }] };
+  connectionView.hero(entries.entryFromRecord(group), false);
+  html = nodes.get("hero-body").innerHTML;
+  provenanceChecks.push(["parent and recorded child each expose collapsed connection evidence",
+    html.includes('data-history-details="provenance-work:connection"')
+      && html.includes('data-history-details="provenance-work:step:1:connection"')
+      && !html.includes('data-history-details="provenance-work:connection" open')]);
+  const sessions = [{ ...laterSession, tab_count: 2, active_operations: 0, connections: [evidence,
+    { ...evidence, connection_id: "connection_other", reported_application: "Second application",
+      observed_executable: null, observation: "Unavailable on this platform" }] }];
+  const sessionSnapshot = { ...snapshot(), sessions };
+  connectionView.collections(sessionSnapshot, new Set());
+  html = nodes.get("connections").innerHTML;
+  provenanceChecks.push(["shared sessions retain every connection with authored unavailable evidence",
+    html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("Second application")
+      && html.includes("Unavailable on this platform") && !html.includes("trusted")
+      && !html.includes('data-history-details="sessions:connections" open')]);
+  documentHandlers.get("toggle")({ target: { dataset: { historyDetails: "sessions:connections" }, open: true,
+    classList: { contains: () => false } } });
+  connectionView.collections({ ...sessionSnapshot, sessions: [{ ...sessions[0], active_operations: 1 }] }, new Set());
+  provenanceChecks.push(["connection details stay open across session refresh",
+    nodes.get("connections").innerHTML.includes('data-history-details="sessions:connections" open')]);
+}
+
 
 // H7: an existing health surface stays quiet when healthy and keeps failed storage explicit.
 const healthSnapshot = snapshot();
@@ -510,6 +564,7 @@ const checks = [
     /value="permitted_content"[^>]*disabled/.test(pinnedCoverageControl)
       && /value="on_demand"[^>]*disabled/.test(pinnedCoverageControl) && pinnedCoverageControl.includes("Example Org")],
   ...historyChecks,
+  ...provenanceChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["heartbeat installed", heartbeat],
   ["surface wired", listeners.some((l) => l.startsWith("document:click"))],

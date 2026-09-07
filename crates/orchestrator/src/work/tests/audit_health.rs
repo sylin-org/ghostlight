@@ -142,6 +142,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         .snapshot(&crate::language::RequestRestrictions::default());
     let cancellation = CancellationToken::default();
     let context = InvocationContext {
+        provenance: None,
         invocation: "queued",
         workspace: &workspace,
         requested_browser: None,

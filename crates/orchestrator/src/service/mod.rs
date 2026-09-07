@@ -542,20 +542,15 @@ fn serve_session(
     // Before opening anything, release workspaces whose owner is gone and close the tabs they
     // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
     reap_finished_sessions(&workspaces, browser.as_ref());
-    // Observed attribution (ADR-0105 stage 2): the kernel names the connection's owner; nothing
-    // caller-asserted can forge it. Only the bounded lowercase image name is kept -- never the
-    // path, and never as an authority input.
-    let peer_image = match (observed_local, observed_peer) {
-        (Some(local), Some(peer)) => {
-            ghostlight_win_peer::identify_addresses(local, peer).map(|peer| peer.image_name)
-        }
-        _ => None,
-    };
-    let label_for_diagnostics = client_label.clone();
-    let workspace = match session {
-        Some(marker) => workspaces.resume_or_admit(client_label, channel, marker, peer_image),
-        None => workspaces.admit(client_label, channel, peer_image),
-    };
+    // Evidence belongs to this connection. Workspace continuity never replaces it.
+    let connection = Arc::new(crate::provenance::ConnectionEvidence::observe(
+        &client_label,
+        channel,
+        observed_local,
+        observed_peer,
+    ));
+    drop(client_label);
+    let workspace = workspaces.connect(connection.clone(), session);
     write_response(
         &writer,
         &ServiceResponse::HelloAccepted {
@@ -572,7 +567,15 @@ fn serve_session(
         ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
         ghostlight_bridge::diagnostics::Level::Info,
         None,
-        &format!("{label_for_diagnostics} via {}", channel.as_str()),
+        &format!(
+            "{} via {}",
+            connection
+                .attribution()
+                .connection_id
+                .as_deref()
+                .unwrap_or_default(),
+            channel.as_str()
+        ),
     );
     let queue = Arc::new(SessionQueue::new(budget));
     let mut workers = Vec::new();
@@ -685,7 +688,12 @@ fn serve_session(
                         + QUEUED_METADATA_BYTES;
                     let job = Job {
                         id,
-                        prepared: Arc::new(PreparedInvocation::new(&tool, input, deadline_ms)),
+                        prepared: Arc::new(PreparedInvocation::new(
+                            &tool,
+                            input,
+                            deadline_ms,
+                            Some(connection.clone()),
+                        )),
                         cancellation: CancellationToken::default(),
                     };
                     match queue.admit(job.clone(), bytes) {
@@ -735,6 +743,14 @@ fn serve_session(
     for worker in workers {
         let _ = worker.join();
     }
+    workspaces.disconnect(
+        &workspace,
+        connection
+            .attribution()
+            .connection_id
+            .as_deref()
+            .unwrap_or_default(),
+    );
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
     if !workspaces.is_owned(&workspace) {

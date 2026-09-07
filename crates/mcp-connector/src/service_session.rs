@@ -170,7 +170,7 @@ fn reconnect_loop(
             event::SERVICE_CONNECTED,
             Level::Info,
             None,
-            &format!("{client_label} connected to the orchestrator"),
+            "connected to the orchestrator",
         );
         event_handler(ServiceEvent::Connected { catalog_changed });
         read_until_disconnected(reader, &state, generation, &event_handler);
@@ -192,7 +192,7 @@ fn reconnect_loop(
                 event::SERVICE_DISCONNECTED,
                 Level::Warn,
                 None,
-                &format!("{client_label} lost the orchestrator connection"),
+                "lost the orchestrator connection",
             );
             event_handler(ServiceEvent::Disconnected);
         }

@@ -864,6 +864,7 @@ mod tests {
 
         let app = &surface_source();
         let operation = OperationSummary {
+            provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
             tool: "browser_read".into(),
@@ -873,6 +874,7 @@ mod tests {
             phase: OperationPhase::Running,
         };
         let record = HistoryItem {
+            provenance: None,
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: String::new(),
             complete: true,
