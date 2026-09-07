@@ -79,6 +79,53 @@ impl CancellationToken {
     }
 }
 
+/// Decoded once at service intake; waiting consumes the original invocation deadline.
+pub(crate) struct PreparedInvocation {
+    pub(crate) invocation: String,
+    pub(crate) tool: String,
+    started: Instant,
+    deadline: Instant,
+    decoded: Result<Operation, language::LanguageError>,
+    stage: Mutex<InvocationStage>,
+}
+
+#[derive(Default)]
+struct InvocationStage {
+    running_or_finished: bool,
+    waiting_reported: bool,
+}
+
+impl PreparedInvocation {
+    /// Expiration is measured from intake, including time waiting behind earlier work.
+    pub(crate) fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+
+    /// Decode and start the deadline before any queue wait.
+    pub(crate) fn new(tool: &str, input: Value, caller_deadline_ms: Option<u64>) -> Self {
+        let started = Instant::now();
+        let decoded = language::decode(tool, input);
+        let timeout = caller_deadline_ms
+            .unwrap_or_else(|| decoded.as_ref().map(operation_timeout).unwrap_or(8_000))
+            .clamp(100, 30_000);
+        Self {
+            invocation: format!("invocation_{}", Uuid::new_v4().simple()),
+            tool: tool.into(),
+            started,
+            deadline: started + Duration::from_millis(timeout),
+            decoded,
+            stage: Mutex::default(),
+        }
+    }
+
+    /// Operations already independent of the workspace lease retain their own admission lane.
+    pub(crate) fn independent(&self) -> bool {
+        self.decoded
+            .as_ref()
+            .is_ok_and(|operation| !operation_requires_workspace_lease(operation))
+    }
+}
+
 /// The single application executor for every model-requested operation and sequence step.
 pub struct ApplicationExecutor {
     governance: GovernanceFacade,
@@ -196,13 +243,50 @@ impl ApplicationExecutor {
         caller_deadline_ms: Option<u64>,
         cancellation: &CancellationToken,
     ) -> InvocationResult {
-        let invocation = format!("invocation_{}", Uuid::new_v4().simple());
-        let started = std::time::Instant::now();
+        let prepared = PreparedInvocation::new(tool, input, caller_deadline_ms);
+        self.execute_prepared(workspace, &prepared, cancellation, false)
+    }
+
+    /// Show a sustained admission wait on the existing operation surface, without a popup.
+    pub(crate) fn show_waiting(&self, workspace: &WorkspaceId, prepared: &PreparedInvocation) {
+        let mut stage = prepared
+            .stage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if stage.running_or_finished
+            || stage.waiting_reported
+            || prepared.started.elapsed() < Duration::from_millis(500)
+        {
+            return;
+        }
+        let Ok(operation) = &prepared.decoded else {
+            return;
+        };
+        stage.waiting_reported = true;
+        self.workbench.react(&DomainEvent::WorkWaiting {
+            invocation: prepared.invocation.clone(),
+            workspace: workspace.as_str().into(),
+            tool: prepared.tool.clone(),
+            activity: operation_activity(operation),
+            capabilities: language::capability_map::requirements(operation),
+        });
+    }
+
+    /// Execute or refuse one prepared request through the same truthful completion path.
+    pub(crate) fn execute_prepared(
+        &self,
+        workspace: &WorkspaceId,
+        prepared: &PreparedInvocation,
+        cancellation: &CancellationToken,
+        capacity_refused: bool,
+    ) -> InvocationResult {
+        let invocation = prepared.invocation.clone();
+        let tool = prepared.tool.as_str();
+        let started = prepared.started;
         let gate = CompletionGate::default();
-        let decoded = language::decode(tool, input);
-        let (operation, requirements) = match decoded {
+        let (operation, requirements) = match &prepared.decoded {
             Ok(operation) => {
-                let requirements = language::capability_map::requirements(&operation);
+                let requirements = language::capability_map::requirements(operation);
                 (operation, requirements)
             }
             Err(error) => {
@@ -244,13 +328,14 @@ impl ApplicationExecutor {
                 );
             }
         };
-        let deadline_ms = caller_deadline_ms
-            .unwrap_or_else(|| operation_timeout(&operation))
-            .clamp(100, 30_000);
-        let deadline = Instant::now() + Duration::from_millis(deadline_ms);
-        let requires_lease = operation_requires_workspace_lease(&operation);
-        let lease = if requires_lease {
+        let deadline = prepared.deadline;
+        let requires_lease = operation_requires_workspace_lease(operation);
+        let lease = if requires_lease && !capacity_refused {
             loop {
+                if cancellation.is_cancelled() || Instant::now() >= deadline {
+                    break None;
+                }
+                self.show_waiting(workspace, prepared);
                 match self.workspaces.acquire(workspace) {
                     Ok(lease) => break Some(lease),
                     Err(WorkspaceError::Busy)
@@ -269,17 +354,44 @@ impl ApplicationExecutor {
             requirements,
             invocation: &invocation,
             workspace,
-            requested_browser: operation_browser(&operation),
+            requested_browser: operation_browser(operation),
             snapshot: &snapshot,
             deadline,
             cancellation,
         };
-        let terminal = if !requires_lease || lease.is_some() {
+        let terminal = if capacity_refused {
+            let refusal = Refusal::Capacity;
+            Terminal {
+                result: InvocationResult::new(
+                    &invocation,
+                    Status::Failed,
+                    Effect::None,
+                    Readiness::NotApplicable,
+                    true,
+                    &refusal.summary(),
+                    json!({"reason":"capacity"}),
+                    refusal.next_steps(),
+                ),
+                decision: Decision::permitted(),
+                physical_id: None,
+                observed: Observed::default(),
+                audit: refusal.audit(),
+            }
+        } else if (!requires_lease || lease.is_some())
+            && !cancellation.is_cancelled()
+            && Instant::now() < deadline
+        {
+            let mut stage = prepared
+                .stage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            stage.running_or_finished = true;
+            drop(stage);
             self.emit(DomainEvent::WorkStarted {
                 invocation: invocation.clone(),
                 workspace: workspace.as_str().into(),
                 tool: tool.into(),
-                activity: operation_activity(&operation),
+                activity: operation_activity(operation),
                 capabilities: requirements,
             });
             register_active_authority(
@@ -289,9 +401,9 @@ impl ApplicationExecutor {
                 &snapshot,
             );
             let terminal = if let Some(lease) = lease.as_ref() {
-                self.run(&context, lease, &operation)
+                self.run(&context, lease, operation)
             } else {
-                self.run_without_workspace_lease(&context, &operation)
+                self.run_without_workspace_lease(&context, operation)
             };
             deregister_active_authority(&self.active_authority, workspace.as_str(), &invocation);
             terminal
@@ -336,6 +448,11 @@ impl ApplicationExecutor {
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
         };
+        prepared
+            .stage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .running_or_finished = true;
         self.finish(
             &gate,
             terminal,

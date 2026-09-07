@@ -362,7 +362,7 @@
       if (feed.length <= 1) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "Nothing earlier in this session.";
+        empty.textContent = "No other activity in this session.";
         el.queue.append(empty);
       }
       queueCount(feed);

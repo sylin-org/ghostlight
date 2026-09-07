@@ -64,7 +64,7 @@
    */
   const settledMs = entry =>
     entry.durationMs || (entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
-  const isRunning = entry => !entry.settled && (entry.phase === "running" || entry.phase === "held" || entry.phase === "attention");
+  const isRunning = entry => !entry.settled && (entry.phase === "waiting" || entry.phase === "running" || entry.phase === "held" || entry.phase === "attention");
   const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
 
   return Object.freeze({ entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isBlocked });

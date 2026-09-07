@@ -113,6 +113,13 @@ The browser bridge has generic messages for hello, primitive request, receipt, b
 cancel, and presentation. It carries a closed primitive vocabulary but no model-facing tool
 names, product defaults, governance decisions, recovery text, or result envelopes.
 
+The service bounds unfinished exchanges and response delivery while keeping healthy idle peers
+connected. Fixed per-connection workers absorb bursts in bounded ordinary and independent-control
+queues. The executor decodes once at intake; waiting consumes the original deadline and reaches
+the same completion/audit path. Sustained waits appear in the existing workbench operation list.
+Runtime discovery is published from a new private file; Windows creation uses the existing audited
+FFI boundary. ADR-0160 records exact bounds and the limits of this local resilience guarantee.
+
 The service edge bridge uses versioned newline-delimited JSON on an authenticated loopback
 connection. The browser relay and adapter protocol use Chromium's four-byte little-endian length
 prefix end to end, so the native host can forward bounded adapter frames without decoding them.

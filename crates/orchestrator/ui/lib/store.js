@@ -90,7 +90,10 @@
       }
       state.feed = [...byInvocation.values()]
         .filter((entry) => !state.hidden.has(entry.invocation))
-        .sort((left, right) => entryTime(right) - entryTime(left));
+        .sort((left, right) => {
+          const rank = entry => isRunning(entry) ? (entry.phase === "waiting" ? 1 : 0) : 2;
+          return rank(left) - rank(right) || entryTime(right) - entryTime(left);
+        });
       trim();
     }
 
@@ -106,6 +109,13 @@
       if (state.hidden.has(operation.invocation)) return;
       const entry = entryFromOperation(operation);
       const index = state.feed.findIndex((item) => item.invocation === entry.invocation);
+      if (entry.phase === "waiting" && index < 0 && state.feed.some(item => isRunning(item) && item.phase !== "waiting")) {
+        const lastLive = state.feed.findLastIndex(isRunning);
+        state.feed.splice(lastLive + 1, 0, entry);
+        trim();
+        emit(CHANGE.Feed);
+        return;
+      }
       if (index === 0) {
         state.feed[0] = { ...state.feed[0], ...entry };
         emit(CHANGE.Hero, { entry: state.feed[0] });

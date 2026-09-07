@@ -55,6 +55,10 @@ the owner wants, and what this project learned the hard way.
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **Absorb ordinary bursts.** The owner rejected a refusal-led local-resilience experience. Keep
+  permitted work flowing within its original deadline, make sustained waiting legible, contain
+  stalled connections, preserve other sessions and human controls, and recover without replay.
+  Capacity bounds serve continuity; people should not have to tune service machinery (ADR-0160).
 - **Manual browser recovery speaks to the model.** When browser auto-open is off, never make the
   model translate a person-facing error. Tell it to ask the user to open any eligible installed
   browser Ghostlight can name, with the extension installed, then repeat the call.

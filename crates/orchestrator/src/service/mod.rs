@@ -1,6 +1,7 @@
 //! Persistent service lifecycle and generic bridge session handling.
 
-use std::collections::HashMap;
+mod admission;
+
 use std::env;
 use std::io::{self, BufReader};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use ghostlight_bridge::browser::{BrowserCommand, BrowserEvent};
-use ghostlight_bridge::framing::{read_json_line, read_native, write_json_line, write_native};
+use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
 use ghostlight_bridge::runtime::{read_runtime, write_runtime, RuntimeEndpoint};
@@ -20,6 +21,7 @@ use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
     SERVICE_BRIDGE_MAJOR,
 };
+use ghostlight_bridge::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
@@ -28,11 +30,16 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuditRecord, Capability, GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
-use crate::work::{ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken};
+use crate::work::{
+    ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken, PreparedInvocation,
+};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
+const QUEUED_METADATA_BYTES: usize = 512;
+
+use admission::{Capacity, Job, Permit, QueueBudget, Refused, SessionQueue};
 
 /// A running local service host. Dropping it requests listener shutdown.
 pub struct ServiceHost {
@@ -266,12 +273,21 @@ fn spawn_service_listener(
     token: String,
     diagnostics: Arc<DiagnosticsHub>,
 ) -> JoinHandle<()> {
+    let handshakes = Capacity::new(admission::HANDSHAKES);
+    let sessions = Capacity::new(admission::SESSIONS);
+    let budget = QueueBudget::default();
     thread::Builder::new()
         .name("ghostlight-service-listener".into())
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        let Some(handshake) = handshakes.acquire(1) else {
+                            continue;
+                        };
+                        let sessions = sessions.clone();
+                        let budget = budget.clone();
+                        let session_stop = stop.clone();
                         let executor = Arc::clone(&executor);
                         let workspaces = workspaces.clone();
                         let browser = Arc::clone(&browser);
@@ -282,7 +298,7 @@ fn spawn_service_listener(
                         let _ = thread::Builder::new()
                             .name("ghostlight-mcp-session".into())
                             .spawn(move || {
-                                if let Err(error) = serve_session(
+                                if serve_session(
                                     stream,
                                     executor,
                                     workspaces,
@@ -291,8 +307,12 @@ fn spawn_service_listener(
                                     governance,
                                     &token,
                                     diagnostics,
-                                ) {
-                                    eprintln!("MCP service session ended: {error:#}");
+                                    handshake,
+                                    sessions,
+                                    budget,
+                                    session_stop,
+                                ).is_err() {
+                                    eprintln!("MCP service session ended after an invalid or interrupted exchange.");
                                 }
                             });
                     }
@@ -312,19 +332,25 @@ fn spawn_browser_listener(
     browser: Arc<RelayBrowserPort>,
     token: String,
 ) -> JoinHandle<()> {
+    let handshakes = Capacity::new(admission::HANDSHAKES);
     thread::Builder::new()
         .name("ghostlight-browser-listener".into())
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        let Some(handshake) = handshakes.acquire(1) else {
+                            continue;
+                        };
                         let browser = Arc::clone(&browser);
                         let token = token.clone();
+                        let session_stop = stop.clone();
                         let _ = thread::Builder::new()
                             .name("ghostlight-browser-session".into())
                             .spawn(move || {
-                                if let Err(error) = serve_browser_relay(stream, &browser, &token) {
-                                    eprintln!("Browser bridge rejected connection: {error:#}");
+                                let _handshake = handshake;
+                                if serve_browser_relay(stream, &browser, &token, session_stop).is_err() {
+                                    eprintln!("Browser relay ended after an invalid or interrupted exchange.");
                                 }
                             });
                     }
@@ -339,45 +365,42 @@ fn spawn_browser_listener(
 }
 
 fn serve_browser_relay(
-    mut stream: TcpStream,
+    stream: TcpStream,
     browser: &Arc<RelayBrowserPort>,
     expected_token: &str,
+    stop: Arc<AtomicBool>,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
-    let Some(request) = read_native::<BrowserRelayRequest>(&mut stream)? else {
+    let opening = Instant::now() + EXCHANGE_TIMEOUT;
+    let mut reader = SocketReader::new(stream.try_clone()?).interrupted_by(stop);
+    let writer = SocketWriter::new(stream.try_clone()?)?;
+    let Some(request) = reader.native::<BrowserRelayRequest>(Some(opening))? else {
         return Ok(());
     };
     let BrowserRelayRequest::Hello { major, token } = request;
     if token != expected_token {
-        write_native(
-            &mut stream,
-            &BrowserRelayResponse::Rejected {
-                code: "authentication_failed".into(),
-                message: "Runtime authentication failed.".into(),
-            },
-        )?;
+        writer.native(&BrowserRelayResponse::Rejected {
+            code: "authentication_failed".into(),
+            message: "Runtime authentication failed.".into(),
+        })?;
         return Ok(());
     }
     if major != BROWSER_RELAY_MAJOR {
-        write_native(
-            &mut stream,
-            &BrowserRelayResponse::Rejected {
-                code: "incompatible_relay".into(),
-                message: format!(
-                    "Browser relay major {major} is incompatible with required {BROWSER_RELAY_MAJOR}."
-                ),
-            },
-        )?;
+        writer.native(&BrowserRelayResponse::Rejected {
+            code: "incompatible_relay".into(),
+            message: format!(
+                "Browser relay major {major} is incompatible with required {BROWSER_RELAY_MAJOR}."
+            ),
+        })?;
         return Ok(());
     }
-    write_native(
-        &mut stream,
-        &BrowserRelayResponse::Accepted {
-            major: BROWSER_RELAY_MAJOR,
-        },
-    )?;
-    browser.attach(stream).map_err(anyhow::Error::msg)
+    writer.native(&BrowserRelayResponse::Accepted {
+        major: BROWSER_RELAY_MAJOR,
+    })?;
+    browser
+        .attach_reader(stream, reader, opening)
+        .map_err(anyhow::Error::msg)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -390,6 +413,10 @@ fn serve_session(
     governance: GovernanceFacade,
     expected_token: &str,
     diagnostics: Arc<DiagnosticsHub>,
+    handshake: Permit,
+    sessions: Capacity,
+    budget: QueueBudget,
+    stop: Arc<AtomicBool>,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
@@ -398,9 +425,10 @@ fn serve_session(
     let observed_local = stream.local_addr().ok();
     let observed_peer = stream.peer_addr().ok();
     let reader_stream = stream.try_clone()?;
-    let mut reader = BufReader::new(reader_stream);
-    let writer = Arc::new(Mutex::new(stream));
-    let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? else {
+    let mut reader = SocketReader::new(reader_stream).interrupted_by(stop);
+    let writer = Arc::new(SocketWriter::new(stream)?);
+    let Some(request) = reader.json::<ServiceRequest>(Some(Instant::now() + EXCHANGE_TIMEOUT))?
+    else {
         return Ok(());
     };
     let (major, token, opening) = match request {
@@ -461,6 +489,7 @@ fn serve_session(
         );
         return Ok(());
     }
+    drop(handshake);
     let (client_label, channel, session) = match opening {
         ServiceOpening::WorkbenchActivation => {
             write_response(
@@ -482,6 +511,17 @@ fn serve_session(
             channel,
             session,
         } => (client_label, channel, session),
+    };
+    let Some(_session_permit) = sessions.acquire(1) else {
+        write_response(
+            &writer,
+            &ServiceResponse::Error {
+                id: None,
+                code: "service_capacity".into(),
+                message: "Connection capacity is temporarily full.".into(),
+            },
+        );
+        return Ok(());
     };
     // Admission, before any workspace exists: an authority layer may decline an intake entirely.
     let admission = governance.admits_channel(channel);
@@ -534,11 +574,14 @@ fn serve_session(
         None,
         &format!("{label_for_diagnostics} via {}", channel.as_str()),
     );
-    let active: Arc<Mutex<HashMap<String, CancellationToken>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let queue = Arc::new(SessionQueue::new(budget));
+    let mut workers = Vec::new();
     let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
     let catalog_watch_stop = Arc::new(AtomicBool::new(false));
-    let catalog_watch = (channel == IntakeChannel::Mcp).then(|| {
+    let catalog_watch = {
+        let queue = queue.clone();
+        let executor = executor.clone();
+        let workspace = workspace.clone();
         let governance = governance.clone();
         let writer = Arc::clone(&writer);
         let published = Arc::clone(&published_catalog);
@@ -549,6 +592,10 @@ fn serve_session(
                 let mut generation = 1_u64;
                 while !stop.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(250));
+                    queue.advance_cancelled();
+                    for job in queue.jobs() {
+                        executor.show_waiting(&workspace, &job.prepared);
+                    }
                     let Some(previous) = lock(&published).clone() else {
                         continue;
                     };
@@ -578,8 +625,7 @@ fn serve_session(
                     }
                 }
             })
-            .expect("policy catalog watcher starts")
-    });
+    };
 
     // Every way this connection can end has to reach the teardown below. A reset socket, an
     // oversized frame, and one malformed line are all ordinary ways for a client to go away, and
@@ -587,7 +633,33 @@ fn serve_session(
     // it held then survived with nothing able to collect them: an unowned workspace has no owning
     // process to look up, so the reaper cannot see it either.
     let served = (|| -> Result<()> {
-        while let Some(request) = read_json_line::<ServiceRequest>(&mut reader)? {
+        if catalog_watch.is_err() {
+            bail!("session watcher could not start");
+        }
+        for independent in [false, true] {
+            let queue = queue.clone();
+            let executor = executor.clone();
+            let workspace = workspace.clone();
+            let writer = writer.clone();
+            workers.push(
+                thread::Builder::new()
+                    .name("ghostlight-session-work".into())
+                    .spawn(move || {
+                        while let Some(job) = queue.next(independent) {
+                            let result = executor.execute_prepared(
+                                &workspace,
+                                &job.prepared,
+                                &job.cancellation,
+                                false,
+                            );
+                            deliver_result(&writer, &job.id, result);
+                            queue.complete(&job.id);
+                        }
+                    })
+                    .context("start bounded session worker")?,
+            );
+        }
+        while let Some(request) = reader.json::<ServiceRequest>(None)? {
             match request {
                 ServiceRequest::Catalog => {
                     let snapshot = governance.snapshot(&RequestRestrictions::default());
@@ -606,40 +678,39 @@ fn serve_session(
                     input,
                     deadline_ms,
                 } => {
-                    let cancellation = CancellationToken::default();
-                    if lock(&active)
-                        .insert(id.clone(), cancellation.clone())
-                        .is_some()
-                    {
-                        write_response(
+                    // Bound retained payloads as well as queue count. Decoding occurs once at intake.
+                    let bytes = serde_json::to_vec(&input)?.len()
+                        + id.len()
+                        + tool.len()
+                        + QUEUED_METADATA_BYTES;
+                    let job = Job {
+                        id,
+                        prepared: Arc::new(PreparedInvocation::new(&tool, input, deadline_ms)),
+                        cancellation: CancellationToken::default(),
+                    };
+                    match queue.admit(job.clone(), bytes) {
+                        Ok(()) => {}
+                        Err(Refused::Duplicate) => write_response(
                             &writer,
                             &ServiceResponse::Error {
-                                id: Some(id),
+                                id: Some(job.id),
                                 code: "duplicate_request".into(),
                                 message: "Request id is already active.".into(),
                             },
-                        );
-                        continue;
-                    }
-                    let executor = Arc::clone(&executor);
-                    let writer = Arc::clone(&writer);
-                    let active = Arc::clone(&active);
-                    let workspace = workspace.clone();
-                    let _ = thread::Builder::new().name("ghostlight-invocation".into()).spawn(move || {
-                        let mut result = executor.execute(&workspace, &tool, input, deadline_ms, &cancellation);
-                        lock(&active).remove(&id);
-                        let text = result.model_text();
-                        let is_error = result.is_error();
-                        let content = std::mem::take(&mut result.content);
-                        let value = serde_json::to_value(&result).unwrap_or_else(|_| serde_json::json!({"status":"unknown","effect":"unknown","repeat_safe":false,"summary":"Result serialization failed.","facts":{},"next_steps":[]}));
-                        write_response(&writer, &ServiceResponse::Result { id, text, result: value, is_error, content });
-                    });
-                }
-                ServiceRequest::Cancel { id } => {
-                    if let Some(token) = lock(&active).get(&id) {
-                        token.cancel();
+                        ),
+                        Err(Refused::Full) => {
+                            let result = executor.execute_prepared(
+                                &workspace,
+                                &job.prepared,
+                                &job.cancellation,
+                                true,
+                            );
+                            deliver_result(&writer, &job.id, result);
+                        }
+                        Err(Refused::Closed) => break,
                     }
                 }
+                ServiceRequest::Cancel { id } => queue.cancel(&id),
                 ServiceRequest::Hello { .. }
                 | ServiceRequest::ActivateWorkbench { .. }
                 | ServiceRequest::InspectReadiness { .. } => write_response(
@@ -656,11 +727,13 @@ fn serve_session(
     })();
 
     catalog_watch_stop.store(true, Ordering::SeqCst);
-    if let Some(watch) = catalog_watch {
+    writer.close();
+    queue.stop();
+    if let Ok(watch) = catalog_watch {
         let _ = watch.join();
     }
-    for cancellation in lock(&active).values() {
-        cancellation.cancel();
+    for worker in workers {
+        let _ = worker.join();
     }
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
@@ -744,8 +817,31 @@ fn owner_alive(marker: &SessionMarker) -> bool {
         .is_some_and(|process| process.start_time() == *started_at)
 }
 
-fn write_response(writer: &Mutex<TcpStream>, response: &ServiceResponse) {
-    let _ = write_json_line(&mut *lock(writer), response);
+fn write_response(writer: &SocketWriter, response: &ServiceResponse) {
+    let _ = writer.json(response);
+}
+
+fn deliver_result(
+    writer: &SocketWriter,
+    id: &str,
+    mut result: crate::work::result::InvocationResult,
+) {
+    let text = result.model_text();
+    let is_error = result.is_error();
+    let content = std::mem::take(&mut result.content);
+    match serde_json::to_value(&result) {
+        Ok(value) => write_response(
+            writer,
+            &ServiceResponse::Result {
+                id: id.into(),
+                text,
+                result: value,
+                is_error,
+                content,
+            },
+        ),
+        Err(_) => writer.close(),
+    }
 }
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex

@@ -4,7 +4,7 @@ pub mod recovery;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::net::{Shutdown, TcpStream};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -17,7 +17,10 @@ use ghostlight_bridge::browser::{
     BrowserOutcome, BrowserRequest, DiagnosticsState, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
     COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
 };
-use ghostlight_bridge::framing::{read_native, write_length_frame, write_native, FrameError};
+use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
+use ghostlight_bridge::transport::{
+    SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT,
+};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
@@ -32,6 +35,8 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 // A product name is a label a person reads next to a browser they already recognize, not a
 // place for an adapter to write prose.
 const BROWSER_NAME_MAX_CHARS: usize = 40;
+const MAX_BROWSER_CONNECTIONS: usize = 16;
+const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug)]
 struct HeartbeatSettings {
@@ -173,7 +178,7 @@ type PendingResult = Result<BrowserOutcome, BrowserError>;
 #[derive(Debug)]
 struct Connection {
     id: String,
-    writer: Arc<Mutex<TcpStream>>,
+    writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     adapter_version: String,
     browser_id: String,
@@ -424,9 +429,21 @@ impl RelayBrowserPort {
         stream
             .set_nodelay(true)
             .map_err(|error| BrowserError::Protocol(error.to_string()))?;
-        let mut reader = stream
-            .try_clone()
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        let reader = SocketReader::new(
+            stream
+                .try_clone()
+                .map_err(|error| BrowserError::Protocol(error.to_string()))?,
+        );
+        self.attach_reader(stream, reader, Instant::now() + EXCHANGE_TIMEOUT)
+    }
+
+    /// Continue authentication using the reader that may already hold coalesced adapter bytes.
+    pub(crate) fn attach_reader(
+        &self,
+        stream: TcpStream,
+        mut reader: SocketReader,
+        opening: Instant,
+    ) -> Result<(), BrowserError> {
         let Some(BrowserFrame::Hello {
             major,
             adapter_version,
@@ -435,7 +452,9 @@ impl RelayBrowserPort {
             browser_name,
             attended,
             capabilities,
-        }) = read_native(&mut reader).map_err(|error| BrowserError::Protocol(error.to_string()))?
+        }) = reader
+            .native(Some(opening))
+            .map_err(|error| BrowserError::Protocol(error.to_string()))?
         else {
             return Err(BrowserError::Authentication);
         };
@@ -471,18 +490,9 @@ impl RelayBrowserPort {
             >= 1)
             .then(|| Arc::new(Mutex::new(ConnectionLiveness::new(Instant::now()))));
 
-        let writer = Arc::new(Mutex::new(stream));
-        write_native(
-            &mut *lock(&writer),
-            &BrowserFrame::HelloAccepted {
-                major: ADAPTER_PROTOCOL_MAJOR,
-                service_version: env!("CARGO_PKG_VERSION").into(),
-                service_epoch: self.service_epoch.clone(),
-                control_state: *lock(&self.control_state),
-                diagnostics: *lock(&self.diagnostics),
-            },
-        )
-        .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        let writer = Arc::new(
+            SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
+        );
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let connection_id = format!("connection_{}", Uuid::new_v4().simple());
         let connection = Connection {
@@ -497,6 +507,14 @@ impl RelayBrowserPort {
         };
         let replaced = {
             let mut adapters = lock(&self.adapters);
+            if !adapters.connections.contains_key(&browser_id)
+                && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
+            {
+                writer.close();
+                return Err(BrowserError::Protocol(
+                    "browser connection capacity reached".into(),
+                ));
+            }
             let previous = adapters.connections.insert(browser_id.clone(), connection);
             if let Some(previous) = &previous {
                 retire(previous);
@@ -506,6 +524,16 @@ impl RelayBrowserPort {
             }
             previous.is_some()
         };
+        if let Err(error) = writer.native(&BrowserFrame::HelloAccepted {
+            major: ADAPTER_PROTOCOL_MAJOR,
+            service_version: env!("CARGO_PKG_VERSION").into(),
+            service_epoch: self.service_epoch.clone(),
+            control_state: *lock(&self.control_state),
+            diagnostics: *lock(&self.diagnostics),
+        }) {
+            self.detach_registered(&browser_id, &connection_id);
+            return Err(BrowserError::Protocol(error.to_string()));
+        }
         let lifecycle = lock(&self.lifecycle).clone();
         if let Some(observer) = lifecycle.as_ref() {
             observer.adapter_attached(&browser_id, replaced);
@@ -696,7 +724,19 @@ impl RelayBrowserPort {
                 "adapter does not support chunked command transfers".into(),
             ));
         }
-        let mut output = lock(&writer);
+        let mut output = writer
+            .until_unless(deadline.min(Instant::now() + DELIVERY_TIMEOUT), || {
+                cancelled.load(Ordering::SeqCst)
+            })
+            .map_err(|_| {
+                if cancelled.load(Ordering::SeqCst) {
+                    BrowserError::CancelledBeforeDispatch
+                } else if Instant::now() >= deadline {
+                    BrowserError::DeadlineBeforeDispatch
+                } else {
+                    BrowserError::DisconnectedBeforeDispatch
+                }
+            })?;
         if cancelled.load(Ordering::SeqCst) {
             return Err(BrowserError::CancelledBeforeDispatch);
         }
@@ -708,13 +748,13 @@ impl RelayBrowserPort {
         let probe = liveness
             .as_ref()
             .map(|liveness| lock(liveness).begin_probe());
-        if write_request_payload(&mut *output, &payload, &correlation).is_err() {
+        if write_request_payload(&mut output, &payload, &correlation).is_err() {
             lock(&pending).remove(&correlation);
             mark_stale(&liveness);
             return Err(BrowserError::DisconnectedAfterDispatch);
         }
         if let Some(sequence) = probe {
-            if write_native(&mut *output, &BrowserFrame::Heartbeat { sequence }).is_err() {
+            if write_native(&mut output, &BrowserFrame::Heartbeat { sequence }).is_err() {
                 lock(&pending).remove(&correlation);
                 mark_stale(&liveness);
                 return Err(BrowserError::DisconnectedAfterDispatch);
@@ -796,8 +836,9 @@ impl RelayBrowserPort {
             .map(|connection| Arc::clone(&connection.writer))
             .collect();
         let mut published = Ok(());
+        let deadline = Instant::now() + CONTROL_DELIVERY_TIMEOUT;
         for writer in writers {
-            if write_native(&mut *lock(&writer), &frame).is_err() {
+            if writer.native_until(&frame, deadline).is_err() {
                 published = Err(BrowserError::DisconnectedAfterDispatch);
             }
         }
@@ -847,7 +888,7 @@ fn write_request_payload(
 fn await_receipt(
     receiver: Receiver<PendingResult>,
     correlation: &str,
-    writer: &Arc<Mutex<TcpStream>>,
+    writer: &Arc<SocketWriter>,
     pending: &Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     deadline: Instant,
     cancelled: &AtomicBool,
@@ -885,7 +926,7 @@ fn await_receipt(
     }
 }
 
-fn send_cancel(writer: &Arc<Mutex<TcpStream>>, correlation: &str) {
+fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
     let frame = BrowserFrame::Request {
         request: BrowserRequest {
             correlation: format!("cancel_{}", Uuid::new_v4().simple()),
@@ -895,7 +936,7 @@ fn send_cancel(writer: &Arc<Mutex<TcpStream>>, correlation: &str) {
             },
         },
     };
-    let _ = write_native(&mut *lock(writer), &frame);
+    let _ = writer.native_until(&frame, Instant::now() + CONTROL_DELIVERY_TIMEOUT);
 }
 
 /// The notification targets one adapter reader reports to: the typed event sink and the
@@ -906,8 +947,8 @@ struct AdapterNotifications {
 }
 
 fn read_adapter(
-    mut reader: TcpStream,
-    writer: Arc<Mutex<TcpStream>>,
+    mut reader: SocketReader,
+    writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     notifications: AdapterNotifications,
     adapters: Arc<Mutex<AdapterRegistry>>,
@@ -916,7 +957,7 @@ fn read_adapter(
 ) {
     let ConnectionTag { browser_id, .. } = &tag;
     loop {
-        match read_native::<BrowserFrame>(&mut reader) {
+        match reader.native::<BrowserFrame>(None) {
             Ok(Some(BrowserFrame::Receipt { receipt })) => {
                 let correlation = receipt.correlation.clone();
                 if let Some(sender) = lock(&pending).remove(&correlation) {
@@ -955,6 +996,7 @@ fn read_adapter(
             }
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => {
+                writer.close();
                 fail_pending(&pending, BrowserError::DisconnectedAfterDispatch);
                 // A replaced connection must not evict the connection that replaced it. Its
                 // attention place survives, so the same browser reconnecting resumes where it
@@ -985,7 +1027,7 @@ fn read_adapter(
 }
 
 fn heartbeat_adapter(
-    writer: Arc<Mutex<TcpStream>>,
+    writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     liveness: Arc<Mutex<ConnectionLiveness>>,
     adapters: Arc<Mutex<AdapterRegistry>>,
@@ -993,7 +1035,9 @@ fn heartbeat_adapter(
     settings: HeartbeatSettings,
 ) {
     loop {
-        thread::sleep(settings.interval);
+        if writer.wait_closed(settings.interval) {
+            return;
+        }
         if !is_current(&adapters, &tag) {
             return;
         }
@@ -1012,7 +1056,10 @@ fn heartbeat_adapter(
         if became_stale {
             fail_pending(&pending, BrowserError::DisconnectedAfterDispatch);
         }
-        if write_native(&mut *lock(&writer), &BrowserFrame::Heartbeat { sequence }).is_err() {
+        if writer
+            .native(&BrowserFrame::Heartbeat { sequence })
+            .is_err()
+        {
             lock(&liveness).mark_stale();
             return;
         }
@@ -1046,7 +1093,7 @@ fn is_current(adapters: &Mutex<AdapterRegistry>, tag: &ConnectionTag) -> bool {
 /// relay reads end-of-stream and exits, and the browser observes its port disconnect.
 fn retire(previous: &Connection) {
     fail_pending(&previous.pending, BrowserError::DisconnectedAfterDispatch);
-    let _ = lock(&previous.writer).shutdown(Shutdown::Both);
+    previous.writer.close();
 }
 
 /// Validate the optional bounded product name an adapter reports for itself.
@@ -1069,11 +1116,8 @@ fn mark_stale(liveness: &Option<Arc<Mutex<ConnectionLiveness>>>) {
     }
 }
 
-fn acknowledge(writer: &Arc<Mutex<TcpStream>>, correlation: String) {
-    let _ = write_native(
-        &mut *lock(writer),
-        &BrowserFrame::Acknowledge { correlation },
-    );
+fn acknowledge(writer: &Arc<SocketWriter>, correlation: String) {
+    let _ = writer.native(&BrowserFrame::Acknowledge { correlation });
 }
 
 fn adapter_error(code: &str, message: String, effect_unknown: bool) -> BrowserError {

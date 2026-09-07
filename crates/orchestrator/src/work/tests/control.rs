@@ -1,6 +1,36 @@
 //! Runtime-control and session-isolation regressions at the application boundary.
 
 use super::*;
+
+#[test]
+fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
+    for intent in [
+        ghostlight_bridge::browser::RuntimeControlIntent::Hold,
+        ghostlight_bridge::browser::RuntimeControlIntent::EndSession,
+    ] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        let notices = Arc::new(Notices::default());
+        executor.workbench.attach_presentation(notices.clone());
+        executor.governance.apply_runtime_intent(intent);
+        for _ in 0..3 {
+            let result = executor.execute(
+                &workspace,
+                "browser_navigate",
+                json!({"url":"https://example.com","new_tab":true}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(result.effect, Effect::None);
+            assert_eq!(result.status, Status::Blocked);
+        }
+        assert!(browser.calls().is_empty());
+        assert_eq!(audit.0.lock().unwrap().len(), 3);
+        assert!(
+            notices.0.lock().unwrap().is_empty(),
+            "human controls need no guardrail popup for every queued request"
+        );
+    }
+}
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
 use crate::governance::ReasonCode;
 use crate::workbench::{

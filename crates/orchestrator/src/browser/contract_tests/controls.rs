@@ -16,7 +16,7 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
         peer.set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
         let (stream, _) = listener.accept().unwrap();
-        let writer = Arc::new(Mutex::new(stream));
+        let writer = Arc::new(ghostlight_bridge::transport::SocketWriter::new(stream).unwrap());
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let port = RelayBrowserPort::new("test".into());
         lock(&port.adapters).connections.insert(
@@ -35,7 +35,9 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
         let cancelled = AtomicBool::new(false);
         let held = AtomicBool::new(false);
         let (admitted, checked) = mpsc::channel();
-        let guard = lock(&writer);
+        let guard = writer
+            .until(Instant::now() + Duration::from_secs(3))
+            .unwrap();
         let deadline = Instant::now()
             + if case == 2 {
                 Duration::from_millis(60)

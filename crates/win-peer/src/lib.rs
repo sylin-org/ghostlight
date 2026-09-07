@@ -9,7 +9,7 @@
 //! a security-sensitive path: every foreign function is declared by hand below against system
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
-//! One capability is exposed: [`identify_connection`] resolves the owning process of an accepted
+//! Socket-peer observation: [`identify_connection`] resolves the owning process of an accepted
 //! loopback connection through `GetExtendedTcpTable`, and [`PeerIdentity`] carries that process
 //! id with the executable's bounded lowercase file name. The name only -- never the path -- is
 //! what may reach audit or presentation surfaces (ADR-0105 Decision 2).
@@ -17,7 +17,8 @@
 //! Signer-gated admission (ADR-0105 stage 3) stays deferred and this crate deliberately contains
 //! no signature-verification code: revisit it when Ghostlight's first signed artifact exists to
 //! verify against. Non-Windows targets compile the same surface returning `None`, so callers
-//! stay branch-free.
+//! stay branch-free. ADR-0160 adds Windows-only creation of owner-private runtime files in
+//! `private_file`, keeping creation-time security attributes inside this same FFI boundary.
 
 /// The process observed to own one side of a local connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,7 +32,16 @@ pub struct PeerIdentity {
 #[cfg(target_os = "windows")]
 mod image;
 #[cfg(target_os = "windows")]
+mod private_file;
+#[cfg(target_os = "windows")]
 mod table;
+
+/// Create a new file with a protected current-user/SYSTEM DACL before it can contain secrets.
+/// Existing paths are refused. Runtime publication belongs to the caller (ADR-0160).
+#[cfg(target_os = "windows")]
+pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    private_file::create(path)
+}
 
 /// Identify the process that owns the peer end of an accepted local connection.
 ///

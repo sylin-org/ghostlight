@@ -23,6 +23,27 @@ Reload of the unpacked Ghostlight extension. Browser security policy blocked age
 Nothing was pushed or published. The earlier implementation records below describe their
 pre-deployment validation; this section owns the current deployment state.
 
+## H8 local continuity (2026-09-07)
+
+The owner approved the continuity-focused H8 profile and directed implementation. Ordinary bursts
+now use bounded session queues and fixed workers, with an independent lane for existing status and
+recording controls. Original deadlines include waiting. The workbench shows sustained waits below
+running work; Pause/Stop drains queued work into quiet terminal history. Duplicate request IDs keep
+the original cancellation token. Incomplete exchanges and stalled writes expire without imposing
+an idle-session timeout or replaying uncertain effects.
+
+The Windows discovery-file check found inherited broad-user permissions on the installed file.
+New source creates private runtime files before writing tokens, through the existing audited Win32
+boundary, and uses fresh exclusive 0600 files on Linux. Installed permissions remain unchanged.
+
+[ADR-0160](adr/0160-local-service-continuity.md) and the
+[H8 record](tasks/security-hardening/h8-local-continuity.md) own decisions and evidence. All required
+gates, 498 Rust tests, 192 extension tests, real-process reconnect/audit, CLI, the new H8 process
+journey, workbench checks, and 29 Sylin/MV3 regressions pass. H8 is committed locally with
+`fix(service): absorb bursts and bound local exchanges`; Git owns the hash. H6, H7, and H8 are not
+deployed or published. Linux runtime and cross-user impersonation remain untested in this session.
+Next ideation: C1 client-provenance reporting details (I8).
+
 ## H7 audit health (2026-09-07)
 
 The owner accepted I6 and directed implementation. H7 now separates browser outcomes from
@@ -36,8 +57,8 @@ report health and gaps. Cold storage failure no longer prevents service startup.
 All 488 Rust tests, 192 extension tests, formatting, Clippy, JavaScript syntax, the real-process
 failure/repair/cold-start journey, workbench checks, and 29 Sylin/MV3 regression checks pass.
 H7 is not deployed or published. H6 also
-remains undeployed; its installed native-host transport proof remains outstanding. Next ideation:
-H8 local-service resilience (I7), followed by C1 provenance details (I8).
+remains undeployed; its installed native-host transport proof remains outstanding. H8 source
+validation is recorded above. Next ideation: C1 provenance details (I8).
 
 ## Security-hardening epic (2026-09-06)
 

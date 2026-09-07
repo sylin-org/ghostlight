@@ -859,9 +859,14 @@ pub enum BrowserRecoveryReason {
     HandshakeTimeout,
 }
 
+/// Human-only status for an admitted job still waiting for earlier work.
+pub const WAITING_FOR_WORK: &str = "Waiting for earlier browser work";
+
 /// Why a browser job did not complete in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Refusal {
+    /// The bounded admission queue could not accept another request.
+    Capacity,
     /// Model-facing input did not match the catalog.
     InvalidRequest,
     /// Cancellation won before workspace admission.
@@ -936,6 +941,7 @@ impl Refusal {
     #[must_use]
     pub fn summary(&self) -> String {
         match self {
+            Self::Capacity => "The work queue is full. This request was not started.",
             Self::InvalidRequest => "The call does not match the Ghostlight catalog.",
             Self::CancelledBeforeStart => "The browser job was cancelled before it started.",
             Self::DeadlineBeforeStart => {
@@ -1024,7 +1030,7 @@ impl Refusal {
             Self::InvalidRequest => {
                 vec!["Match the call to the advertised schema; the invalid_input detail states exactly what to change.".into()]
             }
-            Self::DeadlineBeforeStart => vec![
+            Self::Capacity | Self::DeadlineBeforeStart => vec![
                 "Repeat the call when the current Ghostlight action has finished.".into(),
             ],
             Self::LocalInterlock => vec![

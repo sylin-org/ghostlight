@@ -100,7 +100,12 @@ popups, recover automatically with bounded attempts, and leave gaps explicit wit
 [ADR-0159](../../adr/0159-audit-health-and-recovery.md) owns the decision;
 [H7](h7-audit-health.md) owns implementation evidence. No remaining I6 product choice.
 
-## I7: H8 local resilience
+## I7: H8 local resilience -- accepted (2026-09-07)
+
+The owner rejected a refusal-led experience, accepted ordinary burst absorption, quiet cleanup,
+visible sustained waiting, responsive other sessions and human controls, and recovery without
+replay, then directed implementation. [ADR-0160](../../adr/0160-local-service-continuity.md) owns the
+decision; [H8](h8-local-continuity.md) owns its evidence. The original investigation agenda follows.
 
 - Choose the concrete failure cases to test: abandoned unauthenticated peers, malformed framing,
   oversized requests, cancellation, and concurrent legitimate callers.

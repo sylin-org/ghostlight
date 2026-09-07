@@ -440,6 +440,17 @@ view.collections({
 
 const historyChecks = [];
 {
+  const store = sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
+  const active = { invocation: "active-h8", workspace: "w", tool: "browser_read", activity: "Reading", phase: "running" };
+  const waiting = { ...active, invocation: "waiting-h8", phase: "waiting", activity: "Waiting for earlier browser work" };
+  store.applySnapshot({ seq: 0, service: { runtime_state: "active" }, operations: [active], history: [], sessions: [] }, true);
+  store.applyChange({ seq: 1, change: { kind: "operation_started", operation: waiting } });
+  historyChecks.push(["waiting work stays live beneath the running action", store.hero().invocation === active.invocation
+    && store.feed().length === 2 && sandbox.globalThis.GhostlightEntries.isRunning(store.feed()[1])]);
+  store.applyChange({ seq: 2, change: { kind: "operation_started", operation: { ...waiting, phase: "running", activity: "Reading" } } });
+  historyChecks.push(["admitted work becomes the running action without a duplicate row", store.hero().invocation === waiting.invocation && store.feed().length === 2]);
+}
+{
   const receipt = { invocation: "group", workspace: "w", tool: "browser_read", capability: "read",
     status: "succeeded", effect: "none", allowed: true, summary: "Read 5 words.", complete: true,
     permissions: { checks: [{ requirements: ["read"], host: "example.com" }], truncated: false },

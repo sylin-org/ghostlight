@@ -18,6 +18,14 @@ pub enum DenialPresentation {
 /// The complete in-process event vocabulary.
 #[derive(Clone, Debug)]
 pub enum DomainEvent {
+    /// Admitted work has waited long enough to warrant a visible, content-free status.
+    WorkWaiting {
+        invocation: String,
+        workspace: String,
+        tool: String,
+        activity: PresentationActivity,
+        capabilities: CapabilitySet,
+    },
     /// One unit of work started.
     WorkStarted {
         invocation: String,
@@ -88,7 +96,8 @@ impl DomainEvent {
     #[must_use]
     pub fn invocation(&self) -> &str {
         match self {
-            Self::WorkStarted { invocation, .. }
+            Self::WorkWaiting { invocation, .. }
+            | Self::WorkStarted { invocation, .. }
             | Self::TabCreated { invocation, .. }
             | Self::DocumentCommitted { invocation, .. }
             | Self::TargetIndicated { invocation, .. }
@@ -104,7 +113,8 @@ impl DomainEvent {
     #[must_use]
     pub fn workspace(&self) -> &str {
         match self {
-            Self::WorkStarted { workspace, .. }
+            Self::WorkWaiting { workspace, .. }
+            | Self::WorkStarted { workspace, .. }
             | Self::TabCreated { workspace, .. }
             | Self::DocumentCommitted { workspace, .. }
             | Self::TargetIndicated { workspace, .. }

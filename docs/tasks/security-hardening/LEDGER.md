@@ -31,7 +31,10 @@ See [H6 verification](h6-verification.md). It is not deployed or published.
 H7 I6 is accepted and H7 is implemented and verified locally under ADR-0159.
 See [H7 verification](h7-audit-health.md): 488 Rust/192 extension tests, real-process failure and
 recovery, workbench checks, and 29 Sylin/MV3 regressions pass. H7 is not deployed or published.
-Next: H8 ideation I7, then C1 reporting details I8.
+H8 I7 is accepted; H8 is implemented and verified locally under ADR-0160.
+See [H8 continuity](h8-local-continuity.md): 498 Rust/192 extension tests, process/CLI/UI checks,
+Windows private runtime replacement, and 29 Sylin/MV3 regressions pass. H8 is not deployed.
+Next ideation: C1 reporting details I8.
 Installed native-host transport and cross-platform runtime lanes remain untested for H6.
 See [H2b](h2b-aggregate-outcomes.md) for the accepted behavior and bounded work.
 Do not repeat completed cycles or implement undecided remedies silently.
@@ -73,7 +76,7 @@ refusal. H6 is implemented locally; the H6 verification record owns its evidence
 | H5 | IMPLEMENTED and verified locally; deployed locally | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
 | H6 | IMPLEMENTED and verified locally; not deployed | I5 accepted; ADR-0158, 478 Rust/192 extension tests, process checks, and 29 Sylin browser cases. |
 | H7 | IMPLEMENTED and verified locally; not deployed | I6 accepted; 488 Rust/192 extension tests, real-process and UI checks, plus 29 Sylin regressions. ADR-0159 and H7. |
-| H8 | Included; investigation still proposed | Ideation I7 for bounded cases and evidence-driven controls. |
+| H8 | IMPLEMENTED and verified locally; not deployed | I7 accepted. Continuity, bounded queues/exchanges, private discovery, and quiet controls. ADR-0160 and H8. |
 | C1 | Reporting direction AGREED; details open | Ideation I8 and a safe audit projection before adding durable fields. |
 | C2/C3 | Admission direction CONDITIONAL; mechanism open | Ideation I9 chooses a concrete integration and connection proof. |
 
@@ -306,11 +309,20 @@ collector or local hash-chain feature is assumed necessary.
 
 ### H8: Bounded local service
 
-Confirm installed discovery-file access on supported platforms without reading owner-local notes.
-Inspect pre-authentication waits, frame limits, thread/invocation admission, cancellation, and
-reconnect cleanup. Use bounded isolated process tests, including another legitimate workspace
-remaining usable under malformed or abandoned requests. Add limits for demonstrated gaps rather
-than inventing a general scheduling framework.
+I7 is accepted and H8 is implemented locally. The owner selected quiet burst absorption, useful
+waiting status, containment of stalled connections, usable other sessions and human controls,
+and automatic connection recovery without action replay. ADR-0160 owns that decision and the
+fixed implementation bounds. The [H8 record](h8-local-continuity.md) owns verification and limits.
+
+The Windows permission review found inherited broad-user rules on the installed discovery file.
+New runtime publication now creates a protected current-user/SYSTEM file before writing the token;
+Linux uses a new exclusive 0600 file. The installed file remains unchanged until deployment.
+The duplicate-ID cancellation defect and repeated Pause/Stop guardrail popups also have regressions.
+
+All required gates, 498 Rust/192 extension tests, process reconnect/audit, CLI, new isolated H8
+resilience, workbench UI, and 29 Sylin/MV3 checks pass. Local commit:
+`fix(service): absorb bursts and bound local exchanges`. No deployment or publication. Linux
+runtime execution, another-user impersonation, and installed-browser transport remain untested.
 
 ## Cross-cutting acceptance
 

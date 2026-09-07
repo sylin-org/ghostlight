@@ -63,7 +63,14 @@ impl ApplicationExecutor {
             }
         } else {
             match terminal.result.status {
-                Status::Blocked if terminal.decision.reason != ReasonCode::AuditUnavailable => {
+                Status::Blocked
+                    if !matches!(
+                        terminal.decision.reason,
+                        ReasonCode::AuditUnavailable
+                            | ReasonCode::RuntimeHold
+                            | ReasonCode::SessionEnded
+                    ) =>
+                {
                     DomainEvent::WorkBlocked {
                         invocation: terminal.result.invocation.clone(),
                         workspace: workspace.as_str().into(),

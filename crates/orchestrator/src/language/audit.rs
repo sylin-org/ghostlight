@@ -85,6 +85,7 @@ pub enum AuditRefusal {
     InvalidRequest,
     CancelledBeforeStart,
     DeadlineBeforeStart,
+    Capacity,
     AuthorityBlocked { cause: BlockedReason },
     AttentionRequired,
     LocalInterlock,
@@ -138,6 +139,7 @@ impl Refusal {
             Self::InvalidRequest => AuditRefusal::InvalidRequest,
             Self::CancelledBeforeStart => AuditRefusal::CancelledBeforeStart,
             Self::DeadlineBeforeStart => AuditRefusal::DeadlineBeforeStart,
+            Self::Capacity => AuditRefusal::Capacity,
             Self::AuthorityBlocked { reason, .. } => {
                 AuditRefusal::AuthorityBlocked { cause: *reason }
             }

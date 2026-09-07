@@ -5,8 +5,10 @@
 //! beside its own executable (ADR-0124).
 
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+#[cfg(not(target_os = "windows"))]
+use std::fs::OpenOptions;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -97,7 +99,17 @@ fn runtime_file_from(
 
 /// Read the running service endpoint.
 pub fn read_runtime(path: &Path) -> io::Result<RuntimeEndpoint> {
-    let bytes = fs::read(path)?;
+    const MAX_RUNTIME_BYTES: u64 = 64 * 1024;
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(MAX_RUNTIME_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_RUNTIME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "runtime discovery is too large",
+        ));
+    }
     serde_json::from_slice(&bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
@@ -108,33 +120,44 @@ pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> 
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "runtime path has no parent"))?;
     fs::create_dir_all(parent)?;
-    let temporary = path.with_extension("json.tmp");
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
     let bytes = serde_json::to_vec(endpoint)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let mut options = OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temporary)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    if let Err(error) = fs::rename(&temporary, path) {
-        if path.exists()
-            && matches!(
-                error.kind(),
-                io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
-            )
+    #[cfg(target_os = "windows")]
+    let mut file = ghostlight_win_peer::create_private_file(&temporary)?;
+    #[cfg(not(target_os = "windows"))]
+    let mut file = {
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(target_os = "linux")]
         {
-            fs::remove_file(path)?;
-            fs::rename(temporary, path)?;
-        } else {
-            return Err(error);
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        options.open(&temporary)?
+    };
+    let published = (|| {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        if let Err(error) = fs::rename(&temporary, path) {
+            if path.exists()
+                && matches!(
+                    error.kind(),
+                    io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+                )
+            {
+                fs::remove_file(path)?;
+                fs::rename(&temporary, path)?;
+            } else {
+                return Err(error);
+            }
+        }
+        Ok(())
+    })();
+    if published.is_err() {
+        let _ = fs::remove_file(&temporary);
     }
-    Ok(())
+    published
 }
 
 #[cfg(test)]
@@ -168,9 +191,25 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
+        fs::write(&path, b"old inherited discovery").unwrap();
+        let legacy_temporary = path.with_extension("json.tmp");
+        fs::write(&legacy_temporary, b"unowned old temporary").unwrap();
         write_runtime(&path, &endpoint(41000)).unwrap();
         write_runtime(&path, &endpoint(42000)).unwrap();
         assert_eq!(read_runtime(&path).unwrap(), endpoint(42000));
+        assert_eq!(
+            fs::read(&legacy_temporary).unwrap(),
+            b"unowned old temporary"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_file(legacy_temporary).unwrap();
         fs::remove_file(path).unwrap();
     }
 

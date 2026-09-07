@@ -94,6 +94,7 @@ impl PresentationReactor {
                 .unwrap_or(PresentationActivity::Quiet)
         };
         let (signal, activity, phase, detail, tab_id, locator, terminal) = match event {
+            DomainEvent::WorkWaiting { .. } => return,
             DomainEvent::WorkStarted { activity, .. } => {
                 self.activities
                     .lock()

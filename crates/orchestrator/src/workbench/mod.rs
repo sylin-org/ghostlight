@@ -215,7 +215,14 @@ impl WorkbenchProjection {
         let (notification, change) = {
             let mut state = self.lock();
             match event {
-                DomainEvent::WorkStarted {
+                DomainEvent::WorkWaiting {
+                    invocation,
+                    workspace,
+                    tool,
+                    activity,
+                    capabilities,
+                }
+                | DomainEvent::WorkStarted {
                     invocation,
                     workspace,
                     tool,
@@ -229,7 +236,11 @@ impl WorkbenchProjection {
                         activity: *activity,
                         capabilities: *capabilities,
                         started_at_ms: unix_ms(),
-                        phase: OperationPhase::Running,
+                        phase: if matches!(event, DomainEvent::WorkWaiting { .. }) {
+                            OperationPhase::Waiting
+                        } else {
+                            OperationPhase::Running
+                        },
                     };
                     let started = WorkbenchChange::OperationStarted {
                         operation: OperationSummary::from(&operation),
@@ -1200,7 +1211,11 @@ impl From<&OperationState> for OperationSummary {
             invocation: value.invocation.clone(),
             workspace: value.workspace.clone(),
             tool: value.tool.clone(),
-            activity: activity_label(value.activity).into(),
+            activity: if value.phase == OperationPhase::Waiting {
+                crate::language::outcome::WAITING_FOR_WORK.into()
+            } else {
+                activity_label(value.activity).into()
+            },
             capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
@@ -1212,6 +1227,8 @@ impl From<&OperationState> for OperationSummary {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationPhase {
+    /// Admitted work is waiting within its original deadline.
+    Waiting,
     /// Work is active.
     Running,
     /// Runtime governance held work.
@@ -1227,6 +1244,7 @@ pub enum OperationPhase {
 impl OperationPhase {
     const fn label(self) -> &'static str {
         match self {
+            Self::Waiting => "waiting",
             Self::Running => "running",
             Self::Held => "held",
             Self::Attention => "attention",
@@ -1748,6 +1766,24 @@ mod tests {
     #[test]
     fn projection_tracks_current_work_then_moves_it_to_history() {
         let projection = WorkbenchProjection::default();
+        let notifications = Arc::new(Notifications::default());
+        projection.attach_presentation(notifications.clone());
+        projection.react(&DomainEvent::WorkWaiting {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            tool: "browser_read".into(),
+            activity: PresentationActivity::Read,
+            capabilities: Capability::Read.into(),
+        });
+        assert_eq!(
+            projection.operations()[0].phase,
+            super::OperationPhase::Waiting
+        );
+        assert_eq!(
+            projection.operations()[0].activity,
+            "Waiting for earlier browser work"
+        );
+        assert!(notifications.0.lock().unwrap().is_empty());
         projection.react(&DomainEvent::WorkStarted {
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
@@ -1756,6 +1792,10 @@ mod tests {
             capabilities: Capability::Read.into(),
         });
         assert_eq!(projection.operations().len(), 1);
+        assert_eq!(
+            projection.operations()[0].phase,
+            super::OperationPhase::Running
+        );
 
         let durable = Arc::new(MemoryAudit::default());
         let sink = AuditRecorder::new(durable.clone(), projection.clone());

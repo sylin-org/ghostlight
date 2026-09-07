@@ -176,6 +176,23 @@ try {
   await until(() => evaluate("document.querySelector('#audit-health').textContent.includes('1 earlier receipt')"), "recovery gap notice");
   assert.equal(await evaluate("document.querySelector('.history-step').textContent.includes('Storage was not confirmed')"), true);
   await capture("audit-recovered");
+  // H8: delayed admission stays live below the running action, then promotes the same row.
+  await evaluate(`(() => {
+    const operation = { invocation: 'h8-active', workspace: 'workspace_codex', tool: 'browser_read',
+      activity: 'Reading', capability: 'read', phase: 'running', started_at_ms: Date.now() };
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_started', operation });
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_started', operation: { ...operation,
+      invocation: 'h8-waiting', phase: 'waiting', activity: 'Waiting for earlier browser work' } });
+  })()`);
+  await until(() => evaluate("document.body.textContent.includes('Waiting for earlier browser work')"), "waiting operation visible");
+  assert.equal(await evaluate("document.querySelector('#hero-body').textContent.includes('Reading')"), true);
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  await capture("waiting");
+  await evaluate(`window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_started', operation: {
+    invocation: 'h8-waiting', workspace: 'workspace_codex', tool: 'browser_read', capability: 'read',
+    activity: 'Reading', phase: 'running', started_at_ms: Date.now() } })`);
+  await until(() => evaluate("!document.body.textContent.includes('Waiting for earlier browser work')"), "waiting operation started");
+  console.log("H8 browser history: waiting stays live beneath running work, then promotes without duplication.");
   console.log("H7 browser history: persistent health, independent child storage, recovery gap, preserved expansion, and narrow layout passed.");
   console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");
 } finally {

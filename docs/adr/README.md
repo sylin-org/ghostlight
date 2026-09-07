@@ -174,6 +174,7 @@ history live here.
 | [0158](0158-document-access-and-coverage.md) | Document-specific authority, policy-selectable coverage, human-only host details, masked captures, and recording/script boundaries | Accepted; implemented and verified locally; not deployed |
 
 | [0159](0159-audit-health-and-recovery.md) | Audit health, optional strict admission, explicit storage gaps, and bounded recovery without replay | Accepted; implemented and verified locally; not deployed |
+| [0160](0160-local-service-continuity.md) | Bounded local exchanges, quiet burst admission, waiting progress, cancellation isolation, and private runtime publication | Accepted; implemented and verified locally; not deployed |
 
 ## Conventions
 

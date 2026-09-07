@@ -55,6 +55,12 @@ so another region can be selected from the magnified image.
 Timeouts are bounded from 100 to 30000 milliseconds and default to 8000 milliseconds. Text is
 UTF-8 and bounded. URLs must be absolute `http` or `https` URLs.
 
+Ordinary bursts may wait within the original invocation deadline. Sustained waiting is visible
+in the human workbench; it does not create a new tool call or a popup. An exceptional admission
+capacity refusal returns `reason: capacity`, no effect, and safe guidance for a request that never
+started. Human Pause/Stop preserves its fixed directive and terminal history without repeated
+guardrail popups while queued work drains (ADR-0160).
+
 ## Result envelope
 
 Every invocation returns one envelope:
