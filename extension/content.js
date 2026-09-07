@@ -202,7 +202,7 @@
     if (element.getAttribute("aria-expanded") === "true") state.push("expanded");
     if (element.getAttribute("aria-expanded") === "false") state.push("collapsed");
     if (element.selected) state.push("selected");
-    if (element.hidden || element.getAttribute("aria-hidden") === "true") state.push("hidden");
+    if (!isComposedVisible(element)) state.push("hidden");
     return state.slice(0, 8);
   }
 
@@ -451,6 +451,36 @@
     if (setter) setter.call(element, value); else element.value = value;
   }
 
+  // Browser editing preserves an editor's input transaction and undo state. A DOM assignment
+  // followed by an untrusted generic event can be discarded by a controlled rich-text editor.
+  function replaceEditableText(element, value) {
+    element.focus({ preventScroll: true });
+    const selection = element.getRootNode().getSelection?.() ?? document.getSelection();
+    if (!selection) throw new Error("editable target has no selection");
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const text = String(value);
+    if (!text && !element.textContent) return;
+    if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
+      throw new Error("browser could not replace editable text");
+    }
+  }
+
+  function clearText(element) {
+    requireActionable(element, "type");
+    if (credentialClass(element)) throw credentialHandoffError(element);
+    const subject = actionSubject(element);
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      setNativeValue(element, "");
+      element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    } else if (element.isContentEditable) {
+      replaceEditableText(element, "");
+    } else throw new Error("target is not text-editable");
+    return { cleared: true, subject };
+  }
+
   function fillElement(element, value) {
     requireActionable(element, "fill");
     if (credentialClass(element)) throw credentialHandoffError(element);
@@ -465,7 +495,8 @@
     } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       setNativeValue(element, value);
     } else if (element.isContentEditable) {
-      element.textContent = value;
+      replaceEditableText(element, value);
+      return;
     } else {
       throw new Error("target is not fillable");
     }
@@ -490,6 +521,9 @@
     }
     if (element.disabled || element.getAttribute("aria-disabled") === "true" || closestAcrossBoundaries(element, "[inert]")) {
       throw new Error(`target is disabled for ${intent}`);
+    }
+    if (["fill", "type"].includes(intent) && (element.readOnly || element.getAttribute("aria-readonly") === "true")) {
+      throw new Error(`target is read-only for ${intent}`);
     }
     return element;
   }
@@ -641,7 +675,7 @@
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "query_semantic") return querySemanticTargets(message);
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
-      if (message.kind === "clear_focused") { const element = requireActionable(deepestActiveElement(), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
+      if (message.kind === "clear_focused") return clearText(deepestActiveElement());
       if (message.kind === "drop_files") {
         const dropTarget = deepestElementFromPoint(document, message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");
@@ -690,7 +724,7 @@
       }
       if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
-      if (message.kind === "clear") { const element = requireActionable(resolve(message.locator), "type"); if (credentialClass(element)) throw credentialHandoffError(element); const subject = actionSubject(element); if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) setNativeValue(element, ""); else if (element.isContentEditable) element.textContent = ""; else throw new Error("target is not text-editable"); element.dispatchEvent(new Event("input", { bubbles: true, composed: true })); return { cleared: true, subject }; }
+      if (message.kind === "clear") return clearText(resolve(message.locator));
       if (message.kind === "scroll") {
         let subject = null;
         if (message.locator) { const element = requireActionable(resolve(message.locator), "scroll"); subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }

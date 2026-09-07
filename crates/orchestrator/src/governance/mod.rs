@@ -673,6 +673,19 @@ impl AuthoritySnapshot {
         )
     }
 
+    /// Whether this refusal was decided by caller-supplied restrictions on this invocation.
+    #[must_use]
+    pub fn is_request_denial(&self, decision: Decision) -> bool {
+        !decision.allowed
+            && matches!(
+                decision.reason,
+                ReasonCode::CapabilityDenied | ReasonCode::HostDenied
+            )
+            && decision
+                .attribution
+                .is_some_and(|attribution| usize::from(attribution.layer) == self.layers.len())
+    }
+
     /// Policy tier and grant id for one decision, when authored policy decided it.
     #[must_use]
     pub fn attribution(&self, decision: Decision) -> Option<(&'static str, Option<&str>)> {

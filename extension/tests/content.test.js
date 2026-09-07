@@ -12,6 +12,12 @@ function contentHarness() {
   let clock = 0;
   const delays = [];
   const windowListeners = new Map();
+  const edits = [];
+  let selectedRange = null;
+  const selection = {
+    removeAllRanges() { selectedRange = null; },
+    addRange(range) { selectedRange = range; }
+  };
 
   function selectorMatches(element, selector) {
     const tag = String(element.tagName ?? "").toLowerCase();
@@ -75,6 +81,7 @@ function contentHarness() {
       this.clientTop = 0;
       this.clientWidth = 100;
       this.clientHeight = 30;
+      this.events = [];
     }
 
     append(...nodes) {
@@ -97,6 +104,9 @@ function contentHarness() {
     matches(selector) { return selectorMatches(this, selector); }
     closest(selector) { return this.matches(selector) ? this : null; }
     querySelectorAll(selector) { return descendantsOf(this, selector); }
+    focus() { document.activeElement = this; }
+    scrollIntoView() {}
+    dispatchEvent(event) { this.events.push(event.type); return true; }
   }
 
   class HTMLInputElement extends HTMLElement {
@@ -172,18 +182,29 @@ function contentHarness() {
       let selected = null;
       return {
         selectNodeContents(node) { selected = node; },
+        get selected() { return selected; },
         getClientRects() { return selected?.rendered === false ? [] : [{ width: 1, height: 1 }]; },
         detach() {}
       };
+    },
+    getSelection() { return selection; },
+    execCommand(command, _showUi, value) {
+      const element = selectedRange?.selected;
+      if (!element) return false;
+      edits.push({ element, command, value });
+      element.textContent = command === "delete" ? "" : value;
+      element.events.push("input");
+      return true;
     },
     getElementById() { return null; }
   };
   input.getRootNode = () => document;
 
   function computedStyle(element) {
-    return element?.hidden
+    const style = element?.hidden
       ? { display: "none", visibility: "hidden", contentVisibility: "hidden", opacity: "0", paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0" }
       : { display: "block", visibility: "visible", contentVisibility: "visible", opacity: "1", paddingLeft: "0", paddingRight: "0", paddingTop: "0", paddingBottom: "0" };
+    return { ...style, ...element?.computedStyle };
   }
 
   const context = {
@@ -269,6 +290,7 @@ function contentHarness() {
 
   return {
     input,
+    edits,
     delays,
     document,
     send,
@@ -513,6 +535,69 @@ test("form fill reports the verified fields without a submit", async () => {
   assert.equal(filled.result.submitted, false);
 });
 
+test("rich editor fills and clears use one native edit scoped to the chosen editor", async () => {
+  const harness = contentHarness();
+  const editor = harness.element("div");
+  editor.isContentEditable = true;
+  editor.textContent = "old draft";
+  editor.setAttribute("contenteditable", "true");
+  editor.setAttribute("aria-label", "Reply");
+  harness.document.body.append(editor);
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets.find((target) => target.name === "Reply").locator;
+  const filled = await harness.send({ kind: "fill", fields: [{ locator, value: "First line\nSecond line" }] });
+  assert.equal(filled.result.submitted, false);
+  assert.equal(editor.textContent, "First line\nSecond line");
+  assert.equal(harness.edits[0].element, editor);
+  assert.equal(harness.edits[0].command, "insertText");
+  assert.deepEqual(editor.events, ["input"], "native input must not be followed by another synthetic event");
+  const cleared = await harness.send({ kind: "clear", locator });
+  assert.equal(cleared.ok, true);
+  assert.equal(editor.textContent, "");
+  assert.equal(harness.edits[1].command, "delete");
+  const empty = await harness.send({ kind: "fill", fields: [{ locator, value: "" }] });
+  assert.equal(empty.ok, true);
+  assert.equal(harness.edits.length, 2, "an empty editor is already cleared");
+});
+
+test("rich editor refusal prevents native editing and preserves the existing draft", async () => {
+  for (const [attribute, value, reason] of [["aria-readonly", "true", /read-only/], ["aria-disabled", "true", /disabled/], ["autocomplete", "current-password", /handoff/]]) {
+    const harness = contentHarness();
+    const editor = harness.element("div");
+    editor.isContentEditable = true;
+    editor.textContent = "untouched";
+    editor.setAttribute("contenteditable", "true");
+    editor.setAttribute("aria-label", "Reply");
+    editor.setAttribute(attribute, value);
+    harness.document.body.append(editor);
+    const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+    const locator = inspected.result.targets.find((target) => target.name === "Reply").locator;
+    const result = await harness.send({ kind: "fill", fields: [{ locator, value: "replacement" }] });
+    assert.equal(result.ok, false);
+    assert.match(result.error, reason);
+    assert.equal(editor.textContent, "untouched");
+    assert.equal(harness.edits.length, 0);
+  }
+});
+
+test("inspection distinguishes styled hidden controls from a visible rich editor", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  harness.input.setAttribute("aria-label", "Hidden draft helper");
+  harness.input.computedStyle = { display: "none" };
+  const editor = harness.element("div");
+  editor.isContentEditable = true;
+  editor.setAttribute("contenteditable", "true");
+  editor.setAttribute("aria-label", "Reply");
+  harness.document.body.append(editor);
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const hidden = inspected.result.targets.find((target) => target.name === "Hidden draft helper");
+  const visible = inspected.result.targets.find((target) => target.name === "Reply");
+  assert.ok(hidden.state.includes("hidden"));
+  assert.ok(!visible.state.includes("hidden"));
+});
+
 test("the fill reply crosses to the worker before the verified submit fires", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
@@ -737,7 +822,9 @@ function shadowFixture(name) {
     events: [],
     getAttribute(key) { return key === "aria-label" ? name : null; },
     getBoundingClientRect() { return { left: 4, top: 4, width: 40, height: 20 }; },
-    dispatchEvent(event) { this.events.push(event.type); return true; }
+    dispatchEvent(event) { this.events.push(event.type); return true; },
+    focus() {},
+    getRootNode() { return {}; }
   };
 }
 

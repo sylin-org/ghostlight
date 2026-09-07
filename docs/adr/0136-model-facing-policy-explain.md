@@ -58,3 +58,20 @@ already renders grants, settings, and the RAWX capability directory from typed m
   counts with this commit. Older ADRs' "22-tool" phrasing stays as written history.
 - The workbench Policy destination remains the human surface; this tool adds no second renderer --
   both consume the same `effective_authority()` compilation.
+
+## Amendment: explanation remains available during a browser hold (2026-09-07)
+
+An installed incident exposed a contradiction in the implementation: `policy_explain` demanded
+Read even though its declared requirement was EMPTY. After repeated caller-restriction denials
+raised session attention, the diagnostic also refused, leaving the caller unable to inspect the
+authority that constrained its work.
+
+The owner authorized an immediate correction. This amends Decision 1's runtime qualification:
+`policy_explain` remains available during session attention, global Pause or Stop, and a required
+audit outage. It requires no browser grant, dispatches no browser work, and acquires no workspace
+lease. It retains the normal deadline, cancellation, bounded admission, completion, and audit
+paths. Its permission evidence records the empty requirement without inventing evaluated grants.
+
+Explanation neither clears attention nor resumes or replays work. Human controls and audit
+requirements continue to constrain browser operations. Storage failures remain visible on the
+explanation's receipt.

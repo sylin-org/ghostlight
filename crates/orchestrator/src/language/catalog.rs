@@ -93,7 +93,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill one to thirty ordinary form fields in one call. Nothing submits unless submit_target names the control, and credential fields stop so the user can enter their secret.",
+            "Fill one to thirty ordinary form fields in one call. Requires read and write, including unsent drafts; submit_target also requires action. Nothing submits unless submit_target names the control, and credential fields stop so the user can enter their secret.",
             fill_schema(),
             Hints::browser_action(true),
         ),
@@ -1472,7 +1472,7 @@ fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     ));
     fields.push((
         "restrict_capabilities",
-        json!({"type":"array","minItems":1,"uniqueItems":true,"description":"Optional capabilities that can only narrow this call's authority. Usually omit.","items":{"type":"string","enum":CAPABILITIES}}),
+        json!({"type":"array","minItems":1,"uniqueItems":true,"description":"Optional per-call allowlist; usually omit. Every required capability must be included. Restricting to write alone denies form fill, which also requires read. These limits do not distinguish drafts from submissions.","items":{"type":"string","enum":CAPABILITIES}}),
     ));
     raw_object(fields, required)
 }

@@ -34,6 +34,12 @@ Every tool may accept these flat request restrictions:
 Restrictions can only reduce configured authority. Capabilities are `read`, `action`, `write`,
 and `execute`.
 
+Usually omit request restrictions. They are per-call allowlists, and every required capability
+must be included: an unsent form still needs `read + write`. They do not express a draft-versus-
+submission boundary. A refusal caused by these fields names `restrict_capabilities` or
+`restrict_hosts`; capability refusals report the operation's requirements. Configured-policy
+refusals remain distinct, and no correction or replay happens automatically.
+
 An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
 the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected and
 points to `browser_tabs`. Tab handles are durable correlation slots: navigating by a handle whose
@@ -283,6 +289,10 @@ for checkboxes and radios, or a finite number for numeric inputs; optional `tab`
 `submit_target`; optional `timeout_ms`; optional restrictions.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
+Rich-text controls use the browser's editing transaction so controlled editors can retain the
+replacement. Empty values clear only the named editor. Filling never activates a submit control
+unless the caller supplied `submit_target`.
+
 Credential-class targets stop before any value dispatch and request visible user handoff. Facts:
 `tab`, `filled_count`, `submitted`, and any governed committed landing.
 
@@ -522,6 +532,9 @@ or what is allowed before acting.
 
 Inputs: none beyond optional restrictions. Capability: empty requirement set (always available).
 Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
+It remains available during session attention, global Pause or Stop, and a required audit outage.
+It does not clear attention or change controls. Cancellation, deadlines, bounded admission, and
+the ordinary completion/audit path still apply.
 
 The result carries the orchestrator's compiled projection -- the same compilation the workbench
 Policy destination renders -- with layer document texts and filesystem paths withheld from model
@@ -531,7 +544,7 @@ results. The summary names its measurement: capability areas explained over laye
 
 Request restrictions remain enforcing under observe policy. A denial that reaches its session's
 attention threshold retains the actual policy explanation and returns `attention_required`.
-Further work in that session requires explicit human review/resume in the workbench; global Resume
+Further browser work in that session requires explicit human review/resume in the workbench; global Resume
 leaves it intact. Model tools cannot resume attention. The triggering composition stops even under
 Continue; recovery permits new requests and never replays prior steps.
 

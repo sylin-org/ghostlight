@@ -38,6 +38,9 @@ fresh screenshot.
 
 - `browser_fill_form` fills 1 to 30 fields in one call and proves a contained submit before
   clicking `submit_target`; it never submits without one. Use it over repeated typing.
+  It requires `read + write` even for unsent drafts; submit also requires `action`. Usually omit
+  `restrict_capabilities`: a supplied list must include every required capability, and does not
+  distinguish drafts from submissions. A request-restriction refusal names the supplied field.
 - `browser_type_text` sends real per-character events, with `focused: true` to type into
   whatever is focused and `clear_first` to replace. Use it when keystroke events matter.
 - `browser_click` takes a target or a view point; `click_count` covers double and triple.

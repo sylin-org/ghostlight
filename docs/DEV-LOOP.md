@@ -53,6 +53,11 @@ process.
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
 
+An extension reload invalidates content-script receivers in already-open pages. The current
+adapter does not bootstrap them back into those documents. Refresh a disposable verification tab
+after reloading; do not automatically refresh user pages that can contain unsaved drafts. A fresh
+navigation is also enough. Reloading the extension alone does not prove existing pages are ready.
+
 ## Replacing a live stack
 
 A running stack holds its own executables open, so a release swap is build-elsewhere, stop, copy,

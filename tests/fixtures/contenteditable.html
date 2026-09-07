@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ghostlight controlled editor fixture</title>
+<style>[contenteditable] { display: block; border: 1px solid; min-height: 80px; white-space: pre-wrap; }</style>
+<form id="draft-form">
+  <input aria-label="Hidden draft helper" style="display:none">
+  <div id="reply" contenteditable="true" role="textbox" aria-label="Reply">Initial draft</div>
+  <button>Send</button>
+</form>
+<div id="editor-shell"></div>
+<script>
+  // This controlled editor accepts native editing transactions. Unannounced DOM changes or
+  // generic synthetic input revert to its model, as real managed rich-text editors can do.
+  const model = {};
+  let submissions = 0;
+  document.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); submissions++; });
+  const shadow = document.querySelector("#editor-shell").attachShadow({ mode: "open" });
+  shadow.innerHTML = '<style>div { border: 1px solid; min-height: 80px; white-space: pre-wrap; }</style><div contenteditable="true" role="textbox" aria-label="Shadow reply">Other draft</div>';
+  const editors = { reply: document.querySelector("#reply"), shadow: shadow.querySelector("div") };
+  const text = (editor) => editor.textContent ? editor.innerText : "";
+  for (const [name, editor] of Object.entries(editors)) {
+    model[name] = { value: text(editor), native: 0, synthetic: 0 };
+    editor.addEventListener("input", (event) => {
+      if (event instanceof InputEvent && event.isTrusted) {
+        model[name].value = text(editor);
+        model[name].native++;
+      } else model[name].synthetic++;
+    });
+    new MutationObserver(() => {
+      if (text(editor) !== model[name].value) editor.textContent = model[name].value;
+    }).observe(editor, { subtree: true, childList: true, characterData: true });
+  }
+  window.editorEvidence = () => ({
+    reply: { ...model.reply, rendered: text(editors.reply) },
+    shadow: { ...model.shadow, rendered: text(editors.shadow) },
+    submissions
+  });
+</script>
+</html>

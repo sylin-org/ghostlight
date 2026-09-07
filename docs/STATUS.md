@@ -1,9 +1,44 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (orchestrator through H5 deployed locally; H3 extension reload pending;
-service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+Last updated: 2026-09-07 (hardening through C1 reporting and Reddit editor incident fix deployed
+and verified locally; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
-## Local deployment (2026-09-07)
+## Installed hardening and editor incident (2026-09-07)
+
+The authorized dev-loop deployment replaced the orchestrator and MCP connector from `00b44646`.
+The browser connector was unchanged. The new service is Ready, ordinary CLI policy explanation
+confirms all-open authority, and the runtime discovery file now grants only the current user and
+SYSTEM. The owner explicitly reloaded the unpacked extension. Existing pages need a refresh to
+receive fresh content scripts after extension reload; only the disposable test page was refreshed.
+
+The owner interrupted the wider installed Sylin journey with a Reddit draft incident. Its exact
+receipt proves a caller-supplied capability restriction denied a `read + write` form fill, followed
+by session attention after repeated attempts. The refusal misidentified the source, and
+`policy_explain` was also blocked. A separate live test reached Reddit's rich editor and exposed
+a false successful fill: the page discarded the DOM-only replacement. The
+[incident record](tasks/security-hardening/editor-incident-2026-09-07.md) owns the fixes and evidence.
+
+The correction is now deployed: rich-editor fill/clear uses native editing, hidden controls carry
+an accurate state, caller restrictions name their source, typing uses its declared landing
+capability, and policy explanation stays available during attention or human holds. The installed
+Reddit test retained the synthetic reply visibly with `submitted:false`; it remains unsent for
+review. Fresh installed MCP calls prove request-refusal detail and policy explanation under session
+attention without releasing the hold. The exact-path orchestrator swap matches the isolated release
+build SHA-256 `f03440c7beb28323d68bb8b3b8a5803d5a8db7b73225bffc235682f09676f243`; both
+connectors survived unchanged. All 513 Rust tests, 195 extension tests, required formatting/Clippy/
+syntax checks, process/CLI journeys, and 31 Chromium/MV3 cases pass. This record accompanies the
+incident-fix commit; Git owns its source revision.
+
+Linux validation is partial: native Debian bridge tests passed 55/64, including runtime `0600`;
+eight networking failures also reproduce with an independent loopback probe, and one fixture
+retains its Windows cross-build source path. The Linux unsupported-peer test passed. Full Linux
+process and desktop/browser validation remains outstanding. No packages or system configuration
+were changed, and nothing was pushed or published.
+
+The dated implementation sections below retain their original pre-deployment evidence. This
+section owns current deployment truth.
+
+## Earlier local deployment (2026-09-07)
 
 The owner authorized local deployment. `scripts/dev-loop.ps1 -Action Deploy` built the
 orchestrator at `93976733` in `.target-dev-loop/release` and replaced only

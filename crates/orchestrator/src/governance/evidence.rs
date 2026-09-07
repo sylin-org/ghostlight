@@ -71,6 +71,7 @@ mod tests {
         snapshot.request_capabilities = Some(CapabilitySet::READ);
         let (decision, restricted) = snapshot.authorize_with_evidence(CapabilitySet::WRITE, None);
         assert!(!decision.allowed);
+        assert!(snapshot.is_request_denial(decision));
         assert!(restricted.request_restricted && restricted.request_evaluated);
         assert!(crate::language::history::permission(&restricted)
             .contains("request restrictions refused this work"));
@@ -85,6 +86,7 @@ mod tests {
         let (decision, observed) =
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
         assert!(!decision.allowed && !decision.observed);
+        assert!(snapshot.is_request_denial(decision));
         assert!(!observed.layers[0].allowed);
         assert!(observed.request_restricted && observed.request_evaluated);
         assert!(crate::language::history::permission(&observed)
@@ -98,9 +100,21 @@ mod tests {
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
         assert!(!decision.allowed && !decision.observed);
+        assert!(!snapshot.is_request_denial(decision));
         assert!(
             protected.layers.is_empty(),
             "protected rejection never evaluated grants"
+        );
+        snapshot.layers[0].manifest = manifest::parse(
+            r#"{"schema":3,"name":"enforced","version":"1","grants":[]}"#,
+            "test",
+        )
+        .unwrap();
+        let decision = snapshot.authorize_capability(super::super::Capability::Write);
+        assert!(!decision.allowed);
+        assert!(
+            !snapshot.is_request_denial(decision),
+            "configured denial wins before caller restrictions"
         );
     }
 

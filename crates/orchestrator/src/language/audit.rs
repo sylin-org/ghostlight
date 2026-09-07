@@ -87,6 +87,7 @@ pub enum AuditRefusal {
     DeadlineBeforeStart,
     Capacity,
     AuthorityBlocked { cause: BlockedReason },
+    RequestRestricted { cause: BlockedReason },
     AttentionRequired,
     LocalInterlock,
     CredentialHandoff,
@@ -143,6 +144,12 @@ impl Refusal {
             Self::AuthorityBlocked { reason, .. } => {
                 AuditRefusal::AuthorityBlocked { cause: *reason }
             }
+            Self::RequestCapabilities { .. } => AuditRefusal::RequestRestricted {
+                cause: BlockedReason::Capability,
+            },
+            Self::RequestHosts { .. } => AuditRefusal::RequestRestricted {
+                cause: BlockedReason::Host,
+            },
             Self::AttentionRequired => AuditRefusal::AttentionRequired,
             Self::LocalInterlock => AuditRefusal::LocalInterlock,
             Self::CredentialHandoff => AuditRefusal::CredentialHandoff,

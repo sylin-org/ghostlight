@@ -86,6 +86,10 @@ const server = createServer(async (request, response) => {
     return;
   }
   response.setHeader("content-type", "text/html");
+  if (request.url === "/editor") {
+    response.end(readFileSync(join(repository, "tests/fixtures/contenteditable.html"), "utf8"));
+    return;
+  }
   const child = request.url.startsWith("/form");
   let html = source[child ? 1 : 0].replace("<head>", '<head><base href="https://sylin.org/">');
   if (!child) html = html.replace('src="./form/"', `src="http://127.0.0.1:${port}/form"`)
@@ -314,8 +318,55 @@ try {
   result = await call("browser_execute", { tab, script: "document.title='UNAVAILABLE_SCRIPT'" });
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("unavailable embedded documents are separate and bounded scripts refuse");
+  await newSession();
+  const editorPage = await call("browser_navigate", { url: `http://localhost:${port}/editor`, new_tab: true });
+  assert.equal(editorPage.status, "succeeded", JSON.stringify(editorPage)); tab = editorPage.facts.tab;
+  physical = await rawWorker(`(await chrome.tabs.query({})).find(tab => tab.url === 'http://localhost:${port}/editor').id`);
+  result = await call("browser_inspect", { tab, scope: "controls", max_items: 20 });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  const replyTarget = result.facts.items.find((item) => item.name === "Reply")?.target;
+  const shadowTarget = result.facts.items.find((item) => item.name === "Shadow reply")?.target;
+  assert.ok(replyTarget); assert.ok(shadowTarget);
+  assert.ok(result.facts.items.find((item) => item.name === "Hidden draft helper")?.state.includes("hidden"));
+  assert.ok(!result.facts.items.find((item) => item.name === "Reply").state.includes("hidden"));
+  // Prove this fixture catches the old DOM-assignment plus synthetic-event failure.
+  await rawPage("document.querySelector('#reply').textContent='UNACCEPTED'; document.querySelector('#reply').dispatchEvent(new Event('input',{bubbles:true})); true");
+  await delay(50);
+  assert.equal((await rawPage("editorEvidence()")).reply.rendered, "Initial draft");
+  for (const [target, name, value] of [[replyTarget, "reply", "Draft line one\nDraft line two"],
+    [shadowTarget, "shadow", "Shadow draft\nSecond line"], [replyTarget, "reply", "Replacement draft"],
+    [replyTarget, "reply", ""], [replyTarget, "reply", ""], [shadowTarget, "shadow", ""]]) {
+    const before = await rawPage("editorEvidence()");
+    result = await call("browser_fill_form", { tab, fields: [{ target, value }] });
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.equal(result.facts.filled_count, 1); assert.equal(result.facts.submitted, false);
+    await delay(50);
+    const after = await rawPage("editorEvidence()");
+    assert.equal(after[name].value, value);
+    assert.equal(after[name].rendered, value);
+    assert.equal(after[name].synthetic, before[name].synthetic);
+    assert.equal(after[name === "reply" ? "shadow" : "reply"].rendered, before[name === "reply" ? "shadow" : "reply"].rendered);
+    assert.equal(after.submissions, 0);
+  }
+  check("controlled rich editors retain native multiline fills and clears without synthetic events or submission");
+  result = await call("browser_fill_form", { tab, fields: [{ target: replyTarget, value: "Old typed draft" }] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  result = await call("browser_type_text", { tab, target: replyTarget, text: "Typed replacement", clear_first: true });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  await delay(50);
+  assert.equal((await rawPage("editorEvidence()")).reply.rendered, "Typed replacement");
+  result = await call("browser_fill_form", { tab, fields: [{ target: shadowTarget, value: "Focused draft" }] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  result = await call("browser_type_text", { tab, focused: true, text: "", clear_first: true });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  await delay(50);
+  const clearedEditor = await rawPage("editorEvidence()");
+  assert.equal(clearedEditor.shadow.rendered, "");
+  assert.equal(clearedEditor.reply.rendered, "Typed replacement");
+  assert.equal(clearedEditor.shadow.synthetic, 0); assert.equal(clearedEditor.submissions, 0);
+  check("targeted typing replacement and focused shadow-editor clearing preserve native editor state");
   const audit = readFileSync(environment.GHOSTLIGHT_AUDIT_FILE, "utf8");
-  assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project/);
+  assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project|Draft line one|Shadow draft|Replacement draft/);
   check("durable audit excludes embedded origins, values, and selectors");
   writeFileSync(join(scratchRoot, "h6-browser-evidence.json"), JSON.stringify({ browser: version.product, source: sourceEvidence, passed,
     transport: "MV3 native-port shim -> real browser connector -> orchestrator -> real MCP connector" }, null, 2));

@@ -8,6 +8,21 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 ## RESUME HERE
 
+Current override, 2026-09-07: orchestrator and MCP connector through `00b44646` were deployed
+using the dev-loop; the browser connector stayed unchanged. The owner reloaded the extension.
+The broader installed Sylin journey was interrupted by an urgent Reddit draft incident. Its fix
+is implemented, deployed, and verified: 513 Rust tests, 195 extension tests, process/CLI journeys,
+31 Chromium cases, a visibly retained unsent Reddit reply through the installed native host, and
+fresh installed MCP proof of diagnostic availability during attention. See
+[the incident record](editor-incident-2026-09-07.md) for its repair and installed evidence. Earlier
+package paragraphs below retain the readiness recorded when each package completed; STATUS owns
+the latest deployed state. Remaining C1 verification choices still require ideation.
+
+Linux bridge validation ran natively in Debian WSL: 55 passed, 9 environment/cross-build failures;
+the private runtime `0600` check and unsupported Linux peer-observation check passed. Full Linux
+journeys remain outstanding. The interrupted broader installed Sylin journey must resume after
+the incident fix, rather than being inferred complete from the isolated browser fixtures.
+
 The owner requested a complete epic covering the assessment and all subsequent decisions, and
 accepted H3 as the first implementation cycle. The [epic](EPIC.md), [bootstrap](BOOTSTRAP.md), and
 [ideation agenda](IDEATION.md) now organize that work. Undecided packages require an ideation

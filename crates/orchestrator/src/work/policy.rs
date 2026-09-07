@@ -6,7 +6,7 @@
 
 use serde_json::{json, Value};
 
-use crate::governance::Capability;
+use crate::governance::{CapabilitySet, Decision};
 use crate::language::outcome::Outcome;
 
 use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal};
@@ -14,17 +14,16 @@ use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal}
 impl ApplicationExecutor {
     /// Explain current authority from the orchestrator-owned projection.
     pub(super) fn explain_policy(&self, context: &InvocationContext<'_>) -> Terminal {
-        let decision = self.authorize(context, Capability::Read, None);
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
+        // Explaining authority requires no browser permission and remains available while that
+        // authority stops browser work. Keep the ordinary completion/audit path, without clearing
+        // attention, changing human controls, or inventing a grant evaluation (ADR-0136).
+        let decision = Decision::permitted();
+        self.retain_permission(
+            context,
+            context
+                .snapshot
+                .decision_evidence(CapabilitySet::EMPTY, None, decision),
+        );
         let mut authority = self.governance.effective_authority();
         // Machine-local reading aids stay out of model results (ADR-0136 Decision 2). The
         // person's workbench destination keeps rendering them.

@@ -168,6 +168,11 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **A filled DOM is not proof that a controlled editor retained the draft.** Reddit discarded
+  `textContent` plus generic synthetic input while Ghostlight reported success. Native browser
+  editing preserves the editor's transaction; regression fixtures must reject the old mechanism,
+  and installed verification must read the retained editor value or inspect a screenshot.
+
 - **Mocked debugger replies do not prove JavaScript completion semantics.** H3's real Chromium
   lane found that `awaitPromise` plus `replMode` returned an async wrapper's promise as `{}`;
   explicitly awaiting the selected wrapper produced its intended value. Preserve real engine

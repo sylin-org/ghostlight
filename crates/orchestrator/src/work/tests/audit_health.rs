@@ -118,6 +118,25 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         executor.governance.runtime_state(),
         ghostlight_bridge::browser::RuntimeControlState::Held
     );
+    let explain = executor.execute(
+        &workspace,
+        "policy_explain",
+        json!({"restrict_capabilities":["action"]}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(explain.status, Status::Succeeded);
+    assert_eq!(explain.effect, Effect::None);
+    assert_eq!(explain.facts["audit"]["mode"], "require_audit");
+    assert_eq!(
+        explain.history_storage,
+        crate::language::audit_health::Storage::Unconfirmed
+    );
+    assert_eq!(browser.calls().len(), commands);
+    assert_eq!(
+        executor.governance.runtime_state(),
+        ghostlight_bridge::browser::RuntimeControlState::Held
+    );
     fs::remove_file(policy).unwrap();
 }
 

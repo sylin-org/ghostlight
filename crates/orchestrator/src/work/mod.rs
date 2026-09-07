@@ -1399,6 +1399,17 @@ impl ApplicationExecutor {
         let attention = decision.reason == ReasonCode::RuntimeAttention;
         let refusal = if attention {
             Refusal::AttentionRequired
+        } else if context.snapshot.is_request_denial(decision) {
+            if decision.reason == ReasonCode::CapabilityDenied {
+                facts["restriction"] = json!("restrict_capabilities");
+                facts["required_capabilities"] = json!(context.requirements);
+                Refusal::RequestCapabilities {
+                    required: context.requirements,
+                }
+            } else {
+                facts["restriction"] = json!("restrict_hosts");
+                Refusal::RequestHosts { host: blocked_host }
+            }
         } else {
             Refusal::AuthorityBlocked {
                 reason: blocked_reason(decision.reason),
@@ -2296,6 +2307,7 @@ mod tests {
     mod control;
     mod documents;
     mod provenance;
+    mod request_restrictions;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -4487,7 +4499,7 @@ mod tests {
         );
 
         assert_eq!(result.status, Status::Blocked);
-        assert_eq!(result.summary, "Blocked: 127.0.0.1 is not an allowed host.");
+        assert_eq!(result.summary, "Blocked by this call's restrict_hosts.");
         assert!(browser.calls().is_empty());
 
         let records = audit.0.lock().unwrap();

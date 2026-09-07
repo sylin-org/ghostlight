@@ -32,7 +32,7 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
     }
 }
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
-use crate::governance::ReasonCode;
+use crate::governance::{CapabilitySet, ReasonCode};
 use crate::workbench::{
     NotificationKind, WorkbenchFacade, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort,
@@ -40,6 +40,89 @@ use crate::workbench::{
 use crate::workspace::AttentionReason;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
+
+#[test]
+fn policy_explain_remains_available_without_releasing_attention_or_human_controls() {
+    let policy = temporary_policy("explain-no-browser-authority");
+    fs::write(
+        &policy,
+        r#"{"schema":3,"name":"no browser grants","version":"1","grants":[]}"#,
+    )
+    .unwrap();
+    for intent in [
+        RuntimeControlIntent::StartSession,
+        RuntimeControlIntent::Hold,
+        RuntimeControlIntent::EndSession,
+    ] {
+        for attention in [false, true] {
+            let (executor, browser, workspaces, workspace, audit) =
+                fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+            if attention {
+                executor.require_session_attention(
+                    &workspace,
+                    "original_denial",
+                    AttentionReason::RepeatedDenials,
+                );
+            }
+            let incident = workspaces.attention(&workspace);
+            let control = executor.governance.apply_runtime_intent(intent);
+            let lease = workspaces.acquire(&workspace).unwrap();
+            let result = executor.execute(
+                &workspace,
+                "policy_explain",
+                json!({"restrict_capabilities":["write"],"restrict_hosts":["unused.example"]}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(result.status, Status::Succeeded, "{result:?}");
+            assert_eq!(result.effect, Effect::None);
+            assert!(result.repeat_safe);
+            assert_eq!(result.facts["layers"].as_array().unwrap().len(), 1);
+            assert!(browser.calls().is_empty());
+            assert_eq!(workspaces.attention(&workspace), incident);
+            assert_eq!(executor.governance.runtime_state(), control);
+            let records = audit.0.lock().unwrap();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].requirements(), CapabilitySet::EMPTY);
+            assert_eq!(records[0].permissions.checks.len(), 1);
+            let evidence = &records[0].permissions.checks[0];
+            assert!(evidence.allowed);
+            assert_eq!(evidence.requirements, CapabilitySet::EMPTY);
+            assert!(evidence.layers.is_empty());
+            assert!(!evidence.request_evaluated);
+            drop(records);
+            drop(lease);
+            let blocked = executor.execute(
+                &workspace,
+                "browser_tabs",
+                json!({"action":"list"}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_ne!(blocked.status, Status::Succeeded);
+            assert!(browser.calls().is_empty());
+        }
+    }
+    fs::remove_file(policy).unwrap();
+}
+
+#[test]
+fn policy_explain_still_honors_cancellation_and_original_deadlines() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    let cancellation = CancellationToken::default();
+    cancellation.cancel();
+    let result = executor.execute(&workspace, "policy_explain", json!({}), None, &cancellation);
+    assert_eq!(result.status, Status::Cancelled);
+    assert_eq!(result.facts["reason"], "cancelled");
+    let mut expired = crate::work::PreparedInvocation::new("policy_explain", json!({}), None, None);
+    expired.deadline = Instant::now() - Duration::from_millis(1);
+    let result =
+        executor.execute_prepared(&workspace, &expired, &CancellationToken::default(), false);
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.facts["reason"], "deadline");
+    assert!(browser.calls().is_empty());
+    assert_eq!(audit.0.lock().unwrap().len(), 2);
+}
 
 #[derive(Default)]
 struct Notices(Mutex<Vec<WorkbenchNotification>>);
