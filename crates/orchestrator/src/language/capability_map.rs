@@ -213,8 +213,8 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
     variant(
         "browser_record",
         Some("save_target"),
-        CapabilitySet::WRITE,
-        "Place a recording into a page target.",
+        READ_WRITE,
+        "Read captured sources and place a recording into a page target.",
     ),
     variant(
         "browser_diagnose",
@@ -269,9 +269,7 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         Operation::HandleDialog(value) if value.action == "status" => CapabilitySet::READ,
         Operation::HandleDialog(_) => CapabilitySet::ACTION,
         Operation::Record(value) if value.action == "start" => CapabilitySet::READ,
-        Operation::Record(value) if value.action == "save" && value.target.is_some() => {
-            CapabilitySet::WRITE
-        }
+        Operation::Record(value) if value.action == "save" && value.target.is_some() => READ_WRITE,
         Operation::Record(value) if value.action == "save" => CapabilitySet::READ,
         Operation::Record(_) => CapabilitySet::EMPTY,
     }

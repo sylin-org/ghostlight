@@ -6,15 +6,21 @@
 <form id="draft-form">
   <input aria-label="Hidden draft helper" style="display:none">
   <div id="reply" contenteditable="true" role="textbox" aria-label="Reply">Initial draft</div>
+  <input id="ordinary" aria-label="Ordinary draft" value="Original input">
+  <textarea id="multiline" aria-label="Multiline draft">Original textarea</textarea>
+  <input id="readonly" aria-label="Read only draft" readonly value="Protected input">
+  <input id="disabled" aria-label="Disabled draft" disabled value="Disabled input">
+  <select aria-label="Draft category"><option value="general">General</option></select>
   <button>Send</button>
 </form>
+<form><button id="other-send" aria-label="Other form send">Send other form</button></form>
 <div id="editor-shell"></div>
 <script>
   // This controlled editor accepts native editing transactions. Unannounced DOM changes or
   // generic synthetic input revert to its model, as real managed rich-text editors can do.
   const model = {};
   let submissions = 0;
-  document.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); submissions++; });
+  for (const form of document.querySelectorAll("form")) form.addEventListener("submit", (event) => { event.preventDefault(); submissions++; });
   const shadow = document.querySelector("#editor-shell").attachShadow({ mode: "open" });
   shadow.innerHTML = '<style>div { border: 1px solid; min-height: 80px; white-space: pre-wrap; }</style><div contenteditable="true" role="textbox" aria-label="Shadow reply">Other draft</div>';
   const editors = { reply: document.querySelector("#reply"), shadow: shadow.querySelector("div") };
@@ -34,6 +40,10 @@
   window.editorEvidence = () => ({
     reply: { ...model.reply, rendered: text(editors.reply) },
     shadow: { ...model.shadow, rendered: text(editors.shadow) },
+    ordinary: document.querySelector("#ordinary").value,
+    multiline: document.querySelector("#multiline").value,
+    readonly: document.querySelector("#readonly").value,
+    disabled: document.querySelector("#disabled").value,
     submissions
   });
 </script>

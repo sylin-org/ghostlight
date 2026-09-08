@@ -203,6 +203,19 @@ impl ApplicationExecutor {
         lease: Option<&WorkspaceLease>,
         value: &Record,
     ) -> Terminal {
+        // Capture-source Read and optional destination Write are known before freezing.
+        // Recheck their actual hosts below once the browser returns the source inventory.
+        let decision = self.authorize(context, context.requirements, None);
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                None,
+                Effect::None,
+                true,
+                json!({"reason":decision.reason.as_str()}),
+            );
+        }
         let stopped = match self.ensure_recording_stopped(context, value.recording.as_deref()) {
             Ok(summary) => summary,
             Err(terminal) => return *terminal,
@@ -214,8 +227,16 @@ impl ApplicationExecutor {
                 Err(terminal) => return *terminal,
             };
 
+        let delivery_context = InvocationContext {
+            requirements: if matches!(destination, RecordingDestination::Target { .. }) {
+                CapabilitySet::WRITE
+            } else {
+                context.requirements
+            },
+            ..*context
+        };
         match self.dispatch(
-            context,
+            &delivery_context,
             BrowserCommand::ExportRecording {
                 recording_id: Some(stopped.recording_id.clone()),
                 destination,
@@ -327,7 +348,10 @@ impl ApplicationExecutor {
                 )));
             }
             match self.dispatch(
-                context,
+                &InvocationContext {
+                    requirements: CapabilitySet::WRITE,
+                    ..*context
+                },
                 BrowserCommand::DescribeTargets {
                     tab_id: selected.physical_id,
                     locators: vec![target.locator.clone()],

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -53,9 +54,30 @@ function structured(response) {
   return response.result.structuredContent;
 }
 
+const passed = [];
+const evidence = [];
+function check(name) { passed.push(name); console.log(`PASS installed: ${name}`); }
+async function call(name, args) {
+  const response = await request("tools/call", { name, arguments: args }, 45000);
+  const result = structured(response);
+  evidence.push({ tool: name, invocation: result.invocation, status: result.status, effect: result.effect });
+  return result;
+}
+
 // Serve only a disposable fixture, never repository or machine files.
-const localFixture = createServer((_request, response) => {
+const localFixture = createServer((incoming, response) => {
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  if (incoming.url === "/editor") {
+    response.end(readFileSync(join(repository, "tests/fixtures/contenteditable.html"), "utf8")); return;
+  }
+  if (incoming.url === "/frames") {
+    response.end(`<!doctype html><title>Installed document boundaries</title><h1>Permitted parent</h1>
+      <label>Parent field<input aria-label="Parent field" id="parent"></label>
+      <iframe title="Separate origin" src="http://127.0.0.1:${localFixture.address().port}/child" style="width:700px;height:200px"></iframe>`); return;
+  }
+  if (incoming.url === "/child") {
+    response.end('<!doctype html><title>Child fixture</title><label>Excluded child sentinel<input aria-label="Excluded child sentinel"></label>'); return;
+  }
   response.end("<!doctype html><html><head><title>Ghostlight local acceptance</title></head><body><h1>Local development works</h1></body></html>");
 });
 
@@ -71,6 +93,9 @@ try {
   const listed = await request("tools/list");
   assert.equal(listed.result.tools.length, 24);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
+  const authority = await call("policy_explain", {});
+  assert.equal(authority.status, "succeeded", JSON.stringify(authority));
+  assert.equal(authority.facts.layers.length, 0, "This installed acceptance lane requires all-open authority; it never changes policy.");
 
   await new Promise((resolve, reject) => {
     localFixture.once("error", reject);
@@ -81,7 +106,7 @@ try {
   for (const host of ["localhost", "127.0.0.1"]) {
     const localOpened = structured(await request("tools/call", {
       name: "browser_navigate",
-      arguments: { url: `http://${host}:${localPort}/`, ...(localTab ? { tab: localTab } : {}) }
+      arguments: { url: `http://${host}:${localPort}/`, ...(localTab ? { tab: localTab } : { new_tab: true }) }
     }));
     assert.equal(localOpened.status, "succeeded", JSON.stringify(localOpened));
     localTab = localOpened.facts.tab;
@@ -97,6 +122,110 @@ try {
   assert.equal(restrictedLocal.status, "blocked", JSON.stringify(restrictedLocal));
   assert.equal(restrictedLocal.facts.reason, "host_denied");
   console.log(JSON.stringify({ localhost: true, loopback: true, local_policy_denial: true }));
+
+  const editor = await call("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/editor` });
+  assert.equal(editor.status, "succeeded", JSON.stringify(editor));
+  const tabEvidence = async script => {
+    const result = await call("browser_execute", { tab: localTab, script });
+    assert.equal(result.status, "succeeded", JSON.stringify(result)); return result.facts.value;
+  };
+  const inspectedEditor = await call("browser_inspect", { tab: localTab, scope: "controls", max_items: 100 });
+  assert.equal(inspectedEditor.status, "succeeded", JSON.stringify(inspectedEditor));
+  const reply = inspectedEditor.facts.items.find(item => item.name === "Reply");
+  const shadow = inspectedEditor.facts.items.find(item => item.name === "Shadow reply");
+  assert.ok(reply && shadow, JSON.stringify(inspectedEditor));
+  const hidden = inspectedEditor.facts.items.find(item => item.name === "Hidden draft helper");
+  if (hidden) assert.ok(hidden.state.includes("hidden"));
+  const fill = await call("browser_fill_form", { tab: localTab, restrict_capabilities: ["read", "write"], fields: [
+    { target: reply.target, value: "Installed unsent draft\nSecond line" }, { target: shadow.target, value: "Installed shadow draft" }
+  ] });
+  assert.equal(fill.status, "succeeded", JSON.stringify(fill)); assert.equal(fill.facts.submitted, false);
+  let editorValue = await tabEvidence("editorEvidence()");
+  assert.equal(editorValue.reply.value, "Installed unsent draft\nSecond line");
+  assert.equal(editorValue.reply.rendered, editorValue.reply.value);
+  assert.equal(editorValue.shadow.value, "Installed shadow draft"); assert.equal(editorValue.submissions, 0);
+  check("ordinary and shadow rich-editor drafts are retained without submission");
+  const readOnly = inspectedEditor.facts.items.find(item => item.name === "Read only draft"); assert.ok(readOnly);
+  const refusedBatch = await call("browser_fill_form", { tab: localTab, fields: [
+    { target: reply.target, value: "MUST_NOT_CHANGE_EARLIER_DRAFT" }, { target: readOnly.target, value: "MUST_NOT_CHANGE_READONLY" }
+  ] });
+  assert.notEqual(refusedBatch.status, "succeeded", JSON.stringify(refusedBatch));
+  const afterRefusal = await tabEvidence("editorEvidence()");
+  assert.equal(afterRefusal.reply.value, editorValue.reply.value);
+  assert.equal(afterRefusal.readonly, "Protected input"); assert.equal(afterRefusal.submissions, 0);
+  check("known ineligible batch field leaves the earlier draft unchanged");
+  const typed = await call("browser_type_text", { tab: localTab, target: reply.target, text: "Action-only typing", clear_first: true,
+    restrict_capabilities: ["action"] });
+  assert.equal(typed.status, "succeeded", JSON.stringify(typed));
+  const afterTyping = await tabEvidence("editorEvidence()");
+  assert.equal(afterTyping.reply.value, "Action-only typing"); assert.equal(afterTyping.reply.rendered, "Action-only typing");
+  assert.equal(afterTyping.shadow.value, "Installed shadow draft"); assert.equal(afterTyping.submissions, 0);
+  const cleared = await call("browser_type_text", { tab: localTab, focused: true, text: "", clear_first: true, restrict_capabilities: ["action"] });
+  assert.equal(cleared.status, "succeeded", JSON.stringify(cleared));
+  editorValue = await tabEvidence("editorEvidence()");
+  assert.equal(editorValue.reply.value, ""); assert.equal(editorValue.reply.rendered, "");
+  assert.equal(editorValue.shadow.value, "Installed shadow draft"); assert.equal(editorValue.submissions, 0);
+  check("Action-only targeted typing and focused clearing preserve their actual effects");
+
+  for (const [onError, expected] of [["stop", 1], ["continue", 2]]) {
+    await tabEvidence("window.installedEffects = 0; 0");
+    const flow = await call("browser_flow", { on_error: onError, steps: [
+      { id: "failed", tool: "browser_execute", arguments: { tab: localTab,
+        script: "window.installedEffects++; throw new SyntaxError('Illegal return statement');" } },
+      { id: "later", tool: "browser_execute", arguments: { tab: localTab, script: "window.installedEffects++; return 2;" } }
+    ] });
+    assert.equal(flow.status, "unknown", JSON.stringify(flow)); assert.equal(flow.effect, "unknown");
+    assert.equal(flow.repeat_safe, false);
+    assert.equal(flow.facts.steps[1].status, onError === "stop" ? "not_run" : "succeeded");
+    assert.equal(await tabEvidence("window.installedEffects"), expected);
+    check(`${onError}: script exceptions execute once and composition keeps truthful progress`);
+  }
+  const invalid = await call("browser_execute", { tab: localTab, script: "window.installedEffects++; const broken = ();" });
+  assert.equal(invalid.status, "failed", JSON.stringify(invalid)); assert.equal(invalid.effect, "none");
+  assert.equal(await tabEvidence("window.installedEffects"), 2);
+  const awaited = await tabEvidence("await Promise.resolve(); return 7;"); assert.equal(awaited, 7);
+  check("syntax refusal has no effect and awaited bare returns retain their value");
+
+  const framed = await call("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/frames` });
+  assert.equal(framed.status, "succeeded", JSON.stringify(framed));
+  const unrestricted = await call("browser_read", { tab: localTab });
+  assert.equal(unrestricted.status, "succeeded", JSON.stringify(unrestricted));
+  assert.match(unrestricted.facts.text, /Excluded child sentinel/);
+  const restricted = await call("browser_read", { tab: localTab, restrict_hosts: ["localhost"] });
+  assert.equal(restricted.status, "succeeded", JSON.stringify(restricted));
+  assert.equal(restricted.facts.coverage.excluded_documents, 1);
+  assert.match(restricted.facts.text, /Permitted parent/);
+  assert.doesNotMatch(JSON.stringify(restricted), /127\.0\.0\.1|Excluded child sentinel/);
+  const parentFill = await call("browser_fill_form", { tab: localTab, restrict_hosts: ["localhost"], fields: [
+    { selector: { name: "Parent field", role: "textbox", exact: true }, value: "Permitted parent draft" }
+  ] });
+  assert.equal(parentFill.status, "succeeded", JSON.stringify(parentFill));
+  assert.equal(await tabEvidence("document.getElementById('parent').value"), "Permitted parent draft");
+  const maskedResponse = await request("tools/call", { name: "browser_screenshot", arguments: { tab: localTab, restrict_hosts: ["localhost"] } }, 30000);
+  const masked = structured(maskedResponse); assert.equal(masked.status, "succeeded", JSON.stringify(masked));
+  assert.equal(masked.facts.coverage.masked_regions, 1);
+  const maskedImage = maskedResponse.result.content.find(item => item.type === "image"); assert.ok(maskedImage);
+  mkdirSync(join(repository, ".tmp"), { recursive: true });
+  writeFileSync(join(repository, ".tmp/installed-hardening-mask.jpg"), Buffer.from(maskedImage.data, "base64"));
+  const pixels = await tabEvidence(`(async () => {
+    const image = new Image(); image.src = ${JSON.stringify(`data:${maskedImage.mimeType};base64,${maskedImage.data}`)};
+    await image.decode(); const canvas = document.createElement('canvas');
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d'); context.drawImage(image,0,0);
+    const rectangle = document.querySelector('iframe').getBoundingClientRect();
+    const scale = image.width / innerWidth;
+    return [0.2,0.8].flatMap(x => [0.2,0.8].map(y => [...context.getImageData(
+      Math.round((rectangle.left + rectangle.width*x)*scale),
+      Math.round((rectangle.top + rectangle.height*y)*scale),1,1).data]));
+  })()`);
+  for (const pixel of pixels) for (const [index, expected] of [32, 36, 43, 255].entries()) {
+    assert.ok(Math.abs(pixel[index] - expected) <= 5, `Installed exclusion pixel: ${pixel}`);
+  }
+  assert.equal(await tabEvidence("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
+  const refusedScript = await call("browser_execute", { tab: localTab, restrict_hosts: ["localhost"], script: "document.title = 'MUST_NOT_RUN'" });
+  assert.equal(refusedScript.status, "blocked", JSON.stringify(refusedScript));
+  assert.equal(refusedScript.effect, "none"); assert.notEqual(await tabEvidence("document.title"), "MUST_NOT_RUN");
+  check("installed native host preserves permitted work, excludes child content, masks captures, and refuses unbounded scripts");
 
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",
@@ -265,6 +394,15 @@ try {
   assert.ok(closed.status === "succeeded" || preserved, JSON.stringify(closed));
   if (closed.status === "succeeded") assert.equal(closed.facts.closed, true);
   console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, composed_read: true, composed_inspect: true, composed_find: true, composed_wait: true, framed_hover: true, target_screenshot: true, composed_fill: true, composed_completion: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
+  check("live Sylin framed form, local-only submission, and target/viewport/magnified captures");
+  const binaryEvidence = Object.fromEntries(["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"].map(name => {
+    const path = join(binDir, name + executableSuffix);
+    return [name, { path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }];
+  }));
+  writeFileSync(join(repository, ".tmp/installed-hardening-evidence.json"), JSON.stringify({
+    recorded_at: new Date().toISOString(), transport: "installed MCP -> service -> registered native host -> installed MV3 adapter",
+    binaries: binaryEvidence, passed, invocations: evidence, preserved_tab: preserved ? tab : null
+  }, null, 2) + "\n");
 } finally {
   child.stdin.end();
   child.kill();

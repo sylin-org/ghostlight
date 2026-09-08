@@ -698,6 +698,9 @@ async function persistPresentationQueue() {
 
 async function presentationTab(workspace, signal) {
   if (signal.tab_id) return signal.tab_id;
+  // Page activity needs its actual operation destination. Admission has only a workspace;
+  // guessing its active tab sends a start and its completion to different pages.
+  if (!["denial", "attention"].includes(signal.signal)) return undefined;
   const owned = new Set(topology.tabsFor(workspace));
   const ownedTabs = (await chrome.tabs.query({})).filter((tab) => owned.has(tab.id));
   return ownedTabs.find((tab) => tab.active)?.id ?? (ownedTabs.length === 1 ? ownedTabs[0].id : undefined);
@@ -732,6 +735,13 @@ async function deliverPresentation(workspace, signal) {
   const tabId = await presentationTab(workspace, signal);
   if (!tabId) return false;
   if (signal.signal === "denial" && !(await tabIsVisible(tabId))) {
+    // The notice waits until its page is visible, but the invocation's activity is over.
+    // Retire its decoration now so activating the page cannot reveal an abandoned spinner.
+    const terminal = presentMessage(tabId, {
+      ...signal, signal: "completion", activity: "quiet", phase: "", detail: null,
+      locator: null, click: null
+    }, preferences);
+    await contentIn(tabId, terminal.frameId, terminal.message, true);
     await deferPresentation(workspace, tabId, signal);
     return false;
   }
@@ -768,7 +778,7 @@ function updateActivity(signal, workspace) {
     label: shared.activityLabel(signal.activity),
     phase: shared.bounded(signal.phase, 80)
   };
-  if (signal.signal === "completion") activity.delete(signal.invocation);
+  if (["completion", "denial", "attention"].includes(signal.signal)) activity.delete(signal.invocation);
   else activity.set(signal.invocation, item);
   publishUiState();
 }
@@ -1411,6 +1421,7 @@ async function activate(correlation, command) {
 
 async function fill(correlation, command) {
   const commits = [];
+  let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
     // Grouped fill (ADR-0138): fields route to their owning frames in first-appearance
@@ -1429,7 +1440,17 @@ async function fill(correlation, command) {
     }
     let filledCount = 0;
     let submitted = false;
+    // Validate every frame before entering any edit. A later frame's known readonly,
+    // hidden, invalid-option, or submit failure must not leave an earlier frame half filled.
     for (const [frameId, fields] of groups) {
+      await contentIn(command.tab_id, frameId, {
+        kind: "prepare_fill",
+        fields,
+        submit_locator: submitFrame === frameId ? frames.localOf(command.submit_locator) : undefined
+      });
+    }
+    for (const [frameId, fields] of groups) {
+      dispatched = true;
       const result = await contentIn(command.tab_id, frameId, {
         kind: "fill",
         fields,
@@ -1443,7 +1464,7 @@ async function fill(correlation, command) {
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "filled", tab: physicalTab(tab), filled_count: filledCount, submitted, committed_urls: commits };
   } catch (error) {
-    error.effectUnknown = true;
+    error.effectUnknown = dispatched || Boolean(error.effectUnknown);
     throw error;
   } finally { navigationWatchers.delete(command.tab_id); }
 }

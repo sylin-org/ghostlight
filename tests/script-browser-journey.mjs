@@ -5,10 +5,11 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import evaluator from "../extension/lib/script-evaluator.js";
+import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const binDir = resolve(process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0/debug"));
@@ -83,16 +84,16 @@ const fixture = createServer((_request, response) => {
 });
 let socket;
 let cdp;
+let chromium;
 try {
   await new Promise((done) => fixture.listen(0, "127.0.0.1", done));
   const url = `http://127.0.0.1:${fixture.address().port}/`;
   const profile = join(scratch, "profile");
-  const chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+  chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update",
     "--disable-sync", "about:blank"]);
-  const portFile = join(profile, "DevToolsActivePort");
-  await until(() => { if (chromium.startError) throw chromium.startError; return existsSync(portFile); }, "Chromium startup");
-  const [port, endpoint] = readFileSync(portFile, "utf8").trim().split(/\r?\n/);
+  const [port, endpoint] = await readDevToolsPort(profile, chromium);
   socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`);
   await new Promise((done, reject) => { socket.onopen = done; socket.onerror = reject; });
   cdp = requestChannel((message) => { delete message.jsonrpc; socket.send(JSON.stringify(message)); });
@@ -183,10 +184,11 @@ try {
   createInterface({ input: connector.stdout }).on("line", (line) => mcp.receive(JSON.parse(line)));
   await mcp.send("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "h3-journey", version: "1" } });
   connector.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+  let lastResponse;
   const call = async (name, args) => {
-    const response = await mcp.send("tools/call", { name, arguments: args });
-    assert.ok(response.structuredContent, JSON.stringify(response));
-    return response.structuredContent;
+    lastResponse = await mcp.send("tools/call", { name, arguments: args });
+    assert.ok(lastResponse.structuredContent, JSON.stringify(lastResponse));
+    return lastResponse.structuredContent;
   };
   const opened = await call("browser_navigate", { url });
   assert.equal(opened.status, "succeeded", JSON.stringify({ opened, commands }));
@@ -232,20 +234,58 @@ try {
   assert.equal(executions, beforeInvalid);
   assert.equal(await raw("document.getElementById('effect').textContent"), "0");
   checks += 1;
+  // Composition must preserve the same real browser effects as a direct script call. These
+  // cases detect both speculative evaluator retries and continuing past an explicit stop.
+  for (const [onError, count, completed, stopped] of [["stop", "1", 0, true], ["continue", "2", 1, false]]) {
+    await raw("document.getElementById('effect').textContent = '0'");
+    const before = executions;
+    const result = await call("browser_flow", { on_error: onError, steps: [
+      { id: "failing", tool: "browser_execute", arguments: { tab: opened.facts.tab,
+        script: `${mutation} throw new SyntaxError('PRIVATE_SCRIPT_EXCEPTION: Illegal return statement');` } },
+      { id: "later", tool: "browser_execute", arguments: { tab: opened.facts.tab,
+        script: `${mutation} return 'PRIVATE_SCRIPT_RESULT';` } }
+    ] });
+    assert.equal(lastResponse.isError, true, JSON.stringify(lastResponse));
+    assert.equal(result.status, "unknown", JSON.stringify(result));
+    assert.equal(result.effect, "unknown"); assert.equal(result.repeat_safe, false);
+    assert.equal(result.facts.completed, completed); assert.equal(result.facts.stopped, stopped);
+    assert.equal(result.facts.steps[0].result.effect, "unknown");
+    assert.equal(result.facts.steps[1].status, onError === "stop" ? "not_run" : "succeeded");
+    if (onError === "continue") assert.equal(result.facts.steps[1].result.facts.value, "PRIVATE_SCRIPT_RESULT");
+    assert.equal(executions - before, Number(count));
+    assert.equal(await raw("document.getElementById('effect').textContent"), count);
+    checks += 1;
+    console.log(`PASS ${onError}: failed script executes once and composition preserves actual browser effects`);
+  }
+  await raw("document.getElementById('effect').textContent = '0'");
+  const beforeDryRun = executions;
+  const dryRun = await call("browser_flow", { dry_run: true, steps: [
+    { id: "script", tool: "browser_execute", arguments: { tab: opened.facts.tab, script: mutation } }
+  ] });
+  assert.equal(dryRun.status, "succeeded", JSON.stringify(dryRun));
+  assert.equal(dryRun.effect, "none"); assert.equal(executions, beforeDryRun);
+  assert.equal(await raw("document.getElementById('effect').textContent"), "0");
+  checks += 1;
+  console.log("PASS dry-run script composition never executes the page program");
+  const audit = readFileSync(environment.GHOSTLIGHT_AUDIT_FILE, "utf8");
+  assert.doesNotMatch(audit, /PRIVATE_SCRIPT_EXCEPTION|PRIVATE_SCRIPT_RESULT|document\.getElementById|runtime-thrown exception|forged prefix/);
+  const records = audit.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.ok(records.length >= checks, "the privacy assertion must inspect populated audit records");
+  checks += 1;
+  console.log("PASS real script source, result, and exception text stay out of durable audit");
   console.log(`Script browser journey: ${checks} cases passed with ${version.product}; evaluator -> Chromium CDP -> real relays/orchestrator -> MCP results.`);
 } finally {
   if (cdp && socket?.readyState === WebSocket.OPEN) {
     try { await cdp.send("Browser.close"); } catch { /* browser shutdown may close the reply channel */ }
   }
   socket?.close();
+  await waitForChromiumExit(chromium);
   for (const child of children.toReversed()) {
     if (child.exitCode === null && child.signalCode === null) child.kill();
   }
   await until(() => children.every((child) => child.exitCode !== null || child.signalCode !== null || child.startError), "owned child exit");
   await new Promise((done) => fixture.close(done));
-  assert.equal(dirname(resolve(scratch)), resolve(scratchRoot));
-  assert.ok(basename(scratch).startsWith("script-browser-"));
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await removeBrowserScratch(scratch, scratchRoot, "script-browser-");
   for (const path of [runtimeFile, runtimeFile.replace(/\.json$/, ".lock")]) {
     assert.equal(dirname(resolve(path)), binDir);
     rmSync(path, { force: true });

@@ -2,8 +2,9 @@
 // This proves rendering and interaction, not an installed Tauri/native-host deployment.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const scratchRoot = join(repository, ".tmp");
@@ -36,6 +37,7 @@ function start(executable, args, env = process.env) {
 }
 let socket;
 let send;
+let chromium;
 try {
   const server = start(process.execPath, ["tests/workbench-preview-server.mjs"], {
     ...process.env, GHOSTLIGHT_PREVIEW_SCENARIO: "h5", GHOSTLIGHT_PREVIEW_PORT: "0"
@@ -44,12 +46,11 @@ try {
   server.stdout.on("data", (data) => { address += data; });
   await until(() => address.includes("http://"), "preview server");
   const profile = join(scratch, "profile");
-  start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+  chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "about:blank"]);
-  const portFile = join(profile, "DevToolsActivePort");
-  await until(() => existsSync(portFile), "Chromium startup");
-  const [port, endpoint] = readFileSync(portFile, "utf8").trim().split(/\r?\n/);
+  const [port, endpoint] = await readDevToolsPort(profile, chromium);
   socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`);
   await new Promise((done, reject) => { socket.onopen = done; socket.onerror = reject; });
   let nextId = 0;
@@ -176,6 +177,14 @@ try {
   await until(() => evaluate("document.querySelector('#audit-health').textContent.includes('1 earlier receipt')"), "recovery gap notice");
   assert.equal(await evaluate("document.querySelector('.history-step').textContent.includes('Storage was not confirmed')"), true);
   await capture("audit-recovered");
+  await evaluate(`(() => {
+    const snapshot = window.__GHOSTLIGHT_PREVIEW__;
+    snapshot.audit_notice = 'History is saving. 2 unreadable entries were omitted.';
+    snapshot.audit_health = { failure: null, unconfirmed_receipts: 1, unreadable_entries: 2, history_unavailable: false };
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
+  })()`);
+  await until(() => evaluate("document.querySelector('#audit-health').textContent.includes('2 unreadable entries')"), "unreadable history stays explicit after writes recover");
+  assert.equal(await evaluate("document.querySelector('.history-step').textContent.includes('Storage was not confirmed')"), true);
   // H8: delayed admission stays live below the running action, then promotes the same row.
   await evaluate(`(() => {
     const operation = { invocation: 'h8-active', workspace: 'workspace_codex', tool: 'browser_read',
@@ -228,20 +237,47 @@ try {
   assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
   await capture("connection-details");
-  console.log("C1 browser history: immutable action attribution, plural connection evidence, quiet details, focus retention, and narrow layout passed.");
+  // Restored receipts have no retained application claim. Neither a current session nor a legacy
+  // basename can silently supply missing evidence, and even live claims remain plain text.
+  await evaluate(`(() => {
+    const record = { invocation: 'c1-restored', workspace: 'workspace_codex', tool: 'browser_read',
+      capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
+      complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
+        ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
+        reported_application: null, observed_executable: 'original-restored-peer.exe' } };
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
+      ...record, invocation: 'c1-legacy', provenance: null, peer_image: 'legacy-unverified.exe' } });
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
+      ...record, invocation: 'c1-escaped', provenance: { ...record.provenance,
+        reported_application: '<img src=x onerror="window.__C1_INJECTED__=true">' } } });
+  })()`);
+  const restoredDetails = '[data-history-details="c1-restored:connection"]';
+  const legacyDetails = '[data-history-details="c1-legacy:connection"]';
+  const escapedDetails = '[data-history-details="c1-escaped:connection"]';
+  await until(() => evaluate(`!!document.querySelector('${restoredDetails}') && !!document.querySelector('${escapedDetails}')`), "restored and escaped connection records");
+  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Not retained in history')`), true);
+  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('original-restored-peer.exe')`), true);
+  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Later application')`), false);
+  assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Connection details were not recorded.')`), true);
+  assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('legacy-unverified.exe')`), false);
+  assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Later application')`), false);
+  assert.equal(await evaluate(`document.querySelector('${escapedDetails}').textContent.includes('<img src=x')`), true);
+  assert.equal(await evaluate(`document.querySelector('${escapedDetails} img') !== null || window.__C1_INJECTED__ === true`), false);
+  assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  console.log("C1 browser history: immutable attribution, plural connections, restored/legacy evidence, escaped claims, quiet details, focus retention, and narrow layout passed.");
   console.log("H8 browser history: waiting stays live beneath running work, then promotes without duplication.");
-  console.log("H7 browser history: persistent health, independent child storage, recovery gap, preserved expansion, and narrow layout passed.");
+  console.log("H7 browser history: persistent health, independent child storage, recovery gaps and unreadable entries, preserved expansion, and narrow layout passed.");
   console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }
   }
   socket?.close();
+  await waitForChromiumExit(chromium);
   for (const child of children.toReversed()) {
     if (child.exitCode === null && child.signalCode === null) child.kill();
   }
   await until(() => children.every((child) => child.exitCode !== null || child.signalCode !== null || child.startError), "owned child exit");
-  assert.equal(dirname(resolve(scratch)), resolve(scratchRoot));
-  assert.ok(basename(scratch).startsWith("history-browser-"));
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await removeBrowserScratch(scratch, scratchRoot, "history-browser-");
 }

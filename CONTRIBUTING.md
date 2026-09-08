@@ -75,6 +75,14 @@ The suite has three useful layers:
 Visible browser journeys and native tray/notification smoke tests remain release gates because a
 green unit suite cannot substitute for the user's actual desktop and browser.
 
+For the complete hardening regression suite, set `GHOSTLIGHT_TEST_BROWSER` to Chrome for Testing
+and run `node tests/hardening-suite.mjs`. It builds fresh binaries and runs Rust, extension,
+process, continuity, provenance, CLI, workbench, and real Chromium journeys. Missing browser
+prerequisites fail the run. The [coverage and execution guide](docs/tasks/security-hardening/regression-suite.md)
+maps every implemented session feature to its tests and separates installed acceptance from
+isolated fixtures. A browser or governance change must preserve allowed work as well as refusals;
+verify retained values and actual effects independently of the returned receipt.
+
 ## What not to report publicly
 
 Suspected vulnerabilities go to hello@sylin.org with "SECURITY" in the subject, per

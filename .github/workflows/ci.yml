@@ -136,6 +136,10 @@ jobs:
       - if: runner.os == 'Windows'
         run: node tests/process-journey.mjs
       - if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/local-resilience-journey.mjs
+      - if: runner.os == 'Windows'
+        run: node tests/local-resilience-journey.mjs
+      - if: runner.os == 'Linux'
         run: xvfb-run -a node tests/provenance-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/provenance-journey.mjs
@@ -148,6 +152,66 @@ jobs:
       - if: runner.os == 'Windows'
         run: node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
+
+  browser-journeys:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci-browser
+      # Only disposable test profiles use this flag. No installed browser is changed.
+      GHOSTLIGHT_TEST_NO_SANDBOX: ${{ runner.os == 'Linux' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: browser-${{ matrix.os }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Install pinned Chrome for Testing
+        shell: pwsh
+        run: |
+          $chromePlatform = if ($IsWindows) { 'win64' } else { 'linux64' }
+          $chromeRoot = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome'
+          $chromeArchive = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome.zip'
+          Invoke-WebRequest "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/$chromePlatform/chrome-$chromePlatform.zip" -OutFile $chromeArchive
+          Expand-Archive -LiteralPath $chromeArchive -DestinationPath $chromeRoot
+          $chromeDirectory = Join-Path $chromeRoot "chrome-$chromePlatform"
+          $chromeExecutable = Join-Path $chromeDirectory $(if ($IsWindows) { 'chrome.exe' } else { 'chrome' })
+          if (-not $IsWindows) {
+            chmod +x $chromeExecutable (Join-Path $chromeDirectory 'chrome_crashpad_handler') (Join-Path $chromeDirectory 'chrome_sandbox')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Run real Chromium regressions on fresh binaries
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/hardening-suite.mjs --lane=browser
+      - name: Run real Chromium regressions on fresh binaries
+        if: runner.os == 'Windows'
+        run: node tests/hardening-suite.mjs --lane=browser
+      - name: Keep browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardening-browser-${{ matrix.os }}
+          path: |
+            .tmp/hardening-suite/
+            .tmp/h6-browser-evidence.json
+            .tmp/h6-masked-sylin.jpg
+            .tmp/h6-visual-*.png
+            .tmp/h4-*.png
+          retention-days: 14
 
   supply-chain:
     runs-on: ubuntu-latest

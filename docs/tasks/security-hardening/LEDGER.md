@@ -8,6 +8,16 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 ## RESUME HERE
 
+Current work, 2026-09-07: the owner requested the [full-session regression suite](regression-suite.md)
+and reported wrong-page read animations plus a persistent script spinner. The suite and visual
+corrections are complete in source: all 16 gates pass on unchanged code, including 520 Rust tests,
+207 extension tests, six harness fault tests, 23 script cases, and 65 real MV3 cases. It also exposed
+and repaired form-batch preflight and recording export requirements. The first complete run caught
+stale PowerShell fixture negotiation and Windows Chrome lifecycle races; their corrected harnesses
+still fail explicitly on persistent failure. STATUS records the final service deployment.
+The final adapter reload and installed acceptance remain pending. Preserve the earlier completed
+feature work and distinguish configured Windows/Linux CI jobs from executed Linux evidence.
+
 Current override, 2026-09-07: orchestrator and MCP connector through `00b44646` were deployed
 using the dev-loop; the browser connector stayed unchanged. The owner reloaded the extension.
 The broader installed Sylin journey was interrupted by an urgent Reddit draft incident. Its fix

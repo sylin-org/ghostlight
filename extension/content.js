@@ -481,14 +481,39 @@
     return { cleared: true, subject };
   }
 
-  function fillElement(element, value) {
+  function validateFillElement(element, value) {
     requireActionable(element, "fill");
     if (credentialClass(element)) throw credentialHandoffError(element);
-    element.scrollIntoView({ block: "center", inline: "center" });
-    element.focus({ preventScroll: true });
     if (element instanceof HTMLSelectElement) {
       const option = Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
       if (!option) throw new Error("select option not found");
+      return option;
+    }
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
+      throw new Error("target is not fillable");
+    }
+    return null;
+  }
+
+  // This is a read-only plan. Every known invalid field and submit target must be found
+  // before an earlier field can be edited, including when the worker is preparing several frames.
+  function prepareFill(message) {
+    const elements = message.fields.map((field) => resolve(field.locator));
+    elements.forEach((element, index) => validateFillElement(element, message.fields[index].value));
+    let submitElement = null;
+    if (message.submit_locator) {
+      submitElement = requireActionable(resolve(message.submit_locator), "activate");
+      const owner = elements[0]?.closest?.("form") ?? null;
+      if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
+    }
+    return { elements, submitElement };
+  }
+
+  function fillElement(element, value) {
+    const option = validateFillElement(element, value);
+    element.scrollIntoView({ block: "center", inline: "center" });
+    element.focus({ preventScroll: true });
+    if (element instanceof HTMLSelectElement) {
       element.value = option.value;
     } else if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       element.checked = ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
@@ -621,14 +646,8 @@
     // the service worker while the thread is still live; only the verified submit follows.
     if (message.kind === "fill") {
       try {
-        const elements = message.fields.map((field) => resolve(field.locator));
+        const { elements, submitElement } = prepareFill(message);
         elements.forEach((element, index) => fillElement(element, message.fields[index].value));
-        let submitElement = null;
-        if (message.submit_locator) {
-          submitElement = resolve(message.submit_locator);
-          const owner = elements[0]?.closest?.("form") ?? null;
-          if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
-        }
         sendResponse({ ok: true, result: { filled_count: message.fields.length, submitted: Boolean(submitElement) } });
         if (submitElement) submitElement.click();
       } catch (error) {
@@ -645,6 +664,7 @@
       if (message.kind === "capture_mask") return installCaptureMask(message);
       if (message.kind === "capture_mask_check") return verifyCaptureMask();
       if (message.kind === "capture_mask_clear") return clearCaptureMask();
+      if (message.kind === "prepare_fill") { prepareFill(message); return { prepared: true }; }
       if (message.kind === "document_route") {
         if (message.focused) {
           const element = deepestActiveElement();

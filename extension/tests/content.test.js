@@ -580,6 +580,48 @@ test("rich editor refusal prevents native editing and preserves the existing dra
   }
 });
 
+test("fill preparation checks every field before any native edit or input event", async () => {
+  for (const kind of ["prepare_fill", "fill"]) {
+    for (const [attribute, value] of [["aria-readonly", "true"], ["aria-disabled", "true"],
+      ["aria-hidden", "true"], ["autocomplete", "current-password"]]) {
+      const harness = contentHarness();
+      harness.input.hidden = false; harness.input.type = "text"; harness.input.value = "Existing ordinary draft";
+      const editor = harness.element("div");
+      editor.isContentEditable = true; editor.textContent = "Existing controlled draft";
+      editor.setAttribute("contenteditable", "true"); editor.setAttribute("aria-label", "Protected reply");
+      editor.setAttribute(attribute, value); harness.document.body.append(editor);
+      const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+      const ordinary = inspected.result.targets.find((target) => target.name !== "Protected reply").locator;
+      const protectedTarget = inspected.result.targets.find((target) => target.name === "Protected reply").locator;
+      const result = await harness.send({ kind, fields: [
+        { locator: ordinary, value: "MUST_NOT_CHANGE" }, { locator: protectedTarget, value: "MUST_NOT_CHANGE" }
+      ] });
+      assert.equal(result.ok, false, `${kind}/${attribute}`);
+      assert.equal(harness.input.value, "Existing ordinary draft");
+      assert.equal(editor.textContent, "Existing controlled draft");
+      assert.deepEqual(harness.input.events, []); assert.deepEqual(harness.edits, []);
+    }
+  }
+});
+
+test("successful fill preparation changes nothing and final mixed native fields remain supported", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false; harness.input.type = "text"; harness.input.value = "Original input";
+  const editor = harness.element("div");
+  editor.isContentEditable = true; editor.textContent = "Original rich draft";
+  editor.setAttribute("contenteditable", "true"); editor.setAttribute("aria-label", "Reply");
+  harness.document.body.append(editor);
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const fields = inspected.result.targets.map((target) => ({ locator: target.locator, value: "Replacement draft" }));
+  const prepared = await harness.send({ kind: "prepare_fill", fields });
+  assert.equal(prepared.result.prepared, true);
+  assert.equal(harness.input.value, "Original input"); assert.equal(editor.textContent, "Original rich draft");
+  assert.deepEqual(harness.edits, []); assert.deepEqual(harness.input.events, []);
+  const filled = await harness.send({ kind: "fill", fields });
+  assert.equal(filled.result.filled_count, 2); assert.equal(filled.result.submitted, false);
+  assert.equal(harness.input.value, "Replacement draft"); assert.equal(editor.textContent, "Replacement draft");
+});
+
 test("inspection distinguishes styled hidden controls from a visible rich editor", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
@@ -634,6 +676,8 @@ test("a submit control outside the resolved form refuses before any reply", asyn
 
   assert.equal(refused.ok, false);
   assert.match(refused.error, /not contained/);
+  assert.equal(harness.input.value, "");
+  assert.deepEqual(harness.input.events, []);
 });
 
 test("invisibility refusals name the exact predicate", async () => {

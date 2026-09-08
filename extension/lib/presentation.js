@@ -12,6 +12,9 @@
   const SPRING = "cubic-bezier(.22,1,.36,1)";
   const DENIAL_MS = 5000;
   const CLICK_STAGGER_MS = 150;
+  // The service admits at most 30 seconds of work. This browser-local fallback leaves
+  // room for terminal delivery, then retires decoration whose owner disappeared.
+  const STALE_SIGNATURE_MS = 35_000;
 
   // The transient effect vocabulary. One row per treatment, and the row is the whole truth
   // about it: `selector` enrolls it for reduced motion, and `beat` is how long it is visibly
@@ -99,7 +102,9 @@
   let attention = null;
   let signature = null;
   let signatureKind = null;
+  let signatureInvocation = null;
   let signatureTimer = null;
+  let signatureExpiryTimer = null;
   let denialTimer = null;
   let captionTimer = null;
   let managed = false;
@@ -368,29 +373,44 @@
     return icon;
   }
 
-  function beginSignature(kind, confirming = false) {
+  function removeSignature() {
     clearTimeout(signatureTimer);
+    clearTimeout(signatureExpiryTimer);
     if (signature) signature.remove();
+    signature = null;
+    signatureKind = null;
+    signatureInvocation = null;
+  }
+
+  function beginSignature(kind, invocation, confirming = false) {
+    if (signature && signatureKind === kind && signatureInvocation === invocation
+      && !signature.classList.contains("completing")) return;
+    removeSignature();
     signature = document.createElement("div");
     signature.className = `signature entering${confirming ? " confirming" : ""}`;
     signature.appendChild(signatureMarkup(kind));
     signatureLayer.appendChild(signature);
     signatureKind = kind;
-    requestAnimationFrame(() => signature?.classList.remove("entering"));
-    if (confirming) signatureTimer = setTimeout(() => finishSignature(kind), 900);
+    signatureInvocation = invocation;
+    const started = signature;
+    requestAnimationFrame(() => started.classList.remove("entering"));
+    signatureExpiryTimer = setTimeout(() => {
+      if (signature === started) removeSignature();
+    }, STALE_SIGNATURE_MS);
+    if (confirming) signatureTimer = setTimeout(() => finishSignature(invocation), 900);
   }
 
-  function finishSignature(kind) {
-    if (!signature || signatureKind !== kind) return;
+  function finishSignature(invocation) {
+    if (!signature || signatureInvocation !== invocation || signature.classList.contains("completing")) return;
     const finishing = signature;
     finishing.classList.add("completing");
     clearTimeout(signatureTimer);
+    clearTimeout(signatureExpiryTimer);
     signatureTimer = setTimeout(() => {
       finishing.classList.add("leaving");
       setTimeout(() => {
         if (signature === finishing) {
-          signature = null;
-          signatureKind = null;
+          removeSignature();
         }
         finishing.remove();
       }, 460);
@@ -433,10 +453,7 @@
     if (!surface) return;
     fxLayer.replaceChildren();
     caption.classList.remove("on");
-    if (signature) signature.remove();
-    signature = null;
-    signatureKind = null;
-    clearTimeout(signatureTimer);
+    removeSignature();
   }
 
   function render(signal, preferences, rectangle) {
@@ -449,16 +466,23 @@
       return true;
     }
     if (kind === "denial") {
+      if (signatureInvocation === signal.invocation) removeSignature();
       showDenial(signal);
       return true;
     }
+    // Teardown belongs to the invocation, regardless of its final activity, outcome,
+    // or a preference change while it was running. Another invocation cannot finish it.
+    if (kind === "completion") finishSignature(signal.invocation);
+    if ((kind === "start" || kind === "progress") && signatureInvocation === signal.invocation
+      && signatureKind !== activity) removeSignature();
+    if (!preferences.effects) removeSignature();
     if (activity === "quiet") return false;
     showCaption(activity, Boolean(preferences.captions));
     if (!preferences.effects) return Boolean(preferences.captions);
 
     if (kind === "start" || kind === "progress") {
       if (activity === "read") readScan();
-      if (["find", "script", "type", "wait"].includes(activity)) beginSignature(activity);
+      if (["find", "script", "type", "wait"].includes(activity)) beginSignature(activity, signal.invocation);
       if (activity === "key") keyLozenge();
       if (activity === "scroll") scrollCue(null);
     }
@@ -479,10 +503,9 @@
       if (activity === "navigate") navigationPill();
       if (activity === "screenshot") {
         screenshotEffect();
-        beginSignature("screenshot", true);
+        beginSignature("screenshot", signal.invocation, true);
       }
       if (activity === "zoom") zoomEffect(rectangle);
-      if (["find", "script", "type", "wait"].includes(activity)) finishSignature(activity);
     }
     return true;
   }
@@ -490,6 +513,7 @@
   function setManaged(value) {
     managed = Boolean(value);
     mount();
+    if (!managed) clearTransient();
     syncVisibility();
   }
 
@@ -508,6 +532,7 @@
 
   function setRuntimeState(value) {
     mount();
+    if (value !== "active") clearTransient();
     runtimeReachable = !["ended", "disconnected"].includes(value);
     attention.classList.toggle("on", value === "attention");
     syncVisibility();

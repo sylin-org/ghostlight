@@ -37,6 +37,7 @@ const children = [];
 const physicalCommands = [];
 let queryCount = 0;
 let pauseBeforeFocusedReceipt = false;
+let failAuditAfterNextOpen = false;
 const physicalRequests = [];
 let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
@@ -219,6 +220,11 @@ async function runAdapter(peer) {
     else if (command.command === "open_tab") {
       tab = { ...tab, title: "Example Domain", url: new URL(command.url).href, readiness: "complete" };
       result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
+      if (failAuditAfterNextOpen) {
+        failAuditAfterNextOpen = false;
+        renameSync(auditFile, auditBackup);
+        mkdirSync(auditFile);
+      }
     } else if (command.command === "read_text") {
       result = { outcome: "text", tab_id: tab.tab_id, text: "Example Domain", truncated: false, title: tab.title, url: tab.url };
     } else if (command.command === "find") {
@@ -1003,6 +1009,10 @@ try {
   await resumeState;
   const stillAttention = structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
   assert.equal(stillAttention.status, "attention_required", "global Resume cannot clear a session review");
+  const attentionExplanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: { restrict_capabilities: ["write"] } }));
+  assert.equal(attentionExplanation.status, "succeeded", "the client can diagnose the original restriction while attention is held");
+  assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status,
+    "attention_required", "diagnostics never release session attention");
   const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
     .filter((record) => record.invocation === attention.invocation);
   assert.equal(attentionRecords.filter((record) => record.step).length, 3);
@@ -1079,6 +1089,43 @@ try {
   assert.equal(JSON.stringify(repairedRecords.filter((record) => record.audit_gap)).includes("example.com"), false);
   await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: unrecorded.facts.tab } });
   console.log("audit health ok: real write failure -> default continuation -> strict stop in observe mode -> human controls -> automatic repair -> explicit gap, no replay");
+
+  // A real sink failure first becomes known at an acknowledged child's completion. Continue
+  // cannot cross the next audit boundary, and recovery cannot manufacture the missing receipts.
+  failAuditAfterNextOpen = true;
+  const beforeStrictFlow = physicalCommands.filter(command => command === "open_tab").length;
+  const strictFlow = structured(await mcp.request("tools/call", { name: "browser_flow", arguments: {
+    on_error: "continue", steps: ["first", "second", "third"].map(id => ({ id,
+      tool: "browser_navigate", arguments: { url: `https://example.com/h7-${id}`, new_tab: true } }))
+  } }));
+  assert.equal(strictFlow.status, "blocked"); assert.equal(strictFlow.effect, "partial");
+  assert.equal(strictFlow.repeat_safe, false); assert.equal(strictFlow.history_storage, "unconfirmed");
+  assert.equal(strictFlow.facts.progress.counts.succeeded, 1);
+  assert.equal(strictFlow.facts.progress.counts.not_run, 1);
+  assert.equal(strictFlow.facts.progress.issue.cause, "audit_unavailable");
+  assert.equal(strictFlow.facts.unconfirmed_history_steps, 2);
+  assert.equal(strictFlow.facts.steps[0].result.effect, "applied");
+  assert.equal(strictFlow.facts.steps[0].result.history_storage, "unconfirmed");
+  assert.equal(strictFlow.facts.steps[1].result.effect, "none");
+  assert.equal(strictFlow.facts.steps[1].result.facts.reason, "audit_unavailable");
+  assert.equal(strictFlow.facts.steps[2].status, "not_run");
+  assert.equal(physicalCommands.filter(command => command === "open_tab").length, beforeStrictFlow + 1);
+  rmdirSync(auditFile);
+  renameSync(auditBackup, auditFile);
+  const flowRecoveryDeadline = Date.now() + 15000;
+  do {
+    await new Promise(done => setTimeout(done, 250));
+    recoveredHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
+  } while (recoveredHealth.facts.audit_health.failure !== null && Date.now() < flowRecoveryDeadline);
+  assert.equal(recoveredHealth.facts.audit_health.failure, null);
+  assert.equal(physicalCommands.filter(command => command === "open_tab").length, beforeStrictFlow + 1,
+    "storage recovery cannot repeat the first child or run later children");
+  assert.equal(readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse)
+    .some(record => record.invocation === strictFlow.invocation), false, "no parent or child receipt is backfilled");
+  const newWork = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: strictFlow.facts.steps[0].result.facts.tab } }));
+  assert.equal(newWork.status, "succeeded"); assert.equal(newWork.history_storage, "saved");
+  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: strictFlow.facts.steps[0].result.facts.tab } });
+  console.log("audit composition ok: an acknowledged effect survives failed child history; Continue stops; parent and children stay unconfirmed; repair admits only new work");
 
   // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
   // disconnects, recovery must preserve the profile binding and stop before repair, launch, or

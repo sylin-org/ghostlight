@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createConnection } from "node:net";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, statSync, mkdirSync, rmSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -73,9 +73,16 @@ try {
   await until(() => { try { return JSON.parse(readFileSync(runtime)).service_port; } catch { return false; } }, "isolated service starts");
   const endpoint = JSON.parse(readFileSync(runtime));
   if (process.platform === "win32") {
-    const script = `$ErrorActionPreference = 'Stop'; $a = [System.IO.File]::GetAccessControl('${runtime.replaceAll("'", "''")}'); [PSCustomObject]@{Protected=$a.AreAccessRulesProtected;Broad=@($a.Access | Where-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -in @('S-1-1-0','S-1-5-11','S-1-5-32-545') }).Count} | ConvertTo-Json -Compress`;
+    const script = `$ErrorActionPreference = 'Stop'; $a = [System.IO.File]::GetAccessControl('${runtime.replaceAll("'", "''")}'); $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; [PSCustomObject]@{Protected=$a.AreAccessRulesProtected;Owner=$a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;CurrentUser=$currentUser;Rules=@($a.Access | ForEach-Object { [PSCustomObject]@{Sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;Type=$_.AccessControlType.ToString();Inherited=$_.IsInherited;Rights=$_.FileSystemRights.ToString()} })} | ConvertTo-Json -Compress -Depth 4`;
     const acl = JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, encoding: "utf8" }));
-    assert.deepEqual(acl, { Protected: true, Broad: 0 });
+    assert.equal(acl.Protected, true);
+    assert.equal(acl.Owner, acl.CurrentUser);
+    assert.deepEqual(acl.Rules.map(rule => rule.Sid).sort(), [acl.CurrentUser, "S-1-5-18"].sort());
+    for (const rule of acl.Rules) {
+      assert.equal(rule.Type, "Allow"); assert.equal(rule.Inherited, false); assert.equal(rule.Rights, "FullControl");
+    }
+  } else {
+    assert.equal(statSync(runtime).mode & 0o777, 0o600, "replacement discovery is readable only by its owner");
   }
   console.log("PASS private runtime publication");
   async function client(label) {
@@ -177,6 +184,38 @@ try {
   await browser.take(value => value.kind === "control_state" && value.state === "active", "human resume");
   assert.equal((await a.result(a.invoke("browser_read"))).status, "succeeded");
   console.log("PASS capacity isolation, independent controls, queued cancellation/expiry, Pause/Resume and recovery");
+
+  // Stop is terminal: queued jobs settle without effects, and ordinary Resume cannot undo it.
+  hold = a.session;
+  a.invoke("browser_read", {}, "stop-in-flight");
+  await until(() => held.length === 3, "Stop fixture dispatched");
+  const stoppedIds = Array.from({ length: 5 }, (_, index) => a.invoke("browser_read", {}, `stop-queued-${index}`));
+  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "end_session" } });
+  await browser.take(value => value.kind === "control_state" && value.state === "ended", "human Stop", 1500);
+  a.send({ kind: "cancel", id: "stop-in-flight" });
+  const stoppedInFlight = await a.result("stop-in-flight", 2000);
+  assert.equal(stoppedInFlight.effect, "unknown"); assert.equal(stoppedInFlight.repeat_safe, false);
+  for (const id of stoppedIds) {
+    const result = await a.result(id, 2000);
+    assert.equal(result.status, "blocked"); assert.equal(result.effect, "none");
+    assert.equal(result.summary, "The user asked to interrupt the process. Wait for further instructions.");
+    assert.deepEqual(result.next_steps, [], "Stop never suggests automatic retry");
+  }
+  assert.equal(held.length, 3, "Stop prevents every queued browser dispatch");
+  assert.equal((await a.result(a.invoke("policy_explain"), 2000)).status, "succeeded", "diagnostics remain available after Stop");
+  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
+  await browser.take(value => value.kind === "control_state" && value.state === "ended", "Resume preserves Stop");
+  const stillStopped = await b.result(b.invoke("browser_read"), 2000);
+  assert.equal(stillStopped.status, "blocked"); assert.equal(stillStopped.effect, "none");
+  assert.equal(held.length, 3);
+  const beforeNewSession = requests.filter(request => ["read_document", "read_text"].includes(request.command.command)).length;
+  hold = null;
+  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "start_session" } });
+  await browser.take(value => value.kind === "control_state" && value.state === "active", "explicit new session");
+  assert.equal((await a.result(a.invoke("browser_read"))).status, "succeeded");
+  assert.equal(requests.filter(request => ["read_document", "read_text"].includes(request.command.command)).length,
+    beforeNewSession + 1, "new session permits the new request without replaying stopped or uncertain work");
+  console.log("PASS Stop drains queued work, preserves in-flight uncertainty, keeps diagnostics usable, and requires explicit new-session recovery without replay");
 
   const nonreader = await client("H8 stopped reading");
   nonreader.socket.pause();

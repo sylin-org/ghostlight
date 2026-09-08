@@ -29,6 +29,8 @@ const environment = {
   GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
 };
 const children = [];
+const physicalRequests = [];
+let adapterFailure;
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -95,9 +97,15 @@ async function runAdapter(peer) {
   let tab = { tab_id: 41, title: "", url: "about:blank", active: true, readiness: "complete" };
   for (;;) {
     const frame = await peer.next(0);
+    if (frame.kind === "heartbeat") {
+      peer.send({ kind: "heartbeat_ack", sequence: frame.sequence });
+      continue;
+    }
     if (frame.kind !== "request") continue;
     const request = frame.request;
-    const command = request.command;
+    const scope = request.command.command === "in_documents" ? request.command.scope : null;
+    const command = scope ? request.command.primitive : request.command;
+    physicalRequests.push({ command, scope });
     let result;
     switch (command.command) {
       case "present":
@@ -106,6 +114,13 @@ async function runAdapter(peer) {
       case "open_tab":
         tab = { ...tab, title: "Example Domain", url: "https://example.com/", readiness: "complete" };
         result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
+        break;
+      case "describe_documents":
+        assert.equal(command.tab_id, tab.tab_id);
+        result = { outcome: "documents", tab_id: tab.tab_id, inventory: {
+          documents: [{ id: "powershell-document", url: tab.url, parent: null, supported: true }],
+          subjects: [], unresolved: false, incomplete: false
+        } };
         break;
       case "read_text":
       case "read_document":
@@ -143,6 +158,12 @@ async function runAdapter(peer) {
       default:
         throw new Error(`Unexpected physical primitive ${command.command}`);
     }
+    if (scope) {
+      assert.deepEqual(scope.allowed, ["powershell-document"], "the CLI observes only the admitted document");
+      result = { outcome: "in_documents", result, observation: {
+        visited: scope.allowed, unavailable: [], limited_by_size: false, masked_regions: 0
+      } };
+    }
     peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   }
 }
@@ -165,7 +186,7 @@ try {
     browser_id: "browser_psjourney",
     adapter_epoch: "adapter_psjourney",
     capabilities: [
-      "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
+      "document_scope", "adapter_liveness", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation"
     ].map((name) => ({ name, revision: { script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
@@ -178,7 +199,7 @@ try {
     "hello_accepted",
     `the relay never accepted the adapter: ${JSON.stringify(accepted)}`
   );
-  runAdapter(native).catch((error) => process.stderr.write(`[adapter] ${error}\n`));
+  runAdapter(native).catch((error) => { adapterFailure = error; process.stderr.write(`[adapter] ${error}\n`); });
 
   // Never spawnSync here. The scripted adapter answers on this event loop, and a synchronous
   // child would block it, so every browser call would dispatch and then time out as unknown.
@@ -201,6 +222,7 @@ try {
   });
   process.stdout.write(journey.stdout ?? "");
   if (journey.status !== 0) process.stderr.write(journey.stderr ?? "");
+  assert.equal(adapterFailure, undefined, `the adapter failed: ${adapterFailure}`);
   assert.equal(journey.status, 0, "the PowerShell journey must exit zero when every step succeeds");
 
   const output = journey.stdout ?? "";
@@ -218,6 +240,11 @@ try {
   assert.ok(image.length > 100, "the screenshot is too small to be an image");
   assert.equal(image[0], 0xff, "the screenshot is not JPEG bytes");
   assert.equal(image[1], 0xd8, "the screenshot is not JPEG bytes");
+  assert.deepEqual(image, Buffer.from(PIXEL_JPEG, "base64"), "the CLI saves the exact delivered screenshot bytes");
+  const contentRequests = physicalRequests.filter(({ command }) => ["read_text", "read_document", "screenshot"].includes(command.command));
+  assert.equal(contentRequests.filter(({ command }) => command.command !== "screenshot").length, 1, "the read physically executes once");
+  assert.equal(contentRequests.filter(({ command }) => command.command === "screenshot").length, 1, "the capture physically executes once");
+  for (const request of contentRequests) assert.deepEqual(request.scope?.allowed, ["powershell-document"], "read and capture use document admission");
 
   await sleep(300);
   const records = readFileSync(auditFile, "utf8")
@@ -231,6 +258,7 @@ try {
   for (const record of records) {
     assert.equal(record.channel, "cli", "a scripted step was not attributed to the cli channel");
     assert.equal(record.allowed, true, `${record.tool} was refused: ${record.reason}`);
+    assert.equal(record.status, "succeeded", `${record.tool} did not complete: ${record.summary}`);
   }
   // The audit stays payload-free even when a script drove the work.
   const encoded = JSON.stringify(records);

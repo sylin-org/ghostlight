@@ -70,7 +70,13 @@ impl PresentationPort for BrowserPresentation {
 #[derive(Clone)]
 pub struct PresentationReactor {
     port: Arc<dyn PresentationPort>,
-    activities: Arc<Mutex<HashMap<String, PresentationActivity>>>,
+    activities: Arc<Mutex<HashMap<String, ActivePresentation>>>,
+}
+
+#[derive(Clone, Copy)]
+struct ActivePresentation {
+    activity: PresentationActivity,
+    tab: Option<u64>,
 }
 
 impl PresentationReactor {
@@ -90,8 +96,15 @@ impl PresentationReactor {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(event.invocation())
-                .copied()
+                .map(|active| active.activity)
                 .unwrap_or(PresentationActivity::Quiet)
+        };
+        let recorded_tab = || {
+            self.activities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(event.invocation())
+                .and_then(|active| active.tab)
         };
         let (signal, activity, phase, detail, tab_id, locator, terminal) = match event {
             DomainEvent::WorkWaiting { .. } => return,
@@ -99,7 +112,13 @@ impl PresentationReactor {
                 self.activities
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(event.invocation().into(), *activity);
+                    .insert(
+                        event.invocation().into(),
+                        ActivePresentation {
+                            activity: *activity,
+                            tab: None,
+                        },
+                    );
                 (
                     PresentationKind::Start,
                     *activity,
@@ -118,7 +137,13 @@ impl PresentationReactor {
                 self.activities
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(event.invocation().into(), *activity);
+                    .insert(
+                        event.invocation().into(),
+                        ActivePresentation {
+                            activity: *activity,
+                            tab: *physical_id,
+                        },
+                    );
                 (
                     PresentationKind::Start,
                     *activity,
@@ -174,7 +199,7 @@ impl PresentationReactor {
                 current(),
                 "Ghostlight needs your attention",
                 None,
-                *physical_id,
+                physical_id.or_else(recorded_tab),
                 None,
                 true,
             ),
@@ -189,7 +214,7 @@ impl PresentationReactor {
                     current(),
                     phase,
                     Some(detail),
-                    *physical_id,
+                    physical_id.or_else(recorded_tab),
                     None,
                     true,
                 )
@@ -199,7 +224,7 @@ impl PresentationReactor {
                 current(),
                 activity_label(current()),
                 None,
-                *physical_id,
+                physical_id.or_else(recorded_tab),
                 None,
                 true,
             ),
@@ -226,6 +251,99 @@ impl PresentationReactor {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(event.invocation());
         }
+    }
+
+    /// Bind page feedback to the physical command's tab, once per invocation phase.
+    ///
+    /// Admission has no page destination yet. Recording a workspace-wide start must never
+    /// animate whichever unrelated tab happens to be active while the real target resolves.
+    pub(crate) fn bind_command(&self, workspace: &str, invocation: &str, command: &BrowserCommand) {
+        let Some(tab) = command_tab(command) else {
+            return;
+        };
+        let activity = {
+            let mut activities = self
+                .activities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(active) = activities.get_mut(invocation) else {
+                return;
+            };
+            if active.tab == Some(tab) {
+                return;
+            }
+            active.tab = Some(tab);
+            active.activity
+        };
+        let _ = self.port.present(
+            workspace,
+            PresentationSignal {
+                invocation: invocation.into(),
+                signal: PresentationKind::Start,
+                activity,
+                phase: activity_label(activity).into(),
+                detail: None,
+                tab_id: Some(tab),
+                locator: None,
+                click: None,
+            },
+        );
+    }
+}
+
+fn command_tab(command: &BrowserCommand) -> Option<u64> {
+    match command {
+        BrowserCommand::InDocuments { primitive, .. } => command_tab(primitive),
+        BrowserCommand::DescribeDocuments { tab_id, .. }
+        | BrowserCommand::FocusTab { tab_id }
+        | BrowserCommand::Navigate { tab_id, .. }
+        | BrowserCommand::TraverseHistory { tab_id, .. }
+        | BrowserCommand::Reload { tab_id, .. }
+        | BrowserCommand::CloseTab { tab_id, .. }
+        | BrowserCommand::NavigateDiscardingBeforeUnload { tab_id, .. }
+        | BrowserCommand::ReadText { tab_id, .. }
+        | BrowserCommand::ReadDocument { tab_id, .. }
+        | BrowserCommand::Inspect { tab_id, .. }
+        | BrowserCommand::InspectTree { tab_id, .. }
+        | BrowserCommand::Find { tab_id, .. }
+        | BrowserCommand::Screenshot { tab_id, .. }
+        | BrowserCommand::ScreenshotRegion { tab_id, .. }
+        | BrowserCommand::DescribeTargets { tab_id, .. }
+        | BrowserCommand::QuerySemantic { tab_id, .. }
+        | BrowserCommand::Activate { tab_id, .. }
+        | BrowserCommand::ActivatePoint { tab_id, .. }
+        | BrowserCommand::ActivateModified { tab_id, .. }
+        | BrowserCommand::ActivatePointModified { tab_id, .. }
+        | BrowserCommand::WheelAt { tab_id, .. }
+        | BrowserCommand::Scroll { tab_id, .. }
+        | BrowserCommand::SetZoom { tab_id, .. }
+        | BrowserCommand::ResizeWindow { tab_id, .. }
+        | BrowserCommand::Hover { tab_id, .. }
+        | BrowserCommand::HoverPoint { tab_id, .. }
+        | BrowserCommand::Fill { tab_id, .. }
+        | BrowserCommand::TypeText { tab_id, .. }
+        | BrowserCommand::DescribeFocused { tab_id }
+        | BrowserCommand::TypeFocused { tab_id, .. }
+        | BrowserCommand::PressKey { tab_id, .. }
+        | BrowserCommand::Drag { tab_id, .. }
+        | BrowserCommand::DragPoints { tab_id, .. }
+        | BrowserCommand::UploadFiles { tab_id, .. }
+        | BrowserCommand::DropImageAt { tab_id, .. }
+        | BrowserCommand::EvaluateScript { tab_id, .. }
+        | BrowserCommand::Observe { tab_id, .. }
+        | BrowserCommand::InspectDialog { tab_id }
+        | BrowserCommand::HandleDialog { tab_id, .. }
+        | BrowserCommand::ReadDiagnostics { tab_id, .. }
+        | BrowserCommand::StartRecording { tab_id } => Some(*tab_id),
+        BrowserCommand::ListTabs
+        | BrowserCommand::OpenTab { .. }
+        | BrowserCommand::ClearDiagnostics { .. }
+        | BrowserCommand::StatusRecording { .. }
+        | BrowserCommand::StopRecording { .. }
+        | BrowserCommand::ExportRecording { .. }
+        | BrowserCommand::DiscardRecording { .. }
+        | BrowserCommand::Cancel { .. }
+        | BrowserCommand::Present { .. } => None,
     }
 }
 
@@ -437,5 +555,116 @@ mod tests {
             signals[0].detail.as_deref(),
             Some("Your Preserve Ghostlight tabs setting is on. You can close it yourself.")
         );
+    }
+
+    #[test]
+    fn overlapping_reads_keep_their_page_destination_and_completion_independent() {
+        use ghostlight_bridge::browser::BrowserCommand;
+
+        let port = Arc::new(RecordingPort::default());
+        let reactor = PresentationReactor::new(port.clone());
+        for (invocation, tab) in [("read-a", 7), ("read-b", 11)] {
+            reactor.react(&DomainEvent::WorkStarted {
+                invocation: invocation.into(),
+                workspace: "shared-workspace".into(),
+                tool: "browser_read".into(),
+                activity: PresentationActivity::Read,
+                capabilities: Capability::Read.into(),
+                provenance: None,
+            });
+            let command = BrowserCommand::ReadDocument {
+                tab_id: tab,
+                mode: "visible".into(),
+                max_chars: 500,
+            };
+            reactor.bind_command("shared-workspace", invocation, &command);
+            reactor.bind_command("shared-workspace", invocation, &command);
+        }
+        reactor.react(&DomainEvent::WorkCompleted {
+            invocation: "read-a".into(),
+            workspace: "shared-workspace".into(),
+            physical_id: None,
+        });
+        assert_eq!(
+            reactor
+                .activities
+                .lock()
+                .unwrap()
+                .get("read-b")
+                .unwrap()
+                .tab,
+            Some(11)
+        );
+        reactor.react(&DomainEvent::WorkCompleted {
+            invocation: "read-b".into(),
+            workspace: "shared-workspace".into(),
+            physical_id: None,
+        });
+        let signals = port.0.lock().unwrap();
+        for (invocation, tab) in [("read-a", 7), ("read-b", 11)] {
+            let signals: Vec<_> = signals
+                .iter()
+                .filter(|signal| signal.invocation == invocation)
+                .collect();
+            assert_eq!(
+                signals.len(),
+                3,
+                "one admission, one exact-page start, one completion"
+            );
+            assert_eq!(signals[0].tab_id, None, "admission cannot invent a page");
+            assert_eq!(signals[1].signal, PresentationKind::Start);
+            assert_eq!(signals[1].tab_id, Some(tab));
+            assert_eq!(signals[2].signal, PresentationKind::Completion);
+            assert_eq!(
+                signals[2].tab_id,
+                Some(tab),
+                "a missing terminal tab falls back only to this invocation's destination"
+            );
+        }
+        assert!(reactor.activities.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn composition_phases_bind_fresh_destinations_and_denials_finish_their_origin() {
+        use ghostlight_bridge::browser::BrowserCommand;
+
+        let port = Arc::new(RecordingPort::default());
+        let reactor = PresentationReactor::new(port.clone());
+        for (activity, tab) in [
+            (PresentationActivity::Script, 7),
+            (PresentationActivity::Read, 11),
+        ] {
+            reactor.react(&DomainEvent::WorkPhaseStarted {
+                invocation: "flow".into(),
+                workspace: "shared-workspace".into(),
+                physical_id: None,
+                activity,
+            });
+            reactor.bind_command(
+                "shared-workspace",
+                "flow",
+                &BrowserCommand::DescribeDocuments {
+                    tab_id: tab,
+                    locators: vec![],
+                    points: vec![],
+                    focused: false,
+                },
+            );
+            reactor.react(&DomainEvent::WorkBlocked {
+                invocation: "flow".into(),
+                workspace: "shared-workspace".into(),
+                physical_id: None,
+                presentation: DenialPresentation::Guardrail,
+            });
+        }
+        let signals = port.0.lock().unwrap();
+        for (phase, tab) in signals.chunks_exact(3).zip([7, 11]) {
+            assert_eq!(phase[0].tab_id, None);
+            assert_eq!(phase[1].tab_id, Some(tab));
+            assert_eq!(phase[2].tab_id, Some(tab));
+            assert_eq!(phase[2].signal, PresentationKind::Denial);
+            assert_eq!(phase[2].activity, phase[1].activity);
+        }
+        assert!(reactor.activities.lock().unwrap().is_empty());
     }
 }

@@ -58,7 +58,24 @@ repeated read twice. Composition children each retain coverage, while volatile h
 encountered exclusions under their invocation. See the [verification record](../tasks/security-hardening/h6-verification.md)
 for actual browser, process, policy, privacy, capture, and deployment evidence.
 
+## Implementation amendment: recording export requirements (2026-09-07)
+
+The full-session regression matrix found that target export still advertised Write alone while
+the source checks correctly required Read. A caller that supplied the advertised Write allowance
+was refused after its recording had already been stopped, with an incomplete requirement message.
+The correction aligns the declaration and preflight with the existing source boundary.
+Target export requires Read + Write; client return and download require Read. Check the complete
+set before StopRecording, then retain source-specific Read and destination-specific Write checks.
+This adds no source access and changes no recording containment or delivery mechanism.
+
 ## Evidence required
+
+The September 7 full-session browser suite also exposed incomplete physical batch preparation.
+Per-field validation discovered an invalid later field only after an earlier edit. The adapter
+now validates every document group, field, option, and submit containment before the first edit,
+then revalidates each field as it executes. Preparation failure reports no effect; a page change
+after dispatch preserves partial or uncertain effects. This implements Decision 9 and promises
+no transaction or rollback. Real Chromium tests inspect the retained values in both cases.
 
 Policy resolution and mixed RAWX grants; denied content excluded before extraction; stale and
 navigating documents; scoped negative results; all three handling and notice modes; human-only

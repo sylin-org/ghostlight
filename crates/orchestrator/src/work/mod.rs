@@ -49,7 +49,7 @@ use crate::language::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
         TargetRole, WorkspaceReason,
     },
-    Operation, Record, SequenceStep, TakeScreenshot,
+    Operation, Record, TakeScreenshot,
 };
 use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
@@ -1188,6 +1188,8 @@ impl ApplicationExecutor {
     ) -> Result<BrowserOutcome, BrowserError> {
         self.admit_dispatch(context)?;
         let browser = self.target_browser(context)?;
+        self.presentation
+            .bind_command(context.workspace.as_str(), context.invocation, &command);
         let admit = || self.admit_dispatch(context);
         let outcome = self.browser.call_guarded(
             &browser,
@@ -1933,18 +1935,6 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
     }
 }
 
-fn step_activity(step: &SequenceStep) -> PresentationActivity {
-    match step {
-        SequenceStep::Click { .. } => PresentationActivity::Click,
-        SequenceStep::TypeText { .. } => PresentationActivity::Type,
-        SequenceStep::Fill { .. } => PresentationActivity::Fill,
-        SequenceStep::PressKey { .. } => PresentationActivity::Key,
-        SequenceStep::Scroll { .. } => PresentationActivity::Scroll,
-        SequenceStep::Hover { .. } => PresentationActivity::Hover,
-        SequenceStep::Wait { .. } => PresentationActivity::Wait,
-    }
-}
-
 /// The refusal for a browser choice that could not be made, and the facts that explain it.
 ///
 /// Returning candidates rather than a choice is the point: two connected browsers are two
@@ -2304,8 +2294,10 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod audit_health;
+    mod catalog_authority;
     mod control;
     mod documents;
+    mod presentation;
     mod provenance;
     mod request_restrictions;
     use std::fs;

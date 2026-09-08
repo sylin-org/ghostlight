@@ -125,6 +125,19 @@ Turn the process log on, reproduce, read the story:
 
 ## Automated gates
 
+The complete hardening suite has one local entry point:
+
+```text
+node tests/hardening-suite.mjs
+```
+
+Set `GHOSTLIGHT_TEST_BROWSER` to Chrome for Testing. The runner builds into the isolated
+`CARGO_TARGET_DIR` (default `.target-ghostlight-1.0`) and passes that exact build to every journey.
+It includes the omitted real-browser and continuity lanes, writes per-gate evidence, and fails if
+a required lane cannot run or source changes during execution. See the
+[feature coverage guide](tasks/security-hardening/regression-suite.md). Installed validation uses
+`node tests/live-journey.mjs` separately after the changed components are active.
+
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

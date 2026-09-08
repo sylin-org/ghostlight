@@ -3,6 +3,37 @@
 Last updated: 2026-09-07 (hardening through C1 reporting and Reddit editor incident fix deployed
 and verified locally; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
+## Full-session regression suite (2026-09-07)
+
+The owner requested a complete regression suite for this session, then reported wrong-page read
+animations and a script spinner that never clears. The [suite record](tasks/security-hardening/regression-suite.md)
+maps H1-H8, C1 reporting, editor corrections, and these visual failures to executable coverage.
+All 16 source gates now pass on unchanged source: 520 Rust tests, 207 extension tests, six browser
+harness tests, 23 real-engine script cases, 65 real MV3 cases, both CLI and all process/continuity/
+provenance journeys, policy grammar, workbench surface, and real Chromium history interaction.
+
+The expanded tests reproduced two additional root defects. Form fill now prepares all document
+groups before the first edit, including readonly/disabled/hidden fields, invalid options, and submit
+containment; post-dispatch page changes retain effect uncertainty. Recording attachment now declares
+Read + Write and checks that complete set before stopping, while source Read and destination Write
+remain independent. Page feedback now binds to the actual dispatched tab and invocation, including
+composition children. Terminal cleanup preserves other operations; hidden denials clear activity
+while retaining the human notice. Abandoned signatures have the previously decided bounded fallback.
+Actual closed-shadow DOM checks and raw screenshots prove routing and wheel removal.
+
+The final service is deployed via the dev-loop; installed and isolated release SHA-256 match
+`75650ebf6bd5c222f6ada8321c4b625bdac63647e33af3a7184166e2116c1252`. The exact-path process is
+Ready, the deploy lock is absent, and both connectors are unchanged. The final adapter changes
+require the owner's explicit reload; that request and installed live verification remain pending.
+
+The first full run passed required Rust/extension gates and all 60 MV3 behavior assertions, but
+failed a stale PowerShell synthetic-adapter fixture and Windows Chromium startup/cleanup races.
+Those harness defects are corrected and remain failing gates on persistent errors. The suite now
+follows Cargo's actual executable artifact paths, uses a hash-checked offline Sylin snapshot,
+and schedules continuity plus all browser journeys in Windows/Linux CI. Remote CI has not run.
+The final stable-source run passed every gate. Installed full-session acceptance remains pending;
+the earlier installed Reddit proof does not establish these newly changed adapter bytes.
+
 ## Installed hardening and editor incident (2026-09-07)
 
 The authorized dev-loop deployment replaced the orchestrator and MCP connector from `00b44646`.

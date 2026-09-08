@@ -6,7 +6,6 @@ use ghostlight_bridge::browser::{
     BrowserCommand, BrowserOutcome, DiagnosticDetail, DiagnosticEntry, DiagnosticSource,
 };
 
-use crate::events::DomainEvent;
 use crate::governance::Capability;
 use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::outcome::{Outcome, Refusal};
@@ -19,8 +18,7 @@ use crate::workspace::WorkspaceLease;
 use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
 use super::result::{Effect, Status};
 use super::{
-    observed_host, permitted, readiness, step_activity, ApplicationExecutor, InvocationContext,
-    Terminal,
+    observed_host, permitted, readiness, ApplicationExecutor, InvocationContext, Terminal,
 };
 
 impl ApplicationExecutor {
@@ -47,12 +45,6 @@ impl ApplicationExecutor {
             if progress.stop_at_boundary(context, index + 1) {
                 break;
             }
-            self.emit(DomainEvent::WorkPhaseStarted {
-                invocation: context.invocation.into(),
-                workspace: context.workspace.as_str().into(),
-                physical_id: Some(selected.physical_id),
-                activity: step_activity(step),
-            });
             let operation = match step {
                 SequenceStep::Click {
                     target,

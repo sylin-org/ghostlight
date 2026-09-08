@@ -481,11 +481,14 @@ Actions are:
 - `status`: optional `recording`; report state and deadlines; no new capability.
 - `stop`: optional `recording`; capture a final frame, stop, and freeze; no new capability.
 - `save`: optional `recording`; auto-stop if active. One replay goes to one place: with `target`,
-  the browser attaches it to that file input and Ghostlight requires `write`; with
+  the browser attaches it to that file input and Ghostlight requires `read + write`; with
   `"download": true`, the browser saves it as a file and Ghostlight requires `read`; with neither,
   the GIF is returned to the client and Ghostlight requires `read`. `target` and `download`
   together are refused.
 - `discard`: optional `recording`; erase captured bytes; no new capability.
+
+Save checks its complete capability requirement before stopping active capture. Read still
+authorizes every captured source; Write separately authorizes the attachment destination.
 
 `recording` may be omitted only when exactly one owned recording can be resolved. `target` and
 `download` are valid only for save. The extension owns recording identity, frames, bounds,

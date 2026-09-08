@@ -172,6 +172,12 @@ Every one of these cost something to learn.
   `textContent` plus generic synthetic input while Ghostlight reported success. Native browser
   editing preserves the editor's transaction; regression fixtures must reject the old mechanism,
   and installed verification must read the retained editor value or inspect a screenshot.
+- **Guardrail tests must prove permitted work too.** A caller supplying exactly the advertised
+  capability set must complete the operation, including its landing and export checks. Assert
+  actual retained values, effect counts, and captured pixels independently of receipts. Form-batch
+  validation must cover every frame before the first edit; checking each field only when its turn
+  arrives can change an earlier field before discovering a known invalid later one. The full
+  hardening suite and its feature map live in `docs/tasks/security-hardening/regression-suite.md`.
 
 - **Mocked debugger replies do not prove JavaScript completion semantics.** H3's real Chromium
   lane found that `awaitPromise` plus `replMode` returned an async wrapper's promise as `{}`;

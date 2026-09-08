@@ -91,6 +91,14 @@ impl ApplicationExecutor {
         };
         if step.is_none() {
             self.emit(event);
+        } else {
+            // A child finishes its own decoration without settling its parent's lifecycle
+            // or showing a guardrail notice for every unsuccessful child in a composition.
+            self.presentation.react(&DomainEvent::WorkCompleted {
+                invocation: terminal.result.invocation.clone(),
+                workspace: workspace.as_str().into(),
+                physical_id: terminal.physical_id,
+            });
         }
         let status = serde_json::to_value(terminal.result.status)
             .ok()
@@ -167,6 +175,12 @@ impl ApplicationExecutor {
             requirements: language::capability_map::requirements(operation),
             ..*context
         };
+        self.emit(DomainEvent::WorkPhaseStarted {
+            invocation: context.invocation.into(),
+            workspace: context.workspace.as_str().into(),
+            physical_id: None,
+            activity: operation_activity(operation),
+        });
         let terminal = self.run(&context, lease, operation);
         self.complete_terminal(
             &CompletionGate::default(),

@@ -429,6 +429,155 @@ mod tests {
     }
 
     #[test]
+    fn recovered_composition_parent_preserves_child_storage_gaps_live_and_after_restart() {
+        use crate::language::composition::{CompositionProgress, EffectCounts, StepCounts};
+        use crate::language::history::{CompositionKind, StepReceipt};
+        use crate::workbench::{StepHistoryState, WorkbenchFacade};
+
+        let history = |projection| {
+            WorkbenchFacade::new(
+                projection,
+                crate::workspace::WorkspaceStore::default(),
+                crate::governance::GovernanceFacade::new(None, None),
+                Arc::new(crate::browser::RelayBrowserPort::new(
+                    "audit-recovery-test".into(),
+                )),
+                crate::diagnostics::DiagnosticsHub::for_tests(),
+            )
+            .snapshot()
+            .history
+        };
+
+        for kind in [CompositionKind::Flow, CompositionKind::Sequence] {
+            let sink = Arc::new(SwitchSink::default());
+            let projection = WorkbenchProjection::default();
+            let recorder = AuditRecorder::new(sink.clone(), projection.clone());
+            let mut child = AuditRecord::now(
+                "composition",
+                "workspace",
+                "browser_fill_form",
+                CapabilitySet::READ.union(CapabilitySet::WRITE),
+                "authority",
+                Decision::permitted(),
+                "succeeded",
+                "applied",
+                &Outcome::FormFilled {
+                    fields: 1,
+                    submitted: false,
+                    host: Some("example.com".into()),
+                }
+                .audit(),
+                1,
+            );
+            child.step = Some(StepReceipt {
+                parent: kind,
+                position: 1,
+                total: 2,
+                preparation_failed: false,
+            });
+            sink.fails.store(true, Ordering::SeqCst);
+            assert_eq!(recorder.record(&child), Storage::Unconfirmed);
+            sink.fails.store(false, Ordering::SeqCst);
+            recorder.recover_at(Instant::now() + RECOVERY_INTERVAL);
+            assert!(!recorder.health().unavailable());
+
+            let mut second = record("composition");
+            second.step = Some(StepReceipt {
+                parent: kind,
+                position: 2,
+                total: 2,
+                preparation_failed: false,
+            });
+            assert_eq!(recorder.record(&second), Storage::Saved);
+            let progress = CompositionProgress {
+                counts: StepCounts {
+                    total: 2,
+                    succeeded: 2,
+                    ..Default::default()
+                },
+                effects: EffectCounts {
+                    applied: 1,
+                    none: 1,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let parent = AuditRecord::now(
+                "composition",
+                "workspace",
+                kind.tool(),
+                CapabilitySet::EMPTY,
+                "authority",
+                Decision::permitted(),
+                "succeeded",
+                "applied",
+                &Outcome::CompositionRan(progress)
+                    .audit()
+                    .with_unconfirmed_history(1),
+                2,
+            );
+            assert_eq!(recorder.record(&parent), Storage::Saved);
+            let live = history(projection.clone());
+            assert_eq!(live.len(), 1);
+            assert_eq!(live[0].status, "succeeded");
+            assert_eq!(live[0].effect, "applied");
+            assert_eq!(live[0].storage, Storage::Saved);
+            assert!(live[0].storage_detail.contains("Some step history"));
+            let first = live[0].steps[0].record.as_ref().unwrap();
+            assert_eq!(first.storage, Storage::Unconfirmed);
+            assert_eq!(first.status, "succeeded");
+            assert_eq!(first.effect, "applied");
+            assert_eq!(
+                sink.writes.load(Ordering::SeqCst),
+                3,
+                "recovery does not retry the failed receipt"
+            );
+
+            // Reload only what the destination confirmed, including its explicit gap marker.
+            let path = std::env::temp_dir().join(format!(
+                "ghostlight-composition-recovery-{}.jsonl",
+                uuid::Uuid::new_v4()
+            ));
+            let mut persisted = Vec::new();
+            for gap in sink.gaps.lock().unwrap().iter() {
+                assert_eq!(gap.unconfirmed_receipts, 1);
+                serde_json::to_writer(
+                    &mut persisted,
+                    &GapEntry {
+                        audit_gap: gap.clone(),
+                    },
+                )
+                .unwrap();
+                persisted.push(b'\n');
+            }
+            for record in sink.records.lock().unwrap().iter() {
+                serde_json::to_writer(&mut persisted, record).unwrap();
+                persisted.push(b'\n');
+            }
+            assert!(!String::from_utf8_lossy(&persisted).contains("PRIVATE_"));
+            fs::write(&path, persisted).unwrap();
+            let restored = WorkbenchProjection::default();
+            restored.load_history(&path).unwrap();
+            fs::remove_file(path).unwrap();
+            let history = history(restored.clone());
+            assert_eq!(history.len(), 1);
+            assert_eq!(history[0].status, "succeeded");
+            assert_eq!(history[0].effect, "applied");
+            assert_eq!(history[0].storage, Storage::Saved);
+            assert_eq!(history[0].steps[0].state, StepHistoryState::Unconfirmed);
+            assert!(
+                history[0].steps[0].record.is_none(),
+                "restart must not fabricate the missing child's receipt"
+            );
+            assert_eq!(
+                history[0].steps[1].record.as_ref().unwrap().storage,
+                Storage::Saved
+            );
+            assert_eq!(restored.audit_health().unconfirmed_receipts, 1);
+        }
+    }
+
+    #[test]
     fn actual_file_repair_keeps_good_history_and_reports_torn_and_missing_entries() {
         let root = std::env::temp_dir().join(format!("ghostlight-h7-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();

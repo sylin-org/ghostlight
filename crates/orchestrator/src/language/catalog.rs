@@ -1401,7 +1401,7 @@ fn record_schema() -> Value {
                         "action",
                         constant(
                             "save",
-                            "Save an immutable animated GIF; active capture stops first.",
+                            "Save an immutable animated GIF. Requires read for captured sources, plus write when attaching to a target; active capture stops after capability admission.",
                         ),
                     ),
                     ("recording", recording()),
@@ -1409,7 +1409,7 @@ fn record_schema() -> Value {
                         "target",
                         handle(
                             "target_",
-                            "Attach the replay to this current file input, inside the browser.",
+                            "Attach the replay to this current file input, inside the browser. Requires read + write.",
                         ),
                     ),
                     (
