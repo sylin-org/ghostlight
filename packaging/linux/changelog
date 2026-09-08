@@ -1,3 +1,12 @@
+ghostlight (1.3.5) unstable; urgency=medium
+
+  * Harden configured authority, document coverage, effect reporting,
+    local process recovery, and grouped history.
+  * Use one flow tool and expose action details from At a glance.
+  * Expand real installed-browser and package-launcher integration checks.
+
+ -- Leonardo Botinelly <hello@sylin.org>  Tue, 08 Sep 2026 00:00:00 -0400
+
 ghostlight (1.3.4) unstable; urgency=medium
 
   * Remove built-in localhost, loopback, and link-local restrictions.

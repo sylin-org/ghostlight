@@ -5,6 +5,29 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - Unreleased
+
+Source candidate. The service and its package artifacts advance to 1.3.5; Chrome adapter 1.1.2
+was submitted for Google review on 2026-09-08 with publication deferred. Public release records
+remain at service 1.3.4 and adapter 1.1.1 until the corresponding releases are observable.
+
+### Fixed
+
+- Record real JavaScript dialog-opening events before optional before-unload handling, so the
+  adapter reports and retains prompts until they are answered or dismissed (adapter 1.1.2).
+- Preserve truthful script/flow effects, document-specific coverage, bounded diagnostics and
+  audit, local process continuity, and human controls across the security-hardening journeys.
+- Exercise npm's actual installed platform command instead of requiring symlink privileges on
+  Windows. Repair the Foundry scripts' retired catalog inputs and malformed shell payload.
+
+### Changed
+
+- Configure host and capability authority through policy; retire caller-supplied restrictions
+  and flow dry-run. Use `browser_flow` in place of the retired `browser_sequence` tool (ADR-0162).
+- Show grouped incremental action history and expandable action details from At a glance.
+- Add real installed Windows native-host recovery, retained MCP/native connection checks, and
+  all-catalog browser acceptance. Define the outstanding clean-package and visible Linux gates.
+
 ## [1.3.4] - 2026-09-05
 
 Published as GitHub release `v1.3.4`, npm package `ghostlight@1.3.4`, and MCP Registry version

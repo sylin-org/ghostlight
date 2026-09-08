@@ -157,6 +157,11 @@ systemd user service. The connectors demand-start the orchestrator.
 
 ### Browser and MCP journeys
 
+Use the [pre-release integration matrix](testing/pre-release-integration.md) for executable
+Windows installed-stack checks, both cold installation orders with Chrome already running,
+and the required visible Linux/package evidence. A passing development lane does not close
+the package, store-adapter, clean-machine, or actual MCP-client gates.
+
 Run the accepted matrix in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md) with a visible ordinary browser
 profile. Include two supported Chromium families where available and at least three supported MCP
 harnesses. Exercise concurrent sessions, screenshots, semantic and coordinate input, file upload,

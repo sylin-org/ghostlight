@@ -333,8 +333,9 @@ Wait for one explicit observable condition. Shortest call: `{"condition":"load_r
 Inputs use one condition-specific branch: `load_ready` accepts neither value nor target;
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
-live page until a control matching it exists; `duration` requires a whole millisecond `value`
-from 0 to 10000 and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`. Capability: `read`.
+live page until a control matching it exists; `duration` requires a decimal string `value`
+of whole milliseconds from 0 to 10000 (for example, `"1200"`) and waits executor-side.
+Every branch accepts optional `tab`, `timeout_ms`. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
 slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.

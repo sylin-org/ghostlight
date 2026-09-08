@@ -317,6 +317,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
   if (method === "Page.javascriptDialogOpening") {
+    debuggerLifecycle.openDialog(source.tabId, params.type);
+    send(shared.browserEventFrame({ event: "dialog_changed", tab_id: source.tabId, present: true, dialog_type: params.type || "unknown" }));
     if (beforeUnloadAcceptors.get(source.tabId) && params.type === "beforeunload") {
       sendDebugger({ tabId: source.tabId }, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
     }
@@ -363,10 +365,6 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (method === "Network.loadingFailed") {
     diagnostics.loadingFailed(source.tabId, params);
     return;
-  }
-  if (method === "Page.javascriptDialogOpening") {
-    debuggerLifecycle.openDialog(source.tabId, params.type);
-    send(shared.browserEventFrame({ event: "dialog_changed", tab_id: source.tabId, present: true, dialog_type: params.type || "unknown" }));
   }
   if (method === "Page.javascriptDialogClosed") {
     debuggerLifecycle.closeDialog(source.tabId).catch(() => {});

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createServer } from "node:http";
 
@@ -10,15 +10,25 @@ const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, "target", "release");
 const connectorPath = join(binDir, `ghostlight-mcp-connector${executableSuffix}`);
-const evidencePath = join(repository, ".tmp/installed-hardening-evidence.json");
+const evidencePath = resolve(process.env.GHOSTLIGHT_LIVE_EVIDENCE || join(repository,
+  `.tmp/installed-browser/${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.json`));
 const MAX_INVOCATION_RECORDS = 256;
 const checks = [];
 const evidence = [];
+const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+function sourceFingerprint() {
+  const paths = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--",
+    "extension", "tests/live-journey.mjs", "tests/fixtures"], { cwd: repository, windowsHide: true, encoding: "utf8" })
+    .split("\0").filter(Boolean).sort();
+  return hash(paths.map(path => `${path}\0${existsSync(join(repository, path)) ? hash(readFileSync(join(repository, path))) : "deleted"}\n`).join(""));
+}
 const report = {
   started_at: new Date().toISOString(),
   transport: "installed MCP -> service -> registered native host -> installed MV3 adapter",
   binaries: {}, passed: false, checks, invocations: evidence, preserved_tab: null,
-  failure: { code: "run_incomplete" }
+  failure: { code: "run_incomplete" },
+  expected_adapter_and_test_source_sha256: sourceFingerprint(),
+  adapter_loading: "Operator must load these extension bytes; source hash alone does not attest the running worker"
 };
 
 function writeEvidence() {
@@ -36,7 +46,7 @@ function evidenceToken(value, limit) {
 }
 
 // Invalidate earlier success before startup, and keep bounded progress if this run is interrupted.
-mkdirSync(join(repository, ".tmp"), { recursive: true });
+mkdirSync(dirname(evidencePath), { recursive: true });
 writeEvidence();
 
 let child;
@@ -132,6 +142,21 @@ const localFixture = createServer((incoming, response) => {
   }
   if (incoming.url === "/child") {
     response.end('<!doctype html><title>Child fixture</title><label>Excluded child sentinel<input aria-label="Excluded child sentinel"></label>'); return;
+  }
+  if (incoming.url === "/interactions") {
+    response.end(`<!doctype html><title>Installed interaction acceptance</title>
+      <style>button,input {margin:15px;padding:15px} #drop {margin-left:200px} body {height:3000px}</style>
+      <h1>Installed interaction acceptance</h1>
+      <input aria-label="Keyboard draft" id="draft">
+      <input type="file" aria-label="Evidence attachment" id="file">
+      <button id="source" aria-label="Drag source">Drag source</button>
+      <button id="drop" aria-label="Drop destination">Drop destination</button>
+      <button id="ask" onclick="window.answer=window.prompt('Test prompt')">Test prompt</button>
+      <script>
+      window.dropped=false; window.dragging=false;
+      source.addEventListener('mousedown',()=>window.dragging=true);
+      drop.addEventListener('mouseup',()=>{window.dropped=window.dragging;window.dragging=false});
+      </script>`); return;
   }
   response.end("<!doctype html><html><head><title>Ghostlight local acceptance</title></head><body><h1>Local development works</h1></body></html>");
 });
@@ -279,6 +304,79 @@ try {
   assert.equal(typeof await tabEvidence("document.title"), "string");
   check("all-open embedded content remains readable, editable, capturable, and scriptable through the installed native host");
 
+  const succeed = async (name, args) => {
+    const result = await call(name, args);
+    assert.equal(result.status, "succeeded", `${name}: ${JSON.stringify(result)}`);
+    return result;
+  };
+  await succeed("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/interactions` });
+  await succeed("browser_wait", { tab: localTab, condition: "load_ready" });
+  const controls = await succeed("browser_inspect", { tab: localTab, scope: "controls", max_items: 100 });
+  const target = name => {
+    const item = controls.facts.items.find(item => item.name === name);
+    assert.ok(item, `Missing disposable control: ${name}`); return item.target;
+  };
+  await succeed("browser_type_text", { tab: localTab, target: target("Keyboard draft"), text: "draft" });
+  await succeed("browser_press_key", { tab: localTab, target: target("Keyboard draft"), key: "End" });
+  assert.equal(await tabEvidence("document.querySelector('#draft').selectionStart"), 5);
+  await succeed("browser_drag", { tab: localTab, source_target: target("Drag source"), destination_target: target("Drop destination") });
+  assert.equal(await tabEvidence("window.dropped"), true);
+  check("real keyboard caret and pointer drag effects reach the document");
+
+  await succeed("browser_upload", { tab: localTab, target: target("Evidence attachment"),
+    files: [{ name: "acceptance.txt", data_base64: Buffer.from("Installed upload sentinel").toString("base64") }] });
+  assert.equal(await tabEvidence("await document.querySelector('#file').files[0].text()"), "Installed upload sentinel");
+  await succeed("browser_upload", { tab: localTab, target: target("Evidence attachment"),
+    paths: [join(repository, "tests/fixtures/contenteditable.html")] });
+  assert.equal(await tabEvidence("await document.querySelector('#file').files[0].text()"),
+    readFileSync(join(repository, "tests/fixtures/contenteditable.html"), "utf8"));
+  check("inline and real filesystem attachments arrive byte-exact in the browser");
+
+  await succeed("browser_diagnose", { tab: localTab, source: "console", detail: "all" });
+  for (const action of ["respond", "dismiss"]) {
+    await succeed("browser_click", { tab: localTab, target: target("Test prompt") });
+    const dialog = await succeed("browser_dialog", { tab: localTab, action: "status" });
+    assert.equal(dialog.facts.present, true, "The real prompt must be reported as present");
+    await succeed("browser_dialog", { tab: localTab, action, ...(action === "respond" ? { text: "Accepted answer" } : {}) });
+    assert.equal(await tabEvidence("window.answer"), action === "respond" ? "Accepted answer" : null);
+  }
+  check("real JavaScript prompts accept text and dismiss without an answer");
+
+  await succeed("browser_diagnose", { tab: localTab, source: "both", detail: "all" });
+  await tabEvidence("console.warn('Installed diagnostic sentinel'); await fetch('/diagnostic-ping'); true");
+  const diagnosed = await succeed("browser_diagnose", { tab: localTab, source: "console", detail: "all", match: "Installed diagnostic sentinel" });
+  assert.match(JSON.stringify(diagnosed.facts), /Installed diagnostic sentinel/);
+  const network = await succeed("browser_diagnose", { tab: localTab, source: "network", detail: "all", match: "diagnostic-ping" });
+  assert.match(JSON.stringify(network.facts), /diagnostic-ping/);
+  check("opt-in console and network diagnostics observe real browser events");
+
+  const originalZoom = await tabEvidence("window.devicePixelRatio");
+  await succeed("browser_window", { tab: localTab, action: "zoom", percent: 125 });
+  try { assert.notEqual(await tabEvidence("window.devicePixelRatio"), originalZoom); }
+  finally { await succeed("browser_window", { tab: localTab, action: "zoom", percent: 100 }); }
+  await succeed("browser_scroll", { tab: localTab, direction: "down", amount: "page" });
+  assert.ok(await tabEvidence("window.scrollY") > 0);
+  await succeed("browser_scroll", { tab: localTab, target: target("Keyboard draft") });
+  check("tab zoom and scrolling change the visible browser state");
+
+  const recording = (await succeed("browser_record", { tab: localTab, action: "start" })).facts.recording;
+  assert.ok(recording);
+  try {
+    await succeed("browser_scroll", { tab: localTab, direction: "down", amount: "small" });
+    await succeed("browser_wait", { tab: localTab, condition: "duration", value: "1200" });
+    await succeed("browser_record", { recording, action: "stop" });
+    const saved = await request("tools/call", { name: "browser_record", arguments: { recording, action: "save" } }, 45000);
+    assert.equal(structured(saved).status, "succeeded");
+    const gif = saved.result.content.find(item => item.type === "image" && item.mimeType === "image/gif");
+    assert.ok(gif); assert.match(Buffer.from(gif.data, "base64").subarray(0, 6).toString(), /^GIF8[79]a$/);
+  } finally { await succeed("browser_record", { recording, action: "discard" }); }
+  check("browser-owned recording returns a GIF and discards captured bytes");
+  await succeed("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/` });
+  await succeed("browser_history", { tab: localTab, action: "back" });
+  assert.match((await succeed("browser_read", { tab: localTab })).facts.text, /Installed interaction acceptance/);
+  await succeed("browser_tabs", { action: "list" });
+  check("history restores the prior document and session tab listing remains usable");
+
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",
     arguments: { tab: localTab, url: "https://sylin.org/ghostlight/demo/iframe/" }
@@ -392,7 +490,7 @@ try {
     arguments: { tab }
   });
   const screenshot = structured(screenshotResponse);
-  assert.equal(openScreenshot.status, "succeeded", JSON.stringify(openScreenshot));
+  assert.equal(screenshot.status, "succeeded", JSON.stringify(screenshot));
   assert.match(screenshot.facts.view, /^view_/);
   assert.equal(screenshot.facts.data, undefined);
   assert.equal(screenshotResponse.result.content[0].type, "text");
@@ -448,6 +546,10 @@ try {
   console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, composed_read: true, composed_inspect: true, composed_find: true, composed_wait: true, framed_hover: true, target_screenshot: true, composed_fill: true, composed_completion: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
   check("live Sylin framed form, local-only submission, and target/viewport/magnified captures");
   report.preserved_tab = preserved ? tab : null;
+  const exercised = new Set(evidence.filter(item => item.status === "succeeded").map(item => item.tool));
+  report.catalog_coverage = listed.result.tools.map(tool => ({ tool: tool.name, succeeded: exercised.has(tool.name) }));
+  assert.ok(report.catalog_coverage.every(item => item.succeeded), "Every advertised tool needs a successful installed invocation");
+  assert.equal(sourceFingerprint(), report.expected_adapter_and_test_source_sha256, "Adapter or test source changed during the run");
   report.passed = true;
   report.failure = null;
 } catch (error) {
@@ -465,5 +567,6 @@ try {
     throw error;
   } finally {
     writeEvidence();
+    console.log(`Evidence: ${evidencePath}`);
   }
 }

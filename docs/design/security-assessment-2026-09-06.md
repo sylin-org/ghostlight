@@ -206,7 +206,8 @@ outcomes. Cover both a governed refusal and a decode failure followed by an inde
 ### SA-02: Composite children bypass terminal audit completion
 
 Reproduced for flow; source finding for sequence. Flow invokes `self.run` for each decoded child.
-[Sequence](../../crates/orchestrator/src/work/sequence.rs) invokes individual operation handlers.
+[Sequence at assessment time](https://github.com/sylin-org/ghostlight/blob/ed8415a7/crates/orchestrator/src/work/sequence.rs)
+invokes individual operation handlers. ADR-0162 later retired that implementation.
 Neither takes each child through the top-level `finish` path in
 [work/mod.rs](../../crates/orchestrator/src/work/mod.rs).
 

@@ -144,6 +144,10 @@ the owner wants, and what this project learned the hard way.
   be green while an older authority is still serving real connectors. Do not call that a full
   integration test. Identify exact live image paths, deploy and restart only the changed component,
   prove its existing shores renegotiate, and name any physical lane that still did not run.
+- **Installation must connect without restarting the browser.** Installing the service and extension
+  must make an already-running browser usable. A complete Chrome shutdown is not an acceptable
+  setup requirement. Installation acceptance uses the actual browser, native-host registration,
+  extension, and installed executables; a replacement native pipe cannot prove that promise.
 - **A representative fixture does not prove a fixed roster is complete.** When a surface promises
   every supported product, assert the exact target ids and product cardinality, then verify the
   deployed live projection. A small fixture may prove layout, but it cannot prove completeness.

@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight"
-version = "1.3.4"
+version = "1.3.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-bridge"
-version = "1.3.4"
+version = "1.3.5"
 dependencies = [
  "fs2",
  "ghostlight-win-peer",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-browser-connector"
-version = "1.3.4"
+version = "1.3.5"
 dependencies = [
  "anyhow",
  "ghostlight-bridge",
@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-mcp-connector"
-version = "1.3.4"
+version = "1.3.5"
 dependencies = [
  "anyhow",
  "ghostlight-bridge",
@@ -1537,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-win-peer"
-version = "1.3.4"
+version = "1.3.5"
 
 [[package]]
 name = "gio"

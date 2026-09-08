@@ -1,32 +1,56 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   assertAllowedDownload,
   assetNames,
   ensureBinary,
   executableNames,
-  isMain,
   publishedAssetNames,
   releaseTarget,
   selectedExecutable,
   validateChecksums,
 } from "../bin/ghostlight.js";
 
-test("an installed npm bin symlink still invokes the launcher", async () => {
+test("a real offline npm install invokes the launcher through the platform bin entry", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ghostlight-npm-bin-"));
-  const module = join(directory, "ghostlight.js");
-  const command = join(directory, "ghostlight");
-  await writeFile(module, "launcher");
-  await symlink(module, command);
   try {
-    assert.equal(isMain(command, pathToFileURL(module)), true);
+    const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+    const stage = join(directory, "package");
+    await mkdir(stage);
+    await cp(join(packageRoot, "bin"), join(stage, "bin"), { recursive: true });
+    await cp(join(packageRoot, "package.json"), join(stage, "package.json"));
+    const metadata = JSON.parse(await readFile(join(stage, "package.json"), "utf8"));
+    // A deliberately incomplete checksum set stops the actual launcher before any download.
+    // This proves npm's installed entry point, not candidate binary delivery or startup.
+    await writeFile(join(stage, "checksums.json"), JSON.stringify({ version: metadata.version,
+      algorithm: "sha256", binaries: {} }));
+    const npmCli = process.env.npm_execpath || join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
+    const environment = { ...process.env, npm_config_cache: join(directory, "cache"),
+      GHOSTLIGHT_HOME: join(directory, "ghostlight-cache") };
+    const run = (command, args) => spawnSync(command, args, { cwd: directory, env: environment,
+      windowsHide: true, encoding: "utf8", timeout: 30000 });
+    const packed = run(process.execPath, [npmCli, "pack", stage, "--json", "--ignore-scripts", "--offline", "--pack-destination", directory]);
+    assert.equal(packed.status, 0, packed.stderr || packed.error?.message);
+    const archive = join(directory, JSON.parse(packed.stdout)[0].filename);
+    const installed = run(process.execPath, [npmCli, "install", archive, "--prefix", directory,
+      "--offline", "--ignore-scripts", "--no-audit", "--no-fund"]);
+    assert.equal(installed.status, 0, installed.stderr || installed.error?.message);
+    const bin = join(directory, "node_modules/.bin/ghostlight");
+    const launched = process.platform === "win32"
+      ? run("pwsh", ["-NoProfile", "-File", `${bin}.ps1`, "--version"])
+      : run(bin, ["--version"]);
+    assert.equal(launched.status, 1, launched.error?.message);
+    assert.match(launched.stderr, /complete binary checksum set/);
+    assert.equal(launched.stdout, "", "Launcher failures must not pollute MCP stdout");
   } finally {
+    assert.equal(resolve(dirname(directory)), resolve(tmpdir()));
     await rm(directory, { recursive: true, force: true });
   }
 });

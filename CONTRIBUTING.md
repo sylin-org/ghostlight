@@ -75,6 +75,11 @@ The suite has three useful layers:
 Visible browser journeys and native tray/notification smoke tests remain release gates because a
 green unit suite cannot substitute for the user's actual desktop and browser.
 
+The [pre-release integration guide](docs/testing/pre-release-integration.md) includes the opt-in
+installed Windows journey and the Linux release matrix. That journey briefly removes owned native
+registrations and crashes the installed processes while keeping Chrome open; run it only on an
+idle development or dedicated acceptance installation.
+
 For the complete hardening regression suite, set `GHOSTLIGHT_TEST_BROWSER` to Chrome for Testing
 and run `node tests/hardening-suite.mjs`. It builds fresh binaries and runs Rust, extension,
 process, continuity, provenance, CLI, workbench, and real Chromium journeys. Missing browser

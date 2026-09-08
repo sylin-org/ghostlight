@@ -1,7 +1,80 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (action details and header order implemented, verified, and deployed; published versions remain
-service 1.3.4 and adapter 1.1.1).
+Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
+published versions remain service 1.3.4 and adapter 1.1.1).
+
+## Service 1.3.5 and adapter 1.1.2 (2026-09-08)
+
+The owner authorized patch revision bumps and extension submission first. Service-derived source
+and package manifests now name 1.3.5. Adapter 1.1.2 covers service 1.3.4-1.3.5; the existing 1.1.1
+row also extends through 1.3.5. Observed public metadata and MCP Registry metadata remain at the
+published versions.
+
+Chrome Web Store accepted `ghostlight-extension-v1.1.2.zip` and reports **Pending review** for
+the existing Ghostlight item. Automatic publication was unchecked before final submission;
+the reviewed revision will be staged. The package/service has not been published.
+The [custody record](testing/candidate-custody-2026-09-08.md) binds the uploaded archive hash,
+version-bump validation, and remaining package release gates.
+
+## Pre-release integration suite (2026-09-08)
+
+The owner requested real integration acceptance before the next release, authorized building and
+running the Windows suite now, and requested explicit Linux release gates. The
+[integration guide](testing/pre-release-integration.md) maps cold installation in both orders,
+published delivery routes, upgrade/removal, actual MCP clients, browser capabilities, governance,
+human controls, privacy, process recovery, and visible Linux desktop acceptance.
+
+`tests/installed-windows-journey.ps1` now tests actual native-host unregister/reinstall, native
+connector failure, service failure, retained native port and initialized MCP connection, then
+all 23 catalog tools through ordinary installed Chrome. The successful complete run retained
+Chrome throughout: registration repair 1,073 ms, connector recovery 3,233 ms, and authority/MCP
+recovery 7,222 ms. Evidence: `.tmp/installed-windows/20260908T170744608/`.
+These are development-installation results, not a clean-package or store-adapter attestation.
+
+Real prompt testing found an early return in `Page.javascriptDialogOpening` that prevented dialog
+state from reaching the lifecycle tracker and service. The event is now recorded before optional
+before-unload acceptance. The owner reloaded the unpacked adapter; actual prompt status, response,
+and dismissal pass. No Rust binary or browser restart was needed to load that fix.
+
+The npm launcher test now performs a real offline pack/install and invokes npm's generated platform
+entry, replacing a symlink assumption that failed on ordinary Windows accounts. Its checksum
+refusal proves entry-point execution only, not candidate download or binary startup. The hardening
+runner includes both npm and MCPB launcher checks. Foundry scripts use current flow/configured
+authority semantics and create their own tab; the shell script's malformed opening payload is fixed.
+
+All 19 Windows hardening gates pass on one unchanged source fingerprint
+`dc6b38008f75e46d5d7dfd436bd68508be68a0067ceeb5d0a08708db32b19f59`.
+Evidence: `.tmp/hardening-suite/2026-09-08T17-08-33-898Z-38008/results.json`.
+The updated PowerShell Foundry demo also completed through the actual installed CLI, including
+file attachment, recording delivery/erase, flows, and real prompt response/dismissal. Its log is
+`.tmp/foundry-integration-20260908.log`. Shell syntax passes; the Linux demo still needs execution
+on Linux. Final installed doctor state is Ready, connected and idle, with process diagnostics off.
+
+Failed evidence remains: a post-navigation document-scope race occurred before an explicit readiness
+wait was added, and one combined installed run timed out on the public demo's text wait. The latter
+ran alongside a fresh Rust build, but resource contention is unproven. The full installed rerun
+passed without concurrent compilation. These observations and the original installation incident
+remain release follow-up items; no automatic retry or widened deadline was added to conceal them.
+The dialog fix is now in submitted adapter 1.1.2 and still needs store approval/validation. Linux,
+clean-machine installation in both orders, package upgrade/removal, and three actual MCP clients
+remain required and unevidenced by this Windows development run.
+
+## Fresh-machine installation incident (2026-09-08)
+
+All three executables were built from `c8bfb905` through the dev-loop and installed locally.
+The unpacked extension initially reported `Not installed here` despite a present, valid native-host
+registration. Extension reloads and reported browser restarts did not restore it. A diagnostic
+launch after confirming all Chrome processes had exited connected successfully. The original
+failure cause remains unproven; the restart is not an accepted setup requirement or a product fix.
+
+A subsequent test against the actual installed Chrome removed and restored Ghostlight's native-host
+registration while Chrome and the authority stayed running. The real connector reappeared and
+completed negotiation in 1,138 ms, with identical restored manifest bytes. A fresh installed MCP
+session then listed tabs, opened Example Domain, and read its text through the real extension.
+The [incident record](testing/installation-recovery-2026-09-08.md) separates this evidence from the
+unresolved original failure and records the owner's no-browser-restart acceptance requirement.
+The installation investigation itself changed no production source; the separate integration
+suite work above subsequently found and fixed the dialog-handler defect.
 
 ## At a glance detail access (2026-09-07)
 

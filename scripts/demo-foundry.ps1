@@ -6,8 +6,8 @@
 .DESCRIPTION
     All seven beats from docs/design/tcg-foundry-demo.md: a foil proof fails QA, Ghostlight inspects
     the defect, records a rejection, requests a revision, reads the page's own console and network
-    evidence, attaches proof, completes the release packet, is refused when it tries to leave the
-    domain, and finally hands the page an animated replay of its own work and erases the bytes.
+    evidence, attaches proof, completes the release packet, explains configured authority,
+    and finally hands the page an animated replay of its own work and erases the bytes.
 
     This shipped on the 0.8 line as the `ghostlight demo` subcommand. It does not need to be one:
     the command line reaches the same catalog through the same governance, so a recording operator
@@ -62,7 +62,6 @@ $Release = @{
     'Release owner' = 'Maya Chen'
     'QA note'       = 'Revision B clears the foil mask and the Sylin back stamp.'
 }
-$OffDomain = 'https://example.com/'
 
 function Resolve-Ghostlight {
     if ($Ghostlight) { return (Resolve-Path -LiteralPath $Ghostlight).Path }
@@ -192,7 +191,7 @@ Write-Host ('{0,-16} {1,-10} {2}' -f '----', '------', '-------------')
 
 # 1. Open the Foundry, frame the composition, and start a memory-only recording lease.
 # The frame is not decoration: a smaller viewport spends the recording's fidelity budget slower.
-$tab = (Step 'open' 'browser_navigate' @{ url = $Url }).facts.tab
+$tab = (Step 'open' 'browser_navigate' @{ url = $Url; new_tab = $true }).facts.tab
 $null = Step 'frame' 'browser_window' @{ tab = $tab; action = 'resize'; width = $Width; height = $Height }
 # The whole story is recorded. The browser owns all of it -- capture, bounds, encoding, delivery --
 # so beat seven's replay is attached to the page without one frame leaving Chromium (ADR-0109).
@@ -242,10 +241,8 @@ $null = Step 'key to end' 'browser_press_key' @{
 }
 $null = Step 'complete' 'browser_click' @{ tab = $tab; target = (Target $after 'button' 'Complete release packet') }
 
-# 6. Try to leave the domain. The refusal is the point, so anything else fails the run.
-$null = Step 'off-domain' 'browser_navigate' @{
-    tab = $tab; url = $OffDomain; restrict_hosts = @('sylin.org')
-} @() 'blocked'
+# 6. Explain the person's configured authority without creating caller-side policy.
+$null = Step 'explain policy' 'policy_explain' @{}
 
 # 7. Hand the page the replay, confirm it landed, and erase the bytes.
 $null = Step 'save replay' 'browser_record' @{
@@ -262,11 +259,11 @@ if (-not $KeepRecording) {
 $null = Step 'scroll stage' 'browser_scroll' @{ tab = $tab; direction = 'down'; amount = 'page' }
 $null = Step 'scroll back' 'browser_scroll' @{ tab = $tab; direction = 'up'; amount = 'medium' }
 $null = Step 'read title' 'browser_execute' @{ tab = $tab; script = 'document.title' }
-$null = Step 'seq scroll-wait' 'browser_sequence' @{
+$null = Step 'flow scroll-wait' 'browser_flow' @{
     tab = $tab
     steps = @(
-        @{ action = 'scroll'; direction = 'down'; amount = 'small' }
-        @{ action = 'wait'; condition = 'text_present'; value = 'SYLIN' }
+        @{ tool = 'browser_scroll'; arguments = @{ direction = 'down'; amount = 'small' } }
+        @{ tool = 'browser_wait'; arguments = @{ condition = 'text_present'; value = 'SYLIN' } }
     )
 }
 $null = Step 'flow title-find' 'browser_flow' @{
@@ -278,12 +275,7 @@ $null = Step 'flow title-find' 'browser_flow' @{
         } }
     )
 }
-# The 24th catalog tool belongs in the story, or "whole catalog rehearsed" stops being true
-# (CachyOS finding 3, 2026-08-25).
-$explain = Step 'explain policy' 'policy_explain' @{}
-if ($explain.summary -notmatch '^Explained current authority across ') {
-    throw "policy_explain summary drifted: $($explain.summary)"
-}
+$null = Step 'list tabs' 'browser_tabs' @{ action = 'list' }
 $null = Step 'demo index' 'browser_navigate' @{ tab = $tab; url = 'https://sylin.org/ghostlight/demo/' }
 $null = Step 'history back' 'browser_history' @{ tab = $tab; action = 'back' }
 
@@ -305,7 +297,7 @@ $null = Step 'bell silent' 'browser_wait' @{
 
 Remove-Item -LiteralPath $shot -Force -ErrorAction SilentlyContinue
 Write-Host ''
-Write-Host 'Story complete: inspected, rejected, revised, evidenced, refused off-domain, replayed, erased.'
+Write-Host 'Story complete: inspected, rejected, revised, evidenced, explained authority, replayed, erased.'
 Write-Host 'Whole catalog rehearsed, ending with the desk bell answering and dismissing.'
 Write-Host 'The tab stays open for your capture; close it when you are done.'
 exit 0

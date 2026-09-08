@@ -11,7 +11,6 @@ width="1280"
 height="800"
 keep_recording=0
 rejection="Foil registration drifts past the lower-right safe area. Hold for Revision B."
-off_domain="https://example.com/"
 
 usage() {
   cat <<'EOF'
@@ -160,7 +159,7 @@ printf 'Stage:      %s\n\n' "$url"
 printf '%-16s %-10s %s\n' BEAT STATUS 'WHAT HAPPENED'
 printf '%-16s %-10s %s\n' ---- ------ '-------------'
 
-step open browser_navigate "$(jq -nc --arg url "$url" '{url:\}')" succeeded
+step open browser_navigate "$(jq -nc --arg url "$url" '{url:$url,new_tab:true}')" succeeded
 tab=$(jq -er '.facts.tab' "$result")
 step frame browser_window "$(jq -nc --arg tab "$tab" --argjson width "$width" --argjson height "$height" '{tab:$tab,action:"resize",width:$width,height:$height}')" succeeded
 step 'record start' browser_record "$(jq -nc --arg tab "$tab" '{action:"start",tab:$tab}')" succeeded
@@ -218,15 +217,15 @@ step 'release packet' browser_fill_form "$(jq -nc \
 # Completion replaces the packet view, so this is the keyboard beat's only honest moment.
 step 'key to end' browser_press_key "$(jq -nc --arg tab "$tab" --arg target "$release_name" '{tab:$tab,target:$target,key:"End"}')" succeeded
 step complete browser_click "$(jq -nc --arg tab "$tab" --arg target "$complete" '{tab:$tab,target:$target}')" succeeded
-step off-domain browser_navigate "$(jq -nc --arg tab "$tab" --arg url "$off_domain" '{tab:$tab,url:$url,restrict_hosts:["sylin.org"]}')" blocked
+step 'explain policy' policy_explain '{}' succeeded
 step 'save replay' browser_record "$(jq -nc --arg target "$replay" '{action:"save",target:$target}')" succeeded
 step 'replay landed' browser_wait "$(jq -nc --arg tab "$tab" '{tab:$tab,condition:"text_present",value:"Replay ready"}')" succeeded
 
 if [ "$keep_recording" -eq 0 ]; then
   step 'erase bytes' browser_record '{"action":"discard"}' succeeded
-  outcome='Story complete: inspected, rejected, revised, evidenced, refused off-domain, replayed, erased.'
+  outcome='Story complete: inspected, rejected, revised, evidenced, explained authority, replayed, erased.'
 else
-  outcome='Story complete: inspected, rejected, revised, evidenced, refused off-domain, and replayed. Recording retained until expiry.'
+  outcome='Story complete: inspected, rejected, revised, evidenced, explained authority, and replayed. Recording retained until expiry.'
 fi
 
 # Whole-catalog coda. The story above is the narrative; this is the rehearsal, so one script
@@ -235,11 +234,9 @@ fi
 step 'scroll stage' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"down",amount:"page"}')" succeeded
 step 'scroll back' browser_scroll "$(jq -nc --arg tab "$tab" '{tab:$tab,direction:"up",amount:"medium"}')" succeeded
 step 'read title' browser_execute "$(jq -nc --arg tab "$tab" '{tab:$tab,script:"document.title"}')" succeeded
-step 'seq scroll-wait' browser_sequence "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{action:"scroll",direction:"down",amount:"small"},{action:"wait",condition:"text_present",value:"SYLIN"}]}')" succeeded
+step 'flow scroll-wait' browser_flow "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{tool:"browser_scroll",arguments:{direction:"down",amount:"small"}},{tool:"browser_wait",arguments:{condition:"text_present",value:"SYLIN"}}]}')" succeeded
 step 'flow title-find' browser_flow "$(jq -nc --arg tab "$tab" '{tab:$tab,steps:[{id:"title",tool:"browser_execute",arguments:{script:"document.title"}},{id:"find it",tool:"browser_find",arguments:{text:{flow_ref:{step:"title",pointer:"/facts/value"}}}}]}')" succeeded
-# The 24th catalog tool belongs in the story, or "whole catalog rehearsed" stops being true
-# (CachyOS finding 3, 2026-08-25).
-step 'explain policy' policy_explain '{}' succeeded
+step 'list tabs' browser_tabs '{"action":"list"}' succeeded
 step 'demo index' browser_navigate "$(jq -nc --arg tab "$tab" --arg index 'https://sylin.org/ghostlight/demo/' '{tab:$tab,url:$index}')" succeeded
 step 'history back' browser_history "$(jq -nc --arg tab "$tab" '{tab:$tab,action:"back"}')" succeeded
 
