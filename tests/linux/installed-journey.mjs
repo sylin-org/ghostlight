@@ -20,18 +20,19 @@ for (let index = 2; index < process.argv.length; index++) {
 }
 assert.ok(process.platform === "linux" && options.get("--exercise-installed-stack") &&
   options.get("--bin-dir") && options.get("--browser"),
-"Usage: node tests/installed-linux-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack [--devtools-port-file <dedicated browser file>]");
+"Usage: node tests/linux/installed-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack [--devtools-port-file <dedicated browser file>]");
 for (const name of ["GHOSTLIGHT_RUNTIME_FILE", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE", "GHOSTLIGHT_RUNTIME_CONTROL_FILE"]) {
   assert.ok(!process.env[name], `Remove ${name}: this journey requires the installation's ordinary paths.`);
 }
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "../..");
 const bin = realpathSync(options.get("--bin-dir"));
 const browserImage = realpathSync(options.get("--browser"));
 const authorityImage = join(bin, "ghostlight");
 const nativeImage = join(bin, "ghostlight-browser-connector");
 const mcpImage = join(bin, "ghostlight-mcp-connector");
 const configRoot = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-const output = join(root, ".tmp/installed-linux", `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`);
+const output = join(process.env.GHOSTLIGHT_LINUX_INSTALLED_AREA || join(root, ".tmp/linux-installed"),
+  "recovery", `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`);
 mkdirSync(output, { recursive: true });
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const delay = ms => new Promise(done => setTimeout(done, ms));
