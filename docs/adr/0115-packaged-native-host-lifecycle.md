@@ -89,3 +89,24 @@ harvest inventory records the rest until an equivalent 1.0 proof exists.
   archives without duplicating registry or manifest policy in packaging scripts.
 - Release work now includes native packaging and real Linux revalidation. Those are product gates,
   not standing release bureaucracy.
+
+## Amendment: register the physical Windows manifest path (2026-09-08)
+
+A real reboot failure showed that installation from a packaged desktop caller can redirect
+AppData file access into that caller's package cache. The registry contained the logical AppData
+path, and a check in the same redirected context reported Current. Ordinary Chrome successfully
+read the registry but failed to open the nonexistent logical manifest path. Relaunching Chrome
+from the packaged caller concealed the defect by giving it the same redirected view.
+
+Windows registration now resolves the written manifest to its physical filesystem path before
+publishing that path in the browser registry. Inspection requires the registered spelling itself
+to name that physical location; equivalence only inside the inspecting process's virtual view is
+not enough to report Current. Owned redirected registrations remain Updatable and use the same
+install/repair operation. Ownership checks, fixed browser identities, per-user scope, and the
+single existing connector are unchanged. No second manifest or helper service is introduced.
+
+This registers the actual storage location; it does not make a caller-owned package cache survive
+removal of that package. Ordinary installation outside such a caller still uses ordinary AppData.
+Release acceptance must include a browser launched independently of the installer context, and
+installation custody must remain visible in evidence. See the
+[Windows boot investigation](../testing/windows-boot-connection-2026-09-08.md).

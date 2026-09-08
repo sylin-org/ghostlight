@@ -551,16 +551,23 @@ fn inspect_browser(
                 return Ok((NativeHostState::Missing, None));
             };
             let registered_path = PathBuf::from(registered_path);
+            let physical_path = normalize_path(&registered_path);
             let contents = registration_io.read_file(&registered_path)?;
             classify_manifest(
                 contents.as_deref(),
                 expected,
                 context.platform,
-                same_path(
-                    &registered_path,
-                    &windows_manifest_path(context),
-                    context.platform,
-                ),
+                // A packaged caller can read a virtual AppData path that an ordinary browser
+                // cannot. The registry must name the physical file, not merely a path that
+                // resolves to that file inside this process's redirected filesystem view.
+                registered_path
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&physical_path.to_string_lossy())
+                    && same_path(
+                        &physical_path,
+                        &windows_manifest_path(context),
+                        context.platform,
+                    ),
             )
         }
         NativeHostPlatform::Linux => {
@@ -714,6 +721,9 @@ fn apply_install_for_mode(
                 }
             }
             registration_io.write_file(&manifest_path, &contents)?;
+            // Resolve after writing: MSIX can redirect creation into package-local storage.
+            // Chromium runs outside that context and needs the resulting physical path.
+            let manifest_path = normalize_path(&manifest_path);
             let manifest_value = manifest_path.to_string_lossy();
             for browser in browsers {
                 let observed = before

@@ -161,6 +161,11 @@ the owner wants, and what this project learned the hard way.
   must make an already-running browser usable. A complete Chrome shutdown is not an acceptable
   setup requirement. Installation acceptance uses the actual browser, native-host registration,
   extension, and installed executables; a replacement native pipe cannot prove that promise.
+- **The installer's filesystem view is not the browser's view.** Packaged desktop callers can
+  redirect AppData writes while their checks still see the logical path. Register the physical
+  manifest path and test against a browser launched independently. A successful browser launch
+  from the same caller can hide the failure; elevation and matching user identities do not prove
+  an unredirected filesystem view (ADR-0115's September 8 amendment).
 - **A representative fixture does not prove a fixed roster is complete.** When a surface promises
   every supported product, assert the exact target ids and product cardinality, then verify the
   deployed live projection. A small fixture may prove layout, but it cannot prove completeness.

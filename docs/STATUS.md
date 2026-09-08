@@ -26,6 +26,18 @@ too. Reboot normally. If the connection fails, preserve that browser process and
 extension connection diagnostics before restarting it. See
 [boot investigation evidence](testing/windows-boot-connection-2026-09-08.md).
 
+The next reboot reproduced the failure and exposed its cause. Windows redirected the installer's
+AppData file into Codex's package cache, but the registry named the ordinary AppData path. Checks
+in the installer's redirected view falsely reported Current. Chrome's real I/O trace showed
+successful registry lookup followed by manifest `STATUS_OBJECT_PATH_NOT_FOUND` failures. Changing
+the registration to the physical existing file restored Ready in the same Chrome and authority
+processes, without reloading or copying the product. The installer now publishes the physical path
+and treats redirected logical registrations as Updatable (ADR-0115 amendment). Source checks and
+normal in-place deployment passed. The installed checker correctly detected the original bad
+registration when briefly restored, and the installed repair corrected it while Chrome remained
+connected. All four browser registrations now name the physical file. A subsequent owner reboot
+is the remaining confirmation of persistence across boot.
+
 ## Product-wide leniency directive and history application
 
 The owner clarified that resilience through leniency is a general product rule, not just an audit
