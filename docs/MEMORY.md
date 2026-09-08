@@ -179,6 +179,15 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
+  URL that does not identify the release tag. Resolve the latest release page first, validate the
+  stable tag, then pin checksums and every sibling download to that one release. The actual Linux
+  one-line installation and `tests/installer-shell.mjs` caught the old final-asset-URL assumption.
+- **Fixed archive timestamps do not guarantee reproducible bytes.** .NET's Pax writer also puts
+  the packager PID into extended-header names. The portable package's fixed short roster uses
+  Ustar now; test it in separate packager processes, since two calls in one process miss this bug.
+  Compression-runtime identity remains part of the reproduction environment.
+
 Every one of these cost something to learn.
 
 - **A filled DOM is not proof that a controlled editor retained the draft.** Reddit discarded

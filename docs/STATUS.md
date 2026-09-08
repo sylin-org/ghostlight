@@ -27,6 +27,32 @@ It identifies the tested Windows boundaries, missing installed Linux evidence, e
 adapter custody, runnable entry points, destructive package-script isolation, and publication
 boundaries. The submitted adapter stays unchanged while Google reviews it.
 
+## Additional local Linux acceptance (2026-09-08)
+
+The owner authorized all remaining locally feasible Linux work. The
+[additional Linux evidence](testing/linux-local-acceptance-2026-09-08.md) records installed
+configured governance and privacy, Chromium/Brave and plural-profile continuity, portable
+ownership-safe removal, no-tray Applications launch, and actual WebKit renderer recovery.
+Seven additional signed managed-policy checks pass through the installed native host, including
+cold admission refusal, verified-cache recovery, and signed rollback refusal. These use dedicated
+contexts and leave the owner's 1.3.4 installation in place.
+
+Local delivery testing found two packaging defects: Pax archive headers embedded the packager
+PID, and the shell installer tried to derive a release tag from GitHub's final asset CDN URL.
+The portable packager now uses Ustar; the installer resolves the release page and pins its tag
+before downloading checksums and siblings. Both have executable regression checks. The fixed
+one-line installer and the actual public npm entry downloaded and verified the published 1.3.4
+siblings; npm also completed an installed native browser open/read/capture journey.
+
+A disposable Ubuntu 22.04 environment built 1.3.5 with the pinned Rust and Tauri tools. The
+three binaries require GLIBC 2.34. Its finalized Debian package passes native-content inspection;
+Debian 12 and Ubuntu 24.04 consumer lifecycle checks both passed. This is local build
+and package evidence, not GitHub build provenance or store-adapter acceptance.
+Forward 1.3.4-to-1.3.5 upgrades also pass on both consumers after explicit service restart and
+retained-MCP negotiation. Package replacement alone leaves the old authority running. A reverse
+fixture downgrade exposed that public 1.3.4 cannot read newer `permissions` audit fields; preserve
+that failed evidence and do not claim transparent rollback with newer history.
+
 ## Service 1.3.5 and adapter 1.1.2 (2026-09-08)
 
 The owner authorized patch revision bumps and extension submission first. Service-derived source

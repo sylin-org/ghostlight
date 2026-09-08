@@ -277,3 +277,17 @@ Final full Windows run:
 The browser interaction evidence uses isolated Chromium with synthetic workbench events. It does
 not claim those clicks occurred inside the installed Tauri window. Full Linux execution remains
 outstanding; this follow-up does not reopen or complete deferred admission/verification decisions.
+
+## Linux delivery follow-up (2026-09-08)
+
+The full suite now runs the portable archive regression on both platforms and the shell installer
+regression on Linux. Portable tests compare separate packager processes and extracted payload,
+owner, timestamp, and mode metadata. Shell tests pin one validated release across CDN asset
+transport and reject invalid release/version/checksum inputs. The actual public download is a
+separate local integration result, not part of the offline regression.
+
+All 20 Linux gates passed on unchanged source at
+`.tmp/hardening-suite/2026-09-08T21-31-40-763Z-113207/results.json`, fingerprint
+`d5b65ea751a6d6b00c1b9eb1db7f4ea772d3b0846a8910efe473fabbf137162e`.
+The [additional Linux evidence](../../testing/linux-local-acceptance-2026-09-08.md) records the
+real defects, actual delivery, installed browser/desktop checks, and package-consumer boundaries.

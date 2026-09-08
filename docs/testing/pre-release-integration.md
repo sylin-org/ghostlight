@@ -123,6 +123,12 @@ the existing 23-tool live journey and shell Foundry story. This is actual native
 development context, not a clean account, a candidate package, or store delivery. See the
 [Linux evidence record](linux-integration-2026-09-08.md).
 
+The [additional local Linux run](linux-local-acceptance-2026-09-08.md) adds configured native
+RAWX/privacy and signed managed-policy checks, Chromium plus Brave and a second ordinary profile, renderer-loss recovery,
+Applications launch without a tray host, portable ownership-safe removal, actual public npm and
+one-line delivery, and local baseline Debian package-consumer evidence. These narrower passes
+retain the candidate/store/visible-GNOME/actual-client requirements in the matrix below.
+
 ### Required release rows
 
 Run each row on Windows and visible Linux using the release's supported routes. One successful

@@ -150,6 +150,12 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 A 1.0 updater replaces the three version-matched sibling executables and desktop assets as one
 package. It does not silently edit harness registrations or extension settings.
 
+On Linux, replacing a Debian package does not replace an already-running authority. After the
+package update, use Ghostlight's Quit action, then open Ghostlight from Applications or run
+`ghostlight open`. Reconnect MCP clients to load the updated connector executables. Check
+`ghostlight doctor` for the running service version; `ghostlight --version` reports the executable
+on disk and can differ until the old process has exited.
+
 Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to Disconnect
 each registration it owns.
 Then remove the matching browser extension and use the operating system's package uninstall. A
