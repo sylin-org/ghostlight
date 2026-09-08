@@ -38,6 +38,14 @@ const MAX_DETAIL_BYTES: usize = 500;
 /// The closed event-name vocabulary. Event names are constants so no call site carries a
 /// literal.
 pub mod event {
+    pub const PROCESS_CONTEXT: &str = "process_context";
+    pub const PROCESS_FAILED: &str = "process_failed";
+    pub const PROCESS_EXITED: &str = "process_exited";
+    pub const NATIVE_HELLO_RECEIVED: &str = "native_hello_received";
+    pub const NATIVE_INPUT_CLOSED: &str = "native_input_closed";
+    pub const NATIVE_INPUT_FAILED: &str = "native_input_failed";
+    pub const SERVICE_CONNECT_FAILED: &str = "service_connect_failed";
+    pub const RUNTIME_PUBLISHED: &str = "runtime_published";
     pub const PROCESS_STARTED: &str = "process_started";
     pub const SINK_OPENED: &str = "sink_opened";
     pub const SINK_CLOSED: &str = "sink_closed";
@@ -273,14 +281,29 @@ impl Sink {
     /// watch. The explicit layer, when present, pins the sink on for this process's life.
     pub fn birth(component: Component, version: &str, runtime_path: &Path) -> Arc<Sink> {
         let pinned = std::env::var_os(ENV_DIR).map(PathBuf::from);
-        Sink::birth_with(
+        let sink = Sink::birth_with(
             component,
             version,
             runtime_path,
             pinned,
             &OsMarkerWatcher,
             None,
-        )
+        );
+        sink.emit(
+            event::PROCESS_CONTEXT,
+            Level::Info,
+            None,
+            &format!(
+                "executable={} runtime={} runtime_exists={} deploy_lock={}",
+                std::env::current_exe().unwrap_or_default().display(),
+                runtime_path.display(),
+                runtime_path.exists(),
+                runtime_path
+                    .with_file_name(crate::lifecycle::DEPLOY_LOCK_FILE)
+                    .exists()
+            ),
+        );
+        sink
     }
 
     /// Birth with explicit inputs; the seam tests use.

@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js", "lib/connection-log.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
@@ -24,6 +24,14 @@ const scriptEvaluator = globalThis.GhostlightScriptEvaluator;
 const HOST_NAME = shared.NATIVE_HOST_NAME;
 const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/chromium-extension/post-install/";
 const adapterEpoch = `adapter_${crypto.randomUUID().replaceAll("-", "")}`;
+const connectionEvents = globalThis.GhostlightConnectionLog.EVENTS;
+const connectionLog = globalThis.GhostlightConnectionLog.create({
+  storage: chrome.storage.local, debugKey: stateApi.DEBUG_KEY,
+  context: { epoch: adapterEpoch, adapter_version: chrome.runtime.getManifest().version,
+    extension_id: chrome.runtime.id, browser_version: navigator.userAgent }
+});
+connectionLog.record(connectionEvents.WORKER_STARTED);
+let connectionAttemptNumber = 0;
 const operationEngine = globalThis.GhostlightOperationEngine.create({
   load: async () => (await chrome.storage.session.get(stateApi.OPERATIONS_KEY))[stateApi.OPERATIONS_KEY],
   save: async (value) => chrome.storage.session.set({ [stateApi.OPERATIONS_KEY]: value })
@@ -87,6 +95,8 @@ function send(frame) {
 }
 
 async function initializeLocalState() {
+  const started = Date.now();
+  connectionLog.record(connectionEvents.INITIALIZE_STARTED);
   const stored = await chrome.storage.local.get([
     stateApi.BROWSER_ID_KEY,
     stateApi.EFFECTS_KEY,
@@ -112,6 +122,7 @@ async function initializeLocalState() {
       await syncPresentationState(tab.id);
       await flushPendingPresentation(tab.id);
     }));
+  connectionLog.record(connectionEvents.INITIALIZE_FINISHED, { browser_id: browserId, duration_ms: Date.now() - started });
 }
 
 async function tabPreservationEnabled() {
@@ -169,7 +180,9 @@ async function retainManagedDebugger(tabId) {
   }
 }
 
-function connectNative() {
+function connectNative(trigger = "worker") {
+  connectionLog.record(connectionEvents.CONNECT_REQUESTED, { trigger: typeof trigger === "string" ? trigger : "event",
+    has_port: Boolean(nativePort), pending: Boolean(nativeConnectionAttempt) });
   if (nativePort) return Promise.resolve();
   if (nativeConnectionAttempt) return nativeConnectionAttempt;
   nativeConnectionAttempt = establishNativeConnection()
@@ -178,10 +191,14 @@ function connectNative() {
 }
 
 async function establishNativeConnection() {
+  const attempt = ++connectionAttemptNumber;
+  let stage = "initialize";
   try {
     if (!browserId) await initializeLocalState();
     if (nativePort) return;
+    stage = "connect_native";
     const port = chrome.runtime.connectNative(HOST_NAME);
+    connectionLog.record(connectionEvents.NATIVE_PORT_OPENED, { attempt });
     nativePort = port;
     port.onMessage.addListener((frame) => {
       if (nativePort !== port) return;
@@ -193,12 +210,14 @@ async function establishNativeConnection() {
       const disconnectError = chrome.runtime.lastError?.message || "Native connection ended.";
       if (nativePort !== port) return;
       nativePort = null;
+      connectionLog.record(connectionEvents.NATIVE_DISCONNECTED, { attempt, error: disconnectError });
       settleServiceBoundaryState().catch(() => {});
       setConnection({ connected: false, service_version: null, last_error: disconnectError });
       broadcastRuntimeState("disconnected").catch(() => {});
-      chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 });
+      scheduleNativeRetry(attempt);
     });
-    send({
+    stage = "hello";
+    const helloSent = send({
       kind: "hello",
       major: shared.ADAPTER_PROTOCOL_MAJOR,
       adapter_version: chrome.runtime.getManifest().version,
@@ -208,23 +227,41 @@ async function establishNativeConnection() {
       attended: await holdsFocusedWindow(),
       capabilities: shared.ADAPTER_CAPABILITIES
     });
+    connectionLog.record(helloSent ? connectionEvents.NATIVE_HELLO_SENT : connectionEvents.NATIVE_HELLO_SKIPPED,
+      { attempt, browser_id: browserId });
   } catch (error) {
     nativePort = null;
     setConnection({ connected: false, service_version: null, last_error: shared.bounded(error?.message ?? error, 500) });
-    chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 });
+    connectionLog.record(connectionEvents.CONNECT_FAILED, { attempt, stage, error: shared.bounded(error?.message ?? error, 500) });
+    scheduleNativeRetry(attempt);
   }
 }
 
+function scheduleNativeRetry(attempt) {
+  Promise.resolve().then(() => chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 }))
+    .then(() => chrome.alarms.get("ghostlight-reconnect"))
+    .then(alarm => connectionLog.record(connectionEvents.RETRY_SCHEDULED, { attempt, scheduled_time: alarm?.scheduledTime ?? 0 }))
+    .catch(error => connectionLog.record(connectionEvents.RETRY_FAILED, { attempt, error: shared.bounded(error?.message ?? error, 500) }));
+}
+
 function onExtensionInstalled(details) {
-  connectNative();
+  connectionLog.record(connectionEvents.EXTENSION_INSTALLED, { trigger: details?.reason });
+  connectNative("installed");
   if (details?.reason === "install") {
     chrome.tabs.create({ url: SERVICE_INSTALL_URL }).catch(() => {});
   }
 }
 
 chrome.runtime.onInstalled.addListener(onExtensionInstalled);
-chrome.runtime.onStartup.addListener(connectNative);
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "ghostlight-reconnect") connectNative(); });
+chrome.runtime.onStartup.addListener(() => {
+  connectionLog.record(connectionEvents.BROWSER_STARTED);
+  connectNative("browser_startup");
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== "ghostlight-reconnect") return;
+  connectionLog.record(connectionEvents.ALARM_FIRED, { scheduled_time: alarm.scheduledTime });
+  connectNative("alarm");
+});
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (recordingDocuments.has(details.tabId)) recording.interruptTab(details.tabId, "document_boundary");
@@ -489,12 +526,14 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
     return;
   }
   if (frame.kind === "backend_unavailable") {
+    connectionLog.record(connectionEvents.BACKEND_UNAVAILABLE);
     await settleServiceBoundaryState();
     setConnection({ connected: false, service_version: null, last_error: "The local Ghostlight service is unavailable." });
     await broadcastRuntimeState("disconnected");
     return;
   }
   if (frame.kind === "hello_accepted") {
+    connectionLog.record(connectionEvents.HELLO_ACCEPTED, { service_version: frame.service_version });
     browserNegotiation = (async () => {
       const changed = await operationEngine.activate(frame.service_epoch);
       if (changed) await settleServiceBoundaryState();
@@ -2027,6 +2066,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   Promise.resolve().then(async () => {
     if (message?.kind === "ui_state_changed") return null;
     if (message?.kind === "ui_snapshot") return uiSnapshot();
+    if (message?.kind === "connection_diagnostics") {
+      if (_sender.url !== chrome.runtime.getURL("options.html")) throw new Error("Open extension options to export connection diagnostics.");
+      return connectionLog.snapshot();
+    }
     if (message?.kind === "runtime_control") {
       requestRuntimeControl(message.intent);
       return { queued: true };
@@ -2062,6 +2105,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.kind === "set_preferences") {
       preferences = stateApi.preferences(message.preferences);
       await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
+      await connectionLog.setEnabled(preferences.diagnostics);
+      connectionLog.record(connectionEvents.PREFERENCES_CHANGED);
       return preferences;
     }
     throw new Error("Unknown extension message.");

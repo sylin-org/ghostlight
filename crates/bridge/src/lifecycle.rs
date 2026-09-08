@@ -14,7 +14,8 @@ use fs2::FileExt;
 
 use crate::runtime::{runtime_discovery, RuntimeDiscovery};
 
-const DEPLOY_LOCK_FILE: &str = "deploy.lock";
+/// Presence marker used to quiesce demand-start during a sibling replacement.
+pub const DEPLOY_LOCK_FILE: &str = "deploy.lock";
 const DEPLOY_LOCK_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 const SERVICE_LOCK_EXTENSION: &str = "lock";
 

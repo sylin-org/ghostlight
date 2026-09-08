@@ -42,11 +42,43 @@ fn main() -> Result<()> {
         None,
         "browser native relay starting",
     );
+    let result = run(&diagnostics);
+    match &result {
+        Ok(()) => diagnostics.emit(
+            event::PROCESS_EXITED,
+            Level::Info,
+            None,
+            "native relay exited",
+        ),
+        Err(error) => diagnostics.emit(
+            event::PROCESS_FAILED,
+            Level::Error,
+            None,
+            &format!("{error:#}"),
+        ),
+    }
+    result
+}
+
+fn run(diagnostics: &Sink) -> Result<()> {
     let (events, incoming) = sync_channel(FRAME_BUFFER);
     let chrome_alive = Arc::new(AtomicBool::new(true));
     spawn_chrome_reader(events.clone(), Arc::clone(&chrome_alive))?;
 
-    let adapter_hello = receive_adapter_hello(&incoming)?;
+    let adapter_hello = receive_adapter_hello(&incoming).inspect_err(|error| {
+        diagnostics.emit(
+            event::NATIVE_INPUT_FAILED,
+            Level::Error,
+            None,
+            &error.to_string(),
+        );
+    })?;
+    diagnostics.emit(
+        event::NATIVE_HELLO_RECEIVED,
+        Level::Info,
+        None,
+        &format!("first native frame bytes={}", adapter_hello.len()),
+    );
     let stdout = io::stdout();
     let mut chrome_output = stdout.lock();
     let mut service: Option<TcpStream> = None;
@@ -56,10 +88,16 @@ fn main() -> Result<()> {
         if service.is_none() {
             let connection = match connect_once(&adapter_hello) {
                 Ok(connection) => Some(connection),
-                Err(_) => {
+                Err(error) => {
+                    diagnostics.emit(
+                        event::SERVICE_CONNECT_FAILED,
+                        Level::Warn,
+                        None,
+                        &format!("{error:#}"),
+                    );
                     write_native(&mut chrome_output, &BrowserRelayStatus::BackendUnavailable)
                         .context("report unavailable backend")?;
-                    connect_adapter(&adapter_hello, &chrome_alive, &diagnostics)?
+                    connect_adapter(&adapter_hello, &chrome_alive, diagnostics)?
                 }
             };
             let Some((stream, first_adapter_response)) = connection else {
@@ -87,8 +125,17 @@ fn main() -> Result<()> {
                     service = None;
                 }
             }
-            Ok(RelayEvent::ChromeClosed) | Err(_) => return Ok(()),
+            Ok(RelayEvent::ChromeClosed) | Err(_) => {
+                diagnostics.emit(
+                    event::NATIVE_INPUT_CLOSED,
+                    Level::Info,
+                    None,
+                    "browser closed native input",
+                );
+                return Ok(());
+            }
             Ok(RelayEvent::ChromeFailed(message)) => {
+                diagnostics.emit(event::NATIVE_INPUT_FAILED, Level::Error, None, &message);
                 anyhow::bail!("native input failed: {message}")
             }
             Ok(RelayEvent::ServiceFrame {
@@ -165,9 +212,17 @@ fn connect_adapter(
     }
     let mut startup_error_reported = false;
     let mut reported_disposition: Option<String> = None;
+    let mut reported_connection_error = String::new();
     while chrome_alive.load(Ordering::SeqCst) {
-        if let Ok(connection) = connect_once(adapter_hello) {
-            return Ok(Some(connection));
+        match connect_once(adapter_hello) {
+            Ok(connection) => return Ok(Some(connection)),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                if detail != reported_connection_error {
+                    diagnostics.emit(event::SERVICE_CONNECT_FAILED, Level::Warn, None, &detail);
+                    reported_connection_error = detail;
+                }
+            }
         }
         match request_orchestrator_start() {
             Ok(disposition) => {

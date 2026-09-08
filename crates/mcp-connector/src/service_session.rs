@@ -104,8 +104,16 @@ fn reconnect_loop(
 ) {
     let mut startup_error_reported = false;
     let mut reported_disposition: Option<String> = None;
+    let mut reported_connection_error = String::new();
     loop {
         let connection = connect(&client_label);
+        if let Err(error) = &connection {
+            let detail = format!("{error:#}");
+            if reported_connection_error != detail {
+                diagnostics.emit(event::SERVICE_CONNECT_FAILED, Level::Warn, None, &detail);
+                reported_connection_error = detail;
+            }
+        }
         let Ok((stream, reader, server, catalog)) = connection else {
             match request_orchestrator_start() {
                 Ok(disposition) => {
@@ -146,6 +154,7 @@ fn reconnect_loop(
             continue;
         };
         startup_error_reported = false;
+        reported_connection_error.clear();
         reported_disposition = None;
         let writer = Arc::new(Mutex::new(stream));
         let (generation, catalog_changed) = {

@@ -68,6 +68,18 @@ enum ServiceOpening {
 impl ServiceHost {
     /// Start both authenticated loopback listeners and publish runtime discovery.
     pub fn start(path: &Path) -> Result<Self> {
+        let diagnostics = DiagnosticsHub::birth(path);
+        Self::start_with_diagnostics(path, Arc::clone(&diagnostics)).inspect_err(|error| {
+            diagnostics.sink().emit(
+                ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                ghostlight_bridge::diagnostics::Level::Error,
+                None,
+                &format!("service startup: {error:#}"),
+            );
+        })
+    }
+
+    fn start_with_diagnostics(path: &Path, diagnostics: Arc<DiagnosticsHub>) -> Result<Self> {
         let lease = ServiceLease::try_acquire(path)
             .context("open the orchestrator service lease")?
             .context("another Ghostlight orchestrator already owns this runtime")?;
@@ -96,7 +108,6 @@ impl ServiceHost {
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
         let browser = Arc::new(RelayBrowserPort::new(service_epoch));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
-        let diagnostics = DiagnosticsHub::birth(path);
         browser
             .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
         {
@@ -149,6 +160,18 @@ impl ServiceHost {
         }));
 
         write_runtime(path, &endpoint).context("publish runtime endpoint")?;
+        diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            &format!(
+                "service_port={} browser_port={} service_major={} browser_major={}",
+                endpoint.service_port,
+                endpoint.browser_port,
+                endpoint.service_bridge_major,
+                endpoint.browser_relay_major
+            ),
+        );
         let stop = Arc::new(AtomicBool::new(false));
         let audit_stop = stop.clone();
         let audit_thread = std::thread::spawn(move || {

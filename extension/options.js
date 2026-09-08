@@ -10,6 +10,17 @@
   const linkText = document.getElementById("link-text");
   const linkSub = document.getElementById("link-sub");
   const setupRoute = document.getElementById("setup-route");
+  document.getElementById("export-connection-log").addEventListener("click", async () => {
+    const reportStatus = document.getElementById("connection-log-status");
+    try {
+      const report = await request({ kind: "connection_diagnostics" });
+      await chrome.downloads.download({
+        url: `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`,
+        filename: `ghostlight-connection-${Date.now()}.json`, saveAs: false
+      });
+      reportStatus.textContent = "Connection diagnostics saved to Downloads.";
+    } catch (error) { reportStatus.textContent = String(error?.message ?? error); }
+  });
 
   setupRoute.addEventListener("click", () => {
     const destination = navigator.onLine

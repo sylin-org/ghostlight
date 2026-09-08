@@ -151,6 +151,12 @@ the owner wants, and what this project learned the hard way.
   be green while an older authority is still serving real connectors. Do not call that a full
   integration test. Identify exact live image paths, deploy and restart only the changed component,
   prove its existing shores renegotiate, and name any physical lane that still did not run.
+- **Live debugging uses the installation in place.** The owner does not want a second Ghostlight
+  authority, an alternate diagnostic build running beside it, startup helpers, or diagnostic
+  shortcuts scattered around the OS. Build away from locked files, deploy through the dev loop,
+  and exercise only the normal installed graph. Keep diagnostic capability in the product's
+  existing toggles and log locations. Ask before running a separate desktop test installation
+  during an active live-debugging session.
 - **Installation must connect without restarting the browser.** Installing the service and extension
   must make an already-running browser usable. A complete Chrome shutdown is not an acceptable
   setup requirement. Installation acceptance uses the actual browser, native-host registration,

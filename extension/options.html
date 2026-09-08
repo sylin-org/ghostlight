@@ -58,10 +58,12 @@
         <div class="row">
           <div class="text">
             <h2>Developer diagnostics</h2>
-            <p>Keeps bounded connection lifecycle details available in the extension while diagnostics are enabled. Off by default.</p>
+            <p>Saves bounded startup, connection, and retry details across browser restarts. Off by default. No page contents are recorded.</p>
           </div>
           <label class="switch"><input type="checkbox" id="debug" aria-label="Developer diagnostics"><span class="slider"></span></label>
         </div>
+        <button id="export-connection-log" type="button">Save connection diagnostics</button>
+        <p id="connection-log-status" role="status"></p>
       </section>
 
       <section class="card info">

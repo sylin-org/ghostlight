@@ -18,6 +18,38 @@
 
 ## Context
 
+### Amendment: failed native startup before a service connection (2026-09-08)
+
+The owner requested persistent diagnostics across a reboot after Chromium repeatedly reported
+`Specified native messaging host not found` despite valid registration and a healthy service.
+Extension reload did not recover; complete Chrome exit and a logging-enabled relaunch did.
+The extension trace proves that initialization and retry alarms were active during the failure.
+This is evidence of a browser native-host lookup/launch failure, not proof of its underlying cause.
+
+The existing extension diagnostics preference now enables a separate bounded local connection
+log in `chrome.storage.local`, independent of any native connection. Keep the latest 400 events
+and 16 worker-start anchors. Record worker epochs, version/identity, initialization, native port
+attempts, exact bounded native errors, alarm scheduling/firing, and backend negotiation. Never
+retain native payloads, page URLs/content, cookies, or runtime authentication tokens. Logging
+failure cannot fail browser work. The extension options page exports these local diagnostics
+through the existing download permission, including while the host is unreachable.
+
+The shared process sink records executable/runtime context on birth. The native connector logs
+the first frame's byte count, changed reconnect errors, native closure/failure, and terminal
+failure. MCP records changed connection failures. The service sink starts before listener/lease
+setup and records startup failures and published port/contract numbers without tokens.
+
+The owner clarified that instrumentation must live in the normal deployed product. Do not add
+an OS startup observer, diagnostic shortcut, or parallel desktop installation for live debugging.
+The initially prepared RunOnce entry, shortcut, copied helper, and empty helper directories were
+removed before reboot. Build outputs may be isolated to avoid locked files, but the installation
+in place is the live test target. Existing process-log retention and the extension's local
+connection log survive boot.
+
+The submitted 1.1.2 store archive predates this normal-source addition. Do not overwrite that
+artifact or claim these changes are already in the store submission. Reconcile the next store
+publication explicitly after the incident is resolved; there is no separate diagnostic product.
+
 Model clients report errors, and today there is nothing to look at afterward. The blindness is
 structural, one gap per layer:
 

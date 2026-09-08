@@ -3,6 +3,29 @@
 Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
 published versions remain service 1.3.4 and adapter 1.1.1).
 
+## Windows boot connection investigation
+
+The rebooted Windows installation ran a healthy 1.3.4 authority with valid native registration
+but no browser connector. Unpacked adapter 1.1.2 was enabled. Reloading it did not recover.
+The new built-in extension connection log captured completed initialization and repeated alarm
+retries, each failing with Chrome's `Specified native messaging host not found` error.
+Complete Chrome exit and a logging-enabled relaunch restored Ready within seconds while the same
+authority process stayed running. This narrows the failure to browser-side native-host lookup or
+launch state; it does not prove the underlying cause or establish reboot recovery.
+
+Normal-source diagnostics now persist extension startup/native-error/retry events through browser
+restarts and export from extension options even when disconnected. All three deployed siblings
+under `target/release` are now 1.3.5 with process/runtime context, changed connection failures,
+native first-frame/closure/failure, and service startup/publication records. The persistent
+diagnostics marker is enabled. There is one running installed authority; separate test processes
+have ended. The owner requires subsequent live debugging to use this installation only.
+
+The owner rejected extra OS startup helpers and shortcuts. The prepared RunOnce value, desktop
+shortcut, copied helper, and its empty directories were removed; the helper source was removed
+too. Reboot normally. If the connection fails, preserve that browser process and save the built-in
+extension connection diagnostics before restarting it. See
+[boot investigation evidence](testing/windows-boot-connection-2026-09-08.md).
+
 ## Product-wide leniency directive and history application
 
 The owner clarified that resilience through leniency is a general product rule, not just an audit
@@ -16,7 +39,8 @@ records on disk, reports omissions, and permits startup and new saving. ADR-0163
 Windows verified real public 1.3.4-written history with the current 1.3.5 executable, repeated
 startup and saving, original-byte preservation, and separately mutated future-format records.
 See [history compatibility evidence](testing/history-compatibility-2026-09-08.md). Source changes
-are not deployed; the public 1.3.4 downgrade defect and release acceptance remain open.
+were subsequently deployed with the normal diagnostics update above; the public 1.3.4 downgrade
+defect and release acceptance remain open.
 
 ## Resume on Linux
 
