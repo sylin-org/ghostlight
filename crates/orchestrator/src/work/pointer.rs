@@ -24,7 +24,7 @@ impl ApplicationExecutor {
         value: &Click,
     ) -> Terminal {
         let location = if let Some(selector) = &value.selector {
-            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, false) {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok((tab, target)) => ResolvedLocation::Target { tab, target },
                 Err(terminal) => return terminal,
             }
@@ -43,7 +43,7 @@ impl ApplicationExecutor {
             }
         };
         let selected = location.tab();
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,

@@ -298,3 +298,41 @@ setting is introduced. H1's closed audit projection may retain this payload-free
 child receipts, expandable history, and resume UI remain H4/future work.
 
 See [H2b](../tasks/security-hardening/h2b-aggregate-outcomes.md) for the bounded contract and evidence.
+
+## Implementation correction: ordinary control selection (2026-09-07)
+
+Installed hardening acceptance found that a labeled input outside an HTML `form` could be filled
+by target handle but not by the equivalent semantic selector. The executor silently forced form
+ancestry for selector-based fills and file attachments. That restriction predates hardening and is
+absent from the advertised catalog and current language contract.
+
+Decision 3's selector/handle equivalence governs: a non-submitting fill resolves ordinary controls
+without requiring form ancestry, including standalone and shadow-root editors. File attachment
+uses the same ordinary-control resolution. The executor no longer requests implicit form scope.
+The current catalog has no explicit form-scope option; the earlier optional-scope description is
+not evidence that one is implemented.
+
+The resolved target still crosses the same capability, document, credential, and physical batch
+preflight checks. An explicit submit target is still checked against the first resolved field's
+containing form. This correction uses the existing browser query mechanism and changes no adapter
+or relay. The regression suite retains the original standalone-field fixture and proves actual retained
+values through both selector and handle inputs.
+
+## Amendment: complete lookup and postcondition requirements (2026-09-07)
+
+Decision 3's semantic alternative includes a document lookup before the effect. That lookup
+already authorizes Read in the executor. ADR-0078 Decision 3 also requires Read for an explicit
+`expect` postcondition. The operation directory and classification now include those requirements:
+`browser_click` and `browser_type_text` require Read + Action with `selector` or `expect`;
+`browser_press_key` requires Read + Action with `expect`; `browser_upload` requires Read + Write
+with `selector`. Form fill already requires Read + Write, with Action for explicit submission.
+
+The ordinary handle, view, and focused branches retain their existing effect requirements when
+no postcondition is requested. Document checks remain at lookup, target dispatch, and subsequent
+observation. Landing checks use the acknowledged action's effect requirement; a selector lookup at
+the source does not require Read on an Action-only landing. The complete request is admitted before
+an effect, so a known missing
+Read grant cannot be discovered only after the effect has occurred. Catalog and policy help name
+the complete variants. The catalog also advertises the existing bounded `expect` input accepted
+by the four effect-tool decoders; this adds no execution mode. Later observation failures still
+preserve already-applied effects through the ordinary completion path.

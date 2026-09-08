@@ -873,28 +873,28 @@ impl ApplicationExecutor {
     #[allow(clippy::result_large_err)]
     /// Resolve one typed semantic selector through a single adapter query.
     /// Zero or several matches fail without any effect; exactly one match is
-    /// registered as an ordinary generation-bound target.
+    /// registered as an ordinary generation-bound target. Named controls use the
+    /// same physical scope as handles; no implicit form ancestry is required.
     fn resolve_semantic(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         selector: &crate::language::SemanticSelector,
-        form_scope: bool,
     ) -> Result<(SelectedTab, SelectedTarget), Terminal> {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
             Err(error) => return Err(self.workspace_failure(context, error)),
         };
-        let read_decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
-        if !read_decision.allowed {
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
+        if !decision.allowed {
             return Err(self.blocked(
                 context,
-                read_decision,
+                decision,
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":read_decision.reason.as_str()}),
+                json!({"reason":decision.reason.as_str()}),
             ));
         }
         match self.dispatch(
@@ -904,7 +904,7 @@ impl ApplicationExecutor {
                 name: selector.name.clone(),
                 role: selector.role.clone(),
                 exact: selector.exact,
-                form_scope,
+                form_scope: false,
             },
         ) {
             Ok(BrowserOutcome::Targets { tab_id, targets }) if tab_id == selected.physical_id => {
@@ -922,7 +922,7 @@ impl ApplicationExecutor {
                             json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
                             outcome.next_steps(),
                         ),
-                        decision: read_decision,
+                        decision,
                         physical_id: Some(selected.physical_id),
                         observed: outcome.observed(),
                         audit: outcome.audit(),
@@ -946,9 +946,9 @@ impl ApplicationExecutor {
                     Err(error) => Err(self.workspace_failure(context, error)),
                 }
             }
-            Ok(_) => Err(self.protocol_failure(context, read_decision, Some(selected.physical_id))),
+            Ok(_) => Err(self.protocol_failure(context, decision, Some(selected.physical_id))),
             Err(error) => {
-                Err(self.browser_failure(context, read_decision, error, Some(selected.physical_id)))
+                Err(self.browser_failure(context, decision, error, Some(selected.physical_id)))
             }
         }
     }

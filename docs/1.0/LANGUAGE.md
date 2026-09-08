@@ -247,10 +247,12 @@ Facts: `tab`, `view`, `mime_type`, `width`, and `height`, plus one bounded MCP i
 Click a current semantic target or a point in a current screenshot. Shortest call:
 `{"target":"target_..."}`.
 
-Inputs use exactly one location branch: required `target`, or required `view`, `x`, and `y`.
+Inputs use exactly one location branch: required `target`, typed semantic `selector`, or required
+`view`, `x`, and `y`.
 Optional `tab`; optional `button` of `primary`, `middle`, or `secondary`, default `primary`;
 optional `click_count` from 1 to 3 for single, double, or triple, default 1; optional `timeout_ms`;
-optional restrictions. Capability: `action`.
+optional restrictions; optional `expect` postcondition. Capabilities: `action`, plus `read` when
+`selector` or `expect` is supplied.
 
 Facts: `tab`, optional `target`, optional `view`, `activated`, and any governed committed landing.
 
@@ -286,12 +288,16 @@ Fill one or more ordinary controls. It does not submit unless `submit_target` is
 Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
 exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
 for checkboxes and radios, or a finite number for numeric inputs; optional `tab`; optional
-`submit_target`; optional `timeout_ms`; optional restrictions.
+`submit_target`; optional `timeout_ms`; optional restrictions; optional `expect` postcondition.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Rich-text controls use the browser's editing transaction so controlled editors can retain the
 replacement. Empty values clear only the named editor. Filling never activates a submit control
 unless the caller supplied `submit_target`.
+
+Semantic selectors and target handles can address the same ordinary controls, including editors
+outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.
+An explicit `submit_target` is still checked against the first resolved field's containing form.
 
 Credential-class targets stop before any value dispatch and request visible user handoff. Facts:
 `tab`, `filled_count`, `submitted`, and any governed committed landing.
@@ -304,7 +310,9 @@ Type ordinary text through browser input events. Shortest call:
 Inputs use one location: `target` with bounded `text`; or `selector` with `text`; or
 `focused:true` to type into the currently focused editable control. Optional `clear_first`, default
 `false`; optional `tab`; optional `timeout_ms`; optional restrictions. Empty text is valid only as an
-explicit clear together with `clear_first:true`. Capability: `action`.
+explicit clear together with `clear_first:true`. Optional `expect` adds a postcondition.
+Capabilities: `action`, plus `read` when `selector` or `expect` is supplied. Targeted and focused
+typing without a postcondition require `action`.
 
 Credential-class targets stop before text dispatch. Facts: `tab`, `target`, `typed`,
 `character_count`, and any governed committed landing.
@@ -316,9 +324,15 @@ Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 Inputs: exactly one of required `key` as one character or one named key from the closed list, or
 required `strokes`, an ordered sequence of 1 to 20 of the same items, with optional `repeat` from 1
 to 100 defaulting to 1; optional `tab`; optional `target`; optional unique `modifiers` from `Alt`,
-`Control`, `Meta`, and `Shift`; optional restrictions. Capability: `action`.
+`Control`, `Meta`, and `Shift`; optional restrictions; optional `expect` postcondition.
+Capabilities: `action`, plus `read` when `expect` is supplied.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
+
+The optional `expect` on click, fill, type, and key calls uses one condition: `load_ready` with no
+value, or `url_contains`, `text_present`, or `text_absent` with a required non-empty `value` of at
+most 2,000 characters. Lookup and postcondition Read requirements are admitted with the complete
+request before an effect. A later observation failure preserves the effect already applied.
 
 ### `browser_drag`
 
@@ -370,7 +384,10 @@ Inputs: exactly one source of required `paths`, an array of 1 to 5 unique absolu
 or `files`, 1 to 5 inline objects with `name` and base64 `data_base64`; or one `source_image`
 handle from an earlier capture, optionally with `view`, `x`, and `y` to drop it at a point instead
 of attaching. The destination is optional `target` or typed semantic `selector`. Optional `tab`,
-`timeout_ms`, and restrictions. Capability: `write`.
+`timeout_ms`, and restrictions. Capabilities: `write`, plus `read` when `selector` is supplied.
+Target-handle attachment and current-view image drops require `write`.
+
+As with form fill, a semantic selector can address an ordinary file input outside an HTML `form`.
 
 Ghostlight rejects directories, missing files, any file larger than 5,000,000 bytes, and a combined
 payload larger than 5,000,000 bytes before browser dispatch, and refuses an upload above the

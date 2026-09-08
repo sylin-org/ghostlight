@@ -10,39 +10,93 @@ const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, "target", "release");
 const connectorPath = join(binDir, `ghostlight-mcp-connector${executableSuffix}`);
-if (!existsSync(connectorPath)) throw new Error(`Repo-built MCP connector is missing ${connectorPath}`);
+const evidencePath = join(repository, ".tmp/installed-hardening-evidence.json");
+const MAX_INVOCATION_RECORDS = 256;
+const checks = [];
+const evidence = [];
+const report = {
+  started_at: new Date().toISOString(),
+  transport: "installed MCP -> service -> registered native host -> installed MV3 adapter",
+  binaries: {}, passed: false, checks, invocations: evidence, preserved_tab: null,
+  failure: { code: "run_incomplete" }
+};
 
-const child = spawn(connectorPath, [], {
-  env: process.env,
-  stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true
-});
+function writeEvidence() {
+  report.recorded_at = new Date().toISOString();
+  writeFileSync(evidencePath, JSON.stringify(report, null, 2) + "\n");
+}
+
+function failureCode(error) {
+  return ["ERR_ASSERTION", "ETIMEDOUT", "EPIPE", "ENOENT", "ECONNRESET", "ERR_MCP_PROTOCOL", "ERR_EVIDENCE_LIMIT"]
+    .includes(error?.code) ? error.code : "live_journey_failed";
+}
+
+function evidenceToken(value, limit) {
+  return typeof value === "string" && value.length <= limit && /^[a-zA-Z0-9_-]+$/.test(value) ? value : null;
+}
+
+// Invalidate earlier success before startup, and keep bounded progress if this run is interrupted.
+mkdirSync(join(repository, ".tmp"), { recursive: true });
+writeEvidence();
+
+let child;
 const pending = new Map();
 let nextId = 1;
 let stderr = "";
-child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
-createInterface({ input: child.stdout }).on("line", (line) => {
-  const message = JSON.parse(line);
-  const waiter = pending.get(JSON.stringify(message.id));
-  if (waiter) {
-    pending.delete(JSON.stringify(message.id));
-    waiter.resolve(message);
-  }
-});
 
-function request(method, params = {}, timeoutMs = 15000) {
+function rejectPending(error) {
+  for (const waiter of pending.values()) waiter.reject(error);
+  pending.clear();
+}
+
+async function request(method, params = {}, timeoutMs = 15000) {
+  let record;
+  if (method === "tools/call") {
+    if (evidence.length >= MAX_INVOCATION_RECORDS) {
+      throw Object.assign(new Error("Installed invocation evidence limit reached"), { code: "ERR_EVIDENCE_LIMIT" });
+    }
+    record = { tool: evidenceToken(params.name, 80), invocation: null, status: null, effect: null };
+    evidence.push(record);
+    writeEvidence();
+  }
   const id = nextId++;
-  const promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending.delete(JSON.stringify(id));
-      reject(new Error(`Timed out waiting for MCP ${method}${stderr ? `: ${stderr.trim()}` : ""}`));
-    }, timeoutMs);
-    pending.set(JSON.stringify(id), {
-      resolve(value) { clearTimeout(timer); resolve(value); }
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(JSON.stringify(id));
+        reject(Object.assign(new Error(`Timed out waiting for MCP ${method}${stderr ? `: ${stderr.trim()}` : ""}`), { code: "ETIMEDOUT" }));
+      }, timeoutMs);
+      const waiter = {
+        resolve(value) { clearTimeout(timer); resolve(value); },
+        reject(error) { clearTimeout(timer); reject(error); }
+      };
+      pending.set(JSON.stringify(id), waiter);
+      try {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, error => {
+          if (!error || !pending.delete(JSON.stringify(id))) return;
+          waiter.reject(error);
+        });
+      } catch (error) {
+        pending.delete(JSON.stringify(id));
+        waiter.reject(error);
+      }
     });
-  });
-  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-  return promise;
+    if (record) {
+      const result = response.result?.structuredContent;
+      record.invocation = evidenceToken(result?.invocation, 128);
+      record.status = ["succeeded", "blocked", "failed", "cancelled", "attention_required", "unknown"].includes(result?.status) ? result.status : null;
+      record.effect = ["none", "applied", "partial", "unknown"].includes(result?.effect) ? result.effect : null;
+      if (response.error) record.failure = { code: "mcp_error", rpc_code: Number.isSafeInteger(response.error.code) ? response.error.code : null };
+      else if (!record.tool || !record.invocation || !record.status || !record.effect) record.failure = { code: "invalid_tool_receipt" };
+      if (record.failure) throw Object.assign(new Error("Invalid installed tool receipt"), { code: "ERR_MCP_PROTOCOL" });
+    }
+    return response;
+  } catch (error) {
+    if (record) record.failure ??= { code: failureCode(error) };
+    throw error;
+  } finally {
+    if (record) writeEvidence();
+  }
 }
 
 function notify(method, params = {}) {
@@ -54,18 +108,19 @@ function structured(response) {
   return response.result.structuredContent;
 }
 
-const passed = [];
-const evidence = [];
-function check(name) { passed.push(name); console.log(`PASS installed: ${name}`); }
+function check(name) { checks.push(name); console.log(`PASS installed: ${name}`); }
 async function call(name, args) {
   const response = await request("tools/call", { name, arguments: args }, 45000);
-  const result = structured(response);
-  evidence.push({ tool: name, invocation: result.invocation, status: result.status, effect: result.effect });
-  return result;
+  return structured(response);
 }
 
-// Serve only a disposable fixture, never repository or machine files.
+let capturedMask;
+// Serve only a disposable fixture and its captured test image, never arbitrary machine files.
 const localFixture = createServer((incoming, response) => {
+  if (incoming.url === "/captured-mask.jpg" && capturedMask) {
+    response.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+    response.end(capturedMask); return;
+  }
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   if (incoming.url === "/editor") {
     response.end(readFileSync(join(repository, "tests/fixtures/contenteditable.html"), "utf8")); return;
@@ -82,6 +137,23 @@ const localFixture = createServer((incoming, response) => {
 });
 
 try {
+  if (!existsSync(connectorPath)) throw Object.assign(new Error(`Repo-built MCP connector is missing ${connectorPath}`), { code: "ENOENT" });
+  report.binaries = Object.fromEntries(["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"].map(name => {
+    const path = join(binDir, name + executableSuffix);
+    return [name, { path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }];
+  }));
+  writeEvidence();
+  child = spawn(connectorPath, [], { env: process.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  child.on("error", rejectPending);
+  child.stdin.on("error", rejectPending);
+  child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString("utf8")).slice(-4000); });
+  createInterface({ input: child.stdout }).on("line", line => {
+    let message;
+    try { message = JSON.parse(line); }
+    catch { rejectPending(Object.assign(new Error("Invalid MCP protocol frame"), { code: "ERR_MCP_PROTOCOL" })); return; }
+    const waiter = pending.get(JSON.stringify(message?.id));
+    if (waiter) { pending.delete(JSON.stringify(message.id)); waiter.resolve(message); }
+  });
   const initialized = await request("initialize", {
     protocolVersion: "2025-11-25",
     capabilities: {},
@@ -206,9 +278,10 @@ try {
   assert.equal(masked.facts.coverage.masked_regions, 1);
   const maskedImage = maskedResponse.result.content.find(item => item.type === "image"); assert.ok(maskedImage);
   mkdirSync(join(repository, ".tmp"), { recursive: true });
-  writeFileSync(join(repository, ".tmp/installed-hardening-mask.jpg"), Buffer.from(maskedImage.data, "base64"));
-  const pixels = await tabEvidence(`(async () => {
-    const image = new Image(); image.src = ${JSON.stringify(`data:${maskedImage.mimeType};base64,${maskedImage.data}`)};
+  capturedMask = Buffer.from(maskedImage.data, "base64");
+  writeFileSync(join(repository, ".tmp/installed-hardening-mask.jpg"), capturedMask);
+  const pixels = await tabEvidence(`
+    const image = new Image(); image.src = '/captured-mask.jpg';
     await image.decode(); const canvas = document.createElement('canvas');
     canvas.width = image.width; canvas.height = image.height;
     const context = canvas.getContext('2d'); context.drawImage(image,0,0);
@@ -217,7 +290,8 @@ try {
     return [0.2,0.8].flatMap(x => [0.2,0.8].map(y => [...context.getImageData(
       Math.round((rectangle.left + rectangle.width*x)*scale),
       Math.round((rectangle.top + rectangle.height*y)*scale),1,1).data]));
-  })()`);
+  `);
+  assert.ok(Array.isArray(pixels), JSON.stringify(pixels));
   for (const pixel of pixels) for (const [index, expected] of [32, 36, 43, 255].entries()) {
     assert.ok(Math.abs(pixel[index] - expected) <= 5, `Installed exclusion pixel: ${pixel}`);
   }
@@ -395,17 +469,23 @@ try {
   if (closed.status === "succeeded") assert.equal(closed.facts.closed, true);
   console.log(JSON.stringify({ live: true, catalog_tools: listed.result.tools.length, opened: true, composed_read: true, composed_inspect: true, composed_find: true, composed_wait: true, framed_hover: true, target_screenshot: true, composed_fill: true, composed_completion: true, screenshot: true, region_screenshot: true, chained_region_screenshot: true, closed: closed.status === "succeeded", preserved }));
   check("live Sylin framed form, local-only submission, and target/viewport/magnified captures");
-  const binaryEvidence = Object.fromEntries(["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"].map(name => {
-    const path = join(binDir, name + executableSuffix);
-    return [name, { path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }];
-  }));
-  writeFileSync(join(repository, ".tmp/installed-hardening-evidence.json"), JSON.stringify({
-    recorded_at: new Date().toISOString(), transport: "installed MCP -> service -> registered native host -> installed MV3 adapter",
-    binaries: binaryEvidence, passed, invocations: evidence, preserved_tab: preserved ? tab : null
-  }, null, 2) + "\n");
+  report.preserved_tab = preserved ? tab : null;
+  report.passed = true;
+  report.failure = null;
+} catch (error) {
+  report.passed = false;
+  report.failure = { code: failureCode(error) };
+  throw error;
 } finally {
-  child.stdin.end();
-  child.kill();
-  localFixture.closeAllConnections();
-  if (localFixture.listening) await new Promise((resolve) => localFixture.close(resolve));
+  try {
+    if (child) { child.stdin.end(); child.kill(); }
+    localFixture.closeAllConnections();
+    if (localFixture.listening) await new Promise((resolve) => localFixture.close(resolve));
+  } catch (error) {
+    report.passed = false;
+    report.failure = { code: failureCode(error) };
+    throw error;
+  } finally {
+    writeEvidence();
+  }
 }

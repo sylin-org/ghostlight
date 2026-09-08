@@ -178,6 +178,9 @@ Every one of these cost something to learn.
   validation must cover every frame before the first edit; checking each field only when its turn
   arrives can change an earlier field before discovering a known invalid later one. The full
   hardening suite and its feature map live in `docs/tasks/security-hardening/regression-suite.md`.
+  A tool name alone is not a complete input matrix: handles, selectors, and postconditions can
+  require different capabilities. Advertise and admit the complete request before effects, while
+  keeping the action's landing requirement separate from earlier lookup and later observation.
 
 - **Mocked debugger replies do not prove JavaScript completion semantics.** H3's real Chromium
   lane found that `awaitPromise` plus `replMode` returned an async wrapper's promise as `{}`;

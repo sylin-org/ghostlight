@@ -59,7 +59,6 @@ impl ApplicationExecutor {
                         .as_deref()
                         .or_else(|| selected.as_ref().map(|tab| tab.handle.as_str())),
                     selector,
-                    true,
                 ) {
                     Ok(value) => value,
                     Err(terminal) => return terminal,
@@ -185,7 +184,7 @@ impl ApplicationExecutor {
             return self.type_focused(context, lease, value);
         }
         let (selected, target) = if let Some(selector) = &value.selector {
-            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, false) {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok(value) => value,
                 Err(terminal) => return terminal,
             }
@@ -196,7 +195,7 @@ impl ApplicationExecutor {
             }
         };
         let typed_role = target.role;
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -258,7 +257,7 @@ impl ApplicationExecutor {
                     context,
                     lease,
                     decision,
-                    context.requirements,
+                    Capability::Action,
                     &selected,
                     &tab,
                     &committed_urls,
@@ -303,7 +302,7 @@ impl ApplicationExecutor {
                 }
             }
         } else if let Some(selector) = &value.selector {
-            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector, true) {
+            match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok((tab, target)) => {
                     let locator = target.locator.clone();
                     let role = target.role;
@@ -541,7 +540,7 @@ impl ApplicationExecutor {
             Ok(value) => value,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -878,7 +877,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -939,7 +938,7 @@ impl ApplicationExecutor {
                     context,
                     lease,
                     decision,
-                    context.requirements,
+                    Capability::Action,
                     &selected,
                     &tab,
                     &committed_urls,

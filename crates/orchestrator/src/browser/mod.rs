@@ -2006,7 +2006,9 @@ pub(crate) mod testing {
                 .pop_front()
                 .unwrap_or_else(|| Err(BrowserError::Primitive("no fake outcome".into())));
             if let Ok(
-                BrowserOutcome::TabOpened { tab, .. } | BrowserOutcome::Navigated { tab, .. },
+                BrowserOutcome::TabOpened { tab, .. }
+                | BrowserOutcome::Navigated { tab, .. }
+                | BrowserOutcome::Typed { tab, .. },
             ) = &result
             {
                 lock(&self.documents).insert(

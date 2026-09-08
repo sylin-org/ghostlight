@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 
 use crate::governance::AuthoritySnapshot;
 
-use super::{CAPABILITIES, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS};
+use super::{
+    CAPABILITIES, DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS,
+    MIN_TIMEOUT_MS, NAMED_KEYS,
+};
 
 /// Return the complete native Ghostlight language in deterministic order.
 #[must_use]
@@ -72,8 +75,8 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_click",
             "Click",
-            "Click a current target_ handle or an exact point from a current view_ screenshot. Prefer a target when one is known; points suit canvases and maps.",
-            click_schema(),
+            "Click a current target_ handle, a control found by selector, or an exact point from a current view_ screenshot. Requires action; selector lookup or an expect check also requires read. Prefer a target when one is known; points suit canvases and maps.",
+            with_expect(click_schema()),
             Hints::browser_action(true),
         ),
         tool(
@@ -94,21 +97,21 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "browser_fill_form",
             "Fill form",
             "Fill one to thirty ordinary form fields in one call. Requires read and write, including unsent drafts; submit_target also requires action. Nothing submits unless submit_target names the control, and credential fields stop so the user can enter their secret.",
-            fill_schema(),
+            with_expect(fill_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_type_text",
             "Type text",
-            "Type text through real per-character keyboard input. Use browser_fill_form instead when plain values are enough.",
-            type_schema(),
+            "Type text through real per-character keyboard input. Requires action; selector lookup or an expect check also requires read. Use browser_fill_form instead when plain values are enough.",
+            with_expect(type_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_press_key",
             "Press key",
-            "Send one named key or one literal character, optionally aimed at a current target_. Use strokes for shortcuts such as Control-a.",
-            key_schema(),
+            "Send one named key or one literal character, optionally aimed at a current target_. Requires action; an expect check also requires read. Use strokes for shortcuts such as Control-a.",
+            with_expect(key_schema()),
             Hints::browser_action(true),
         ),
         tool(
@@ -135,7 +138,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_upload",
             "Upload files",
-            "Attach explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a point in a current view.",
+            "Attach explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a point in a current view. Requires write; selector lookup also requires read.",
             upload_schema(),
             Hints::browser_action(true),
         ),
@@ -685,7 +688,7 @@ fn semantic_selector() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "description": "Typed semantic selector resolved against the live document.",
+        "description": "Typed semantic selector resolved against the live document. Lookup requires read.",
         "properties": {
             "name": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Required accessible-name text."},
             "role": {"type": "string", "enum": ["button","link","checkbox","radio","textbox","searchbox","combobox","listbox","select","slider","spinbutton","tab","menuitem","option","heading","image"], "description": "Optional closed role filter."},
@@ -1544,6 +1547,20 @@ fn examples(mut schema: Value, values: Vec<Value>) -> Value {
     schema
 }
 
+fn with_expect(mut schema: Value) -> Value {
+    schema["properties"]["expect"] = json!({
+        "type":"object",
+        "additionalProperties":false,
+        "description":"Optional condition checked after the effect. Requires read as well as the action's capabilities, admitted before the effect. A failed check preserves the applied effect.",
+        "properties":{
+            "condition":{"type":"string","enum":["load_ready","url_contains","text_present","text_absent"]},
+            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Required text for url_contains, text_present, and text_absent; omit for load_ready."}
+        },
+        "required":["condition"]
+    });
+    schema
+}
+
 fn with<'a>(mut fields: Vec<(&'a str, Value)>, field: (&'a str, Value)) -> Vec<(&'a str, Value)> {
     fields.push(field);
     fields
@@ -1634,7 +1651,7 @@ fn extent(description: &str) -> Value {
 mod tests {
     use std::fs;
 
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use super::{catalog, catalog_for};
     use crate::governance::GovernanceFacade;
@@ -1688,6 +1705,43 @@ mod tests {
                 "{} lacks examples",
                 tool.name
             );
+        }
+    }
+
+    #[test]
+    fn postconditions_are_discoverable_on_the_tools_that_execute_them() {
+        let supported = [
+            "browser_click",
+            "browser_fill_form",
+            "browser_type_text",
+            "browser_press_key",
+        ];
+        for tool in catalog() {
+            let expectation = &tool.input_schema["properties"]["expect"];
+            if !supported.contains(&tool.name.as_str()) {
+                assert!(
+                    expectation.is_null(),
+                    "{} does not execute expect",
+                    tool.name
+                );
+                continue;
+            }
+            assert_eq!(expectation["type"], "object", "{}", tool.name);
+            assert_eq!(expectation["additionalProperties"], false);
+            let mut input = tool.input_schema["examples"][0].clone();
+            input["expect"] = json!({"condition":"text_present","value":"Ready"});
+            assert!(crate::language::decode(&tool.name, input.clone()).is_ok());
+            input["expect"]["value"] = json!("x".repeat(
+                expectation["properties"]["value"]["maxLength"]
+                    .as_u64()
+                    .expect("advertised text bound") as usize
+                    + 1
+            ));
+            assert!(crate::language::decode(&tool.name, input.clone()).is_err());
+            input["expect"] = json!({"condition":"load_ready"});
+            assert!(crate::language::decode(&tool.name, input.clone()).is_ok());
+            input["expect"]["value"] = json!("unexpected");
+            assert!(crate::language::decode(&tool.name, input).is_err());
         }
     }
 

@@ -27,6 +27,7 @@ use url::Url;
 const DEFAULT_TIMEOUT_MS: u64 = 8_000;
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 30_000;
+pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 const COMMON_FIELDS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
@@ -1700,7 +1701,7 @@ fn validate_expect(expect: &Option<Postcondition>) -> Result<(), LanguageError> 
             let value = expectation.value.as_deref().ok_or_else(|| {
                 LanguageError::Invalid(format!("{} requires value", expectation.condition))
             })?;
-            validate_text(value, 2_000, "value")
+            validate_text(value, MAX_POSTCONDITION_VALUE_CHARS, "value")
         }
         _ => Err(LanguageError::Invalid(
             "expect supports load_ready, url_contains, text_present, or text_absent".into(),

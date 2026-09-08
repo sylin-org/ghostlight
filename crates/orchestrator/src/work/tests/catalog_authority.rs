@@ -188,6 +188,37 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         }],
     );
     add(
+        "browser_click",
+        Some("selector"),
+        &["read", "action"],
+        json!({"selector":{"name":"Ordinary control","role":"button","exact":true}}),
+        vec![
+            BrowserOutcome::Targets {
+                tab_id: 7,
+                targets: vec![field("submit", "button")],
+            },
+            BrowserOutcome::Activated {
+                tab: tab(7, PAGE),
+                subject: None,
+                committed_urls: vec![PAGE.into()],
+            },
+        ],
+    );
+    add(
+        "browser_click",
+        Some("expect"),
+        &["read", "action"],
+        json!({"target":button,"expect":{"condition":"load_ready"}}),
+        vec![
+            BrowserOutcome::Activated {
+                tab: tab(7, PAGE),
+                subject: None,
+                committed_urls: vec![PAGE.into()],
+            },
+            observed(),
+        ],
+    );
+    add(
         "browser_scroll",
         None,
         &["read"],
@@ -250,6 +281,38 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         ],
     );
     add(
+        "browser_type_text",
+        Some("selector"),
+        &["read", "action"],
+        json!({"selector":{"name":"Ordinary control","role":"textbox","exact":true},"text":"PRIVATE_DRAFT"}),
+        vec![
+            targets(),
+            describe(false),
+            BrowserOutcome::Typed {
+                tab: tab(7, PAGE),
+                character_count: 13,
+                subject: None,
+                committed_urls: vec![PAGE.into()],
+            },
+        ],
+    );
+    add(
+        "browser_type_text",
+        Some("expect"),
+        &["read", "action"],
+        json!({"focused":true,"text":"PRIVATE_DRAFT","expect":{"condition":"load_ready"}}),
+        vec![
+            describe(false),
+            BrowserOutcome::Typed {
+                tab: tab(7, PAGE),
+                character_count: 13,
+                subject: None,
+                committed_urls: vec![PAGE.into()],
+            },
+            observed(),
+        ],
+    );
+    add(
         "browser_press_key",
         None,
         &["action"],
@@ -260,6 +323,21 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             subject: None,
             committed_urls: vec![PAGE.into()],
         }],
+    );
+    add(
+        "browser_press_key",
+        Some("expect"),
+        &["read", "action"],
+        json!({"key":"Tab","expect":{"condition":"load_ready"}}),
+        vec![
+            BrowserOutcome::KeyPressed {
+                tab: tab(7, PAGE),
+                key: "Tab".into(),
+                subject: None,
+                committed_urls: vec![PAGE.into()],
+            },
+            observed(),
+        ],
     );
     add(
         "browser_drag",
@@ -279,6 +357,22 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         &["write"],
         json!({"target":target,"files":[{"name":"PRIVATE_FILE.txt","data_base64":"eA=="}]}),
         vec![
+            describe(false),
+            BrowserOutcome::FilesUploaded {
+                tab_id: 7,
+                uploaded_count: 1,
+                uploaded_bytes: 1,
+                subject: None,
+            },
+        ],
+    );
+    add(
+        "browser_upload",
+        Some("selector"),
+        &["read", "write"],
+        json!({"selector":{"name":"Ordinary control","role":"textbox","exact":true},"files":[{"name":"PRIVATE_FILE.txt","data_base64":"eA=="}]}),
+        vec![
+            targets(),
             describe(false),
             BrowserOutcome::FilesUploaded {
                 tab_id: 7,
@@ -712,6 +806,91 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
         failures.len(),
         failures.join("\n")
     );
+}
+
+#[test]
+fn observation_variants_reject_missing_configured_capabilities_before_browser_effects() {
+    let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
+    for (index, template) in templates
+        .iter()
+        .enumerate()
+        .filter(|(_, case)| matches!(case.variant, Some("selector" | "expect")))
+    {
+        for missing in template.required {
+            for composed in [false, true] {
+                let (mut executor, browser, _, workspace, audit) = fixture();
+                let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+                let case = cases(&target, &button, &tab_handle).swap_remove(index);
+                let permitted: Vec<_> = case
+                    .required
+                    .iter()
+                    .copied()
+                    .filter(|capability| capability != missing)
+                    .collect();
+                let policy = temporary_policy("observation-missing-authority");
+                fs::write(
+                    &policy,
+                    serde_json::to_vec(&json!({
+                        "schema":3,"name":"Incomplete named work","version":"1",
+                        "grants":[{"id":"partial","hosts":{"allow":["*"]},"allowed":permitted}]
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                executor.governance = GovernanceFacade::new(Some(policy.clone()), None);
+                for reply in case.replies {
+                    browser.push(Ok(reply));
+                }
+                let before = browser.calls().len();
+                let invocation = if composed {
+                    json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":case.tool,"arguments":case.arguments}]})
+                } else {
+                    case.arguments
+                };
+                let result = executor.execute(
+                    &workspace,
+                    if composed { "browser_flow" } else { case.tool },
+                    invocation,
+                    None,
+                    &CancellationToken::default(),
+                );
+                fs::remove_file(policy).unwrap();
+                let label = format!(
+                    "{} {:?}, missing {missing}, composed={composed}",
+                    case.tool, case.variant
+                );
+                assert_eq!(result.status, Status::Blocked, "{label}: {result:?}");
+                assert_eq!(result.effect, Effect::None, "{label}");
+                assert_eq!(
+                    browser.calls().len(),
+                    before,
+                    "{label}: admit the whole request before lookup or effect"
+                );
+                let facts = if composed {
+                    &result.facts["steps"][0]["result"]["facts"]
+                } else {
+                    &result.facts
+                };
+                assert!(
+                    facts.get("restriction").is_none(),
+                    "{label}: configured grant failure is not a caller restriction"
+                );
+                let records = audit.0.lock().unwrap();
+                assert!(
+                    records
+                        .iter()
+                        .any(|record| record.invocation == result.invocation && !record.allowed),
+                    "{label}: retain denied authority evidence"
+                );
+                assert!(
+                    !serde_json::to_string(&*records)
+                        .unwrap()
+                        .contains("PRIVATE_"),
+                    "{label}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

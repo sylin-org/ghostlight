@@ -1,15 +1,15 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (hardening through C1 reporting and Reddit editor incident fix deployed
-and verified locally; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+Last updated: 2026-09-07 (hardening regression and installed Sylin acceptance complete, including
+editor and visual corrections; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
 
 ## Full-session regression suite (2026-09-07)
 
 The owner requested a complete regression suite for this session, then reported wrong-page read
 animations and a script spinner that never clears. The [suite record](tasks/security-hardening/regression-suite.md)
 maps H1-H8, C1 reporting, editor corrections, and these visual failures to executable coverage.
-All 16 source gates now pass on unchanged source: 520 Rust tests, 207 extension tests, six browser
-harness tests, 23 real-engine script cases, 65 real MV3 cases, both CLI and all process/continuity/
+All 16 source gates pass: 525 Rust tests, 207 extension tests, six browser
+harness tests, 23 real-engine script cases, 68 real MV3 cases, both CLI and all process/continuity/
 provenance journeys, policy grammar, workbench surface, and real Chromium history interaction.
 
 The expanded tests reproduced two additional root defects. Form fill now prepares all document
@@ -21,18 +21,33 @@ composition children. Terminal cleanup preserves other operations; hidden denial
 while retaining the human notice. Abandoned signatures have the previously decided bounded fallback.
 Actual closed-shadow DOM checks and raw screenshots prove routing and wheel removal.
 
+Installed acceptance then exposed a pre-existing selector/handle inconsistency: named fills and
+file attachments silently required an HTML form ancestor. The shared resolver now admits ordinary
+controls, including standalone and shadow editors. The capability directory covers 38 variants
+and 338 authority cases, including selector lookup and explicit postcondition Read requirements.
+Those complete requirements are admitted before discovery or effects; the catalog now advertises
+the already-supported postcondition input. Source lookup does not add Read to an Action-only
+landing, and a refused later observation preserves the acknowledged action without holding the tab.
+
 The final service is deployed via the dev-loop; installed and isolated release SHA-256 match
-`75650ebf6bd5c222f6ada8321c4b625bdac63647e33af3a7184166e2116c1252`. The exact-path process is
-Ready, the deploy lock is absent, and both connectors are unchanged. The final adapter changes
-require the owner's explicit reload; that request and installed live verification remain pending.
+`57f4e3147023d606e60ebb4c78d17b719c0b2f78b999b077e9a4482153f88435`. The exact-path process is
+Ready, the deploy lock is absent, and both connectors are unchanged. The owner confirmed the final
+extension reload. Installed acceptance passes through the actual MCP connector, service, registered
+native host, and adapter: eight named groups and 50 recorded calls. It proves retained drafts,
+batch preflight, script/flow effects, permitted parent access, excluded child content, actual masked
+pixels, script refusal, and the live Sylin form's local-only simulation and captures. The owned
+test tab remains open under preserve-tabs; the earlier Reddit draft remains untouched and unsent.
 
 The first full run passed required Rust/extension gates and all 60 MV3 behavior assertions, but
 failed a stale PowerShell synthetic-adapter fixture and Windows Chromium startup/cleanup races.
 Those harness defects are corrected and remain failing gates on persistent errors. The suite now
 follows Cargo's actual executable artifact paths, uses a hash-checked offline Sylin snapshot,
 and schedules continuity plus all browser journeys in Windows/Linux CI. Remote CI has not run.
-The final stable-source run passed every gate. Installed full-session acceptance remains pending;
-the earlier installed Reddit proof does not establish these newly changed adapter bytes.
+Installed evidence is `.tmp/installed-hardening-evidence.json`, with `passed:true`, and the masked
+image was inspected. The harness records failed attempts as failed, including its corrected image
+size/async-return checks. The suite record owns exact source fingerprints and report paths. Real
+visual rendering remains independently verified by isolated MV3 checks; installed acceptance does
+not additionally claim human-control races or audit-storage failure injection.
 
 ## Installed hardening and editor incident (2026-09-07)
 
@@ -66,8 +81,8 @@ retains its Windows cross-build source path. The Linux unsupported-peer test pas
 process and desktop/browser validation remains outstanding. No packages or system configuration
 were changed, and nothing was pushed or published.
 
-The dated implementation sections below retain their original pre-deployment evidence. This
-section owns current deployment truth.
+The dated implementation sections retain their original evidence. The Full-session regression
+suite section above owns current deployment truth.
 
 ## Earlier local deployment (2026-09-07)
 

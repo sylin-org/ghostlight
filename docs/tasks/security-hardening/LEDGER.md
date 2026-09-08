@@ -10,15 +10,21 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 Current work, 2026-09-07: the owner requested the [full-session regression suite](regression-suite.md)
 and reported wrong-page read animations plus a persistent script spinner. The suite and visual
-corrections are complete in source: all 16 gates pass on unchanged code, including 520 Rust tests,
-207 extension tests, six harness fault tests, 23 script cases, and 65 real MV3 cases. It also exposed
+corrections are complete: all 16 gates pass, including 525 Rust tests,
+207 extension tests, six harness fault tests, 23 script cases, and 68 real MV3 cases. It also exposed
 and repaired form-batch preflight and recording export requirements. The first complete run caught
 stale PowerShell fixture negotiation and Windows Chrome lifecycle races; their corrected harnesses
 still fail explicitly on persistent failure. STATUS records the final service deployment.
-The final adapter reload and installed acceptance remain pending. Preserve the earlier completed
-feature work and distinguish configured Windows/Linux CI jobs from executed Linux evidence.
+The owner confirmed the final adapter reload. Installed acceptance passes through the actual native
+host, including retained drafts, document exclusion/masking, script/flow effects, and the live Sylin
+form's local-only simulation and captures. Its eight groups and 50 invocation records are in
+`.tmp/installed-hardening-evidence.json`; STATUS owns the final service hash. The acceptance fixture
+also exposed and fixed implicit form ancestry in semantic fills/uploads and incomplete declared
+selector/postcondition requirements. The 38-variant, 338-case authority matrix includes those inputs.
+Preserve the earlier completed feature work and distinguish configured Windows/Linux CI jobs from
+executed Linux evidence. No further extension reload is owed for this service-only follow-up.
 
-Current override, 2026-09-07: orchestrator and MCP connector through `00b44646` were deployed
+Earlier incident evidence, 2026-09-07: orchestrator and MCP connector through `00b44646` were deployed
 using the dev-loop; the browser connector stayed unchanged. The owner reloaded the extension.
 The broader installed Sylin journey was interrupted by an urgent Reddit draft incident. Its fix
 is implemented, deployed, and verified: 513 Rust tests, 195 extension tests, process/CLI journeys,
@@ -30,8 +36,8 @@ the latest deployed state. Remaining C1 verification choices still require ideat
 
 Linux bridge validation ran natively in Debian WSL: 55 passed, 9 environment/cross-build failures;
 the private runtime `0600` check and unsupported Linux peer-observation check passed. Full Linux
-journeys remain outstanding. The interrupted broader installed Sylin journey must resume after
-the incident fix, rather than being inferred complete from the isolated browser fixtures.
+journeys remain outstanding. The interrupted broader installed Sylin journey is now complete,
+with actual installed evidence recorded above separately from the isolated browser fixtures.
 
 The owner requested a complete epic covering the assessment and all subsequent decisions, and
 accepted H3 as the first implementation cycle. The [epic](EPIC.md), [bootstrap](BOOTSTRAP.md), and
@@ -98,15 +104,15 @@ refusal. H6 is implemented locally; the H6 verification record owns its evidence
 | Package | Current disposition | Before its implementation cycle |
 | --- | --- | --- |
 | H2a | Fixed and committed as `8103c69b`; deployed locally | Required gates and process journey pass. |
-| H3 | IMPLEMENTED and verified locally; not deployed | Complete evidence is in its task record; no remaining H3 implementation task. |
+| H3 | IMPLEMENTED, deployed, and verified locally | Complete evidence is in its task record and the regression suite; no remaining H3 implementation task. |
 | H1 | IMPLEMENTED and verified locally; deployed locally | I1 accepted; all 447 Rust/183 extension tests and the extended process journey pass. See H1 and ADR-0103. |
 | H2b | IMPLEMENTED and verified locally; deployed locally | I2 accepted; 455 Rust/183 extension tests and actual MCP/JSONL progress checks pass. See H2b. |
 | H4 | IMPLEMENTED and verified locally; deployed locally | I3 accepted; 463 Rust/183 extension tests, incremental JSONL process checks, and isolated Chromium history checks pass. ADR-0156 and H4. |
 | H5 | IMPLEMENTED and verified locally; deployed locally | I4 accepted; scoped recovery, admission, timing, and history evidence in H5 and ADR-0157. |
-| H6 | IMPLEMENTED and verified locally; not deployed | I5 accepted; ADR-0158, 478 Rust/192 extension tests, process checks, and 29 Sylin browser cases. |
-| H7 | IMPLEMENTED and verified locally; not deployed | I6 accepted; 488 Rust/192 extension tests, real-process and UI checks, plus 29 Sylin regressions. ADR-0159 and H7. |
-| H8 | IMPLEMENTED and verified locally; not deployed | I7 accepted. Continuity, bounded queues/exchanges, private discovery, and quiet controls. ADR-0160 and H8. |
-| C1 | Option A foundation IMPLEMENTED and verified locally; full C1 incomplete | ADR-0161 settles immutable attribution and quiet reporting. Signature/hash verification remains deferred to another C1 ideation. |
+| H6 | IMPLEMENTED, deployed, and verified locally | I5 accepted; ADR-0158, full regression suite, 68 MV3 cases, and installed Sylin/native-host acceptance. |
+| H7 | IMPLEMENTED, deployed, and verified locally | I6 accepted; real-process failure/repair and history UI checks pass in the full suite. ADR-0159 and H7. |
+| H8 | IMPLEMENTED, deployed, and verified locally on Windows | I7 accepted. Continuity, bounded queues/exchanges, private discovery, and quiet controls. Full Linux journeys remain outstanding. ADR-0160 and H8. |
+| C1 | Option A foundation IMPLEMENTED, deployed, and verified locally; full C1 incomplete | ADR-0161 settles immutable attribution and quiet reporting. Signature/hash verification remains deferred to another C1 ideation. |
 | C2/C3 | Admission direction CONDITIONAL; mechanism open | Ideation I9 chooses a concrete integration and connection proof. |
 
 Ideation can proceed alongside independent agreed work. Inclusion in the epic does not imply

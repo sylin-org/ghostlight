@@ -299,6 +299,17 @@ try {
     assert.equal(result.status, "succeeded", JSON.stringify(result));
     assert.equal(result.facts.coverage.excluded_documents, 0); check(`${mode}: unrelated parent target remains usable`);
   }
+  policy();
+  result = await call("browser_fill_form", { tab, fields: [
+    { selector: { name: "Parent note", role: "textbox", exact: true }, value: "Standalone semantic draft" }
+  ] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.equal(result.facts.submitted, false);
+  assert.equal(await rawPage("document.getElementById('h6-parent').value"), "Standalone semantic draft");
+  result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: "Standalone handle draft" }] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
+  assert.equal(await rawPage("document.getElementById('h6-parent').value"), "Standalone handle draft");
+  check("standalone permitted controls support equivalent semantic-selector and handle fills");
   policy(); await freshFixture();
   result = await call("browser_find", { tab, text: "Project name", scope: "control" });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.matches.length, 0, JSON.stringify(result));
@@ -458,6 +469,40 @@ try {
     assert.equal(after.submissions, 0);
   }
   check("controlled rich editors retain native multiline fills and clears without synthetic events or submission");
+  const beforeSemanticShadow = await rawPage("editorEvidence()");
+  result = await call("browser_fill_form", { tab, restrict_capabilities: ["read", "write"], fields: [
+    { selector: { name: "Shadow reply", role: "textbox", exact: true }, value: "Standalone semantic shadow draft" }
+  ] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
+  const afterSemanticShadow = await rawPage("editorEvidence()");
+  assert.equal(afterSemanticShadow.shadow.value, "Standalone semantic shadow draft");
+  assert.equal(afterSemanticShadow.shadow.rendered, afterSemanticShadow.shadow.value);
+  assert.equal(afterSemanticShadow.reply.rendered, beforeSemanticShadow.reply.rendered);
+  assert.equal(afterSemanticShadow.submissions, 0);
+  result = await call("browser_fill_form", { tab, fields: [{ target: shadowTarget, value: "Standalone handle shadow draft" }] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
+  const afterHandleShadow = await rawPage("editorEvidence()");
+  assert.equal(afterHandleShadow.shadow.value, "Standalone handle shadow draft");
+  assert.equal(afterHandleShadow.shadow.rendered, afterHandleShadow.shadow.value);
+  assert.equal(afterHandleShadow.submissions, 0);
+  check("open-shadow rich editors outside forms support equivalent semantic-selector and handle fills");
+  await rawPage("(()=>{const input=document.createElement('input');input.type='file';input.id='standalone-upload';input.setAttribute('aria-label','Standalone upload');document.body.append(input);return true;})()");
+  const uploadPath = join(scratch, "standalone-upload.txt");
+  const uploadedFile = () => rawPage("(async()=>{const files=document.getElementById('standalone-upload').files;return {count:files.length,name:files[0]?.name,text:await files[0]?.text()};})()");
+  writeFileSync(uploadPath, "SYNTHETIC_UPLOAD_BY_SELECTOR");
+  result = await call("browser_upload", { tab, restrict_capabilities: ["read", "write"],
+    selector: { name: "Standalone upload", exact: true }, paths: [uploadPath] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.uploaded_count, 1);
+  assert.deepEqual(await uploadedFile(), { count: 1, name: "standalone-upload.txt", text: "SYNTHETIC_UPLOAD_BY_SELECTOR" });
+  result = await call("browser_inspect", { tab, scope: "controls", max_items: 30 });
+  const uploadTarget = result.facts.items.find(item => item.name === "Standalone upload")?.target;
+  assert.ok(uploadTarget, JSON.stringify(result));
+  writeFileSync(uploadPath, "SYNTHETIC_UPLOAD_BY_HANDLE");
+  result = await call("browser_upload", { tab, restrict_capabilities: ["write"], target: uploadTarget, paths: [uploadPath] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.uploaded_count, 1);
+  assert.deepEqual(await uploadedFile(), { count: 1, name: "standalone-upload.txt", text: "SYNTHETIC_UPLOAD_BY_HANDLE" });
+  assert.equal((await rawPage("editorEvidence()")).submissions, 0);
+  check("standalone file inputs support equivalent selector and handle attachment with verified file contents");
   result = await call("browser_fill_form", { tab, fields: [{ target: replyTarget, value: "Old typed draft" }] });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   result = await call("browser_type_text", { tab, target: replyTarget, text: "Typed replacement", clear_first: true });
@@ -705,7 +750,7 @@ try {
     await Promise.allSettled(visualRequests.map(request => request.promise));
   }
   const audit = readFileSync(environment.GHOSTLIGHT_AUDIT_FILE, "utf8");
-  assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project|Draft line one|Shadow draft|Replacement draft|action draft|Complete allowlist draft|Ordinary replacement|MUST_NOT_CHANGE_|PARTIAL_DRAFT_EFFECT/);
+  assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project|Draft line one|Shadow draft|Replacement draft|action draft|Complete allowlist draft|Ordinary replacement|MUST_NOT_CHANGE_|PARTIAL_DRAFT_EFFECT|Standalone semantic|Standalone handle|standalone-upload\.txt|SYNTHETIC_UPLOAD_/);
   check("durable audit excludes embedded origins, values, and selectors");
   writeFileSync(join(scratchRoot, "h6-browser-evidence.json"), JSON.stringify({ browser: version.product,
     source_kind: liveSylin ? "live_html" : "checked_in_snapshot", source: sourceEvidence, passed,

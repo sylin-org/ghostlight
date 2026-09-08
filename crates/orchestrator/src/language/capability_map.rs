@@ -5,6 +5,7 @@ use crate::governance::CapabilitySet;
 use super::{Operation, SequenceStep};
 
 const READ_WRITE: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::WRITE);
+const READ_ACTION: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::ACTION);
 const READ_WRITE_ACTION: CapabilitySet = READ_WRITE.union(CapabilitySet::ACTION);
 
 /// One reachable capability variant of an advertised tool.
@@ -109,6 +110,18 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "Activate a page target.",
     ),
     variant(
+        "browser_click",
+        Some("selector"),
+        READ_ACTION,
+        "Find a named control and activate it.",
+    ),
+    variant(
+        "browser_click",
+        Some("expect"),
+        READ_ACTION,
+        "Activate a page target and observe the requested postcondition.",
+    ),
+    variant(
         "browser_scroll",
         None,
         CapabilitySet::READ,
@@ -139,10 +152,28 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "Type through browser input events.",
     ),
     variant(
+        "browser_type_text",
+        Some("selector"),
+        READ_ACTION,
+        "Find a named control and type through browser input events.",
+    ),
+    variant(
+        "browser_type_text",
+        Some("expect"),
+        READ_ACTION,
+        "Type through browser input events and observe the requested postcondition.",
+    ),
+    variant(
         "browser_press_key",
         None,
         CapabilitySet::ACTION,
         "Send one keyboard action.",
+    ),
+    variant(
+        "browser_press_key",
+        Some("expect"),
+        READ_ACTION,
+        "Send one keyboard action and observe the requested postcondition.",
     ),
     variant(
         "browser_drag",
@@ -155,6 +186,12 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         None,
         CapabilitySet::WRITE,
         "Place declared files into a page input.",
+    ),
+    variant(
+        "browser_upload",
+        Some("selector"),
+        READ_WRITE,
+        "Find a named file input and place declared files into it.",
     ),
     variant(
         "browser_execute",
@@ -255,12 +292,20 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         | Operation::Diagnose(_) => CapabilitySet::READ,
         Operation::ResizeWindow(_) => CapabilitySet::EMPTY,
         Operation::ExplainPolicy(_) => CapabilitySet::EMPTY,
+        Operation::Click(value) if value.selector.is_some() || value.expect.is_some() => {
+            READ_ACTION
+        }
+        Operation::TypeText(value) if value.selector.is_some() || value.expect.is_some() => {
+            READ_ACTION
+        }
+        Operation::PressKey(value) if value.expect.is_some() => READ_ACTION,
         Operation::Click(_)
         | Operation::TypeText(_)
         | Operation::PressKey(_)
         | Operation::Drag(_) => CapabilitySet::ACTION,
         Operation::FillForm(value) if value.submit_target.is_some() => READ_WRITE_ACTION,
         Operation::FillForm(_) => READ_WRITE,
+        Operation::UploadFiles(value) if value.selector.is_some() => READ_WRITE,
         Operation::UploadFiles(_) => CapabilitySet::WRITE,
         Operation::RunScript(_) => CapabilitySet::EXECUTE,
         Operation::RunSequence(_) => CapabilitySet::EMPTY,
@@ -330,6 +375,10 @@ mod tests {
             ("browser_find", None) => json!({"text":"Login"}),
             ("browser_screenshot", None) => json!({}),
             ("browser_click", None) => json!({"target":"target_1"}),
+            ("browser_click", Some("selector")) => json!({"selector":{"name":"Save"}}),
+            ("browser_click", Some("expect")) => {
+                json!({"target":"target_1","expect":{"condition":"load_ready"}})
+            }
             ("browser_scroll", None) => json!({}),
             ("browser_hover", None) => json!({"target":"target_1"}),
             ("browser_fill_form", Some("fill")) => {
@@ -339,11 +388,23 @@ mod tests {
                 json!({"fields":[{"target":"target_1","value":"Ada"}],"submit_target":"target_2"})
             }
             ("browser_type_text", None) => json!({"target":"target_1","text":"Ada"}),
+            ("browser_type_text", Some("selector")) => {
+                json!({"selector":{"name":"Draft"},"text":"Ada"})
+            }
+            ("browser_type_text", Some("expect")) => {
+                json!({"focused":true,"text":"Ada","expect":{"condition":"load_ready"}})
+            }
             ("browser_press_key", None) => json!({"key":"Enter"}),
+            ("browser_press_key", Some("expect")) => {
+                json!({"key":"Enter","expect":{"condition":"load_ready"}})
+            }
             ("browser_drag", None) => {
                 json!({"source_target":"target_1","destination_target":"target_2"})
             }
             ("browser_upload", None) => json!({"target":"target_1","paths":[upload_path]}),
+            ("browser_upload", Some("selector")) => {
+                json!({"selector":{"name":"Attachment"},"paths":[upload_path]})
+            }
             ("browser_execute", None) => json!({"script":"1+1"}),
             ("browser_wait", None) => json!({"condition":"load_ready"}),
             ("browser_sequence", None) => json!({"steps":[
