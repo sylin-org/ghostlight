@@ -19,7 +19,6 @@ const MAX_ENTRY_BYTES: u64 = 1024 * 1024;
 
 /// Content-free record of unconfirmed storage, never a replacement receipt.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct AuditGap {
     pub id: String,
     pub started_at_ms: u64,
@@ -28,7 +27,6 @@ pub struct AuditGap {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct GapEntry {
     audit_gap: AuditGap,
 }
@@ -610,6 +608,46 @@ mod tests {
         assert!(text.contains("before") && text.contains("after"));
         assert!(!text.contains("\"missing\""));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn historical_extensions_preserve_known_receipts_without_copying_unknown_payloads() {
+        let expected = record("known");
+        let mut extended = serde_json::to_value(&expected).unwrap();
+        extended["future_optional"] = serde_json::json!({"payload": "PRIVATE_FUTURE_FIELD"});
+        let Some(AuditLine::Receipt(decoded)) =
+            read_line(&mut io::Cursor::new(serde_json::to_vec(&extended).unwrap())).unwrap()
+        else {
+            panic!("An additive field hid a readable receipt");
+        };
+        assert_eq!(*decoded, expected);
+        assert!(!serde_json::to_string(&decoded)
+            .unwrap()
+            .contains("PRIVATE_"));
+
+        // An unsupported required meaning is not a safe default. Preserve readable neighbors.
+        extended["reason"] = serde_json::json!("future_decision");
+        let mut bytes = serde_json::to_vec(&extended).unwrap();
+        bytes.push(b'\n');
+        serde_json::to_writer(&mut bytes, &expected).unwrap();
+        let mut reader = io::Cursor::new(bytes);
+        assert!(matches!(
+            read_line(&mut reader).unwrap(),
+            Some(AuditLine::Unreadable)
+        ));
+        assert!(matches!(
+            read_line(&mut reader).unwrap(),
+            Some(AuditLine::Receipt(_))
+        ));
+
+        let gap = br#"{"future_optional":"PRIVATE_FUTURE_FIELD","audit_gap":{"id":"gap_future","started_at_ms":1,"recovered_at_ms":2,"unconfirmed_receipts":3,"future_optional":true}}"#;
+        let Some(AuditLine::Gap(decoded)) = read_line(&mut io::Cursor::new(gap)).unwrap() else {
+            panic!("An additive field hid a readable gap");
+        };
+        assert_eq!(decoded.unconfirmed_receipts, 3);
+        assert!(!serde_json::to_string(&decoded)
+            .unwrap()
+            .contains("future_optional"));
     }
 
     #[test]

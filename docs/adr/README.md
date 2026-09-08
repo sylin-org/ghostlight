@@ -179,6 +179,8 @@ history live here.
 
 | [0162](0162-configured-authority-and-one-flow-tool.md) | Configured policy owns authority; one flow tool replaces sequence and removes request restrictions and flow dry-run | Accepted; implemented, verified locally, and deployed |
 
+| [0163](0163-persistent-history-compatibility.md) | Tolerant historical receipts, preserved unsupported records, strict live authority, and real-version persistence acceptance | Accepted |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

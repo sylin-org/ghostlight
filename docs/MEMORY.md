@@ -10,6 +10,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
+  optional information, and unavailable nonessential components. Use safe defaults and bounded
+  automatic recovery; keep unaffected work available instead of rejecting the whole operation or
+  installation. Users should not have to repair routine incompatibilities. Be strict where
+  continuing would misinterpret an action, lose data, or bypass authority; do not silently guess
+  those semantics. Versioned history is one application, not the scope of this directive
+  (ADR-0163). Prove recovery at real boundaries, preserve evidence, and never replay uncertain work.
 - **Preserve history.** Docs, ADRs, licenses, research, trust and legal material, task ledgers, and
   product identity survive internal rewrites. Reconcile active documents; never erase evidence.
 - **Clean-room is not a resource wipe.** Old implementation code is not authority for new

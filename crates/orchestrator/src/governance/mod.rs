@@ -1820,8 +1820,9 @@ fn unix_ms() -> u64 {
 }
 
 /// A content-minimized audit record produced after a terminal outcome.
+/// Historical receipts ignore additional fields without retaining or reserializing them.
+/// This is a persistence reader, never an authority or command input (ADR-0163).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct AuditRecord {
     /// Child receipts whose storage could not be confirmed.
     #[serde(default, skip_serializing_if = "is_zero")]

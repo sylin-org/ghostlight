@@ -3,6 +3,21 @@
 Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
 published versions remain service 1.3.4 and adapter 1.1.1).
 
+## Product-wide leniency directive and history application
+
+The owner clarified that resilience through leniency is a general product rule, not just an audit
+or downgrade requirement. MEMORY records safe defaults, tolerance of harmless variation, bounded
+recovery, and continued unaffected work, with strictness where actions, data, or authority depend
+on exact meaning. This session applies it at the historical reader; it is not a whole-product audit.
+
+The receipt and gap readers now ignore additive fields without retaining unknown payloads. Known
+semantic validation and active policy remain strict; existing H7 handling preserves unsupported
+records on disk, reports omissions, and permits startup and new saving. ADR-0163 owns the decision.
+Windows verified real public 1.3.4-written history with the current 1.3.5 executable, repeated
+startup and saving, original-byte preservation, and separately mutated future-format records.
+See [history compatibility evidence](testing/history-compatibility-2026-09-08.md). Source changes
+are not deployed; the public 1.3.4 downgrade defect and release acceptance remain open.
+
 ## Resume on Linux
 
 Linux source validation now passes all 18 hardening gates on CachyOS KDE Wayland, after fixing

@@ -43,6 +43,15 @@ Fixture provenance and update instructions are in [the fixture guide](../../../t
 
 ## Feature coverage
 
+`tests/history-compatibility.mjs` runs the real desktop authority and CLI against a preserved
+JSONL file across restarts. It proves new work is saved, additive history fields remain readable,
+unsupported records are counted without blocking startup, and original bytes stay unchanged.
+It runs in the full and process lanes. Set `GHOSTLIGHT_BIN_DIR` to freshly built siblings for a
+direct run. Set `GHOSTLIGHT_PREVIOUS_EXECUTABLE` to an independently verified published executable
+to first create real predecessor history and test the upgrade reader. Without that input the
+report explicitly says no predecessor was exercised. Future-format mutations are separately
+identified; they do not prove compatibility with an actual future release or installed browser.
+
 Every row needs permitted-work and refusal/failure evidence, with an independent observation of
 effects where the browser can change. Test counts alone do not close a row.
 

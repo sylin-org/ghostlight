@@ -131,6 +131,12 @@ retain the candidate/store/visible-GNOME/actual-client requirements in the matri
 
 ### Required release rows
 
+Persistence compatibility uses the actual predecessor and candidate executables on the same
+preserved history. The source runner is `tests/history-compatibility.mjs`; its optional
+`GHOSTLIGHT_PREVIOUS_EXECUTABLE` input enables real predecessor-written history. A default run
+alone does not prove upgrade or downgrade acceptance. The known public 1.3.4 reader failure on
+1.3.5 history stays recorded until a compatible delivery/storage strategy is verified (ADR-0163).
+
 Run each row on Windows and visible Linux using the release's supported routes. One successful
 example of each tool does not prove every variant or the workflows below.
 

@@ -90,6 +90,7 @@ if (built) {
 if (lane !== "browser") {
   for (const [name, file] of [
     ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
+    ["history-compatibility", "history-compatibility.mjs"],
     ["provenance", "provenance-journey.mjs"], ["cli", "cli-journey.mjs"],
     ["cli-powershell", "cli-powershell-journey.mjs"], ["workbench", "workbench-surface.mjs"]
   ]) {
