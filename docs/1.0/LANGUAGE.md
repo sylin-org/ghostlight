@@ -2,7 +2,7 @@
 
 ## Contract rules
 
-The 24 tools below are the complete 1.0 catalog. Input objects and nested objects set
+The 23 tools below are the complete 1.0 catalog. Input objects and nested objects set
 `additionalProperties` to `false`. Every input schema is a top-level object without root-level
 `oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
 Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
@@ -13,32 +13,16 @@ Each declaration includes concise field descriptions, one shortest valid example
 output schema, and standard MCP annotations. The implementation owns bounds and defaults as named
 constants shared by schema rendering and decoding.
 
-### browser_flow
+`browser_flow` is the single composition tool for one to twenty ordinary tool calls. Step IDs
+are optional for short batches and available for explicit result references. Each child uses the
+invocation's immutable configured authority snapshot and the ordinary executor. `on_error` defaults
+to `stop`. Captured result payloads have a bounded total budget; progress remains explicit.
 
-`browser_flow` composes one to twenty uniquely named steps. Each step names a current advertised
-non-composite tool and supplies its argument object; any argument value may be an explicit
-`{"flow_ref":{"step","pointer"}}` reference into an earlier step's canonical result envelope.
-References resolve before the ordinary child decoder runs again on the substituted arguments.
-Children classify and authorize normally under the invocation's immutable authority snapshot;
-steps may not carry their own restriction fields. `on_error` defaults to `stop`, `dry_run` decodes
-and classifies without dispatching, and captured step envelopes stop being recorded past a bounded
-total budget while execution continues to a truthful terminal aggregate.
-
-Every tool may accept these flat request restrictions:
-
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `restrict_hosts` | string array | absent | Allow only these host patterns for this invocation. |
-| `restrict_capabilities` | string array | absent | Allow only the named capabilities for this invocation. |
-
-Restrictions can only reduce configured authority. Capabilities are `read`, `action`, `write`,
-and `execute`.
-
-Usually omit request restrictions. They are per-call allowlists, and every required capability
-must be included: an unsent form still needs `read + write`. They do not express a draft-versus-
-submission boundary. A refusal caused by these fields names `restrict_capabilities` or
-`restrict_hosts`; capability refusals report the operation's requirements. Configured-policy
-refusals remain distinct, and no correction or replay happens automatically.
+Authority comes from configured managed/local policy and human controls. Tools do not accept
+`restrict_hosts`, `restrict_capabilities`, or `browser_flow.dry_run`. The retired `browser_sequence`
+tool is replaced by ordinary tool steps in `browser_flow`. Obsolete calls fail before browser work
+with catalog-refresh guidance; nothing retries automatically. Existing history remains readable.
+See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md).
 
 An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
 the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected and
@@ -147,8 +131,7 @@ Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
 Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional `reuse` of
 `domain` or `never`, default `domain`; optional `beforeunload` whose only value is `discard`,
-accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`; optional
-restrictions. `tab` and `new_tab:true` cannot be combined, and `reuse` cannot be combined with
+accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`. `tab` and `new_tab:true` cannot be combined, and `reuse` cannot be combined with
 `new_tab`. Without `beforeunload`, a blocking prompt stops the navigation and is reported, never
 accepted.
 
@@ -165,8 +148,7 @@ Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `documen
 Move through history or reload. Shortest call: `{"action":"back"}`.
 
 Inputs: required `action` of `back`, `forward`, or `reload`; optional `tab`; optional
-`timeout_ms`; optional `bypass_cache`, default `false`, valid only for reload; optional
-restrictions. Capability: `action`.
+`timeout_ms`; optional `bypass_cache`, default `false`, valid only for reload. Capability: `action`.
 
 Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generation`.
 
@@ -193,7 +175,7 @@ order. Closed shadow roots, hidden content, and editable values remain absent. U
 Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
 the default; explicit `article` prefers a useful article in the top document and falls back to the
 same full-page visible read; ignored with `target`); optional `max_chars` from 500 to 50000, default
-8000; optional restrictions. Capability: `read`.
+8000. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 `document_generation`.
@@ -204,7 +186,7 @@ Inspect semantic controls or page structure and return fresh target handles. Sho
 
 Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `document`, default
 `controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12;
-optional `max_items` from 1 to 200, default 80; optional restrictions. Capability: `read`.
+optional `max_items` from 1 to 200, default 80. Capability: `read`.
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, semantic role,
 bounded accessible name, state, and credential-class flag. Selectors are not exposed. A
@@ -222,7 +204,7 @@ open shadow roots and http(s) embedded frames. Use it when the desired label or 
 Shortest call: `{"text":"Submit"}`.
 
 Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,
-default `any`; optional `max_results` from 1 to 50, default 20; optional restrictions. Capability:
+default `any`; optional `max_results` from 1 to 50, default 20. Capability:
 `read`.
 
 Facts: `tab`, `document_generation`, and bounded ranked `matches` with target, role, name, and
@@ -237,7 +219,7 @@ call: `{}`.
 Inputs use one of four schema branches: optional `tab` only for viewport capture; optional `tab`
 plus required `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
 required `view`, `x`, `y`, `width`, and `height`. Region coordinates are image pixels and must form
-a positive rectangle wholly inside the current view. Optional `timeout_ms` and restrictions apply
+a positive rectangle wholly inside the current view. Optional `timeout_ms` apply
 to every branch. Target, full-page, and region capture cannot be combined. Capability: `read`.
 
 Facts: `tab`, `view`, `mime_type`, `width`, and `height`, plus one bounded MCP image content block.
@@ -251,7 +233,7 @@ Inputs use exactly one location branch: required `target`, typed semantic `selec
 `view`, `x`, and `y`.
 Optional `tab`; optional `button` of `primary`, `middle`, or `secondary`, default `primary`;
 optional `click_count` from 1 to 3 for single, double, or triple, default 1; optional `timeout_ms`;
-optional restrictions; optional `expect` postcondition. Capabilities: `action`, plus `read` when
+optional `expect` postcondition. Capabilities: `action`, plus `read` when
 `selector` or `expect` is supplied.
 
 Facts: `tab`, optional `target`, optional `view`, `activated`, and any governed committed landing.
@@ -265,7 +247,7 @@ Inputs use one of three branches: required `target` to reveal; or optional `tab`
 `direction` of `up`, `down`, `left`, or `right` defaulting to `down`, and optional `amount` of
 `small`, `medium`, `large`, or `page` defaulting to `medium`; or coordinate wheel input with
 required `view`, `x`, `y`, and `ticks` from 1 to 10 plus a two-way `direction` of `up` or `down`.
-Optional `timeout_ms` and restrictions apply to every branch. Capability: `read`.
+Optional `timeout_ms` apply to every branch. Capability: `read`.
 
 Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertical offsets.
 
@@ -275,7 +257,7 @@ Hover a current semantic target or a point in a current screenshot. Shortest cal
 `{"target":"target_..."}`.
 
 Inputs use exactly one location branch: required `target`, or required `view`, `x`, and `y`;
-optional `tab`; optional `timeout_ms`; optional restrictions. Capability: `read`.
+optional `tab`; optional `timeout_ms`. Capability: `read`.
 
 Facts: `tab`, optional `target`, optional `view`, and `hovered`.
 
@@ -288,7 +270,7 @@ Fill one or more ordinary controls. It does not submit unless `submit_target` is
 Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
 exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
 for checkboxes and radios, or a finite number for numeric inputs; optional `tab`; optional
-`submit_target`; optional `timeout_ms`; optional restrictions; optional `expect` postcondition.
+`submit_target`; optional `timeout_ms`; optional `expect` postcondition.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Rich-text controls use the browser's editing transaction so controlled editors can retain the
@@ -309,7 +291,7 @@ Type ordinary text through browser input events. Shortest call:
 
 Inputs use one location: `target` with bounded `text`; or `selector` with `text`; or
 `focused:true` to type into the currently focused editable control. Optional `clear_first`, default
-`false`; optional `tab`; optional `timeout_ms`; optional restrictions. Empty text is valid only as an
+`false`; optional `tab`; optional `timeout_ms`. Empty text is valid only as an
 explicit clear together with `clear_first:true`. Optional `expect` adds a postcondition.
 Capabilities: `action`, plus `read` when `selector` or `expect` is supplied. Targeted and focused
 typing without a postcondition require `action`.
@@ -324,7 +306,7 @@ Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 Inputs: exactly one of required `key` as one character or one named key from the closed list, or
 required `strokes`, an ordered sequence of 1 to 20 of the same items, with optional `repeat` from 1
 to 100 defaulting to 1; optional `tab`; optional `target`; optional unique `modifiers` from `Alt`,
-`Control`, `Meta`, and `Shift`; optional restrictions; optional `expect` postcondition.
+`Control`, `Meta`, and `Shift`; optional `expect` postcondition.
 Capabilities: `action`, plus `read` when `expect` is supplied.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
@@ -340,8 +322,7 @@ Drag one semantic target to another, or drag between two points in a current scr
 call: `{"source_target":"target_...","destination_target":"target_..."}`.
 
 Inputs use exactly one schema branch: required `source_target` and `destination_target`; or
-required `view`, `start_x`, `start_y`, `end_x`, and `end_y`. Optional `tab`, `timeout_ms`, and
-restrictions apply to both. Capability: `action`.
+required `view`, `start_x`, `start_y`, `end_x`, and `end_y`. Optional `tab`, `timeout_ms` apply to both. Capability: `action`.
 
 Facts: `tab`, `dragged`, and any governed committed landing.
 
@@ -353,8 +334,7 @@ Inputs use one condition-specific branch: `load_ready` accepts neither value nor
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
 live page until a control matching it exists; `duration` requires a whole millisecond `value`
-from 0 to 10000 and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`, and
-restrictions. Capability: `read`.
+from 0 to 10000 and waits executor-side. Every branch accepts optional `tab`, `timeout_ms`. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
 slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.
@@ -370,7 +350,7 @@ Inspect or resolve the current JavaScript dialog.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
 - `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `action`.
 
-All branches accept optional `tab` and restrictions. `text` is required only for `respond` and is
+All branches accept optional `tab`. `text` is required only for `respond` and is
 invalid for every other action. Facts: `tab`, `dialog_type`, `present`, `accepted`, and `handled`
 as applicable. Dialog text is never audited.
 
@@ -384,7 +364,7 @@ Inputs: exactly one source of required `paths`, an array of 1 to 5 unique absolu
 or `files`, 1 to 5 inline objects with `name` and base64 `data_base64`; or one `source_image`
 handle from an earlier capture, optionally with `view`, `x`, and `y` to drop it at a point instead
 of attaching. The destination is optional `target` or typed semantic `selector`. Optional `tab`,
-`timeout_ms`, and restrictions. Capabilities: `write`, plus `read` when `selector` is supplied.
+`timeout_ms`. Capabilities: `write`, plus `read` when `selector` is supplied.
 Target-handle attachment and current-view image drops require `write`.
 
 As with form fill, a semantic selector can address an ordinary file input outside an HTML `form`.
@@ -401,7 +381,7 @@ Execute explicit bounded JavaScript in the page. It may read, mutate, or navigat
 semantic tool when one fits. Shortest call: `{"script":"document.title"}`.
 
 Inputs: required non-empty `script` up to 20000 characters; optional `tab`; optional
-`max_result_chars` from 100 to 20000, default 8000; optional `timeout_ms`; optional restrictions.
+`max_result_chars` from 100 to 20000, default 8000; optional `timeout_ms`.
 Capability: `execute`.
 
 The adapter parses the source before dispatch and selects the async form for a top-level return.
@@ -412,37 +392,22 @@ or lost reply remains uncertain regardless of its text or exception class.
 Facts: `tab`, `value`, `truncated`, and any governed committed landing. Script source and result
 never enter audit or presentation.
 
-### `browser_sequence`
-
-Run two to eight fully specified steps on one controlled tab. Shortest useful call:
-`{"steps":[{"action":"click","target":"target_..."},{"action":"wait","condition":"load_ready"}]}`.
-
-Inputs: required `steps`; optional `tab`; optional `timeout_ms`; optional restrictions. A step is a
-typo-closed discriminated object. Allowed actions are `click`, `fill`, `type_text`, `press_key`,
-`scroll`, `hover`, and `wait`; other catalog operations are not silently accepted. The sequence
-wrapper requires no RAWX capability. Every step is classified and admitted independently through
-the same executor and completion path as a direct call. Each attempted child records a safe
-receipt as it finishes, correlated by parent invocation and position (ADR-0156).
-
-Direct and sequence steps use the same operation executor and browser port. Facts: `tab`,
-`completed_steps`, `total_steps`, `progress`, and bounded per-step status/effect metadata.
-Completed counts successes. Execution stops at the first non-success; later steps are `not_run`.
-Partial sequences are never repeat-safe. Flow and sequence share the progress contract below.
-
 ### `browser_flow`
 
-Compose one to twenty steps on one controlled tab. Shortest useful call:
-`{"steps":[{"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com"}}]}`.
+Compose one to twenty ordinary tool calls. A short batch:
+`{"steps":[{"tool":"browser_click","arguments":{"target":"target_..."}},{"tool":"browser_wait","arguments":{"condition":"load_ready"}}]}`.
 
-Inputs: required `steps` array of 1 to 20 uniquely named objects, each with a required bounded
-`id`, a required `tool` naming one current advertised non-composite Ghostlight tool, and an
-optional `arguments` object; optional `on_error` of `stop` or `continue`, default `stop`; optional
-`dry_run`, default `false`; optional `tab`, `timeout_ms`, and restrictions. The wrapper requires no
-RAWX capability; every child step classifies and admits independently under the same immutable
-invocation snapshot. Each attempted child records a safe receipt before parent completion.
-History groups these under one expandable parent, with distinct input-preparation and missing
-receipt states. Permission details retain actual evaluation evidence; payloads and caller labels
-stay out of audit. Steps carry no restriction fields of their own (ADR-0156).
+Inputs: required `steps` array of 1 to 20 objects. Each step has a required `tool` naming a current
+advertised non-composite tool, optional bounded `id`, and optional `arguments` defaulting to `{}`.
+Omitted IDs become `step_1`, `step_2`, and so on; all IDs must be unique. Optional `on_error` is
+`stop` or `continue`, default `stop`. Optional `tab` supplies a default for tab-scoped children;
+explicit child tabs win, new-tab navigation and tab-independent work keep their ordinary meaning.
+Optional `timeout_ms` bounds the entire flow. There is no simulation mode.
+
+The wrapper requires no RAWX capability. Every child classifies and admits independently under
+the same immutable configured authority snapshot. Each attempted child records a safe receipt
+before parent completion. History groups these under one expandable parent, with distinct input
+preparation and missing receipt states. Payloads and caller labels stay out of audit (ADR-0156).
 
 Any argument value may be an explicit reference object,
 `{"flow_ref":{"step":"earlier_id","pointer":"/facts/..."}}`, resolved from that step's canonical
@@ -455,13 +420,12 @@ them back. Explicit `continue` permits later independent steps to run and still 
 non-success when any child fails. Human pause/stop, attention, cancellation, and deadlines end
 execution even under Continue.
 
-`dry_run:true` decodes and classifies every step without dispatching anything. Captured per-step
-envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
+Captured per-step envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
 terminal aggregate. Facts: `completed`, `total`, `stopped`, `progress`, and bounded per-step rows
 with each step's envelope where the budget allowed. `completed` counts successes. References still
 resolve against the full volatile envelope when its client payload is omitted.
 
-Flow and sequence share this progress contract:
+Flow uses this progress contract; historical sequence receipts retain it:
 
 - `progress.counts`: `total`, `succeeded`, `failed`, `blocked`, `cancelled`, `attention_required`,
   `unknown`, `not_started`, and `not_run`. The categories are disjoint and sum to `total`.
@@ -528,8 +492,7 @@ Read bounded console and network evidence for a controlled tab. Tracking is opt-
 
 Inputs: optional `tab`; optional `source` of `both`, `console`, or `network`, default `both`;
 optional `detail` of `problems` or `all`, default `problems`; optional case-insensitive literal
-`match`; optional opaque `after` cursor; optional `limit` from 1 to 200, default 50; optional
-restrictions. Capability: `read`.
+`match`; optional opaque `after` cursor; optional `limit` from 1 to 200, default 50. Capability: `read`.
 
 Problems are console warnings, errors, exceptions, failed requests, and HTTP error responses.
 All detail also includes ordinary console events and successful requests. The first call enables
@@ -550,7 +513,7 @@ permanent ceilings, browser startup posture, organization identity, and passport
 Available under every authority including all-open; use it to learn why another call was refused
 or what is allowed before acting.
 
-Inputs: none beyond optional restrictions. Capability: empty requirement set (always available).
+Inputs: none. Capability: empty requirement set (always available).
 Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
 It remains available during session attention, global Pause or Stop, and a required audit outage.
 It does not clear attention or change controls. Cancellation, deadlines, bounded admission, and
@@ -562,7 +525,7 @@ results. The summary names its measurement: capability areas explained over laye
 
 ## Session attention and human control (ADR-0157)
 
-Request restrictions remain enforcing under observe policy. A denial that reaches its session's
+Configured observe-mode policy reports would-deny decisions without refusing ordinary work. A denial that reaches its session's
 attention threshold retains the actual policy explanation and returns `attention_required`.
 Further browser work in that session requires explicit human review/resume in the workbench; global Resume
 leaves it intact. Model tools cannot resume attention. The triggering composition stops even under

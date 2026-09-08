@@ -4,6 +4,7 @@ mod composition;
 mod documents;
 mod flow;
 mod forms;
+mod interaction;
 mod navigation;
 mod pointer;
 mod policy;
@@ -11,7 +12,6 @@ mod reading;
 mod receipt;
 mod recording;
 pub mod result;
-mod sequence;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -306,9 +306,7 @@ impl ApplicationExecutor {
                 (operation, requirements)
             }
             Err(error) => {
-                let snapshot = self
-                    .governance
-                    .snapshot(&language::RequestRestrictions::default());
+                let snapshot = self.governance.snapshot();
                 let decision = Decision::refused(ReasonCode::InvalidRequest);
                 let refusal = Refusal::InvalidRequest;
                 let summary = refusal.summary();
@@ -364,7 +362,7 @@ impl ApplicationExecutor {
         } else {
             None
         };
-        let snapshot = self.governance.snapshot(operation.restrictions());
+        let snapshot = self.governance.snapshot();
         let context = InvocationContext {
             requirements,
             provenance: prepared.provenance.as_deref(),
@@ -563,7 +561,6 @@ impl ApplicationExecutor {
             Operation::UploadFiles(value) => self.upload_files(context, lease, value),
             Operation::RunScript(value) => self.run_script(context, lease, value),
             Operation::Wait(value) => self.perform_wait(context, lease, value),
-            Operation::RunSequence(value) => self.sequence(context, lease, value),
             Operation::RunFlow(value) => self.flow(context, lease, value),
             Operation::HandleDialog(value) => self.handle_dialog(context, lease, value),
             Operation::Diagnose(value) => self.diagnose(context, lease, value),
@@ -1401,17 +1398,6 @@ impl ApplicationExecutor {
         let attention = decision.reason == ReasonCode::RuntimeAttention;
         let refusal = if attention {
             Refusal::AttentionRequired
-        } else if context.snapshot.is_request_denial(decision) {
-            if decision.reason == ReasonCode::CapabilityDenied {
-                facts["restriction"] = json!("restrict_capabilities");
-                facts["required_capabilities"] = json!(context.requirements);
-                Refusal::RequestCapabilities {
-                    required: context.requirements,
-                }
-            } else {
-                facts["restriction"] = json!("restrict_hosts");
-                Refusal::RequestHosts { host: blocked_host }
-            }
         } else {
             Refusal::AuthorityBlocked {
                 reason: blocked_reason(decision.reason),
@@ -1925,7 +1911,6 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::UploadFiles(_) => PresentationActivity::Upload,
         Operation::RunScript(_) => PresentationActivity::Script,
         Operation::Wait(_) => PresentationActivity::Wait,
-        Operation::RunSequence(_) => PresentationActivity::Quiet,
         Operation::RunFlow(_) => PresentationActivity::Quiet,
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
         Operation::Diagnose(_) => PresentationActivity::Quiet,
@@ -2025,7 +2010,6 @@ fn operation_timeout(operation: &Operation) -> u64 {
         Operation::UploadFiles(value) => value.timeout_ms,
         Operation::RunScript(value) => value.timeout_ms,
         Operation::Wait(value) => value.timeout_ms,
-        Operation::RunSequence(value) => value.timeout_ms,
         Operation::RunFlow(value) => value.timeout_ms,
         Operation::Record(_) => 30_000,
         _ => 8_000,
@@ -2295,11 +2279,11 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 mod tests {
     mod audit_health;
     mod catalog_authority;
+    mod configured_authority;
     mod control;
     mod documents;
     mod presentation;
     mod provenance;
-    mod request_restrictions;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -3001,6 +2985,39 @@ mod tests {
         ))
     }
 
+    /// A real, isolated policy source that tests may edit between invocations.
+    struct TestPolicy(PathBuf);
+
+    impl TestPolicy {
+        fn new() -> Self {
+            let policy = Self(temporary_policy("configured-authority"));
+            policy.set(json!(["read", "action", "write", "execute"]));
+            policy
+        }
+
+        fn facade(&self) -> GovernanceFacade {
+            GovernanceFacade::new(Some(self.0.clone()), None)
+        }
+
+        fn set(&self, capabilities: serde_json::Value) {
+            fs::write(
+                &self.0,
+                serde_json::to_vec(&json!({
+                    "schema":3,"name":"test authority","version":"1",
+                    "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for TestPolicy {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
     fn all_open_policy_with(config: &str) -> String {
         format!(
             r#"{{"schema":3,"name":"work test","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read","action","write","execute"]}}],"config":{config}}}"#
@@ -3008,8 +3025,73 @@ mod tests {
     }
 
     #[test]
+    fn retired_tools_and_inputs_never_dispatch_or_trigger_policy_attention() {
+        let (executor, browser, workspaces, workspace, audit) = fixture();
+        let mut cases = vec![
+            (
+                "browser_sequence".to_string(),
+                json!({"steps":[{"action":"click","target":"target_one"}]}),
+            ),
+            (
+                "browser_flow".to_string(),
+                json!({"dry_run":true,"steps":[{"tool":"browser_tabs"}]}),
+            ),
+            (
+                "browser_flow".to_string(),
+                json!({"dry_run":false,"steps":[{"tool":"browser_tabs"}]}),
+            ),
+        ];
+        for tool in crate::language::catalog() {
+            for field in ["restrict_hosts", "restrict_capabilities"] {
+                let mut input = tool
+                    .input_schema
+                    .get("examples")
+                    .and_then(|examples| examples.get(0))
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                input[field] = json!(["read"]);
+                cases.push((tool.name.clone(), input));
+            }
+        }
+        for field in ["restrict_hosts", "restrict_capabilities"] {
+            let mut arguments = json!({"script":"MUST_NOT_RUN"});
+            arguments[field] = json!(["read"]);
+            cases.push(("browser_flow".to_string(), json!({"steps":[{"tool":"browser_tabs","arguments":{"action":"list"}},{"tool":"browser_execute","arguments":arguments}]})));
+        }
+        for (tool, input) in cases {
+            let result = executor.execute(
+                &workspace,
+                &tool,
+                input,
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(result.status, Status::Failed, "{tool}: {result:?}");
+            assert_eq!(result.effect, Effect::None);
+            assert!(
+                result
+                    .next_steps
+                    .iter()
+                    .any(|step| step.contains("removed")),
+                "{tool}: {result:?}"
+            );
+        }
+        assert!(browser.calls().is_empty());
+        assert!(workspaces.attention(&workspace).is_none());
+        assert!(audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|record| record.permissions.checks.is_empty()));
+    }
+
+    #[test]
     fn flow_stops_after_a_refused_child_without_reverting_prior_effects() {
-        let (executor, browser, _workspaces, workspace, _) = fixture();
+        let policy = TestPolicy::new();
+        policy.set(json!(["read"]));
+        let (executor, browser, _workspaces, workspace, _) =
+            fixture_with_governance(policy.facade());
         for id in [7, 8] {
             browser.push(Ok(BrowserOutcome::TabOpened {
                 reused: false,
@@ -3022,7 +3104,7 @@ mod tests {
             &workspace,
             "browser_flow",
             json!({
-                "restrict_capabilities":["read"],
+
                 "steps":[
                     {"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
                     {"id":"denied","tool":"browser_execute","arguments":{"script":"42"}},
@@ -3114,7 +3196,9 @@ mod tests {
 
     #[test]
     fn continue_reports_policy_denial_after_later_independent_success() {
-        let (executor, browser, _, workspace, audit) = fixture();
+        let policy = TestPolicy::new();
+        policy.set(json!(["read"]));
+        let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
         for id in [7, 8] {
             browser.push(Ok(BrowserOutcome::TabOpened {
                 reused: false,
@@ -3123,7 +3207,7 @@ mod tests {
             }));
         }
         let result = executor.execute(&workspace, "browser_flow", json!({
-            "on_error":"continue", "restrict_capabilities":["read"], "steps":[
+            "on_error":"continue",  "steps":[
                 {"id":"first","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
                 {"id":"denied","tool":"browser_execute","arguments":{"script":"PRIVATE_SCRIPT"}},
                 {"id":"last","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
@@ -3196,6 +3280,62 @@ mod tests {
         assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
             .unwrap()
             .contains("PRIVATE_"));
+    }
+
+    #[test]
+    fn short_flow_uses_its_default_tab_with_multiple_controlled_pages() {
+        let (executor, browser, _, workspace, _) = fixture();
+        let mut handles = Vec::new();
+        for id in [7, 8] {
+            browser.push(Ok(BrowserOutcome::TabOpened {
+                reused: false,
+                tab: tab(id, "https://example.com/"),
+                committed_urls: vec![],
+            }));
+            let opened = executor.execute(
+                &workspace,
+                "browser_navigate",
+                json!({"url":"https://example.com/","new_tab":true}),
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(opened.status, Status::Succeeded);
+            handles.push(opened.facts["tab"].clone());
+        }
+        for id in [7, 8, 7] {
+            browser.push(Ok(BrowserOutcome::Text {
+                tab_id: id,
+                text: "read".into(),
+                title: "Example".into(),
+                url: "https://example.com/".into(),
+                truncated: false,
+            }));
+        }
+        let before = browser.calls().len();
+        let result = executor.execute(
+            &workspace,
+            "browser_flow",
+            json!({"tab":handles[0],"steps":[
+                {"tool":"browser_read"},
+                {"tool":"browser_read","arguments":{"tab":handles[1]}},
+                {"tool":"browser_read"}
+            ]}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{result:?}");
+        let actual: Vec<_> = browser.calls()[before..]
+            .iter()
+            .filter_map(|command| {
+                if let BrowserCommand::ReadDocument { tab_id, .. } = command.primitive() {
+                    Some(*tab_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(actual, [7, 8, 7]);
+        assert_eq!(result.facts["steps"][2]["id"], "step_3");
     }
 
     #[test]
@@ -3941,9 +4081,8 @@ mod tests {
             }),
             None,
         )
-        .snapshot(&crate::language::RequestRestrictions::default());
-        let wide = GovernanceFacade::new(None, None)
-            .snapshot(&crate::language::RequestRestrictions::default());
+        .snapshot();
+        let wide = GovernanceFacade::new(None, None).snapshot();
         assert_ne!(
             narrow.id(),
             wide.id(),
@@ -4110,7 +4249,12 @@ mod tests {
 
     #[test]
     fn client_save_authorizes_source_before_recording_bytes_cross() {
-        let (executor, browser, _, workspace, _) = fixture();
+        let policy = TestPolicy::new();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
+        document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+        fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
+        let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::RecordingStopped {
             summary: recording_summary(RecordingState::Frozen, "http://127.0.0.1/private"),
             changed: true,
@@ -4119,7 +4263,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_record",
-            json!({"action":"save","recording":"recording_one","restrict_hosts":["example.com"]}),
+            json!({"action":"save","recording":"recording_one"}),
             None,
             &CancellationToken::default(),
         );
@@ -4481,17 +4625,22 @@ mod tests {
 
     #[test]
     fn refused_navigation_audits_only_the_attempted_host() {
-        let (executor, browser, _, workspace, audit) = fixture();
+        let policy = TestPolicy::new();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
+        document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+        fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
+        let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"http://127.0.0.1/private/record-42?token=secret#detail","restrict_hosts":["example.com"]}),
+            json!({"url":"http://127.0.0.1/private/record-42?token=secret#detail"}),
             None,
             &CancellationToken::default(),
         );
 
         assert_eq!(result.status, Status::Blocked);
-        assert_eq!(result.summary, "Blocked by this call's restrict_hosts.");
+        assert!(result.summary.contains("127.0.0.1"));
         assert!(browser.calls().is_empty());
 
         let records = audit.0.lock().unwrap();
@@ -4760,7 +4909,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_and_sequence_actions_use_the_same_physical_executor_path() {
+    fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         let (executor, browser, _, workspace, _) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,
@@ -4822,7 +4971,7 @@ mod tests {
             elapsed_ms: 5,
             readiness: BrowserReadiness::Complete,
         }));
-        let sequence = executor.execute(&workspace, "browser_sequence", json!({"tab":tab_handle,"steps":[{"action":"click","target":target},{"action":"wait","condition":"load_ready"}]}), None, &CancellationToken::default());
+        let sequence = executor.execute(&workspace, "browser_flow", json!({"tab":tab_handle,"steps":[{"tool":"browser_click","arguments":{"target":target}},{"tool":"browser_wait","arguments":{"condition":"load_ready"}}]}), None, &CancellationToken::default());
         assert_eq!(sequence.status, Status::Succeeded);
         let calls = browser.calls();
         assert_eq!(
@@ -4840,7 +4989,8 @@ mod tests {
             1
         );
         for unknown in [false, true] {
-            for tool in ["browser_sequence", "browser_flow"] {
+            for named in [false, true] {
+                let tool = "browser_flow";
                 browser.push(Ok(BrowserOutcome::Activated {
                     tab: tab(7, "https://example.com/"),
                     committed_urls: vec![],
@@ -4852,19 +5002,16 @@ mod tests {
                     BrowserError::Primitive("PRIVATE_WAIT_FAILURE".into())
                 }));
                 let before = browser.calls().len();
-                let arguments = if tool == "browser_sequence" {
-                    json!({"tab":tab_handle,"steps":[
-                        {"action":"click","target":target},
-                        {"action":"wait","condition":"load_ready"},
-                        {"action":"click","target":target}
-                    ]})
-                } else {
-                    json!({"steps":[
-                        {"id":"click","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}},
-                        {"id":"wait","tool":"browser_wait","arguments":{"tab":tab_handle,"condition":"load_ready"}},
-                        {"id":"later","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}}
-                    ]})
-                };
+                let mut arguments = json!({"steps":[
+                    {"id":"click","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}},
+                    {"id":"wait","tool":"browser_wait","arguments":{"tab":tab_handle,"condition":"load_ready"}},
+                    {"id":"later","tool":"browser_click","arguments":{"tab":tab_handle,"target":target}}
+                ]});
+                if !named {
+                    for step in arguments["steps"].as_array_mut().unwrap() {
+                        step.as_object_mut().unwrap().remove("id");
+                    }
+                }
                 let result = executor.execute(
                     &workspace,
                     tool,
@@ -4966,7 +5113,12 @@ mod tests {
 
     #[test]
     fn denied_redirect_is_compensated_without_replay_risk() {
-        let (executor, browser, _, workspace, _) = fixture();
+        let policy = TestPolicy::new();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
+        document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+        fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
+        let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,
             tab: tab(7, "http://127.0.0.1/private"),
@@ -4979,7 +5131,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
+            json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
         );
@@ -4999,6 +5151,10 @@ mod tests {
             ),
         )
         .unwrap();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&policy).unwrap()).unwrap();
+        document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+        fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
         browser.push(Ok(BrowserOutcome::TabOpened {
@@ -5012,7 +5168,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
+            json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
         );
@@ -5027,7 +5183,12 @@ mod tests {
 
     #[test]
     fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensation() {
-        let (executor, browser, _, workspace, _) = fixture();
+        let policy = TestPolicy::new();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
+        document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+        fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
+        let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,
             tab: tab(7, "http://127.0.0.1/private"),
@@ -5042,7 +5203,7 @@ mod tests {
         let result = executor.execute(
             &workspace,
             "browser_navigate",
-            json!({"url":"https://example.com","restrict_hosts":["example.com"]}),
+            json!({"url":"https://example.com"}),
             None,
             &CancellationToken::default(),
         );

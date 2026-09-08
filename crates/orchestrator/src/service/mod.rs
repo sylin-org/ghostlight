@@ -28,7 +28,7 @@ use crate::audit::AuditRecorder;
 use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuditRecord, Capability, GovernanceFacade, JsonlAuditSink};
-use crate::language::{catalog_for, RequestRestrictions, SERVER_INSTRUCTIONS};
+use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{
     ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken, PreparedInvocation,
@@ -602,7 +602,7 @@ fn serve_session(
                     let Some(previous) = lock(&published).clone() else {
                         continue;
                     };
-                    let snapshot = governance.snapshot(&RequestRestrictions::default());
+                    let snapshot = governance.snapshot();
                     let current = catalog_for(&snapshot);
                     if current == previous {
                         continue;
@@ -665,7 +665,7 @@ fn serve_session(
         while let Some(request) = reader.json::<ServiceRequest>(None)? {
             match request {
                 ServiceRequest::Catalog => {
-                    let snapshot = governance.snapshot(&RequestRestrictions::default());
+                    let snapshot = governance.snapshot();
                     let tools = catalog_for(&snapshot);
                     write_response(
                         &writer,
@@ -893,7 +893,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
                     .get(workspace.as_str())
                     .and_then(|entries| entries.last())
                     .map(|(_, snapshot)| snapshot.clone())
-                    .unwrap_or_else(|| self.governance.snapshot(&RequestRestrictions::default()));
+                    .unwrap_or_else(|| self.governance.snapshot());
                 // A committed document is evidence from work already admitted (or from the
                 // human). Runtime control gates future commands; only policy holds this tab.
                 let decision = snapshot.authorize_landing(Capability::Action, &url);

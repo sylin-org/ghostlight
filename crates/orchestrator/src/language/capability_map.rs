@@ -2,7 +2,7 @@
 
 use crate::governance::CapabilitySet;
 
-use super::{Operation, SequenceStep};
+use super::Operation;
 
 const READ_WRITE: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::WRITE);
 const READ_ACTION: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::ACTION);
@@ -206,12 +206,6 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "Observe one bounded page condition.",
     ),
     variant(
-        "browser_sequence",
-        None,
-        CapabilitySet::EMPTY,
-        "Compose independently governed steps.",
-    ),
-    variant(
         "browser_flow",
         None,
         CapabilitySet::EMPTY,
@@ -308,7 +302,6 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         Operation::UploadFiles(value) if value.selector.is_some() => READ_WRITE,
         Operation::UploadFiles(_) => CapabilitySet::WRITE,
         Operation::RunScript(_) => CapabilitySet::EXECUTE,
-        Operation::RunSequence(_) => CapabilitySet::EMPTY,
         // A flow classifies nothing itself; every child step authorizes normally.
         Operation::RunFlow(_) => CapabilitySet::EMPTY,
         Operation::HandleDialog(value) if value.action == "status" => CapabilitySet::READ,
@@ -320,20 +313,6 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
     }
 }
 
-/// Return the exact requirement set for one sequence step.
-#[must_use]
-pub fn sequence_step_requirements(step: &SequenceStep) -> CapabilitySet {
-    match step {
-        SequenceStep::Wait { .. } | SequenceStep::Scroll { .. } | SequenceStep::Hover { .. } => {
-            CapabilitySet::READ
-        }
-        SequenceStep::Fill { .. } => READ_WRITE,
-        SequenceStep::Click { .. }
-        | SequenceStep::TypeText { .. }
-        | SequenceStep::PressKey { .. } => CapabilitySet::ACTION,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -341,10 +320,7 @@ mod tests {
     use crate::governance::CapabilitySet;
     use serde_json::json;
 
-    use super::{
-        requirements, sequence_step_requirements, variants, CapabilityVariant, SequenceStep,
-        DIRECTORY,
-    };
+    use super::{requirements, variants, CapabilityVariant, DIRECTORY};
 
     fn decoded(tool: &str, input: serde_json::Value) -> CapabilitySet {
         requirements(&crate::language::decode(tool, input).expect("valid operation"))
@@ -407,10 +383,6 @@ mod tests {
             }
             ("browser_execute", None) => json!({"script":"1+1"}),
             ("browser_wait", None) => json!({"condition":"load_ready"}),
-            ("browser_sequence", None) => json!({"steps":[
-                {"action":"wait","condition":"load_ready"},
-                {"action":"hover","target":"target_1"}
-            ]}),
             ("browser_flow", None) => json!({"steps":[
                 {"id":"list","tool":"browser_tabs","arguments":{"action":"list"}}
             ]}),
@@ -452,7 +424,6 @@ mod tests {
             "browser_upload",
             "browser_execute",
             "browser_wait",
-            "browser_sequence",
             "browser_flow",
             "browser_dialog",
             "browser_record",
@@ -536,29 +507,18 @@ mod tests {
             decoded("browser_record", json!({"action":"discard"})),
             CapabilitySet::EMPTY
         );
-        assert_eq!(
-            decoded(
-                "browser_sequence",
-                json!({"steps":[
-                    {"action":"fill","target":"target_1","value":"Ada"},
-                    {"action":"wait","condition":"load_ready"}
-                ]})
-            ),
-            CapabilitySet::EMPTY
-        );
-        let sequence = crate::language::decode(
-            "browser_sequence",
-            json!({"steps":[
-                {"action":"fill","target":"target_1","value":"Ada"},
-                {"action":"wait","condition":"load_ready"}
-            ]}),
-        )
-        .expect("valid sequence");
-        let crate::language::Operation::RunSequence(sequence) = sequence else {
-            panic!("sequence decoded as a sequence")
+        let flow = crate::language::decode("browser_flow", json!({"steps":[
+            {"tool":"browser_fill_form","arguments":{"fields":[{"target":"target_1","value":"Ada"}]}},
+            {"tool":"browser_wait","arguments":{"condition":"load_ready"}}
+        ]})).unwrap();
+        assert_eq!(requirements(&flow), CapabilitySet::EMPTY);
+        let crate::language::Operation::RunFlow(flow) = flow else {
+            panic!("flow")
         };
+        let child =
+            crate::language::decode(&flow.steps[0].tool, flow.steps[0].arguments.clone()).unwrap();
         assert_eq!(
-            sequence_step_requirements(&sequence.steps[0]),
+            requirements(&child),
             CapabilitySet::READ.union(CapabilitySet::WRITE)
         );
     }
@@ -580,89 +540,6 @@ mod tests {
                 expected,
                 "tool={tool} variant={variant:?}: DIRECTORY's advertised requirement diverged \
                  from what requirements() actually returns for the decoded operation"
-            );
-        }
-    }
-
-    #[test]
-    fn sequence_steps_carry_the_same_requirements_as_their_standalone_tool() {
-        // Every SequenceStep variant has exactly one standalone-tool equivalent in DIRECTORY.
-        // A drift here means composing an action inside browser_sequence would be governed
-        // differently than calling the same action directly -- exactly the kind of mismatch
-        // that would let a sequence step slip past a policy the standalone tool honors.
-        let pairs: &[(&str, Option<&str>, SequenceStep)] = &[
-            (
-                "browser_click",
-                None,
-                SequenceStep::Click {
-                    target: "target_1".into(),
-                    button: "primary".into(),
-                    click_count: 1,
-                },
-            ),
-            (
-                "browser_fill_form",
-                Some("fill"),
-                SequenceStep::Fill {
-                    target: "target_1".into(),
-                    value: "Ada".into(),
-                },
-            ),
-            (
-                "browser_type_text",
-                None,
-                SequenceStep::TypeText {
-                    target: "target_1".into(),
-                    text: "Ada".into(),
-                    clear_first: false,
-                },
-            ),
-            (
-                "browser_press_key",
-                None,
-                SequenceStep::PressKey {
-                    key: "Enter".into(),
-                    target: None,
-                    modifiers: Vec::new(),
-                },
-            ),
-            (
-                "browser_scroll",
-                None,
-                SequenceStep::Scroll {
-                    target: None,
-                    direction: None,
-                    amount: None,
-                },
-            ),
-            (
-                "browser_hover",
-                None,
-                SequenceStep::Hover {
-                    target: "target_1".into(),
-                },
-            ),
-            (
-                "browser_wait",
-                None,
-                SequenceStep::Wait {
-                    condition: "load_ready".into(),
-                    value: None,
-                    target: None,
-                },
-            ),
-        ];
-        for (tool, variant, step) in pairs {
-            let expected = DIRECTORY
-                .iter()
-                .find(|entry| entry.tool == *tool && entry.variant == *variant)
-                .unwrap_or_else(|| panic!("no DIRECTORY entry for tool={tool} variant={variant:?}"))
-                .requirements;
-            assert_eq!(
-                sequence_step_requirements(step),
-                expected,
-                "tool={tool} variant={variant:?}: sequence step requirements diverged from its \
-                 standalone tool's DIRECTORY entry"
             );
         }
     }

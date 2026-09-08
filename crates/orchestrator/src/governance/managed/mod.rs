@@ -775,7 +775,7 @@ mod tests {
         write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
         let facade = super::super::GovernanceFacade::with_managed_paths(paths);
 
-        let snapshot = facade.snapshot(&crate::language::RequestRestrictions::default());
+        let snapshot = facade.snapshot();
 
         assert!(
             snapshot

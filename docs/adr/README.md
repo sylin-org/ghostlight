@@ -177,6 +177,8 @@ history live here.
 | [0160](0160-local-service-continuity.md) | Bounded local exchanges, quiet burst admission, waiting progress, cancellation isolation, and private runtime publication | Accepted; implemented and verified locally; not deployed |
 | [0161](0161-connection-bound-provenance.md) | Immutable per-connection attribution, transient application claims, narrow durable observations, and quiet human details | Accepted; reporting foundation implemented and verified locally; not deployed; verification deferred |
 
+| [0162](0162-configured-authority-and-one-flow-tool.md) | Configured policy owns authority; one flow tool replaces sequence and removes request restrictions and flow dry-run | Accepted; implemented, verified locally, and deployed |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

@@ -81,12 +81,10 @@ printf '%s\n' \
 ```
 
 Because it reads a line at a time, a caller can read a handle out of one result and write the next
-line using it. For a fixed sequence with no handle passing, `browser_sequence` does the whole
-thing in one call.
-
-Because it reads a line at a time, a caller can read a handle out of one result and write the next
-line using it. For a fixed sequence with no handle passing, `browser_sequence` does the whole
-thing in one call.
+line using it. `browser_flow` batches ordinary tool calls in one invocation. Step IDs are optional
+for a fixed batch; name steps when later arguments use `flow_ref` to read their results. A flow
+executes its steps and stops on the first failure by default. Policy remains configured by the
+person or organization; calls do not accept host or capability restriction fields.
 
 Two habits keep scripts out of rework:
 

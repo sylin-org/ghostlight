@@ -28,11 +28,10 @@ const DEFAULT_TIMEOUT_MS: u64 = 8_000;
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 30_000;
 pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
-const COMMON_FIELDS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
+const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
 pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. Use the advertised short calls and inspect current handles after navigation.";
-const CAPABILITIES: &[&str] = &["read", "action", "write", "execute"];
 /// Closed role vocabulary a semantic selector may filter on.
 const SEMANTIC_ROLES: &[&str] = &[
     "button",
@@ -69,17 +68,6 @@ const NAMED_KEYS: &[&str] = &[
     "PageDown",
     "Space",
 ];
-
-/// Optional caller restrictions that can only tighten authority.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-pub struct RequestRestrictions {
-    /// Host patterns allowed for this invocation.
-    #[serde(default)]
-    pub restrict_hosts: Option<Vec<String>>,
-    /// Capabilities allowed for this invocation.
-    #[serde(default)]
-    pub restrict_capabilities: Option<Vec<String>>,
-}
 
 /// A typed user job decoded by the language context.
 #[derive(Clone, Debug, PartialEq)]
@@ -130,8 +118,6 @@ pub enum Operation {
     RunScript(RunScript),
     /// Wait for an explicit condition.
     Wait(Wait),
-    /// Run a short known sequence.
-    RunSequence(RunSequence),
     /// Run one governed result-aware flow of decoded steps.
     RunFlow(RunFlow),
     /// Resolve a browser dialog.
@@ -146,42 +132,6 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Return caller restrictions carried by this operation.
-    #[must_use]
-    pub fn restrictions(&self) -> &RequestRestrictions {
-        match self {
-            Self::ListTabs(value) => &value.restrictions,
-            Self::ActivateTab(value) => &value.restrictions,
-            Self::OpenPage(value) => &value.restrictions,
-            Self::NavigatePage(value) => &value.restrictions,
-            Self::NavigateHistory(value) => &value.restrictions,
-            Self::ReloadPage(value) => &value.restrictions,
-            Self::CloseTab(value) => &value.restrictions,
-            Self::ReadPage(value) => &value.restrictions,
-            Self::InspectPage(value) => &value.restrictions,
-            Self::Find(value) => &value.restrictions,
-            Self::TakeScreenshot(value) => &value.restrictions,
-            Self::Click(value) => &value.restrictions,
-            Self::ScrollPage(value) => &value.restrictions,
-            Self::SetZoom(value) => &value.restrictions,
-            Self::ResizeWindow(value) => &value.restrictions,
-            Self::Hover(value) => &value.restrictions,
-            Self::FillForm(value) => &value.restrictions,
-            Self::TypeText(value) => &value.restrictions,
-            Self::PressKey(value) => &value.restrictions,
-            Self::Drag(value) => &value.restrictions,
-            Self::UploadFiles(value) => &value.restrictions,
-            Self::RunScript(value) => &value.restrictions,
-            Self::Wait(value) => &value.restrictions,
-            Self::RunSequence(value) => &value.restrictions,
-            Self::RunFlow(value) => &value.restrictions,
-            Self::HandleDialog(value) => &value.restrictions,
-            Self::Record(value) => &value.restrictions,
-            Self::Diagnose(value) => &value.restrictions,
-            Self::ExplainPolicy(value) => &value.restrictions,
-        }
-    }
-
     /// Return the exact catalog name of this operation.
     #[must_use]
     pub const fn name(&self) -> &'static str {
@@ -204,7 +154,6 @@ impl Operation {
             Self::UploadFiles(_) => "browser_upload",
             Self::RunScript(_) => "browser_execute",
             Self::Wait(_) => "browser_wait",
-            Self::RunSequence(_) => "browser_sequence",
             Self::RunFlow(_) => "browser_flow",
             Self::HandleDialog(_) => "browser_dialog",
             Self::Record(_) => "browser_record",
@@ -220,8 +169,6 @@ pub struct TabsRequest {
     pub action: String,
     #[serde(default)]
     pub tab: Option<String>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Model input for the cohesive history controller.
@@ -234,8 +181,6 @@ pub struct HistoryRequest {
     pub bypass_cache: bool,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Model input for opening or reusing a controlled browser tab.
@@ -257,8 +202,6 @@ pub struct NavigateRequest {
     pub beforeunload: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Model input for the cohesive browser-window controller.
@@ -273,23 +216,16 @@ pub struct WindowRequest {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for listing controlled tabs.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-pub struct ListTabs {
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
-}
+pub struct ListTabs {}
 
 /// Input for bringing one exact tab into view.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ActivateTab {
     pub tab: String,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Whether opening a page may adopt an existing unbound same-host tab (ADR-0137).
@@ -330,8 +266,6 @@ pub struct OpenPage {
     /// Whether the open may adopt an unbound same-host tab instead of creating one.
     #[serde(default)]
     pub reuse: ReusePolicy,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for navigating a page.
@@ -348,8 +282,6 @@ pub struct NavigatePage {
     pub reuse: ReusePolicy,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for browser history traversal.
@@ -360,8 +292,6 @@ pub struct NavigateHistory {
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for reloading a controlled tab.
@@ -373,16 +303,12 @@ pub struct ReloadPage {
     pub bypass_cache: bool,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for closing an exact tab.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct CloseTab {
     pub tab: String,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for bounded page reading.
@@ -397,8 +323,6 @@ pub struct ReadPage {
     pub mode: Option<ReadMode>,
     #[serde(default = "default_max_chars")]
     pub max_chars: usize,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// The closed document-reading strategy.
@@ -437,8 +361,6 @@ pub struct InspectPage {
     pub max_depth: Option<usize>,
     #[serde(default = "default_max_items")]
     pub max_items: usize,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for semantic finding.
@@ -451,8 +373,6 @@ pub struct Find {
     pub scope: String,
     #[serde(default = "default_max_results")]
     pub max_results: usize,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for a screenshot.
@@ -476,8 +396,6 @@ pub struct TakeScreenshot {
     pub height: Option<f64>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// One typed semantic selector resolved against the live document.
@@ -529,8 +447,6 @@ pub struct Click {
     pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for page scrolling or target reveal.
@@ -554,8 +470,6 @@ pub struct ScrollPage {
     pub ticks: Option<u8>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for setting visible tab zoom.
@@ -564,8 +478,6 @@ pub struct SetZoom {
     pub percent: u16,
     #[serde(default)]
     pub tab: Option<String>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for resizing the browser window that contains a controlled tab.
@@ -575,8 +487,6 @@ pub struct ResizeWindow {
     pub height: u32,
     #[serde(default)]
     pub tab: Option<String>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for semantic or screenshot-coordinate hover.
@@ -594,8 +504,6 @@ pub struct Hover {
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// One ordinary form value.
@@ -634,8 +542,6 @@ pub struct FillForm {
     pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for typing ordinary text through browser input events.
@@ -659,8 +565,6 @@ pub struct TypeText {
     pub expect: Option<Postcondition>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for one keyboard action.
@@ -683,8 +587,6 @@ pub struct PressKey {
     /// Optional expectation checked after the applied effect.
     #[serde(default)]
     pub expect: Option<Postcondition>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for semantic or screenshot-coordinate drag.
@@ -708,8 +610,6 @@ pub struct Drag {
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for bounded local file upload.
@@ -739,8 +639,6 @@ pub struct UploadFiles {
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// One bounded inline file supplied directly by the caller.
@@ -769,8 +667,6 @@ pub struct RunScript {
     pub max_result_chars: usize,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for one explicit wait.
@@ -789,70 +685,6 @@ pub struct Wait {
     pub selector: Option<SemanticSelector>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
-}
-
-/// One flat step in a short sequence.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SequenceStep {
-    /// Activate a current target.
-    Click {
-        target: String,
-        #[serde(default = "default_button")]
-        button: String,
-        #[serde(default = "default_click_count")]
-        click_count: u8,
-    },
-    /// Fill one ordinary field.
-    Fill { target: String, value: String },
-    /// Type ordinary text through browser input events.
-    TypeText {
-        target: String,
-        text: String,
-        #[serde(default)]
-        clear_first: bool,
-    },
-    /// Send one keyboard action.
-    PressKey {
-        key: String,
-        #[serde(default)]
-        target: Option<String>,
-        #[serde(default)]
-        modifiers: Vec<String>,
-    },
-    /// Scroll in a direction or reveal a target.
-    Scroll {
-        #[serde(default)]
-        target: Option<String>,
-        #[serde(default)]
-        direction: Option<String>,
-        #[serde(default)]
-        amount: Option<String>,
-    },
-    /// Hover one current target.
-    Hover { target: String },
-    /// Observe one condition.
-    Wait {
-        condition: String,
-        #[serde(default)]
-        value: Option<String>,
-        #[serde(default)]
-        target: Option<String>,
-    },
-}
-
-/// Input for a short sequence.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct RunSequence {
-    pub steps: Vec<SequenceStep>,
-    #[serde(default)]
-    pub tab: Option<String>,
-    #[serde(default = "default_timeout")]
-    pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// One explicit result reference embedded in a flow argument.
@@ -866,13 +698,14 @@ pub struct ResultReference {
 
 /// One named step of a governed flow.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FlowStep {
-    /// Unique step id within this flow.
+    /// Unique step id; decoding assigns step_1, step_2, and so on when omitted.
     pub id: String,
     /// Current advertised non-composite Ghostlight tool.
     pub tool: String,
     /// Argument object; values may embed `{"flow_ref":{"step","pointer"}}`.
-    #[serde(default)]
+    #[serde(default = "empty_arguments")]
     pub arguments: Value,
 }
 
@@ -883,13 +716,13 @@ pub struct RunFlow {
     #[serde(default = "default_on_error")]
     pub on_error: String,
     #[serde(default)]
-    pub dry_run: bool,
-    #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
+}
+
+fn empty_arguments() -> Value {
+    serde_json::json!({})
 }
 
 fn default_on_error() -> String {
@@ -904,8 +737,6 @@ pub struct HandleDialog {
     pub tab: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for the memory-only recording lifecycle.
@@ -921,8 +752,6 @@ pub struct Record {
     /// Let the browser write the replay to a file instead of returning it.
     #[serde(default)]
     pub download: bool,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for bounded opt-in browser diagnostics.
@@ -940,19 +769,14 @@ pub struct Diagnose {
     pub after: Option<String>,
     #[serde(default = "default_diagnostic_limit")]
     pub limit: usize,
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
 }
 
 /// Input for the always-available policy explain operation (ADR-0136).
 ///
 /// There is nothing to configure: the projection is compiled from the authority in force, so the
-/// input carries only the shared request restrictions every tool accepts.
+/// input has no arguments.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-pub struct ExplainPolicy {
-    #[serde(flatten)]
-    pub restrictions: RequestRestrictions,
-}
+pub struct ExplainPolicy {}
 
 /// A model-language validation failure before work starts.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -997,7 +821,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                     ));
                 }
                 validate_range(value.max_chars, 500, 50_000, "max_chars")?;
-                validate_restrictions(&value.restrictions)
+                Ok(())
             },
         )?)
         .into_ok(),
@@ -1024,7 +848,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                     }
                 }
                 validate_range(value.max_items, 1, 200, "max_items")?;
-                validate_restrictions(&value.restrictions)
+                Ok(())
             },
         )?)
         .into_ok(),
@@ -1036,7 +860,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
                 validate_range(value.max_results, 1, 50, "max_results")?;
-                validate_restrictions(&value.restrictions)
+                Ok(())
             },
         )?)
         .into_ok(),
@@ -1172,7 +996,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_range(value.max_result_chars, 100, 20_000, "max_result_chars")?;
                 validate_timeout(value.timeout_ms)?;
-                validate_restrictions(&value.restrictions)
+                Ok(())
             },
         )?)
         .into_ok(),
@@ -1189,18 +1013,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             validate_wait,
         )?)
         .into_ok(),
-        "browser_sequence" => Operation::RunSequence(parse(
-            input,
-            &["steps", "tab", "timeout_ms"],
-            validate_sequence,
-        )?)
-        .into_ok(),
-        "browser_flow" => Operation::RunFlow(parse(
-            input,
-            &["steps", "on_error", "dry_run", "tab", "timeout_ms"],
-            validate_flow,
-        )?)
-        .into_ok(),
+        "browser_sequence" => Err(LanguageError::Invalid("browser_sequence was removed; use browser_flow with ordinary tool steps. Refresh the tool catalog before retrying.".into())),
+        "browser_flow" => decode_flow(input),
         "browser_dialog" => decode_dialog(input),
         "browser_record" => decode_record(input),
         "browser_diagnose" => decode_diagnose(input),
@@ -1239,18 +1053,15 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
             )?,
             _ => {}
         }
-        validate_restrictions(&value.restrictions)
+        Ok(())
     })?;
-    let restrictions = value.restrictions;
     Ok(match value.action.as_str() {
-        "list" => Operation::ListTabs(ListTabs { restrictions }),
+        "list" => Operation::ListTabs(ListTabs {}),
         "focus" => Operation::ActivateTab(ActivateTab {
             tab: value.tab.expect("validated tab"),
-            restrictions,
         }),
         "close" => Operation::CloseTab(CloseTab {
             tab: value.tab.expect("validated tab"),
-            restrictions,
         }),
         _ => unreachable!("validated action"),
     })
@@ -1298,7 +1109,7 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
                 ));
             }
             validate_timeout(value.timeout_ms)?;
-            validate_restrictions(&value.restrictions)
+            Ok(())
         },
     )?;
     Ok(if value.new_tab {
@@ -1318,7 +1129,6 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
             browser: value.browser,
             timeout_ms: value.timeout_ms,
             reuse,
-            restrictions: value.restrictions,
         })
     } else {
         Operation::NavigatePage(NavigatePage {
@@ -1330,7 +1140,6 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
                 _ => ReusePolicy::Domain,
             },
             timeout_ms: value.timeout_ms,
-            restrictions: value.restrictions,
         })
     })
 }
@@ -1349,7 +1158,7 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
                 ));
             }
             validate_timeout(value.timeout_ms)?;
-            validate_restrictions(&value.restrictions)
+            Ok(())
         },
     )?;
     Ok(if value.action == "reload" {
@@ -1357,14 +1166,12 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
             tab: value.tab,
             bypass_cache: value.bypass_cache,
             timeout_ms: value.timeout_ms,
-            restrictions: value.restrictions,
         })
     } else {
         Operation::NavigateHistory(NavigateHistory {
             direction: value.action,
             tab: value.tab,
             timeout_ms: value.timeout_ms,
-            restrictions: value.restrictions,
         })
     })
 }
@@ -1411,21 +1218,19 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                 }
                 _ => unreachable!("validated action"),
             }
-            validate_restrictions(&value.restrictions)
+            Ok(())
         },
     )?;
     Ok(if value.action == "zoom" {
         Operation::SetZoom(SetZoom {
             percent: value.percent.expect("validated percent"),
             tab: value.tab,
-            restrictions: value.restrictions,
         })
     } else {
         Operation::ResizeWindow(ResizeWindow {
             width: value.width.expect("validated width"),
             height: value.height.expect("validated height"),
             tab: value.tab,
-            restrictions: value.restrictions,
         })
     })
 }
@@ -1456,7 +1261,7 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
             }
             _ => {}
         }
-        validate_restrictions(&value.restrictions)
+        Ok(())
     })?;
     Ok(Operation::HandleDialog(value))
 }
@@ -1502,7 +1307,7 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
                 }
                 _ => {}
             }
-            validate_restrictions(&value.restrictions)
+            Ok(())
         },
     )?;
     Ok(Operation::Record(value))
@@ -1521,7 +1326,7 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
             }
             validate_optional_handle(value.after.as_deref(), "diag_")?;
             validate_range(value.limit, 1, 200, "limit")?;
-            validate_restrictions(&value.restrictions)
+            Ok(())
         },
     )?;
     Ok(Operation::Diagnose(value))
@@ -1553,8 +1358,9 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
     let object = input
         .as_object()
         .ok_or_else(|| LanguageError::Invalid("input must be an object".into()))?;
+    reject_retired_arguments(input)?;
     for key in object.keys() {
-        if !fields.contains(&key.as_str()) && !COMMON_FIELDS.contains(&key.as_str()) {
+        if !fields.contains(&key.as_str()) {
             return Err(LanguageError::Invalid(format!(
                 "unknown field `{key}`: check this tool's advertised fields"
             )));
@@ -1575,6 +1381,64 @@ fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
 const FLOW_FORBIDDEN_TOOLS: &[&str] = &["browser_flow", "browser_sequence"];
 const FLOW_REF_POINTER_LIMIT: usize = 512;
 const FLOW_REF_DEPTH_LIMIT: usize = 32;
+
+fn reject_retired_arguments(input: &Value) -> Result<(), LanguageError> {
+    for field in RETIRED_RESTRICTIONS {
+        if has_field(input, field) {
+            return Err(LanguageError::Invalid(format!(
+                "`{field}` was removed. Browser authority comes from configured policy and human controls. Refresh the tool catalog and review the intended work before retrying."
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn decode_flow(mut input: Value) -> Result<Operation, LanguageError> {
+    if has_field(&input, "dry_run") {
+        return Err(LanguageError::Invalid("browser_flow.dry_run was removed; a flow executes its steps. Refresh the tool catalog before retrying.".into()));
+    }
+    if let Some(steps) = input.get_mut("steps").and_then(Value::as_array_mut) {
+        for (index, step) in steps.iter_mut().enumerate() {
+            if let Some(object) = step.as_object_mut() {
+                object
+                    .entry("id")
+                    .or_insert_with(|| Value::String(format!("step_{}", index + 1)));
+            }
+        }
+    }
+    let value = parse(
+        input,
+        &["steps", "on_error", "tab", "timeout_ms"],
+        validate_flow,
+    )?;
+    Ok(Operation::RunFlow(value))
+}
+
+/// Decode an ordinary flow child, inheriting the batch tab only for tab-scoped work.
+pub(crate) fn decode_flow_step(
+    tool: &str,
+    mut input: Value,
+    tab: Option<&str>,
+) -> Result<Operation, LanguageError> {
+    let uses_tab = match tool {
+        "policy_explain" => false,
+        "browser_tabs" => input
+            .get("action")
+            .and_then(Value::as_str)
+            .is_some_and(|action| matches!(action, "focus" | "close")),
+        "browser_record" => input.get("action").and_then(Value::as_str) == Some("start"),
+        "browser_navigate" => input.get("new_tab") != Some(&Value::Bool(true)),
+        _ => true,
+    };
+    if uses_tab {
+        if let (Some(tab), Some(object)) = (tab, input.as_object_mut()) {
+            object
+                .entry("tab")
+                .or_insert_with(|| Value::String(tab.into()));
+        }
+    }
+    decode(tool, input)
+}
 
 fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
     validate_range(
@@ -1615,23 +1479,10 @@ fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
                 "step arguments must be an object".into(),
             ));
         }
-        if has_restriction_fields(&step.arguments) {
-            return Err(LanguageError::Invalid(
-                "flow steps do not accept their own restrictions; the flow's apply".into(),
-            ));
-        }
+        reject_retired_arguments(&step.arguments)?;
         validate_flow_references(&step.arguments, &seen[..seen.len() - 1], index)?;
     }
-    validate_restrictions(&value.restrictions)
-}
-
-fn has_restriction_fields(input: &Value) -> bool {
-    input
-        .as_object()
-        .is_some_and(|object| object.contains_key("restrict_hosts"))
-        || input
-            .as_object()
-            .is_some_and(|object| object.contains_key("restrict_capabilities"))
+    Ok(())
 }
 
 fn validate_flow_references(
@@ -1732,7 +1583,7 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
@@ -1781,7 +1632,7 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
         }
     }
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_hover(value: &Hover) -> Result<(), LanguageError> {
@@ -1793,7 +1644,7 @@ fn validate_hover(value: &Hover) -> Result<(), LanguageError> {
     )?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_location(
@@ -1869,7 +1720,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
         }
     }
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
@@ -1895,7 +1746,7 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
             validate_text_allow_empty(text, 8_000, "field value")?;
         }
     }
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
@@ -1922,7 +1773,7 @@ fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
@@ -1974,7 +1825,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 const INLINE_FILE_LIMIT: usize = 5;
@@ -2082,7 +1933,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_coordinate(value: f64, field: &str) -> Result<(), LanguageError> {
@@ -2129,7 +1980,7 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
     validate_optional_handle(value.target.as_deref(), "target_")?;
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
@@ -2150,7 +2001,7 @@ fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
                 "selector_present accepts neither value nor target".into(),
             ));
         }
-        return validate_restrictions(&value.restrictions);
+        return Ok(());
     }
     if value.selector.is_some() {
         return Err(LanguageError::Invalid(
@@ -2162,85 +2013,7 @@ fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
         value.value.as_deref(),
         value.target.as_deref(),
     )?;
-    validate_restrictions(&value.restrictions)
-}
-
-fn validate_sequence(value: &RunSequence) -> Result<(), LanguageError> {
-    validate_range(value.steps.len(), 2, 8, "steps")?;
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
-    validate_timeout(value.timeout_ms)?;
-    for step in &value.steps {
-        match step {
-            SequenceStep::Click {
-                target,
-                button,
-                click_count,
-            } => {
-                validate_handle(target, "target_")?;
-                validate_choice(button, &["primary", "middle", "secondary"], "button")?;
-                validate_range(usize::from(*click_count), 1, 2, "click_count")?;
-            }
-            SequenceStep::Fill { target, value } => {
-                validate_handle(target, "target_")?;
-                validate_text_allow_empty(value, 8_000, "value")?;
-            }
-            SequenceStep::TypeText {
-                target,
-                text,
-                clear_first,
-            } => {
-                validate_handle(target, "target_")?;
-                if text.is_empty() && !clear_first {
-                    return Err(LanguageError::Invalid(
-                        "text cannot be empty unless clear_first is true".into(),
-                    ));
-                }
-                validate_text_allow_empty(text, 8_000, "text")?;
-            }
-            SequenceStep::PressKey {
-                key,
-                target,
-                modifiers,
-            } => {
-                validate_key(key)?;
-                validate_optional_handle(target.as_deref(), "target_")?;
-                validate_modifiers(modifiers)?;
-            }
-            SequenceStep::Scroll {
-                target,
-                direction,
-                amount,
-            } => {
-                let step = ScrollPage {
-                    tab: None,
-                    target: target.clone(),
-                    direction: direction.clone(),
-                    amount: amount.clone(),
-                    view: None,
-                    x: None,
-                    y: None,
-                    ticks: None,
-                    timeout_ms: DEFAULT_TIMEOUT_MS,
-                    restrictions: RequestRestrictions::default(),
-                };
-                validate_scroll(&step)?;
-            }
-            SequenceStep::Hover { target } => validate_handle(target, "target_")?,
-            SequenceStep::Wait {
-                condition,
-                value,
-                target,
-            } => {
-                if condition == "duration" {
-                    return Err(LanguageError::Invalid(
-                        "duration waits do not run inside sequences".into(),
-                    ));
-                }
-                validate_condition(condition, value.as_deref(), target.as_deref())?
-            }
-        }
-    }
-    validate_restrictions(&value.restrictions)
+    Ok(())
 }
 
 fn validate_condition(
@@ -2308,45 +2081,6 @@ fn validate_condition(
         }
         _ => Ok(()),
     }
-}
-
-fn validate_restrictions(value: &RequestRestrictions) -> Result<(), LanguageError> {
-    if let Some(hosts) = &value.restrict_hosts {
-        if hosts.is_empty()
-            || hosts.iter().any(|host| {
-                host.trim().is_empty()
-                    || host.len() > 253
-                    || host.contains('/')
-                    || host.contains(':')
-                    || (host.contains('*') && !host.starts_with("*."))
-            })
-        {
-            return Err(LanguageError::Invalid(
-                "restrict_hosts must contain non-empty bounded patterns".into(),
-            ));
-        }
-        if has_duplicates(hosts) {
-            return Err(LanguageError::Invalid(
-                "restrict_hosts must be unique".into(),
-            ));
-        }
-    }
-    if let Some(capabilities) = &value.restrict_capabilities {
-        if capabilities.is_empty() {
-            return Err(LanguageError::Invalid(
-                "restrict_capabilities cannot be empty".into(),
-            ));
-        }
-        for capability in capabilities {
-            validate_choice(capability, CAPABILITIES, "restrict_capabilities")?;
-        }
-        if has_duplicates(capabilities) {
-            return Err(LanguageError::Invalid(
-                "restrict_capabilities must be unique".into(),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn validate_url(value: &str) -> Result<(), LanguageError> {
@@ -2511,6 +2245,7 @@ fn default_diagnostic_limit() -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::decode_flow_step;
     use serde_json::json;
 
     use super::{catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy};
@@ -2518,16 +2253,77 @@ mod tests {
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 24);
+        assert_eq!(catalog.len(), 23);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 23);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
             assert!(tool.output_schema.is_some());
             assert!(tool.annotations.is_some());
         }
+    }
+
+    #[test]
+    fn short_flows_assign_ids_and_reject_ambiguous_or_obsolete_input() {
+        let Operation::RunFlow(flow) = decode(
+            "browser_flow",
+            json!({"steps":[
+                {"tool":"browser_tabs"},
+                {"id":"named","tool":"browser_read","arguments":{}}
+            ]}),
+        )
+        .unwrap() else {
+            panic!("flow")
+        };
+        assert_eq!(flow.steps[0].id, "step_1");
+        assert_eq!(flow.steps[0].arguments, json!({}));
+        assert_eq!(flow.steps[1].id, "named");
+        for steps in [
+            json!([{"id":"","tool":"browser_tabs"}]),
+            json!([{"tool":"browser_tabs"},{"id":"step_1","tool":"browser_tabs"}]),
+            json!([{"tool":"browser_tabs","typo":true}]),
+            json!([{"tool":"browser_read","arguments":{"restrict_hosts":["example.com"]}}]),
+        ] {
+            assert!(decode("browser_flow", json!({"steps":steps})).is_err());
+        }
+    }
+
+    #[test]
+    fn a_flow_tab_defaults_only_tab_scoped_children_and_preserves_explicit_choices() {
+        let Operation::ReadPage(read) =
+            decode_flow_step("browser_read", json!({}), Some("tab_batch")).unwrap()
+        else {
+            panic!("read")
+        };
+        assert_eq!(read.tab.as_deref(), Some("tab_batch"));
+        let Operation::ReadPage(read) = decode_flow_step(
+            "browser_read",
+            json!({"tab":"tab_other"}),
+            Some("tab_batch"),
+        )
+        .unwrap() else {
+            panic!("read")
+        };
+        assert_eq!(read.tab.as_deref(), Some("tab_other"));
+        for (tool, input) in [
+            ("policy_explain", json!({})),
+            ("browser_tabs", json!({"action":"list"})),
+            ("browser_record", json!({"action":"status"})),
+            (
+                "browser_navigate",
+                json!({"new_tab":true,"url":"https://example.com"}),
+            ),
+        ] {
+            assert!(decode_flow_step(tool, input, Some("tab_batch")).is_ok());
+        }
+        let Operation::ActivateTab(focus) =
+            decode_flow_step("browser_tabs", json!({"action":"focus"}), Some("tab_batch")).unwrap()
+        else {
+            panic!("focus")
+        };
+        assert_eq!(focus.tab, "tab_batch");
     }
 
     #[test]

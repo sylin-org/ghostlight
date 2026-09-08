@@ -121,7 +121,7 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
     let explain = executor.execute(
         &workspace,
         "policy_explain",
-        json!({"restrict_capabilities":["action"]}),
+        json!({}),
         None,
         &CancellationToken::default(),
     );
@@ -156,9 +156,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         Arc::new(UnwritableAudit),
         executor.workbench.clone(),
     ));
-    let snapshot = executor
-        .governance
-        .snapshot(&crate::language::RequestRestrictions::default());
+    let snapshot = executor.governance.snapshot();
     let cancellation = CancellationToken::default();
     let context = InvocationContext {
         provenance: None,

@@ -30,7 +30,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::language::audit::{AuditProjection, AuditRefusal};
-use crate::language::{outcome::Observed, RequestRestrictions};
+use crate::language::outcome::Observed;
 
 const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
@@ -389,8 +389,6 @@ pub struct AuthoritySnapshot {
     id: String,
     managed_sequence: Option<u64>,
     layers: Vec<PolicyLayer>,
-    request_capabilities: Option<CapabilitySet>,
-    request_hosts: Option<Vec<String>>,
     tab_close_allowed: bool,
     tab_close_source: Option<u16>,
     preserve_target_names: bool,
@@ -459,15 +457,12 @@ impl AuthoritySnapshot {
         self.decide_requirements(requirements).0
     }
 
-    fn decide_requirements(
-        &self,
-        requirements: CapabilitySet,
-    ) -> (Decision, Vec<LayerOutcome>, bool) {
+    fn decide_requirements(&self, requirements: CapabilitySet) -> (Decision, Vec<LayerOutcome>) {
         if !self.valid {
-            return (Decision::deny(ReasonCode::InvalidAuthority), vec![], false);
+            return (Decision::deny(ReasonCode::InvalidAuthority), vec![]);
         }
         if requirements.is_empty() {
-            return (Decision::allow(), vec![], false);
+            return (Decision::allow(), vec![]);
         }
         let outcomes: Vec<_> = self
             .layers
@@ -476,23 +471,9 @@ impl AuthoritySnapshot {
             .collect();
         let policy_decision = self.resolve_outcomes(&outcomes);
         if let Some(decision) = policy_decision.filter(|decision| !decision.allowed) {
-            return (decision, outcomes, false);
+            return (decision, outcomes);
         }
-        if self
-            .request_capabilities
-            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
-        {
-            return (
-                self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability),
-                outcomes,
-                true,
-            );
-        }
-        (
-            policy_decision.unwrap_or_else(Decision::allow),
-            outcomes,
-            true,
-        )
+        (policy_decision.unwrap_or_else(Decision::allow), outcomes)
     }
 
     /// Decide whether model-driven tab closure is admitted by every authority layer.
@@ -539,23 +520,23 @@ impl AuthoritySnapshot {
         &self,
         requirements: CapabilitySet,
         url: &str,
-    ) -> (Decision, Vec<LayerOutcome>, bool) {
+    ) -> (Decision, Vec<LayerOutcome>) {
         if !self.valid {
-            return (Decision::deny(ReasonCode::InvalidAuthority), vec![], false);
+            return (Decision::deny(ReasonCode::InvalidAuthority), vec![]);
         }
         let Ok(parsed) = Url::parse(url) else {
-            return (Decision::deny(ReasonCode::HostDenied), vec![], false);
+            return (Decision::deny(ReasonCode::HostDenied), vec![]);
         };
         if !matches!(parsed.scheme(), "http" | "https")
             || protected_by_policy(&parsed, &self.sacred_hosts)
         {
-            return (Decision::deny(ReasonCode::ProtectedHost), vec![], false);
+            return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
         }
         let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
-            return (Decision::deny(ReasonCode::HostDenied), vec![], false);
+            return (Decision::deny(ReasonCode::HostDenied), vec![]);
         };
         if requirements.is_empty() {
-            return (Decision::allow(), vec![], false);
+            return (Decision::allow(), vec![]);
         }
         let outcomes: Vec<_> = self
             .layers
@@ -564,34 +545,9 @@ impl AuthoritySnapshot {
             .collect();
         let policy_decision = self.resolve_outcomes(&outcomes);
         if let Some(decision) = policy_decision.filter(|decision| !decision.allowed) {
-            return (decision, outcomes, false);
+            return (decision, outcomes);
         }
-        if self
-            .request_capabilities
-            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
-        {
-            return (
-                self.session_denial(ReasonCode::CapabilityDenied, PolicyRule::Capability),
-                outcomes,
-                true,
-            );
-        }
-        if self
-            .request_hosts
-            .as_ref()
-            .is_some_and(|patterns| !patterns.iter().any(|pattern| host_matches(&host, pattern)))
-        {
-            return (
-                self.session_denial(ReasonCode::HostDenied, PolicyRule::UnmatchedHost),
-                outcomes,
-                true,
-            );
-        }
-        (
-            policy_decision.unwrap_or_else(Decision::allow),
-            outcomes,
-            true,
-        )
+        (policy_decision.unwrap_or_else(Decision::allow), outcomes)
     }
 
     /// Whether policy-aware discovery can prove that some host-scoped variant may proceed.
@@ -605,13 +561,6 @@ impl AuthoritySnapshot {
         }
         if requirements.is_empty() {
             return true;
-        }
-        if self
-            .request_capabilities
-            .is_some_and(|allowed| !requirements.is_subset_of(allowed))
-            || self.request_hosts.as_ref().is_some_and(Vec::is_empty)
-        {
-            return false;
         }
         let outcomes: Vec<_> = self
             .layers
@@ -658,41 +607,11 @@ impl AuthoritySnapshot {
         ))
     }
 
-    fn session_denial(&self, reason: ReasonCode, rule: PolicyRule) -> Decision {
-        let layer = u16::try_from(self.layers.len()).expect("policy layer count is bounded");
-        Decision::policy(
-            reason,
-            PolicyAttribution {
-                layer,
-                grant: None,
-                rule,
-                denial: denial_bytes(&self.id, "session", rule),
-                mode: manifest::PolicyMode::Enforce,
-            },
-            manifest::PolicyMode::Enforce,
-        )
-    }
-
-    /// Whether this refusal was decided by caller-supplied restrictions on this invocation.
-    #[must_use]
-    pub fn is_request_denial(&self, decision: Decision) -> bool {
-        !decision.allowed
-            && matches!(
-                decision.reason,
-                ReasonCode::CapabilityDenied | ReasonCode::HostDenied
-            )
-            && decision
-                .attribution
-                .is_some_and(|attribution| usize::from(attribution.layer) == self.layers.len())
-    }
-
     /// Policy tier and grant id for one decision, when authored policy decided it.
     #[must_use]
     pub fn attribution(&self, decision: Decision) -> Option<(&'static str, Option<&str>)> {
         let attribution = decision.attribution?;
-        let Some(layer) = self.layers.get(usize::from(attribution.layer)) else {
-            return Some(("session", None));
-        };
+        let layer = self.layers.get(usize::from(attribution.layer))?;
         let grant = attribution
             .grant
             .and_then(|index| layer.manifest.grants.get(usize::from(index)))
@@ -1518,10 +1437,7 @@ impl GovernanceFacade {
     /// renders them and computes nothing (ADR-0122 Decision 2).
     #[must_use]
     pub fn effective_authority(&self) -> effective::EffectiveAuthority {
-        let sacred_hosts = self
-            .snapshot(&RequestRestrictions::default())
-            .sacred_hosts()
-            .to_vec();
+        let sacred_hosts = self.snapshot().sacred_hosts().to_vec();
         self.refresh_policies();
         let policies = self
             .policies
@@ -1589,9 +1505,9 @@ impl GovernanceFacade {
         effective::browser_startup(&inputs).value
     }
 
-    /// Build one immutable snapshot and apply caller restrictions by intersection.
+    /// Build one immutable snapshot from configured policy authority.
     #[must_use]
-    pub fn snapshot(&self, restrictions: &RequestRestrictions) -> AuthoritySnapshot {
+    pub fn snapshot(&self) -> AuthoritySnapshot {
         self.refresh_policies();
         let (sources, managed_sequence, valid) = {
             let policies = self
@@ -1607,7 +1523,7 @@ impl GovernanceFacade {
                 policies.managed_valid() && policies.user.has_authority(),
             )
         };
-        assemble(restrictions, sources, managed_sequence, valid)
+        assemble(sources, managed_sequence, valid)
     }
 
     /// Build the snapshot a candidate user policy would produce, without applying it.
@@ -1632,7 +1548,6 @@ impl GovernanceFacade {
         };
         Ok(Candidate {
             snapshot: assemble(
-                &RequestRestrictions::default(),
                 [
                     (managed, AuthorityTier::Managed),
                     (Some(candidate), AuthorityTier::User),
@@ -1775,9 +1690,8 @@ impl GovernanceFacade {
     }
 }
 
-/// Fold resolved layers and caller restrictions into one immutable snapshot.
+/// Fold resolved policy layers into one immutable snapshot.
 fn assemble(
-    restrictions: &RequestRestrictions,
     sources: [(Option<manifest::Manifest>, AuthorityTier); 2],
     managed_sequence: Option<u64>,
     valid: bool,
@@ -1787,7 +1701,6 @@ fn assemble(
     let mut tab_close_source = None;
     let mut preserve_target_names = true;
     let mut sacred_hosts = Vec::new();
-    let mut valid = valid;
     for (policy, tier) in sources {
         let Some(policy) = policy else { continue };
         let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
@@ -1806,39 +1719,12 @@ fn assemble(
             manifest: policy,
         });
     }
-    let request_capabilities = restrictions.restrict_capabilities.as_ref().map(|values| {
-        values.iter().fold(
-            CapabilitySet::EMPTY,
-            |set, value| match Capability::from_str(value) {
-                Ok(capability) => set.union(capability.into()),
-                Err(_) => {
-                    valid = false;
-                    set
-                }
-            },
-        )
-    });
-    let request_hosts = restrictions.restrict_hosts.clone();
-    if request_hosts.as_ref().is_some_and(|patterns| {
-        patterns
-            .iter()
-            .any(|pattern| !manifest::valid_host_pattern(pattern))
-    }) {
-        valid = false;
-    }
-    let id = authority_id(
-        &layers,
-        request_capabilities,
-        request_hosts.as_deref(),
-        valid,
-    );
+    let id = authority_id(&layers, valid);
 
     AuthoritySnapshot {
         id,
         managed_sequence,
         layers,
-        request_capabilities,
-        request_hosts,
         tab_close_allowed,
         tab_close_source,
         preserve_target_names,
@@ -1889,12 +1775,7 @@ fn read_policy(path: &Path) -> Result<manifest::Manifest, GovernanceError> {
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))
 }
 
-fn authority_id(
-    layers: &[PolicyLayer],
-    request_capabilities: Option<CapabilitySet>,
-    request_hosts: Option<&[String]>,
-    valid: bool,
-) -> String {
+fn authority_id(layers: &[PolicyLayer], valid: bool) -> String {
     let mut identity = String::new();
     identity.push_str(if valid { "valid\n" } else { "invalid\n" });
     for layer in layers {
@@ -1902,23 +1783,6 @@ fn authority_id(
         identity.push(':');
         identity.push_str(&layer.manifest.hash);
         identity.push('\n');
-    }
-    if let Some(capabilities) = request_capabilities {
-        identity.push_str("capabilities:");
-        for capability in capabilities.iter() {
-            identity.push_str(capability.as_str());
-            identity.push(',');
-        }
-        identity.push('\n');
-    }
-    if let Some(hosts) = request_hosts {
-        let mut hosts = hosts.to_vec();
-        hosts.sort_unstable();
-        identity.push_str("hosts:");
-        for host in hosts {
-            identity.push_str(&host.to_ascii_lowercase());
-            identity.push(',');
-        }
     }
     let digest = Sha256::digest(identity.as_bytes());
     format!("authority_{}", hex_prefix(&digest, 16))
@@ -2179,7 +2043,6 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use crate::language::RequestRestrictions;
     use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
     use super::{
@@ -2265,8 +2128,7 @@ mod tests {
     fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
         let path = temporary(name);
         fs::write(&path, source).unwrap();
-        let snapshot = GovernanceFacade::new(Some(path.clone()), None)
-            .snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
         let _ = fs::remove_file(path);
         snapshot
     }
@@ -2274,7 +2136,7 @@ mod tests {
     #[test]
     fn no_policy_allows_local_and_remote_http_destinations() {
         let facade = GovernanceFacade::new(None, None);
-        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        let snapshot = facade.snapshot();
         assert!(snapshot.preserves_target_names());
         assert!(snapshot.authorize_tab_close().allowed);
         for url in [
@@ -2302,7 +2164,7 @@ mod tests {
 
     #[test]
     fn non_http_schemes_still_refuse_without_policy() {
-        let snapshot = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(None, None).snapshot();
         for url in [
             "chrome://extensions/",
             "chrome-extension://example/options.html",
@@ -2379,8 +2241,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
-            .snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
         assert_eq!(
             snapshot.authorize_tab_close().reason,
             ReasonCode::TabCloseDenied
@@ -2413,8 +2274,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
-            .snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
         assert!(!snapshot.preserves_target_names());
 
         fs::write(
@@ -2435,8 +2295,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()))
-            .snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
         assert!(!snapshot.preserves_target_names());
 
         let _ = fs::remove_file(local);
@@ -2444,13 +2303,19 @@ mod tests {
     }
 
     #[test]
-    fn request_restrictions_only_tighten() {
-        let facade = GovernanceFacade::new(None, None);
-        let restrictions = RequestRestrictions {
-            restrict_hosts: Some(vec!["example.com".into()]),
-            restrict_capabilities: Some(vec!["read".into()]),
-        };
-        let snapshot = facade.snapshot(&restrictions);
+    fn configured_policy_bounds_hosts_and_capabilities() {
+        let path = temporary("configured-boundary");
+        fs::write(
+            &path,
+            policy(
+                "test",
+                r#"[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]}]"#,
+                "[]",
+            ),
+        )
+        .unwrap();
+        let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
+        fs::remove_file(path).unwrap();
         assert!(
             snapshot
                 .authorize_landing(Capability::Read, "https://example.com")
@@ -2477,7 +2342,7 @@ mod tests {
             assert_eq!(
                 snapshot.authorize_landing(Capability::Read, url).reason,
                 ReasonCode::HostDenied,
-                "request restrictions still narrow {url}"
+                "configured policy still bounds {url}"
             );
         }
     }
@@ -2494,8 +2359,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let snapshot = GovernanceFacade::new(Some(path.clone()), None)
-            .snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
         assert!(
             snapshot
                 .authorize_requirements(CapabilitySet::READ.union(CapabilitySet::WRITE))
@@ -2696,8 +2560,8 @@ mod tests {
         )
         .unwrap();
         let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
-        let first = facade.snapshot(&RequestRestrictions::default());
-        let same = facade.snapshot(&RequestRestrictions::default());
+        let first = facade.snapshot();
+        let same = facade.snapshot();
         let denied = first.authorize_landing(Capability::Read, "https://example.com");
         assert!(
             !denied.allowed,
@@ -2710,7 +2574,7 @@ mod tests {
             r#"{"schema":3,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-        let changed = facade.snapshot(&RequestRestrictions::default());
+        let changed = facade.snapshot();
         assert_ne!(first.id(), changed.id());
         let _ = fs::remove_file(managed);
         let _ = fs::remove_file(local);
@@ -2789,14 +2653,14 @@ mod tests {
         // A machine that has never authored one is open, not failing closed.
         assert!(
             facade
-                .snapshot(&RequestRestrictions::default())
+                .snapshot()
                 .authorize_capability(Capability::Execute)
                 .allowed
         );
 
         let good = r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#;
         facade.apply_user_policy(good).unwrap();
-        let applied = facade.snapshot(&RequestRestrictions::default());
+        let applied = facade.snapshot();
         assert!(
             applied
                 .authorize_landing(CapabilitySet::READ, "https://example.com")
@@ -2814,7 +2678,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), good);
         assert!(
             facade
-                .snapshot(&RequestRestrictions::default())
+                .snapshot()
                 .authorize_landing(CapabilitySet::READ, "https://example.com")
                 .allowed
         );
@@ -2830,7 +2694,7 @@ mod tests {
         assert!(!path.exists());
         assert!(
             facade
-                .snapshot(&RequestRestrictions::default())
+                .snapshot()
                 .authorize_capability(Capability::Execute)
                 .allowed
         );
@@ -2921,7 +2785,7 @@ mod tests {
         assert!(!facade.user_authoring_allowed());
         // The switch gates authoring only. An existing user layer keeps subtracting, because
         // ignoring it would restore authority the organization never granted back.
-        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        let snapshot = facade.snapshot();
         assert!(
             snapshot
                 .authorize_landing(CapabilitySet::READ, "https://example.com")
@@ -2943,7 +2807,7 @@ mod tests {
         let path = temporary("invalid-managed");
         fs::write(&path, br#"{"version":1,"managed":false}"#).unwrap();
         let facade = GovernanceFacade::new(None, Some(path.clone()));
-        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        let snapshot = facade.snapshot();
         assert_eq!(
             snapshot.authorize_capability(Capability::Read).reason,
             ReasonCode::InvalidAuthority
@@ -2956,7 +2820,7 @@ mod tests {
         let path = temporary("missing-managed");
         let _ = fs::remove_file(&path);
         let facade = GovernanceFacade::new(None, Some(path));
-        let snapshot = facade.snapshot(&RequestRestrictions::default());
+        let snapshot = facade.snapshot();
         assert_eq!(
             snapshot.authorize_capability(Capability::Read).reason,
             ReasonCode::InvalidAuthority
@@ -2976,7 +2840,7 @@ mod tests {
         )
         .unwrap();
         let facade = GovernanceFacade::new(Some(path.clone()), None);
-        let first = facade.snapshot(&RequestRestrictions::default());
+        let first = facade.snapshot();
         fs::write(
             &path,
             policy(
@@ -2988,7 +2852,7 @@ mod tests {
         .unwrap();
         assert!(first.authorize_capability(Capability::Read).allowed);
         assert!(!first.authorize_capability(Capability::Action).allowed);
-        let second = facade.snapshot(&RequestRestrictions::default());
+        let second = facade.snapshot();
         assert!(!second.authorize_capability(Capability::Read).allowed);
         assert!(second.authorize_capability(Capability::Action).allowed);
         let _ = fs::remove_file(path);
@@ -3009,13 +2873,13 @@ mod tests {
         let facade = GovernanceFacade::new(Some(path.clone()), None);
         assert!(
             facade
-                .snapshot(&RequestRestrictions::default())
+                .snapshot()
                 .authorize_capability(Capability::Read)
                 .allowed
         );
 
         fs::write(&path, "{half-written").unwrap();
-        let retained = facade.snapshot(&RequestRestrictions::default());
+        let retained = facade.snapshot();
         assert!(retained.authorize_capability(Capability::Read).allowed);
         assert!(!retained.authorize_capability(Capability::Action).allowed);
         let retained_diagnostics = facade.diagnostics();
@@ -3031,7 +2895,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let replaced = facade.snapshot(&RequestRestrictions::default());
+        let replaced = facade.snapshot();
         assert!(!replaced.authorize_capability(Capability::Read).allowed);
         assert!(replaced.authorize_capability(Capability::Action).allowed);
         let replaced_diagnostics = facade.diagnostics();

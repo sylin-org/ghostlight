@@ -176,7 +176,7 @@ requirements are present in the advertised schema rather than left only to runti
 
 ### Work
 
-Owns invocation ids, lifecycle, deadlines, cancellation, sequences, the application executor,
+Owns invocation ids, lifecycle, deadlines, cancellation, flows, the application executor,
 unit-of-work state, uncertainty, and the single completion path.
 
 ### Workspace
@@ -246,13 +246,13 @@ failure ends the desktop authority instead of leaving an invisible process.
 
 ## Chokepoints and unit of work
 
-Every direct call, flow, and sequence enters `ApplicationExecutor::execute`. One invocation owns one
+Every direct call and flow enters `ApplicationExecutor::execute`. One invocation owns one
 unit of work until exactly one completion is committed.
 
 The synchronous path is:
 
 1. Decode and validate through language.
-2. Snapshot configured and managed authority, then apply request restrictions.
+2. Snapshot configured local and managed authority.
 3. Start work and emit `WorkStarted`.
 4. Resolve ownership and acquire a workspace lease.
 5. Ask the governance facade at the final boundary for each required capability or landing.
@@ -264,7 +264,7 @@ The synchronous path is:
 An operation handler cannot mutate another context directly, call a transport, bypass
 governance, or construct a client result around `CompletionGate`.
 
-Flow and sequence retain the parent's lease and immutable authority snapshot. Their ordinary
+Flows retain the parent's lease and immutable authority snapshot. Their ordinary
 child executors feed one accumulator in `work/composition.rs`; language owns its closed progress,
 summary, and recovery in `language/composition.rs`, through `Outcome::CompositionRan`. One safe
 projection carries that account into the parent audit record. Child payloads remain separate,
@@ -275,7 +275,8 @@ parent invocation and position. Only the parent settles the lifecycle. Actual ch
 once; aggregate wrappers do not repeat them.
 
 `governance/evidence.rs` captures bounded permission checks from the admission evaluator, including
-positive grant identities for each evaluated layer and whether request restrictions were reached.
+positive grant identities for each evaluated layer. Legacy receipts retain old request restriction
+evidence without applying that retired mechanism to new calls.
 `language/history.rs` owns the readable explanations. `workbench/history.rs` projects and restores
 whole groups, at most 500 with at most 20 children each. Missing receipts stay unconfirmed; only
 parent evidence establishes a never-run suffix. A composition-change projection updates the
@@ -388,8 +389,7 @@ the browser automation contract.
 
 `GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-3 local policy. Ordered grants combine
 host allow and deny patterns with complete independent RAWX sets. Exact hosts outrank longer
-suffix wildcards, which outrank `*`; an exact tie denies. Managed policy, local policy, and request
-restrictions intersect. Sacred destinations compose by union. False tab-close and target-name
+suffix wildcards, which outrank `*`; an exact tie denies. Managed and local policy intersect. Sacred destinations compose by union. False tab-close and target-name
 settings are monotonic. Observe mode records ordinary would-deny decisions while protected
 destinations continue to enforce. A malformed cold source fails closed; an invalid replacement
 keeps the last valid authority for future snapshots.
@@ -409,8 +409,7 @@ boundary. Its exact states are `active`, `hold`, `attention`, and `end_session`.
 invalid configured control file enters hold. These controls never expand the immutable authority
 snapshot.
 
-One immutable effective snapshot is stored in the unit of work. Request restrictions intersect
-with it. Runtime hold, attention, end-session, and cancellation controls are checked immediately
+One immutable configured authority snapshot is stored in the unit of work. Runtime hold, attention, end-session, and cancellation controls are checked immediately
 before browser dispatch and on browser events.
 
 Navigation prepares commit observation before dispatch. Every committed URL is checked before
@@ -534,8 +533,8 @@ human controls. WorkbenchFacade owns reviewed incident recovery; the allowlisted
 unavailable through model tools. Recovery changes no grants and replays no invocation. The WebView
 renders the session notice and opens its current history group, even after a disposable Clear view.
 
-Observe-mode policy allowance still evaluates and enforces request restrictions. Permission
-receipts retain the final decision and actual evaluated layers. The executor supplies a live
+Observe-mode policy allowance remains useful. Obsolete request fields fail during decoding;
+they cannot turn observation into enforcement. Permission receipts retain the final decision and actual evaluated layers. The executor supplies a live
 admission callback to the common browser port; the relay invokes it after writer acquisition and
 before transmission. The same check guards compensating close. Control authority is not locked
 while waiting for a browser receipt. Already dispatched work retains acknowledged and uncertain

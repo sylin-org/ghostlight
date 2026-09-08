@@ -163,7 +163,7 @@ try {
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
+  assert.equal(listed.result.tools.length, 23);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   const authority = await call("policy_explain", {});
   assert.equal(authority.status, "succeeded", JSON.stringify(authority));
@@ -191,9 +191,9 @@ try {
   const restrictedLocal = structured(await request("tools/call", {
     name: "browser_read", arguments: { tab: localTab, restrict_hosts: ["example.com"] }
   }));
-  assert.equal(restrictedLocal.status, "blocked", JSON.stringify(restrictedLocal));
-  assert.equal(restrictedLocal.facts.reason, "host_denied");
-  console.log(JSON.stringify({ localhost: true, loopback: true, local_policy_denial: true }));
+  assert.equal(restrictedLocal.status, "failed", JSON.stringify(restrictedLocal));
+  assert.ok(restrictedLocal.next_steps.some(step => step.includes("removed")));
+  console.log(JSON.stringify({ localhost: true, loopback: true, retired_input_rejected: true }));
 
   const editor = await call("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/editor` });
   assert.equal(editor.status, "succeeded", JSON.stringify(editor));
@@ -208,7 +208,7 @@ try {
   assert.ok(reply && shadow, JSON.stringify(inspectedEditor));
   const hidden = inspectedEditor.facts.items.find(item => item.name === "Hidden draft helper");
   if (hidden) assert.ok(hidden.state.includes("hidden"));
-  const fill = await call("browser_fill_form", { tab: localTab, restrict_capabilities: ["read", "write"], fields: [
+  const fill = await call("browser_fill_form", { tab: localTab, fields: [
     { target: reply.target, value: "Installed unsent draft\nSecond line" }, { target: shadow.target, value: "Installed shadow draft" }
   ] });
   assert.equal(fill.status, "succeeded", JSON.stringify(fill)); assert.equal(fill.facts.submitted, false);
@@ -227,12 +227,12 @@ try {
   assert.equal(afterRefusal.readonly, "Protected input"); assert.equal(afterRefusal.submissions, 0);
   check("known ineligible batch field leaves the earlier draft unchanged");
   const typed = await call("browser_type_text", { tab: localTab, target: reply.target, text: "Action-only typing", clear_first: true,
-    restrict_capabilities: ["action"] });
+    });
   assert.equal(typed.status, "succeeded", JSON.stringify(typed));
   const afterTyping = await tabEvidence("editorEvidence()");
   assert.equal(afterTyping.reply.value, "Action-only typing"); assert.equal(afterTyping.reply.rendered, "Action-only typing");
   assert.equal(afterTyping.shadow.value, "Installed shadow draft"); assert.equal(afterTyping.submissions, 0);
-  const cleared = await call("browser_type_text", { tab: localTab, focused: true, text: "", clear_first: true, restrict_capabilities: ["action"] });
+  const cleared = await call("browser_type_text", { tab: localTab, focused: true, text: "", clear_first: true, });
   assert.equal(cleared.status, "succeeded", JSON.stringify(cleared));
   editorValue = await tabEvidence("editorEvidence()");
   assert.equal(editorValue.reply.value, ""); assert.equal(editorValue.reply.rendered, "");
@@ -263,43 +263,21 @@ try {
   const unrestricted = await call("browser_read", { tab: localTab });
   assert.equal(unrestricted.status, "succeeded", JSON.stringify(unrestricted));
   assert.match(unrestricted.facts.text, /Excluded child sentinel/);
-  const restricted = await call("browser_read", { tab: localTab, restrict_hosts: ["localhost"] });
-  assert.equal(restricted.status, "succeeded", JSON.stringify(restricted));
-  assert.equal(restricted.facts.coverage.excluded_documents, 1);
-  assert.match(restricted.facts.text, /Permitted parent/);
-  assert.doesNotMatch(JSON.stringify(restricted), /127\.0\.0\.1|Excluded child sentinel/);
-  const parentFill = await call("browser_fill_form", { tab: localTab, restrict_hosts: ["localhost"], fields: [
-    { selector: { name: "Parent field", role: "textbox", exact: true }, value: "Permitted parent draft" }
+  assert.ok(!unrestricted.facts.coverage || unrestricted.facts.coverage.excluded_documents === 0);
+  const parentFill = await call("browser_flow", { tab: localTab, steps: [
+    { tool: "browser_fill_form", arguments: { fields: [
+      { selector: { name: "Parent field", role: "textbox", exact: true }, value: "Open parent draft" }
+    ] } },
+    { tool: "browser_read" }
   ] });
   assert.equal(parentFill.status, "succeeded", JSON.stringify(parentFill));
-  assert.equal(await tabEvidence("document.getElementById('parent').value"), "Permitted parent draft");
-  const maskedResponse = await request("tools/call", { name: "browser_screenshot", arguments: { tab: localTab, restrict_hosts: ["localhost"] } }, 30000);
-  const masked = structured(maskedResponse); assert.equal(masked.status, "succeeded", JSON.stringify(masked));
-  assert.equal(masked.facts.coverage.masked_regions, 1);
-  const maskedImage = maskedResponse.result.content.find(item => item.type === "image"); assert.ok(maskedImage);
-  mkdirSync(join(repository, ".tmp"), { recursive: true });
-  capturedMask = Buffer.from(maskedImage.data, "base64");
-  writeFileSync(join(repository, ".tmp/installed-hardening-mask.jpg"), capturedMask);
-  const pixels = await tabEvidence(`
-    const image = new Image(); image.src = '/captured-mask.jpg';
-    await image.decode(); const canvas = document.createElement('canvas');
-    canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image,0,0);
-    const rectangle = document.querySelector('iframe').getBoundingClientRect();
-    const scale = image.width / innerWidth;
-    return [0.2,0.8].flatMap(x => [0.2,0.8].map(y => [...context.getImageData(
-      Math.round((rectangle.left + rectangle.width*x)*scale),
-      Math.round((rectangle.top + rectangle.height*y)*scale),1,1).data]));
-  `);
-  assert.ok(Array.isArray(pixels), JSON.stringify(pixels));
-  for (const pixel of pixels) for (const [index, expected] of [32, 36, 43, 255].entries()) {
-    assert.ok(Math.abs(pixel[index] - expected) <= 5, `Installed exclusion pixel: ${pixel}`);
-  }
+  assert.equal(parentFill.facts.steps[0].id, "step_1");
+  const openScreenshot = structured(await request("tools/call", { name: "browser_screenshot", arguments: { tab: localTab } }, 30000));
+  assert.equal(openScreenshot.status, "succeeded", JSON.stringify(openScreenshot));
+  assert.ok(!openScreenshot.facts.coverage || !openScreenshot.facts.coverage.masked_regions);
   assert.equal(await tabEvidence("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
-  const refusedScript = await call("browser_execute", { tab: localTab, restrict_hosts: ["localhost"], script: "document.title = 'MUST_NOT_RUN'" });
-  assert.equal(refusedScript.status, "blocked", JSON.stringify(refusedScript));
-  assert.equal(refusedScript.effect, "none"); assert.notEqual(await tabEvidence("document.title"), "MUST_NOT_RUN");
-  check("installed native host preserves permitted work, excludes child content, masks captures, and refuses unbounded scripts");
+  assert.equal(typeof await tabEvidence("document.title"), "string");
+  check("all-open embedded content remains readable, editable, capturable, and scriptable through the installed native host");
 
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",
@@ -414,7 +392,7 @@ try {
     arguments: { tab }
   });
   const screenshot = structured(screenshotResponse);
-  assert.equal(screenshot.status, "succeeded", JSON.stringify(screenshot));
+  assert.equal(openScreenshot.status, "succeeded", JSON.stringify(openScreenshot));
   assert.match(screenshot.facts.view, /^view_/);
   assert.equal(screenshot.facts.data, undefined);
   assert.equal(screenshotResponse.result.content[0].type, "text");

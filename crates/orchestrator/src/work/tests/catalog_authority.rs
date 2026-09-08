@@ -403,13 +403,6 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
     );
     // Wrappers need no capability of their own. Their concrete children still need Read.
     add(
-        "browser_sequence",
-        None,
-        &["read"],
-        json!({"steps":[{"action":"wait","condition":"load_ready"},{"action":"wait","condition":"load_ready"}]}),
-        vec![observed(), observed()],
-    );
-    add(
         "browser_flow",
         None,
         &["read"],
@@ -585,8 +578,7 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
             .iter()
             .find(|entry| (entry.tool, entry.variant) == (case.tool, case.variant))
             .unwrap();
-        let requirements: BTreeSet<_> = if matches!(case.tool, "browser_flow" | "browser_sequence")
-        {
+        let requirements: BTreeSet<_> = if matches!(case.tool, "browser_flow") {
             BTreeSet::new()
         } else {
             case.required.iter().copied().collect()
@@ -621,10 +613,12 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
             }));
         for (restriction_index, restriction) in restrictions.enumerate() {
             for composed in [false, true] {
-                if composed && matches!(template.tool, "browser_flow" | "browser_sequence") {
+                if composed && matches!(template.tool, "browser_flow") {
                     continue;
                 }
-                let (executor, browser, _, workspace, audit) = fixture();
+                let policy = TestPolicy::new();
+                let (executor, browser, _, workspace, audit) =
+                    fixture_with_governance(policy.facade());
                 let (tab_handle, target, button) = established(&executor, &browser, &workspace);
                 let case = cases(&target, &button, &tab_handle).swap_remove(index);
                 let permitted = restriction_index < 2;
@@ -632,13 +626,13 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
                     browser.push(Ok(reply));
                 }
                 let before = browser.calls().len();
-                let mut arguments = if composed {
+                let arguments = if composed {
                     json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":case.tool,"arguments":case.arguments}]})
                 } else {
                     case.arguments
                 };
                 if let Some(restriction) = &restriction {
-                    arguments["restrict_capabilities"] = json!(restriction);
+                    policy.set(json!(restriction));
                 }
                 let result = executor.execute(
                     &workspace,
@@ -671,33 +665,29 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
                 } else {
                     assert_eq!(result.effect, Effect::None, "{label}");
                     assert!(commands[before..].is_empty(), "{label}: denied work must not extract, edit, stop capture, or export: {:?}", &commands[before..]);
-                    if case.tool == "browser_sequence" {
-                        assert!(
-                            audit
-                                .0
-                                .lock()
-                                .unwrap()
-                                .iter()
-                                .any(|record| record.step.is_some()
-                                    && record.summary.contains("restrict_capabilities")),
-                            "{label}: retain the child's actual restriction"
-                        );
-                    } else {
-                        let refused = if composed || case.tool == "browser_flow" {
-                            &result.facts["steps"][0]["result"]["facts"]
-                        } else {
-                            &result.facts
-                        };
-                        assert_eq!(
-                            refused["restriction"], "restrict_capabilities",
-                            "{label}: name the caller's restriction"
-                        );
-                        assert_eq!(
-                            refused["required_capabilities"].as_array().unwrap().iter().map(|value| value.as_str().unwrap()).collect::<BTreeSet<_>>(),
-                            case.required.iter().copied().collect::<BTreeSet<_>>(),
-                            "{label}: report the complete requirements, including the missing capability"
-                        );
-                    }
+                    let checks: Vec<_> = audit
+                        .0
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .flat_map(|record| record.permissions.checks.clone())
+                        .filter(|check| !check.allowed)
+                        .collect();
+                    assert!(
+                        checks.iter().any(|check| check
+                            .requirements
+                            .iter()
+                            .map(|cap| cap.as_str())
+                            .collect::<BTreeSet<_>>()
+                            == case.required.iter().copied().collect::<BTreeSet<_>>()),
+                        "{label}: retain every required capability"
+                    );
+                    assert!(
+                        checks
+                            .iter()
+                            .all(|check| !check.request_restricted && !check.layers.is_empty()),
+                        "{label}: configured policy owns the denial"
+                    );
                 }
                 assert!(
                     !serde_json::to_string(&*audit.0.lock().unwrap())
@@ -722,7 +712,7 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
     let mut failures = Vec::new();
     for (index, template) in templates.iter().enumerate() {
         for composed in [false, true] {
-            if composed && matches!(template.tool, "browser_flow" | "browser_sequence") {
+            if composed && matches!(template.tool, "browser_flow") {
                 continue;
             }
             let (mut executor, browser, _, workspace, audit) = fixture();
@@ -926,12 +916,12 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 browser.push(Ok(reply));
             }
             let before = browser.calls().len();
-            let mut arguments = if composed {
+            let arguments = if composed {
                 json!({"steps":[{"id":"attach","tool":"browser_record","arguments":case.arguments}]})
             } else {
                 case.arguments
             };
-            arguments["restrict_capabilities"] = json!(["read", "write"]);
+
             let result = executor.execute(
                 &workspace,
                 if composed {

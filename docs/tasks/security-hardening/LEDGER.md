@@ -11,9 +11,16 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 Latest discussion, 2026-09-07: an all-open Reddit session repeatedly supplied its own
 `restrict_hosts` list. The owner rejected that model-facing capability and requested an audit of
 other misaligned tools. The [tool surface review](../../design/tool-surface-review-2026-09-07.md)
-records recommendations and two reproduced dry-run result defects. No removal is implemented;
-candidate changes to submission and batching need decisions before implementation. Preserve
-configured governance, accepted browser jobs, and historical request attribution.
+records recommendations and two reproduced dry-run result defects. The owner then authorized
+removing both request restrictions and flow dry-run and consolidating sequence into flow.
+[ADR-0162](../../adr/0162-configured-authority-and-one-flow-tool.md) records the accepted decision.
+Implementation, full validation, and installed acceptance are complete. All 17 gates pass with
+530 Rust tests and 207 extension tests. The deployed orchestrator advertises 23 tools, rejects
+obsolete inputs without effects, and passes eight installed groups including unsent drafts and
+live Sylin framed content. STATUS owns the deployed hash; the regression-suite record owns evidence.
+Submission bundling stays; removing it was not authorized. Preserve configured governance and
+historical request/sequence attribution. Cached clients need a catalog refresh/reconnect, not an
+extension reload. Nothing was pushed or published. Deferred ideation items remain deferred.
 
 Current work, 2026-09-07: the owner reported two open Ghostlight copies. Both were real responsive
 native windows inside one service. The startup/Open construction race and a related short startup

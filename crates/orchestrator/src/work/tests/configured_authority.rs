@@ -1,4 +1,4 @@
-//! Caller restriction failures retain their source and the form operation's complete requirements.
+//! Configured authority preserves form, upload, and typing boundaries.
 
 use super::*;
 
@@ -49,7 +49,8 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 Status::Blocked,
             ),
         ] {
-            let (executor, browser, _, workspace, audit) = fixture();
+            let policy = TestPolicy::new();
+            let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
             browser.push(Ok(BrowserOutcome::TabOpened {
                 reused: false,
                 tab: tab(7, "https://example.com/"),
@@ -119,12 +120,12 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     }));
                 }
             }
-            let mut invocation = if composed {
+            let invocation = if composed {
                 json!({"steps":[{"id":"draft","tool":"browser_fill_form","arguments":arguments}]})
             } else {
                 arguments
             };
-            invocation["restrict_capabilities"] = restrictions;
+            policy.set(restrictions);
             let result = executor.execute(
                 &workspace,
                 if composed {
@@ -201,7 +202,8 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
 fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
     for composed in [false, true] {
         for credential in [false, true] {
-            let (executor, browser, _, workspace, audit) = fixture();
+            let policy = TestPolicy::new();
+            let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
             browser.push(Ok(BrowserOutcome::TabOpened {
                 reused: false,
                 tab: tab(7, "https://example.com/"),
@@ -244,12 +246,12 @@ fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
                 "selector":{"name":"Attachment","role":"button","exact":true},
                 "files":[{"name":"PRIVATE_FILE.txt","data_base64":"eA=="}]
             });
-            let mut invocation = if composed {
+            let invocation = if composed {
                 json!({"steps":[{"id":"attach","tool":"browser_upload","arguments":arguments}]})
             } else {
                 arguments
             };
-            invocation["restrict_capabilities"] = json!(["read", "write"]);
+
             let result = executor.execute(
                 &workspace,
                 if composed {
@@ -337,15 +339,11 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                 state: vec![],
                 credential_class: false,
             };
-            let mut input =
-                json!({"tab":handle,"text":"PRIVATE_DRAFT","restrict_capabilities":[request]});
+            let mut input = json!({"tab":handle,"text":"PRIVATE_DRAFT"});
             if location == "focused" {
                 input["focused"] = json!(true);
             } else if location == "selector" {
                 input["selector"] = json!({"name":"Draft","role":"textbox","exact":true});
-                if request == "action" {
-                    input["restrict_capabilities"] = json!(["read", "action"]);
-                }
             } else {
                 browser.push(Ok(BrowserOutcome::Targets {
                     tab_id: 7,
@@ -379,6 +377,12 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     committed_urls: vec!["https://landing.example/".into()],
                 }));
             }
+            if request != "action" {
+                let mut document: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&policy).unwrap()).unwrap();
+                document["grants"][0]["allowed"] = json!(["read"]);
+                fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
+            }
             let result = executor.execute(
                 &workspace,
                 "browser_type_text",
@@ -390,7 +394,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                 assert_eq!(result.status, Status::Blocked);
                 assert_eq!(result.effect, Effect::None);
                 assert_eq!(browser.calls().len(), before);
-                assert_eq!(result.facts["restriction"], "restrict_capabilities");
+                assert_eq!(result.facts["policy_rule"], "capability");
             } else {
                 assert_eq!(result.effect, Effect::Applied);
                 assert!(!result.repeat_safe);
@@ -498,12 +502,12 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 committed_urls: vec!["https://landing.example/".into()],
             }));
             let before = browser.calls().len();
-            let mut invocation = if composed {
+            let invocation = if composed {
                 json!({"steps":[{"id":"draft","tool":"browser_type_text","arguments":arguments}]})
             } else {
                 arguments
             };
-            invocation["restrict_capabilities"] = json!(["read", "action"]);
+
             let result = executor.execute(
                 &workspace,
                 if composed {
@@ -576,7 +580,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
             let follow_up = executor.execute(
                 &workspace,
                 "browser_press_key",
-                json!({"key":"Tab","restrict_capabilities":["action"]}),
+                json!({"key":"Tab"}),
                 None,
                 &CancellationToken::default(),
             );
@@ -591,9 +595,10 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
 }
 
 #[test]
-fn an_unsent_form_needs_read_and_write_and_names_a_callers_missing_capability() {
+fn an_unsent_form_needs_read_and_write_under_configured_policy() {
     for restriction in [json!(["read"]), json!(["write"]), json!(["read", "write"])] {
-        let (executor, browser, _, workspace, audit) = fixture();
+        let policy = TestPolicy::new();
+        let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,
             tab: tab(7, "https://example.com/"),
@@ -640,7 +645,14 @@ fn an_unsent_form_needs_read_and_write_and_names_a_callers_missing_capability() 
             }));
         }
         let calls_before = browser.calls().len();
-        let result = executor.execute(&workspace, "browser_fill_form", json!({"tab":handle,"restrict_capabilities":restriction,"fields":[{"target":target,"value":"PRIVATE_DRAFT"}]}), None, &CancellationToken::default());
+        policy.set(restriction);
+        let result = executor.execute(
+            &workspace,
+            "browser_fill_form",
+            json!({"tab":handle,"fields":[{"target":target,"value":"PRIVATE_DRAFT"}]}),
+            None,
+            &CancellationToken::default(),
+        );
         if permitted {
             assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
             assert_eq!(result.facts["submitted"], false);
@@ -655,13 +667,11 @@ fn an_unsent_form_needs_read_and_write_and_names_a_callers_missing_capability() 
             assert_eq!(result.status, Status::Blocked);
             assert_eq!(result.effect, Effect::None);
             assert_eq!(browser.calls().len(), calls_before);
-            assert_eq!(result.facts["restriction"], "restrict_capabilities");
+            assert_eq!(result.facts["policy_rule"], "capability");
             assert_eq!(
-                result.facts["required_capabilities"],
-                json!(["read", "write"])
+                result.summary,
+                "Blocked: this session may not take that kind of action."
             );
-            assert_eq!(result.summary, "Blocked by this call's restrict_capabilities; this operation requires read + write.");
-            assert!(result.next_steps[0].contains("user's intended limits"));
             let records = audit.0.lock().unwrap();
             assert_eq!(records.last().unwrap().summary, result.summary);
             assert!(!serde_json::to_string(&*records)
@@ -672,7 +682,7 @@ fn an_unsent_form_needs_read_and_write_and_names_a_callers_missing_capability() 
 }
 
 #[test]
-fn request_host_denial_does_not_blame_configured_policy_or_reveal_excluded_hosts() {
+fn retired_host_input_is_rejected_before_any_browser_work() {
     let (executor, browser, _, workspace, _) = fixture();
     let result = executor.execute(
         &workspace,
@@ -681,9 +691,11 @@ fn request_host_denial_does_not_blame_configured_policy_or_reveal_excluded_hosts
         None,
         &CancellationToken::default(),
     );
-    assert_eq!(result.status, Status::Blocked);
-    assert_eq!(result.facts["restriction"], "restrict_hosts");
-    assert_eq!(result.summary, "Blocked by this call's restrict_hosts.");
+    assert_eq!(result.status, Status::Failed);
+    assert!(result
+        .next_steps
+        .iter()
+        .any(|step| step.contains("removed")));
     assert!(!result.summary.contains("excluded.example"));
     assert!(browser.calls().is_empty());
 }

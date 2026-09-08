@@ -5,6 +5,11 @@ sent a Reddit-only host list, then asked for other misaligned capabilities to re
 This is a review of the current surface, not an implementation decision for the candidates below.
 No tool, configured policy, or browser behavior was changed by this review.
 
+Subsequent decision: the owner authorized removal of both request restrictions and flow dry-run,
+and consolidation of sequence into flow. [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md)
+records the implemented decision. Submission bundling remains supported. This review retains its
+original 24-tool baseline and reproduction findings below.
+
 ## Scope and evidence
 
 Baseline: `c7f46e8a`. Reviewed all 24 tools in the current source catalog and a fresh installed

@@ -512,10 +512,7 @@ impl WorkbenchFacade {
             .filter(|session| session.attention.is_some())
             .count();
         let audit_health = self.projection.audit_health();
-        let required = self
-            .governance
-            .snapshot(&crate::language::RequestRestrictions::default())
-            .requires_audit();
+        let required = self.governance.snapshot().requires_audit();
         let mut readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
             audit_required_unavailable: required && audit_health.unavailable(),
             browser_connected: !browsers.is_empty(),
@@ -1835,7 +1832,7 @@ mod tests {
         let durable = Arc::new(MemoryAudit::default());
         let sink = AuditRecorder::new(durable.clone(), projection.clone());
         let governance = GovernanceFacade::new(None, None);
-        let snapshot = governance.snapshot(&Default::default());
+        let snapshot = governance.snapshot();
         let record = AuditRecord::now(
             "invocation_1",
             "workspace_1",
@@ -1892,7 +1889,7 @@ mod tests {
             physical_id: None,
         });
         let governance = GovernanceFacade::new(None, None);
-        let authority = governance.snapshot(&Default::default());
+        let authority = governance.snapshot();
         AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone()).record(
             &AuditRecord::now(
                 "invocation_1",

@@ -8,8 +8,7 @@ use serde_json::{json, Value};
 use crate::governance::AuthoritySnapshot;
 
 use super::{
-    CAPABILITIES, DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS,
-    MIN_TIMEOUT_MS, NAMED_KEYS,
+    DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
 };
 
 /// Return the complete native Ghostlight language in deterministic order.
@@ -150,16 +149,9 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_action(true),
         ),
         tool(
-            "browser_sequence",
-            "Run sequence",
-            "Run two to eight fully specified click, fill, type, key, scroll, hover, or wait steps on one tab, stopping at the first failed step.",
-            sequence_call_schema(),
-            Hints::browser_action(true),
-        ),
-        tool(
             "browser_flow",
             "Run flow",
-            "Compose one to twenty steps on one tab. Each step names a current tool and supplies its arguments; later arguments may reference earlier step results. Dry run decodes everything without dispatching.",
+            "Compose one to twenty ordinary tool calls. Optional tab defaults tab-scoped steps; explicit child tabs win. Later arguments may reference earlier results. Step IDs are optional for simple batches. Stops at the first failed step by default.",
             flow_schema(),
             Hints::browser_action(true),
         ),
@@ -1159,7 +1151,7 @@ fn flow_schema() -> Value {
             vec![
                 (
                     "steps",
-                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Uniquely named steps executed in order.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Unique step id within this flow."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["id","tool"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Ordinary tool calls executed in order. Omitted ids become step_1, step_2, and so on.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Optional unique step id for result references."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
                 ),
                 (
                     "on_error",
@@ -1169,13 +1161,6 @@ fn flow_schema() -> Value {
                         "Whether later steps run after a failed step.",
                     ),
                 ),
-                (
-                    "dry_run",
-                    boolean(
-                        false,
-                        "Decode and classify every step without dispatching anything.",
-                    ),
-                ),
                 ("tab", tab()),
                 ("timeout_ms", timeout()),
             ],
@@ -1183,204 +1168,9 @@ fn flow_schema() -> Value {
         ),
         vec![
             json!({"steps":[{"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com"}},{"id":"read","tool":"browser_read","arguments":{"max_chars":2000}}]}),
-            json!({"steps":[{"id":"inspect","tool":"browser_inspect","arguments":{"scope":"document"}}],"dry_run":true}),
+            json!({"steps":[{"tool":"browser_inspect"},{"tool":"browser_read","arguments":{"max_chars":2000}}]}),
         ],
     )
-}
-
-fn sequence_call_schema() -> Value {
-    examples(
-        object(
-            vec![
-                ("steps", sequence_steps()),
-                ("tab", tab()),
-                ("timeout_ms", timeout()),
-            ],
-            vec!["steps"],
-        ),
-        vec![
-            json!({"steps":[{"action":"click","target":"target_..."},{"action":"wait","condition":"load_ready"}]}),
-        ],
-    )
-}
-
-fn sequence_steps() -> Value {
-    let mut branches = vec![
-        step_object(
-            vec![
-                ("action", constant("click", "Click step.")),
-                ("target", handle("target_", "Current target.")),
-                (
-                    "button",
-                    enumeration(
-                        &["primary", "middle", "secondary"],
-                        Some("primary"),
-                        "Pointer button.",
-                    ),
-                ),
-                ("click_count", integer(1, 2, Some(1), "Click count.")),
-            ],
-            vec!["action", "target"],
-        ),
-        step_object(
-            vec![
-                ("action", constant("fill", "Fill step.")),
-                ("target", handle("target_", "Current form target.")),
-                ("value", text(0, 8_000, "Literal field value.")),
-            ],
-            vec!["action", "target", "value"],
-        ),
-    ];
-    branches.extend(sequence_type_steps());
-    branches.push(step_object(
-        vec![
-            ("action", constant("press_key", "Keyboard step.")),
-            (
-                "key",
-                json!({"oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]}),
-            ),
-            ("target", handle("target_", "Optional current target.")),
-            (
-                "modifiers",
-                json!({"type":"array","uniqueItems":true,"default":[],"items":{"enum":["Alt","Control","Meta","Shift"]}}),
-            ),
-        ],
-        vec!["action", "key"],
-    ));
-    branches.extend(sequence_scroll_steps());
-    branches.push(step_object(
-        vec![
-            ("action", constant("hover", "Hover step.")),
-            ("target", handle("target_", "Current target.")),
-        ],
-        vec!["action", "target"],
-    ));
-    branches.extend(sequence_wait_steps());
-
-    json!({
-        "type":"array",
-        "minItems":2,
-        "maxItems":8,
-        "description":"Fully specified same-tab steps executed in order.",
-        "items":{"oneOf":branches}
-    })
-}
-
-fn sequence_type_steps() -> Vec<Value> {
-    let common = vec![
-        ("action", constant("type_text", "Typing step.")),
-        ("target", handle("target_", "Current editable target.")),
-    ];
-    vec![
-        step_object(
-            with_many(
-                common.clone(),
-                vec![
-                    ("text", text(1, 8_000, "Literal text.")),
-                    ("clear_first", boolean(false, "Clear first.")),
-                ],
-            ),
-            vec!["action", "target", "text"],
-        ),
-        step_object(
-            with_many(
-                common,
-                vec![
-                    (
-                        "text",
-                        constant("", "Empty text is valid only for an explicit clear."),
-                    ),
-                    (
-                        "clear_first",
-                        constant_bool(true, "Clear the current value."),
-                    ),
-                ],
-            ),
-            vec!["action", "target", "text", "clear_first"],
-        ),
-    ]
-}
-
-fn sequence_scroll_steps() -> Vec<Value> {
-    vec![
-        step_object(
-            vec![
-                ("action", constant("scroll", "Scroll step.")),
-                ("target", handle("target_", "Current target to reveal.")),
-            ],
-            vec!["action", "target"],
-        ),
-        step_object(
-            vec![
-                ("action", constant("scroll", "Scroll step.")),
-                (
-                    "direction",
-                    enumeration(
-                        &["up", "down", "left", "right"],
-                        Some("down"),
-                        "Scroll direction.",
-                    ),
-                ),
-                (
-                    "amount",
-                    enumeration(
-                        &["small", "medium", "large", "page"],
-                        Some("medium"),
-                        "Scroll distance.",
-                    ),
-                ),
-            ],
-            vec!["action"],
-        ),
-    ]
-}
-
-fn sequence_wait_steps() -> Vec<Value> {
-    vec![
-        sequence_wait_branch("load_ready", None, None),
-        sequence_wait_branch("url_contains", Some("Literal URL fragment."), None),
-        sequence_wait_branch("text_present", Some("Literal text that must appear."), None),
-        sequence_wait_branch(
-            "text_absent",
-            Some("Literal text that must disappear."),
-            None,
-        ),
-        sequence_wait_branch(
-            "target_present",
-            None,
-            Some("Current target that must be present."),
-        ),
-        sequence_wait_branch(
-            "target_absent",
-            None,
-            Some("Current target that must disappear."),
-        ),
-    ]
-}
-
-fn sequence_wait_branch(
-    condition: &str,
-    value_description: Option<&str>,
-    target_description: Option<&str>,
-) -> Value {
-    let mut fields = vec![
-        ("action", constant("wait", "Wait step.")),
-        ("condition", constant(condition, "Observable condition.")),
-    ];
-    let mut required = vec!["action", "condition"];
-    if let Some(description) = value_description {
-        fields.push(("value", text(1, 2_000, description)));
-        required.push("value");
-    }
-    if let Some(description) = target_description {
-        fields.push(("target", handle("target_", description)));
-        required.push("target");
-    }
-    step_object(fields, required)
-}
-
-fn step_object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
-    raw_object(fields, required)
 }
 
 fn record_schema() -> Value {
@@ -1445,7 +1235,7 @@ fn record_id_branch(action: &str, description: &str) -> Value {
     )
 }
 
-/// Input schema for the policy explain operation: nothing beyond the shared restrictions.
+/// Input schema for the policy explain operation: no arguments.
 fn explain_policy_schema() -> Value {
     examples(object(Vec::new(), Vec::new()), vec![json!({})])
 }
@@ -1468,15 +1258,6 @@ fn diagnose_schema() -> Value {
 }
 
 fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
-    let mut fields = fields;
-    fields.push((
-        "restrict_hosts",
-        json!({"type":"array","minItems":1,"uniqueItems":true,"description":"Optional host patterns that can only narrow this call's authority. Usually omit.","items":{"type":"string","minLength":1,"maxLength":253,"pattern":"^(\\*\\.)?[^/:*]+$"}}),
-    ));
-    fields.push((
-        "restrict_capabilities",
-        json!({"type":"array","minItems":1,"uniqueItems":true,"description":"Optional per-call allowlist; usually omit. Every required capability must be included. Restricting to write alone denies form fill, which also requires read. These limits do not distinguish drafts from submissions.","items":{"type":"string","enum":CAPABILITIES}}),
-    ));
     raw_object(fields, required)
 }
 
@@ -1655,9 +1436,8 @@ mod tests {
 
     use super::{catalog, catalog_for};
     use crate::governance::GovernanceFacade;
-    use crate::language::RequestRestrictions;
 
-    const EXPECTED_TOOL_NAMES: [&str; 24] = [
+    const EXPECTED_TOOL_NAMES: [&str; 23] = [
         "browser_tabs",
         "browser_navigate",
         "browser_history",
@@ -1677,7 +1457,6 @@ mod tests {
         "browser_dialog",
         "browser_upload",
         "browser_execute",
-        "browser_sequence",
         "browser_flow",
         "browser_record",
         "browser_diagnose",
@@ -1747,7 +1526,7 @@ mod tests {
 
     #[test]
     fn policy_projection_is_quiet_when_all_open_and_removes_impossible_tools() {
-        let all_open = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        let all_open = GovernanceFacade::new(None, None).snapshot();
         assert_eq!(catalog_for(&all_open), catalog());
 
         let path = std::env::temp_dir().join(format!(
@@ -1759,8 +1538,7 @@ mod tests {
             r#"{"schema":3,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-        let read_only = GovernanceFacade::new(Some(path.clone()), None)
-            .snapshot(&RequestRestrictions::default());
+        let read_only = GovernanceFacade::new(Some(path.clone()), None).snapshot();
         let names: Vec<_> = catalog_for(&read_only)
             .into_iter()
             .map(|tool| tool.name)
@@ -1777,8 +1555,7 @@ mod tests {
             r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
         )
         .unwrap();
-        let observe = GovernanceFacade::new(Some(path.clone()), None)
-            .snapshot(&RequestRestrictions::default());
+        let observe = GovernanceFacade::new(Some(path.clone()), None).snapshot();
         assert_eq!(catalog_for(&observe), catalog());
         let _ = fs::remove_file(path);
     }
@@ -1805,7 +1582,6 @@ mod tests {
             ("browser_dialog", false, true, false, true),
             ("browser_upload", false, true, false, true),
             ("browser_execute", false, true, false, true),
-            ("browser_sequence", false, true, false, true),
             ("browser_flow", false, true, false, true),
             ("browser_record", false, true, false, true),
             ("browser_diagnose", true, false, true, true),
@@ -1923,97 +1699,22 @@ mod tests {
     }
 
     #[test]
-    fn sequence_schema_discriminates_type_scroll_and_wait_shapes() {
-        let schema = tool_schema("browser_sequence");
-        let branches = schema
-            .pointer("/properties/steps/items/oneOf")
-            .and_then(Value::as_array)
-            .expect("sequence step branches");
-        assert_eq!(branches.len(), 14);
-        assert!(branches
-            .iter()
-            .all(|branch| { branch.get("additionalProperties") == Some(&Value::Bool(false)) }));
-
-        let type_steps = action_branches(branches, "type_text");
-        assert_eq!(type_steps.len(), 2);
-        let clear_step = type_steps
-            .iter()
-            .find(|branch| {
-                property(branch, "text").and_then(|value| value.get("const"))
-                    == Some(&Value::String(String::new()))
-            })
-            .expect("explicit clear step");
+    fn flow_schema_unifies_batches_without_client_authority_or_simulation() {
+        for tool in catalog() {
+            let encoded = serde_json::to_string(&tool.input_schema).unwrap();
+            assert!(!encoded.contains("restrict_hosts"));
+            assert!(!encoded.contains("restrict_capabilities"));
+        }
+        let schema = tool_schema("browser_flow");
+        assert!(property(&schema, "dry_run").is_none());
         assert_eq!(
-            property(clear_step, "clear_first").and_then(|value| value.get("const")),
-            Some(&Value::Bool(true))
+            schema.pointer("/properties/steps/items/required"),
+            Some(&serde_json::json!(["tool"]))
         );
-        assert!(is_required(clear_step, "clear_first"));
-        let nonempty_step = type_steps
-            .iter()
-            .find(|branch| {
-                property(branch, "text").and_then(|value| value.get("minLength"))
-                    == Some(&Value::from(1))
-            })
-            .expect("non-empty typing step");
         assert_eq!(
-            property(nonempty_step, "clear_first").and_then(|value| value.get("default")),
+            schema.pointer("/properties/steps/items/additionalProperties"),
             Some(&Value::Bool(false))
         );
-
-        let scroll_steps = action_branches(branches, "scroll");
-        assert_eq!(scroll_steps.len(), 2);
-        let target_scroll = scroll_steps
-            .iter()
-            .find(|branch| property(branch, "target").is_some())
-            .expect("target scroll step");
-        assert!(is_required(target_scroll, "target"));
-        assert!(property(target_scroll, "direction").is_none());
-        assert!(property(target_scroll, "amount").is_none());
-        let directional_scroll = scroll_steps
-            .iter()
-            .find(|branch| property(branch, "target").is_none())
-            .expect("directional scroll step");
-        assert_eq!(
-            property(directional_scroll, "direction").and_then(|value| value.get("default")),
-            Some(&Value::String("down".into()))
-        );
-        assert_eq!(
-            property(directional_scroll, "amount").and_then(|value| value.get("default")),
-            Some(&Value::String("medium".into()))
-        );
-
-        let wait_steps = action_branches(branches, "wait");
-        assert_eq!(wait_steps.len(), 6);
-        for (condition, required_field) in [
-            ("load_ready", None),
-            ("url_contains", Some("value")),
-            ("text_present", Some("value")),
-            ("text_absent", Some("value")),
-            ("target_present", Some("target")),
-            ("target_absent", Some("target")),
-        ] {
-            let branch = wait_steps
-                .iter()
-                .find(|branch| {
-                    property(branch, "condition").and_then(|value| value.get("const"))
-                        == Some(&Value::String(condition.into()))
-                })
-                .unwrap_or_else(|| panic!("missing {condition} wait branch"));
-            assert_eq!(
-                property(branch, "value").is_some(),
-                required_field == Some("value")
-            );
-            assert_eq!(
-                property(branch, "target").is_some(),
-                required_field == Some("target")
-            );
-            if let Some(field) = required_field {
-                assert!(
-                    is_required(branch, field),
-                    "{condition} must require {field}"
-                );
-            }
-        }
     }
 
     fn tool_schema(name: &str) -> Value {
@@ -2024,24 +1725,7 @@ mod tests {
             .input_schema
     }
 
-    fn action_branches<'a>(branches: &'a [Value], action: &str) -> Vec<&'a Value> {
-        branches
-            .iter()
-            .filter(|branch| {
-                property(branch, "action").and_then(|value| value.get("const"))
-                    == Some(&Value::String(action.into()))
-            })
-            .collect()
-    }
-
     fn property<'a>(branch: &'a Value, name: &str) -> Option<&'a Value> {
         branch.get("properties").and_then(|value| value.get(name))
-    }
-
-    fn is_required(branch: &Value, name: &str) -> bool {
-        branch
-            .get("required")
-            .and_then(Value::as_array)
-            .is_some_and(|required| required.iter().any(|value| value.as_str() == Some(name)))
     }
 }

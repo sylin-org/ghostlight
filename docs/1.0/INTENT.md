@@ -39,7 +39,7 @@ Ghostlight supports these distinct jobs:
 18. Upload explicitly named, bounded local files to an ordinary file control.
 19. Run an explicit bounded page script and return its serializable result.
 20. Wait for an explicit observable condition.
-21. Run a short, fully specified sequence on one controlled tab.
+21. Run a short batch of ordinary tool calls through browser_flow.
 22. Resolve a visible browser dialog.
 
 These jobs are separate when their intent, required inputs, safety, or result facts differ.
@@ -179,7 +179,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
   link-local destinations. Host restrictions belong to policy.
 - Configured schema-3 grants admit complete independent RAWX sets; every authority tier and
   request restriction can only tighten them.
-- Started work uses one immutable authority snapshot. Request restrictions only tighten it.
+- Started work uses one immutable configured authority snapshot. Tool calls do not author policy.
 - Ownership, leases, runtime controls, and landing authority are checked at their final boundary.
 - Model-driven tab closure occurs only when the immutable service authority and the browser's
   local preserve-tabs choice both permit it. Neither gate can expand the other, and local human

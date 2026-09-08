@@ -470,7 +470,7 @@ try {
   }
   check("controlled rich editors retain native multiline fills and clears without synthetic events or submission");
   const beforeSemanticShadow = await rawPage("editorEvidence()");
-  result = await call("browser_fill_form", { tab, restrict_capabilities: ["read", "write"], fields: [
+  result = await call("browser_fill_form", { tab, fields: [
     { selector: { name: "Shadow reply", role: "textbox", exact: true }, value: "Standalone semantic shadow draft" }
   ] });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
@@ -490,7 +490,7 @@ try {
   const uploadPath = join(scratch, "standalone-upload.txt");
   const uploadedFile = () => rawPage("(async()=>{const files=document.getElementById('standalone-upload').files;return {count:files.length,name:files[0]?.name,text:await files[0]?.text()};})()");
   writeFileSync(uploadPath, "SYNTHETIC_UPLOAD_BY_SELECTOR");
-  result = await call("browser_upload", { tab, restrict_capabilities: ["read", "write"],
+  result = await call("browser_upload", { tab,
     selector: { name: "Standalone upload", exact: true }, paths: [uploadPath] });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.uploaded_count, 1);
   assert.deepEqual(await uploadedFile(), { count: 1, name: "standalone-upload.txt", text: "SYNTHETIC_UPLOAD_BY_SELECTOR" });
@@ -498,7 +498,7 @@ try {
   const uploadTarget = result.facts.items.find(item => item.name === "Standalone upload")?.target;
   assert.ok(uploadTarget, JSON.stringify(result));
   writeFileSync(uploadPath, "SYNTHETIC_UPLOAD_BY_HANDLE");
-  result = await call("browser_upload", { tab, restrict_capabilities: ["write"], target: uploadTarget, paths: [uploadPath] });
+  result = await call("browser_upload", { tab, target: uploadTarget, paths: [uploadPath] });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.uploaded_count, 1);
   assert.deepEqual(await uploadedFile(), { count: 1, name: "standalone-upload.txt", text: "SYNTHETIC_UPLOAD_BY_HANDLE" });
   assert.equal((await rawPage("editorEvidence()")).submissions, 0);
@@ -526,7 +526,7 @@ try {
       const before = await rawPage("editorEvidence()");
       const replacement = `${name} ${focused ? "focused" : "targeted"} action draft`;
       result = await call("browser_type_text", { tab, ...(focused ? { focused: true } : { target }),
-        text: replacement, clear_first: true, restrict_capabilities: ["action"] });
+        text: replacement, clear_first: true, });
       assert.equal(result.status, "succeeded", JSON.stringify(result));
       assert.equal(result.effect, "applied");
       await delay(50);
@@ -541,7 +541,7 @@ try {
   }
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 20 });
   const editorTargets = new Map(result.facts.items.map((item) => [item.name, item.target]));
-  result = await call("browser_fill_form", { tab, restrict_capabilities: ["read", "write"], fields: [
+  result = await call("browser_fill_form", { tab, fields: [
     { target: editorTargets.get("Ordinary draft"), value: "Ordinary replacement" },
     { target: editorTargets.get("Multiline draft"), value: "Ordinary first line\nOrdinary second line" }
   ] });
@@ -589,16 +589,18 @@ try {
   assert.equal(result.effect, "unknown"); assert.equal(result.repeat_safe, false);
   await rawPage("document.querySelector('#multiline').readOnly=false; true");
   check("a page change after the first edit preserves the partial draft and refuses replay");
+  const editorPolicy = readFileSync(environment.GHOSTLIGHT_POLICY_FILE, "utf8");
   for (const capabilities of [["read"], ["write"], ["read", "write"]]) {
+    const configured = JSON.parse(editorPolicy);
+    for (const grant of configured.grants) grant.allowed = capabilities;
+    writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify(configured));
     const before = await rawPage("editorEvidence()");
     const beforeDispatch = commands.length;
-    result = await call("browser_fill_form", { tab, restrict_capabilities: capabilities,
+    result = await call("browser_fill_form", { tab,
       fields: [{ target: replyTarget, value: "Complete allowlist draft" }] });
     if (capabilities.length === 1) {
       assert.equal(result.status, "blocked", JSON.stringify(result)); assert.equal(result.effect, "none");
-      assert.equal(result.facts.restriction, "restrict_capabilities");
-      assert.deepEqual(result.facts.required_capabilities, ["read", "write"]);
-      assert.match(result.summary, /restrict_capabilities.*read \+ write/);
+      assert.equal(result.facts.policy_rule, "capability");
       assert.ok(!dispatchedSince(beforeDispatch).some((command) => ["fill_form", "type_text"].includes(command)));
       assert.deepEqual(await rawPage("editorEvidence()"), before);
     } else {
@@ -608,8 +610,9 @@ try {
       assert.equal(after.reply.rendered, "Complete allowlist draft");
       assert.equal(after.reply.value, "Complete allowlist draft"); assert.equal(after.submissions, 0);
     }
-    check(`${capabilities.join("+")}: draft fill uses the complete per-call capability allowlist`);
+    check(`${capabilities.join("+")}: draft fill enforces the configured capability grant`);
   }
+  writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, editorPolicy);
   // Exercise the shipped renderer in its closed shadow tree. Holding an observation or script
   // gives us time to inspect the actual live elements while another controlled tab is active.
   policy("permitted_content", "all"); await newSession();

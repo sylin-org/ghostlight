@@ -8,7 +8,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Contract gates
 
-1. The catalog contains exactly the 24 tools in `LANGUAGE.md`, in documented order, with no
+1. The catalog contains exactly the 23 tools in `LANGUAGE.md`, in documented order, with no
    simultaneously advertised legacy dialect or client-selected profile. Page JavaScript is
    `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
 2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
@@ -78,7 +78,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 2. One invocation can commit only one terminal outcome.
 3. Deadline or cancellation before dispatch reports no effect and is repeat-safe when the job is.
 4. Disconnect or cancellation after uncertain dispatch reports unknown effect and no replay advice.
-5. Flow and sequence count successful steps as completed. Mixed Continue remains non-success.
+5. Flows count successful steps as completed. Mixed Continue remains non-success.
    Known partial effects stay partial; later uncertainty preserves prior known effect counts.
    Unable-to-start and never-run steps remain distinct. Result omission preserves status/effect
    metadata. Recovery respects completed work; human directives and invocation limits beat Continue.
@@ -108,15 +108,15 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. With no active policy, local and remote HTTP(S) browser work is permitted, including localhost,
    its subdomains, loopback, link-local metadata, and IPv4-embedded IPv6 destinations.
 2. Non-HTTP(S) schemes remain denied. Local destinations follow authored host and capability
-   rules, request restrictions, observe/enforce modes, and policy-defined never-touch hosts.
+   rules, observe/enforce modes, and policy-defined never-touch hosts.
 3. RAWX is independent: each operation uses its complete set, and composition steps are admitted
    separately. Empty wrapper or local-window operations do not invent authority. Current audit has
    one parent composition record plus safe incremental child receipts. Grouped history and policy
    previews use the child evidence without double-counting the aggregate (ADR-0156).
 4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
    deny, observe/enforce, and layer-intersection rules from ADR-0121.
-5. Request restrictions never add a host or capability. Started work keeps one immutable authority
-   snapshot even if configuration changes.
+5. Tool calls cannot author host or capability policy. Obsolete request fields fail before effects.
+   Started work keeps one immutable configured authority snapshot even if configuration changes.
 6. A configured invalid cold source fails closed. An invalid replacement retains last valid for
    future snapshots and never falls back to unrestricted.
 7. Ownership and leases are checked immediately before effects.
@@ -173,7 +173,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
    described target is credential-class.
 5. Wait for success and timeout branches of each condition family.
-6. Run click plus wait directly and as a sequence; observe the same executor behavior.
+6. Run click plus wait directly and as a flow with omitted step IDs; observe the same executor behavior.
 7. Accept, dismiss, and supply non-secret prompt text to a visible dialog.
 8. Disconnect the adapter before dispatch and after dispatch; observe no-effect and unknown-effect
    truth respectively.
@@ -388,8 +388,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. Equivalent direct and composed work retains equivalent decisions, requirements, effects,
    measurements, and safe summaries. Caller labels, results, and arbitrary errors stay out.
 2. Actual policy evaluation records all evaluated layers and distinguishes all-open, granted,
-   refused, and observe-mode admission. Request restrictions identify whether evaluation reached
-   them. Permission traces are bounded and disclose omission.
+   refused, and observe-mode admission. Legacy request restriction receipts remain explainable
+   without blaming human policy. Permission traces are bounded and disclose omission.
 3. The workbench keeps the parent active as child receipts arrive; restored incomplete groups
    state that completion was not recorded. Missing evidence never becomes a no-effect claim.
 4. Groups start collapsed. Opening brings the first problem into view; updates preserve expansion,
@@ -402,8 +402,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 
 ## Session control evidence (ADR-0157)
 
-1. Direct and composed request restrictions refuse dispatch under observe policy; permitted
-   observe work remains useful and cannot trip enforced-denial attention.
+1. Obsolete request restrictions fail before dispatch under every policy mode. Configured enforcing
+   policy still denies direct and composed work; observe work cannot trip enforced-denial attention.
 2. Session A's third matching denial opens one review notice and stops its composition. Session B
    can continue through the same browser. Global Resume leaves A's attention intact.
 3. Explicit recovery targets the current incident, changes no policy, and replays no work. Global
@@ -477,3 +477,16 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 
 This foundation adds no signature/hash verifier or identity admission. Linux observation remains
 unsupported; source portability does not replace a live Linux runtime check.
+
+## Consolidated tool surface (ADR-0162)
+
+1. No schema exposes request host/capability restrictions, flow dry-run, or browser_sequence.
+   Their presence is rejected without browser effects, including obsolete fields in later children.
+2. Short and named flows use ordinary tool arguments. IDs default deterministically, duplicates
+   and explicit empty IDs fail, and result references retain their original semantics.
+3. A flow's tab defaults its tab-scoped children, explicit child tabs win, and tab-independent
+   work receives no invented tab argument. Plural controlled tabs remain supported.
+4. Capability matrices use real configured grants. Draft writes, credentials, frames, screenshots,
+   scripts, recordings, controls, history, and all-open browser work retain their existing coverage.
+5. Old sequence receipts and request denials remain readable; request denials do not claim to come
+   from the person's rules. Cached clients receive catalog-refresh guidance without automatic replay.

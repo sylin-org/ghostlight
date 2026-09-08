@@ -11,6 +11,7 @@
 // remembered as finished.
 //
 // Run with: node tests/workbench-surface.mjs
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { join, resolve } from "node:path";
@@ -352,6 +353,17 @@ view.hero({
   summary: "Refused.", endedAt: Date.now(), durationMs: 12
 }, false);
 const refusal = nodes.get("hero-body").innerHTML;
+view.hero({
+  invocation: "legacy", workspace: "w1", tool: "browser_execute", capability: "execute",
+  settled: true, allowed: false, phase: "blocked", reason: "host_denied",
+  policyTier: "session", denialId: "D-legacy", summary: "Blocked by this call's restrict_hosts.",
+  permissionExplanations: ["Refused: request restrictions refused this work."], endedAt: Date.now(), durationMs: 0
+}, false);
+const legacyRefusal = nodes.get("hero-body").innerHTML;
+assert.ok(legacyRefusal.includes("request restrictions refused this work"));
+assert.ok(!legacyRefusal.includes("your own rules"));
+assert.ok(!legacyRefusal.includes("See the policy"));
+
 
 view.policy(compiled(true));
 const board = nodes.get("capability-board").innerHTML;

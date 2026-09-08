@@ -203,3 +203,52 @@ Windows/Linux CI now includes the missing continuity and all three browser lanes
 has not run and no push is authorized. Full Linux desktop/browser verification remains unexecuted
 here; the earlier WSL loopback/environment failures remain documented in STATUS. This report
 does not close deferred C1 verification, C2/C3 admission, or extension reload bootstrap recovery.
+
+## Tool consolidation follow-up (2026-09-07)
+
+ADR-0162 removes caller restrictions and flow dry-run and retires sequence into the ordinary flow
+executor. The catalog has 23 tools. Flow IDs are optional, missing argument objects default to `{}`,
+and a parent tab defaults only tab-scoped children. A three-step regression across two controlled
+pages proves inherited tab, explicit override, and return to the parent tab. Named references,
+Stop/Continue, partial effects, audit storage failures, and human control still use the same seams.
+
+The authority matrix now uses real isolated policy files for admitted and missing-capability cases.
+It retains every current catalog variant and equivalent flow child, credentials, draft/submission
+distinctions, upload, typing, recording source/destination authority, and H6 coverage. New negative
+tests reject obsolete inputs before browser effects, even when supplied in a later child. Legacy
+request and sequence receipts remain readable, and the rendered workbench does not blame the
+person's rules for historical request denials.
+
+Final full Windows run:
+
+- Report: `.tmp/hardening-suite/2026-09-08T02-30-03-979Z-33624/results.json`.
+- Source SHA-256: `3e1aa2e7c989bcc1217f173a5f255ba6a91463ba358315a56966db6898273e50`.
+- All 17 gates passed; `source_unchanged: true`.
+- 530 Rust tests, 207 extension tests, 18 native desktop/profile checks, six browser harness checks,
+  23 script-browser cases, and 68 MV3 frame/editor cases passed, plus the process/CLI/history lanes.
+- Changed JavaScript passed `node --check`.
+
+Earlier runs exposed stale tool-count/dry-run assertions and an invalid tab-list test input. The
+process negative test also distinguished requested child dispatch from an earlier navigation's
+independent landing observation. These were corrected; earlier failed runs are not counted as passes.
+
+The dev-loop deployed only the orchestrator. Installed and isolated release SHA-256 match
+`8c2675e6a8ca922f5d137fcf0eaa705b5cc3b41ac8b43fb83bf36d21deb61a2e`; the installed service is Ready.
+Connector hashes remain `1271afb9604d0148ef3eb17219cc2d0ac1bc5692d98825fa8a520375b7fb7a6b`
+(MCP) and `6c8e85e8d54cfd40d3423bba2bf1d49969ef0290961426eec0bfed064721580a` (browser).
+
+Fresh installed MCP verifies the current catalog, rejection of both restriction fields, both
+dry-run boolean values, and the retired tool. Policy explanation remains available after those
+invalid calls. Evidence: `.tmp/installed-tool-removal-evidence.json`, with the catalog separately
+in `.tmp/installed-tool-removal-catalog.json`.
+
+Installed browser acceptance completed at `2026-09-08T02:33:57Z`: eight groups, 46 calls, passed.
+It proves unsent ordinary/shadow drafts, unchanged earlier fields on batch preflight refusal,
+typing/clearing, script/flow effect counts, unrestricted embedded read/fill/capture/script access,
+and live Sylin framed content with local-only simulated submission and captures. Restricted frame
+and pixel-mask proof remains in the real MV3 lane under configured policy; the installed all-open
+fixture does not rewrite the person's authority. Evidence: `.tmp/installed-hardening-evidence.json`.
+The previous installed receipt was preserved as `.tmp/installed-hardening-before-tool-removal.json`.
+The disposable test tab `tab_05231c5669234f61967bd8e976cc7abb` remains open; the Reddit draft was
+untouched. Cached clients need a catalog refresh/reconnect. No extension reload is needed, nothing
+was pushed/published, and full Linux execution remains outstanding.

@@ -45,6 +45,10 @@ the owner wants, and what this project learned the hard way.
 - **Host restrictions belong to policy.** The owner removed the built-in localhost, loopback, and
   link-local ban. All-open includes local HTTP(S) browser work; do not reintroduce a hard-coded
   address block, a local-access toggle, or an exception flow (ADR-0155).
+- **Model calls describe work; people configure authority.** The owner removed caller-supplied
+  host/capability restrictions and flow dry-run, and consolidated sequence into ordinary flow
+  steps. Do not recreate a model-authored policy layer or simulation mode under another name.
+  Configured governance and historical evidence remain intact (ADR-0162).
 - **Refactor authority is standing.** When work touches a weird-shaped seam, the owner has
   authorized refactoring toward a lean domain-driven monolith: fewest but most meaningful moving
   parts, each kind of complexity isolated at exactly one seam. Capture facts where they are

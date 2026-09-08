@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::governance::CapabilitySet;
 use crate::workspace::WorkspaceError;
 
 /// What a controller is told when a person has paused Ghostlight (ADR-0126 Decision 4).
@@ -220,8 +219,6 @@ pub enum Outcome {
     /// Invalid child inputs prevented entering the ordinary executor.
     StepNotStarted,
 
-    /// One flow decoded and classified without dispatching.
-    FlowDecoded { steps: usize },
     /// One bounded document-tree observation was recorded.
     DocumentInspected {
         nodes: usize,
@@ -390,9 +387,7 @@ impl Outcome {
             }
             Self::CompositionUnrecorded => "Completion was not recorded.".into(),
             Self::StepNotStarted => "This step could not start.".into(),
-            Self::FlowDecoded { steps } => {
-                format!("Decoded {steps} flow steps; nothing was dispatched.")
-            }
+
             Self::SelectorUnresolved { matched } => {
                 if *matched == 0 {
                     "No visible control matched the semantic selector in the inspected content."
@@ -738,8 +733,7 @@ impl Outcome {
                 count: measured(progress.counts.succeeded),
                 ..Observed::default()
             },
-            Self::CompositionProgress { completed, .. }
-            | Self::FlowDecoded { steps: completed } => Observed {
+            Self::CompositionProgress { completed, .. } => Observed {
                 count: measured(*completed),
                 ..Observed::default()
             },
@@ -883,10 +877,6 @@ pub enum Refusal {
         reason: BlockedReason,
         host: Option<String>,
     },
-    /// The caller's capability restriction excludes this operation's requirements.
-    RequestCapabilities { required: CapabilitySet },
-    /// The caller's host restriction excludes an accessed document.
-    RequestHosts { host: Option<String> },
     /// Runtime control requires the user.
     AttentionRequired,
     /// The browser-local physical safety setting refused the action.
@@ -953,13 +943,6 @@ impl Refusal {
                 "The browser job deadline expired while waiting for the workspace."
             }
             Self::AuthorityBlocked { reason, host } => return blocked(*reason, host),
-            Self::RequestCapabilities { required } => {
-                return format!(
-                    "Blocked by this call's restrict_capabilities; this operation requires {}.",
-                    required.label()
-                );
-            }
-            Self::RequestHosts { .. } => "Blocked by this call's restrict_hosts.",
             Self::AttentionRequired => "The browser job requires user attention.",
             Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
             Self::CredentialHandoff => {
@@ -1039,9 +1022,7 @@ impl Refusal {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
-            Self::RequestCapabilities { .. } | Self::RequestHosts { .. } => vec![
-                "Check the restrictions supplied with this call against the user's intended limits. policy_explain shows the configured authority.".into(),
-            ],
+
             Self::InvalidRequest => {
                 vec!["Match the call to the advertised schema; the invalid_input detail states exactly what to change.".into()]
             }
@@ -1141,7 +1122,7 @@ impl Refusal {
     #[must_use]
     pub fn observed(&self) -> Observed {
         match self {
-            Self::AuthorityBlocked { host, .. } | Self::RequestHosts { host } => Observed {
+            Self::AuthorityBlocked { host, .. } => Observed {
                 host: host.clone(),
                 ..Observed::default()
             },

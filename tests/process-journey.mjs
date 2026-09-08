@@ -529,7 +529,7 @@ try {
   mcp.notify("notifications/initialized");
 
   const listed = await mcp.request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
+  assert.equal(listed.result.tools.length, 23);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
@@ -579,7 +579,7 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
   const relisted = await waitForMcpReady(mcp);
-  assert.equal(relisted.result.tools.length, 24);
+  assert.equal(relisted.result.tools.length, 23);
 
   const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(reopened.status, "succeeded");
@@ -732,7 +732,8 @@ try {
   }));
   assert.equal(guarded.status, "succeeded");
 
-  // R6: flow dry run plus a referenced three-step flow over ordinary results.
+  // Retired simulation is rejected; actual flows use ordinary results.
+  const beforeRetiredFlow = physicalCommands.length;
   const flowDry = structured(await mcp.request("tools/call", {
     name: "browser_flow",
     arguments: {
@@ -743,9 +744,11 @@ try {
       ]
     }
   }));
-  assert.equal(flowDry.status, "succeeded");
-  assert.equal(flowDry.facts.steps[0].capabilities.includes("read"), true);
-  assert.equal(flowDry.facts.steps[1].capabilities.includes("execute"), false);
+  assert.equal(flowDry.status, "failed");
+  assert.equal(flowDry.effect, "none");
+  assert.ok(flowDry.next_steps.some(step => step.includes("removed")));
+  assert.deepEqual(physicalCommands.slice(beforeRetiredFlow).filter(command => ["list_tabs", "read_document"].includes(command)), [],
+    "retired flow inputs dispatch neither requested child; prior landing observations may finish independently");
   const flowResponse = await mcp.request("tools/call", {
     name: "browser_flow",
     arguments: {
@@ -801,8 +804,12 @@ try {
   assert.equal(mixed.facts.steps[2].status, "succeeded");
   assert.equal(mixed.repeat_safe, false);
 
+  const ordinaryPolicy = readFileSync(policyFile, "utf8");
+  const readPolicy = JSON.parse(ordinaryPolicy);
+  readPolicy.grants[0].allowed = ["read"];
+  writeFileSync(policyFile, JSON.stringify(readPolicy));
   const blockedResponse = await mcp.request("tools/call", {
-    name: "browser_flow", arguments: { restrict_capabilities: ["read"], steps: [
+    name: "browser_flow", arguments: { steps: [
       { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
       { id: "blocked", tool: "browser_execute", arguments: { script: "PRIVATE_BLOCKED_SCRIPT" } },
       { id: "unreached", tool: "browser_read", arguments: { max_chars: 500 } }
@@ -815,6 +822,7 @@ try {
   assert.equal(blockedFlow.facts.steps[2].status, "not_run");
   assert.equal(blockedFlow.summary, "Completed 1 of 3 steps. Step 2 blocked by policy.");
 
+  writeFileSync(policyFile, ordinaryPolicy);
   const invalidResponse = await mcp.request("tools/call", {
     name: "browser_flow", arguments: { steps: [
       { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
@@ -992,9 +1000,12 @@ try {
   const troubled = new McpPeer(troubledConnector);
   await troubled.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H5 isolated session", version: "1" } });
   troubled.notify("notifications/initialized");
+  const actionPolicy = JSON.parse(ordinaryPolicy);
+  actionPolicy.grants[0].allowed = ["action"];
+  writeFileSync(policyFile, JSON.stringify(actionPolicy));
   const beforeAttention = physicalCommands.length;
   const attentionResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
-    restrict_capabilities: ["action"], on_error: "continue", steps: Array.from({ length: 4 }, (_, index) => ({
+    on_error: "continue", steps: Array.from({ length: 4 }, (_, index) => ({
       id: `denied_${index}`, tool: "browser_tabs", arguments: { action: "list" }
     }))
   }});
@@ -1003,14 +1014,15 @@ try {
   assert.equal(attention.status, "attention_required");
   assert.equal(attention.facts.steps[3].status, "not_run");
   assert.equal(physicalCommands.length, beforeAttention);
+  writeFileSync(policyFile, ordinaryPolicy);
   assert.equal(structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
   const resumeState = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
   await resumeState;
   const stillAttention = structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
   assert.equal(stillAttention.status, "attention_required", "global Resume cannot clear a session review");
-  const attentionExplanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: { restrict_capabilities: ["write"] } }));
-  assert.equal(attentionExplanation.status, "succeeded", "the client can diagnose the original restriction while attention is held");
+  const attentionExplanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: {} }));
+  assert.equal(attentionExplanation.status, "succeeded", "the client can diagnose the configured policy while attention is held");
   assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status,
     "attention_required", "diagnostics never release session attention");
   const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))

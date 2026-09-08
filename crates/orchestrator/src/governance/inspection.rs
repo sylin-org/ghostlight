@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 
 use super::{managed, manifest, CapabilitySet, GovernanceFacade};
-use crate::language::{capability_map, RequestRestrictions};
+use crate::language::capability_map;
 
 /// One local policy inspection command.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,7 +145,7 @@ fn explain(policy: &manifest::Manifest, out: &mut impl Write) -> Result<()> {
 fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
     let manifest = load(policy)?;
     let facade = GovernanceFacade::new(Some(policy.to_path_buf()), None);
-    let snapshot = facade.snapshot(&RequestRestrictions::default());
+    let snapshot = facade.snapshot();
     let file = fs::File::open(audit).with_context(|| format!("read audit {}", audit.display()))?;
     let mut records = 0_u64;
     let mut denied = 0_u64;

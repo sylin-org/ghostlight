@@ -4,17 +4,13 @@ use std::collections::HashMap;
 
 use serde_json::{json, Map, Value};
 
-use crate::governance::{Capability, CapabilitySet};
+use crate::governance::CapabilitySet;
 use crate::language::composition::StepCause;
 use crate::language::history::{CompositionKind, StepReceipt};
-use crate::language::outcome::Outcome;
 use crate::language::RunFlow;
 use crate::workspace::WorkspaceLease;
 
-use super::{
-    result::Readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, Status,
-    Terminal,
-};
+use super::{result::Readiness, ApplicationExecutor, Effect, InvocationContext, Status, Terminal};
 
 use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
 
@@ -39,48 +35,6 @@ impl ApplicationExecutor {
             );
         }
         let total = value.steps.len();
-        if value.dry_run {
-            let mut rows = Vec::with_capacity(total);
-            for step in &value.steps {
-                let empty = HashMap::new();
-                match substitute_references(&step.arguments, &empty) {
-                    Ok(Some(arguments)) => {
-                        let row = match crate::language::decode(&step.tool, arguments) {
-                            Ok(operation) => {
-                                let requirements =
-                                    crate::language::capability_map::requirements(&operation);
-                                json!({
-                                    "id":step.id,
-                                    "tool":operation.name(),
-                                    "capabilities":capability_names(&requirements),
-                                })
-                            }
-                            Err(error) => json!({"id":step.id,"decode_error":error.to_string()}),
-                        };
-                        rows.push(row);
-                    }
-                    Ok(None) => rows
-                        .push(json!({"id":step.id,"error":"a result reference did not resolve"})),
-                    Err(reason) => rows.push(json!({"id":step.id,"error":reason})),
-                }
-            }
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Succeeded,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    Outcome::FlowDecoded { steps: total }.summary().as_str(),
-                    json!({"dry_run":true,"steps":rows}),
-                    Outcome::FlowDecoded { steps: total }.next_steps(),
-                ),
-                decision,
-                physical_id: None,
-                observed: Outcome::FlowDecoded { steps: total }.observed(),
-                audit: Outcome::FlowDecoded { steps: total }.audit(),
-            };
-        }
         let mut envelopes: HashMap<String, Value> = HashMap::new();
         let mut rows = Vec::with_capacity(total);
         let mut progress = Composition::new(total, decision, Readiness::NotApplicable, None);
@@ -96,7 +50,7 @@ impl ApplicationExecutor {
                 })
                 .map_err(|error| (StepCause::MissingReference, error))
                 .and_then(|arguments| {
-                    crate::language::decode(&step.tool, arguments)
+                    crate::language::decode_flow_step(&step.tool, arguments, value.tab.as_deref())
                         .map_err(|error| (StepCause::InvalidArguments, error.to_string()))
                 });
             let decoded = match prepared {
@@ -171,19 +125,6 @@ impl ApplicationExecutor {
             .with_tools(value.steps.iter().map(|step| &step.tool));
         terminal
     }
-}
-
-fn capability_names(requirements: &CapabilitySet) -> Vec<&'static str> {
-    [
-        (Capability::Read, "read"),
-        (Capability::Action, "action"),
-        (Capability::Write, "write"),
-        (Capability::Execute, "execute"),
-    ]
-    .into_iter()
-    .filter(|(capability, _)| requirements.contains(*capability))
-    .map(|(_, name)| name)
-    .collect()
 }
 
 /// Substitute every embedded `{"flow_ref":{...}}` with the referenced value.

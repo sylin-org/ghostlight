@@ -264,6 +264,11 @@
      */
     function refusalMarkup(entry) {
       if (!entry.policyTier && !entry.grantId && !entry.denialId) return "";
+      if (entry.policyTier === "session") {
+        const explanation = entry.permissionExplanations?.find(text => text.includes("request restrictions refused")) ?? entry.summary;
+        return `<p class="hero-refusal">${escapeHtml(explanation)}`
+          + (entry.denialId ? `<span class="denial-id">${escapeHtml(entry.denialId)}</span>` : "") + `</p>`;
+      }
       const managed = entry.policyTier === "managed";
       const who = managed ? (passportName() ?? "your organization") : "your own rules";
       const parts = [`Refused by ${who}`];

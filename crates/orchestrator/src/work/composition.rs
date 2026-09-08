@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use crate::governance::GovernanceFacade;
     use crate::language::outcome::{Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
-    use crate::language::RequestRestrictions;
+
     use crate::workspace::WorkspaceStore;
     use ghostlight_bridge::service::IntakeChannel;
 
@@ -408,7 +408,7 @@ mod tests {
     fn between_step_limits_do_not_fabricate_attempts_or_lose_prior_effects() {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
-        let snapshot = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(None, None).snapshot();
         for cancelled in [true, false] {
             let token = super::super::CancellationToken::default();
             if cancelled {

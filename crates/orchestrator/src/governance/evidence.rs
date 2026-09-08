@@ -19,12 +19,10 @@ pub struct LayerEvidence {
 mod tests {
     use super::*;
     use crate::governance::{manifest, AuthorityTier, GovernanceFacade, PolicyLayer};
-    use crate::language::RequestRestrictions;
 
     #[test]
     fn positive_evidence_preserves_ordered_grants_and_every_layer() {
-        let mut snapshot =
-            GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        let mut snapshot = GovernanceFacade::new(None, None).snapshot();
         for tier in [AuthorityTier::Managed, AuthorityTier::User] {
             snapshot.layers.push(PolicyLayer { tier, manifest: manifest::parse(r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap() });
         }
@@ -57,9 +55,9 @@ mod tests {
     }
 
     #[test]
-    fn all_open_restrictions_observe_and_protected_denials_keep_their_actual_meaning() {
+    fn all_open_observe_and_protected_denials_keep_their_actual_meaning() {
         let facade = GovernanceFacade::new(None, None);
-        let mut snapshot = facade.snapshot(&RequestRestrictions::default());
+        let mut snapshot = facade.snapshot();
         let (decision, open) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("http://localhost:3000/"));
         assert!(decision.allowed);
@@ -68,13 +66,6 @@ mod tests {
             crate::language::history::permission(&open),
             "Allowed without configured policy."
         );
-        snapshot.request_capabilities = Some(CapabilitySet::READ);
-        let (decision, restricted) = snapshot.authorize_with_evidence(CapabilitySet::WRITE, None);
-        assert!(!decision.allowed);
-        assert!(snapshot.is_request_denial(decision));
-        assert!(restricted.request_restricted && restricted.request_evaluated);
-        assert!(crate::language::history::permission(&restricted)
-            .contains("request restrictions refused this work"));
         snapshot.layers.push(PolicyLayer {
             tier: AuthorityTier::User,
             manifest: manifest::parse(
@@ -85,22 +76,15 @@ mod tests {
         });
         let (decision, observed) =
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
-        assert!(!decision.allowed && !decision.observed);
-        assert!(snapshot.is_request_denial(decision));
-        assert!(!observed.layers[0].allowed);
-        assert!(observed.request_restricted && observed.request_evaluated);
-        assert!(crate::language::history::permission(&observed)
-            .contains("request restrictions refused"));
-        let (decision, allowed_observe) =
-            snapshot.authorize_with_evidence(CapabilitySet::READ, Some("https://example.com/"));
         assert!(decision.allowed && decision.observed);
-        assert!(allowed_observe.request_evaluated);
-        assert!(crate::language::history::permission(&allowed_observe)
-            .starts_with("Allowed in observe mode"));
+        assert!(!observed.layers[0].allowed);
+        assert!(!observed.request_restricted && !observed.request_evaluated);
+        assert!(
+            crate::language::history::permission(&observed).starts_with("Allowed in observe mode")
+        );
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
         assert!(!decision.allowed && !decision.observed);
-        assert!(!snapshot.is_request_denial(decision));
         assert!(
             protected.layers.is_empty(),
             "protected rejection never evaluated grants"
@@ -113,14 +97,14 @@ mod tests {
         let decision = snapshot.authorize_capability(super::super::Capability::Write);
         assert!(!decision.allowed);
         assert!(
-            !snapshot.is_request_denial(decision),
-            "configured denial wins before caller restrictions"
+            snapshot.attribution(decision).unwrap().0 == "user",
+            "new decisions contain no caller restriction evidence"
         );
     }
 
     #[test]
     fn trace_bounds_and_deduplication_keep_omission_explicit() {
-        let snapshot = GovernanceFacade::new(None, None).snapshot(&RequestRestrictions::default());
+        let snapshot = GovernanceFacade::new(None, None).snapshot();
         let mut trace = PermissionTrace::default();
         for index in 0..=PERMISSION_CHECK_LIMIT {
             let (_, check) = snapshot.authorize_with_evidence(
@@ -145,9 +129,9 @@ pub struct PermissionCheck {
     pub observed: bool,
     pub reason: ReasonCode,
     pub layers: Vec<LayerEvidence>,
-    /// Presence only: an earlier boundary may return before these restrictions are checked.
+    /// Legacy receipt field: a retired caller restriction was supplied.
     pub request_restricted: bool,
-    /// Whether this decision reached request restrictions after the authority layers.
+    /// Legacy receipt field: that historical decision evaluated the caller restriction.
     pub request_evaluated: bool,
 }
 
@@ -181,12 +165,11 @@ impl AuthoritySnapshot {
         requirements: CapabilitySet,
         url: Option<&str>,
     ) -> (Decision, PermissionCheck) {
-        let (decision, outcomes, request_evaluated) = match url {
+        let (decision, outcomes) = match url {
             Some(url) => self.decide_landing(requirements, url),
             None => self.decide_requirements(requirements),
         };
         let mut evidence = self.decision_evidence(requirements, url, decision);
-        evidence.request_evaluated = evidence.request_restricted && request_evaluated;
         evidence.layers = self
             .layers
             .iter()
@@ -234,7 +217,7 @@ impl AuthoritySnapshot {
             observed: decision.observed,
             reason: decision.reason,
             layers: vec![],
-            request_restricted: self.request_capabilities.is_some() || self.request_hosts.is_some(),
+            request_restricted: false,
             request_evaluated: false,
         }
     }

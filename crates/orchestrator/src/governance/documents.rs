@@ -120,13 +120,6 @@ impl AuthoritySnapshot {
     pub fn permits_any_document(&self, requirements: super::CapabilitySet) -> bool {
         self.valid
             && self.sacred_hosts.is_empty()
-            && self
-                .request_hosts
-                .as_ref()
-                .is_none_or(|hosts| hosts.iter().any(|host| host == "*"))
-            && self
-                .request_capabilities
-                .is_none_or(|allowed| requirements.is_subset_of(allowed))
             && self.layers.iter().all(|layer| {
                 layer.manifest.grants.iter().any(|grant| {
                     grant.hosts.allow.iter().any(|host| host == "*")

@@ -1,9 +1,35 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (tool surface review after the all-open restriction incident; native
-workbench correction remains deployed; published versions remain service 1.3.4 and adapter 1.1.1).
+Last updated: 2026-09-07 (tool consolidation implemented, verified, and deployed; published versions remain
+service 1.3.4 and adapter 1.1.1).
 
-## Tool surface review (2026-09-07)
+## Tool consolidation (2026-09-07)
+
+The owner authorized removing both request restriction inputs and flow dry-run, consolidating
+sequence into flow, and adjusting policy handling. [ADR-0162](adr/0162-configured-authority-and-one-flow-tool.md)
+records the decision. Source now advertises 23 tools. Short flows accept ordinary calls with
+optional IDs and correctly default their tab-scoped children. Configured policy, human controls,
+and H6 document handling remain enforced. Historical request/sequence receipts remain readable.
+Obsolete calls fail before browser effects; refreshing the catalog is required for cached clients.
+Submission bundling remains supported; its removal was not authorized.
+
+All 17 Windows hardening gates pass against unchanged source: 530 Rust tests, 207 extension tests,
+18 native lifecycle/profile checks, 68 MV3 frame/editor cases, and the existing process, continuity,
+provenance, CLI, script, and history journeys. The
+[suite record](tasks/security-hardening/regression-suite.md#tool-consolidation-follow-up-2026-09-07)
+owns exact paths and the source fingerprint. Full Linux execution remains outstanding.
+
+The dev-loop replaced only the orchestrator. Installed and isolated release SHA-256 match
+`8c2675e6a8ca922f5d137fcf0eaa705b5cc3b41ac8b43fb83bf36d21deb61a2e`.
+The installed service is Ready; both connector hashes are unchanged. Fresh installed MCP proves
+the 23-tool catalog and effect-free rejection of all retired inputs/tool names. Installed browser
+acceptance passes eight groups and 46 calls, including unsent ordinary/shadow drafts, short flows,
+all-open iframe read/fill/capture/script behavior, and the live Sylin form's local-only simulation.
+Evidence: `.tmp/installed-tool-removal-evidence.json` and `.tmp/installed-hardening-evidence.json`.
+The disposable test tab is preserved. The user's Reddit draft was not touched. Clients with cached
+schemas must refresh/reconnect; no extension reload is needed. Nothing was pushed or published.
+
+## Earlier tool surface review (2026-09-07)
 
 The owner rejected model-authored request restrictions and requested a search for other misaligned
 tool capabilities. The [24-tool review](design/tool-surface-review-2026-09-07.md) records the fresh

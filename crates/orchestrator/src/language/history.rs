@@ -7,12 +7,37 @@ use serde::{Deserialize, Serialize};
 /// Maximum child count supported by a composition, including restored history.
 pub const COMPOSITION_STEP_LIMIT: usize = 20;
 
-/// The two composition forms; caller labels never supply a retained identity.
+/// Current flow and historical sequence identities; caller labels never supply an identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompositionKind {
     Flow,
+    /// Retained for receipts written before sequence was consolidated into flow.
     Sequence,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn retired_request_and_sequence_receipts_keep_their_original_meaning() {
+        let check: PermissionCheck = serde_json::from_value(json!({
+            "requirements":["execute"],"host":null,"allowed":false,"observed":false,
+            "reason":"host_denied","layers":[],"request_restricted":true,"request_evaluated":true
+        }))
+        .unwrap();
+        assert_eq!(
+            permission(&check),
+            "Refused: request restrictions refused this work."
+        );
+        let receipt: StepReceipt = serde_json::from_value(json!({
+            "parent":"sequence","position":2,"total":3,"preparation_failed":false
+        }))
+        .unwrap();
+        assert_eq!(receipt.parent.tool(), "browser_sequence");
+    }
 }
 
 impl CompositionKind {

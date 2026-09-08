@@ -262,11 +262,11 @@ try {
   const dryRun = await call("browser_flow", { dry_run: true, steps: [
     { id: "script", tool: "browser_execute", arguments: { tab: opened.facts.tab, script: mutation } }
   ] });
-  assert.equal(dryRun.status, "succeeded", JSON.stringify(dryRun));
+  assert.equal(dryRun.status, "failed", JSON.stringify(dryRun));
   assert.equal(dryRun.effect, "none"); assert.equal(executions, beforeDryRun);
   assert.equal(await raw("document.getElementById('effect').textContent"), "0");
   checks += 1;
-  console.log("PASS dry-run script composition never executes the page program");
+  console.log("PASS retired dry_run is rejected without executing the page program");
   const audit = readFileSync(environment.GHOSTLIGHT_AUDIT_FILE, "utf8");
   assert.doesNotMatch(audit, /PRIVATE_SCRIPT_EXCEPTION|PRIVATE_SCRIPT_RESULT|document\.getElementById|runtime-thrown exception|forged prefix/);
   const records = audit.trim().split(/\r?\n/).map((line) => JSON.parse(line));

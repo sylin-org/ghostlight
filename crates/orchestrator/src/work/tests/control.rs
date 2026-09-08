@@ -70,7 +70,7 @@ fn policy_explain_remains_available_without_releasing_attention_or_human_control
             let result = executor.execute(
                 &workspace,
                 "policy_explain",
-                json!({"restrict_capabilities":["write"],"restrict_hosts":["unused.example"]}),
+                json!({}),
                 None,
                 &CancellationToken::default(),
             );
@@ -149,11 +149,13 @@ fn facade(executor: &ApplicationExecutor) -> WorkbenchFacade {
 
 #[test]
 fn automatic_attention_is_local_reviewed_and_never_replays_work() {
-    let (executor, browser, workspaces, one, audit) = fixture();
+    let policy = TestPolicy::new();
+    policy.set(json!(["action"]));
+    let (executor, browser, workspaces, one, audit) = fixture_with_governance(policy.facade());
     let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp, None);
     let notices = Arc::new(Notices::default());
     executor.workbench.attach_presentation(notices.clone());
-    let refused = json!({"restrict_capabilities":["action"],"on_error":"continue","steps":[
+    let refused = json!({"on_error":"continue","steps":[
         {"id":"one","tool":"browser_tabs","arguments":{"action":"list"}},
         {"id":"two","tool":"browser_tabs","arguments":{"action":"list"}},
         {"id":"three","tool":"browser_tabs","arguments":{"action":"list"}},
@@ -186,6 +188,7 @@ fn automatic_attention_is_local_reviewed_and_never_replays_work() {
         assert_eq!(blocked.status, Status::AttentionRequired);
         assert_eq!(workspaces.attention(&one), Some(incident.clone()));
     }
+    policy.set(json!(["read", "action"]));
     browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
     assert_eq!(
         executor
@@ -237,6 +240,7 @@ fn automatic_attention_is_local_reviewed_and_never_replays_work() {
         .governance
         .apply_runtime_intent(RuntimeControlIntent::StartSession);
     assert!(recovery.resume_session(one.as_str(), &incident.id).accepted);
+    policy.set(json!(["action"]));
     let newer = executor.execute(
         &one,
         "browser_flow",
@@ -273,7 +277,7 @@ fn automatic_attention_is_local_reviewed_and_never_replays_work() {
 }
 
 #[test]
-fn observe_admission_still_enforces_direct_and_composed_request_limits() {
+fn obsolete_arguments_are_rejected_even_in_observe_mode() {
     let path = temporary_policy("h5-observe");
     fs::write(
         &path,
@@ -315,17 +319,18 @@ fn observe_admission_still_enforces_direct_and_composed_request_limits() {
                 None,
                 &CancellationToken::default(),
             );
-            assert_eq!(result.status, Status::Blocked, "{tool}: {}", result.summary);
+            assert_eq!(result.status, Status::Failed, "{tool}: {}", result.summary);
             assert!(browser.calls().is_empty());
             assert!(audit
                 .0
                 .lock()
                 .unwrap()
                 .iter()
-                .flat_map(|record| &record.permissions.checks)
-                .any(|check| !check.allowed
-                    && check.request_restricted
-                    && check.request_evaluated));
+                .all(|record| record.permissions.checks.is_empty()));
+            assert!(result
+                .next_steps
+                .iter()
+                .any(|step| step.contains("removed")));
         }
     }
     let (executor, browser, _, workspace, _) =
