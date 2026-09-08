@@ -364,6 +364,9 @@ Every one of these cost something to learn.
   reviewed Chrome Web Store artifact. A packager used for publication must pin serialization and
   container fields explicitly to the reviewed artifact's exact shape, and a release must prove
   determinism across operating systems, not just across runs on one machine.
+  The runtime matters too: on 2026-09-08, PowerShell 7.5.2 and 7.6.5 produced identical extracted
+  adapter files but different compressed ZIP bytes. Only 7.6.5 reproduced the submitted 1.1.2
+  hash. Record the packaging runtime with artifact custody; fixed ZIP metadata alone is insufficient.
 - **A READY card covers only the roster.** Registration state is per-client, read from that
   client's own configuration; a client with no registry row is invisible no matter how broken
   its hand-written entry is, and one client's green card never contradicts another's failure

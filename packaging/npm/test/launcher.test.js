@@ -31,15 +31,22 @@ test("a real offline npm install invokes the launcher through the platform bin e
     // This proves npm's installed entry point, not candidate binary delivery or startup.
     await writeFile(join(stage, "checksums.json"), JSON.stringify({ version: metadata.version,
       algorithm: "sha256", binaries: {} }));
-    const npmCli = process.env.npm_execpath || join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
+    // npm exposes its exact CLI when it runs this test. A direct Node invocation on Linux
+    // resolves npm through PATH; its installation need not live beside the Node executable.
+    const npmCommand = process.env.npm_execpath
+      ? [process.execPath, process.env.npm_execpath]
+      : process.platform === "win32"
+        ? [process.execPath, join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")]
+        : ["npm"];
     const environment = { ...process.env, npm_config_cache: join(directory, "cache"),
       GHOSTLIGHT_HOME: join(directory, "ghostlight-cache") };
     const run = (command, args) => spawnSync(command, args, { cwd: directory, env: environment,
       windowsHide: true, encoding: "utf8", timeout: 30000 });
-    const packed = run(process.execPath, [npmCli, "pack", stage, "--json", "--ignore-scripts", "--offline", "--pack-destination", directory]);
+    const runNpm = args => run(npmCommand[0], [...npmCommand.slice(1), ...args]);
+    const packed = runNpm(["pack", stage, "--json", "--ignore-scripts", "--offline", "--pack-destination", directory]);
     assert.equal(packed.status, 0, packed.stderr || packed.error?.message);
     const archive = join(directory, JSON.parse(packed.stdout)[0].filename);
-    const installed = run(process.execPath, [npmCli, "install", archive, "--prefix", directory,
+    const installed = runNpm(["install", archive, "--prefix", directory,
       "--offline", "--ignore-scripts", "--no-audit", "--no-fund"]);
     assert.equal(installed.status, 0, installed.stderr || installed.error?.message);
     const bin = join(directory, "node_modules/.bin/ghostlight");

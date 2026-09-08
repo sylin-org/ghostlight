@@ -5,6 +5,12 @@ published versions remain service 1.3.4 and adapter 1.1.1).
 
 ## Resume on Linux
 
+Linux source validation now passes all 18 hardening gates on CachyOS KDE Wayland, after fixing
+the npm test's Windows-only CLI lookup. The Linux packager reproduces the submitted adapter ZIP
+exactly with PowerShell 7.6.5; 7.5.2 produced identical extracted files but different compressed
+bytes. The [Linux evidence record](testing/linux-integration-2026-09-08.md) retains both runs and
+the packaging comparison. Installed and clean-package acceptance remain separate work.
+
 The owner requested pushing all project updates to `dev` and continuing release-readiness work
 on Linux. Start with the [Linux agent handoff](testing/linux-release-handoff-2026-09-08.md).
 It identifies the tested Windows boundaries, missing installed Linux evidence, exact source and
