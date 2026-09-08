@@ -154,9 +154,6 @@ pub fn run() -> Result<()> {
             }
         })
         .setup(move |app| {
-            setup_workbench.attach_presentation(Arc::new(NativePresentation {
-                app: app.handle().clone(),
-            }));
             setup_workbench.attach_events(Arc::new(NativeEvents {
                 app: app.handle().clone(),
             }));
@@ -195,9 +192,17 @@ pub fn run() -> Result<()> {
                         if !tray_available.load(Ordering::SeqCst) {
                             eprintln!("Ghostlight has no desktop interaction route and will stop");
                             app.exit(1);
+                            return;
                         }
                     }
                 }
+                // Publish activation only after startup has finished constructing and registering
+                // its window. Otherwise a service-thread Open can build a second native window
+                // before Tauri registers the first under MAIN_WINDOW. Early callers already retry
+                // unavailable presentation; a recoverable construction failure still permits Open.
+                app.state::<DesktopState>()
+                    .workbench
+                    .attach_presentation(Arc::new(NativePresentation { app: app.clone() }));
             }
             RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
                 api.prevent_exit();

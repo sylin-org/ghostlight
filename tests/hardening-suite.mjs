@@ -91,6 +91,10 @@ if (lane !== "browser") {
   ]) {
     if (built) await node(name, `tests/${file}`); else blocked(name, "Current-source build failed.");
   }
+  if (process.platform === "win32") {
+    if (built) await run("desktop-windows", "pwsh", ["-NoProfile", "-File", "tests/windows-desktop-journey.ps1"]);
+    else blocked("desktop-windows", "Current-source build failed.");
+  }
 }
 if (lane !== "process") {
   await run("browser-harness", process.execPath, ["--test", "tests/chromium-harness.test.mjs"]);

@@ -1,7 +1,34 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (hardening regression and installed Sylin acceptance complete, including
-editor and visual corrections; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+Last updated: 2026-09-07 (native workbench duplication fixed and deployed after the hardening
+regressions; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+
+## Native workbench duplication (2026-09-07)
+
+The owner reported two open Ghostlight copies. Windows enumeration found two responsive Tauri
+workbench windows inside one installed service process. Startup and a concurrent Open request
+could both construct a window before Tauri registered its label. Activation is now published only
+after initial construction and backgrounding. Open separately tolerates up to 15 seconds of native
+startup; expiration invites retry without telling the person to stop a healthy authority.
+[ADR-0119's amendment](adr/0119-durable-desktop-authority-disposable-workbench.md) owns this correction.
+
+The new Windows native journey reproduced duplication on the old installed release. A real
+authenticated delayed-presentation regression also failed on the old one-second Open wait. Final
+source passes all 17 gates: 526 Rust tests, 207 extension tests, 18 native lifecycle/profile checks,
+and the existing process and Chromium journeys. The native test counts actual windows, including
+hidden ones, verifies the same window is restored after minimize, exercises concurrent reopen,
+and proves its actual WebView profile is isolated from the installed workbench. The
+[suite record](tasks/security-hardening/regression-suite.md) owns exact report paths and fingerprints.
+
+The dev-loop replaced only the orchestrator. Installed and isolated release SHA-256 match
+`21943722debf5f1fd4dc1899bf7a463d022fed93051ff730215f368d854bd2a9`.
+The installed service is Ready, with exactly one responsive restored native window across eight
+concurrent Open requests and 20 observations. Existing connector processes survived with unchanged
+binaries. A fresh installed MCP connection passes policy explanation and live browser tab listing
+through the existing native host and adapter. This thread's cached tool transport returned
+`Transport closed`, so that transport is not claimed as verified. Evidence is
+`.tmp/installed-native-desktop-evidence.json`. No browser page or draft was changed, and no extension
+reload is owed. Nothing was pushed or published; full Linux native validation remains outstanding.
 
 ## Full-session regression suite (2026-09-07)
 
@@ -81,8 +108,8 @@ retains its Windows cross-build source path. The Linux unsupported-peer test pas
 process and desktop/browser validation remains outstanding. No packages or system configuration
 were changed, and nothing was pushed or published.
 
-The dated implementation sections retain their original evidence. The Full-session regression
-suite section above owns current deployment truth.
+The dated implementation sections retain their original evidence. The Native workbench duplication
+section above owns current deployment truth.
 
 ## Earlier local deployment (2026-09-07)
 

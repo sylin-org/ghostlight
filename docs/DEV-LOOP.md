@@ -138,6 +138,18 @@ a required lane cannot run or source changes during execution. See the
 [feature coverage guide](tasks/security-hardening/regression-suite.md). Installed validation uses
 `node tests/live-journey.mjs` separately after the changed components are active.
 
+On Windows, the full and process lanes include the `desktop-windows` gate. It requires
+PowerShell 7 and a Windows desktop. The journey launches an isolated authority, sends concurrent
+Open requests during startup, counts its real native workbench windows, and checks responsiveness,
+minimize/restore, and close/reopen while the authority stays alive. It uses the fresh
+`GHOSTLIGHT_BIN_DIR` build and changes only its own processes, windows, runtime files, and WebView
+profile. It verifies the spawned WebView uses that isolated profile; the
+installed stack and browser registration stay intact. To run it directly after building:
+
+```powershell
+pwsh -NoProfile -File tests/windows-desktop-journey.ps1
+```
+
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

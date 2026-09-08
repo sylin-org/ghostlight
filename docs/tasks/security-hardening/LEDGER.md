@@ -8,7 +8,16 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 ## RESUME HERE
 
-Current work, 2026-09-07: the owner requested the [full-session regression suite](regression-suite.md)
+Current work, 2026-09-07: the owner reported two open Ghostlight copies. Both were real responsive
+native windows inside one service. The startup/Open construction race and a related short startup
+wait are corrected and deployed. All 17 gates pass, including 526 Rust tests and 18 new native
+window/profile checks. Installed verification finds one responsive window through concurrent Open,
+with Ready service and successful fresh MCP/browser calls. STATUS owns the deployed hash and the
+[suite record](regression-suite.md#native-workbench-regression-follow-up-2026-09-07) owns evidence.
+The thread's cached MCP tool transport remains closed; fresh installed MCP validation passed.
+No extension reload is required, no browser drafts were touched, and nothing was pushed/published.
+
+Earlier full-session work, 2026-09-07: the owner requested the [full-session regression suite](regression-suite.md)
 and reported wrong-page read animations plus a persistent script spinner. The suite and visual
 corrections are complete: all 16 gates pass, including 525 Rust tests,
 207 extension tests, six harness fault tests, 23 script cases, and 68 real MV3 cases. It also exposed

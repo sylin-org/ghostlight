@@ -11,10 +11,14 @@ use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const ACTIVATION_RETRY_COUNT: usize = 20;
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
+// Native window construction can outlast service publication without indicating a failure.
+const WORKBENCH_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(15);
+const WORKBENCH_OPEN_TIMEOUT_MESSAGE: &str =
+    "The Ghostlight workbench did not open in time. Run 'ghostlight open' to try again.";
 
 /// Every subcommand a person is offered, in help order.
 ///
@@ -836,14 +840,22 @@ fn open_desktop() -> anyhow::Result<()> {
 }
 
 fn wait_for_workbench_activation(runtime: &Path) -> ActivationState {
+    wait_for_workbench_activation_until(runtime, Instant::now() + WORKBENCH_ACTIVATION_TIMEOUT)
+}
+
+fn wait_for_workbench_activation_until(runtime: &Path, deadline: Instant) -> ActivationState {
     let mut presentation_seen = false;
-    for _ in 0..ACTIVATION_RETRY_COUNT {
+    loop {
         match ghostlight::service::request_workbench_activation(runtime) {
             Ok(true) => return ActivationState::Activated,
             Ok(false) => presentation_seen = true,
             Err(_) => {}
         }
-        thread::sleep(ACTIVATION_RETRY_DELAY);
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        thread::sleep(ACTIVATION_RETRY_DELAY.min(remaining));
     }
     if presentation_seen {
         ActivationState::Unavailable
@@ -858,12 +870,10 @@ fn finish_activation(
 ) -> anyhow::Result<()> {
     match activation {
         ActivationState::Activated => Ok(()),
-        ActivationState::Unavailable => anyhow::bail!(
-            "the running Ghostlight authority has no desktop workbench; stop it before opening Ghostlight again"
-        ),
-        ActivationState::Unreachable => Err(start_error.unwrap_or_else(|| {
-            anyhow::anyhow!("the running Ghostlight authority could not be reached")
-        })),
+        ActivationState::Unavailable => anyhow::bail!(WORKBENCH_OPEN_TIMEOUT_MESSAGE),
+        ActivationState::Unreachable => {
+            Err(start_error.unwrap_or_else(|| anyhow::anyhow!(WORKBENCH_OPEN_TIMEOUT_MESSAGE)))
+        }
     }
 }
 
@@ -1061,6 +1071,66 @@ mod tests {
         launch_mode, readiness_line, select_install_browsers, LaunchMode, NativeHostCommand,
         SetupOptions,
     };
+
+    #[test]
+    fn open_waits_for_delayed_native_presentation_and_reveals_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use ghostlight::workbench::{
+            WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+        };
+
+        struct DelayedPresentation(AtomicUsize);
+
+        impl WorkbenchPresentationPort for DelayedPresentation {
+            fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn notify(&self, _: WorkbenchNotification) -> Result<(), WorkbenchPresentationError> {
+                Ok(())
+            }
+        }
+
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-delayed-presentation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let runtime = directory.join("runtime.json");
+        let host = ghostlight::service::ServiceHost::start(&runtime).unwrap();
+        assert!(!ghostlight::service::request_workbench_activation(&runtime).unwrap());
+        let timeout_started = std::time::Instant::now();
+        let timeout = super::wait_for_workbench_activation_until(
+            &runtime,
+            timeout_started + Duration::from_millis(100),
+        );
+        assert_eq!(timeout, super::ActivationState::Unavailable);
+        assert!(timeout_started.elapsed() < Duration::from_secs(1));
+        let message = super::finish_activation(timeout, None)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("did not open in time"));
+        assert!(message.contains("ghostlight open"));
+        assert!(!message.contains("stop"));
+        let presentation = Arc::new(DelayedPresentation(AtomicUsize::new(0)));
+        let delayed_presentation = presentation.clone();
+        let workbench = host.workbench.clone();
+        let ready = std::thread::spawn(move || {
+            // A cold WebView can become ready after the old one-second activation budget.
+            std::thread::sleep(Duration::from_secs(2));
+            workbench.attach_presentation(delayed_presentation);
+        });
+        let result = super::wait_for_workbench_activation(&runtime);
+        ready.join().unwrap();
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+        assert_eq!(result, super::ActivationState::Activated);
+        assert_eq!(presentation.0.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn doctor_renders_every_workbench_readiness_state_in_the_same_words() {

@@ -72,6 +72,27 @@ native renderer defaults.
 - Linux NVIDIA compatibility may trade WebView rendering performance for stability only on the
   affected driver family, and users retain an explicit override.
 
+## Implementation amendment: publish activation after startup (2026-09-07)
+
+Windows verification found two responsive native Tauri workbench windows owned by one service
+process. Setup published the presentation port before the event loop's Ready callback constructed
+the initial window. A concurrent service activation could also construct a window before the first
+was registered. Tauri's label check precedes native construction, so it did not serialize the two
+creations.
+
+The desktop adapter now publishes its activation port after initial construction and backgrounding
+have finished. Activation callers retry when presentation is unavailable, with a separate bounded
+wait for native startup. Timeout means the workbench did not open; it does not prove the authority
+must be stopped. A recoverable window-construction failure still publishes the port so a later Open
+can retry; failure of both tray and workbench still exits. Startup does not acquire a blocking lifecycle lock that an
+activation thread could hold while waiting for the same UI thread.
+
+The Windows native journey counts actual Tauri windows belonging to its isolated service during
+startup activation bursts and after close/reopen. Service-process counts and a mocked presentation
+port do not prove the one-workbench promise. Its WebView profile is isolated from the installed
+workbench as well as its runtime and policy. This correction belongs to desktop construction and
+its CLI activation caller; service, connector, and browser contracts stay unchanged.
+
 ## Prior art
 
 - [Electron tray lifecycle](https://www.electronjs.org/docs/latest/tutorial/tray)

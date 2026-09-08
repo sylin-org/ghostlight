@@ -112,6 +112,11 @@ the owner wants, and what this project learned the hard way.
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
   the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
   keeps the Applications entry and `ghostlight open`; there is no service-only launch mode.
+- **One process does not prove one workbench.** A startup/Open race created two responsive native
+  windows inside one authority. Publish activation only after startup construction finishes;
+  Tauri's label lookup does not reserve a window under construction. Native lifecycle acceptance
+  counts actual windows, including hidden ones, through startup and close/reopen bursts. A mock
+  activation port or process count cannot prove this promise (ADR-0119's September 7 amendment).
 - **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
   connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
   no product, workspace, authority, or model-language decision.

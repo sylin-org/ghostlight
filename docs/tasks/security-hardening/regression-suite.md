@@ -18,7 +18,8 @@ node tests/hardening-suite.mjs
 The runner performs formatting, Clippy with warnings denied, all workspace Rust tests, every
 extension test, policy grammar, a fresh workspace build, process/reconnect, local continuity,
 provenance, both CLI journeys, the workbench surface, real Chromium script execution, actual MV3
-document/editor/capture/recording behavior, and real Chromium history interaction. It runs all
+document/editor/capture/recording behavior, and real Chromium history interaction. Windows also
+runs the native desktop lifecycle journey, including concurrent startup Open requests. It runs all
 independent gates after a failure and exits nonzero if any fails or a required browser is missing.
 It never labels an unavailable lane as passed.
 
@@ -60,6 +61,7 @@ effects where the browser can change. Test counts alone do not close a row.
 | C1 reporting | Distinct processes are observed correctly; queued/composed/refused work keeps its original connection across shared sessions/reconnects; claims remain transient; restored history cannot borrow a new claim. | Rust provenance/audit/history tests; real provenance processes; actual Chromium history rendering/escaping. |
 | Draft editing and form preflight | Native transactions retain ordinary/open-shadow controlled drafts, replacement, multiline text, and clearing; fixture drafts remain unsent and Ghostlight invokes submission only when requested; known invalid fields anywhere in a batch prevent earlier edits. Standalone editors support both selectors and handles. | Extension content/worker tests; real MV3 editor and cross-frame cases; installed live journey. |
 | Page feedback and script progress | Read feedback follows the resolved tab; overlapping operations cannot animate an unrelated page or clear each other's progress; every terminal path removes its own script spinner. | Orchestrator presentation/dispatch tests, extension routing/renderer tests, and real Chromium visual checks. |
+| One native workbench | Concurrent startup Open calls create one responsive native window; minimize/restore preserves one window; close leaves the authority alive; concurrent reopen creates one replacement. Counts include hidden windows. | Windows native desktop journey in the full/process runner and Windows process CI. |
 
 The [process and human-history inventory](regression-process-coverage.md) names individual checks
 for H1/H2/H4/H5/H7/H8/C1. Browser and executor additions are retained beside their existing fixtures,
@@ -104,9 +106,49 @@ earlier success before startup and retains failure evidence. Run it after the ch
 actually active. An isolated MV3/native-port shim cannot establish native-host installation, and
 an installed live check cannot replace deterministic audit-failure or control-race tests.
 
-## Execution record
+## Native workbench regression follow-up (2026-09-07)
 
-The final Windows run on September 7 passed all 16 gates on unchanged source:
+The owner subsequently reported two open Ghostlight copies. Native enumeration found two
+responsive Tauri workbench windows inside one installed service process. The first Windows
+journey reproduced that race on release `57f4e314`: service activation and startup could both
+construct a window before Tauri registered either label. The previous process tests did not count
+native windows and therefore did not establish this promise.
+
+The desktop now publishes activation only after startup construction and backgrounding. Open
+allows a separate 15-second native startup wait; expiration invites retry without diagnosing the
+authority or telling the person to stop it. A real authenticated service regression first failed
+on the old one-second wait, then passed with presentation attached after two seconds and exactly
+one reveal. A short unavailable deadline also remains bounded.
+
+`tests/windows-desktop-journey.ps1` launches the ordinary no-argument authority and bursts eight
+authenticated Open requests during startup and after close. It counts real native Tauri windows,
+including hidden ones, checks responsiveness, verifies minimize/Open keeps the same native window,
+and closes the view while proving the authority remains alive. Three rounds provide 18 checks,
+including verification of each actual WebView2 profile under the test's evidence directory.
+Runtime, policy, native-host, diagnostics, and WebView state are isolated; cleanup addresses only
+owned callers and authorities. This gate runs in the Windows full/process lanes and Windows CI.
+
+Final Windows evidence is
+`.tmp/hardening-suite/2026-09-08T01-12-37-972Z-31076/results.json`: all 17 gates pass,
+`source_unchanged:true`, source fingerprint
+`b6ea519480f040c75c7488739813f0eac5353d3eb3b0addcb1b192928fd09754`.
+It includes 526 Rust tests, 207 extension tests, six browser-harness checks, 23 script cases,
+68 MV3 cases, and the 18 native checks at
+`.tmp/native-desktop-9fc18bd7eeaf4cdda5c1ba89ac9d5508/results.json`.
+The native duplicate-window failure was retained at
+`.tmp/native-desktop-efc7390e47574ea3956609cd6c6f86ba`.
+
+After the dev-loop swap, `.tmp/installed-native-desktop-evidence.json` verifies the installed
+release hash against the isolated build, Ready service, eight concurrent Open calls, and one
+responsive restored native window across 20 samples. Existing connector processes and binaries
+survived. A fresh installed MCP connector passes policy explanation and live browser tab listing
+through the existing native host and extension. The thread's cached MCP transport returned
+`Transport closed`; this record makes no successful-reconnection claim for that transport.
+STATUS owns the deployed release hash. No extension reload or browser-page mutation was needed.
+
+## Earlier execution record
+
+The earlier Windows run on September 7 passed all 16 gates on unchanged source:
 
 - 525 Rust tests, including the 338 catalog/authority case iterations.
 - 207 extension tests and six Chromium-harness fault-injection tests.

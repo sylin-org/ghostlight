@@ -294,6 +294,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    session provides one; the Applications entry and `ghostlight open` remain available when it
    does not. Closing destroys only the workbench window, tray Open rebuilds it, and only explicit
    quit stops the process. Native minimize does not close or hide the window.
+   Concurrent Open calls during startup and after close produce one responsive native workbench
+   for the exact authority process. Windows acceptance counts actual Tauri windows, including
+   hidden windows; a single service PID or a mocked activation result is insufficient evidence.
+   Open tolerates delayed native startup within its bounded wait; an expired wait permits retry
+   without telling the person to stop a healthy authority.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. The persistent lamp band states whether Ghostlight is all-open, has one or more
    policies applied, or has a configured policy issue, and links to Status for detail. Activity,

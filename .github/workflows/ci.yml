@@ -152,6 +152,16 @@ jobs:
       - if: runner.os == 'Windows'
         run: node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
+      - name: Verify native Windows desktop lifecycle
+        if: runner.os == 'Windows'
+        run: pwsh -NoProfile -File tests/windows-desktop-journey.ps1
+      - name: Keep native Windows desktop evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-desktop-windows
+          path: .tmp/native-desktop-*/results.json
+          retention-days: 14
 
   browser-journeys:
     strategy:
