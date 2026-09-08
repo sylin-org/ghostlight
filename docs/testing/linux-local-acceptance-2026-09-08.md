@@ -17,8 +17,10 @@ None of these results is a release approval or a store-adapter acceptance result
   installation, browser profiles, MCP configuration, and machine-local notes are outside that work.
 - The host-built sibling hashes are those in the earlier Linux record. They require GLIBC 2.39
   and cannot prove the older release baseline. A separate Ubuntu 22.04 build below addresses it.
-- Reports and test drivers remain local under `.tmp/linux-local/`; shared evidence carries
+- Reports remain local under `.tmp/linux-local/`; shared evidence carries
   bounded receipts and artifact identities, not page contents or screenshots.
+- The reusable drivers now live in [`tests/linux/`](../../tests/linux/README.md), with
+  per-environment path settings. Their move preserves these original report locations.
 
 ## Two delivery defects fixed
 

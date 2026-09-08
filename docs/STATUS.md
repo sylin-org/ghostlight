@@ -101,6 +101,18 @@ boundaries. The submitted adapter stays unchanged while Google reviews it.
 
 ## Additional local Linux acceptance (2026-09-08)
 
+The 21 Linux acceptance drivers and helpers now live under
+[`tests/linux/`](../tests/linux/README.md), including the relocated installed recovery journey.
+One runner exports per-environment fixture, browser, package, version, and build-tool paths.
+An example shell configuration documents overrides; profiles, reports, keys, and guest roots
+remain ignored. Machine-specific browser and process identities are discovered at runtime.
+Guest upgrade scripts are mounted from tracked source and refuse direct host execution.
+Syntax, ASCII, relative imports, cross-language path overrides (including spaces), guest mounts,
+fresh-context imports, and opt-in refusal checks pass. Formatting, Clippy, extension tests,
+and repository integrity pass. All Rust workspace tests pass with local socket access;
+the initial sandbox denied binds.
+This is test-source relocation/configuration work; the live acceptance journeys were not rerun.
+
 The owner authorized all remaining locally feasible Linux work. The
 [additional Linux evidence](testing/linux-local-acceptance-2026-09-08.md) records installed
 configured governance and privacy, Chromium/Brave and plural-profile continuity, portable

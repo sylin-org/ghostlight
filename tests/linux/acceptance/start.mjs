@@ -1,0 +1,11 @@
+import {homedir} from 'node:os';
+import {spawn,execFileSync} from 'node:child_process';
+import {mkdirSync,writeFileSync,openSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+const root=resolve(process.env.GHOSTLIGHT_LINUX_AREA), bin=process.env.GHOSTLIGHT_LINUX_BIN_DIR;
+const env={...process.env};for(const [key,dir] of Object.entries({XDG_CONFIG_HOME:'config',XDG_CACHE_HOME:'cache',XDG_DATA_HOME:'data',XDG_STATE_HOME:'state'}))env[key]=join(root,'context',dir);
+mkdirSync(join(root,'home'),{recursive:true});
+const install=execFileSync('bwrap',['--bind','/','/','--bind',join(root,'home'),homedir(),'--',join(bin,'ghostlight'),'install','--all-browsers','--no-clients','--no-open'],{env,encoding:'utf8'});
+writeFileSync(join(root,'install.log'),install);writeFileSync(join(root,'context.json'),JSON.stringify({bin,env:Object.fromEntries(Object.entries(env).filter(([k])=>k.startsWith('XDG_')))},null,2));
+const browser=spawn(process.env.GHOSTLIGHT_LINUX_CHROMIUM,['--no-first-run','--no-default-browser-check','--disable-default-apps','--disable-background-networking','--disable-component-update','--remote-debugging-port=0',`--load-extension=${process.env.GHOSTLIGHT_LINUX_EXTENSION}`,'about:blank'],{env,detached:true,stdio:['ignore',openSync(join(root,'chromium.log'),'a'),openSync(join(root,'chromium.log'),'a')]});
+writeFileSync(join(root,'browser.json'),JSON.stringify({pid:browser.pid,started_at:new Date().toISOString()}));browser.unref();console.log(install,'browser pid',browser.pid);

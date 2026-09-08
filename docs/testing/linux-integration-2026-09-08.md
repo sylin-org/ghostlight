@@ -94,7 +94,7 @@ Report: `.tmp/installed-browser/2026-09-08T18-09-33-339Z-39076.json`.
 The shell Foundry story passed, including recording delivery/erase and both dialog responses.
 Log: `.tmp/linux-installed/foundry.log`. Preserve-tabs remained enabled.
 
-The new opt-in `tests/installed-linux-journey.mjs` passed all five recovery phases:
+The new opt-in `tests/linux/installed-journey.mjs` passed all five recovery phases:
 
 | Phase | Measured elapsed time |
 | --- | --- |
@@ -132,7 +132,9 @@ minimize/Open reconstruction, close without stopping service, and close/Open rec
 Eight concurrent Open commands left one focused, unminimized compositor window across ten
 observations. The window identity changed on reconstruction, as the Linux contract requires.
 Both the owner's original and the isolated test authority had distinct registered tray items.
-Local evidence and driver: `.tmp/linux-installed/desktop.json` and `desktop-check.py`.
+Local evidence: `.tmp/linux-installed/desktop.json`. The driver now lives at
+`tests/linux/installed/desktop-check.py`; [`tests/linux/`](../../tests/linux/README.md)
+documents its environment settings and the additional Linux drivers.
 This proves visible KDE window behavior, not GNOME/non-tray behavior, hidden-window enumeration,
 renderer-crash handling, Applications installation, or clean-package lifecycle.
 

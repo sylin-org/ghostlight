@@ -105,11 +105,11 @@ not close the clean-package, store, multi-client, or Linux rows below.
 
 ### Installed Linux recovery runner
 
-`tests/installed-linux-journey.mjs` exercises the real Linux manifest and native-pipe boundary.
+`tests/linux/installed-journey.mjs` exercises the real Linux manifest and native-pipe boundary.
 Run it only against an idle development installation in a dedicated browser context:
 
 ```sh
-node tests/installed-linux-journey.mjs \
+node tests/linux/installed-journey.mjs \
   --bin-dir /absolute/installed/sibling/directory \
   --browser /absolute/running/browser/image \
   --exercise-installed-stack \
@@ -130,7 +130,9 @@ enables forced worker-stop testing in the dedicated browser. A pinned workspace 
 replacement profile without effect; a normal new-tab event wakes the same adapter, and fresh
 work completes without replay. This is event-driven recovery, not proof of idle reactivation.
 Without that explicit browser control endpoint the worker phase is blocked and the run is not green.
-The fixture tab remains preserved. Results live under `.tmp/installed-linux/`.
+The fixture tab remains preserved. New results live under
+`$GHOSTLIGHT_LINUX_INSTALLED_AREA/recovery/` (default `.tmp/linux-installed/recovery/`).
+The original September 8 reports remain under `.tmp/installed-linux/`.
 
 The 2026-09-08 CachyOS run passed all five phases with release-built 1.3.5 siblings deployed via
 the dev-loop, native Chromium, the source 1.1.2 adapter, and fresh XDG directories. It also passed
@@ -143,6 +145,8 @@ RAWX/privacy and signed managed-policy checks, Chromium plus Brave and a second 
 Applications launch without a tray host, portable ownership-safe removal, actual public npm and
 one-line delivery, and local baseline Debian package-consumer evidence. These narrower passes
 retain the candidate/store/visible-GNOME/actual-client requirements in the matrix below.
+The reusable Linux drivers and per-environment configuration are in
+[`tests/linux/`](../../tests/linux/README.md). Generated reports and fixtures remain ignored.
 
 ### Required release rows
 
