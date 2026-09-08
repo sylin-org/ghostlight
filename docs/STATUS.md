@@ -3,6 +3,15 @@
 Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
 published versions remain service 1.3.4 and adapter 1.1.1).
 
+## Extension UI queued for the next update
+
+The owner deferred the new persistent connection diagnostics and export control to the next
+extension update. The source options page now styles export and setup actions with its existing
+dark surfaces, sky-blue accents, rounded borders, keyboard focus, and card spacing. Export status
+uses the existing muted text styling and wraps long errors. The submitted 1.1.2 ZIP is unchanged;
+no version bump or store action was made. Live visual inspection is pending: Computer Use stopped
+because it could not determine the existing Chrome URL confidently enough to enforce policy.
+
 ## Windows boot connection investigation
 
 Resolved on the installed Windows stack. The owner confirmed automatic connection after the

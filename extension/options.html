@@ -62,8 +62,10 @@
           </div>
           <label class="switch"><input type="checkbox" id="debug" aria-label="Developer diagnostics"><span class="slider"></span></label>
         </div>
-        <button id="export-connection-log" type="button">Save connection diagnostics</button>
-        <p id="connection-log-status" role="status"></p>
+        <div class="card-actions">
+          <button id="export-connection-log" class="action-button" type="button">Save connection diagnostics</button>
+          <p id="connection-log-status" class="action-status" role="status"></p>
+        </div>
       </section>
 
       <section class="card info">

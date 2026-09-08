@@ -61,6 +61,14 @@ button:disabled { cursor: default; opacity: .6; }
 .text h2 { margin: 0 0 4px; font-size: 15.5px; font-weight: 600; }
 .text h3 { margin: 0 0 4px; color: #cdd9e8; font-size: 14px; font-weight: 600; }
 .text p { max-width: 44ch; margin: 0; color: #93a3ba; font-size: 12.5px; }
+.options-shell .card-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-bottom: 18px; }
+.options-shell :is(.action-button, #setup-route) { max-width: 100%; padding: 9px 14px; border: 1px solid rgba(56,189,248,.4); border-radius: 8px; color: #bce9fc; background: #131c2c; font-size: 12.5px; font-weight: 600; text-align: left; transition: background .2s, border-color .2s, box-shadow .2s; }
+.options-shell .card > #setup-route { margin-bottom: 18px; }
+.options-shell :is(.action-button, #setup-route):hover:not(:disabled) { border-color: #38bdf8; background: #17273b; box-shadow: 0 0 16px -6px rgba(56,189,248,.5); }
+.options-shell :is(.action-button, #setup-route):active:not(:disabled) { background: #1b3248; }
+.options-shell :is(.action-button, #setup-route):focus-visible { outline: 2px solid #38bdf8; outline-offset: 3px; }
+.options-shell .action-status { margin: 0; color: #93a3ba; font-size: 12.5px; overflow-wrap: anywhere; }
+.options-shell .action-status:empty { display: none; }
 .switch { position: relative; flex: none; width: 46px; height: 26px; }
 .switch input { position: absolute; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .slider { position: absolute; inset: 0; border: 1px solid #223049; border-radius: 999px; background: #24314a; transition: background .2s, border-color .2s; }
