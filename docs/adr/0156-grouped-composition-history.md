@@ -36,3 +36,14 @@ whole-group projection is `workbench/history.rs`. The existing workbench change 
 one composition update that leaves the parent lifecycle active. Permission evidence does not
 change policy evaluation order or admission semantics. The H4 task records exact validation and
 remaining platform/deployment limits. No new connector contract or extension policy logic.
+
+## Amendment: action details and header order (2026-09-07)
+
+The owner requested detail access for every action in At a glance. The action name is a native
+button that toggles an inline panel using the hero's existing detail renderer. It starts closed,
+supports mouse and keyboard activation, and preserves expansion and focus as receipts update or
+new actions arrive. The current hero continues to show the newest action. Expanded rows grow to
+fit their content. This is disposable workbench view state, with no new product or relay contract.
+
+The persistent Pause control precedes At a glance in both visual and keyboard order. Its existing
+pause/resume behavior stays governed by ADR-0126.

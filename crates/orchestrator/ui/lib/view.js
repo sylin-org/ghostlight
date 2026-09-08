@@ -117,15 +117,34 @@
 
     // Expansion is disposable view state; new receipts never force a panel open.
     const expandedHistory = new Set();
+    document.addEventListener("click", (event) => {
+      // Native toggle events are deferred. Remember the click before a receipt can repaint it.
+      const details = event.target.closest?.("summary")?.parentElement;
+      const historyKey = details?.dataset?.historyDetails;
+      if (historyKey) {
+        if (details.open) expandedHistory.delete(historyKey); else expandedHistory.add(historyKey);
+        details.dataset.historyOpening = String(!details.open);
+      }
+      const button = event.target.closest?.("[data-action-details]");
+      if (!button) return;
+      const key = button.dataset.actionDetails;
+      const panel = document.getElementById(button.getAttribute("aria-controls"));
+      if (!panel) return;
+      const open = !expandedHistory.has(key);
+      if (open) expandedHistory.add(key); else expandedHistory.delete(key);
+      button.setAttribute("aria-expanded", String(open));
+      panel.hidden = !open;
+    });
     document.addEventListener("toggle", (event) => {
       const details = event.target;
       const key = details?.dataset?.historyDetails;
       if (!key || details.isConnected === false) return;
       const wasOpen = expandedHistory.has(key);
       if (details.open) expandedHistory.add(key); else expandedHistory.delete(key);
-      if (details.open && !wasOpen && details.classList.contains("composition-details")) {
+      if (details.open && (!wasOpen || details.dataset.historyOpening === "true") && details.classList.contains("composition-details")) {
         details.querySelector('[data-step-problem="true"]')?.scrollIntoView({ block: "nearest" });
       }
+      delete details.dataset.historyOpening;
     }, true);
 
     function replaceHistoryMarkup(node, markup) {
@@ -134,6 +153,7 @@
       const active = document.activeElement;
       const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
         ? active.closest("details")?.dataset.historyDetails : null;
+      const actionFocus = node.contains(active) ? active?.dataset?.actionDetails : null;
       node.innerHTML = markup;
       for (const list of node.querySelectorAll(".history-steps")) {
         const key = list.closest("details")?.dataset.historyDetails;
@@ -143,6 +163,10 @@
         [...node.querySelectorAll("details")].find((details) => details.dataset.historyDetails === focusKey)
           ?.querySelector("summary")?.focus({ preventScroll: true });
       }
+      if (actionFocus) {
+        [...node.querySelectorAll("[data-action-details]")].find((button) => button.dataset.actionDetails === actionFocus)
+          ?.focus({ preventScroll: true });
+      }
     }
 
     function reviewSession(entry) {
@@ -151,6 +175,7 @@
       const invocation = entry.invocation;
       if (entry.steps?.length) expandedHistory.add(`${invocation}:steps`);
       const node = rowNodes.get(invocation);
+      if (node) expandedHistory.add(`${invocation}:action`);
       if (node) row(entry); else hero(entry, false);
       const target = node ?? el["hero-body"];
       target?.scrollIntoView({ block: "nearest" });
@@ -326,19 +351,22 @@
     }
 
     function rowMarkup(entry) {
+      const detailsKey = `${entry.invocation}:action`;
+      const detailsId = `action-details-${entry.invocation}`;
+      const open = expandedHistory.has(detailsKey);
       const running = isRunning(entry);
       const time = running
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
       return `<div class="med-mini">${glyphFor(entry)}</div>`
-        + `<div class="row-tool">${escapeHtml(entry.tool)}</div>`
+        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.tool)}</button>`
         + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
-        + `<div class="row-history">${compositionMarkup(entry)}</div>`;
+        + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;
     }
 
     function rowClass(entry) {

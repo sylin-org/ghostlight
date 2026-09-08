@@ -1,7 +1,27 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (tool consolidation implemented, verified, and deployed; published versions remain
+Last updated: 2026-09-07 (action details and header order implemented, verified, and deployed; published versions remain
 service 1.3.4 and adapter 1.1.1).
+
+## At a glance detail access (2026-09-07)
+
+Every queued action name now toggles an inline panel using the hero's detail renderer. Open panels,
+nested details, and keyboard focus survive receipt updates and newer activity. Pause precedes
+At a glance in both visual and keyboard order. ADR-0156's amendment records the owner request.
+
+All 17 Windows hardening gates pass, including 530 Rust tests, 207 extension tests, 18 native
+window/profile checks, and the expanded Chromium history journey. Mouse, Space, Enter, actual panel
+visibility, and desktop/narrow layout are verified. The
+[suite record](tasks/security-hardening/regression-suite.md#action-detail-follow-up-2026-09-07)
+owns the report and source fingerprint.
+
+The dev-loop replaced only the orchestrator. Installed and isolated release SHA-256 match
+`79e9ceaafaacfd41a2727d3c7d89cefa0c7baa5acabd1d0d4c87cc6bbd2da6d1`.
+Installed verification finds one responsive restored window through eight concurrent Open requests
+and 20 observations. Doctor confirms the service is running; no browser was connected at that
+check, and this UI follow-up does not claim a new installed browser journey. Evidence:
+`.tmp/installed-action-details-desktop-evidence.json`. No extension reload is required, no browser
+page or draft was changed, and nothing was pushed or published.
 
 ## Tool consolidation (2026-09-07)
 

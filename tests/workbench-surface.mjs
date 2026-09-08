@@ -30,6 +30,9 @@ const ids = [...markup.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
 
 const listeners = [];
 const documentHandlers = new Map();
+function dispatchDocument(kind, event) {
+  for (const handler of documentHandlers.get(kind) ?? []) handler(event);
+}
 const elementHandlers = new Map();
 const failedSetupManual = { open: false };
 const node = (id) => ({
@@ -110,7 +113,8 @@ const sandbox = {
     querySelector: (sel) => sel === '[data-harness-manual="qwen-code"]' ? failedSetupManual : null,
     addEventListener: (kind, handler) => {
       listeners.push(`document:${kind}`);
-      documentHandlers.set(kind, handler);
+      if (!documentHandlers.has(kind)) documentHandlers.set(kind, []);
+      documentHandlers.get(kind).push(handler);
     },
     removeEventListener() {},
     hidden: false, body: node("body"),
@@ -178,7 +182,7 @@ const failedSetupButton = {
     harnessName: "Qwen Code"
   }
 };
-documentHandlers.get("click")({
+dispatchDocument("click", {
   target: {
     closest: (selector) => selector === "[data-harness-operation]" ? failedSetupButton : null
   }
@@ -319,7 +323,7 @@ const fixButton = {
     harnessName: "Cline", harnessTarget: "CLI"
   }
 };
-documentHandlers.get("click")({
+dispatchDocument("click", {
   target: {
     closest: (selector) => selector === "[data-harness-operation]" ? fixButton : null
   }
@@ -330,7 +334,7 @@ const fixConfirmationShown = !nodes.get("confirm-dialog").hidden
   && nodes.get("confirm-title").textContent.includes("CLI")
   && nodes.get("confirm-detail").textContent.includes("backed up")
   && confirmAccept.textContent === "Fix";
-documentHandlers.get("click")({ target: confirmAccept });
+dispatchDocument("click", { target: confirmAccept });
 await new Promise((r) => setTimeout(r, 0));
 const fixWasManaged = managedHarnesses.some((call) =>
   call.id === "cline-cli" && call.action === "fix");
@@ -481,7 +485,8 @@ const historyChecks = [];
   const collapsed = nodes.get("hero-body").innerHTML;
   historyChecks.push(["composition details begin collapsed and escape retained explanations", collapsed.includes('data-history-details="group:steps"') && !collapsed.includes('data-history-details="group:steps" open') && collapsed.includes('&lt;script&gt;') && !collapsed.includes('<script>never')]);
   let scrolled = 0;
-  documentHandlers.get("toggle")({ target: { dataset: { historyDetails: "group:steps" }, open: true,
+  // These standalone view checks target the most recently created view's own listener.
+  documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "group:steps" }, open: true,
     classList: { contains: () => true }, querySelector: () => ({ scrollIntoView: () => scrolled++ }) } });
   store.applyChange({ seq: 1, change: { kind: "composition_changed", record: { ...group, summary: "Completed 2 of 3 steps." } } });
   view.hero(store.hero(), false);
@@ -540,7 +545,7 @@ const provenanceChecks = [];
     html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("Second application")
       && html.includes("Unavailable on this platform") && !html.includes("trusted")
       && !html.includes('data-history-details="sessions:connections" open')]);
-  documentHandlers.get("toggle")({ target: { dataset: { historyDetails: "sessions:connections" }, open: true,
+  documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "sessions:connections" }, open: true,
     classList: { contains: () => false } } });
   connectionView.collections({ ...sessionSnapshot, sessions: [{ ...sessions[0], active_operations: 1 }] }, new Set());
   provenanceChecks.push(["connection details stay open across session refresh",

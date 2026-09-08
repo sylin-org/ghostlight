@@ -269,6 +269,57 @@ try {
   console.log("H8 browser history: waiting stays live beneath running work, then promotes without duplication.");
   console.log("H7 browser history: persistent health, independent child storage, recovery gaps and unreadable entries, preserved expansion, and narrow layout passed.");
   console.log("H4/H5 browser history: expansion, incremental scroll/focus, cleared-history review, scoped resume, and narrow layout passed.");
+  // Ordinary history rows disclose the same detail as the hero, without replacing live work.
+  await evaluate(`(() => {
+    for (const invocation of ['detail-row', 'detail-hero']) {
+      window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
+        invocation, workspace: 'workspace_codex', tool: 'browser_read', capability: 'read',
+        allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
+        complete: true, timestamp_ms: Date.now(), channel: 'mcp',
+        permission_explanations: ['Allowed without configured policy.']
+      }});
+    }
+  })()`);
+  const detailButton = '[data-action-details="detail-row:action"]';
+  const detailPanel = '#action-details-detail-row';
+  await until(() => evaluate(`!!document.querySelector('${detailButton}')`), 'action detail toggle');
+  assert.equal(await evaluate(`document.querySelector('${detailPanel}').hidden`), true);
+  await resize(1280, 900);
+  await delay(80);
+  const point = await evaluate(`(() => { const button = document.querySelector('${detailButton}'); button.scrollIntoView({block:'center'}); const r = button.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+  await page('Input.dispatchMouseEvent', {type:'mousePressed',button:'left',clickCount:1,...point});
+  await page('Input.dispatchMouseEvent', {type:'mouseReleased',button:'left',clickCount:1,...point});
+  assert.equal(await evaluate(`document.querySelector('${detailPanel}').hidden`), false, JSON.stringify(await evaluate(`({point:${JSON.stringify(point)},hit:document.elementFromPoint(${point.x},${point.y})?.outerHTML})`)));
+  assert.equal(await evaluate(`document.querySelector('${detailButton}').getAttribute('aria-expanded')`), 'true');
+  assert.equal(await evaluate(`document.querySelector('${detailPanel}').textContent.includes('Allowed without configured policy.')`), true);
+  await evaluate(`document.querySelector('${detailPanel} .permission-details > summary').click(); document.querySelector('${detailButton}').focus()`);
+  await evaluate(`window.__GHOSTLIGHT_PUBLISH__({kind:'operation_settled',record:{
+    invocation:'detail-row',workspace:'workspace_codex',tool:'browser_read',capability:'read',allowed:true,
+    status:'succeeded',effect:'none',summary:'Read 6 words.',complete:true,timestamp_ms:Date.now(),
+    permission_explanations:['Allowed without configured policy.']
+  }})`);
+  await until(() => evaluate(`document.querySelector('${detailPanel}')?.textContent.includes('Read 6 words.')`), 'open detail update');
+  assert.equal(await evaluate(`document.activeElement.matches('${detailButton}')`), true);
+  assert.equal(await evaluate(`document.querySelector('${detailPanel} .permission-details').open`), true);
+  for (const [key, code, virtual, hidden] of [[' ', 'Space', 32, true], ['Enter', 'Enter', 13, false]]) {
+    await page('Input.dispatchKeyEvent', {type:'keyDown',key,code,windowsVirtualKeyCode:virtual,...(key === 'Enter' ? {text:'\r'} : {})});
+    await page('Input.dispatchKeyEvent', {type:'keyUp',key,code,windowsVirtualKeyCode:virtual});
+    assert.equal(await evaluate(`document.querySelector('${detailPanel}').hidden`), hidden, `keyboard toggle: ${code}`);
+  }
+  await evaluate(`window.__GHOSTLIGHT_PUBLISH__({kind:'operation_settled',record:{
+    invocation:'newer-action',workspace:'workspace_codex',tool:'browser_scroll',capability:'read',allowed:true,
+    status:'succeeded',effect:'none',summary:'Scrolled down.',complete:true,timestamp_ms:Date.now()
+  }})`);
+  assert.equal(await evaluate(`document.querySelector('${detailPanel}').hidden`), false);
+  assert.equal(await evaluate(`document.querySelector('#hero-body').textContent.includes('Scrolled down.')`), true);
+  for (const width of [1280, 720]) {
+    await resize(width, 900);
+    assert.equal(await evaluate(`(() => { const pause=document.querySelector('#wheel'), tab=document.querySelector('[data-view="monitor"]'); return !!(pause.compareDocumentPosition(tab) & Node.DOCUMENT_POSITION_FOLLOWING) && pause.getBoundingClientRect().right <= tab.getBoundingClientRect().left; })()`), true);
+    assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+    assert.equal(await evaluate(`(() => { const panel=document.querySelector('${detailPanel}'); panel.scrollIntoView({block:'center'}); const p=panel.getBoundingClientRect(), r=panel.closest('.row').getBoundingClientRect(); return p.height>100 && p.top>=r.top && p.bottom<=r.bottom; })()`), true, 'expanded panel must be visible within its row');
+    await capture(`action-details-${width}`);
+  }
+  console.log('PASS action name opens hero details; updates retain expansion and focus; mouse, Space, Enter, and Pause order work at both widths');
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }

@@ -252,3 +252,28 @@ The previous installed receipt was preserved as `.tmp/installed-hardening-before
 The disposable test tab `tab_05231c5669234f61967bd8e976cc7abb` remains open; the Reddit draft was
 untouched. Cached clients need a catalog refresh/reconnect. No extension reload is needed, nothing
 was pushed/published, and full Linux execution remains outstanding.
+
+## Action detail follow-up (2026-09-07)
+
+At a glance action names now toggle inline hero details. Native mouse, Space, and Enter activation,
+receipt refresh, newer activity, nested expansion, focus retention, and Pause-before-tab ordering
+are covered in the real bundled Chromium UI. At 1280 and 720 pixels, the expanded panel must fit
+inside its row with no horizontal overflow. Both screenshots were visually inspected:
+`.tmp/h4-action-details-1280.png` and `.tmp/h4-action-details-720.png`.
+
+Checks caught clipped fixed-height rows and a deferred native toggle losing expansion during a
+receipt refresh. Both were corrected before deployment. The first full run also exposed a fake
+DOM that overwrote earlier click listeners. It now dispatches to all registered listeners, and
+the integration Fix confirmation test passes without changing that product behavior.
+
+Final full Windows run:
+
+- Report: `.tmp/hardening-suite/2026-09-08T03-11-26-679Z-12656/results.json`.
+- Source SHA-256: `cb65eabb62cacf9fff25a1f96f8668dbf21fcfdf36b34405ea3d1db7284d745d`.
+- All 17 gates passed; `source_unchanged: true`.
+- 530 Rust tests, 207 extension tests, 18 native desktop/profile checks, and the existing process,
+  browser, script, MV3 frame/editor, and history lanes passed. Changed JavaScript passed syntax checks.
+
+The browser interaction evidence uses isolated Chromium with synthetic workbench events. It does
+not claim those clicks occurred inside the installed Tauri window. Full Linux execution remains
+outstanding; this follow-up does not reopen or complete deferred admission/verification decisions.

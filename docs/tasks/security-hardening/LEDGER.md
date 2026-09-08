@@ -8,6 +8,15 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 ## RESUME HERE
 
+Latest follow-up, 2026-09-07: At a glance action names now open inline hero details, and Pause
+precedes At a glance. ADR-0156's amendment records the owner request. Implementation, visual
+review at 1280/720 pixels, all 17 regression gates, and orchestrator deployment are complete.
+Open details and focus survive incoming receipts; mouse and keyboard toggles work. Installed
+native verification confirms one responsive window through concurrent Open. STATUS owns the
+installed hash; the regression-suite record owns exact evidence. Browser interactions were tested
+in isolated Chromium; no installed browser journey was repeated for this UI change. No extension
+reload is required, no drafts were touched, and nothing was pushed or published.
+
 Latest discussion, 2026-09-07: an all-open Reddit session repeatedly supplied its own
 `restrict_hosts` list. The owner rejected that model-facing capability and requested an audit of
 other misaligned tools. The [tool surface review](../../design/tool-surface-review-2026-09-07.md)

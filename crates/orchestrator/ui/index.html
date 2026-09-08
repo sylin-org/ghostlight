@@ -19,6 +19,11 @@
         <span class="state-facts" id="state-facts"></span>
       </div>
 
+      <button class="wheel" type="button" id="wheel" data-intent="hold" disabled>
+        <svg viewBox="0 0 24 24" id="wheel-icon" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        <span id="wheel-label">Pause</span>
+      </button>
+
       <nav class="tabs" aria-label="Ghostlight">
         <button class="tab active" type="button" data-view="monitor" aria-current="page">At a glance</button>
         <button class="tab" type="button" data-view="integrations">Integrations</button>
@@ -30,11 +35,6 @@
         </button>
         <button class="tab" type="button" data-view="about">About</button>
       </nav>
-
-      <button class="wheel" type="button" id="wheel" data-intent="hold" disabled>
-        <svg viewBox="0 0 24 24" id="wheel-icon" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-        <span id="wheel-label">Pause</span>
-      </button>
     </header>
 
     <main id="main-content" tabindex="-1">

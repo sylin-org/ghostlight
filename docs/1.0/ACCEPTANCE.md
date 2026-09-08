@@ -399,6 +399,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    `tests/workbench-surface.mjs` checks projection updates and escaping. The isolated Chromium
    `tests/workbench-history-browser.mjs` checks the bundled UI at 1280 and 720 pixels using synthetic
    events. These do not establish installed Tauri/MV3 deployment or H5 timing guarantees.
+6. Ordinary action names toggle inline hero details with mouse, Space, and Enter. Receipt updates
+   and newer actions retain open panels and keyboard focus. Expanded content fits its row at both
+   widths, with no horizontal overflow. Pause precedes At a glance visually and in keyboard order.
 
 ## Session control evidence (ADR-0157)
 

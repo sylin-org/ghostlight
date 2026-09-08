@@ -97,6 +97,8 @@ the Applications entry as interaction routes.
   beneath it, so a person can watch a session unfold and scroll back through what already happened.
   While nothing is running, the last completed action stays on screen rather than an empty panel.
   Plural MCP sessions and browser instances appear beside it.
+- Each queued action name toggles an inline panel with the same details as the current action.
+  Mouse and keyboard activation work alike; incoming activity preserves open details and focus.
 - The record beneath the current action is bounded, local, newest first, and content-minimized.
   By default an action keeps the bounded visible name of the element it actually used, such as
   `Clicked the "Save" button`; governance can remove target names without making the action vague.
@@ -114,7 +116,7 @@ the Applications entry as interaction routes.
 - Policy names `browser.startup` as `Auto-open browser on request`. When it is off, Ghostlight
   does not launch a browser; a refused browser call tells the model to ask the person to open any
   eligible installed browser it names, with the Ghostlight extension installed.
-- Pause, resume, and start-session apply from the persistent header beside the connection state
+- Pause, resume, and start-session apply from the persistent header before At a glance
   and match the tray, so taking the wheel has one affordance rather than several.
 - A pause prevents the next browser effect by refusing it at the existing final boundary. It does
   not suspend an invocation or hold a client's request open, because a human-scale pause outlives
