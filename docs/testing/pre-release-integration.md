@@ -1,8 +1,10 @@
 # Pre-release integration acceptance
 
 Requested by the owner on 2026-09-08 after a fresh Windows installation failed to connect
-until Chrome was fully closed. The original failure is still unexplained. A later successful
-reinstall is useful regression evidence, not proof that the original failure is fixed.
+until Chrome was fully closed. The subsequent Windows boot investigation identified redirected
+AppData manifest paths and verified the fix in the running installation and after reboot. See
+[the evidence and lessons](windows-boot-connection-2026-09-08.md). Broader package and store
+acceptance remain separate; one repaired development machine does not pass that matrix.
 
 This guide makes the browser and package journeys in [RELEASE.md](../RELEASE.md) executable
 where possible. It does not replace the historical 1.0 release checklist or authorize publication.
@@ -10,6 +12,17 @@ The supported release matrix remains Windows and Linux.
 
 ## Evidence rules
 
+- Use the installation in place for acceptance. A separate build output is allowed for locked
+  binaries; a separate running product, profile, or runtime cannot substitute for the user's stack.
+  Existing isolated lanes prove only their stated component contracts.
+- Launch the acceptance browser through the normal desktop independently of the agent or installer,
+  then preserve that process through installation and recovery checks. Record the launch context
+  as well as executable paths and versions. A browser launched by the agent may inherit the same
+  filesystem redirection that hid the installer's mistake. Matching users or elevation is not proof
+  of equivalent filesystem visibility.
+- When browser errors contradict installer checks, inspect the browser's real lookup and returned
+  OS error. Register the physical manifest file after writing it. Validate automatic connection in
+  the already-open browser, then repeat the original boot trigger before claiming boot recovery.
 - Test the exact candidate artifacts. Record source revision, dirty source fingerprint, executable
   and adapter hashes, package hash, OS, desktop, browser version, installation route, and MCP client.
 - A green helper, fake browser receipt, replacement native pipe, or unpacked adapter cannot pass
@@ -26,7 +39,9 @@ The supported release matrix remains Windows and Linux.
 ## Run the Windows development lanes
 
 First load the current unpacked extension and leave ordinary installed Chrome open. The installed
-journey requires one idle Ready authority, one native connector, one Chrome root, and four ordinary
+Chrome process must have been launched independently through the normal desktop, not by this task.
+The installed journey requires one idle Ready authority, one native connector, one Chrome root,
+and four ordinary
 Ghostlight-owned browser registrations pointing at the requested binary directory. It refuses a
 foreign installation or redirected runtime. Run it with no other Ghostlight jobs in progress.
 

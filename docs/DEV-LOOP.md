@@ -4,6 +4,13 @@ Ghostlight has one orchestrator and two deliberately stable shores. Ordinary pro
 in `crates/orchestrator`; they must not require MCP connector, browser connector, shared bridge, or
 extension changes when the existing contracts already express the needed work.
 
+Acceptance uses the installation in place and a browser launched independently through the normal
+desktop. Build elsewhere when live files are locked, then deploy through this loop and verify the
+installed graph. Do not start another product instance or browser profile to make an acceptance
+check pass. The isolated lanes below retain their narrower component scope. The
+[Windows boot investigation](testing/windows-boot-connection-2026-09-08.md) showed how an installer
+and an agent-launched browser can share a redirected filesystem view and conceal a real failure.
+
 ## Build
 
 ```powershell

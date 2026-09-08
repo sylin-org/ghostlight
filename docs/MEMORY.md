@@ -151,6 +151,11 @@ the owner wants, and what this project learned the hard way.
   be green while an older authority is still serving real connectors. Do not call that a full
   integration test. Identify exact live image paths, deploy and restart only the changed component,
   prove its existing shores renegotiate, and name any physical lane that still did not run.
+  The owner's default is acceptance on the installation in place with a normally launched browser.
+  Do not switch to a separate installation, profile, runtime, or agent-launched browser to obtain
+  a pass. Isolated checks can supplement that evidence but cannot establish that installation,
+  startup, or recovery works for the user. A separate build directory avoids locked files; it is
+  not authorization to run a second desktop installation.
 - **Live debugging uses the installation in place.** The owner does not want a second Ghostlight
   authority, an alternate diagnostic build running beside it, startup helpers, or diagnostic
   shortcuts scattered around the OS. Build away from locked files, deploy through the dev loop,
@@ -166,6 +171,12 @@ the owner wants, and what this project learned the hard way.
   manifest path and test against a browser launched independently. A successful browser launch
   from the same caller can hide the failure; elevation and matching user identities do not prove
   an unredirected filesystem view (ADR-0115's September 8 amendment).
+- **Preserve the failure before changing its environment.** Capture persistent product diagnostics,
+  exact process identities, and the failing consumer's actual OS operations when local checks
+  disagree with it. A restart that makes a failure disappear is evidence, not a root-cause fix.
+  Record every changed condition, prove the correction on the running installed stack, and repeat
+  the original trigger before closing the incident. The Windows boot case required both recovery
+  in the unchanged Chrome process and a successful ordinary reboot.
 - **A representative fixture does not prove a fixed roster is complete.** When a surface promises
   every supported product, assert the exact target ids and product cardinality, then verify the
   deployed live projection. A small fixture may prove layout, but it cannot prove completeness.

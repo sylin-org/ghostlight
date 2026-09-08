@@ -8,6 +8,9 @@ published versions remain service 1.3.4 and adapter 1.1.1).
 Resolved on the installed Windows stack. The owner confirmed automatic connection after the
 19:25:14 EDT reboot, and a read-only doctor check confirmed Ready with service 1.3.5, one authority,
 and its installed browser connector. The physical-manifest-path fix survived reboot.
+The owner-requested lessons are captured in MEMORY, DEV-LOOP, the pre-release evidence rules, and
+the investigation record: acceptance uses the installed stack and an independently launched browser;
+preserve failed state, verify the consumer's actual filesystem view, and repeat the original trigger.
 
 The rebooted Windows installation ran a healthy 1.3.4 authority with valid native registration
 but no browser connector. Unpacked adapter 1.1.2 was enabled. Reloading it did not recover.

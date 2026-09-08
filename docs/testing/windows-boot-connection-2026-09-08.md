@@ -128,6 +128,26 @@ No repair, extension reload, or browser relaunch was performed by this task afte
 Built-in diagnostics remain enabled. The boot-connection investigation is closed; broader release
 acceptance and the unchanged pending store submission retain their separately documented scope.
 
+## Lessons applied to future work
+
+- Use the installed product and a normally launched browser for acceptance. Separate build outputs
+  solve file locking; separate runtime spaces do not establish the user's outcome. Keep isolated
+  checks scoped to the component behavior they actually prove.
+- Verify from the consumer's context. The installer and doctor agreed because they shared the same
+  redirected filesystem view. The real browser's registry/file trace and the manifest's final file
+  handle path exposed the mismatch. User identity, elevation, and package-identity probes did not.
+- Preserve failed state and log in the deployed product. Persistent worker events proved that
+  initialization and retries worked, while the absence of native-process logs located the failure
+  before connector launch. No alternate diagnostic installation was needed.
+- Treat restart success as a changed experiment. The earlier relaunch changed Chrome's launch
+  context as well as logging flags, so it could not prove a cache issue or a permanent repair.
+- Fix the owning installation seam and its health check. Publishing the physical manifest path
+  and flagging redirected logical registrations corrected the defect without changing the browser
+  protocol, adding retry machinery, or requiring users to restart Chrome.
+- Close against the original user promise. Same-process recovery proved immediate availability;
+  the owner-confirmed reboot proved this fix survived the original trigger. Record both, and keep
+  broader release claims within the evidence actually collected.
+
 Selected raw trace events, decoded registry/file statuses, the registration repair, and the
 successful native-connector log remain beside the ETL. Relevant source references:
 [Chromium lookup](https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/extensions/api/messaging/launch_context.cc),
