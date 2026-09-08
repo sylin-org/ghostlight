@@ -3,6 +3,14 @@
 Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
 published versions remain service 1.3.4 and adapter 1.1.1).
 
+## Resume on Linux
+
+The owner requested pushing all project updates to `dev` and continuing release-readiness work
+on Linux. Start with the [Linux agent handoff](testing/linux-release-handoff-2026-09-08.md).
+It identifies the tested Windows boundaries, missing installed Linux evidence, exact source and
+adapter custody, runnable entry points, destructive package-script isolation, and publication
+boundaries. The submitted adapter stays unchanged while Google reviews it.
+
 ## Service 1.3.5 and adapter 1.1.2 (2026-09-08)
 
 The owner authorized patch revision bumps and extension submission first. Service-derived source
