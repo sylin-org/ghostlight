@@ -79,9 +79,11 @@ try {
             [System.IO.Compression.CompressionLevel]::SmallestSize,
             $true
         )
-        $tar = [System.Formats.Tar.TarWriter]::new($gzip, [System.Formats.Tar.TarEntryFormat]::Pax, $true)
+        # The fixed sibling/legal roster fits Ustar. Pax adds process-id-bearing extended
+        # header names, making identical inputs produce different archives on every run.
+        $tar = [System.Formats.Tar.TarWriter]::new($gzip, [System.Formats.Tar.TarEntryFormat]::Ustar, $true)
         try {
-            $directoryEntry = [System.Formats.Tar.PaxTarEntry]::new(
+            $directoryEntry = [System.Formats.Tar.UstarTarEntry]::new(
                 [System.Formats.Tar.TarEntryType]::Directory,
                 "$baseName/"
             )
@@ -89,7 +91,7 @@ try {
             $directoryEntry.Mode = [System.IO.UnixFileMode]493
             $tar.WriteEntry($directoryEntry)
             foreach ($file in $files) {
-                $entry = [System.Formats.Tar.PaxTarEntry]::new(
+                $entry = [System.Formats.Tar.UstarTarEntry]::new(
                     [System.Formats.Tar.TarEntryType]::RegularFile,
                     "$baseName/$($file.Name)"
                 )
