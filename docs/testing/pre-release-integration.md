@@ -88,6 +88,43 @@ not close the clean-package, store, multi-client, or Linux rows below.
 
 ## Candidate matrix
 
+### Installed Linux recovery runner
+
+`tests/installed-linux-journey.mjs` exercises the real Linux manifest and native-pipe boundary.
+Run it only against an idle development installation in a dedicated browser context:
+
+```sh
+node tests/installed-linux-journey.mjs \
+  --bin-dir /absolute/installed/sibling/directory \
+  --browser /absolute/running/browser/image \
+  --exercise-installed-stack \
+  --devtools-port-file /absolute/dedicated/browser/DevToolsActivePort
+```
+
+The browser argument is its actual process image, not a distribution's shell wrapper. The runner
+requires all four ordinary per-user manifests to name that exact sibling set, one matching browser
+root, one Ready authority, and one native host descending from that browser. It checks process
+start identities before stopping anything and restores original registration bytes on failure.
+It refuses Ghostlight runtime/native-host/profile/policy redirection. Standard XDG paths remain
+the environment's ordinary user-context paths; the report records the configuration root.
+
+The journey removes/restores registrations with Chromium running, crashes the native connector,
+crashes the authority while retaining native pipes and an initialized MCP stream, and interrupts
+a real page effect counted independently by a local fixture server. The optional DevTools file
+enables forced worker-stop testing in the dedicated browser. A pinned workspace first refuses a
+replacement profile without effect; a normal new-tab event wakes the same adapter, and fresh
+work completes without replay. This is event-driven recovery, not proof of idle reactivation.
+Without that explicit browser control endpoint the worker phase is blocked and the run is not green.
+The fixture tab remains preserved. Results live under `.tmp/installed-linux/`.
+
+The 2026-09-08 CachyOS run passed all five phases with release-built 1.3.5 siblings deployed via
+the dev-loop, native Chromium, the source 1.1.2 adapter, and fresh XDG directories. It also passed
+the existing 23-tool live journey and shell Foundry story. This is actual native messaging in a
+development context, not a clean account, a candidate package, or store delivery. See the
+[Linux evidence record](linux-integration-2026-09-08.md).
+
+### Required release rows
+
 Run each row on Windows and visible Linux using the release's supported routes. One successful
 example of each tool does not prove every variant or the workflows below.
 

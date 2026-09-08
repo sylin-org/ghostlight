@@ -9,7 +9,17 @@ Linux source validation now passes all 18 hardening gates on CachyOS KDE Wayland
 the npm test's Windows-only CLI lookup. The Linux packager reproduces the submitted adapter ZIP
 exactly with PowerShell 7.6.5; 7.5.2 produced identical extracted files but different compressed
 bytes. The [Linux evidence record](testing/linux-integration-2026-09-08.md) retains both runs and
-the packaging comparison. Installed and clean-package acceptance remain separate work.
+the packaging comparison. Candidate-bound acceptance remains separate work.
+
+A separate release-built 1.3.5 development installation now passes the real Chromium native-host
+23-tool journey (15 check groups, 88 calls), the shell Foundry story, and five Linux recovery
+phases. Recovery retains native pipes and initialized MCP across authority crashes and counts an
+interrupted page effect once. Forced worker stop preserves the browser binding and recovers on
+ordinary browser activity; idle reactivation was not shown. Exact-PID KWin observations pass
+Open, minimize/Open, close/Open, and concurrent Open on KDE Wayland. The same
+[evidence record](testing/linux-integration-2026-09-08.md) owns hashes, timings, retained test
+failures, and the remaining candidate-package/store/clean-machine limits. The owner's existing
+1.3.4 installation was not replaced.
 
 The owner requested pushing all project updates to `dev` and continuing release-readiness work
 on Linux. Start with the [Linux agent handoff](testing/linux-release-handoff-2026-09-08.md).
