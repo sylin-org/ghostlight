@@ -5,13 +5,17 @@ published versions remain service 1.3.4 and adapter 1.1.1).
 
 ## Windows boot connection investigation
 
+Resolved on the installed Windows stack. The owner confirmed automatic connection after the
+19:25:14 EDT reboot, and a read-only doctor check confirmed Ready with service 1.3.5, one authority,
+and its installed browser connector. The physical-manifest-path fix survived reboot.
+
 The rebooted Windows installation ran a healthy 1.3.4 authority with valid native registration
 but no browser connector. Unpacked adapter 1.1.2 was enabled. Reloading it did not recover.
 The new built-in extension connection log captured completed initialization and repeated alarm
 retries, each failing with Chrome's `Specified native messaging host not found` error.
 Complete Chrome exit and a logging-enabled relaunch restored Ready within seconds while the same
-authority process stayed running. This narrows the failure to browser-side native-host lookup or
-launch state; it does not prove the underlying cause or establish reboot recovery.
+authority process stayed running. That experiment narrowed the failure to browser-side native-host
+lookup or launch state; the later trace and reboot confirmation below established the cause and fix.
 
 Normal-source diagnostics now persist extension startup/native-error/retry events through browser
 restarts and export from extension options even when disconnected. All three deployed siblings
@@ -22,8 +26,7 @@ have ended. The owner requires subsequent live debugging to use this installatio
 
 The owner rejected extra OS startup helpers and shortcuts. The prepared RunOnce value, desktop
 shortcut, copied helper, and its empty directories were removed; the helper source was removed
-too. Reboot normally. If the connection fails, preserve that browser process and save the built-in
-extension connection diagnostics before restarting it. See
+too. Built-in logging remains enabled for further observation. See
 [boot investigation evidence](testing/windows-boot-connection-2026-09-08.md).
 
 The next reboot reproduced the failure and exposed its cause. Windows redirected the installer's
@@ -35,8 +38,8 @@ processes, without reloading or copying the product. The installer now publishes
 and treats redirected logical registrations as Updatable (ADR-0115 amendment). Source checks and
 normal in-place deployment passed. The installed checker correctly detected the original bad
 registration when briefly restored, and the installed repair corrected it while Chrome remained
-connected. All four browser registrations now name the physical file. A subsequent owner reboot
-is the remaining confirmation of persistence across boot.
+connected. All four browser registrations now name the physical file. The subsequent owner reboot
+confirmed persistence across boot; this installation's boot-connection acceptance is complete.
 
 ## Product-wide leniency directive and history application
 

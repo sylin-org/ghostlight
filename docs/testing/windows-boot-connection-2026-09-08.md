@@ -115,8 +115,18 @@ All four browser keys name the existing physical manifest. Chrome PID 16464 and 
 PID 4176 survived the authority swap and reconnected to the new single authority PID 11164.
 A regression check against the deployed executable briefly restored Chrome's original logical
 registry value: `native-host check` reported Updatable, and `native-host install` reported
-changed=true and restored Current. Ready remained true. The next owner reboot is still required
-to confirm boot persistence; the live recovery itself is already demonstrated.
+changed=true and restored Current. Ready remained true.
+
+## Reboot acceptance completed
+
+The owner rebooted again at 19:25:14 EDT and confirmed automatic connection, with a screenshot
+showing Ready, two sessions, and one browser. A read-only check from this task independently
+confirmed Ready on service 1.3.5. Exactly one installed authority was running (PID 7164, started
+19:26:03), with the installed native connector (PID 23476, started 19:26:15), both under the same
+`target/release` directory. This confirms the registration fix survives reboot on this machine.
+No repair, extension reload, or browser relaunch was performed by this task after that reboot.
+Built-in diagnostics remain enabled. The boot-connection investigation is closed; broader release
+acceptance and the unchanged pending store submission retain their separately documented scope.
 
 Selected raw trace events, decoded registry/file statuses, the registration repair, and the
 successful native-connector log remain beside the ETL. Relevant source references:
