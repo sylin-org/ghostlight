@@ -22,14 +22,15 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 sums="$temporary/SHA256SUMS"
-latest="https://github.com/${repository}/releases/latest/download/SHA256SUMS"
-resolved=$(curl -fsSL --proto '=https' --tlsv1.2 -o "$sums" -w '%{url_effective}' "$latest")
+# Resolve the release page first: asset downloads end at GitHub's signed CDN URL,
+# which does not carry the release tag. Pin one tag for checksums and every binary.
+latest="https://github.com/${repository}/releases/latest"
+resolved=$(curl -fsSIL --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' "$latest")
 case "$resolved" in
-  "https://github.com/${repository}/releases/download/"v*/SHA256SUMS) ;;
-  *) echo "ghostlight: release checksums resolved to an unexpected URL" >&2; exit 1 ;;
+  "https://github.com/${repository}/releases/tag/"v*) ;;
+  *) echo "ghostlight: latest release resolved to an unexpected URL" >&2; exit 1 ;;
 esac
-release_root=${resolved%/SHA256SUMS}
-tag=${release_root##*/}
+tag=${resolved##*/}
 version=${tag#v}
 if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
   echo "ghostlight: latest release tag is not a three-part version" >&2
@@ -39,6 +40,8 @@ if [ -n "${GHOSTLIGHT_VERSION:-}" ] && [ "$GHOSTLIGHT_VERSION" != "$version" ]; 
   echo "ghostlight: latest release is ${version}, not requested ${GHOSTLIGHT_VERSION}" >&2
   exit 1
 fi
+release_root="https://github.com/${repository}/releases/download/${tag}"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$sums" "${release_root}/SHA256SUMS"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
