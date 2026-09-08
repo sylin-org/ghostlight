@@ -8,6 +8,13 @@ Opened: 2026-09-06. Review baseline: `48ef29ece1ff0f1633daba62a03932a666f00ca5`.
 
 ## RESUME HERE
 
+Latest discussion, 2026-09-07: an all-open Reddit session repeatedly supplied its own
+`restrict_hosts` list. The owner rejected that model-facing capability and requested an audit of
+other misaligned tools. The [tool surface review](../../design/tool-surface-review-2026-09-07.md)
+records recommendations and two reproduced dry-run result defects. No removal is implemented;
+candidate changes to submission and batching need decisions before implementation. Preserve
+configured governance, accepted browser jobs, and historical request attribution.
+
 Current work, 2026-09-07: the owner reported two open Ghostlight copies. Both were real responsive
 native windows inside one service. The startup/Open construction race and a related short startup
 wait are corrected and deployed. All 17 gates pass, including 526 Rust tests and 18 new native

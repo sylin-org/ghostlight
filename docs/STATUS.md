@@ -1,7 +1,17 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-07 (native workbench duplication fixed and deployed after the hardening
-regressions; service 1.3.4 and Chrome adapter 1.1.1 remain the published versions).
+Last updated: 2026-09-07 (tool surface review after the all-open restriction incident; native
+workbench correction remains deployed; published versions remain service 1.3.4 and adapter 1.1.1).
+
+## Tool surface review (2026-09-07)
+
+The owner rejected model-authored request restrictions and requested a search for other misaligned
+tool capabilities. The [24-tool review](design/tool-surface-review-2026-09-07.md) records the fresh
+installed catalog, source/ADR review, removal priorities, useful capabilities to retain, and
+compatibility concerns. It also reproduces misleading flow dry-run success and missing-reference
+results through the installed MCP edge with no browser effects. Removal of request restrictions
+and dry-run is recommended; submission bundling and the two batching languages are design
+candidates. No production/tool-contract change or new deployment occurred in this review.
 
 ## Native workbench duplication (2026-09-07)
 
