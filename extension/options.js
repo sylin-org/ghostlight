@@ -10,6 +10,13 @@
   const linkText = document.getElementById("link-text");
   const linkSub = document.getElementById("link-sub");
   const setupRoute = document.getElementById("setup-route");
+  if (!globalThis.chrome?.runtime?.id) {
+    linkPill.className = "pill wait";
+    linkText.textContent = "Open extension options";
+    linkSub.textContent = "This is a local file, not the installed extension. Open Ghostlight's options from Chrome's Extensions menu to see its connection and settings.";
+    document.querySelectorAll("input, button").forEach(control => { control.disabled = true; });
+    return;
+  }
   document.getElementById("export-connection-log").addEventListener("click", async () => {
     const reportStatus = document.getElementById("connection-log-status");
     try {

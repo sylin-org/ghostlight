@@ -11,6 +11,12 @@ dark surfaces, sky-blue accents, rounded borders, keyboard focus, and card spaci
 uses the existing muted text styling and wraps long errors. The submitted 1.1.2 ZIP is unchanged;
 no version bump or store action was made. Live visual inspection is pending: Computer Use stopped
 because it could not determine the existing Chrome URL confidently enough to enforce policy.
+The owner then reported a page stuck on Checking. Its console showed `file:///.../options.html`
+and an undefined `chrome.runtime`, while the installed service remained Ready. This was the source
+HTML opened outside the extension context. The options script now detects that case before wiring
+extension APIs, disables inactive controls, and directs the user to the installed options page.
+The installed UI must be opened through Chrome's extension options or its `chrome-extension://`
+URL; opening the source HTML cannot validate live connection status.
 
 ## Windows boot connection investigation
 
