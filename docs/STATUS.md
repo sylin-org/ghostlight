@@ -48,6 +48,37 @@ failures instead of masking them with a TypeError. See the
 [Alpine fleet record](testing/alpine-musl-fleet-2026-09-09.md) for hashes, passed
 checks, retained failures, context boundaries and pending reboot/release evidence.
 
+## Bluefin fleet lane and Codex cold-start repair (2026-09-09)
+
+The isolated test-02 worktree reproduced a Linux Codex cold-start failure: the
+client's default stdio environment drops desktop-session variables. Warm MCP
+works; forwarding six desktop variable names cold-starts one authority and makes
+the real MCP call succeed. A local installer repair adds this handoff to generated
+and manual Codex setup and updates owned old entries without losing custom fields.
+It does not change shared contracts or the extension. See the
+[Bluefin evidence record](testing/bluefin-fleet-2026-09-09.md) for immutable-candidate
+gates, exact hashes, original failure, boundaries, and repair-validation scope.
+Ordinary browser and visible GNOME acceptance remain blocked by unavailable native
+computer controls and the inactive staged native browser. No new support claim.
+The local repaired tree passed 540 Rust tests, 210 extension tests, Clippy,
+formatting, workbench-surface and isolated process recovery. After host-controlled
+deployment, its generated setup cold-started one authority through the real Codex
+CLI and completed policy_explain. This repair is not published or fleet-coordinated.
+Default-profile commit gates also pass. Local portable packaging reproduces exact
+bytes in separate invocations; extraction and host execution pass. The isolated
+real-Chromium script journey passes 23 cases with the browser sandbox enabled.
+These supplemental checks do not prove installed-extension or human browsing.
+Portable missing-display recovery and disposable ownership-safe uninstall/reinstall
+also pass. Repair 4af4988 is signed off and pushed to codex/fleet-test-02 under the
+owner's authorization. Secure Git credentials are verified; no credential handoff
+is pending. The evidence record now carries a sanitized coordinator checkpoint
+because remote task reads return empty items. Desktop and reboot limitations remain.
+Coordinator review reproduced missing env_vars member validation in 4af4988.
+The narrow follow-up rejects malformed members before Linux owned-entry migration
+and preserves original bytes, while retaining valid custom/explicit environment
+settings. See the evidence record for the real Codex parser probe and regression.
+This source follow-up is not deployed; earlier installed-binary evidence is unchanged.
+
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
 ADR-0164 records the owner's clarified boundary: Ghostlight manages only its own actions.

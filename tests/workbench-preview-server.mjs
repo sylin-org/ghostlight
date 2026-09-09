@@ -10,7 +10,7 @@ const connectorCommand = "/opt/ghostlight/ghostlight-mcp-connector";
 const harnessDetail = Object.freeze({
   installed: "Ghostlight is registered for this user context.",
   available: "Detected and ready for an explicit Ghostlight registration.",
-  updatable: "Ghostlight is registered through an older Ghostlight installation or executable.",
+  updatable: "Ghostlight's saved registration needs an update.",
   // ADR-0135: blocked targets name their actual cause and carry precomposed evidence.
   needs_attention: "A foreign entry holds this target's Ghostlight registration; it was left untouched.",
   not_detected: "Not detected. You can prepare its user configuration before installing it."
