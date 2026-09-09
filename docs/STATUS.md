@@ -10,74 +10,65 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
-The owner assigned test-01, test-02, test-03, and leo-desktop-02 to real-environment testing
-and packaging, and explicitly authorized full machine control by the coordinator and local
-agents. All four existing remote tasks received execution assignments after baseline capture:
-Windows customer installation, established Linux continuity, immutable-host integration if
-Bluefin is confirmed, and alternate-libc feasibility if Alpine is confirmed.
-The [campaign](testing/fleet-acceptance-2026-09.md) freezes source round one at `a8cfd033`,
-preserves the fresh Windows install, and separates installed desktop evidence from fixtures.
-The Windows reader now exposes its baseline and first milestones: no existing Ghostlight
-installation, published 1.3.4 installer checksum verified, and Chrome launched through Explorer
-before the consumer attempt. Developer tools, WebView2, and VC runtimes were already present.
-Linux baseline/execution turns still return empty contents, so no Linux test pass is claimed.
-test-01 encountered a tool approval whose command and reason were not exposed remotely.
-The owner then confirmed full app permissions, and the task received a resume instruction.
-Its next snapshot is active in a new turn with no approval flag. Windows prepared the candidate
-worktree at the frozen revision; a failed evidence query was a PowerShell syntax error, not an
-established installation failure. Installed-stack completion is still pending.
+The owner assigned test-01 (CachyOS/KDE), test-02 (Bluefin/GNOME), test-03 (Alpine/KDE),
+and leo-desktop-02 (Windows) full autonomous acceptance and packaging lanes. Source round one
+is frozen at `a8cfd033`. Agents may install prerequisites, operate these dedicated machines,
+fix defects, verify, make signed-off commits and push their own `codex/fleet-*` branches.
+Shared-branch merges and releases are not authorized. The
+[campaign](testing/fleet-acceptance-2026-09.md) distinguishes installed evidence from fixtures.
 
-Local preparation produced a verified 1.3.5 portable candidate without rebuilding or deploying.
-It also reproduced and fixed `package-extension.ps1 -KeepDevelopmentKey` rejecting its own
-retained key at final validation. Both packaging modes now succeed; the development manifest
-matches source, all 38 other entries match, default ZIP bytes and the submitted ZIP are unchanged.
-These local artifacts and packaging checks do not establish native-installer or store acceptance.
-The packaging fix and campaign documents are committed locally. Formatting, Clippy, the Rust
-workspace tests, all 210 extension tests, packaging-mode checks, and diff checks pass.
+All four fleet branches now provide sanitized reports despite intermittent empty task-reader
+output. Their fixes and evidence are combined on `codex/fleet-integration`. Central checks
+pass: 533 Rust tests, 222 extension tests, formatting, Clippy, JavaScript syntax, process,
+provenance and workbench journeys. [Integration evidence](testing/fleet-integration-2026-09-09.md)
+records the combined candidate; its Linux-only check is still pending. The source round and machine-specific evidence remain distinct:
 
-## Alpine fleet acceptance and result-schema repair (2026-09-09)
+- CachyOS: [CachyOS report](testing/fleet-test-01-2026-09-09.md), source `9da0bbf7`. Full installed 23-tool journey,
+  Chromium/Brave/profile isolation, human-browsing boundary, recovery and three real MCP client
+  families passed. Found and repaired background targeted typing erasing an unfocused draft,
+  missing `history_storage` in output schemas, and Debian lifecycle inspection SIGPIPE.
+  All 21 hardening gates passed with 537 Rust and 222 extension tests. Debian/Ubuntu package
+  consumers passed at the original candidate; those archives exclude the later product fixes.
+- Alpine: [Alpine report](testing/alpine-musl-fleet-2026-09-09.md), source `5205c1c3`. Real native-musl installed browser,
+  human-browsing boundary, recovery, multiple profiles and OpenCode/Inspector calls passed.
+  Independently repaired the same output-schema defect and a recovery reporter masking errors.
+  Public GNU binaries fail on musl; the native debug archive is a prototype, not an APK release.
+  The host is currently unavailable after its report prepared a reboot. Post-reboot proof and
+  the actual cause of disconnection remain unconfirmed.
+- Bluefin: [Bluefin report](testing/bluefin-fleet-2026-09-09.md), source `f51130d0`. Native host service and actual Codex cold
+  startup passed after forwarding desktop environment names in client configuration. Review
+  exposed malformed array members being rewritten; the follow-up now preserves them and passes
+  541 Rust and 210 extension tests. The follow-up is not deployed. Native desktop-browser and
+  visible GNOME acceptance remain blocked by available controls and pending OS layering/login.
+- Windows: [Windows report](testing/windows-fleet-packaging-2026-09-09.md), source `21d4e3ed`. Public installation,
+  VS Code discovery and actual Codex policy invocation passed. The peer FFI repair and required
+  gates passed. NSIS now locks deployment and stops only exact installed process identities
+  before replacement; upgrade preserved a foreign authority and unrelated file reader. The final
+  package installed all three expected siblings. Its final uninstall/refusal test was blocked
+  by automatic approval review (`blocked by policy`), so that branch remains unverified.
+  Loaded adapter/browser effects remain unproved because the browser tool blocks extension setup.
 
-The test-03 native-musl lane built the frozen `a8cfd033` candidate dynamically and
-proved real installed Chromium, desktop, human-control, plural-profile, recovery
-and supplemental managed-policy journeys. Published GNU binaries fail on Alpine's
-absent glibc loader; no new platform support is claimed. Actual MCP Inspector and
-OpenCode exposed an omitted `history_storage` output-schema field. The owning
-language schema now declares the existing storage enum, and both real clients
-accept the fixed installed service. The recovery reporter also preserves protocol
-failures instead of masking them with a TypeError. See the
-[Alpine fleet record](testing/alpine-musl-fleet-2026-09-09.md) for hashes, passed
-checks, retained failures, context boundaries and pending reboot/release evidence.
+The owner authorized local repository credential provisioning so every machine can commit and
+push as him. Source Git Credential Manager account `lbotinelly` has verified repository push
+access. CachyOS and Bluefin already have that account, owner commit identity, secure libsecret
+storage and verified branch push access; no token transfer is needed there. Alpine has pushed
+its signed-off branch, but authenticated login/helper verification awaits reconnection. Windows published its
+public intake key through the authenticated GitHub connector at `76464c06`. The coordinator
+verified its fingerprint and sent a destination-encrypted credential envelope for secure GCM
+installation. Windows now verifies `lbotinelly`, repository push access and a successful local
+Git push dry-run with repository-scoped GCM matching. Nonsecret handoff
+state is in `.tmp/fleet-acceptance/credential-provisioning.json`.
 
-## Bluefin fleet lane and Codex cold-start repair (2026-09-09)
+The ten-minute coordinator retrieves new branch reports, reviews/integrates fixes, and resumes
+only actionable unfinished work. It must delete itself when campaign results and requested
+credential verification are complete. Completed task status alone is not a passed test.
 
-The isolated test-02 worktree reproduced a Linux Codex cold-start failure: the
-client's default stdio environment drops desktop-session variables. Warm MCP
-works; forwarding six desktop variable names cold-starts one authority and makes
-the real MCP call succeed. A local installer repair adds this handoff to generated
-and manual Codex setup and updates owned old entries without losing custom fields.
-It does not change shared contracts or the extension. See the
-[Bluefin evidence record](testing/bluefin-fleet-2026-09-09.md) for immutable-candidate
-gates, exact hashes, original failure, boundaries, and repair-validation scope.
-Ordinary browser and visible GNOME acceptance remain blocked by unavailable native
-computer controls and the inactive staged native browser. No new support claim.
-The local repaired tree passed 540 Rust tests, 210 extension tests, Clippy,
-formatting, workbench-surface and isolated process recovery. After host-controlled
-deployment, its generated setup cold-started one authority through the real Codex
-CLI and completed policy_explain. This repair is not published or fleet-coordinated.
-Default-profile commit gates also pass. Local portable packaging reproduces exact
-bytes in separate invocations; extraction and host execution pass. The isolated
-real-Chromium script journey passes 23 cases with the browser sandbox enabled.
-These supplemental checks do not prove installed-extension or human browsing.
-Portable missing-display recovery and disposable ownership-safe uninstall/reinstall
-also pass. Repair 4af4988 is signed off and pushed to codex/fleet-test-02 under the
-owner's authorization. Secure Git credentials are verified; no credential handoff
-is pending. The evidence record now carries a sanitized coordinator checkpoint
-because remote task reads return empty items. Desktop and reboot limitations remain.
-Coordinator review reproduced missing env_vars member validation in 4af4988.
-The narrow follow-up rejects malformed members before Linux owned-entry migration
-and preserves original bytes, while retaining valid custom/explicit environment
-settings. See the evidence record for the real Codex parser probe and regression.
-This source follow-up is not deployed; earlier installed-binary evidence is unchanged.
+Local preparation also fixed `package-extension.ps1 -KeepDevelopmentKey` rejecting its retained
+key at final validation. Both packaging modes pass; default ZIP bytes and the submitted ZIP are
+unchanged. The fix and initial campaign docs are local commits. Formatting, Clippy, Rust tests,
+210 extension tests and packaging checks passed. Local artifact preparation does not establish
+native installer or store acceptance. This branch contains the combined fleet fixes. The owner's dev checkout and public releases
+have not received these runtime changes. The consolidated campaign records integration checks.
 
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
@@ -181,27 +172,6 @@ startup and saving, original-byte preservation, and separately mutated future-fo
 See [history compatibility evidence](testing/history-compatibility-2026-09-08.md). Source changes
 were subsequently deployed with the normal diagnostics update above; the public 1.3.4 downgrade
 defect and release acceptance remain open.
-
-## test-01 fleet acceptance (2026-09-09)
-
-The isolated `codex/fleet-test-01` lane starts at `a8cfd033`. Three signed-off fixes address
-unfocused targeted typing draft loss (38443e9), the missing `history_storage` output-schema
-field (079cfe0), and Debian inspection-pipeline SIGPIPE handling (89ac2ee). The corrected
-installed service 1.3.5 and source adapter 1.1.2 passed the 23-tool live journey (15 groups,
-88 calls). All 21 hardening gates passed, including 537 Rust and 222 extension tests.
-
-Three real MCP client families passed: Codex, Copilot and OpenCode. Normal Chromium/Brave,
-two Chromium profiles, physical pause controls, source reload, process recovery and KDE
-desktop checks passed within the scopes in the [test-01 evidence record](testing/fleet-test-01-2026-09-09.md).
-Frozen a8cfd033 packages passed Debian 12/Ubuntu 24.04 lifecycle and retained-MCP upgrades;
-those Ubuntu-baseline artifacts exclude the later product fixes. Isolated governance,
-signed-policy and extension-first cold fixtures also passed.
-
-The installed stack remains Ready from this worktree's `target/release`, with the original
-Chromium retained and debugging disabled. Policy was restored byte-for-byte. Host reboot
-awaits a desktop-login route; GNOME, store ZIP and release provenance remain unproved.
-These results do not complete the whole fleet or authorize a release. The record preserves
-original failures, corrected results, artifact identities and cleanup qualifications.
 
 ## Resume on Linux
 

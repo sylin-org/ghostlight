@@ -111,6 +111,27 @@ patches should use separate branches/worktrees only after baseline capture and s
 integrated before freezing the next round. Do not let test machines independently modify shared
 product semantics or silently test different revisions.
 
+The owner subsequently requested more autonomy. Agents own the full lane, choose their test and
+installation sequence, install needed tools, fix concrete product/platform/test-driver failures
+at their owning seam, make local signed-off commits, and verify fixes without waiting for a
+coordinator checkpoint. Capture both the initial candidate and each changed revision. Keep
+established architectural decisions intact; escalate material product changes and unresolved
+restrictions or missing resources, while continuing independent work. The coordinator integrates
+shared fixes and freezes the final fleet round after those local investigations.
+
+The ten-minute scheduled check-in resumes idle agents only when meaningful work remains and
+collects evidence without repeatedly interrupting active execution. Once campaign work and
+consolidated results are in place, delete automation `follow-ghostlight-fleet-testing`; do not
+leave a recurring check or merely paused task behind.
+
+The owner also authorized provisioning local Ghostlight Git credentials to all four machines
+so they can commit and push as him. The coordinator verified source account `lbotinelly` has
+push access to `sylin-org/ghostlight`; repository commit identity is Leo Botinelly. Each agent
+may push its own campaign branch after verification. Use secure credential helpers and an
+authenticated confidential transfer or encryption to a destination-owned key. Tokens and private
+keys must never enter task messages, logs, command arguments, source, Git URLs, or evidence.
+Provisioning is pending; the coordinator has requested nonsecret intake state from each machine.
+
 Every result records scenario, candidate identity, environment, installation route, expected and
 observed behavior, passed/failed/blocked/not-run status, and bounded evidence coordinates. Retain
 failed runs and identify what changed on rerun. Keep screenshots, browser content, personal
@@ -137,12 +158,17 @@ encountered another tool approval with no visible command or reason. The owner t
 full app permissions; the coordinator relayed that change and instructed the task to resume.
 The subsequent snapshot shows a new active turn without an approval flag.
 
+A later immediate check found all four tasks idle. Windows' visible turn ended at the known
+evidence-query error; Linux completed turns still returned no report content. All four received
+targeted continuation requests and the owner's expanded autonomy. Their completed turns are
+not completed acceptance: the matrix below remains provisional until evidence is retrieved.
+
 | Lane | Verified environment or milestone | Acceptance state |
 | --- | --- | --- |
-| leo-desktop-02 | Windows 11 Pro 25H2, build 26200.9445, x64; no Ghostlight standard installation, running siblings, or native registrations at baseline. Native Chrome 153 and Edge 152; Codex and VS Code installed. Existing WebView2, VC runtimes, and developer tools. Published 1.3.4 installer checksum verified; Chrome opened through Explorer. | Consumer attempt in progress. First Ghostlight install, not a pristine Windows image. |
-| test-01 | Owner confirmed full app permissions after an approval pause; a new turn is active without an approval flag. Machine results not yet retrievable. | Execution active; no fleet acceptance result. |
-| test-02 | Execution assigned; machine results not yet retrievable. | Active task; no fleet acceptance result. |
-| test-03 | Execution assigned; machine results not yet retrievable. | Active task; no fleet acceptance result. |
+| leo-desktop-02 | Windows 11 Pro 25H2, x64; public install and actual VS Code discovery. | Original upgrade failed. Peer FFI and exact-process installer repairs pass source gates; corrected upgrade passes. Final uninstall/refusal and adapter/browser acceptance blocked. Owner credentials verified. |
+| test-01 | CachyOS rolling, KDE Wayland, glibc 2.44; real Chromium/Brave and three MCP client families. | Installed 23-tool journey and 21 hardening gates passed with repaired candidate. Reboot, store and accessibility limits remain. Existing owner credentials verified. |
+| test-02 | Bluefin 44/Fedora atomic, GNOME Wayland, glibc 2.43; real host service and Codex cold startup. | Codex environment forwarding fixed; review follow-up preserves malformed members. Native visible browser/GNOME coverage blocked. Existing owner credentials verified. |
+| test-03 | Alpine 3.24.1, musl, OpenRC, KDE Wayland; native-musl Chromium and service. | Installed browser/recovery/human-boundary and OpenCode/Inspector passed after schema repair. Prototype packaging only. Host unavailable; reboot and credential-helper verification pending. |
 
 Windows candidate worktree creation is confirmed at
 `D:\repo\github\sylin-org\ghostlight-fleet-leo-desktop-02`, branch
@@ -154,6 +180,65 @@ The public installer hash is
 An evidence query failed because PowerShell cannot pipe that `foreach` statement directly;
 this is a test-script failure, not evidence of an installation defect. Successful native UI
 tool calls alone do not yet establish completed installation or first MCP connection.
+
+### Windows findings retrieved at the 21:05 UTC check
+
+The resumed Windows agent reports completed public 1.3.4 installation and actual VS Code MCP
+discovery of 24 tools. Its later silent 1.3.5 upgrade returned 0, but the recorded size/hash
+still identifies the running MCP connector as 1.3.4. The interactive upgrade had stalled in an
+uninstaller that the available native-control surface could not target. Package replacement is
+therefore failed/investigating, not passed. The surviving connector did receive the new service's
+catalog-change notification; VS Code refreshed from 24 to 23 tools. This is a distinct reconnect
+pass. The coordinator has not yet inspected every underlying installation artifact.
+
+The coordinator retrieved the actual Windows source patch and focused test output for a second
+defect. In `crates/win-peer/src/table.rs`, the remote agent changed `AF_INET` and the
+`GetExtendedTcpTable` address-family argument from u16 to u32. The corrected remote release
+test run passed both win-peer tests. The previous suite had reported a win-peer failure and an
+orchestrator provenance failure. Full validation, the remote commit and central integration are
+pending; the coordinator checkout still has the old declaration.
+
+Browser Use explicitly refused `chrome://extensions/`, including alternate-surface workarounds.
+Opening `https://chromewebstore.google.com/detail/lejccfmoeogmhemakeknjjdhkfkgncdl` returned
+`Not allowed` (code -32000), without enough detail to classify its cause more narrowly. No loaded
+Ghostlight adapter is confirmed, so browser/model effects and human-browsing live acceptance
+remain blocked/not-run. Separate execution policy rejected 7-Zip MSI extraction with only
+`blocked by policy`; the agent retained the existing package evidence and continued other work.
+These enforced restrictions were not bypassed.
+
+The remote checkpoint is `.tmp/fleet-leo-desktop-02/CHECKPOINT.md` in its coordinating checkout.
+Its evidence pointers include `checkpoint-installed-files.json`, `checkpoint-registration.json`,
+`candidate-artifacts.json`, `candidate-rust-tests.log`, `win-peer-tests.log`,
+`default-upgrade-stall.json`, `silent-upgrade-result.json`, and `upgraded-file-check.json`.
+Presence and contents of every named file have not all been independently retrieved.
+
+### Linux reports retrieved through Git at 21:30 UTC
+
+Completed Linux task turns still return empty contents, but the agents pushed sanitized reports
+and signed-off fixes through their authorized branches. The coordinator fetched and read:
+
+- `origin/codex/fleet-test-01` at `9da0bbf7`, report
+  `docs/testing/fleet-test-01-2026-09-09.md`.
+- `origin/codex/fleet-test-02` at `f51130d0`, report
+  `docs/testing/bluefin-fleet-2026-09-09.md`.
+- `origin/codex/fleet-test-03` at `5205c1c3`, report
+  `docs/testing/alpine-musl-fleet-2026-09-09.md`.
+
+These paths currently live on the fetched branches, not the coordinator branch. Raw evidence
+remains on each machine at the locations in its report. The matrix reports their documented
+results; central integration and regression remain outstanding. CachyOS and Alpine independently
+found the same closed output-schema defect. Integrate one implementation, retaining both sets
+of validation evidence. Other fixes cover targeted typing, Debian inspection pipes, recovery
+reporting, and Linux Codex desktop environment forwarding. The Bluefin review follow-up was
+verified by its agent but is not deployed or included in prior live acceptance.
+
+CachyOS and Bluefin both verified existing `lbotinelly` authentication, repository push access,
+owner commit identity and secure libsecret storage. Do not copy tokens or regenerate intake keys
+there. Alpine's actual branch push is established; its authenticated login/helper is not yet
+confirmed. The host is unavailable after preparing a reboot, with no post-reboot result yet.
+Windows' completed short intake also returned empty output. Its agent was asked to use an
+available authenticated repository-write route for sanitized status or public-key material only,
+and retain its intake key if the route is unavailable. No token or private key may be published.
 
 ### Local artifact preparation and packaging finding
 
@@ -180,3 +265,43 @@ package bytes are unchanged. The submitted `dist/ghostlight-extension-v1.1.2.zip
 `keep-development-key-repro.json` retains the failure and marks its partial ZIP unaccepted;
 `package-verification.json` records the rerun. The patch changes no browser runtime bytes and
 requires no new runtime candidate round. No artifacts have been transferred or published.
+
+### Windows credential handoff at 21:33 UTC
+
+The authenticated GitHub connector published public intake commit `76464c06` on
+`codex/fleet-leo-desktop-02`. Connector access is already the owner account, but local Git GCM
+has no stored credential. The coordinator verified the destination RSA-4096 public-key
+fingerprint and delivered an RSA-OAEP-SHA256 encrypted credential envelope. Only the destination
+holds its private key; plaintext credentials were not written to evidence or task messages.
+Secure Windows GCM installation, authenticated account and local push verification are pending.
+The remote peer fix is now local commit `5afcf7b9`; it is not yet on the fetched report branch.
+
+### Windows completion report retrieved at 21:45 UTC
+
+`origin/codex/fleet-leo-desktop-02` at `21d4e3ed` contains the peer repair, secure credential
+verification and installer correction. Reports are `docs/testing/windows-fleet-peer-2026-09-09.md`,
+`docs/testing/windows-fleet-credential-intake-2026-09-09.md` and
+`docs/testing/windows-fleet-packaging-2026-09-09.md` on that branch. Local Git authenticated as
+`lbotinelly` through GCM Windows secure storage, verified repository push access and passed its
+branch push dry-run. The encrypted handoff is complete; do not resend it.
+
+The original mixed-binary upgrade is retained as a failure. The repaired NSIS hooks use the
+existing deployment marker and Windows Restart Manager process identities (exact physical image
+paths plus creation times). Upgrade stopped the installed authority/MCP while a foreign authority
+and unrelated file reader survived. The final installer passed with all three expected siblings
+and no marker left. All 531 Rust tests, 210 extension tests, formatting, Clippy, launcher and
+workbench checks passed; the real executable process journey also passed. Codex invoked the
+installed policy tool successfully. Final uninstall/refusal acceptance was rejected by automatic
+approval review with only `blocked by policy`; it was not retried through another route. Browser
+adapter, reboot and pristine Windows lanes remain explicitly unproved. Central review and
+integration are underway on a separate `codex/fleet-integration` branch.
+
+### Combined candidate checked centrally
+
+The four branch histories, reports and shared repairs are now combined on
+`codex/fleet-integration`. See the [integration report](fleet-integration-2026-09-09.md)
+for reconciliation and evidence. Central Windows verification passes 533 Rust tests,
+222 extension tests, formatting, Clippy, changed JavaScript syntax, the eight harness/reporting
+checks, process and provenance journeys against fresh siblings, and the workbench surface.
+A targeted Linux check of this combined candidate remains; original machine acceptance retains
+its recorded version boundaries. The owner dev checkout has not received these runtime fixes.

@@ -14,9 +14,18 @@ the owner wants, and what this project learned the hard way.
   and each machine's local agents full control of test-01, test-02, test-03, and leo-desktop-02
   for project testing: prerequisites, desktop/browser interaction, installation, packaging,
   and controlled restart, reboot, upgrade, and recovery work. Preserve the baseline first and
-  use that authorization without repeatedly asking. This does not authorize public releases or
-  access to founder-private material. The [fleet campaign](testing/fleet-acceptance-2026-09.md)
+  use that authorization without repeatedly asking. Each machine agent owns its lane end to end:
+  choose the sequence, fix concrete product/platform/test failures locally, commit and verify
+  fixes, and continue without coordinator checkpoints. Escalate only unresolved restrictions,
+  missing resources, or material product decisions; keep working on independent coverage.
+  Record starting and changed candidate identities for later integration. This does not authorize
+  public releases or access to founder-private material. The [fleet campaign](testing/fleet-acceptance-2026-09.md)
   tracks execution and evidence.
+- **Coordinated machines may commit and push as the owner.** The owner authorized provisioning
+  the local Ghostlight Git credentials to the four dedicated machines. Use the owner's verified
+  identity and secure credential helpers; never put tokens or private keys in task messages,
+  logs, command arguments, source, Git URLs, or evidence. Keep each agent's pushes on its own
+  campaign branch for integration. This does not grant force-push, merge, or release authority.
 - **Ghostlight manages only its own actions.** Human browsing creates no Ghostlight activity,
   audit, policy check, tab hold, automatic child-tab adoption, or regrouping. A controlled opener
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
@@ -226,6 +235,16 @@ the owner wants, and what this project learned the hard way.
   environment boundary, and forward variable names through the client's supported
   configuration instead of capturing machine-specific values. See the
   [Bluefin evidence](testing/bluefin-fleet-2026-09-09.md).
+
+- **An installer exit and a refreshed tool catalog do not prove replacement.** A
+  running old MCP connector can reconnect to the new service while retaining old
+  executable bytes. Compare every installed sibling to its intended package,
+  quiesce only exact image paths under the existing deployment lock, and verify
+  that a separate installation and an unrelated file reader both survive.
+- **Normalize only a proven packager transformation.** Tauri's NSIS bundler patches
+  the authority's bundle marker from `UNK` to `NSS` and then restores the raw build.
+  Full byte comparison after that exact in-memory substitution explains the hash
+  difference; a version string or an arbitrary hash exception does not.
 
 - **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
   URL that does not identify the release tag. Resolve the latest release page first, validate the
