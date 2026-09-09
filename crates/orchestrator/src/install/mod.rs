@@ -25,6 +25,16 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
 const SERVER_NAME: &str = "ghostlight";
+// Codex filters its stdio child's environment. Linux demand-start needs the invoking
+// desktop session, not captured machine-local values or a second service-only route.
+const CODEX_DESKTOP_ENVIRONMENT: &[&str] = &[
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_CURRENT_DESKTOP",
+    "XAUTHORITY",
+];
 
 /// Cached, explicit registry of supported development harness integrations.
 #[derive(Clone)]
@@ -908,10 +918,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         Err(_) => "This configuration could not be read; it was left untouched.".into(),
         _ => match state {
             HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
-            HarnessState::Updatable => {
-                "Ghostlight is registered through an older Ghostlight installation or executable."
-                    .into()
-            }
+            HarnessState::Updatable => "Ghostlight's saved registration needs an update.".into(),
             HarnessState::Available if connector_ready => {
                 "Detected and ready for an explicit Ghostlight registration.".into()
             }
@@ -1077,12 +1084,70 @@ fn inspect_toml(
         .and_then(Item::as_str)
         .unwrap_or_default();
     let args = toml_entry_args(entry);
-    Ok(command_registration_state(
-        command,
-        args.as_deref(),
-        connector,
-        windows,
-    ))
+    let state = command_registration_state(command, args.as_deref(), connector, windows);
+    if state == RegistrationState::Current
+        && !missing_codex_desktop_environment(entry, windows)?.is_empty()
+    {
+        return Ok(RegistrationState::Updatable);
+    }
+    Ok(state)
+}
+
+fn missing_codex_desktop_environment(
+    entry: &Item,
+    windows: bool,
+) -> Result<Vec<&'static str>, HarnessError> {
+    if windows || !cfg!(target_os = "linux") {
+        return Ok(Vec::new());
+    }
+    let forwarded = entry
+        .get("env_vars")
+        .map(|item| {
+            item.as_array().ok_or_else(|| {
+                HarnessError::Malformed("Ghostlight's env_vars is not a TOML array".into())
+            })
+        })
+        .transpose()?;
+    Ok(CODEX_DESKTOP_ENVIRONMENT
+        .iter()
+        .copied()
+        .filter(|name| {
+            let explicit = entry
+                .get("env")
+                .and_then(|env| env.get(name))
+                .and_then(Item::as_str)
+                .is_some();
+            let local = forwarded.is_some_and(|values| {
+                values.iter().any(|value| {
+                    value.as_str() == Some(name)
+                        || value.as_inline_table().is_some_and(|table| {
+                            table.get("name").and_then(toml_edit::Value::as_str) == Some(name)
+                                && table
+                                    .get("source")
+                                    .and_then(toml_edit::Value::as_str)
+                                    .is_none_or(|source| source == "local")
+                        })
+                })
+            });
+            !explicit && !local
+        })
+        .collect())
+}
+
+fn forward_codex_desktop_environment(entry: &mut Item, windows: bool) -> Result<(), HarnessError> {
+    let missing = missing_codex_desktop_environment(entry, windows)?;
+    if !missing.is_empty() {
+        if entry.get("env_vars").is_none() {
+            entry["env_vars"] = value(Array::new());
+        }
+        let forwarded = entry["env_vars"]
+            .as_array_mut()
+            .expect("the environment array was validated above");
+        for name in missing {
+            forwarded.push(name);
+        }
+    }
+    Ok(())
 }
 
 fn apply_install(
@@ -1330,6 +1395,7 @@ fn edit_toml_with(
                 .get("args")
                 .and_then(Item::as_array)
                 .is_some_and(Array::is_empty)
+            && missing_codex_desktop_environment(entry, cfg!(windows))?.is_empty()
         {
             return Ok(false);
         }
@@ -1338,17 +1404,24 @@ fn edit_toml_with(
     } else if !intent.installs() {
         return Ok(false);
     }
+    let mut updated = if intent == RegistrationEdit::Fix {
+        Item::Table(Table::new())
+    } else {
+        existing
+            .cloned()
+            .unwrap_or_else(|| Item::Table(Table::new()))
+    };
     if intent.installs() {
+        updated["command"] = value(connector.to_string_lossy().into_owned());
+        updated["args"] = value(Array::new());
+        forward_codex_desktop_environment(&mut updated, cfg!(windows))?;
         if !document.contains_key("mcp_servers") {
             document["mcp_servers"] = Item::Table(Table::new());
         }
         let servers = document["mcp_servers"]
             .as_table_mut()
             .ok_or_else(|| HarnessError::Malformed("mcp_servers is not a TOML table".into()))?;
-        let mut entry = Table::new();
-        entry["command"] = value(connector.to_string_lossy().into_owned());
-        entry["args"] = value(Array::new());
-        servers[SERVER_NAME] = Item::Table(entry);
+        servers[SERVER_NAME] = updated;
     } else if let Some(servers) = document["mcp_servers"].as_table_mut() {
         servers.remove(SERVER_NAME);
         if servers.is_empty() {
@@ -1893,10 +1966,16 @@ fn manual_setup(
     definition: &HarnessDefinition,
 ) -> Result<String, HarnessError> {
     match definition.dialect {
-        ConfigDialect::CodexToml => Ok(format!(
-            "[mcp_servers.{SERVER_NAME}]\ncommand = {}\nargs = []\n",
-            toml_edit::Value::from(context.connector.to_string_lossy().into_owned())
-        )),
+        ConfigDialect::CodexToml => {
+            let mut entry = Item::Table(Table::new());
+            entry["command"] = value(context.connector.to_string_lossy().into_owned());
+            entry["args"] = value(Array::new());
+            forward_codex_desktop_environment(&mut entry, context.windows)?;
+            let mut document = DocumentMut::new();
+            document["mcp_servers"] = Item::Table(Table::new());
+            document["mcp_servers"][SERVER_NAME] = entry;
+            Ok(document.to_string())
+        }
         ConfigDialect::Json(dialect) => manual_json_setup(&context.connector, dialect),
         ConfigDialect::Yaml(dialect) => Ok(manual_yaml_setup(&context.connector, dialect)),
         ConfigDialect::OpenCode => {
@@ -3525,6 +3604,103 @@ mod tests {
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("# keep me"));
         assert!(!removed.contains("mcp_servers"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn codex_owned_registration_gains_desktop_forwarding_without_losing_custom_fields() {
+        let directory = temporary("codex-desktop");
+        let path = directory.join("config.toml");
+        let connector = connector(&directory);
+        let source = format!(
+            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
+            connector.to_string_lossy()
+        );
+        fs::write(&path, &source).unwrap();
+        assert_eq!(
+            inspect_toml(&source, &connector, false).unwrap(),
+            RegistrationState::Updatable
+        );
+        assert!(edit_toml(&path, &connector, true).unwrap());
+        let installed = fs::read_to_string(&path).unwrap();
+        let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+        let entry = &document["mcp_servers"]["ghostlight"];
+        assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(45));
+        assert_eq!(
+            entry["env"]["XAUTHORITY"].as_str(),
+            Some("/explicit/test-authority")
+        );
+        assert_eq!(entry["env_vars"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            document["mcp_servers"]["other"]["command"].as_str(),
+            Some("other-server")
+        );
+        assert!(installed.contains("# keep me"));
+        assert!(super::missing_codex_desktop_environment(entry, false)
+            .unwrap()
+            .is_empty());
+        assert!(!edit_toml(&path, &connector, true).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), installed);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn codex_malformed_environment_is_preserved_and_windows_needs_no_desktop_forwarding() {
+        let directory = temporary("codex-malformed-env");
+        let path = directory.join("config.toml");
+        let connector = connector(&directory);
+        let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = \"not-an-array\"\n",
+            connector.to_string_lossy()
+        );
+        fs::write(&path, &source).unwrap();
+        assert!(inspect_toml(&source, &connector, false).is_err());
+        assert!(edit_toml(&path, &connector, true).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        assert_eq!(
+            inspect_toml(&source, &connector, true).unwrap(),
+            RegistrationState::Current
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn codex_inline_owned_registration_keeps_custom_fields() {
+        let directory = temporary("codex-inline-env");
+        let path = directory.join("config.toml");
+        let connector = connector(&directory);
+        fs::write(&path, format!(
+            "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
+            connector.to_string_lossy()
+        )).unwrap();
+        assert!(edit_toml(&path, &connector, true).unwrap());
+        let installed = fs::read_to_string(&path).unwrap();
+        let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(
+            document["mcp_servers"]["ghostlight"]["startup_timeout_sec"].as_integer(),
+            Some(45)
+        );
+        assert_eq!(
+            inspect_toml(&installed, &connector, false).unwrap(),
+            RegistrationState::Current
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn codex_manual_fragment_matches_automatic_desktop_environment() {
+        let directory = temporary("codex-manual-env");
+        let context = context(&directory);
+        let definition = definitions(&context)
+            .into_iter()
+            .find(|row| row.id == "codex")
+            .unwrap();
+        let manual = super::manual_setup(&context, &definition).unwrap();
+        assert!(edit_toml(&definition.path, &context.connector, true).unwrap());
+        assert_eq!(manual, fs::read_to_string(&definition.path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
 

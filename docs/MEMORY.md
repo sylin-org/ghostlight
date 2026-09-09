@@ -213,6 +213,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **Warm MCP success does not prove cold desktop demand-start.** A client can
+  filter DISPLAY, Wayland, XDG runtime and session-bus variables from its stdio
+  child. Test from no authority through the real client, inspect only the named
+  environment boundary, and forward variable names through the client's supported
+  configuration instead of capturing machine-specific values. See the
+  [Bluefin evidence](testing/bluefin-fleet-2026-09-09.md).
+
 - **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
   URL that does not identify the release tag. Resolve the latest release page first, validate the
   stable tag, then pin checksums and every sibling download to that one release. The actual Linux

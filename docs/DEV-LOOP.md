@@ -118,6 +118,18 @@ destination image paths under `target/release`, copies with a bounded retry, rem
 starts the orchestrator only when it was selected. Both directories must stay inside this
 repository. A browser-connector replacement still requires an explicit extension reload.
 
+### Container builds and host deployment
+
+When build dependencies live in Toolbox but the installed authority runs on the
+host, keep the deployment controller on the host. Delegate only its Cargo command
+to Toolbox. A shared filesystem or PID namespace does not prove that the container
+can read a host process's exact executable path. On Bluefin that path was unavailable
+inside Toolbox: the controller found no matching image and copying failed with
+`Text file busy`. The host controller identified and stopped the exact same PID,
+then completed the ordinary locked swap. Do not replace exact-path ownership checks
+with process-name termination to work around this boundary. See the
+[Bluefin evidence](testing/bluefin-fleet-2026-09-09.md).
+
 ## When an agent reports an error
 
 Turn the process log on, reproduce, read the story:
