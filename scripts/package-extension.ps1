@@ -224,7 +224,7 @@ try {
         if ($packagedManifest.version -ne $manifest.version) {
             throw "extension ZIP manifest version differs from source"
         }
-        if ($null -ne $packagedManifest.PSObject.Properties["key"]) {
+        if (-not $KeepDevelopmentKey -and $null -ne $packagedManifest.PSObject.Properties["key"]) {
             throw "extension ZIP contains the development key"
         }
     }
