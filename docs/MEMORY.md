@@ -10,6 +10,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **The four remote machines are dedicated test resources.** The owner grants the coordinator
+  and each machine's local agents full control of test-01, test-02, test-03, and leo-desktop-02
+  for project testing: prerequisites, desktop/browser interaction, installation, packaging,
+  and controlled restart, reboot, upgrade, and recovery work. Preserve the baseline first and
+  use that authorization without repeatedly asking. This does not authorize public releases or
+  access to founder-private material. The [fleet campaign](testing/fleet-acceptance-2026-09.md)
+  tracks execution and evidence.
 - **Ghostlight manages only its own actions.** Human browsing creates no Ghostlight activity,
   audit, policy check, tab hold, automatic child-tab adoption, or regrouping. A controlled opener
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale

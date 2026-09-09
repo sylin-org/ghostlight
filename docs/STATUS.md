@@ -8,6 +8,33 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Four-machine acceptance campaign (2026-09-09)
+
+The owner assigned test-01, test-02, test-03, and leo-desktop-02 to real-environment testing
+and packaging, and explicitly authorized full machine control by the coordinator and local
+agents. All four existing remote tasks received execution assignments after baseline capture:
+Windows customer installation, established Linux continuity, immutable-host integration if
+Bluefin is confirmed, and alternate-libc feasibility if Alpine is confirmed.
+The [campaign](testing/fleet-acceptance-2026-09.md) freezes source round one at `a8cfd033`,
+preserves the fresh Windows install, and separates installed desktop evidence from fixtures.
+The Windows reader now exposes its baseline and first milestones: no existing Ghostlight
+installation, published 1.3.4 installer checksum verified, and Chrome launched through Explorer
+before the consumer attempt. Developer tools, WebView2, and VC runtimes were already present.
+Linux baseline/execution turns still return empty contents, so no Linux test pass is claimed.
+test-01 encountered a tool approval whose command and reason were not exposed remotely.
+The owner then confirmed full app permissions, and the task received a resume instruction.
+Its next snapshot is active in a new turn with no approval flag. Windows prepared the candidate
+worktree at the frozen revision; a failed evidence query was a PowerShell syntax error, not an
+established installation failure. Installed-stack completion is still pending.
+
+Local preparation produced a verified 1.3.5 portable candidate without rebuilding or deploying.
+It also reproduced and fixed `package-extension.ps1 -KeepDevelopmentKey` rejecting its own
+retained key at final validation. Both packaging modes now succeed; the development manifest
+matches source, all 38 other entries match, default ZIP bytes and the submitted ZIP are unchanged.
+These local artifacts and packaging checks do not establish native-installer or store acceptance.
+The packaging fix and campaign documents are committed locally. Formatting, Clippy, the Rust
+workspace tests, all 210 extension tests, packaging-mode checks, and diff checks pass.
+
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
 ADR-0164 records the owner's clarified boundary: Ghostlight manages only its own actions.

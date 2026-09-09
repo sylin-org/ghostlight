@@ -274,8 +274,10 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 7. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
    browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active
-   window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. Child tabs
-   follow their unambiguous opener, and closing or moving tabs does not transfer ownership.
+   window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. An opener
+   does not grant ownership: child tabs and popups are not automatically adopted, grouped, or
+   attached to a debugger. Manually moving tabs causes no regrouping; closing or moving tabs does
+   not transfer ownership (ADR-0164).
 8. The established content-free visual language renders visibly, stays pointer-transparent except
    for attention controls, remains hidden from screenshots, and remounts after navigation. Its
    palette is sky `#38bdf8`, ink `#eaf6ff`, and governance ground `#0c0f14`; its spring curve is

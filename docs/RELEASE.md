@@ -165,8 +165,16 @@ the package, store-adapter, clean-machine, or actual MCP-client gates.
 Run the accepted matrix in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md) with a visible ordinary browser
 profile. Include two supported Chromium families where available and at least three supported MCP
 harnesses. Exercise concurrent sessions, screenshots, semantic and coordinate input, file upload,
-dialogs, scripts, governed denial, blocked close, group reuse across windows, child-tab adoption,
-orchestrator restart, browser restart, extension reload, and unknown-effect non-replay.
+dialogs, scripts, governed agent denial, blocked agent close, explicit agent tab creation, group
+reuse across windows, orchestrator restart, browser restart, extension reload, and unknown-effect
+non-replay.
+
+Verify [ADR-0164's human-browsing boundary](adr/0164-govern-only-ghostlight-work.md) with the
+candidate service and loaded adapter. Manual navigation, including a protected URL, produces no
+Ghostlight activity, audit, policy response, notification, or tab hold. Child tabs and popups are
+not automatically adopted, grouped, or attached to a debugger, including during agent work.
+Manually moving a tab never causes regrouping, and manual closure remains available. The next
+agent request checks the current destination; document changes still expire cached agent targets.
 
 ## Publication sequence
 
