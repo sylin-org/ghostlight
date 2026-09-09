@@ -224,6 +224,14 @@ the owner wants, and what this project learned the hard way.
 
 Every one of these cost something to learn.
 
+- **A structured result must satisfy its advertised output schema.** Adding
+  `history_storage` to the serialized receipt without updating the closed schema
+  made both MCP Inspector and OpenCode reject every tool result (test-03 Alpine
+  fleet, 2026-09-09). A raw JSON-RPC journey did not expose that client validation.
+  Compare actual serialized fields against every catalog output schema and retain
+  at least one real client that validates structured output.
+
+
 - **A filled DOM is not proof that a controlled editor retained the draft.** Reddit discarded
   `textContent` plus generic synthetic input while Ghostlight reported success. Native browser
   editing preserves the editor's transaction; regression fixtures must reject the old mechanism,

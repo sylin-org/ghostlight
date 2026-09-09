@@ -145,3 +145,24 @@ store adapter, useful WebView accessibility, Codex's enforced approval block,
 three distinct real AI applications, and reboot evidence. Published GNU binaries
 cannot establish Alpine upgrades/downgrades. The native debug prototype is not a
 new supported release channel. Broader fleet and release approval remain separate.
+
+## Fixed artifact and reboot checkpoint
+
+The schema repair is commit `578e8038bc10552d5477d76ef69d71a1c8299752`.
+Both signed-off fixes are pushed only to `codex/fleet-test-03`. No shared branch,
+release, store or package publication was changed.
+
+The fixed-source native archive is
+`ghostlight-v1.3.5-x86_64-unknown-linux-musl-debug-prototype-578e8038.tar.gz`,
+94,062,113 bytes, SHA-256
+`f3fb5476064c0b48342e51211ec8a824b94da57a1cad0a1b90f243a1c024fea8`.
+All seven members verify against the staged bytes, including the two license
+files and build metadata. Its extracted binaries pass version and repeated
+install/uninstall under isolated XDG roots without starting an authority.
+
+Logind reports that this user can reboot. Pre-reboot boot ID is
+`f741e580-6fd6-4b27-8473-abc193846675`. A task heartbeat is prepared to resume
+post-boot verification. The readable SDDM configuration has no Autologin section;
+after reboot, an interactive login may be required. This checkpoint does not
+claim reboot recovery. Primary AT-SPI traversal also did not establish a useful
+WebView tree; preserve that limitation alongside the supplemental no-tray result.
