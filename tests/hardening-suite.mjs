@@ -102,7 +102,7 @@ if (lane !== "browser") {
   }
 }
 if (lane !== "process") {
-  await run("browser-harness", process.execPath, ["--test", "tests/chromium-harness.test.mjs"]);
+  await run("browser-harness", process.execPath, ["--test", "tests/chromium-harness.test.mjs", "tests/linux/installed-reporting.test.mjs"]);
   for (const [name, file] of [
     ["script-browser", "script-browser-journey.mjs"], ["frame-browser", "frame-browser-journey.mjs"],
     ["history-browser", "workbench-history-browser.mjs"]
