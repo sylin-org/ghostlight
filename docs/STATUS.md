@@ -19,6 +19,13 @@ failed and connector retries created repeated short-lived authorities. This rema
 Linux startup defect; the Codex-specific forwarding repair does not solve every MCP client.
 The fleet is not release-ready. The scheduled coordinator was deleted after results were collected.
 
+The owner's follow-up round retrieved Alpine repair `60f555a8`. It applies the existing integrated
+Codex registration writer unchanged, deploys only the native-musl authority, and updates the saved
+Codex configuration. Actual Codex automatic recovery and an explicitly configured MCP Inspector
+cold start now pass, followed by browser rejoin and workbench Open. All 542 native Rust tests and
+210 extension tests pass. Unconfigured clients still strip desktop context, and failed-start
+retry amplification remains unchanged. No second physical reboot or combined Alpine build is claimed.
+
 The owner assigned test-01 (CachyOS/KDE), test-02 (Bluefin/GNOME), test-03 (Alpine/KDE),
 and leo-desktop-02 (Windows) full autonomous acceptance and packaging lanes. Source round one
 is frozen at `a8cfd033`. Agents may install prerequisites, operate these dedicated machines,

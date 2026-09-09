@@ -70,6 +70,16 @@ Alpine candidate, not a new combined build. The combined Codex-specific environm
 forwarding repair does not cover this independent MCP client. Browser-led recovery
 is a pass; generic MCP-led cold startup and overall reboot acceptance are not.
 
+The owner's follow-up round retrieved Alpine repair `60f555a8`. Its installer source is
+byte-identical to this integration branch: the agent applied the existing forwarding repair
+to its installed native-musl lane and updated the saved Codex registration. Actual Codex
+automatic recovery passed. MCP Inspector, explicitly forwarding the same live desktop
+variables, started from no authority and returned a successful policy result in 1.17 seconds.
+Normal browser rejoin and native workbench Open passed; connector and adapter bytes are
+unchanged. Native source gates passed 542 Rust and 210 extension tests. This is a targeted
+installed repair, not a combined Alpine build or a second physical reboot. Unconfigured
+sanitized launches and failed-start retry amplification retain their earlier limitations.
+
 The final Windows uninstall/refusal test was rejected by automatic approval review
 with only `blocked by policy`; no alternate-route retry was made. Windows still
 needs an adapter loaded through an allowed route. Bluefin still lacks native visible

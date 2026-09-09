@@ -38,6 +38,16 @@ target/debug/ghostlight
 There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
 this same no-argument desktop authority.
 
+Linux MCP clients must forward their current desktop context when demand-starting
+this GUI authority. Ghostlight's Codex setup writes `env_vars` names for DISPLAY,
+WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, XDG_CURRENT_DESKTOP and
+XAUTHORITY; update an older owned registration through ordinary setup. Do not
+snapshot session addresses into configuration. When testing through MCP Inspector,
+forward these current values explicitly with its `-e` options, after the target
+command. The SDK's default reduced environment alone cannot initialize GTK.
+The Alpine fleet record preserves both the failing default and the corrected
+installed cold-start. Starting a browser first would conceal this handoff defect.
+
 The normal no-argument launch always starts the complete desktop authority with its tray and a
 backgrounded workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same
 sibling executable with no application arguments. `ghostlight open` is the explicit human intent:

@@ -234,7 +234,8 @@ the owner wants, and what this project learned the hard way.
   child. Test from no authority through the real client, inspect only the named
   environment boundary, and forward variable names through the client's supported
   configuration instead of capturing machine-specific values. See the
-  [Bluefin evidence](testing/bluefin-fleet-2026-09-09.md).
+  [Bluefin evidence](testing/bluefin-fleet-2026-09-09.md) and the
+  [Alpine installed repair](testing/alpine-musl-fleet-2026-09-09.md).
 
 - **An installer exit and a refreshed tool catalog do not prove replacement.** A
   running old MCP connector can reconnect to the new service while retaining old
