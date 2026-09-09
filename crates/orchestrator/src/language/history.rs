@@ -4,6 +4,9 @@ use crate::governance::evidence::PermissionCheck;
 use crate::governance::ReasonCode;
 use serde::{Deserialize, Serialize};
 
+/// Retired passive browser-event receipt. It was never an agent invocation.
+pub const RETIRED_BROWSER_LANDING: &str = "browser_landing";
+
 /// Maximum child count supported by a composition, including restored history.
 pub const COMPOSITION_STEP_LIMIT: usize = 20;
 

@@ -7,6 +7,8 @@ browser steps, applies one authority snapshot, and returns one truthful terminal
 
 The browser is the user's visible, existing, authenticated Chromium browser. Ghostlight does
 not create a hidden browsing world or ask a model to reproduce browser orchestration.
+Ghostlight governs only work requested through its executor. Human browsing produces no
+Ghostlight activity, policy response, or automatic tab ownership (ADR-0164).
 
 Ghostlight 1.0 supports Windows and x86_64 glibc-based desktop Linux. Linux requires a native
 Chrome, Edge, Brave, or Chromium package for browser native messaging. Snap and Flatpak browser

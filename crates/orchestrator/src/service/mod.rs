@@ -27,12 +27,10 @@ use uuid::Uuid;
 use crate::audit::AuditRecorder;
 use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
-use crate::governance::{AuditRecord, Capability, GovernanceFacade, JsonlAuditSink};
+use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
-use crate::work::{
-    ActiveAuthorityRegistry, ApplicationExecutor, CancellationToken, PreparedInvocation,
-};
+use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
@@ -153,8 +151,6 @@ impl ServiceHost {
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
-            active: executor.active_authority(),
-            audit: audit.clone(),
             browser: browser_port.clone(),
             diagnostics: Arc::clone(&diagnostics),
         }));
@@ -891,8 +887,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct ServiceBrowserEvents {
     governance: GovernanceFacade,
     workspaces: WorkspaceStore,
-    active: ActiveAuthorityRegistry,
-    audit: Arc<AuditRecorder>,
     browser: Arc<dyn BrowserPort>,
     diagnostics: Arc<DiagnosticsHub>,
 }
@@ -900,65 +894,18 @@ struct ServiceBrowserEvents {
 impl BrowserEventSink for ServiceBrowserEvents {
     fn on_event(&self, browser: &str, event: BrowserEvent) {
         match event {
-            BrowserEvent::DocumentCommitted {
-                tab_id,
-                url,
-                correlation,
-            } => {
-                let Some(workspace) = self.workspaces.owner_of_physical(browser, tab_id) else {
-                    return;
-                };
-                // The most recently started invocation still governing this workspace, when any
-                // is; several may be active at once (recording status/stop/discard skip the
-                // workspace lease), and each keeps its own entry until it finishes, so no
-                // invocation's completion can clear a different one's still-active snapshot.
-                let snapshot = lock(&self.active)
-                    .get(workspace.as_str())
-                    .and_then(|entries| entries.last())
-                    .map(|(_, snapshot)| snapshot.clone())
-                    .unwrap_or_else(|| self.governance.snapshot());
-                // A committed document is evidence from work already admitted (or from the
-                // human). Runtime control gates future commands; only policy holds this tab.
-                let decision = snapshot.authorize_landing(Capability::Action, &url);
-                let event_id = format!("browser_event_{}", Uuid::new_v4().simple());
-                if correlation.is_none() || !decision.allowed {
-                    let _ = self.workspaces.apply_browser_landing(
-                        browser,
-                        tab_id,
-                        &url,
-                        decision.allowed,
-                    );
-                }
-                let record = AuditRecord::now(
-                    &event_id,
-                    workspace.as_str(),
-                    "browser_landing",
-                    Capability::Action,
-                    snapshot.id(),
-                    decision,
-                    if decision.allowed {
-                        "succeeded"
-                    } else {
-                        "blocked"
-                    },
-                    "applied",
-                    &crate::language::outcome::Outcome::BrowserLanding {
-                        allowed: decision.allowed,
-                    }
-                    .audit(),
-                    0,
-                )
-                .with_policy(&snapshot, decision);
-                let _ = self.audit.record(&record);
+            BrowserEvent::DocumentCommitted { tab_id, url, .. } => {
+                // A commit is browser state, not proof of a Ghostlight action. Never authorize,
+                // audit, or react to it as work. Only stale our own references; the executor
+                // checks the current destination when an agent actually requests an operation.
+                self.workspaces.note_browser_landing(browser, tab_id, &url);
             }
             BrowserEvent::ReadinessChanged { tab_id, readiness } => self
                 .workspaces
                 .apply_browser_readiness(browser, tab_id, readiness),
-            BrowserEvent::ChildTabOpened { tab, opener_tab_id } => {
-                let _ = self
-                    .workspaces
-                    .apply_browser_child(browser, opener_tab_id, &tab);
-            }
+            // Older adapters can still send this event. An opener does not prove authorship:
+            // a person can open a link from a controlled tab. Ownership needs explicit work.
+            BrowserEvent::ChildTabOpened { .. } => {}
             BrowserEvent::RuntimeControlRequested { intent } => {
                 let state = self.governance.apply_runtime_intent(intent);
                 let _ = self.browser.publish_control_state(state);
@@ -1010,6 +957,163 @@ mod tests {
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("ghostlight-runtime.json");
         (directory, path)
+    }
+
+    #[test]
+    fn passive_browsing_never_becomes_work_or_claims_a_child_tab() {
+        use crate::audit::{AuditRecorder, JsonlAuditSink};
+        use crate::browser::BrowserEventSink;
+        use crate::governance::GovernanceFacade;
+        use crate::presentation::{BrowserPresentation, PresentationReactor};
+        use crate::work::result::Status;
+        use crate::work::{ApplicationExecutor, CancellationToken};
+        use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
+        use crate::workspace::WorkspaceStore;
+        use ghostlight_bridge::browser::{BrowserEvent, BrowserReadiness, PhysicalTab};
+        use serde_json::json;
+
+        let (directory, _) = runtime_path("passive-browsing");
+        let policy = directory.join("policy.json");
+        std::fs::write(&policy, r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
+        let governance = GovernanceFacade::new(Some(policy), None);
+        let workspaces = WorkspaceStore::default();
+        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
+        workspaces
+            .pin_browser(workspace.as_str(), FAKE_BROWSER)
+            .unwrap();
+        let tab = PhysicalTab {
+            tab_id: 7,
+            url: "https://allowed.example/".into(),
+            title: "test".into(),
+            active: true,
+            readiness: BrowserReadiness::Complete,
+        };
+        let lease = workspaces.acquire(&workspace).unwrap();
+        let selected = lease.add_tab(&tab).unwrap();
+        let selected = lease.apply_landing(&selected.handle, &tab).unwrap();
+        drop(lease);
+        let browser = Arc::new(FakeBrowser::default());
+        let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
+        let projection = WorkbenchProjection::default();
+        let audit_path = directory.join("audit.jsonl");
+        let executor = ApplicationExecutor::new(
+            governance.clone(),
+            workspaces.clone(),
+            browser.clone(),
+            PresentationReactor::new(Arc::new(BrowserPresentation::new(
+                browser.clone(),
+                workspaces.clone(),
+            ))),
+            projection.clone(),
+            Arc::new(AuditRecorder::new(
+                Arc::new(JsonlAuditSink::new(&audit_path)),
+                projection.clone(),
+            )),
+            diagnostics.clone(),
+        );
+        let sink = super::ServiceBrowserEvents {
+            governance: governance.clone(),
+            workspaces: workspaces.clone(),
+            browser: browser.clone(),
+            diagnostics: diagnostics.clone(),
+        };
+        let view = WorkbenchFacade::new(
+            projection,
+            workspaces.clone(),
+            governance,
+            Arc::new(crate::browser::RelayBrowserPort::new("passive-test".into())),
+            diagnostics,
+        );
+
+        let initial_audit = std::fs::read_to_string(&audit_path).unwrap_or_default();
+
+        // Correlation only means a command was watching. It cannot prove who navigated.
+        for correlation in [None, Some("in-flight-command".into())] {
+            for url in [
+                "chrome://version",
+                "https://denied.example/private?secret=1",
+                "https://allowed.example/",
+            ] {
+                sink.on_event(
+                    FAKE_BROWSER,
+                    BrowserEvent::DocumentCommitted {
+                        tab_id: 7,
+                        url: url.into(),
+                        correlation: correlation.clone(),
+                    },
+                );
+                let current = workspaces
+                    .acquire(&workspace)
+                    .unwrap()
+                    .select_tab(Some(selected.handle.as_str()))
+                    .unwrap();
+                assert_eq!(current.url, url);
+                assert!(current.generation > selected.generation);
+                assert_eq!(workspaces.summaries()[0].held_tab_count, 0);
+                assert!(view.snapshot().history.is_empty());
+                assert!(view.snapshot().operations.is_empty());
+                assert!(browser.calls().is_empty());
+                assert!(browser.control_states().is_empty());
+                assert_eq!(
+                    std::fs::read_to_string(&audit_path).unwrap_or_default(),
+                    initial_audit
+                );
+            }
+        }
+        // A user-created tab with an owned opener must still remain entirely unowned.
+        sink.on_event(
+            FAKE_BROWSER,
+            BrowserEvent::ChildTabOpened {
+                opener_tab_id: 7,
+                tab: PhysicalTab {
+                    tab_id: 8,
+                    ..tab.clone()
+                },
+            },
+        );
+        sink.on_event(
+            FAKE_BROWSER,
+            BrowserEvent::DocumentCommitted {
+                tab_id: 8,
+                url: "chrome://version".into(),
+                correlation: None,
+            },
+        );
+        assert!(workspaces.owner_of_physical(FAKE_BROWSER, 8).is_none());
+        assert!(browser.calls().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&audit_path).unwrap_or_default(),
+            initial_audit
+        );
+
+        // It is the next agent request, not the person's visit, that receives a refusal.
+        sink.on_event(
+            FAKE_BROWSER,
+            BrowserEvent::DocumentCommitted {
+                tab_id: 7,
+                url: "chrome://version".into(),
+                correlation: None,
+            },
+        );
+        let result = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab":selected.handle.as_str()}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked);
+        assert!(browser
+            .calls()
+            .iter()
+            .all(|call| matches!(call, BrowserCommand::Present { .. })));
+        let snapshot = view.snapshot();
+        assert_eq!(snapshot.history.len(), 1);
+        assert_eq!(snapshot.history[0].tool, "browser_read");
+        let bytes = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(!bytes.contains("browser_landing"));
+        assert!(!bytes.contains("secret"));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

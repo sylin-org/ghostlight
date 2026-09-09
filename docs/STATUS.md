@@ -1,7 +1,32 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-08 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
+Last updated: 2026-09-09 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
 published versions remain service 1.3.4 and adapter 1.1.1).
+
+Google's live update feed was checked on 2026-09-09 and still serves adapter 1.1.1.
+The submitted 1.1.2 ZIP has automatic publication disabled; its current review state could not
+be verified because API credentials are absent and dashboard browser access was unavailable.
+The human-browsing extension fixes below postdate that ZIP and have not been submitted.
+
+## Human browsing is outside Ghostlight work (2026-09-09)
+
+ADR-0164 records the owner's clarified boundary: Ghostlight manages only its own actions.
+Passive commits no longer authorize or hold tabs, write audit, or appear in activity. The
+workbench omits old `browser_landing` records on restore without changing the audit file.
+Cached references still expire, and the next agent request checks the current destination.
+The extension no longer adopts or debugs child tabs through an opener, or regroups manually
+moved tabs. Formatting, Clippy with warnings denied, all Rust workspace tests (446 orchestrator
+library tests), 210 extension tests, JavaScript syntax, and workbench surface checks pass.
+The normal dev loop deployed the orchestrator; installed/build SHA-256 values match:
+`42ED720235F6102F7C54D32CB5DB2C24B7EF2EAB69D4B675386DBA638D430786`.
+One installed authority reports 1.3.5 Ready. On the real connected browser, an external change
+of a disposable owned tab from example.com to example.org left audit bytes and mtime unchanged;
+a subsequent agent tab-list request saw the new URL. The disposable tab was closed externally.
+Protected-page behavior is covered by the service regression, not a new live manual trial.
+Extension reload and live child-tab/move acceptance remain pending: Browser Use's URL policy
+blocked `chrome://extensions`, so the owner must reload the local extension. The service fix is
+live, but an old adapter can still group/debug children until reloaded. No alternate desktop
+installation or browser profile was started for process acceptance.
 
 ## Extension UI queued for the next update
 

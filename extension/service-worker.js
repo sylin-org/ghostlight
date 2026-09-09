@@ -319,24 +319,12 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     .catch(() => {});
 });
 
-chrome.tabs.onCreated.addListener((tab) => {
-  if (!tab.openerTabId || !tab.id) return;
-  const workspace = topology.workspaceFor(tab.openerTabId);
-  if (!workspace) return;
-  send(shared.browserEventFrame({ event: "child_tab_opened", tab: physicalTab(tab), opener_tab_id: tab.openerTabId }));
-  topology.assign(tab.id, workspace)
-    .then(async () => {
-      await retainManagedDebugger(tab.id);
-      return syncPresentationState(tab.id);
-    })
-    .catch((error) => setConnection({ last_error: shared.bounded(error?.message ?? error, 500) }));
-});
-chrome.tabs.onAttached.addListener((tabId) => {
-  if (!topology.workspaceFor(tabId)) return;
-  topology.reattach(tabId)
-    .then(() => retainManagedDebugger(tabId))
-    .catch((error) => setConnection({ last_error: shared.bounded(error?.message ?? error, 500) }));
-});
+// An opener relationship does not establish that Ghostlight created a tab. In particular,
+// Ctrl-click and Open link in new tab belong to the person. Explicit commands own assignment.
+
+// A person moving a tab between windows must not cause Ghostlight to regroup it.
+// The next explicit operation resolves its existing ownership without undoing that move.
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   const activeRecording = recording.interruptTab(tabId, "browser_detached");
   diagnostics.forget(tabId);

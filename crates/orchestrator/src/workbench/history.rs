@@ -229,6 +229,35 @@ mod tests {
     }
 
     #[test]
+    fn passive_landing_records_are_not_restored_as_actions_and_the_file_is_unchanged() {
+        use crate::workbench::WorkbenchProjection;
+        let mut action = child(1);
+        action.step = None;
+        let mut landing = action.clone();
+        landing.invocation = "browser_event_legacy".into();
+        landing.tool = crate::language::history::RETIRED_BROWSER_LANDING.into();
+        landing.allowed = false;
+        landing.status = "blocked".into();
+        let bytes = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&action).unwrap(),
+            serde_json::to_string(&landing).unwrap()
+        );
+        let path = std::env::temp_dir().join(format!(
+            "ghostlight-passive-history-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        let restored = WorkbenchProjection::default();
+        restored.load_history(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+        std::fs::remove_file(path).unwrap();
+        let history = restored.history();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].invocation, action.invocation);
+    }
+
+    #[test]
     fn live_group_claims_stay_in_memory_while_restored_receipts_keep_observed_evidence() {
         use crate::provenance::{ConnectionEvidence, PeerObservation};
         use crate::workbench::WorkbenchProjection;

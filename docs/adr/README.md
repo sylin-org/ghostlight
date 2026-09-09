@@ -181,6 +181,8 @@ history live here.
 
 | [0163](0163-persistent-history-compatibility.md) | Tolerant historical receipts, preserved unsupported records, strict live authority, and real-version persistence acceptance | Accepted |
 
+| [0164](0164-govern-only-ghostlight-work.md) | Human browsing produces no Ghostlight work; passive events invalidate references only, opener-based adoption and automatic regrouping are removed | Accepted |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

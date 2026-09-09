@@ -10,6 +10,11 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Ghostlight manages only its own actions.** Human browsing creates no Ghostlight activity,
+  audit, policy check, tab hold, automatic child-tab adoption, or regrouping. A controlled opener
+  and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
+  agent references when the page changes; govern the next actual agent request (ADR-0164).
+
 - **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
   optional information, and unavailable nonessential components. Use safe defaults and bounded
   automatic recovery; keep unaffected work available instead of rejecting the whole operation or

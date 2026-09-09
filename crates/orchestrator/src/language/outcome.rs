@@ -235,8 +235,6 @@ pub enum Outcome {
     PageRecovered { host: Option<String> },
     /// The requested controlled tab was already absent.
     TabAlreadyClosed,
-    /// An asynchronous browser landing crossed the service's governance boundary.
-    BrowserLanding { allowed: bool },
     /// An existing controlled page was navigated.
     PageNavigated { host: Option<String> },
     /// Browser history was traversed.
@@ -421,12 +419,6 @@ impl Outcome {
             },
             Self::PageRecovered { host } => page_recovered_summary(host.as_deref()),
             Self::TabAlreadyClosed => tab_already_closed_summary(),
-            Self::BrowserLanding { allowed } => if *allowed {
-                "The browser landed on a new page and its landing was governed."
-            } else {
-                "Authority blocked the page the browser landed on."
-            }
-            .into(),
             Self::PageNavigated { host } => {
                 format!("Navigated to {}.", place(host, "the requested page"))
             }
@@ -822,7 +814,6 @@ impl Outcome {
             },
             Self::TabClosed
             | Self::TabAlreadyClosed
-            | Self::BrowserLanding { .. }
             | Self::DialogHandled { .. }
             | Self::DialogObserved { .. }
             | Self::CompositionUnrecorded

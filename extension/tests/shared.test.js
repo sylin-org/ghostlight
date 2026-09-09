@@ -831,3 +831,12 @@ test("concurrent same-name opens create one canonical group and window", async (
     { groupId: 100, tabIds: [2] }
   ]);
 });
+
+// These global Chrome events cannot distinguish an agent popup from a person's Ctrl-click.
+test("creating or moving a tab never implicitly binds, groups, or debugs it", () => {
+  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  assert.doesNotMatch(source, /chrome\.tabs\.(?:onCreated|onAttached)\.addListener/);
+  assert.doesNotMatch(source, /event: "child_tab_opened"/);
+  // Assignment remains available to the explicit OpenTab command.
+  assert.match(source, /topology\.open\(/);
+});

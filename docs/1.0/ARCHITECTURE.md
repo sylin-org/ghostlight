@@ -465,9 +465,14 @@ groups. The first tab for a workspace brings the Ghostlight window into view; la
 repeatedly steal window focus. The adapter colors the group blue, records the opaque workspace
 association, and opens without an externally visible blank-tab step. Group ids are restart-local
 hints and exact-title discovery repairs stale hints. The label never routes or grants authority. A
-newly opened tab is adopted only when its opener is mapped unambiguously; the service validates
-parent ownership before adding the child to the workspace aggregate. Moving a group or tab between
-windows does not change ownership.
+newly opened tab is not adopted through its opener: that relationship cannot distinguish an
+agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
+group or tab between windows does not change ownership or trigger automatic regrouping.
+
+Document-commit events silently update cached destinations and invalidate agent references. They
+never authorize browsing, hold tabs, write action history, or produce presentation. Even a
+correlated event is not proof of agent authorship. The executor governs its requested operations
+and returned landings at the existing boundaries. ADR-0164 owns this distinction.
 
 The service worker persists only the installation id, adapter-local preferences, enough opaque
 topology to recover after worker suspension, and a bounded content-free operation disposition

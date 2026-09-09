@@ -143,56 +143,10 @@ pub struct ApplicationExecutor {
     workbench: WorkbenchProjection,
     audit: Arc<crate::audit::AuditRecorder>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
-    active_authority: ActiveAuthorityRegistry,
     observations: ObservationRegistry,
     stale_candidates: StaleCandidateRegistry,
     permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
     coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
-}
-
-/// Current immutable invocation snapshots used only to govern asynchronous browser events.
-///
-/// Keyed by workspace, but the value is every invocation currently governing that workspace, not
-/// just one: operations that skip the workspace lease (recording status/stop/discard) can run
-/// fully concurrently with a lease-holding operation on the same workspace, on separate threads.
-/// A single `HashMap<String, AuthoritySnapshot>` here let one invocation's completion silently
-/// clear -- or its start silently overwrite -- another invocation's still-active entry, and the
-/// reader's fallback on a missing entry is the *widest* policy available, which made this a
-/// fail-open race rather than a merely confusing one. Removal here is scoped to the exact
-/// invocation that inserted it, never to "whatever is currently there for this workspace".
-pub type ActiveAuthorityRegistry = Arc<Mutex<HashMap<String, Vec<(String, AuthoritySnapshot)>>>>;
-
-/// Add one invocation's snapshot to its workspace's active set.
-fn register_active_authority(
-    registry: &ActiveAuthorityRegistry,
-    workspace: &str,
-    invocation: &str,
-    snapshot: &AuthoritySnapshot,
-) {
-    registry
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .entry(workspace.to_owned())
-        .or_default()
-        .push((invocation.to_owned(), snapshot.clone()));
-}
-
-/// Remove exactly this invocation's snapshot, leaving any other invocation still governing the
-/// same workspace untouched.
-fn deregister_active_authority(
-    registry: &ActiveAuthorityRegistry,
-    workspace: &str,
-    invocation: &str,
-) {
-    let mut registry = registry
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(entries) = registry.get_mut(workspace) {
-        entries.retain(|(id, _)| id != invocation);
-        if entries.is_empty() {
-            registry.remove(workspace);
-        }
-    }
 }
 
 /// What each in-flight invocation has been observed doing at the browser boundary.
@@ -227,18 +181,11 @@ impl ApplicationExecutor {
             workbench,
             audit,
             diagnostics,
-            active_authority: Arc::new(Mutex::new(HashMap::new())),
             observations: Arc::new(Mutex::new(HashMap::new())),
             stale_candidates: Arc::new(Mutex::new(HashMap::new())),
             permissions: Mutex::new(HashMap::new()),
             coverage: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Shared read-only source of active immutable snapshots for browser-event governance.
-    #[must_use]
-    pub fn active_authority(&self) -> ActiveAuthorityRegistry {
-        Arc::clone(&self.active_authority)
     }
 
     /// Decode, govern, execute, react, audit, and complete one invocation.
@@ -412,19 +359,11 @@ impl ApplicationExecutor {
                     .as_ref()
                     .map(|connection| connection.details()),
             });
-            register_active_authority(
-                &self.active_authority,
-                workspace.as_str(),
-                &invocation,
-                &snapshot,
-            );
-            let terminal = if let Some(lease) = lease.as_ref() {
+            if let Some(lease) = lease.as_ref() {
                 self.run(&context, lease, operation)
             } else {
                 self.run_without_workspace_lease(&context, operation)
-            };
-            deregister_active_authority(&self.active_authority, workspace.as_str(), &invocation);
-            terminal
+            }
         } else if cancellation.is_cancelled() {
             let refusal = Refusal::CancelledBeforeStart;
             let summary = refusal.summary();
@@ -1065,9 +1004,8 @@ impl ApplicationExecutor {
     /// `url: None` means this operation has no tab in play at all -- `list_tabs` is the only
     /// caller, since listing needs no destination to check. Every operation that names a tab
     /// must pass `Some(&tab.url)`, the tab's raw string as tracked right now, **even when that
-    /// string is empty** because the tab's first landing has not been governed yet (a page
-    /// calling `window.open()` is adopted immediately, before the async navigation-committed
-    /// event that would establish its real host arrives). An empty or otherwise unparseable
+    /// string is empty** because the tab's first landing has not been governed yet. An empty
+    /// or otherwise unparseable
     /// string falls straight through to `authorize_landing`, which denies it as `HostDenied` --
     /// there is no third option here that falls back to a host-blind capability check. That
     /// fallback used to exist and was the bug: a tab whose destination genuinely is not yet
@@ -2313,9 +2251,8 @@ mod tests {
     use crate::workspace::WorkspaceStore;
 
     use super::{
-        browser_reason, deregister_active_authority, observation_budget_ms, observed_from,
-        readiness_name, register_active_authority, routing_refusal, ApplicationExecutor,
-        BrowserError, CancellationToken, Effect, Readiness, Status,
+        browser_reason, observation_budget_ms, observed_from, readiness_name, routing_refusal,
+        ApplicationExecutor, BrowserError, CancellationToken, Effect, Readiness, Status,
     };
 
     #[derive(Default)]
@@ -4058,58 +3995,6 @@ mod tests {
     }
 
     #[test]
-    fn one_invocations_completion_never_clears_a_still_active_sibling() {
-        // Recording status/stop/discard skip the workspace lease and can run fully concurrently
-        // with a lease-holding operation on the same workspace, on separate threads. A single
-        // snapshot-per-workspace registry let one invocation's insert overwrite another's entry,
-        // and one invocation's finish clear an entry a still-running sibling depended on -- the
-        // reader's fallback on a miss is the widest policy available, so this was a fail-open
-        // race, not just a confusing one. Two distinct policies stand in for two distinct
-        // invocations' snapshots, so a clobber would be visible as the wrong one surviving.
-        let (executor, _, _, workspace, _) = fixture();
-        let registry = executor.active_authority();
-
-        let narrow = GovernanceFacade::new(
-            Some({
-                let path = temporary_policy("sibling-narrow");
-                fs::write(
-                    &path,
-                    r#"{"schema":3,"name":"narrow","version":"1","grants":[]}"#,
-                )
-                .unwrap();
-                path
-            }),
-            None,
-        )
-        .snapshot();
-        let wide = GovernanceFacade::new(None, None).snapshot();
-        assert_ne!(
-            narrow.id(),
-            wide.id(),
-            "the two snapshots must be distinguishable"
-        );
-
-        register_active_authority(&registry, workspace.as_str(), "invocation_a", &narrow);
-        register_active_authority(&registry, workspace.as_str(), "invocation_b", &wide);
-
-        // invocation_a finishes first. Its own entry must go; invocation_b's must not.
-        deregister_active_authority(&registry, workspace.as_str(), "invocation_a");
-        {
-            let locked = registry.lock().unwrap();
-            let entries = locked
-                .get(workspace.as_str())
-                .expect("invocation_b is still active");
-            assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0].0, "invocation_b");
-            assert_eq!(entries[0].1.id(), wide.id());
-        }
-
-        // invocation_b finishes. The workspace now has no active invocation at all.
-        deregister_active_authority(&registry, workspace.as_str(), "invocation_b");
-        assert!(registry.lock().unwrap().get(workspace.as_str()).is_none());
-    }
-
-    #[test]
     fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
         // Every other operation in this executor -- even ones needing no capability at all, like
         // activating a tab -- crosses the runtime gate before it can reach the browser. Recording
@@ -4654,14 +4539,8 @@ mod tests {
 
     #[test]
     fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capability_alone() {
-        // A page under the model's control can open a child tab; the workspace adopts it
-        // immediately, before the async navigation-committed event that would establish its real
-        // host arrives, so the tab's own url is briefly empty. A policy that grants Read only on
-        // a specific host, never "*", proves the point: if authorize() fell back to a host-blind
-        // capability check for this tab (the bug), the read would wrongly succeed, because that
-        // fallback unions grants across every host the policy names, ignoring which host the tab
-        // is actually on. It must be refused instead, exactly as an unparseable committed URL
-        // already is on the click/type/fill path.
+        // Acquiring a tab does not grant destination authority. Until a known landing has
+        // been checked, an empty URL must fail closed rather than union host-specific grants.
         let policy = temporary_policy("unknown-landing");
         fs::write(
             &policy,
@@ -4685,16 +4564,13 @@ mod tests {
             &CancellationToken::default(),
         );
         assert_eq!(opened.status, Status::Succeeded, "{opened:?}");
-        let bound_browser = workspaces.browser_of(workspace.as_str()).unwrap();
-
-        // Adopt a child the way a page's own `window.open()` does: through the real production
-        // path (`WorkspaceStore::apply_browser_child`), which stores the new tab's url as empty
-        // regardless of what the physical tab record otherwise says, exactly as it does when the
-        // extension reports a page-opened tab before that tab's first navigation has committed.
-        let (child_workspace, handle) = workspaces
-            .apply_browser_child(&bound_browser, 7, &tab(8, "https://attacker.example/"))
-            .expect("the opener tab is owned by this workspace");
-        assert_eq!(child_workspace, workspace);
+        // Even an explicitly acquired tab without a known destination must fail closed.
+        let handle = workspaces
+            .acquire(&workspace)
+            .unwrap()
+            .add_tab(&tab(8, ""))
+            .unwrap()
+            .handle;
 
         let read = executor.execute(
             &workspace,

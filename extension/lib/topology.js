@@ -200,18 +200,6 @@
       });
     }
 
-    async function adopt(openerTabId, tabId) {
-      const workspace = tabWorkspaces.get(openerTabId);
-      if (!workspace) return null;
-      await assign(tabId, workspace, titles.get(workspace));
-      return workspace;
-    }
-
-    async function reattach(tabId) {
-      const workspace = tabWorkspaces.get(tabId);
-      if (workspace) await assign(tabId, workspace, titles.get(workspace));
-    }
-
     async function forget(tabId) {
       return serialized(async () => {
         tabWorkspaces.delete(tabId);
@@ -267,7 +255,7 @@
       );
     }
 
-    return Object.freeze({ restore, open, assign, adopt, reattach, forget, findReusable, workspaceFor, titleFor, tabsFor });
+    return Object.freeze({ restore, open, assign, forget, findReusable, workspaceFor, titleFor, tabsFor });
   }
 
   return Object.freeze({ GROUP_PREFIX, GROUP_COLOR, validTitle, create });

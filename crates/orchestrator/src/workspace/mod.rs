@@ -556,12 +556,12 @@ impl WorkspaceStore {
         }
     }
 
-    pub fn apply_browser_landing(
+    /// Invalidate agent references after an unrelated page change, without governing browsing.
+    pub fn note_browser_landing(
         &self,
         browser: &str,
         physical_id: u64,
         url: &str,
-        allowed: bool,
     ) -> Option<(WorkspaceId, TabHandle)> {
         let mut state = self.lock();
         for (workspace_id, workspace) in state
@@ -576,10 +576,9 @@ impl WorkspaceStore {
             {
                 tab.generation = tab.generation.saturating_add(1);
                 tab.readiness = BrowserReadiness::Loading;
-                tab.held = !allowed;
-                if allowed {
-                    tab.url = url.into();
-                }
+                tab.held = false;
+                tab.url = url.into();
+                tab.title.clear();
                 return Some((workspace_id.clone(), handle.clone()));
             }
         }
@@ -590,8 +589,7 @@ impl WorkspaceStore {
     ///
     /// A physical tab id is unique inside one browser and nowhere else, so the browser that
     /// reported the event is part of the key. Without it, Chrome's tab 5 and Edge's tab 5 are the
-    /// same lookup, and one browser's navigation would be governed and audited against the
-    /// other's tab.
+    /// same lookup, and one browser's state could change the other's cached references.
     #[must_use]
     pub fn owner_of_physical(&self, browser: &str, physical_id: u64) -> Option<WorkspaceId> {
         let state = self.lock();
@@ -651,57 +649,6 @@ impl WorkspaceStore {
                 return;
             }
         }
-    }
-
-    /// Adopt a physical child tab only through its already-owned opener.
-    pub fn apply_browser_child(
-        &self,
-        browser: &str,
-        opener_physical_id: u64,
-        tab: &PhysicalTab,
-    ) -> Option<(WorkspaceId, TabHandle)> {
-        let mut state = self.lock();
-        if state
-            .workspaces
-            .values()
-            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
-            .any(|workspace| {
-                workspace
-                    .tabs
-                    .values()
-                    .any(|known| known.physical_id == tab.tab_id)
-            })
-        {
-            return None;
-        }
-        for (workspace_id, workspace) in state
-            .workspaces
-            .iter_mut()
-            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
-        {
-            if !workspace
-                .tabs
-                .values()
-                .any(|known| known.physical_id == opener_physical_id)
-            {
-                continue;
-            }
-            let handle = TabHandle(format!("tab_{}", Uuid::new_v4().simple()));
-            workspace.tabs.insert(
-                handle.clone(),
-                TabState {
-                    physical_id: tab.tab_id,
-                    generation: 0,
-                    url: String::new(),
-                    title: String::new(),
-                    readiness: tab.readiness,
-                    active: tab.active,
-                    held: false,
-                },
-            );
-            return Some((workspace_id.clone(), handle));
-        }
-        None
     }
 
     fn lock(&self) -> MutexGuard<'_, AggregateState> {
@@ -1882,20 +1829,5 @@ mod tests {
             None,
             "commit stales assets"
         );
-    }
-
-    #[test]
-    fn child_tabs_are_adopted_only_through_an_owned_opener() {
-        let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
-        let lease = store.acquire(&workspace).unwrap();
-        let _ = lease.add_tab(&physical(7, "about:blank")).unwrap();
-        assert!(store
-            .apply_browser_child(TEST_BROWSER, 7, &physical(8, "about:blank"))
-            .is_some());
-        assert!(store
-            .apply_browser_child(TEST_BROWSER, 99, &physical(9, "about:blank"))
-            .is_none());
-        assert_eq!(lease.tabs().unwrap().len(), 2);
     }
 }

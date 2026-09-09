@@ -199,8 +199,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     - `tests/script-browser-journey.mjs` verifies the evaluator in real Chromium and its receipts
       through the real relays, service, and MCP edge. Its native framing is a test adapter; it
       does not substitute for installed-extension/native-host acceptance.
-15. Open a child tab from a controlled page, adopt it into the same workspace, and preserve
-    ownership after moving the tab group to another window.
+15. Manually navigate a controlled tab to a prohibited destination. No activity, audit record,
+    policy response, or tab hold is produced. The next agent request checks the current URL and
+    refuses prohibited work. Opening a child tab from a controlled page does not adopt, group,
+    or attach a debugger to it. Moving tabs between windows does not trigger regrouping.
+    Cached agent targets still expire on document changes (ADR-0164).
 16. Resize a controlled tab's window within the documented bounds, observe the resulting geometry,
     and prove resize affects no unrelated window while invalidating stale view geometry.
 17. Start a recording, perform ordinary browser work, save without an explicit stop, verify the
