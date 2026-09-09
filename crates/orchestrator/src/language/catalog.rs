@@ -265,6 +265,7 @@ fn outcome_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+            "history_storage": {"type":"string","enum":[super::audit_health::Storage::Saved,super::audit_health::Storage::Unconfirmed],"description":"Whether saving this receipt was confirmed, independently of its browser effects."},
             "invocation": {"type":"string","pattern":"^invocation_.+$","description":"Opaque invocation handle."},
             "status": {"type":"string","enum":["succeeded","blocked","failed","cancelled","attention_required","unknown"]},
             "effect": {"type":"string","enum":["none","applied","partial","unknown"]},
@@ -274,7 +275,7 @@ fn outcome_schema() -> Value {
             "facts": {"type":"object","description":"Tool-specific canonical facts."},
             "next_steps": {"type":"array","maxItems":2,"items":{"type":"string"}}
         },
-        "required": ["invocation","status","effect","readiness","repeat_safe","summary","facts","next_steps"]
+        "required": ["history_storage","invocation","status","effect","readiness","repeat_safe","summary","facts","next_steps"]
     })
 }
 
@@ -1436,6 +1437,49 @@ mod tests {
 
     use super::{catalog, catalog_for};
     use crate::governance::GovernanceFacade;
+
+    #[test]
+    fn serialized_result_fields_are_declared_in_every_output_schema() {
+        use crate::language::audit_health::Storage;
+        use crate::work::result::{Effect, InvocationResult, Readiness, Status};
+
+        let mut result = InvocationResult::new(
+            "invocation_schema_test",
+            Status::Succeeded,
+            Effect::None,
+            Readiness::NotApplicable,
+            true,
+            "Schema fixture.",
+            json!({}),
+            vec![],
+        );
+        for storage in [Storage::Saved, Storage::Unconfirmed] {
+            result.history_storage = storage;
+            let serialized = serde_json::to_value(&result).unwrap();
+            for tool in catalog() {
+                let schema = tool.output_schema.unwrap();
+                assert_eq!(
+                    serialized.as_object().unwrap().keys().collect::<Vec<_>>(),
+                    schema["properties"]
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .collect::<Vec<_>>(),
+                    "{} must declare every serialized result field",
+                    tool.name,
+                );
+                assert!(schema["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("history_storage")));
+                assert!(schema["properties"]["history_storage"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serialized["history_storage"]));
+                assert_eq!(schema["additionalProperties"], false);
+            }
+        }
+    }
 
     const EXPECTED_TOOL_NAMES: [&str; 23] = [
         "browser_tabs",

@@ -8,6 +8,19 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Alpine fleet acceptance and result-schema repair (2026-09-09)
+
+The test-03 native-musl lane built the frozen `a8cfd033` candidate dynamically and
+proved real installed Chromium, desktop, human-control, plural-profile, recovery
+and supplemental managed-policy journeys. Published GNU binaries fail on Alpine's
+absent glibc loader; no new platform support is claimed. Actual MCP Inspector and
+OpenCode exposed an omitted `history_storage` output-schema field. The owning
+language schema now declares the existing storage enum, and both real clients
+accept the fixed installed service. The recovery reporter also preserves protocol
+failures instead of masking them with a TypeError. See the
+[Alpine fleet record](testing/alpine-musl-fleet-2026-09-09.md) for hashes, passed
+checks, retained failures, context boundaries and pending reboot/release evidence.
+
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
 ADR-0164 records the owner's clarified boundary: Ghostlight manages only its own actions.
