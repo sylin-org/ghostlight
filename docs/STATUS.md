@@ -8,6 +8,23 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Windows fleet package replacement (2026-09-09)
+
+The Windows lane reproduced a silent NSIS upgrade returning zero while retaining
+the running public MCP connector's old bytes. The package hooks now hold the
+existing deployment lock and stop only exact installed sibling processes through
+Windows Restart Manager, with PID creation-time binding. Separate installations
+and unrelated readers survive. Browser registration failures return a nonzero
+installer result. The final package installs all expected bytes and leaves no lock.
+
+Formatting, warnings-denied workspace Clippy, 531 Rust tests, 210 extension tests,
+npm launcher, workbench, and NSIS build pass. Actual VS Code transport, an installed
+Codex `policy_explain` call, and native workbench recreation pass. Final uninstall
+with a held file was blocked by automatic tool review; no adapter is loaded because
+browser URL policy blocked extension management. Package/store/clean-machine and
+reboot browser acceptance remain open. The [fleet matrix](testing/windows-fleet-packaging-2026-09-09.md)
+preserves original failures, per-prototype limits, hashes, and machine handoff.
+
 ## Windows fleet peer attribution (2026-09-09)
 
 The Windows fleet lane reproduced missing socket-peer evidence in both the win-peer

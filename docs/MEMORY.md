@@ -213,6 +213,16 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **An installer exit and a refreshed tool catalog do not prove replacement.** A
+  running old MCP connector can reconnect to the new service while retaining old
+  executable bytes. Compare every installed sibling to its intended package,
+  quiesce only exact image paths under the existing deployment lock, and verify
+  that a separate installation and an unrelated file reader both survive.
+- **Normalize only a proven packager transformation.** Tauri's NSIS bundler patches
+  the authority's bundle marker from `UNK` to `NSS` and then restores the raw build.
+  Full byte comparison after that exact in-memory substitution explains the hash
+  difference; a version string or an arbitrary hash exception does not.
+
 - **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
   URL that does not identify the release tag. Resolve the latest release page first, validate the
   stable tag, then pin checksums and every sibling download to that one release. The actual Linux
