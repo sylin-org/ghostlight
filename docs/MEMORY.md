@@ -10,6 +10,12 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Keep local work in the ordinary Ghostlight repository.** The owner rejected
+  separate fleet folders/worktrees on 2026-09-09. The existing acceptance layout
+  may remain for its current run; new work uses the main repository and existing
+  ignored artifact conventions. Flatpak Chromium support takes priority over the
+  remaining native Chromium acceptance until that investigation is resolved.
+
 - **The four remote machines are dedicated test resources.** The owner grants the coordinator
   and each machine's local agents full control of test-01, test-02, test-03, and leo-desktop-02
   for project testing: prerequisites, desktop/browser interaction, installation, packaging,

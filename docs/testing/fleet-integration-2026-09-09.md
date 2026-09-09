@@ -80,6 +80,13 @@ unchanged. Native source gates passed 542 Rust and 210 extension tests. This is 
 installed repair, not a combined Alpine build or a second physical reboot. Unconfigured
 sanitized launches and failed-start retry amplification retain their earlier limitations.
 
+Bluefin checkpoint `6883aa59` additionally proves post-reboot Codex startup, native Chromium
+registration and a warm real Flatpak Chromium extension connection with successful open/read.
+The user preserve-tabs setting refused cleanup, and the agent left the tab and setting intact.
+Flatpak still cannot cold-start the host GUI authority, and its manual test manifest is not
+implemented installer support. No sandbox permissions were broadened. See the
+[Flatpak investigation](flatpak-chromium-2026-09-09.md) for evidence and activation constraints.
+
 The final Windows uninstall/refusal test was rejected by automatic approval review
 with only `blocked by policy`; no alternate-route retry was made. Windows still
 needs an adapter loaded through an allowed route. Bluefin still lacks native visible

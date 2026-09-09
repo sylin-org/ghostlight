@@ -26,6 +26,14 @@ cold start now pass, followed by browser rejoin and workbench Open. All 542 nati
 210 extension tests pass. Unconfigured clients still strip desktop context, and failed-start
 retry amplification remains unchanged. No second physical reboot or combined Alpine build is claimed.
 
+Bluefin checkpoint `6883aa59` adds post-reboot Codex startup and native Chromium registration
+passes, then a real developer-mode Flatpak Chromium extension connection and open/read pass
+against the running host authority. The person's preserve-tabs setting correctly refused test
+cleanup. Flatpak cold startup remains unresolved because the sandbox cannot start the host GUI
+authority; manual test registration is not installer support. No sandbox permissions were widened.
+See the [Flatpak checkpoint](testing/flatpak-chromium-2026-09-09.md). The one-off round did not
+restart the campaign schedule. CachyOS and Windows have no new published acceptance evidence.
+
 The owner assigned test-01 (CachyOS/KDE), test-02 (Bluefin/GNOME), test-03 (Alpine/KDE),
 and leo-desktop-02 (Windows) full autonomous acceptance and packaging lanes. Source round one
 is frozen at `a8cfd033`. Agents may install prerequisites, operate these dedicated machines,
