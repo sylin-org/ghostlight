@@ -57,6 +57,7 @@ Every invocation returns one envelope:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `history_storage` | enum | `saved` or `unconfirmed`; storage confirmation is independent of browser effects. |
 | `invocation` | string | Opaque correlation handle. |
 | `status` | enum | `succeeded`, `blocked`, `failed`, `cancelled`, `attention_required`, or `unknown`. |
 | `effect` | enum | `none`, `applied`, `partial`, or `unknown`. |

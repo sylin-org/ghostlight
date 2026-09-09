@@ -265,7 +265,7 @@ fn outcome_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "history_storage": {"type":"string","enum":["saved","unconfirmed"],"description":"Whether saving this receipt was confirmed, independent of browser effects."},
+            "history_storage": {"type":"string","enum":[super::audit_health::Storage::Saved,super::audit_health::Storage::Unconfirmed],"description":"Whether saving this receipt was confirmed, independent of browser effects."},
             "invocation": {"type":"string","pattern":"^invocation_.+$","description":"Opaque invocation handle."},
             "status": {"type":"string","enum":["succeeded","blocked","failed","cancelled","attention_required","unknown"]},
             "effect": {"type":"string","enum":["none","applied","partial","unknown"]},

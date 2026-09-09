@@ -94,8 +94,10 @@ function request(method, params = {}) {
 async function call(name, args) {
   const reply = await request("tools/call", { name, arguments: args });
   const result = reply.result?.structuredContent;
+  const reason = result?.facts?.reason;
   report.invocations.push({ tool: name, status: result?.status, effect: result?.effect,
-    reason: /^[a-z_]+$/.test(result?.facts?.reason) ? result.facts.reason : null });
+    reason: typeof reason === "string" && /^[a-z_]+$/.test(reason) ? reason : null,
+    ...(Number.isInteger(reply.error?.code) ? { protocol_error_code: reply.error.code } : {}) });
   save();
   assert.equal(reply.error, undefined, "Unexpected MCP protocol failure");
   assert.equal(reply.result?.structuredContent?.status, "succeeded", `${name} did not succeed`);
