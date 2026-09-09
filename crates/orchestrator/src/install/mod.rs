@@ -1085,8 +1085,10 @@ fn inspect_toml(
         .unwrap_or_default();
     let args = toml_entry_args(entry);
     let state = command_registration_state(command, args.as_deref(), connector, windows);
-    if state == RegistrationState::Current
-        && !missing_codex_desktop_environment(entry, windows)?.is_empty()
+    if matches!(
+        state,
+        RegistrationState::Current | RegistrationState::Updatable
+    ) && !missing_codex_desktop_environment(entry, windows)?.is_empty()
     {
         return Ok(RegistrationState::Updatable);
     }
@@ -1103,9 +1105,27 @@ fn missing_codex_desktop_environment(
     let forwarded = entry
         .get("env_vars")
         .map(|item| {
-            item.as_array().ok_or_else(|| {
+            let values = item.as_array().ok_or_else(|| {
                 HarnessError::Malformed("Ghostlight's env_vars is not a TOML array".into())
-            })
+            })?;
+            // Validate every member before deciding whether any handoff is missing.
+            // Codex accepts a name or a closed name/source object, not arbitrary TOML.
+            for (index, value) in values.iter().enumerate() {
+                let valid = value.as_str().is_some()
+                    || value.as_inline_table().is_some_and(|table| {
+                        table.get("name").and_then(toml_edit::Value::as_str).is_some()
+                            && table.get("source").is_none_or(|source| {
+                                matches!(source.as_str(), Some("local" | "remote"))
+                            })
+                            && table.iter().all(|(key, _)| matches!(key, "name" | "source"))
+                    });
+                if !valid {
+                    return Err(HarnessError::Malformed(format!(
+                        "Ghostlight's env_vars member {index} must be a string or a name/source table with a string name and optional local/remote source"
+                    )));
+                }
+            }
+            Ok(values)
         })
         .transpose()?;
     Ok(CODEX_DESKTOP_ENVIRONMENT
@@ -3614,7 +3634,7 @@ mod tests {
         let path = directory.join("config.toml");
         let connector = connector(&directory);
         let source = format!(
-            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
+            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
             connector.to_string_lossy()
         );
         fs::write(&path, &source).unwrap();
@@ -3631,7 +3651,16 @@ mod tests {
             entry["env"]["XAUTHORITY"].as_str(),
             Some("/explicit/test-authority")
         );
-        assert_eq!(entry["env_vars"].as_array().unwrap().len(), 6);
+        assert_eq!(entry["env_vars"].as_array().unwrap().len(), 7);
+        let original = source.parse::<toml_edit::DocumentMut>().unwrap();
+        for (before, after) in original["mcp_servers"]["ghostlight"]["env_vars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(entry["env_vars"].as_array().unwrap().iter())
+        {
+            assert_eq!(before.to_string(), after.to_string());
+        }
         assert_eq!(
             document["mcp_servers"]["other"]["command"].as_str(),
             Some("other-server")
@@ -3663,6 +3692,48 @@ mod tests {
             inspect_toml(&source, &connector, true).unwrap(),
             RegistrationState::Current
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn codex_malformed_environment_members_are_preserved_before_migration() {
+        let directory = temporary("codex-malformed-env-members");
+        let path = directory.join("config.toml");
+        let connector = connector(&directory);
+        for members in [
+            "123",
+            "true",
+            "[]",
+            "{}",
+            "{ name = 123 }",
+            "{ source = \"local\" }",
+            "{ name = \"DISPLAY\", source = 123 }",
+            "{ name = \"DISPLAY\", source = \"bogus\" }",
+            "{ name = \"DISPLAY\", extra = true }",
+            "\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\", 123",
+        ] {
+            for command in [&connector, &directory.join("old/ghostlight-mcp-connector")] {
+                for source in [
+                    format!(
+                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = [{members}]\n",
+                        command.to_string_lossy()
+                    ),
+                    format!(
+                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = [], env_vars = [{members}] }}\n",
+                        command.to_string_lossy()
+                    ),
+                ] {
+                    fs::write(&path, &source).unwrap();
+                    assert!(
+                        inspect_toml(&source, &connector, false).is_err(),
+                        "inspection accepted {source}"
+                    );
+                    assert!(edit_toml(&path, &connector, true).is_err());
+                    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+                }
+            }
+        }
         fs::remove_dir_all(directory).unwrap();
     }
 

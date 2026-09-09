@@ -33,6 +33,11 @@ also pass. Repair 4af4988 is signed off and pushed to codex/fleet-test-02 under 
 owner's authorization. Secure Git credentials are verified; no credential handoff
 is pending. The evidence record now carries a sanitized coordinator checkpoint
 because remote task reads return empty items. Desktop and reboot limitations remain.
+Coordinator review reproduced missing env_vars member validation in 4af4988.
+The narrow follow-up rejects malformed members before Linux owned-entry migration
+and preserves original bytes, while retaining valid custom/explicit environment
+settings. See the evidence record for the real Codex parser probe and regression.
+This source follow-up is not deployed; earlier installed-binary evidence is unchanged.
 
 ## Human browsing is outside Ghostlight work (2026-09-09)
 

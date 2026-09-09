@@ -186,3 +186,35 @@ to unlock GNOME and reopen Codex after reboot is unanswered. No reboot recovery
 is claimed. The campaign is incomplete for the blocked/not-run lanes above;
 credentials are not their blocker. Do not rerun passing checks merely to keep the
 task active. Resume desktop lanes when a permitted control/login path is available.
+
+## Review follow-up: malformed Codex environment members
+
+The coordinator's review of 4af4988 identified that checking only the env_vars
+array shape did not validate its members. A new Linux regression failed against
+that commit's implementation because inspection accepted env_vars = [123].
+The installed Codex CLI 0.152.0 rejects numeric/boolean/nested-array members,
+missing or non-string names, non-string or unsupported sources, and extra fields
+inside a name/source object. String names, omitted source, and local/remote
+sources pass its configuration parser. The read-only probe used per-invocation
+overrides and mcp get; it did not edit client configuration or invoke a model.
+The [official configuration schema](https://learn.chatgpt.com/docs/config-schema.json)
+and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+were checked using OpenAI Docs; the installed parser also confirms the source
+value restriction that the schema describes only as a string.
+
+The follow-up validates every env_vars member before any desktop forwarding or
+owned-path migration. Malformed normal and inline registrations remain byte-for-byte
+unchanged, including stale owned paths and arrays that already contain every
+desktop name. Validation is limited to this field; unrelated configuration is
+not revalidated. Positive coverage retains custom string names, default/local
+objects, remote custom objects, explicit environment values, comments and
+idempotency. No extension, relay or shared contract change is involved.
+All six Codex installer tests pass after the fix. The ordinary commit gates pass:
+541 Rust tests (456 orchestrator library), 210 extension tests, formatting and
+all-target Clippy with warnings denied. No JavaScript files changed.
+
+Raw evidence: codex-env-member-schema-probe.log, codex-env-member-before.log,
+codex-env-member-after.log and codex-env-member-gates.log under the fleet evidence
+root. The installed authority and portable archives still contain the earlier
+repair; this source follow-up is not deployed or counted as new live acceptance.
+No acceptance campaign, native-control or reboot checks were rerun.
