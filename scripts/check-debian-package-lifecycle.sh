@@ -42,24 +42,25 @@ fi
 if ls /etc/dpkg/dpkg.cfg.d/* >/dev/null 2>&1; then
     sed -i 's/^path-exclude/# path-exclude/' /etc/dpkg/dpkg.cfg.d/* 2>/dev/null || true
 fi
+# Drain piped checks: grep -q can close early and make a valid producer fail under pipefail.
 # The archive itself must carry all three manual pages regardless of image behavior.
-dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight.1.gz'
-dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-mcp-connector.1.gz'
-dpkg-deb -c "$artifact" | grep -Fq 'man1/ghostlight-browser-connector.1.gz'
+dpkg-deb -c "$artifact" | grep -F 'man1/ghostlight.1.gz' >/dev/null
+dpkg-deb -c "$artifact" | grep -F 'man1/ghostlight-mcp-connector.1.gz' >/dev/null
+dpkg-deb -c "$artifact" | grep -F 'man1/ghostlight-browser-connector.1.gz' >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y "$artifact"
 test "$(ghostlight --version)" = "ghostlight $expected_version"
 test "$(dpkg-query -W -f='${Version}' ghostlight)" = "$expected_version"
 test "$(dpkg-query -W -f='${Maintainer}' ghostlight)" = "Leonardo Botinelly <hello@sylin.org>"
 test "$(dpkg-query -W -f='${Section}' ghostlight)" = "utils"
-dpkg-query -W -f='${Depends}' ghostlight | grep -Fq 'libc6 (>= 2.34)'
+dpkg-query -W -f='${Depends}' ghostlight | grep -F 'libc6 (>= 2.34)' >/dev/null
 test -z "$(dpkg --verify ghostlight)"
 
 for binary in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
     path=/usr/bin/$binary
     test -x "$path"
     test "$(stat -c %a "$path")" = "755"
-    ! ldd "$path" | grep -Fq 'not found'
-    ! readelf -d "$path" | grep -Eq '(RPATH|RUNPATH)'
+    ! ldd "$path" | grep -F 'not found' >/dev/null
+    ! readelf -d "$path" | grep -E '(RPATH|RUNPATH)' >/dev/null
     max_glibc=$(readelf --version-info "$path" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
     echo "$binary max_glibc=${max_glibc#GLIBC_}"
     test "$(printf '%s\n2.35\n' "${max_glibc#GLIBC_}" | sort -V | tail -1)" = "2.35"
@@ -76,7 +77,7 @@ for directory in \
         .path == "/usr/bin/ghostlight-browser-connector" and
         .type == "stdio" and
         (.allowed_origins | length) == 2' "$manifest" >/dev/null
-    dpkg-query -W -f='${Conffiles}\n' ghostlight | grep -Fq " $manifest "
+    dpkg-query -W -f='${Conffiles}\n' ghostlight | grep -F " $manifest " >/dev/null
 done
 
 mapfile -t desktops < <(grep -R -l '^X-Ghostlight-Owned=true$' /usr/share/applications)
@@ -107,7 +108,7 @@ test -s "$runtime"
 test "$(stat -c %a "$runtime")" = "600"
 setpriv --reuid=1000 --regid=1000 --clear-groups \
     env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" ghostlight status |
-    grep -Fq 'running'
+    grep -F 'running' >/dev/null
 setpriv --reuid=1000 --regid=1000 --clear-groups \
     env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" ghostlight doctor >/dev/null
 setpriv --reuid=1000 --regid=1000 --clear-groups \
