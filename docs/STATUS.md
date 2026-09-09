@@ -19,7 +19,15 @@ language schema now declares the existing storage enum, and both real clients
 accept the fixed installed service. The recovery reporter also preserves protocol
 failures instead of masking them with a TypeError. See the
 [Alpine fleet record](testing/alpine-musl-fleet-2026-09-09.md) for hashes, passed
-checks, retained failures, context boundaries and pending reboot/release evidence.
+checks, retained failures, context boundaries and release limits. Post-reboot browser-led
+recovery, stable adapter identity, fresh browser read and native workbench pass.
+MCP-led cold-start fails: actual MCP Inspector sanitizes desktop environment
+variables, GTK initialization fails, and connector retries spawn repeated short-lived
+authorities. This platform defect remains unresolved; overall reboot acceptance
+is not green. The installed browser-led service is Ready again. Post-reboot local
+Git credential retrieval independently authenticates as `lbotinelly`, confirms
+repository push permission, secure KDE Secret Service helper and the required
+commit identity; an own-branch authenticated push dry-run succeeds.
 
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
