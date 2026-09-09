@@ -40,11 +40,15 @@ Ignored coordinator logs are under `.tmp/fleet-acceptance/` in the owner checkou
 `integration-process-gates.log`. These are central source/isolated-boundary checks,
 not a new installed-browser run or a rebuilt native package acceptance claim.
 
-Linux-only configuration paths need a check of the combined candidate on Linux.
-The previous Bluefin repair and malformed-member follow-up passed their native
-checks independently; combining their source on Windows does not execute those
-conditional tests. Existing installed-browser evidence retains the exact candidate
-and artifact identity recorded by each machine.
+The bounded Linux check of exact combined source db57b9bf is now complete on Bluefin:
+542 Rust tests, including the Linux-only Codex configuration cases, 222 extension
+tests and the source gates pass. The host controller replaced only the authority;
+the actual Codex cold-start call created one authority and returned policy_explain
+with succeeded/effect none/history_storage saved. Connectors and saved client and
+native registration bytes are unchanged. The [Bluefin integration report](bluefin-fleet-integration-2026-09-09.md)
+records exact before/after hashes and scope. Existing installed-browser evidence
+retains the candidate and artifact identity recorded by each machine; no native
+browser/GNOME, reboot or broad campaign checks were repeated.
 
 ## Remaining limits and credential state
 

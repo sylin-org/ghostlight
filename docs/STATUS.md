@@ -21,7 +21,13 @@ All four fleet branches now provide sanitized reports despite intermittent empty
 output. Their fixes and evidence are combined on `codex/fleet-integration`. Central checks
 pass: 533 Rust tests, 222 extension tests, formatting, Clippy, JavaScript syntax, process,
 provenance and workbench journeys. [Integration evidence](testing/fleet-integration-2026-09-09.md)
-records the combined candidate; its Linux-only check is still pending. The source round and machine-specific evidence remain distinct:
+records the combined candidate. The bounded Bluefin check of exact revision
+db57b9bf passed 542 Rust tests (including all Linux-only Codex cases), 222 extension
+tests and the required source gates. Host-controlled authority-only deployment then
+passed the actual Codex cold-start/policy_explain check with one authority and a
+saved, effect-none result. Both connector hashes and saved registration/configuration
+bytes are unchanged. See the [Bluefin integration report](testing/bluefin-fleet-integration-2026-09-09.md).
+This does not close native-browser/GNOME or reboot limits. The source round and machine-specific evidence remain distinct:
 
 - CachyOS: [CachyOS report](testing/fleet-test-01-2026-09-09.md), source `9da0bbf7`. Full installed 23-tool journey,
   Chromium/Brave/profile isolation, human-browsing boundary, recovery and three real MCP client
