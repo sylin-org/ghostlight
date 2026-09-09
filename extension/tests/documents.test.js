@@ -83,6 +83,30 @@ test("later scope failure preserves already dispatched effects", async () => {
   assert.equal(documents.context(7), undefined);
 });
 
+test("focused input preflight refuses absent or excluded focus without marking dispatch", async () => {
+  for (const focusedId of [null, "child-1"]) {
+    const { state, documents, scope } = fixture();
+    state.answer = (id) => ({ focused: id === focusedId });
+    await assert.rejects(documents.run(7, scope, async () => {
+      await documents.verifyInput(7, "Input.insertText", { text: "replacement" });
+    }), { code: "document_scope_changed", effectUnknown: false });
+    assert.ok(state.calls.every(({ message }) => message.kind === "document_route"));
+  }
+});
+
+test("targeted typing dispatch remains bound to the admitted document", async () => {
+  const { state, documents, scope } = fixture();
+  await assert.rejects(documents.run(7, scope, async () => {
+    await assert.rejects(documents.route(7, 2, { kind: "type_text", text: "excluded" }),
+      { code: "document_scope_changed" });
+    assert.equal(documents.context(7).dispatched, false);
+    await documents.route(7, 0, { kind: "type_text", text: "permitted" });
+    state.raw[0].documentId = "top-2";
+    await documents.verify(7);
+  }), { code: "document_scope_changed", effectUnknown: true });
+  assert.deepEqual(state.calls.map(({ id }) => id), ["top-1"]);
+});
+
 test("malformed and oversized document inventories refuse", () => {
   for (const raw of [[], [{}], Array(257).fill({}), [
     { frameId: 0, parentFrameId: -1, documentId: "same", url: "https://allowed.test/" },

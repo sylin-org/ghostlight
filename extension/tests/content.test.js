@@ -138,7 +138,8 @@ function contentHarness() {
     matches() { return true; }
     dispatchEvent(event) { this.events.push(event.type); return true; }
     click() { this.events.push("click"); }
-    focus() {}
+    focus() { document.activeElement = this; }
+    select() { selectedRange = { selected: this }; }
     scrollIntoView() {}
   }
 
@@ -189,10 +190,11 @@ function contentHarness() {
     },
     getSelection() { return selection; },
     execCommand(command, _showUi, value) {
-      const element = selectedRange?.selected;
+      const element = selectedRange?.selected ?? document.activeElement;
       if (!element) return false;
       edits.push({ element, command, value });
-      element.textContent = command === "delete" ? "" : value;
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.value = command === "delete" ? "" : value;
+      else element.textContent = command === "delete" ? "" : value;
       element.events.push("input");
       return true;
     },
@@ -577,6 +579,110 @@ test("rich editor refusal prevents native editing and preserves the existing dra
     assert.match(result.error, reason);
     assert.equal(editor.textContent, "untouched");
     assert.equal(harness.edits.length, 0);
+  }
+});
+
+test("targeted typing replaces an unfocused ordinary or rich draft with one browser edit", async () => {
+  for (const rich of [false, true]) {
+    const harness = contentHarness();
+    harness.document.hasFocus = () => false;
+    const element = rich ? harness.element("div") : harness.input;
+    element.hidden = false; element.type = "text";
+    element.isContentEditable = rich;
+    element.setAttribute("aria-label", "Draft");
+    if (rich) {
+      element.setAttribute("contenteditable", "true");
+      element.textContent = "Original draft";
+      harness.document.body.append(element);
+    } else element.value = "Original draft";
+    const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+    const locator = inspected.result.targets.find((target) => target.name === "Draft").locator;
+    const result = await harness.send({ kind: "type_text", locator, text: "Replacement", clear_first: true });
+    assert.equal(result.ok, true);
+    assert.equal(rich ? element.textContent : element.value, "Replacement");
+    assert.deepEqual(harness.edits.map(({ command, value }) => ({ command, value })),
+      [{ command: "insertText", value: "Replacement" }], "there is no separate destructive clear");
+    assert.deepEqual(element.events, ["input"], "typing does not fabricate input/change events");
+    const cleared = await harness.send({ kind: "type_text", locator, text: "", clear_first: true });
+    assert.equal(cleared.ok, true);
+    assert.equal(rich ? element.textContent : element.value, "");
+    assert.equal(harness.edits.at(-1).command, "delete");
+  }
+});
+
+test("typing preserves drafts when the target or browser refuses before editing", async () => {
+  for (const refusal of ["disabled", "readonly", "credential", "focus", "selection", "browser"]) {
+    const harness = contentHarness();
+    const element = harness.input;
+    element.hidden = false; element.type = "text"; element.value = "Retained draft";
+    const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+    if (refusal === "disabled") element.disabled = true;
+    if (refusal === "readonly") element.readOnly = true;
+    if (refusal === "credential") element.type = "password";
+    if (refusal === "focus") element.focus = () => { harness.document.activeElement = harness.document.body; };
+    if (refusal === "selection") element.select = () => { throw new Error("selection unsupported"); };
+    if (refusal === "browser") harness.document.execCommand = () => false;
+    const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
+      text: "Replacement", clear_first: true });
+    assert.equal(result.ok, false, refusal);
+    assert.equal(element.value, "Retained draft", refusal);
+    assert.equal(harness.edits.length, 0, refusal);
+    assert.deepEqual(element.events, [], refusal);
+  }
+});
+
+test("typing rechecks the exact target after page focus or selection handlers run", async () => {
+  for (const trigger of ["focus", "select"]) {
+    const harness = contentHarness();
+    const element = harness.input;
+    element.hidden = false; element.type = "text"; element.value = "Retained draft";
+    const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+    const original = element[trigger].bind(element);
+    element[trigger] = () => { original(); element.type = "password"; };
+    const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
+      text: "Replacement", clear_first: true });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /handoff/);
+    assert.equal(element.value, "Retained draft");
+    assert.equal(harness.edits.length, 0);
+  }
+});
+
+test("empty typing without explicit clear cannot dispatch a deletion", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false; harness.input.type = "text"; harness.input.value = "Retained draft";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
+    text: "", clear_first: false });
+  assert.equal(result.ok, true);
+  assert.equal(harness.input.value, "Retained draft");
+  assert.equal(harness.edits.length, 0);
+  assert.deepEqual(harness.input.events, []);
+});
+
+test("typing without clear preserves the browser's existing input selection", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false; harness.input.type = "text"; harness.input.value = "Existing draft";
+  harness.input.select = () => { throw new Error("typing must not select all without explicit clear"); };
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
+    text: "suffix", clear_first: false });
+  assert.equal(result.ok, true);
+  assert.deepEqual(harness.edits.map(({ command, value }) => ({ command, value })),
+    [{ command: "insertText", value: "suffix" }]);
+});
+
+test("non-text input controls cannot route typing into a retained document selection", async () => {
+  for (const type of ["checkbox", "radio", "submit", "file", "date", "color"]) {
+    const harness = contentHarness();
+    harness.input.hidden = false; harness.input.type = type; harness.input.value = "Retained value";
+    const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+    const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
+      text: "Replacement", clear_first: true });
+    assert.equal(result.ok, false, type);
+    assert.match(result.error, /not text-editable/);
+    assert.equal(harness.input.value, "Retained value", type);
+    assert.equal(harness.edits.length, 0, type);
   }
 });
 
