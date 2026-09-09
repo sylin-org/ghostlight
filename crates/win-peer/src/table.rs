@@ -5,7 +5,8 @@
 
 use std::net::{IpAddr, SocketAddr, TcpStream};
 
-const AF_INET: u16 = 2;
+// GetExtendedTcpTable takes ULONG, even though socket APIs often use a 16-bit family.
+const AF_INET: u32 = 2;
 /// `TCP_TABLE_OWNER_PID_CONNECTIONS` from `iphlpapi.h`.
 const TCP_TABLE_OWNER_PID_CONNECTIONS: u32 = 4;
 /// `ERROR_INSUFFICIENT_BUFFER`.
@@ -27,7 +28,7 @@ extern "system" {
         tcp_table: *mut core::ffi::c_void,
         size_pointer: *mut u32,
         order: i32,
-        address_family: u16,
+        address_family: u32,
         table_class: u32,
         reserved: u32,
     ) -> u32;

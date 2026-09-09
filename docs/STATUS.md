@@ -8,6 +8,15 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Windows fleet peer attribution (2026-09-09)
+
+The Windows fleet lane reproduced missing socket-peer evidence in both the win-peer
+and orchestrator provenance tests. The hand-declared `GetExtendedTcpTable` address-family
+argument was `u16`, while Windows requires a 32-bit `ULONG`. Correcting that ABI declaration
+makes the original release-profile failure pass. Formatting, warnings-denied Clippy, the
+workspace tests, and all 210 extension tests pass. This is source evidence; installed
+package acceptance continues separately. See [the fleet record](testing/windows-fleet-peer-2026-09-09.md).
+
 ## Human browsing is outside Ghostlight work (2026-09-09)
 
 ADR-0164 records the owner's clarified boundary: Ghostlight manages only its own actions.
