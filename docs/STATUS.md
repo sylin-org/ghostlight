@@ -10,6 +10,16 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
+The owner now prioritizes Flatpak Chromium support before remaining native Chromium
+acceptance, and requires new local work in the ordinary repository, not separate
+fleet folders/worktrees. The [Flatpak investigation](testing/flatpak-chromium-2026-09-09.md)
+proves sandbox connector-to-host warm transport with existing permissions after
+placing a test manifest in Chromium's application-private config root. The real
+extension now connects and opens/reads a disposable local page successfully.
+Its preserve-tabs setting blocked cleanup; that setting and tab were left intact.
+Cold startup remains unproved; no support claim or
+sandbox permission expansion was made.
+
 The owner assigned test-01 (CachyOS/KDE), test-02 (Bluefin/GNOME), test-03 (Alpine/KDE),
 and leo-desktop-02 (Windows) full autonomous acceptance and packaging lanes. Source round one
 is frozen at `a8cfd033`. Agents may install prerequisites, operate these dedicated machines,
