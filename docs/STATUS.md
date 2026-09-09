@@ -10,6 +10,15 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
+Campaign execution and credential provisioning are complete, with explicit failed and blocked
+lanes retained below. All four machines independently verified local Git as `lbotinelly`,
+repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
+is recorded at `27800651`: normal browser-led recovery passed with retained adapter identity,
+but actual MCP Inspector cold startup failed when its SDK stripped desktop variables. GTK
+failed and connector retries created repeated short-lived authorities. This remains an open
+Linux startup defect; the Codex-specific forwarding repair does not solve every MCP client.
+The fleet is not release-ready. The scheduled coordinator was deleted after results were collected.
+
 The owner assigned test-01 (CachyOS/KDE), test-02 (Bluefin/GNOME), test-03 (Alpine/KDE),
 and leo-desktop-02 (Windows) full autonomous acceptance and packaging lanes. Source round one
 is frozen at `a8cfd033`. Agents may install prerequisites, operate these dedicated machines,
@@ -39,8 +48,8 @@ This does not close native-browser/GNOME or reboot limits. The source round and 
   human-browsing boundary, recovery, multiple profiles and OpenCode/Inspector calls passed.
   Independently repaired the same output-schema defect and a recovery reporter masking errors.
   Public GNU binaries fail on musl; the native debug archive is a prototype, not an APK release.
-  The host is currently unavailable after its report prepared a reboot. Post-reboot proof and
-  the actual cause of disconnection remain unconfirmed.
+  Post-reboot browser-led recovery and local Git verification passed. MCP-led cold startup
+  failed with sanitized desktop environment; no overall reboot pass is claimed.
 - Bluefin: [Bluefin report](testing/bluefin-fleet-2026-09-09.md), source `f51130d0`. Native host service and actual Codex cold
   startup passed after forwarding desktop environment names in client configuration. Review
   exposed malformed array members being rewritten; the follow-up now preserves them and passes
@@ -57,8 +66,8 @@ This does not close native-browser/GNOME or reboot limits. The source round and 
 The owner authorized local repository credential provisioning so every machine can commit and
 push as him. Source Git Credential Manager account `lbotinelly` has verified repository push
 access. CachyOS and Bluefin already have that account, owner commit identity, secure libsecret
-storage and verified branch push access; no token transfer is needed there. Alpine has pushed
-its signed-off branch, but authenticated login/helper verification awaits reconnection. Windows published its
+storage and verified branch push access; no token transfer is needed there. Alpine verified
+its local KDE Secret Service helper, account and push access after reboot. Windows published its
 public intake key through the authenticated GitHub connector at `76464c06`. The coordinator
 verified its fingerprint and sent a destination-encrypted credential envelope for secure GCM
 installation. Windows now verifies `lbotinelly`, repository push access and a successful local

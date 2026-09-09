@@ -142,7 +142,7 @@ and native browser bytes outside that masked home. It did not modify host policy
 
 Remaining lane limits: root APK/package-manager lifecycle, a second Chromium brand,
 store adapter, useful WebView accessibility, Codex's enforced approval block,
-three distinct real AI applications, and reboot evidence. Published GNU binaries
+three distinct real AI applications, and reliable MCP-led cold-start. Published GNU binaries
 cannot establish Alpine upgrades/downgrades. The native debug prototype is not a
 new supported release channel. Broader fleet and release approval remain separate.
 
@@ -166,3 +166,77 @@ post-boot verification. The readable SDDM configuration has no Autologin section
 after reboot, an interactive login may be required. This checkpoint does not
 claim reboot recovery. Primary AT-SPI traversal also did not establish a useful
 WebView tree; preserve that limitation alongside the supplemental no-tray result.
+
+
+## Post-reboot result: browser recovery passes, MCP cold-start fails
+
+The owner completed reboot. The new boot ID is
+`6ccc22b2-bfdd-4555-a4b7-25e8bfdc6646`, different from the checkpoint above.
+The actual KDE login session was present. Before intervention, Ghostlight was not
+Ready and MCP-led demand-start repeatedly created authorities that did not stay
+running. One process snapshot contained 54 authority processes.
+
+Launching the normal Chromium Applications entry let the registered native host
+start one installed authority. The adapter retained
+`browser_fec1a57a95d64265a452c5569c428714`; all three binary hashes were unchanged.
+A fresh installed MCP browser read returned `ALPINE-MUSL-135`, and explicit Open
+produced the native Ghostlight workbench. This is a browser-led recovery pass,
+not an overall cold-start pass. See `reboot-result.json` and `reboot-proof.log`.
+
+A controlled repeat closed Chromium normally and stopped only the exact installed
+authority through the deployment-lock dev loop. Actual MCP Inspector then called
+`policy_explain` through the installed connector without first starting a browser.
+It failed with `Connection timed out after 15000 ms`. Logs show repeated authority
+launches and transient runtime publication. See `reboot-mcp-cold-prepare.log`,
+`reboot-mcp-cold-stderr.log`, and `reboot-diagnostics-final.txt`.
+
+The observed MCP connector lacked DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR,
+DBUS_SESSION_BUS_ADDRESS and GDK_BACKEND. The working browser-led authority had
+them. The installed MCP SDK's `client/stdio.js` defaults on Linux to HOME,
+LOGNAME, PATH, SHELL, TERM and USER; its spawn merges only those with explicit
+server environment. Thus this independent client reproduces the failure without
+requiring a Codex tool call or changing its approval policy.
+
+An exact installed-authority launch with desktop variables absent and an isolated
+runtime discovery path confirmed `Failed to initialize GTK`, exit code 1 after
+15.41 seconds, and runtime cleanup. This is supplemental diagnosis, not installed
+acceptance. See `reboot-sanitized-desktop-result.json`.
+
+The owning path is shared bridge lifecycle demand-start plus orchestrator desktop
+initialization. The bridge inherits the caller environment and discards child
+stderr. The authority publishes its service runtime before GTK initialization;
+failed desktop startup releases the service lease, then the activation fallback
+waits up to 15 seconds. Connector retries can create many such waiting processes.
+ADR-0127 correctly prevents an invisible surviving authority. This record does
+not change that decision or add a login supervisor, headless mode, session-address
+hardcoding, or private parent-environment scraping. A reliable desktop-session
+launch mechanism for sanitized MCP clients remains an unresolved platform defect.
+
+Chromium was relaunched normally after the failed cold-start test; the installed
+service is Ready again. Process diagnostics were turned off after evidence capture.
+The final doctor also reports the user command entry absent; the direct installed
+binary, Applications entry and native registration are available. The timing of
+that command-entry loss is not established by this reboot check. The reboot
+heartbeat is paused. No product code or installed binary was changed post-reboot.
+
+
+## Post-reboot local Git authentication verification
+
+Verified from local Git in this worktree, not through a connector account:
+`git credential fill` used the repository-scoped helper backed by KDE Secret
+Service. GitHub authenticated that credential as `lbotinelly`, and the repository
+API confirmed push permission for `sylin-org/ghostlight`. The local commit identity
+is `Leo Botinelly <leonardo.botinelly@gmail.com>`. An authenticated
+`git push --dry-run origin HEAD:refs/heads/codex/fleet-test-03` exited 0.
+`credential.useHttpPath` is true. No new credential intake key is needed.
+
+The helper is `/home/test/.local/libexec/git-credential-ghostlight-wallet`.
+Only the sanitized verification is retained in `auth-post-reboot.json`; no token,
+private key, credential output or plaintext credential material was printed or
+added to the report. The previously authorized local Git setup survives reboot.
+No combined-candidate rebuild or release action was needed for this check.
+
+The post-reboot documentation commit passes formatting, warnings-denied native
+dynamic-musl Clippy, the Rust workspace tests and all 210 extension tests.
+No extension JavaScript changed. Installed binaries remain the prior fixed
+artifact; this report does not imply a new combined-candidate build.

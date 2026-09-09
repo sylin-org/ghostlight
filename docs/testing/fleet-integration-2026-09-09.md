@@ -55,9 +55,20 @@ browser/GNOME, reboot or broad campaign checks were repeated.
 CachyOS and Bluefin verified existing owner authentication through libsecret.
 Windows imported the destination-encrypted handoff directly into GCM Windows secure
 storage and verified owner account, repository push access and authenticated Git
-push dry-run. Alpine's branch push is observed, but its account/helper verification
-and post-reboot report await reconnection. No plaintext credential or private key
+push dry-run. Alpine verified local Git through KDE Secret Service after reboot,
+including the owner account, repository push permission, commit identity and an
+authenticated own-branch push dry-run. No new key or transfer was needed there.
+All four credential setups are verified. No plaintext credential or private key
 is included in source, reports or task messages.
+
+Alpine's post-reboot report at `27800651` adds a material unresolved defect. A normal
+browser launch recovered the installed authority, retained adapter identity and
+completed a fresh browser read. Actual MCP Inspector cold startup instead failed
+after its SDK stripped desktop environment variables. GTK initialization failed;
+retries created many transient authority processes. Its binaries are the prior
+Alpine candidate, not a new combined build. The combined Codex-specific environment
+forwarding repair does not cover this independent MCP client. Browser-led recovery
+is a pass; generic MCP-led cold startup and overall reboot acceptance are not.
 
 The final Windows uninstall/refusal test was rejected by automatic approval review
 with only `blocked by policy`; no alternate-route retry was made. Windows still
@@ -67,6 +78,8 @@ and the published GNU installer is not a working Alpine route. Store, pristine
 Windows, full reboot and release-provenance claims remain limited as recorded in
 the individual reports. None of these limits is converted into a passing result.
 
-The scheduled coordinator continues until the combined Linux check, remaining
-credential verification and consolidated delivery are accounted for. It must then
-delete the campaign automation, as requested by the owner.
+The campaign is complete with these explicit outcomes and outstanding product work.
+All machine work, combined Windows/Linux checks, local Git credentials and reports
+are accounted for. The campaign automation was deleted as requested.
+The next Linux startup work must address sanitized clients without hardcoded session
+addresses, an invisible authority, or a new resident supervisor contrary to the ADRs.
