@@ -1496,21 +1496,21 @@ async function fill(correlation, command) {
 
 async function typeText(correlation, command) {
   const commits = [];
+  let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    const target = await content(command.tab_id, { kind: command.clear_first ? "clear" : "focus", locator: command.locator });
-    if (command.clear_first) await content(command.tab_id, { kind: "focus", locator: command.locator });
-    await ensureDebugger(command.tab_id);
-    await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
+    await documents.verify(command.tab_id);
+    dispatched = true;
+    const target = await content(command.tab_id, { kind: "type_text", locator: command.locator,
+      text: command.text, clear_first: command.clear_first });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: target.subject, committed_urls: commits };
   } catch (error) {
-    error.effectUnknown = true;
+    error.effectUnknown = dispatched || Boolean(error.effectUnknown);
     throw error;
   } finally {
     navigationWatchers.delete(command.tab_id);
-    await detachDebugger(command.tab_id);
   }
 }
 
@@ -1977,15 +1977,18 @@ async function wheelAt(correlation, command) {  await ensureDebugger(command.tab
 
 async function typeFocused(correlation, command) {
   const commits = [];
+  let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    if (command.clear_first) await firstFrameAnswer(command.tab_id, { kind: "clear_focused" });
     await ensureDebugger(command.tab_id);
+    await documents.verifyInput(command.tab_id, "Input.insertText", { text: command.text });
+    dispatched = true;
+    if (command.clear_first) await firstFrameAnswer(command.tab_id, { kind: "clear_focused" });
     await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: null, committed_urls: commits };
-  } catch (error) { error.effectUnknown = true; throw error; }
+  } catch (error) { error.effectUnknown = dispatched || Boolean(error.effectUnknown); throw error; }
   finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
 }
 

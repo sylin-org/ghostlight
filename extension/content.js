@@ -7,6 +7,7 @@
   // their element lives, because that is what the person should see.
   const IS_TOP = window.self === window.top;
   const ACTIONABLE_SELECTOR = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
+  const TEXT_INPUT_TYPES = new Set(["text", "search", "tel", "url", "email", "number", "password"]);
   const TEXT_BLOCK_TAGS = new Set([
     "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figcaption",
     "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
@@ -481,6 +482,47 @@
     return { cleared: true, subject };
   }
 
+  // Keep targeted typing inside its document. A tab-wide Input.insertText depends on
+  // desktop focus and can refuse after an earlier clear. Select the replacement range
+  // without deleting it, then ask the browser for one native editing transaction.
+  function typeText(element, text, clearFirst) {
+    function validate() {
+      requireActionable(element, "type");
+      if (credentialClass(element)) throw credentialHandoffError(element);
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
+        throw new Error("target is not text-editable");
+      }
+      if (element instanceof HTMLInputElement && !TEXT_INPUT_TYPES.has(element.type)) {
+        throw new Error("target is not text-editable");
+      }
+    }
+    validate();
+    const subject = actionSubject(element);
+    if (!text && !clearFirst) return { typed: true, subject };
+    element.scrollIntoView({ block: "center", inline: "center" });
+    element.focus({ preventScroll: true });
+    validate();
+    if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
+    if (clearFirst) {
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.select();
+      else {
+        const selection = element.getRootNode().getSelection?.() ?? document.getSelection();
+        if (!selection) throw new Error("editable target has no selection");
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    validate();
+    if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
+    if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject };
+    if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
+      throw new Error("browser could not type into editable target");
+    }
+    return { typed: true, subject };
+  }
+
   function validateFillElement(element, value) {
     requireActionable(element, "fill");
     if (credentialClass(element)) throw credentialHandoffError(element);
@@ -696,6 +738,7 @@
       if (message.kind === "query_semantic") return querySemanticTargets(message);
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
       if (message.kind === "clear_focused") return clearText(deepestActiveElement());
+      if (message.kind === "type_text") return typeText(resolve(message.locator), message.text, message.clear_first);
       if (message.kind === "drop_files") {
         const dropTarget = deepestElementFromPoint(document, message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");

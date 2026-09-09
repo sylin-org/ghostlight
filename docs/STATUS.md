@@ -138,6 +138,27 @@ See [history compatibility evidence](testing/history-compatibility-2026-09-08.md
 were subsequently deployed with the normal diagnostics update above; the public 1.3.4 downgrade
 defect and release acceptance remain open.
 
+## test-01 fleet acceptance (2026-09-09)
+
+The isolated `codex/fleet-test-01` lane starts at `a8cfd033`. Three signed-off fixes address
+unfocused targeted typing draft loss (38443e9), the missing `history_storage` output-schema
+field (079cfe0), and Debian inspection-pipeline SIGPIPE handling (89ac2ee). The corrected
+installed service 1.3.5 and source adapter 1.1.2 passed the 23-tool live journey (15 groups,
+88 calls). All 21 hardening gates passed, including 537 Rust and 222 extension tests.
+
+Three real MCP client families passed: Codex, Copilot and OpenCode. Normal Chromium/Brave,
+two Chromium profiles, physical pause controls, source reload, process recovery and KDE
+desktop checks passed within the scopes in the [test-01 evidence record](testing/fleet-test-01-2026-09-09.md).
+Frozen a8cfd033 packages passed Debian 12/Ubuntu 24.04 lifecycle and retained-MCP upgrades;
+those Ubuntu-baseline artifacts exclude the later product fixes. Isolated governance,
+signed-policy and extension-first cold fixtures also passed.
+
+The installed stack remains Ready from this worktree's `target/release`, with the original
+Chromium retained and debugging disabled. Policy was restored byte-for-byte. Host reboot
+awaits a desktop-login route; GNOME, store ZIP and release provenance remain unproved.
+These results do not complete the whole fleet or authorize a release. The record preserves
+original failures, corrected results, artifact identities and cleanup qualifications.
+
 ## Resume on Linux
 
 Linux source validation now passes all 18 hardening gates on CachyOS KDE Wayland, after fixing
