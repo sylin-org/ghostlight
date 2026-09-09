@@ -240,3 +240,75 @@ The post-reboot documentation commit passes formatting, warnings-denied native
 dynamic-musl Clippy, the Rust workspace tests and all 210 extension tests.
 No extension JavaScript changed. Installed binaries remain the prior fixed
 artifact; this report does not imply a new combined-candidate build.
+
+
+## Procured cold-start repair and installed proof
+
+The owner authorized procuring a fix after the failed reboot checkpoint. The
+integrated fleet already contained the owning installer repair, commits
+`4af4988522a17f7b733c9f34b0d400fa789ced95` and
+`f51130d08c0c9ec8c94cd06aa8a2220ed2e0f350`. Their complete current
+`crates/orchestrator/src/install/mod.rs` was brought into this Alpine lane from
+integration `0ff1d6c5f4b0cce6befc98091c9114546f3d7e49`. No other fleet runtime
+changes were imported. This is a targeted backport, not combined-candidate acceptance.
+
+The repair belongs to Ghostlight's existing Codex registration writer. It adds
+DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS,
+XDG_CURRENT_DESKTOP and XAUTHORITY to Linux `env_vars`, preserving custom fields
+and explicit settings. Missing forwarding makes an owned registration updatable;
+malformed forwarding members remain untouched. Manual and automatic setup share
+the same helper. Windows receives no Linux fields. These are names resolved by
+Codex when launching, not saved session addresses. The
+[official MCP documentation](https://learn.chatgpt.com/docs/extend/mcp) documents
+this forwarding contract. ADR-0117, ADR-0125 and ADR-0127 remain unchanged.
+
+Native build and the orchestrator-only development-loop deployment passed.
+The installed authority SHA-256 is now
+`04896d7547c79f74ca701ba8fe938a477fd48bb29e3eaa01a1257ca987cd0284`.
+Both connector hashes and the source adapter are unchanged. The actual installed
+`ghostlight install --client codex --browser chromium --no-open` updated the
+user's saved registration. `codex mcp get ghostlight --json` confirms the six
+names and exact installed connector command. Repeating installation preserved
+that same effective registration. The missing user command entry is restored.
+
+The original trigger now works on the normal desktop:
+
+- With Chromium closed, the deployment-lock dev loop stopped authority 23517
+  without starting a replacement. The existing real Codex app's connector 24426
+  automatically started authority 26727, with all six desktop variables present.
+  The app picked up its saved registration without an application restart.
+- A fresh actual Codex CLI 0.153.4 invocation using the saved configuration
+  completed exactly one `policy_explain` call with status succeeded and effect
+  none. It connected to that already recovered authority, so the CLI result is
+  not separately labeled cold-start. No approval settings were overridden.
+- Actual MCP Inspector then started from a verified absent authority and absent
+  browser connector. Existing exact-path MCP connectors were briefly SIGSTOP'ed
+  to prevent them winning the cold-start race, then resumed in a finally block.
+  Inspector forwarded the same six current variable values through its `-e`
+  options, started authority 27991 through connector 27986, and completed
+  `policy_explain` in 1.17 seconds with status succeeded and effect none.
+- Normal Applications Chromium reconnected to that same MCP-started authority.
+  Its adapter identity remained unchanged, a fresh installed browser read returned
+  `ALPINE-MUSL-135`, and native Open produced one active, unminimized workbench.
+
+The first configured Inspector attempt placed options before the target command;
+this version's parser treated it as a catalog invocation and reported no servers.
+It never tested Ghostlight. Its logs are retained as
+`cold-start-fix-inspector-argument-order-*`; the corrected invocation is separate.
+
+Evidence: `cold-start-fix-registration.json`, `cold-start-fix-codex-prepare.log`,
+`cold-start-fix-codex-processes.json`, `cold-start-fix-codex-call-summary.json`,
+`cold-start-fix-inspector-summary.json`, and `cold-start-fix-live-result.json`.
+Formatting, warnings-denied native-musl Clippy, all 542 Rust tests and 210 extension
+tests pass. No extension JavaScript changed. Installer regressions cover migration,
+manual output, explicit/custom settings, malformed members and idempotency.
+
+The installed Codex startup defect is resolved. A deliberately unconfigured MCP
+SDK/Inspector launch still omits desktop context; such callers must forward it.
+No claim is made that an arbitrary sanitized caller can discover a desktop or
+that the service runs without one. Failed-start retry amplification outside a
+correctly configured desktop launch is not changed by this repair. The earlier
+unconfigured failure evidence remains valid. No second physical reboot was run
+for this repair; cold-start, active-client recovery and browser rejoin were tested.
+The service is Ready with its native workbench. Prior prototype archives retain
+their recorded older bytes; no public release or support declaration was changed.

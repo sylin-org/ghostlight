@@ -213,6 +213,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **MCP startup needs the caller's live desktop context.** Linux clients can filter
+  DISPLAY, Wayland, runtime and D-Bus variables before spawning the connector.
+  A browser-led pass hides that cold-start failure. Forward names through the
+  client's supported configuration, never captured session addresses, and prove
+  startup with the browser closed. The Codex installer owns its forwarding repair;
+  a headless authority or parent-process environment scan is not needed.
+
 - **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
   URL that does not identify the release tag. Resolve the latest release page first, validate the
   stable tag, then pin checksums and every sibling download to that one release. The actual Linux
