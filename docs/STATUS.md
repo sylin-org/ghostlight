@@ -28,6 +28,17 @@ blocked `chrome://extensions`, so the owner must reload the local extension. The
 live, but an old adapter can still group/debug children until reloaded. No alternate desktop
 installation or browser profile was started for process acceptance.
 
+## Linux platform candidate research (2026-09-08)
+
+The owner wants to explore distribution packages using the established CachyOS lane, available
+Alpine and Bluefin machines, and one spare machine. The
+[candidate matrix](research/27-linux-platform-candidates-2026-09.md) combines developer survey
+evidence, agent-tool delivery, desktop differences, and current Ghostlight constraints.
+It proposes Ubuntu LTS/GNOME for the spare, Omarchy/Hyprland as the agent-focused alternative,
+and Fedora as the first RPM VM. Alpine/musl and Bluefin host/browser/container integration need
+feasibility evidence. This is a proposal only; no new platform support, release gate, package,
+or machine change is claimed. Exact Alpine/Bluefin configurations remain unverified.
+
 ## Extension UI queued for the next update
 
 The owner deferred the new persistent connection diagnostics and export control to the next

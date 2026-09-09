@@ -74,6 +74,11 @@ cited-sources discipline but are not part of the pre-Phase 0 discovery above.
 | [25-delightful-linux-experience-2026-08.md](25-delightful-linux-experience-2026-08.md) | Linux install, desktop, browser-package, lifecycle, compatibility, and release prior art. Recommends one no-sudo default, one proven Debian package, one verified archive, explicit sandbox diagnosis, and a smallest-complete evidence matrix. Research input only; no product contract changes. |
 | [26-linux-harness-roster-and-integration-delight-2026-08.md](26-linux-harness-roster-and-integration-delight-2026-08.md) | Current Linux MCP harness adoption and configuration contracts behind accepted [ADR-0125](../adr/0125-recognizable-plural-linux-harness-integrations.md): nine added products, lossless YAML, packaged visual identity, per-target actions, safe Locate and Download seams, and a universal copyable connector/manual-configuration route. |
 
+The Linux packaging expansion shortlist is recorded in
+[27-linux-platform-candidates-2026-09.md](27-linux-platform-candidates-2026-09.md): developer-use
+evidence, OS/desktop candidate matrix, current implementation limits, and proposed machine/package
+priorities. It is research input, not a support declaration or new release gate.
+
 The project-agnostic practitioner artifact derived from Research 20 is
 [Getting an open-source project out and about](../guides/open-source-publication.md). It turns the
 case findings into a reusable end-to-end publication, adoption, community, security, funding, and
