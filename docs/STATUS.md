@@ -28,6 +28,11 @@ Default-profile commit gates also pass. Local portable packaging reproduces exac
 bytes in separate invocations; extraction and host execution pass. The isolated
 real-Chromium script journey passes 23 cases with the browser sandbox enabled.
 These supplemental checks do not prove installed-extension or human browsing.
+Portable missing-display recovery and disposable ownership-safe uninstall/reinstall
+also pass. Repair 4af4988 is signed off and pushed to codex/fleet-test-02 under the
+owner's authorization. Secure Git credentials are verified; no credential handoff
+is pending. The evidence record now carries a sanitized coordinator checkpoint
+because remote task reads return empty items. Desktop and reboot limitations remain.
 
 ## Human browsing is outside Ghostlight work (2026-09-09)
 

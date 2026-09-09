@@ -11,7 +11,8 @@ source adapter 1.1.2. No adapter was loaded, so no browser compatibility claim.
 Raw sanitized reports and command logs are retained on test-02 under
 `/var/home/test/ghostlight-fleet-test-02/`. Its BASELINE.md records the state
 before installation. RESULTS.md is the detailed index. No founder-private or
-machine-local repository notes were read. No publication, push or merge occurred.
+machine-local repository notes were read. The owner-authorized fleet branch push
+is recorded below. No shared-branch change, PR, merge or release occurred.
 
 ## Immutable candidate results
 
@@ -129,6 +130,17 @@ script failure behavior and audit exclusion of private script/results. It uses
 headless Chromium and a test native adapter, not the installed MV3 extension or
 the user's normal desktop browser. It does not close the blocked lanes below.
 
+The portable startup driver also passed: a missing Wayland display exits 1 after
+15.076 seconds; a subsequent valid Open exits 0 and starts its own authority.
+This is CLI recovery evidence, not a visible-window assertion. The portable
+ownership lifecycle passed using a disposable bubblewrap home and separate XDG
+directories: install preserves a foreign client entry; uninstall preserves a
+foreign manifest, command, client entry and audit; reinstall restores owned
+surfaces without losing audit. This uses fixture Claude configuration, not an
+actual Claude client session. Despite the driver's no-tray directory name, this
+test used the ordinary session bus and makes no no-tray UI claim. Extra fixture
+authorities were stopped by exact executable identity; files remain for review.
+
 ## Blocked and not run
 
 Native computer APIs are explicitly disabled in the provided tool surface. Only
@@ -143,3 +155,34 @@ store-adapter, public-package upgrade/rollback, reboot, and new RPM packaging la
 were not run. The staged native browser still needs activation after this session.
 The coordinator task could not be resolved from this host; evidence is retained
 locally for retrieval rather than repeated delivery attempts.
+
+## Coordinator retrieval checkpoint
+
+Credential intake is COMPLETE, not awaiting delivery. Machine bluefin (test-02)
+has verified secure credentials for GitHub account lbotinelly with push permission
+to sylin-org/ghostlight. The repository-local helper is libsecret / Secret Service,
+with repository-path matching enabled. Commit identity is Leo Botinelly
+<leonardo.botinelly@gmail.com>. No RSA recipient key was needed or created, so no
+public key or fingerprint exists to send. No token or private key is in this report.
+
+The signed-off repair commit is 4af4988522a17f7b733c9f34b0d400fa789ced95, pushed
+without force to codex/fleet-test-02 and independently read back from the remote.
+The repair's transfer patch is retained locally as
+0001-fix-install-forward-Linux-desktop-context-to-Codex-M.patch, SHA-256
+5aba3f3089c8b874219be777a111106c8f908b42833b33bad900ebfe3b034e75.
+Fetch that branch or the repair commit; credential transfer is unnecessary.
+
+The coordinator reports that remote task reads return items:[] even after final
+responses. That report-delivery limitation remains unresolved. This sanitized
+Git report is the alternate supported retrieval route, not a repair of task
+delivery. Local BASELINE.md, RESULTS.md, CHECKPOINT.md, AUTH-STATE.md and raw
+reports remain preserved. No acceptance tests were rerun for this checkpoint.
+
+Last verified machine state: one installed repaired authority, PID 60429,
+service 1.3.5, diagnostics enabled, browser Not connected. Original main checkout
+remains clean at 48ef29ece1ff0f1633daba62a03932a666f00ca5. Native Chromium remains
+staged and inactive. No GDM automatic login was configured; a request for someone
+to unlock GNOME and reopen Codex after reboot is unanswered. No reboot recovery
+is claimed. The campaign is incomplete for the blocked/not-run lanes above;
+credentials are not their blocker. Do not rerun passing checks merely to keep the
+task active. Resume desktop lanes when a permitted control/login path is available.
