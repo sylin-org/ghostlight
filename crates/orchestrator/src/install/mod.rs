@@ -3,6 +3,8 @@
 pub mod browser_package;
 pub mod command_path;
 pub mod desktop_entry;
+#[cfg(target_os = "linux")]
+pub mod flatpak;
 pub mod handoff;
 pub mod migration;
 pub mod native_host;

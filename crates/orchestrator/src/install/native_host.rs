@@ -447,6 +447,27 @@ fn expected_origins() -> Vec<String> {
         .collect()
 }
 
+/// Render the same fixed native host for an explicitly selected sandbox registration root.
+#[cfg(target_os = "linux")]
+pub(crate) fn manifest_bytes(connector: &Path) -> Result<Vec<u8>, NativeHostError> {
+    HostManifest::expected(connector)
+        .to_json()
+        .map(String::into_bytes)
+}
+
+/// Identify only a parseable Ghostlight native manifest for explicit installer ownership checks.
+#[cfg(target_os = "linux")]
+pub(crate) fn owned_manifest_connector(bytes: &[u8]) -> Option<PathBuf> {
+    let manifest: HostManifest = serde_json::from_slice(bytes).ok()?;
+    (manifest.owned()
+        && manifest.path.is_absolute()
+        && manifest
+            .path
+            .file_name()
+            .is_some_and(|name| name == CONNECTOR_NAME))
+    .then_some(manifest.path)
+}
+
 trait RegistrationIo {
     fn read_file(&self, path: &Path) -> Result<Option<String>, NativeHostError>;
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError>;

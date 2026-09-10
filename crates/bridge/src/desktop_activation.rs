@@ -69,18 +69,26 @@ pub fn request_registered_start(home: &Path, executable: &Path) -> io::Result<()
             "desktop activation does not name the elected installation",
         ));
     }
-    let connection = connection()?;
-    let proxy = zbus::blocking::fdo::DBusProxy::new(&connection).map_err(bus_error)?;
-    let name = BUS_NAME.try_into().map_err(bus_error)?;
-    match proxy.start_service_by_name(name, 0).map_err(bus_error)? {
-        1 | 2 => Ok(()),
-        _ => Err(invalid("unrecognized desktop activation acknowledgment")),
-    }
+    within_deadline(CALL_TIMEOUT, async {
+        let connection = zbus::Connection::session().await.map_err(bus_error)?;
+        let proxy = zbus::fdo::DBusProxy::new(&connection)
+            .await
+            .map_err(bus_error)?;
+        let name = BUS_NAME.try_into().map_err(bus_error)?;
+        match proxy
+            .start_service_by_name(name, 0)
+            .await
+            .map_err(bus_error)?
+        {
+            1 | 2 => Ok(()),
+            _ => Err(invalid("unrecognized desktop activation acknowledgment")),
+        }
+    })
 }
 
 /// Lifetime of the installed activation name, held only by a ready host desktop authority.
 pub struct ActivationNameLease {
-    _connection: zbus::blocking::Connection,
+    _connection: zbus::Connection,
 }
 
 /// Claim the fixed name without queueing or replacing another owner after desktop readiness.
@@ -89,29 +97,40 @@ pub fn claim_ready_name(home: &Path, executable: &Path) -> io::Result<Option<Act
     if !registration_matches(&registration_path(home), executable)? {
         return Ok(None);
     }
-    let connection = connection()?;
-    let reply = connection
-        .request_name_with_flags(BUS_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())
-        .map_err(bus_error)?;
-    match reply {
-        zbus::fdo::RequestNameReply::PrimaryOwner | zbus::fdo::RequestNameReply::AlreadyOwner => {
-            Ok(Some(ActivationNameLease {
+    within_deadline(CALL_TIMEOUT, async {
+        let connection = zbus::Connection::session().await.map_err(bus_error)?;
+        let reply = connection
+            .request_name_with_flags(BUS_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())
+            .await
+            .map_err(bus_error)?;
+        match reply {
+            zbus::fdo::RequestNameReply::PrimaryOwner
+            | zbus::fdo::RequestNameReply::AlreadyOwner => Ok(Some(ActivationNameLease {
                 _connection: connection,
-            }))
+            })),
+            _ => Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "desktop activation name already owned",
+            )),
         }
-        _ => Err(io::Error::new(
-            io::ErrorKind::AddrInUse,
-            "desktop activation name already owned",
-        )),
-    }
+    })
 }
 
-fn connection() -> io::Result<zbus::blocking::Connection> {
-    zbus::blocking::connection::Builder::session()
-        .map_err(bus_error)?
-        .method_timeout(CALL_TIMEOUT)
-        .build()
-        .map_err(bus_error)
+fn within_deadline<T>(
+    timeout: Duration,
+    operation: impl std::future::Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    // Bound connect, authentication, Hello and activation together. A method-only timeout
+    // does not cover an unresponsive authentication peer. Dropping the losing future cancels
+    // that exchange without a detached timeout helper. An activation already submitted to
+    // the bus can still finish; only the shared readiness seam may confirm its outcome.
+    async_io::block_on(futures_lite::future::or(operation, async move {
+        async_io::Timer::after(timeout).await;
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "desktop activation exchange timed out",
+        ))
+    }))
 }
 
 fn invalid(message: &'static str) -> io::Error {
@@ -125,6 +144,37 @@ fn bus_error(error: impl std::fmt::Display) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bus_that_accepts_but_never_authenticates_cannot_hold_the_exchange() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp");
+        fs::create_dir_all(&base).unwrap();
+        let root = base
+            .canonicalize()
+            .unwrap()
+            .join(format!("b-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("bus");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let (stop, wait) = std::sync::mpsc::channel::<()>();
+        let peer = std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            let _ = wait.recv_timeout(Duration::from_secs(2));
+        });
+        let started = std::time::Instant::now();
+        let result = within_deadline(Duration::from_millis(100), async {
+            zbus::connection::Builder::address(format!("unix:path={}", path.display()).as_str())
+                .map_err(bus_error)?
+                .build()
+                .await
+                .map_err(bus_error)
+        });
+        let _ = stop.send(());
+        peer.join().unwrap();
+        assert!(matches!(result, Err(ref error) if error.kind() == io::ErrorKind::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn registration_has_one_fixed_name_and_no_arguments() {

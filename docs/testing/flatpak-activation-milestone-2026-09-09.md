@@ -112,3 +112,46 @@ a losing cold-start process cannot turn a bus activation into an Open intent.
 The real-process journey also passed with GHOSTLIGHT_BIN_DIR=target/debug after a
 fresh workspace build. It exercises normal relays/recovery with test adapters;
 it is not the installed Flatpak cold-start proof.
+
+## Installer and full-exchange timeout checkpoint
+
+The coordinator directed continued implementation, treating the static permission
+boundary as a reported platform constraint. Controlled acceptance restarts of the
+dedicated browser are authorized; customer setup never forces a restart or edits tabs.
+
+The opt-in package seam is now:
+
+```text
+ghostlight native-host check --flatpak-chromium
+ghostlight native-host install --flatpak-chromium --allow-flatpak-activation
+ghostlight native-host uninstall --flatpak-chromium
+```
+
+The grant flag is install-only. Without it, install succeeds only with the explicit
+per-user app grant already present. The installer does not alter global or system
+overrides. A pre-existing grant remains user-owned and survives removal. When setup
+adds the grant, bounded private custody retains the previous bytes. Removal restores
+those bytes if unchanged, or removes only the still-owned key while preserving later
+unrelated settings. Changed grant values, foreign files, symlinks and malformed
+custody remain protected. Multi-file failure attempts an exact-state rollback only.
+Explicit version-path upgrades transfer custody; an older installation cannot remove
+the new owner's registration. Default host data roots and home-resident siblings are
+the initial scope; this is not system-package or custom-data-root support.
+
+The host check rejects same-name .service files in the user activation directory and
+the higher-priority runtime activation directory. This is an installation-state check,
+not containment against later hostile host changes. Shared-runtime authentication is
+still required before browser work. Seven installer regression cases pass, including
+permission selection, repeat/remove/reinstall, preservation, upgrade and precedence.
+
+The first method-only timeout did not cover D-Bus authentication. The whole exchange
+now has one three-second deadline that cancels the pending async exchange. An already
+submitted OS activation can still finish; the shared readiness gate must confirm it.
+A real Unix socket that accepts but never authenticates passes the timeout regression.
+Its first fixture failed on Unix socket path length; that failed .tmp directory was
+retained and the fixture now canonicalizes its repository-local path before binding.
+
+Source checks pass with 556 Rust tests (one opt-in private-bus test separate), format
+and all-target Clippy. The new private-bus executable passed on the host again.
+No installer artifact or new binary has yet been deployed to the live installation.
+Alpine source d67e3b33 is now available and is the next shared-lifecycle integration.

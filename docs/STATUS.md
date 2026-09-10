@@ -26,6 +26,11 @@ passing private-bus fixture; generic lifecycle wiring and installer ownership re
 in progress. Static grant inspection proves the running browser does not receive a
 new talk permission until a new sandbox is created. No browser restart or deployed
 activation is claimed, and first-time hot-install support remains an open limitation.
+The subsequent opt-in Flatpak installer adds ownership-safe activation/native
+registration and an explicitly selected, privately tracked per-app grant. Seven
+installer regressions and the full-exchange authentication timeout proof pass.
+The current source has 556 passing Rust tests; installed deployment and Alpine
+d67e3b33 composition are next. Customer setup never restarts the browser.
 
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
