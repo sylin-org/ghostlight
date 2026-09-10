@@ -44,6 +44,33 @@ Bluefin owns Flatpak host activation and must compose with this shared admission
 boundary. Direct task delivery to its remote host is unavailable here; this branch
 is the coordination record. Shared integration branches remain untouched.
 
+### Flatpak composition interface (coordinator relay)
+
+The coordinator reserved ADR-0166 for this decision; Bluefin owns ADR-0165.
+The shared bridge will expose these two entry points over the same admission,
+readiness wait and cooldown implementation:
+
+```rust
+pub fn request_orchestrator_start() -> io::Result<StartDisposition>;
+pub fn request_orchestrator_activation(
+    activate: impl FnOnce() -> io::Result<()>,
+) -> io::Result<StartDisposition>;
+```
+
+Native start still resolves and launches only its trusted elected sibling.
+Activation calls its narrowly authorized OS activation closure once, only after
+admission; it never invents a child PID or falls back to executing a host command.
+Both wait for new authenticated discovery. Native startup can reap/stop its own
+child; activation has no child handle and cannot stop the externally activated
+authority. Existing runtime and deployment-lock discovery determine custody.
+The callback must itself perform a bounded activation exchange.
+
+Disposition variants will be `Spawned { process_id }`, `ActivationRequested`,
+`AlreadyRunning`, `Starting`, `RetryDeferred`, and `DeploymentInProgress`.
+The last two new waiting states mean keep reconnecting; they are not readiness.
+`ActivationRequested` has no process id. No feature-specific wire revision is
+needed. This interface is a planned source milestone, not yet implemented.
+
 ## Planned evidence
 
 Preserve a native installed sanitized-environment failure with concurrent MCP
