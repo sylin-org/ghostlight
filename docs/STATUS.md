@@ -8,6 +8,14 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Integrated Linux package validation in progress (2026-09-09)
+
+Test-01 is rebuilding exact integrated baseline `ac1becab` through the established
+Ubuntu 22.04 builder and Debian 12/Ubuntu 24.04 consumer lanes. All 542 Rust tests,
+222 extension tests, formatting and Clippy pass. The staged 1,029 Git blobs match.
+Package/installed results remain pending in the [focused record](testing/linux-integrated-packaging-2026-09-09.md).
+Earlier artifacts and the active installation paths are preserved.
+
 ## Four-machine acceptance campaign (2026-09-09)
 
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
