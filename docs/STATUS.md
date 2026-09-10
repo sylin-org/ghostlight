@@ -26,6 +26,26 @@ initial concurrent Ubuntu readiness timeout remains a failure; a fresh serial ru
 passed unchanged. This closes the old a8cfd033 package-candidate gap, not store,
 GNOME, provenance or separately owned startup/Flatpak release gaps.
 
+## Windows focused acceptance round (2026-09-09)
+
+The ordinary Windows repository starts at integrated `ac1becab` on
+`codex/fleet-windows-acceptance`. Its combined release package now replaces all
+three installed siblings with verified expected hashes. The prior worktree is
+preserved. No adapter is connected; loading the current unpacked extension
+in ordinary Chrome is the remaining human step before browser acceptance.
+Four executable NSIS install-hook cases pass, covering owned lock cleanup,
+foreign-marker preservation, invalid sibling refusal, and post-acquisition
+failure. The existing authority survives. All 533 Windows Rust tests, 222
+extension tests, formatting, and Clippy pass. Real process and provenance
+journeys pass against the combined release binaries. After package replacement,
+VS Code 1.137.0 rediscovers 23 tools and an actual Codex policy invocation succeeds
+with a saved, effect-none result. The installer exceeded the initial 30-second
+observation window, then exited and removed its lock; its exit code was not
+retained. Installed bytes, registration, and client recovery are verified
+independently. The final installed-uninstall
+restriction remains in force. See the [round-two report](testing/windows-fleet-round2-2026-09-09.md)
+for exact source/artifact identities and the fixture's narrower evidence boundary.
+
 ## Four-machine acceptance campaign (2026-09-09)
 
 The owner authorized a new focused implementation round after the completed campaign.

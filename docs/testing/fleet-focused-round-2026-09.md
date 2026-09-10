@@ -47,18 +47,31 @@ override enforced tool restrictions or authorize alternate routes around rejecte
 
 ## Milestones received
 
-- Bluefin `b12234d0`: bounded activation design and baseline source gates, 542 Rust
-  and 222 extension tests. No activation implementation or changed sandbox grant yet.
-  Implementation continuation was sent after coordinator review.
-- Windows `13e378de`: production NSIS hooks exercised through an isolated fixture.
+- Bluefin `46bd0e17`: accepted ADR-0165, named activation mechanism and desktop-ready
+  name acquisition; 547 Rust and 222 extension tests plus a private-bus fixture pass.
+  The exact grant is installed; existing Chromium does not inherit it until a new
+  sandbox starts. Installer ownership, shared lifecycle wiring and real cold/recovery
+  proofs are unfinished. Continuation and Alpine's interface were relayed.
+- Windows `13e378de` and `e4a972d4`: production NSIS hooks exercised through an isolated fixture.
   Empty destination, foreign deployment marker, executable-path obstruction, explicit
   failure cleanup and unrelated authority preservation pass. Product hooks are unchanged.
-  All 533 Windows Rust and 222 extension tests pass. This is not a held-file uninstall
-  or current installed-browser pass. Fresh release artifacts remain in progress.
-- CachyOS and Alpine: new work dispatched; no new implementation result collected yet.
+  All 533 Windows Rust and 222 extension tests pass. A combined release package then
+  replaced all three siblings with verified expected bytes; real Codex policy work,
+  VS Code catalog recovery, process and provenance journeys pass. The final installer
+  exit code was not retained. Browser and held-file uninstall limits remain open.
+- CachyOS `cd37fd54`: exact ac1becab portable/Debian candidates pass Ubuntu-baseline
+  build, Debian 12/Ubuntu 24.04 consumer lifecycle and retained-MCP upgrades. Normal
+  installed Chromium/Brave typing/readback pass after authority-only deployment.
+  The initial concurrent Ubuntu readiness timeout is retained; a fresh serial run
+  passed unchanged bytes. Report and candidate manifest integrated in `7291e68d`.
+- Alpine `c43970c5`: published the shared activation callback/admission interface;
+  implementation and musl failure/recovery acceptance remain active. This interface
+  was relayed to Bluefin. No repaired startup acceptance is claimed yet.
 
-These milestones are reviewed reports from remote branches, not merged changes on this
-coordination branch. Update this section when integration and checks actually complete.
+CachyOS and Windows evidence and Windows hook fixtures are integrated on this branch.
+Required central checks pass with 533 Rust and 222 extension tests. Runtime source is
+unchanged. Bluefin and Alpine implementation milestones remain on their own branches
+until the shared startup and installation journeys are complete enough to integrate.
 
 ## Integration and follow-through
 
