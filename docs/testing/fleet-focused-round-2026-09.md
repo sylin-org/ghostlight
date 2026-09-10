@@ -80,6 +80,11 @@ override enforced tool restrictions or authorize alternate routes around rejecte
   authority in 5,874 ms including cooldown. All 547 native Rust and 222 extension tests
   pass. The deployment controller also repairs exact selected connector respawn races,
   with a real Linux executable-lock regression. No physical reboot is claimed.
+  Follow-up `85d2d556` verifies exact combined candidate 0129ff15 with the new Linux
+  dependencies: 564 Rust and 222 extension tests, private-bus and process/startup
+  recovery gates, installed configured Codex cold start, native Chromium rejoin,
+  adapter reload and fresh open/read all pass. Saved configuration, registration
+  and adapter bytes are unchanged. No product fix or Alpine Flatpak setup was needed.
 
 CachyOS and Windows evidence, Windows hook fixtures and Alpine's startup/deployment
 repairs are integrated on this branch. Required central checks pass with 537 Rust and
@@ -91,8 +96,9 @@ Linux candidate rather than rebuilding once for every intermediate milestone.
 Flatpak integration is committed at `0129ff15`. Its Cargo inputs, product crates,
 extension and dev-loop controller are byte-identical to Bluefin's tested 46577c6d
 tree. Central Windows gates pass; Linux-specific private-bus and live evidence come
-from Bluefin. The remaining autonomous work is targeted packaging and native-musl
-compatibility against this combined Linux candidate, followed by evidence collection.
+from Bluefin. Combined native-musl compatibility is complete. The only remaining
+autonomous assignment is CachyOS's targeted package build and consumer validation,
+followed by evidence collection.
 
 ## Integration and follow-through
 
