@@ -1,0 +1,649 @@
+{
+  "source": {
+    "commit": "ac1becab78e5a8a6b89e553e82f6779d93dcb39c",
+    "tree": "b6e0b7b3c5c84cb4fb82a3fc15fe5cd2d4395b88",
+    "verified_git_blobs": 1029,
+    "passed": true
+  },
+  "version": "1.3.5",
+  "branch": "codex/fleet-test-01-packaging",
+  "product_source_changes": false,
+  "release_ready": false,
+  "builder": {
+    "os_release": "PRETTY_NAME=\"Ubuntu 22.04.2 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION=\"22.04.2 LTS (Jammy Jellyfish)\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=jammy\n",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "glibc": "glibc 2.35",
+    "powershell": "7.6.5"
+  },
+  "artifacts": {
+    "deb": {
+      "path": ".tmp/linux-local/integrated-ac1becab/guest/build/target/x86_64-unknown-linux-gnu/release/bundle/deb/Ghostlight_1.3.5_amd64.deb",
+      "sha256": "e6c3776fb60c46d8f0f103b8bace7baac8ca093b9c648571667397f61310b8fe"
+    },
+    "portable": {
+      "path": ".tmp/linux-local/integrated-ac1becab/guest/build/dist/portable/ghostlight-v1.3.5-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "b7facfa6db38ecaf81b930c16ab65ed51e45b9f4d8546fcdbdfa557f1b5ea625"
+    },
+    "binaries": [
+      {
+        "name": "ghostlight",
+        "raw_portable_sha256": "f6e654a472caa0f87e8587204e96ed50cff9957e3916247e623b116ae5c2743a",
+        "deb_sha256": "0b148ecf2da25283fd90b162b3a7fc3ca367f8028b81f399b4f185f0bd3739eb",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "Tauri bundle marker UNK->DEB (3 bytes)",
+        "mode": "0755",
+        "rpath_runpath": false
+      },
+      {
+        "name": "ghostlight-mcp-connector",
+        "raw_portable_sha256": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+        "deb_sha256": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "identical",
+        "mode": "0755",
+        "rpath_runpath": false
+      },
+      {
+        "name": "ghostlight-browser-connector",
+        "raw_portable_sha256": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599",
+        "deb_sha256": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "identical",
+        "mode": "0755",
+        "rpath_runpath": false
+      }
+    ],
+    "portable_roster": [
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight",
+        "mode": "0o755",
+        "sha256": "f6e654a472caa0f87e8587204e96ed50cff9957e3916247e623b116ae5c2743a",
+        "bytes": 20438784
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight-browser-connector",
+        "mode": "0o755",
+        "sha256": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599",
+        "bytes": 992888
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight-mcp-connector",
+        "mode": "0o755",
+        "sha256": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+        "bytes": 1357616
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/LICENSE",
+        "mode": "0o644",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "bytes": 11358
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/LICENSING.md",
+        "mode": "0o644",
+        "sha256": "40fc2124d28f69ef084a1e450cd424e8fe74793d3b69b35d8521bd90801662b9",
+        "bytes": 3182
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/MIT.txt",
+        "mode": "0o644",
+        "sha256": "8876dafa674472bdbea2dc3041636c8e3026a8278a88ed21f19ed4845b246b88",
+        "bytes": 1075
+      }
+    ],
+    "deb_payload": [
+      {
+        "path": "./etc/brave/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/chromium/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/opt/edge/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./usr/bin/ghostlight",
+        "mode": "0o755",
+        "sha256": "0b148ecf2da25283fd90b162b3a7fc3ca367f8028b81f399b4f185f0bd3739eb",
+        "bytes": 20438784
+      },
+      {
+        "path": "./usr/bin/ghostlight-browser-connector",
+        "mode": "0o755",
+        "sha256": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599",
+        "bytes": 992888
+      },
+      {
+        "path": "./usr/bin/ghostlight-mcp-connector",
+        "mode": "0o755",
+        "sha256": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+        "bytes": 1357616
+      },
+      {
+        "path": "./usr/lib/Ghostlight/LICENSING.md",
+        "mode": "0o644",
+        "sha256": "40fc2124d28f69ef084a1e450cd424e8fe74793d3b69b35d8521bd90801662b9",
+        "bytes": 3182
+      },
+      {
+        "path": "./usr/lib/Ghostlight/licenses/Apache-2.0.txt",
+        "mode": "0o644",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "bytes": 11358
+      },
+      {
+        "path": "./usr/lib/Ghostlight/licenses/MIT.txt",
+        "mode": "0o644",
+        "sha256": "8876dafa674472bdbea2dc3041636c8e3026a8278a88ed21f19ed4845b246b88",
+        "bytes": 1075
+      },
+      {
+        "path": "./usr/share/applications/Ghostlight.desktop",
+        "mode": "0o644",
+        "sha256": "794271193f0fb17ea4764ee04f04ff8d659818683ad5d46a90c8b5dc455e3742",
+        "bytes": 264
+      },
+      {
+        "path": "./usr/share/bash-completion/completions/ghostlight",
+        "mode": "0o644",
+        "sha256": "934014511ca49632df71d87c6253793137757320557bf8be117f37a175a803e8",
+        "bytes": 1730
+      },
+      {
+        "path": "./usr/share/doc/ghostlight/changelog.gz",
+        "mode": "0o644",
+        "sha256": "293075a18b7f66e402d999ca29fbaa1bddb8e86b115af7670fc504fc38a84762",
+        "bytes": 1037
+      },
+      {
+        "path": "./usr/share/doc/ghostlight/copyright",
+        "mode": "0o644",
+        "sha256": "45d22597c3adef3f35ff029884acfea164951200429b18f9dc129066484bacbf",
+        "bytes": 372
+      },
+      {
+        "path": "./usr/share/fish/vendor_completions.d/ghostlight.fish",
+        "mode": "0o644",
+        "sha256": "f70f8adb6afdc4a920dd09e249d774cc2f1f07ba8c677723d920828a43aafd2a",
+        "bytes": 3266
+      },
+      {
+        "path": "./usr/share/icons/hicolor/128x128/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "153e65ae92af61a7cd2dcbe38c59e6875287a9e3f0208fb4e73f781292327a67",
+        "bytes": 4340
+      },
+      {
+        "path": "./usr/share/icons/hicolor/32x32/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "645b2b436975da68006fcf5bf89242f55f2988e468cd6278679cffb31a3b2dc8",
+        "bytes": 1181
+      },
+      {
+        "path": "./usr/share/icons/hicolor/512x512/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "b82d525e6ff4332d76f559be1a9e66c4fe8bd2bb745df02a72e34f729c348fc9",
+        "bytes": 7903
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight-browser-connector.1.gz",
+        "mode": "0o644",
+        "sha256": "0f8a95003e18859e8129c9b224ad5bece244a02e06d996415d07169471b4ef50",
+        "bytes": 927
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight-mcp-connector.1.gz",
+        "mode": "0o644",
+        "sha256": "45f62d342a7431f7f05d014f7447200a3e5ea1c44e8909ae1158bf1fc1f43d40",
+        "bytes": 727
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight.1.gz",
+        "mode": "0o644",
+        "sha256": "43f9deca3169a191fe276bebb251fe75826cb97a45606dbe470fc10f58f92ade",
+        "bytes": 2134
+      },
+      {
+        "path": "./usr/share/zsh/vendor-completions/_ghostlight",
+        "mode": "0o644",
+        "sha256": "fab26e405dddf28ab444858ab8d8d7c86dd5c47490aee14f01f5d6980d6b5b75",
+        "bytes": 2310
+      }
+    ]
+  },
+  "portable_repeat_identical": true,
+  "previous_deb": {
+    "version": "1.3.4",
+    "sha256": "30e525d6cd21da30c6569e713a53e9e892adb8b1f0f2aaf325086a0c76eea401",
+    "provenance": "Previously verified public artifact; no new remote attestation check"
+  },
+  "required_gates": {
+    "source": "ac1becab78e5a8a6b89e553e82f6779d93dcb39c",
+    "format": true,
+    "clippy": true,
+    "rust_tests": 542,
+    "extension_tests": 222,
+    "passed": true
+  },
+  "consumers": {
+    "debian": {
+      "lifecycle": {
+        "distribution": "debian",
+        "passed": true,
+        "owned_stale_registration_repaired": true,
+        "foreign_same_filename_preserved": true,
+        "foreign_sha256": "37ed6b53450b783ddaf5f1adfad14b796e487eb4043a8d3d602247aeb1bf8dc2",
+        "no_user_desktop_shadow": true,
+        "runtime_retained_after_purge": true
+      },
+      "upgrade": {
+        "before_version": "1.3.4",
+        "after_package_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.4"
+        },
+        "retained_mcp_pid": 78,
+        "after_explicit_authority_restart_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.5"
+        },
+        "passed": true,
+        "scope": "package upgrade and retained initialized MCP; no browser",
+        "installed_binary_hashes": {
+          "ghostlight": "0b148ecf2da25283fd90b162b3a7fc3ca367f8028b81f399b4f185f0bd3739eb",
+          "ghostlight-mcp-connector": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+          "ghostlight-browser-connector": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599"
+        }
+      },
+      "portable": {
+        "passed": true,
+        "scope": "isolated portable installer CLI; synthetic retained history, no authority or browser",
+        "archive_sha256": "b7facfa6db38ecaf81b930c16ab65ed51e45b9f4d8546fcdbdfa557f1b5ea625",
+        "checks": [
+          "integrated-Codex-forwarding-and-Claude-install-preserve-foreign-clients",
+          "owned-command-desktop-and-native-registration-name-exact-portable-siblings",
+          "uninstall-preserves-foreign-same-filename-command-client-and-user-history",
+          "reinstall-restores-owned-surfaces-and-retains-history"
+        ],
+        "binaries": {
+          "ghostlight": "f6e654a472caa0f87e8587204e96ed50cff9957e3916247e623b116ae5c2743a",
+          "ghostlight-mcp-connector": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+          "ghostlight-browser-connector": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599"
+        }
+      }
+    },
+    "ubuntu": {
+      "lifecycle": {
+        "distribution": "ubuntu",
+        "passed": true,
+        "owned_stale_registration_repaired": true,
+        "foreign_same_filename_preserved": true,
+        "foreign_sha256": "37ed6b53450b783ddaf5f1adfad14b796e487eb4043a8d3d602247aeb1bf8dc2",
+        "no_user_desktop_shadow": true,
+        "runtime_retained_after_purge": true
+      },
+      "upgrade": {
+        "before_version": "1.3.4",
+        "after_package_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.4"
+        },
+        "retained_mcp_pid": 76,
+        "after_explicit_authority_restart_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.5"
+        },
+        "passed": true,
+        "scope": "package upgrade and retained initialized MCP; no browser",
+        "installed_binary_hashes": {
+          "ghostlight": "0b148ecf2da25283fd90b162b3a7fc3ca367f8028b81f399b4f185f0bd3739eb",
+          "ghostlight-mcp-connector": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+          "ghostlight-browser-connector": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599"
+        }
+      },
+      "portable": {
+        "passed": true,
+        "scope": "isolated portable installer CLI; synthetic retained history, no authority or browser",
+        "archive_sha256": "b7facfa6db38ecaf81b930c16ab65ed51e45b9f4d8546fcdbdfa557f1b5ea625",
+        "checks": [
+          "integrated-Codex-forwarding-and-Claude-install-preserve-foreign-clients",
+          "owned-command-desktop-and-native-registration-name-exact-portable-siblings",
+          "uninstall-preserves-foreign-same-filename-command-client-and-user-history",
+          "reinstall-restores-owned-surfaces-and-retains-history"
+        ],
+        "binaries": {
+          "ghostlight": "f6e654a472caa0f87e8587204e96ed50cff9957e3916247e623b116ae5c2743a",
+          "ghostlight-mcp-connector": "3e9c91e6181e8076985e05ba5a0cab15ae4f85db2adc8ef4d4b7b0b4f2a66143",
+          "ghostlight-browser-connector": "141283558888c9549b3d348fce544507845fcbf57f77525bc5d0e5bbe96c2599"
+        }
+      }
+    }
+  },
+  "installed": {
+    "binaries_and_adapter": {
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight": "d0ee844b26a0e032f3aab97a3063e1ed7eff7ad5425bf67c0694c4bab0a09030",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight-mcp-connector": "1a48565f40cd3f6e86e73a8cefe1478423a59d5bcc5b8c81c9cf290d32d27b0c",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight-browser-connector": "2e810eaa0521640b3bec9283a3893db9bdac8e73b0935035f6412f924c11e26b",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/content.js": "db39bed95b51c0a664269961f17600a891b4080bad03c55e581bd4dcc18f32ed",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/service-worker.js": "c361b8db9e4ad8109035dca51782e50da39cb254c875ce2a61d7afa82d4f9db4",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/lib/documents.js": "9226f8d04bda69ca53bc3a9f97932efbe928513472c6b03b093dbf9f6479576e",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/manifest.json": "e32433f59cc581e0b6223d4e78b43592756f0120c435e33855ede879679153dc"
+    },
+    "configuration_hashes_unchanged": true,
+    "deployment_scope": "authority only; original installation path",
+    "source": "ac1becab78e5a8a6b89e553e82f6779d93dcb39c"
+  },
+  "installed_smoke": {
+    "passed": true,
+    "browser_families": [
+      "Chromium",
+      "Brave"
+    ],
+    "tools_per_catalog": 23,
+    "fixture_tabs_preserved": true
+  },
+  "final_health": {
+    "remaining_guest_processes": [],
+    "host_configuration_unchanged": true,
+    "service": {
+      "browser_relay_major": 1,
+      "running": true,
+      "service_bridge_major": 2,
+      "version": "1.3.5"
+    },
+    "readiness": {
+      "detail": "Connected and idle. Agents can work when they ask.",
+      "invites_control": true,
+      "state": "ready",
+      "tone": "quiet",
+      "word": "Ready"
+    },
+    "remote_debugging_port_closed": true,
+    "test_tabs_preserved": true,
+    "scope": "No host reboot, new browser profile, store installation, or startup retry repair",
+    "normal_root_processes": [
+      {
+        "pid": 106551,
+        "exe": "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/linux-local/brave/opt/brave.com/brave/brave",
+        "sha256": "118fea6e58a3f342b9dffc408855ff588a037828bb3bab7dc4dc4e16753bd4db",
+        "start_ticks": "2566779"
+      },
+      {
+        "pid": 111399,
+        "exe": "/usr/lib/chromium/chromium",
+        "sha256": "757de0308bf1f703d70320c78dc2b2218fab748d6275b84a187cf9ed5fe7e772",
+        "start_ticks": "2595933"
+      }
+    ]
+  },
+  "evidence_root": ".tmp/linux-local/integrated-ac1becab",
+  "evidence_files": [
+    {
+      "path": "source-identity.json",
+      "sha256": "70cdbbbd6ddcdbf9aec672dfc5709b2bd5c4dbaeb47c7fc74b719fe83ab24302",
+      "bytes": 161
+    },
+    {
+      "path": "required-gates.json",
+      "sha256": "b0f7c7f85f5fccb7d400104fe67dee293ac29b16a1860a1a611d199141b0a526",
+      "bytes": 160
+    },
+    {
+      "path": "before.json",
+      "sha256": "3c3d477f981684a6d87ac7a0202f454a0ae6e5339c9274f276c8e2d69c75c787",
+      "bytes": 3620
+    },
+    {
+      "path": "installed-before.json",
+      "sha256": "f1078e2a613517a80aeb9c3fc5364835356752d29f6d62455c749aaec264409e",
+      "bytes": 1665
+    },
+    {
+      "path": "installed-after.json",
+      "sha256": "e9aabfa992e5812e36016622d16fa4e259e3b53881c96ba73d05d93745f50fd0",
+      "bytes": 1489
+    },
+    {
+      "path": "final-health.json",
+      "sha256": "100e5387a40e511c662b6246455f01bbb19e5be054607aa70d01a01935c2fd63",
+      "bytes": 1050
+    },
+    {
+      "path": "artifacts.json",
+      "sha256": "9d32dd0dc985094c6dfb7e51ea30d8d6bf83a34e13d6d58278b63d65df890ecf",
+      "bytes": 7757
+    },
+    {
+      "path": "builder-versions.json",
+      "sha256": "27d41384a5fd1fe5b448a4133e5212f28bd7c4ef52e6159779e1413759fdb447",
+      "bytes": 22598
+    },
+    {
+      "path": "builder-packages.tsv",
+      "sha256": "40e43244f5b1ac361a83c5c717eaf825ca4140c719e4fa24248cac901898c740",
+      "bytes": 20755
+    },
+    {
+      "path": "format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "clippy.log",
+      "sha256": "24ab2f4d7bc6b9ae0d165c0c4b84b7dd3e430d50ee2deb63d58060c3fd53953d",
+      "bytes": 13129
+    },
+    {
+      "path": "rust-tests.log",
+      "sha256": "de54e0914d310b089fd017278c484534c0aa50e4dba6bcbccd8468c33f0272dd",
+      "bytes": 62422
+    },
+    {
+      "path": "extension-tests.log",
+      "sha256": "af6521ca8bad3d0c018954f5d27b2289ba385019fcccdfa00e50f4b2107d3999",
+      "bytes": 45630
+    },
+    {
+      "path": "build.log",
+      "sha256": "a958813f5e1be0f16674931e4ba019099b0bdb439bbddd53fbe64c10bfe5d710",
+      "bytes": 3198
+    },
+    {
+      "path": "build-precondition-failure.log",
+      "sha256": "8c03ceed8a1a41600e40cb8f56dfd55532d6453310330d0364a216fabd1be8db",
+      "bytes": 668
+    },
+    {
+      "path": "deploy-plan.log",
+      "sha256": "2a632ac33c9a834e38575c978b62ca5e1c682b27fece243e56e1118fc23b0831",
+      "bytes": 745
+    },
+    {
+      "path": "deploy.log",
+      "sha256": "2af0671822ed1e84ca1a1be55858f6336eae03a2793e494bfb8a9ad1e44b62a3",
+      "bytes": 1606
+    },
+    {
+      "path": "portable-repeat.log",
+      "sha256": "5fdafafeeb206f39ede519e95d9c8f307a272f22d5d807abb60de057f302eaa2",
+      "bytes": 169
+    },
+    {
+      "path": "installed-browser-smoke.json",
+      "sha256": "d02c959aa229983ccb52f1c0bb0085d3eb2c971e01ff2481de9a1f8d099b24c1",
+      "bytes": 9163
+    },
+    {
+      "path": "installed-browser-smoke.log",
+      "sha256": "6de88469656c668aebc4667d385439cb2c95076f91c492f2ab7bf5b7e264920c",
+      "bytes": 27
+    },
+    {
+      "path": "installed-browser-smoke-missing-chromium.json",
+      "sha256": "6dafb72bc23cffdfbfdb4685c27e8226c9652c89ca67966f96eecd2d55886912",
+      "bytes": 902
+    },
+    {
+      "path": "installed-browser-smoke-missing-chromium.log",
+      "sha256": "86ba860130a2d60e533c3ff42c3c34e05c7ecd9679c472a51b7c9c85d41190a3",
+      "bytes": 528
+    },
+    {
+      "path": "debian-lifecycle.log",
+      "sha256": "cae2720cd05cb781d07dac3f2718dec8d5feb1011eda8922e8e18480a59740c0",
+      "bytes": 23577
+    },
+    {
+      "path": "debian-lifecycle-valid.log",
+      "sha256": "d43a93e0247ef39ad02b67ebd8504e7dd7da2e273ae6ae2b80ccb4fa05f7df70",
+      "bytes": 16671
+    },
+    {
+      "path": "debian-lifecycle.json",
+      "sha256": "28bfd394591ccdb3667d96b952838402a32bdca1894d68a3aae241506a604f62",
+      "bytes": 299
+    },
+    {
+      "path": "ubuntu-lifecycle.log",
+      "sha256": "df9d7fb37f4e14f434e79eb8f76c0b14bac4eb907baffe225751ec040adaa02c",
+      "bytes": 1634
+    },
+    {
+      "path": "ubuntu-lifecycle-valid.log",
+      "sha256": "cddc08545fbc3f80436aec199e7333a420996c308fb64e15baa0f5032297ec94",
+      "bytes": 16508
+    },
+    {
+      "path": "ubuntu-lifecycle.json",
+      "sha256": "097830038d5a55c452aad1c578d6489e13bf5d3f7fc46c8b688c51bc95ae8bf3",
+      "bytes": 299
+    },
+    {
+      "path": "debian-upgrade.log",
+      "sha256": "7d3bc0e5939296a65ec858960a8330f7a6bd4ba8ad6190230c6b304785cdcd96",
+      "bytes": 3761
+    },
+    {
+      "path": "debian-upgrade.json",
+      "sha256": "df0d1908427c82edf581dba2dde7c935a8048424390b6c1d83fb381e2a832645",
+      "bytes": 767
+    },
+    {
+      "path": "ubuntu-upgrade.log",
+      "sha256": "23f8954bf405af84482b4628176bd068f1f497cadb92ec7ef3c821801c590ca9",
+      "bytes": 3775
+    },
+    {
+      "path": "ubuntu-upgrade.json",
+      "sha256": "03f40319b319753da1dd2f8c56bb3c5bee03a796bbfa41b6f69f3e660c09a650",
+      "bytes": 767
+    },
+    {
+      "path": "debian-portable.log",
+      "sha256": "d9262223208e9a5e3faf003e04b55e2b16be8733cc2a2dce803d77bb1c36afd1",
+      "bytes": 546
+    },
+    {
+      "path": "debian-portable-valid.log",
+      "sha256": "fcd45e3c1bab10464efe560ebbcb81204bda36b54ddc2b2dde5b8eef90a7b59c",
+      "bytes": 791
+    },
+    {
+      "path": "debian-portable.json",
+      "sha256": "4b7e3511ea111d9d6fc0506eadbc2a8d07ed03a039fce1ce1bf29f90d355e1d3",
+      "bytes": 839
+    },
+    {
+      "path": "ubuntu-portable-valid.log",
+      "sha256": "fcd45e3c1bab10464efe560ebbcb81204bda36b54ddc2b2dde5b8eef90a7b59c",
+      "bytes": 791
+    },
+    {
+      "path": "ubuntu-portable.json",
+      "sha256": "4b7e3511ea111d9d6fc0506eadbc2a8d07ed03a039fce1ce1bf29f90d355e1d3",
+      "bytes": 839
+    },
+    {
+      "path": "environment.sh",
+      "sha256": "73c6512e7e7f76e28d38fdd47b89df76edc2762153d3d7f08a0b342f279671c8",
+      "bytes": 266
+    },
+    {
+      "path": "build-candidate.sh",
+      "sha256": "da955126385d000155b86b863ddc6086a310638f40ebefb3716f1defb5e7dbbe",
+      "bytes": 1496
+    },
+    {
+      "path": "verify-staged-source.py",
+      "sha256": "a8f92dedf31e453783dedcdfa911358b7efb59f7f6b533df799f899905c7f750",
+      "bytes": 1027
+    },
+    {
+      "path": "record-artifacts.py",
+      "sha256": "6427a6ce4f51a8857617daaaa3c0fa4975588f7d25f41a148e16f9198758f48b",
+      "bytes": 2979
+    },
+    {
+      "path": "consumer-lifecycle.sh",
+      "sha256": "e10697946d418415a1696a7463be8403ae08dc2a978ca93ee5f635a9730dd6c3",
+      "bytes": 2154
+    },
+    {
+      "path": "consumer-lifecycle-valid.sh",
+      "sha256": "2263d8ae75b7f74018251fcd249b34def1404a717fa897c86e2f2fc8b4336df1",
+      "bytes": 2207
+    },
+    {
+      "path": "consumer-upgrade.sh",
+      "sha256": "85ac7d84286f241a995d8dc349d3d068502d292ce1cadfae2dd88965eb0a5494",
+      "bytes": 947
+    },
+    {
+      "path": "portable-consumer.py",
+      "sha256": "cdcb3dd92d35a94fe8fb850680d4ed89828146c8a7f3db02d060076b434d2379",
+      "bytes": 4337
+    },
+    {
+      "path": "portable-consumer-valid.py",
+      "sha256": "4c7d09dd6cbc4e6bab2dcafc5d6a82652a5227835ca46693a3e1dad7ce040494",
+      "bytes": 4360
+    },
+    {
+      "path": "installed-browser-smoke.mjs",
+      "sha256": "efdbf38f6d023bc046e96d45f2ac55bb978fe17dc5e34c3f739622f7e1eb5c88",
+      "bytes": 4059
+    }
+  ],
+  "remaining_gaps": [
+    "No CI build-provenance attestation for these local candidate packages",
+    "No Ubuntu GNOME Wayland visible L1-L9 lifecycle against these package bytes and store adapter",
+    "No submitted store ZIP or clean-machine store installation acceptance",
+    "No host reboot or generic sanitized-MCP startup/retry acceptance in this lane",
+    "No Flatpak activation, musl package or additional architecture support claim",
+    "Ubuntu initial concurrent five-second readiness timeout retained; serial rerun passed without source or deadline change"
+  ]
+}
