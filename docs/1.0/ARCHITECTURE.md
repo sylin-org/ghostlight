@@ -49,6 +49,15 @@ It observes the lifetime lease, honors a fresh deployment lock, and starts only 
 `ghostlight` executable with no application arguments and with detached null standard streams. The
 connectors retain their existing reconnect behavior and learn no workbench or product semantics.
 
+Startup admission is separate from the authority lifetime lease. One caller holds
+a per-runtime `.startup` lock through a bounded launch-to-ready exchange; a shared
+five-second failed-start cooldown prevents retry amplification. Native failed
+children are reaped, and only the caller's own unready child can be stopped on
+startup timeout. Named OS activation uses the same admission without a child PID
+or host-command fallback. The desktop publishes discovery only after native Ready
+has established its interaction route. Typed lease contention may await the winner;
+a genuine desktop startup failure exits promptly with diagnostics (ADR-0166).
+
 A no-argument launch first asks a running authority to reveal its workbench, then otherwise starts
 the complete desktop authority, creates its tray, and backgrounds the workbench: minimized on
 Windows and hidden on Linux. Connectors use that exact no-argument launch. The explicit local-human

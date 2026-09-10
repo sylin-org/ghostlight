@@ -8,6 +8,19 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Bounded Linux startup follow-up (2026-09-09)
+
+Test-03 owns generic failed-start custody from integrated baseline `ac1becab` in
+its ordinary repository, branch `codex/fleet-test-03-startup`. ADR-0166 and the
+[focused startup record](testing/linux-startup-recovery-2026-09-09.md) document
+shared startup admission/cooldown, named OS activation composition, desktop-ready
+runtime publication and typed lease contention. Native musl before/after proves
+32 transient authorities in four seconds reduced to one maximum, no premature
+publication, and four corrected-context callers recovering to one authority.
+Required source gates and the real process journey pass. Installed acceptance is
+pending at this source milestone; the previous configured-client repair is kept.
+Bluefin owns the named Flatpak activation implementation and ADR-0165.
+
 ## Four-machine acceptance campaign (2026-09-09)
 
 The focused Bluefin follow-up starts from ac1becab in the ordinary repository.

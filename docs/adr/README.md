@@ -184,6 +184,7 @@ history live here.
 | [0164](0164-govern-only-ghostlight-work.md) | Human browsing produces no Ghostlight work; passive events invalidate references only, opener-based adoption and automatic regrouping are removed | Accepted |
 
 | [0165](0165-flatpak-host-desktop-activation.md) | One explicitly granted named host activation route for Flatpak Chromium; no supervisor or product methods on D-Bus | Accepted for implementation; installed acceptance pending |
+| [0166](0166-bounded-desktop-startup-custody.md) | Shared bounded startup admission and retry cooldown, desktop-ready discovery, typed contention, and named OS activation composition | Accepted; native process validation passes, installed acceptance pending |
 
 ## Conventions
 

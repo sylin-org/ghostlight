@@ -41,7 +41,7 @@ use admission::{Capacity, Job, Permit, QueueBudget, Refused, SessionQueue};
 
 /// A running local service host. Dropping it requests listener shutdown.
 pub struct ServiceHost {
-    /// Published authenticated endpoint.
+    /// Prepared authenticated endpoint, private until desktop readiness is published.
     pub endpoint: RuntimeEndpoint,
     /// Typed in-process application boundary for the disposable desktop workbench.
     pub workbench: WorkbenchFacade,
@@ -52,6 +52,11 @@ pub struct ServiceHost {
     runtime_path: PathBuf,
     _lease: ServiceLease,
 }
+
+/// Another authority owns this runtime; a competing explicit Open may await its presentation.
+#[derive(Debug, thiserror::Error)]
+#[error("another Ghostlight orchestrator already owns this runtime")]
+pub struct AuthorityAlreadyRunning;
 
 enum ServiceOpening {
     Workspace {
@@ -64,7 +69,8 @@ enum ServiceOpening {
 }
 
 impl ServiceHost {
-    /// Start both authenticated loopback listeners and publish runtime discovery.
+    /// Prepare the authenticated service under its lifetime lease without publishing discovery.
+    /// The desktop must call `publish_ready` only after its native interaction route is ready.
     pub fn start(path: &Path) -> Result<Self> {
         let diagnostics = DiagnosticsHub::birth(path);
         Self::start_with_diagnostics(path, Arc::clone(&diagnostics)).inspect_err(|error| {
@@ -80,7 +86,7 @@ impl ServiceHost {
     fn start_with_diagnostics(path: &Path, diagnostics: Arc<DiagnosticsHub>) -> Result<Self> {
         let lease = ServiceLease::try_acquire(path)
             .context("open the orchestrator service lease")?
-            .context("another Ghostlight orchestrator already owns this runtime")?;
+            .ok_or(AuthorityAlreadyRunning)?;
         let service_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .context("bind service bridge")?;
         let browser_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
@@ -155,19 +161,6 @@ impl ServiceHost {
             diagnostics: Arc::clone(&diagnostics),
         }));
 
-        write_runtime(path, &endpoint).context("publish runtime endpoint")?;
-        diagnostics.sink().emit(
-            ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
-            ghostlight_bridge::diagnostics::Level::Info,
-            None,
-            &format!(
-                "service_port={} browser_port={} service_major={} browser_major={}",
-                endpoint.service_port,
-                endpoint.browser_port,
-                endpoint.service_bridge_major,
-                endpoint.browser_relay_major
-            ),
-        );
         let stop = Arc::new(AtomicBool::new(false));
         let audit_stop = stop.clone();
         let audit_thread = std::thread::spawn(move || {
@@ -202,6 +195,23 @@ impl ServiceHost {
             runtime_path: path.into(),
             _lease: lease,
         })
+    }
+
+    /// Publish discovery after the desktop event loop has established an interaction route.
+    pub fn publish_ready(&self) -> Result<()> {
+        write_runtime(&self.runtime_path, &self.endpoint)
+            .context("publish desktop-ready endpoint")?;
+        self.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            &format!(
+                "desktop_ready=true service_port={} browser_port={} service_major={} browser_major={}",
+                self.endpoint.service_port, self.endpoint.browser_port,
+                self.endpoint.service_bridge_major, self.endpoint.browser_relay_major
+            ),
+        );
+        Ok(())
     }
 
     /// The process-diagnostics hub this authority owns.
@@ -1120,6 +1130,7 @@ mod tests {
     fn incompatible_service_bridge_fails_before_catalog() {
         let (directory, path) = runtime_path("incompatible");
         let host = ServiceHost::start(&path).unwrap();
+        host.publish_ready().unwrap();
         let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
         write_json_line(
             &mut stream,
@@ -1145,6 +1156,7 @@ mod tests {
     fn readiness_inspection_is_read_only_and_opens_no_session() {
         let (directory, path) = runtime_path("readiness-inspection");
         let host = ServiceHost::start(&path).unwrap();
+        host.publish_ready().unwrap();
         let before = host.workbench.snapshot();
 
         let observed = request_readiness(&path).unwrap();
@@ -1173,6 +1185,7 @@ mod tests {
     fn sessions_after(name: &str, goodbye: impl FnOnce(&mut TcpStream)) -> usize {
         let (directory, path) = runtime_path(name);
         let host = ServiceHost::start(&path).unwrap();
+        host.publish_ready().unwrap();
         let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
         write_json_line(
             &mut stream,
@@ -1230,6 +1243,33 @@ mod tests {
     }
 
     #[test]
+    fn prepared_service_keeps_discovery_private_until_desktop_ready() {
+        let (directory, path) = runtime_path("desktop-readiness");
+        let host = ServiceHost::start(&path).unwrap();
+        assert!(!path.exists());
+        assert!(request_readiness(&path).is_err());
+        let contender = ServiceHost::start(&path).err().unwrap();
+        assert!(contender.is::<super::AuthorityAlreadyRunning>());
+        host.publish_ready().unwrap();
+        assert_eq!(
+            ghostlight_bridge::runtime::read_runtime(&path)
+                .unwrap()
+                .token,
+            host.endpoint.token
+        );
+        assert!(request_readiness(&path).is_ok());
+        drop(host);
+        assert!(!path.exists());
+        let unpublished = ServiceHost::start(&path).unwrap();
+        drop(unpublished);
+        assert!(
+            !path.exists(),
+            "failed desktop setup leaves no discovery behind"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn service_lease_prevents_concurrent_authorities() {
         let (directory, path) = runtime_path("singleton");
         let first = ServiceHost::start(&path).unwrap();
@@ -1268,6 +1308,7 @@ mod tests {
     fn authenticated_activation_reveals_the_existing_workbench() {
         let (directory, path) = runtime_path("activation");
         let host = ServiceHost::start(&path).unwrap();
+        host.publish_ready().unwrap();
         assert!(!request_workbench_activation(&path).unwrap());
         let reveals = Arc::new(RevealCounter::default());
         host.workbench.attach_presentation(reveals.clone());
