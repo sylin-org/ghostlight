@@ -1,5 +1,9 @@
 # Focused fleet implementation round
 
+Status: Complete with recorded limits. All four machine assignments and final
+affected-platform checks are collected. Runtime source is `0129ff15`; later
+integration commits consolidate evidence without changing product source.
+
 Started 2026-09-09 at the owner's instruction to coordinate the machines autonomously.
 Starting revision: `ac1becab78e5a8a6b89e553e82f6779d93dcb39c`.
 Coordinator branch: `codex/fleet-next`, ordinary repository.
@@ -73,6 +77,11 @@ override enforced tool restrictions or authorize alternate routes around rejecte
   installed Chromium/Brave typing/readback pass after authority-only deployment.
   The initial concurrent Ubuntu readiness timeout is retained; a fresh serial run
   passed unchanged bytes. Report and candidate manifest integrated in `7291e68d`.
+  Final follow-up `648f60a1` replaces that intermediate package evidence with exact
+  combined 0129ff15 candidates. Ubuntu-baseline builds, Debian 12/Ubuntu 24.04 lifecycle,
+  retained-client upgrade, four-client cold startup/recovery and portable ownership
+  checks pass. Normal Chromium/Brave smoke passes after replacing all three siblings.
+  All 564 Rust and 222 extension tests pass; no product or packaging fix was needed.
 - Alpine `f3396e31`: completed shared startup custody/readiness (runtime d67e3b33),
   installed native-musl Codex and browser cold starts, adapter rejoin, open/read and
   native workbench acceptance. Four sanitized callers produced at most one transient
@@ -89,33 +98,31 @@ override enforced tool restrictions or authorize alternate routes around rejecte
 CachyOS and Windows evidence, Windows hook fixtures and Alpine's startup/deployment
 repairs are integrated on this branch. Required central checks pass with 537 Rust and
 222 extension tests. Bluefin's reviewed activation implementation is also integrated.
-Packages previously verified at ac1becab
-do not contain the new startup repair; affected package checks follow the combined
-Linux candidate rather than rebuilding once for every intermediate milestone.
+Final portable and Debian candidates now contain the combined 0129ff15 runtime;
+their manifest and consumer evidence supersede intermediate ac1becab package coverage.
 
 Flatpak integration is committed at `0129ff15`. Its Cargo inputs, product crates,
 extension and dev-loop controller are byte-identical to Bluefin's tested 46577c6d
 tree. Central Windows gates pass; Linux-specific private-bus and live evidence come
-from Bluefin. Combined native-musl compatibility is complete. The only remaining
-autonomous assignment is CachyOS's targeted package build and consumer validation,
-followed by evidence collection.
+from Bluefin. Combined native-musl compatibility and final package consumers pass.
+No autonomous work remains in this round.
 
 ## Integration and follow-through
 
-Review source and evidence before integrating into `codex/fleet-next`. Reconcile shared
-lifecycle changes, run the required central gates against the merged source, and ask the
-affected machine to validate the exact resulting candidate when the change warrants it.
-Keep package identity separate from source-test identity. Do not rerun settled broad
-campaigns or retry unchanged tool blocks just to produce activity.
+Source and evidence were reviewed and integrated into `codex/fleet-next`. Shared
+lifecycle changes were reconciled, required central gates passed, and affected Linux
+package/musl and Windows installed checks completed. Package identities remain
+separate from source-test identities. No shared owner branch or public release changed.
 
 The Windows browser lane currently needs the current repository's `extension` directory
 loaded in ordinary Chrome through an allowed human action. Browser Use prohibits extension
 management. The previously rejected held-file uninstall remains unverified; automatic
-approval review reported `blocked by policy`. Independent package work continues.
+approval review reported `blocked by policy`. These are retained limits, not active
+assignments. Matching store/clean-machine acceptance, fresh Ubuntu GNOME visual
+acceptance and CI provenance for local candidates remain outside this completed round.
 
-The `coordinate-ghostlight-focused-fleet-round` heartbeat is active every ten minutes.
-It stays quiet for unchanged/non-actionable state, reports meaningful changes or required
-user action, and removes itself once results are integrated or the remaining limits are
-explicitly recorded with no autonomous work left. The prior campaign monitor stays deleted.
+The `coordinate-ghostlight-focused-fleet-round` heartbeat was deleted after all four
+assignments and final affected-platform results were collected. The prior campaign
+monitor also remains deleted. No recurring fleet task remains.
 Local retrieval state lives in `.tmp/fleet-acceptance/focused-round-state.json`, never in
 model-private memory.

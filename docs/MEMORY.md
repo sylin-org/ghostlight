@@ -404,6 +404,11 @@ Every one of these cost something to learn.
   controlled; cursors, scans, ripples, frames, and captions say what is happening now.
 - **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
   only by exact executable path, never by image name.
+- **A procfs PID may belong to an outer namespace.** A package fixture saw host PIDs in
+  `/proc` while its Python children and signals used guest PIDs. An `ESRCH` from the
+  mismatched number did not mean the authority had exited. Match the process's PID
+  namespace to the caller, retain both procfs and `NSpid` identities with start time,
+  and signal only the exact test process in the caller's namespace.
 - **Persistent package-test overlays need candidate-scoped user state.** A retained runtime file can
   satisfy a file-exists wait before the new authority publishes, producing a truthful result about
   the wrong candidate. Namespace the test home by candidate, and pass the effective Cargo target
