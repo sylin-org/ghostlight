@@ -8,6 +8,24 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Integrated Linux package validation complete (2026-09-09)
+
+Test-01 rebuilt exact integrated baseline `ac1becab` on Ubuntu 22.04. All siblings
+require at most GLIBC_2.34. The exact Debian candidate passed Debian 12 and Ubuntu
+24.04 lifecycle, owned/foreign registration checks and retained-MCP 1.3.4 upgrades;
+portable installer checks passed in both consumers. Separate packager processes
+produced identical portable archives. All 542 Rust tests, 222 extension tests,
+formatting and Clippy passed. No product or packaging-script change was needed.
+
+Authority-only deployment at the preserved CachyOS installation passed normal
+Chromium/Brave open, typing and readback with unchanged connectors, adapter, policy
+and configuration. The [focused report](testing/linux-integrated-packaging-2026-09-09.md)
+and [candidate manifest](testing/linux-integrated-packaging-2026-09-09.json) retain
+exact bytes, original failed attempts and reproduction inputs. In particular, an
+initial concurrent Ubuntu readiness timeout remains a failure; a fresh serial run
+passed unchanged. This closes the old a8cfd033 package-candidate gap, not store,
+GNOME, provenance or separately owned startup/Flatpak release gaps.
+
 ## Four-machine acceptance campaign (2026-09-09)
 
 The owner authorized a new focused implementation round after the completed campaign.
