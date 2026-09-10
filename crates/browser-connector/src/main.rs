@@ -13,7 +13,7 @@ use ghostlight_bridge::diagnostics::{event, Component, Level, Sink};
 use ghostlight_bridge::framing::{
     read_length_frame, read_native, write_length_frame, write_native,
 };
-use ghostlight_bridge::lifecycle::{request_orchestrator_start, StartDisposition};
+use ghostlight_bridge::lifecycle::request_orchestrator_start;
 use ghostlight_bridge::relay::{
     BrowserRelayRequest, BrowserRelayResponse, BrowserRelayStatus, BROWSER_RELAY_MAJOR,
 };
@@ -226,20 +226,7 @@ fn connect_adapter(
         }
         match request_orchestrator_start() {
             Ok(disposition) => {
-                let note = match &disposition {
-                    StartDisposition::Spawned { process_id } => (
-                        event::DEMAND_START_SPAWNED,
-                        format!("orchestrator pid {process_id}"),
-                    ),
-                    StartDisposition::AlreadyRunning => (
-                        event::DEMAND_START_ALREADY_RUNNING,
-                        "lease held; retrying connection".into(),
-                    ),
-                    StartDisposition::DeploymentInProgress => (
-                        event::DEMAND_START_DEPLOYMENT_IN_PROGRESS,
-                        "deploy lock present; startup quiesced".into(),
-                    ),
-                };
+                let note = disposition.diagnostic();
                 let marker = format!("{}|{}", note.0, note.1);
                 if reported_disposition.as_deref() != Some(marker.as_str()) {
                     reported_disposition = Some(marker);

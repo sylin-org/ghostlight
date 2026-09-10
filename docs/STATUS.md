@@ -46,6 +46,23 @@ independently. The final installed-uninstall
 restriction remains in force. See the [round-two report](testing/windows-fleet-round2-2026-09-09.md)
 for exact source/artifact identities and the fixture's narrower evidence boundary.
 
+## Bounded Linux startup follow-up (2026-09-09)
+
+Test-03 owns generic failed-start custody from integrated baseline `ac1becab` in
+its ordinary repository, branch `codex/fleet-test-03-startup`. ADR-0166 and the
+[focused startup record](testing/linux-startup-recovery-2026-09-09.md) document
+shared startup admission/cooldown, named OS activation composition, desktop-ready
+runtime publication and typed lease contention. Native musl before/after proves
+32 transient authorities in four seconds reduced to one maximum, no premature
+publication, and four corrected-context callers recovering to one authority.
+Required source gates (547 Rust and 222 extension tests), the real process journey,
+and installed Codex/browser/workbench acceptance pass. The previous configured-client
+repair is kept. A failed installed swap also exposed a respawned-connector copy race;
+the dev loop now stops only the selected exact image before retrying, with a real
+Linux executable-lock regression. Unconfigured clients still need desktop context;
+the generic retry amplification and premature readiness defects are repaired.
+Bluefin owns the named Flatpak activation implementation and ADR-0165.
+
 ## Four-machine acceptance campaign (2026-09-09)
 
 The owner authorized a new focused implementation round after the completed campaign.
@@ -56,15 +73,16 @@ activation, Alpine owns failed-start suppression and truthful readiness, CachyOS
 fresh integrated Linux packages, and Windows owns installer/browser acceptance. The
 coordinator approved testing a single named Flatpak activation grant under the owner's
 dedicated-machine authority; customer installation must explicitly disclose and select
-that grant. No new runtime repair or public release is claimed by this dispatch.
+that grant. The completed Alpine repair is integrated above; no public release is claimed.
 
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
 is recorded at `27800651`: normal browser-led recovery passed with retained adapter identity,
 but actual MCP Inspector cold startup failed when its SDK stripped desktop variables. GTK
-failed and connector retries created repeated short-lived authorities. This remains an open
-Linux startup defect; the Codex-specific forwarding repair does not solve every MCP client.
+failed and connector retries created repeated short-lived authorities. The follow-up above
+repairs retry amplification and premature discovery; the Codex-specific forwarding repair
+still does not supply desktop context to every MCP client.
 The fleet is not release-ready. The scheduled coordinator was deleted after results were collected.
 
 The owner's follow-up round retrieved Alpine repair `60f555a8`. It applies the existing integrated
@@ -72,7 +90,9 @@ Codex registration writer unchanged, deploys only the native-musl authority, and
 Codex configuration. Actual Codex automatic recovery and an explicitly configured MCP Inspector
 cold start now pass, followed by browser rejoin and workbench Open. All 542 native Rust tests and
 210 extension tests pass. Unconfigured clients still strip desktop context, and failed-start
-retry amplification remains unchanged. No second physical reboot or combined Alpine build is claimed.
+retry amplification was unchanged at that checkpoint. The follow-up above supersedes
+that failure behavior and verifies an integrated native-musl build; no second physical
+reboot is claimed.
 
 Bluefin checkpoint `6883aa59` adds post-reboot Codex startup and native Chromium registration
 passes, then a real developer-mode Flatpak Chromium extension connection and open/read pass
