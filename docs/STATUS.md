@@ -10,6 +10,16 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
+The owner authorized a new focused implementation round after the completed campaign.
+All four assignments start at `ac1becab`; coordination uses the ordinary repository on
+`codex/fleet-next`. The [focused-round board](testing/fleet-focused-round-2026-09.md)
+records ownership, acceptance and integration state. Bluefin owns bounded Flatpak host
+activation, Alpine owns failed-start suppression and truthful readiness, CachyOS owns
+fresh integrated Linux packages, and Windows owns installer/browser acceptance. The
+coordinator approved testing a single named Flatpak activation grant under the owner's
+dedicated-machine authority; customer installation must explicitly disclose and select
+that grant. No new runtime repair or public release is claimed by this dispatch.
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
