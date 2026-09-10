@@ -155,3 +155,36 @@ Source checks pass with 556 Rust tests (one opt-in private-bus test separate), f
 and all-target Clippy. The new private-bus executable passed on the host again.
 No installer artifact or new binary has yet been deployed to the live installation.
 Alpine source d67e3b33 is now available and is the next shared-lifecycle integration.
+
+## Shared lifecycle composition checkpoint
+
+Alpine d67e3b33 is integrated as 56ecd4bb. Both desktop hooks are retained: publish
+authenticated discovery after native readiness, then claim the optional activation
+name. The Linux demand-start entry now selects named activation only for the exact
+org.chromium.Chromium Flatpak identity. Other sandbox identities refuse rather than
+falling back to executing the host GUI inside the sandbox. Native callers keep their
+existing sibling route. The selected runtime installation must match registration.
+
+The Flatpak callback runs inside the shared startup admission, deployment quiescence,
+readiness wait and failed-start cooldown. It returns ActivationRequested, never an
+invented child PID. The expanded private-bus proof invokes the actual shared entry,
+proves a deployment marker prevents activation, observes fresh discovery under an
+authority lease, and confirms a repeated request reuses the owner. This remains a
+test fixture, not installed-browser acceptance.
+
+Format, warnings-denied Clippy, 562 Rust tests and 222 extension tests pass. The
+private-bus test passes separately. The real Linux startup-recovery journey also
+passes on Bluefin: four missing-context callers produce at most one authority at
+once, three bounded failed attempts in 11.5 seconds, no published runtime, and no
+initialized client. Corrected context recovers all four callers to one authority
+in 5,842 ms. Evidence is in .tmp/linux-startup-recovery/after/result.json.
+The fresh GHOSTLIGHT_BIN_DIR=target/debug real-process journey also passes, including
+relay reconnect, browser fixture work, audit failure/recovery and cold-start refusal.
+
+The installed graph remains unchanged. Deployment has a layout constraint: the
+mandatory scripts/dev-loop.ps1 requires both build and live directories inside its
+repository, while the existing installation is still in the retained external fleet
+tree. This checkpoint does not bypass that guard, manually swap live images, or move
+the installation. A deliberate layout decision is needed before deployed acceptance.
+Installer precedence/name-claim review and actual cold/recovery/remove/reinstall
+acceptance remain open; this does not finish the Flatpak assignment.

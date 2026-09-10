@@ -45,6 +45,15 @@ installer regressions and the full-exchange authentication timeout proof pass.
 The current source has 556 passing Rust tests; installed deployment and Alpine
 d67e3b33 composition are next. Customer setup never restarts the browser.
 
+Composition is now implemented on top of 56ecd4bb (Alpine d67e3b33). Flatpak
+activation uses the same admission, deployment lock, readiness and cooldown as
+native startup. Source gates pass with 562 Rust and 222 extension tests; the
+expanded private-bus proof and Bluefin failed-start/recovery journey pass separately.
+The installed graph remains unchanged. The existing external installation conflicts
+with the dev-loop's repository-local build/live path guard and the owner's new-work
+location preference; no guard bypass or unapproved migration was performed. The
+milestone record names that layout decision and remaining installed acceptance.
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof

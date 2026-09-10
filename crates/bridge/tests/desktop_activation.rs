@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use ghostlight_bridge::desktop_activation::{
     claim_ready_name, registration_bytes, registration_path, request_registered_start, BUS_NAME,
 };
+use ghostlight_bridge::lifecycle::{request_orchestrator_start, ServiceLease, StartDisposition};
+use ghostlight_bridge::runtime::{runtime_discovery, write_runtime, RuntimeEndpoint};
 
 const STAGE: &str = "GHOSTLIGHT_ACTIVATION_TEST_STAGE";
 const ROOT: &str = "GHOSTLIGHT_ACTIVATION_TEST_ROOT";
@@ -33,6 +35,15 @@ fn private_bus_starts_exact_registration_and_reuses_one_name() {
                 .args(["--ignored", "--exact", TEST, "--nocapture"])
                 .env(STAGE, "bus")
                 .env(ROOT, &root)
+                .env("HOME", &root)
+                .env(
+                    "FLATPAK_ID",
+                    ghostlight_bridge::desktop_activation::FLATPAK_APP,
+                )
+                .env(
+                    "GHOSTLIGHT_RUNTIME_FILE",
+                    root.join("bin with spaces/runtime.json"),
+                )
                 .env("XDG_DATA_HOME", root.join(".local/share"))
                 .status()
                 .expect("dbus-run-session is available for the explicit private-bus gate");
@@ -52,7 +63,21 @@ fn root() -> PathBuf {
 fn owner() {
     let root = root();
     let executable = root.join("bin with spaces/ghostlight");
+    let runtime = runtime_discovery();
+    let _authority = ServiceLease::try_acquire(&runtime.path).unwrap().unwrap();
     fs::write(root.join("desktop-ready"), std::process::id().to_string()).unwrap();
+    write_runtime(
+        &runtime.path,
+        &RuntimeEndpoint {
+            service_port: 1,
+            browser_port: 2,
+            token: "private-fixture-ready".into(),
+            service_bridge_major: 2,
+            browser_relay_major: 2,
+            service_version: "fixture".into(),
+        },
+    )
+    .unwrap();
     let lease = claim_ready_name(&root, &executable).unwrap().unwrap();
     let deadline = Instant::now() + Duration::from_secs(15);
     while !root.join("stop").exists() && Instant::now() < deadline {
@@ -80,7 +105,18 @@ fn bus() {
     let proxy = zbus::blocking::fdo::DBusProxy::new(&connection).unwrap();
     proxy.reload_config().unwrap();
     assert!(!proxy.name_has_owner(BUS_NAME.try_into().unwrap()).unwrap());
-    request_registered_start(&root, &executable).unwrap();
+    let deploy = executable.with_file_name("deploy.lock");
+    fs::write(&deploy, "fixture deployment").unwrap();
+    assert_eq!(
+        request_orchestrator_start().unwrap(),
+        StartDisposition::DeploymentInProgress
+    );
+    assert!(!proxy.name_has_owner(BUS_NAME.try_into().unwrap()).unwrap());
+    fs::remove_file(deploy).unwrap();
+    assert_eq!(
+        request_orchestrator_start().unwrap(),
+        StartDisposition::ActivationRequested
+    );
     let owner_pid = proxy
         .get_connection_unix_process_id(BUS_NAME.try_into().unwrap())
         .unwrap();
@@ -89,6 +125,10 @@ fn bus() {
         owner_pid.to_string()
     );
     request_registered_start(&root, &executable).unwrap();
+    assert_eq!(
+        request_orchestrator_start().unwrap(),
+        StartDisposition::AlreadyRunning
+    );
     assert_eq!(
         proxy
             .get_connection_unix_process_id(BUS_NAME.try_into().unwrap())
