@@ -8,6 +8,22 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Windows bounded startup follow-up (2026-09-09)
+
+Exact generic startup candidate `09890c9f` now passes the bounded installed
+Windows check on `codex/fleet-windows-startup`. The normal NSIS upgrade exits 0,
+all three installed hashes match, and no deployment lock remains. Actual Codex
+cold startup from zero installed processes succeeds with a saved, effect-none
+policy result; 134 OS samples observe one authority identity. Codex uses the
+unchanged prior per-run configuration, not a saved Ghostlight registration.
+The existing VS Code entry recovers to 23 tools and one desktop-ready authority,
+with both client configuration files unchanged and unrelated desktop processes
+preserved. All 537 Windows Rust tests, 222 extension tests, formatting, Clippy
+and the fresh-bin process journey pass. No runtime repair was needed. Browser
+and uninstall limits remain. The [Windows startup report](testing/windows-startup-recovery-2026-09-09.md)
+records exact bytes and the distinction between the ephemeral Codex run and
+the settled VS Code authority.
+
 ## Integrated Linux package validation complete (2026-09-09)
 
 These packages contain ac1becab. The later startup and Flatpak repairs below need

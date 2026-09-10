@@ -62,6 +62,12 @@ override enforced tool restrictions or authorize alternate routes around rejecte
   replaced all three siblings with verified expected bytes; real Codex policy work,
   VS Code catalog recovery, process and provenance journeys pass. The final installer
   exit code was not retained. Browser and held-file uninstall limits remain open.
+  Follow-up `d27b176d` then validates exact startup candidate 09890c9f: installed
+  package exited 0 in 20.35 seconds, all three expected images match, actual Codex
+  cold startup observed one authority, VS Code recovered its unchanged configuration,
+  and 19 unrelated VS Code/Edge processes survived. All 537 Windows Rust and 222
+  extension tests pass. The Codex invocation uses an explicit per-run configuration;
+  it is not saved-registration discovery. Browser/uninstall restrictions are unchanged.
 - CachyOS `cd37fd54`: exact ac1becab portable/Debian candidates pass Ubuntu-baseline
   build, Debian 12/Ubuntu 24.04 consumer lifecycle and retained-MCP upgrades. Normal
   installed Chromium/Brave typing/readback pass after authority-only deployment.
@@ -81,6 +87,12 @@ repairs are integrated on this branch. Required central checks pass with 537 Rus
 Packages previously verified at ac1becab
 do not contain the new startup repair; affected package checks follow the combined
 Linux candidate rather than rebuilding once for every intermediate milestone.
+
+Flatpak integration is committed at `0129ff15`. Its Cargo inputs, product crates,
+extension and dev-loop controller are byte-identical to Bluefin's tested 46577c6d
+tree. Central Windows gates pass; Linux-specific private-bus and live evidence come
+from Bluefin. The remaining autonomous work is targeted packaging and native-musl
+compatibility against this combined Linux candidate, followed by evidence collection.
 
 ## Integration and follow-through
 
