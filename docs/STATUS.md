@@ -8,19 +8,30 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
-## Final combined Linux package validation in progress (2026-09-09)
+## Final combined Linux package validation complete (2026-09-09)
 
-Test-01 is rebuilding exact `0129ff15` with the integrated startup/readiness and
-Flatpak activation changes. All 1,045 staged source blobs match; 564 Rust tests,
-222 extension tests, formatting, Clippy, the process journey and selected-image
-copy-retry regression pass. Candidate consumer/deployment results remain pending
-in the [focused record](testing/linux-combined-packaging-2026-09-09.md).
-Prior artifacts, failures and installed paths are preserved.
+Test-01 rebuilt exact `0129ff15` on Ubuntu 22.04 with the integrated startup/readiness
+and Flatpak activation changes. All 1,045 source blobs matched. Formatting, Clippy,
+564 Rust tests, 222 extension tests, the real process journey and selected-image
+copy-retry regression passed. Exact Debian packages passed Debian 12 and Ubuntu
+24.04 lifecycle, retained-client upgrade, four-client cold startup and recovery.
+Portable install/remove/reinstall passed in both; repeated packaging was identical.
+Native defaults preserved Flatpak state, and explicit activation refused /usr/bin
+without mutation. No product or packaging-script change was needed.
+
+All three native siblings were deployed through the dev loop at the preserved
+CachyOS installation. Both normal Chromium and Brave passed after source-adapter
+reload; browser processes and configuration were retained. Final service health
+was Ready with no remaining guest processes. The [focused report](testing/linux-combined-packaging-2026-09-09.md)
+and [manifest](testing/linux-combined-packaging-2026-09-09.json) retain exact hashes,
+passing receipts, fixture failures and scope. CI provenance, matching store/Ubuntu
+GNOME visible acceptance and physical reboot remain outside this lane. No release
+or package publication occurred.
 
 ## Integrated Linux package validation complete (2026-09-09)
 
-These packages contain ac1becab. The later startup and Flatpak repairs below need
-fresh affected-package checks before claiming the same candidate coverage.
+These historical packages contain ac1becab. The final combined report above provides
+fresh affected-package checks for the later startup and Flatpak repairs.
 
 Test-01 rebuilt exact integrated baseline `ac1becab` on Ubuntu 22.04. All siblings
 require at most GLIBC_2.34. The exact Debian candidate passed Debian 12 and Ubuntu

@@ -1,0 +1,899 @@
+{
+  "source": {
+    "commit": "0129ff15bf0c6348a78e8c0d2e4e1d2716695ae8",
+    "tree": "a8f014c5cd53c0acaab5f24980f24cb72f6e3a7f",
+    "verified_git_blobs": 1045,
+    "passed": true
+  },
+  "version": "1.3.5",
+  "branch": "codex/fleet-test-01-final-packaging",
+  "product_source_changes": false,
+  "release_ready": false,
+  "builder": {
+    "os_release": "PRETTY_NAME=\"Ubuntu 22.04.2 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION=\"22.04.2 LTS (Jammy Jellyfish)\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=jammy\n",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "glibc": "glibc 2.35",
+    "powershell": "7.6.5"
+  },
+  "artifacts": {
+    "deb": {
+      "path": ".tmp/linux-local/combined-0129ff15/guest/build/target/x86_64-unknown-linux-gnu/release/bundle/deb/Ghostlight_1.3.5_amd64.deb",
+      "sha256": "9c02034a1c0accff01190537a9ee074e5686d2f116c6becf1edb31bac9651cb6"
+    },
+    "portable": {
+      "path": ".tmp/linux-local/combined-0129ff15/guest/build/dist/portable/ghostlight-v1.3.5-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "ac2a3e2b930c8ac2d2c2492a66e96f94ad061de71b13baa6db4ed0dbbc98f7f7"
+    },
+    "binaries": [
+      {
+        "name": "ghostlight",
+        "raw_portable_sha256": "3948346e3cf6081e64501c0144ead0df9b53d465eb23604a2a071630d68ba7d2",
+        "deb_sha256": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "Tauri bundle marker UNK->DEB (3 bytes)",
+        "mode": "0755",
+        "rpath_runpath": false
+      },
+      {
+        "name": "ghostlight-mcp-connector",
+        "raw_portable_sha256": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+        "deb_sha256": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "identical",
+        "mode": "0755",
+        "rpath_runpath": false
+      },
+      {
+        "name": "ghostlight-browser-connector",
+        "raw_portable_sha256": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1",
+        "deb_sha256": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1",
+        "max_glibc": "2.34",
+        "deb_expected_transform": "identical",
+        "mode": "0755",
+        "rpath_runpath": false
+      }
+    ],
+    "portable_roster": [
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight",
+        "mode": "0o755",
+        "sha256": "3948346e3cf6081e64501c0144ead0df9b53d465eb23604a2a071630d68ba7d2",
+        "bytes": 21108864
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight-browser-connector",
+        "mode": "0o755",
+        "sha256": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1",
+        "bytes": 3466096
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/ghostlight-mcp-connector",
+        "mode": "0o755",
+        "sha256": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+        "bytes": 3828080
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/LICENSE",
+        "mode": "0o644",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "bytes": 11358
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/LICENSING.md",
+        "mode": "0o644",
+        "sha256": "40fc2124d28f69ef084a1e450cd424e8fe74793d3b69b35d8521bd90801662b9",
+        "bytes": 3182
+      },
+      {
+        "path": "ghostlight-v1.3.5-x86_64-unknown-linux-gnu/MIT.txt",
+        "mode": "0o644",
+        "sha256": "8876dafa674472bdbea2dc3041636c8e3026a8278a88ed21f19ed4845b246b88",
+        "bytes": 1075
+      }
+    ],
+    "deb_payload": [
+      {
+        "path": "./etc/brave/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/chromium/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/opt/chrome/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./etc/opt/edge/native-messaging-hosts/org.sylin.ghostlight.json",
+        "mode": "0o644",
+        "sha256": "5822bff21fc3a84210226f8b265b3a4be1916faf3da5c8f4584cdac703f46f9b",
+        "bytes": 303
+      },
+      {
+        "path": "./usr/bin/ghostlight",
+        "mode": "0o755",
+        "sha256": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+        "bytes": 21108864
+      },
+      {
+        "path": "./usr/bin/ghostlight-browser-connector",
+        "mode": "0o755",
+        "sha256": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1",
+        "bytes": 3466096
+      },
+      {
+        "path": "./usr/bin/ghostlight-mcp-connector",
+        "mode": "0o755",
+        "sha256": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+        "bytes": 3828080
+      },
+      {
+        "path": "./usr/lib/Ghostlight/LICENSING.md",
+        "mode": "0o644",
+        "sha256": "40fc2124d28f69ef084a1e450cd424e8fe74793d3b69b35d8521bd90801662b9",
+        "bytes": 3182
+      },
+      {
+        "path": "./usr/lib/Ghostlight/licenses/Apache-2.0.txt",
+        "mode": "0o644",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "bytes": 11358
+      },
+      {
+        "path": "./usr/lib/Ghostlight/licenses/MIT.txt",
+        "mode": "0o644",
+        "sha256": "8876dafa674472bdbea2dc3041636c8e3026a8278a88ed21f19ed4845b246b88",
+        "bytes": 1075
+      },
+      {
+        "path": "./usr/share/applications/Ghostlight.desktop",
+        "mode": "0o644",
+        "sha256": "794271193f0fb17ea4764ee04f04ff8d659818683ad5d46a90c8b5dc455e3742",
+        "bytes": 264
+      },
+      {
+        "path": "./usr/share/bash-completion/completions/ghostlight",
+        "mode": "0o644",
+        "sha256": "934014511ca49632df71d87c6253793137757320557bf8be117f37a175a803e8",
+        "bytes": 1730
+      },
+      {
+        "path": "./usr/share/doc/ghostlight/changelog.gz",
+        "mode": "0o644",
+        "sha256": "293075a18b7f66e402d999ca29fbaa1bddb8e86b115af7670fc504fc38a84762",
+        "bytes": 1037
+      },
+      {
+        "path": "./usr/share/doc/ghostlight/copyright",
+        "mode": "0o644",
+        "sha256": "45d22597c3adef3f35ff029884acfea164951200429b18f9dc129066484bacbf",
+        "bytes": 372
+      },
+      {
+        "path": "./usr/share/fish/vendor_completions.d/ghostlight.fish",
+        "mode": "0o644",
+        "sha256": "f70f8adb6afdc4a920dd09e249d774cc2f1f07ba8c677723d920828a43aafd2a",
+        "bytes": 3266
+      },
+      {
+        "path": "./usr/share/icons/hicolor/128x128/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "153e65ae92af61a7cd2dcbe38c59e6875287a9e3f0208fb4e73f781292327a67",
+        "bytes": 4340
+      },
+      {
+        "path": "./usr/share/icons/hicolor/32x32/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "645b2b436975da68006fcf5bf89242f55f2988e468cd6278679cffb31a3b2dc8",
+        "bytes": 1181
+      },
+      {
+        "path": "./usr/share/icons/hicolor/512x512/apps/ghostlight.png",
+        "mode": "0o644",
+        "sha256": "b82d525e6ff4332d76f559be1a9e66c4fe8bd2bb745df02a72e34f729c348fc9",
+        "bytes": 7903
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight-browser-connector.1.gz",
+        "mode": "0o644",
+        "sha256": "0f8a95003e18859e8129c9b224ad5bece244a02e06d996415d07169471b4ef50",
+        "bytes": 927
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight-mcp-connector.1.gz",
+        "mode": "0o644",
+        "sha256": "45f62d342a7431f7f05d014f7447200a3e5ea1c44e8909ae1158bf1fc1f43d40",
+        "bytes": 727
+      },
+      {
+        "path": "./usr/share/man/man1/ghostlight.1.gz",
+        "mode": "0o644",
+        "sha256": "43f9deca3169a191fe276bebb251fe75826cb97a45606dbe470fc10f58f92ade",
+        "bytes": 2134
+      },
+      {
+        "path": "./usr/share/zsh/vendor-completions/_ghostlight",
+        "mode": "0o644",
+        "sha256": "fab26e405dddf28ab444858ab8d8d7c86dd5c47490aee14f01f5d6980d6b5b75",
+        "bytes": 2310
+      }
+    ],
+    "no_bundled_flatpak_activation_or_grant": true
+  },
+  "portable_repeat_identical": true,
+  "previous_deb": {
+    "version": "1.3.4",
+    "sha256": "30e525d6cd21da30c6569e713a53e9e892adb8b1f0f2aaf325086a0c76eea401",
+    "provenance": "Previously verified public artifact; no new remote attestation check"
+  },
+  "required_gates": {
+    "source": "0129ff15bf0c6348a78e8c0d2e4e1d2716695ae8",
+    "format": true,
+    "clippy": true,
+    "rust_tests": 564,
+    "extension_tests": 222,
+    "process_journey": true,
+    "dev_loop_copy_retry": true,
+    "passed": true
+  },
+  "consumers": {
+    "debian": {
+      "lifecycle": {
+        "native_first_launch_no_flatpak_mutation": true,
+        "distribution": "debian",
+        "passed": true,
+        "owned_stale_registration_repaired": true,
+        "foreign_same_filename_preserved": true,
+        "foreign_sha256": "37ed6b53450b783ddaf5f1adfad14b796e487eb4043a8d3d602247aeb1bf8dc2",
+        "no_user_desktop_shadow": true,
+        "runtime_retained_after_purge": true
+      },
+      "upgrade": {
+        "before_version": "1.3.4",
+        "after_package_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.4"
+        },
+        "retained_mcp_pid": 102,
+        "after_explicit_authority_restart_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.5"
+        },
+        "passed": true,
+        "scope": "package upgrade and retained initialized MCP; no browser",
+        "installed_binary_hashes": {
+          "ghostlight": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        }
+      },
+      "startup": {
+        "candidate": "0129ff15bf0c6348a78e8c0d2e4e1d2716695ae8",
+        "passed": true,
+        "scope": "installed Debian siblings in disposable user/PID guest; four real MCP clients, no browser",
+        "hashes": {
+          "ghostlight": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        },
+        "checks": [
+          "missing-desktop-context-bounded-without-premature-MCP-readiness",
+          "four-corrected-context-clients-cold-start-one-ready-authority-and-complete-policy-work",
+          "same-four-initialized-clients-recover-new-authority-and-fresh-policy-work",
+          "native-packaged-cold-start-adds-no-Flatpak-registration-or-grant"
+        ],
+        "failed_start": {
+          "peak_authorities": 1,
+          "unique_authorities": 3,
+          "premature_runtime": false,
+          "initialized_clients": 0
+        },
+        "cold_start_ms": 5925,
+        "authority_before": {
+          "pid": 74,
+          "proc_pid": 132562,
+          "state": "S",
+          "start_ticks": "3254323"
+        },
+        "retained_mcp_pids": [
+          58,
+          60,
+          64,
+          67
+        ],
+        "recovery_catalog_reconnect_replies": [
+          {
+            "client": 58,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 58,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 60,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 60,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 60,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          }
+        ],
+        "recovery_ms": 1526,
+        "authority_after": {
+          "pid": 186,
+          "proc_pid": 132674,
+          "state": "S",
+          "start_ticks": "3254482"
+        }
+      },
+      "portable": {
+        "passed": true,
+        "scope": "isolated portable installer CLI; synthetic retained history, no authority or browser",
+        "archive_sha256": "ac2a3e2b930c8ac2d2c2492a66e96f94ad061de71b13baa6db4ed0dbbc98f7f7",
+        "checks": [
+          "integrated-Codex-forwarding-and-Claude-install-preserve-foreign-clients",
+          "owned-command-desktop-and-native-registration-name-exact-portable-siblings",
+          "uninstall-preserves-foreign-same-filename-command-client-and-user-history",
+          "reinstall-restores-owned-surfaces-and-retains-history",
+          "native-installer-preserves-existing-Flatpak-override-and-adds-no-activation-or-sandbox-registration"
+        ],
+        "binaries": {
+          "ghostlight": "3948346e3cf6081e64501c0144ead0df9b53d465eb23604a2a071630d68ba7d2",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        }
+      },
+      "flatpak-refusal": {
+        "passed": true,
+        "exit_code": 1,
+        "detail": "Error: Flatpak setup requires the host's home-resident installation and default data/runtime roots",
+        "home_unchanged": true,
+        "scope": "Explicit Flatpak setup refuses /usr/bin package before mutation; native default route separately checked"
+      }
+    },
+    "ubuntu": {
+      "lifecycle": {
+        "native_first_launch_no_flatpak_mutation": true,
+        "distribution": "ubuntu",
+        "passed": true,
+        "owned_stale_registration_repaired": true,
+        "foreign_same_filename_preserved": true,
+        "foreign_sha256": "37ed6b53450b783ddaf5f1adfad14b796e487eb4043a8d3d602247aeb1bf8dc2",
+        "no_user_desktop_shadow": true,
+        "runtime_retained_after_purge": true
+      },
+      "upgrade": {
+        "before_version": "1.3.4",
+        "after_package_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.4"
+        },
+        "retained_mcp_pid": 96,
+        "after_explicit_authority_restart_status": {
+          "browser_relay_major": 1,
+          "running": true,
+          "service_bridge_major": 2,
+          "version": "1.3.5"
+        },
+        "passed": true,
+        "scope": "package upgrade and retained initialized MCP; no browser",
+        "installed_binary_hashes": {
+          "ghostlight": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        }
+      },
+      "startup": {
+        "candidate": "0129ff15bf0c6348a78e8c0d2e4e1d2716695ae8",
+        "passed": true,
+        "scope": "installed Debian siblings in disposable user/PID guest; four real MCP clients, no browser",
+        "hashes": {
+          "ghostlight": "b409c784472fc4bdf0a2c3783438731e68f50412694591056363ef5c5de02237",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        },
+        "checks": [
+          "missing-desktop-context-bounded-without-premature-MCP-readiness",
+          "four-corrected-context-clients-cold-start-one-ready-authority-and-complete-policy-work",
+          "same-four-initialized-clients-recover-new-authority-and-fresh-policy-work",
+          "native-packaged-cold-start-adds-no-Flatpak-registration-or-grant"
+        ],
+        "failed_start": {
+          "peak_authorities": 1,
+          "unique_authorities": 3,
+          "premature_runtime": false,
+          "initialized_clients": 0
+        },
+        "cold_start_ms": 5933,
+        "authority_before": {
+          "pid": 71,
+          "proc_pid": 133909,
+          "state": "S",
+          "start_ticks": "3263615"
+        },
+        "retained_mcp_pids": [
+          55,
+          57,
+          61,
+          65
+        ],
+        "recovery_catalog_reconnect_replies": [
+          {
+            "client": 55,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 55,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 57,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 57,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          },
+          {
+            "client": 57,
+            "error": {
+              "code": -32603,
+              "message": "Ghostlight service is temporarily unavailable"
+            }
+          }
+        ],
+        "recovery_ms": 1588,
+        "authority_after": {
+          "pid": 193,
+          "proc_pid": 134032,
+          "state": "S",
+          "start_ticks": "3263781"
+        }
+      },
+      "portable": {
+        "passed": true,
+        "scope": "isolated portable installer CLI; synthetic retained history, no authority or browser",
+        "archive_sha256": "ac2a3e2b930c8ac2d2c2492a66e96f94ad061de71b13baa6db4ed0dbbc98f7f7",
+        "checks": [
+          "integrated-Codex-forwarding-and-Claude-install-preserve-foreign-clients",
+          "owned-command-desktop-and-native-registration-name-exact-portable-siblings",
+          "uninstall-preserves-foreign-same-filename-command-client-and-user-history",
+          "reinstall-restores-owned-surfaces-and-retains-history",
+          "native-installer-preserves-existing-Flatpak-override-and-adds-no-activation-or-sandbox-registration"
+        ],
+        "binaries": {
+          "ghostlight": "3948346e3cf6081e64501c0144ead0df9b53d465eb23604a2a071630d68ba7d2",
+          "ghostlight-mcp-connector": "d447a5483f5811aacede830aa3ccde8e7a97bbcc914c384c7b3b1fd7011cbd84",
+          "ghostlight-browser-connector": "16d5df4b431c348f64db6ab1bb6c4aba09b26be63e7f0f86a484e193b53114b1"
+        }
+      },
+      "flatpak-refusal": {
+        "passed": true,
+        "exit_code": 1,
+        "detail": "Error: Flatpak setup requires the host's home-resident installation and default data/runtime roots",
+        "home_unchanged": true,
+        "scope": "Explicit Flatpak setup refuses /usr/bin package before mutation; native default route separately checked"
+      }
+    }
+  },
+  "installed": {
+    "source": "0129ff15bf0c6348a78e8c0d2e4e1d2716695ae8",
+    "installed_files": {
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight": "c0363c10467bd9632504008879cedd23cb3ccec6861629bd9895ac9c4937b33a",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight-mcp-connector": "1d7cf8d9663729d245c0400610a3b6628a467cdd0dde70722690f6ce4b3622ab",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight-browser-connector": "bf14eac36d4164f8c4ab5fe2e20824c64a8c6826f170c6d16b565d8c15307dd2",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/manifest.json": "e32433f59cc581e0b6223d4e78b43592756f0120c435e33855ede879679153dc",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/content.js": "db39bed95b51c0a664269961f17600a891b4080bad03c55e581bd4dcc18f32ed",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/service-worker.js": "c361b8db9e4ad8109035dca51782e50da39cb254c875ce2a61d7afa82d4f9db4",
+      "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/extension/lib/documents.js": "9226f8d04bda69ca53bc3a9f97932efbe928513472c6b03b093dbf9f6479576e"
+    },
+    "host_config_and_flatpak_state_unchanged": true,
+    "source_adapter_unchanged": true,
+    "explicit_adapter_reloads": [
+      "Chromium Default",
+      "Brave Default"
+    ],
+    "same_browser_processes_retained": [
+      {
+        "pid": 106551,
+        "exe": "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/linux-local/brave/opt/brave.com/brave/brave",
+        "start_ticks": "2566779"
+      },
+      {
+        "pid": 111399,
+        "exe": "/usr/lib/chromium/chromium",
+        "start_ticks": "2595933"
+      }
+    ]
+  },
+  "installed_smoke": {
+    "passed": true,
+    "browser_families": [
+      "Chromium",
+      "Brave"
+    ],
+    "tools_per_catalog": 23,
+    "source_adapter_reloaded": true,
+    "fixture_tabs_preserved": true
+  },
+  "final_health": {
+    "remaining_guest_processes": [],
+    "installed_authorities": [
+      {
+        "proc_pid": 129997,
+        "exe": "/run/media/test/WORKBENCH/repos/github/sylin-org/ghostlight/.tmp/fleet-test-01/target/release/ghostlight",
+        "sha256": "c0363c10467bd9632504008879cedd23cb3ccec6861629bd9895ac9c4937b33a"
+      }
+    ],
+    "service": {
+      "browser_relay_major": 1,
+      "running": true,
+      "service_bridge_major": 2,
+      "version": "1.3.5"
+    },
+    "readiness": {
+      "detail": "Connected and idle. Agents can work when they ask.",
+      "invites_control": true,
+      "state": "ready",
+      "tone": "quiet",
+      "word": "Ready"
+    },
+    "host_config_and_flatpak_state_unchanged": true,
+    "remote_debugging_port_closed": true,
+    "test_tabs_preserved": true,
+    "no_reboot_or_new_profile": true
+  },
+  "evidence_root": ".tmp/linux-local/combined-0129ff15",
+  "evidence_files": [
+    {
+      "path": "source-identity.json",
+      "sha256": "22f9ba74bd8e9baba1ca144e26299210f2e102f779ad36c3bb0a9a54a9f92df6",
+      "bytes": 161
+    },
+    {
+      "path": "required-gates.json",
+      "sha256": "90ef3494e9801a84130d734210105045c13805d34b08605dbe39fb2e65377bbd",
+      "bytes": 218
+    },
+    {
+      "path": "before.json",
+      "sha256": "49991a4b288eaa25d0b2649edf316a580eee965b7abaa3b006e24920180b8a76",
+      "bytes": 3065
+    },
+    {
+      "path": "installed-after.json",
+      "sha256": "dfcc9c099121f77a4af9674d4c221f271df6b5e9b52738293d92d3b020313541",
+      "bytes": 1883
+    },
+    {
+      "path": "final-health.json",
+      "sha256": "172fe16ecacfe6fcbea766676cc06983a2d766a4f0344fe84ef5a67e85636e5a",
+      "bytes": 779
+    },
+    {
+      "path": "artifacts.json",
+      "sha256": "5df774d15354ef47d06889f6039f715c7547bfd779c743b9a6f7ef6987f5420b",
+      "bytes": 7805
+    },
+    {
+      "path": "builder-versions.json",
+      "sha256": "27d41384a5fd1fe5b448a4133e5212f28bd7c4ef52e6159779e1413759fdb447",
+      "bytes": 22598
+    },
+    {
+      "path": "builder-packages.tsv",
+      "sha256": "40e43244f5b1ac361a83c5c717eaf825ca4140c719e4fa24248cac901898c740",
+      "bytes": 20755
+    },
+    {
+      "path": "format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "clippy.log",
+      "sha256": "54e318b67297347a3cbdf9c9c44588c97869d55e46618a78480d568e4b9f8086",
+      "bytes": 564
+    },
+    {
+      "path": "rust-tests.log",
+      "sha256": "547bae72150a45ee929c6fb61de89c7e84ce03670e172579e259cb9baa2198f9",
+      "bytes": 53280
+    },
+    {
+      "path": "extension-tests.log",
+      "sha256": "782ee10c708a4ab33016991493ef05494eeb6ae6096b90cd76d237de5b823efe",
+      "bytes": 45626
+    },
+    {
+      "path": "debug-build.log",
+      "sha256": "83b4b8bdc2748ea9f5fc7841b2aa9ac1c55d17e721ac56b5667d75307267295b",
+      "bytes": 336
+    },
+    {
+      "path": "process-journey.log",
+      "sha256": "93cebaa29110672cca257cf89e8b45d712b2da735ba99e7645ff92a624db658f",
+      "bytes": 1301
+    },
+    {
+      "path": "dev-loop-copy-retry.log",
+      "sha256": "a9c44f5bde84ec895ce2cb6eec39b78169b915c200843b425ed241adbe739639",
+      "bytes": 845
+    },
+    {
+      "path": "build.log",
+      "sha256": "81018c9e1b62108ad22382effb0f6872349d8aa5b69811df9ee4542c80ca3efc",
+      "bytes": 3198
+    },
+    {
+      "path": "deploy.log",
+      "sha256": "f0d8c958c98c996194562088251ac27e1050d14ed8a1aa8fdfd8a0bb840167ac",
+      "bytes": 7305
+    },
+    {
+      "path": "deploy.ps1",
+      "sha256": "508c718c0b3a102f2b20d7f904602e506cc5900d64a794664325525e0a0656f1",
+      "bytes": 239
+    },
+    {
+      "path": "portable-repeat.log",
+      "sha256": "6bfb08dda712474c59673d87e5d443a29e3fbd4c2e2ccbd764a9d27069278d29",
+      "bytes": 169
+    },
+    {
+      "path": "installed-browser-smoke.json",
+      "sha256": "959e428dd40076c7a59952d9bbcc1e2af0fcef397b70a8b4343473b49c505d51",
+      "bytes": 9170
+    },
+    {
+      "path": "installed-browser-smoke.log",
+      "sha256": "6de88469656c668aebc4667d385439cb2c95076f91c492f2ab7bf5b7e264920c",
+      "bytes": 27
+    },
+    {
+      "path": "debian-lifecycle.log",
+      "sha256": "81ae6a670fa2a4d1fb1febf67d22089902a7c3a0d164896e919c1a31db6e0e1d",
+      "bytes": 23821
+    },
+    {
+      "path": "debian-lifecycle.json",
+      "sha256": "f88c95a32827026d021f890f687f755042bd0ea80a1251a5cc33d67a6e917404",
+      "bytes": 350
+    },
+    {
+      "path": "ubuntu-lifecycle.log",
+      "sha256": "3e431d0178ab557c86f20832e18f29699f4fd0e03e6495b01a7aa8be10d884b6",
+      "bytes": 16557
+    },
+    {
+      "path": "ubuntu-lifecycle.json",
+      "sha256": "1711096fb17a26ddb42a25d9e1ea52385ecb9d62c130d6b5a20f1f669b58c713",
+      "bytes": 350
+    },
+    {
+      "path": "debian-upgrade.log",
+      "sha256": "d6d0945654a004702c45c7f157419b0e66bc9359b2d4ffd2e6d7a1be42ab057c",
+      "bytes": 3764
+    },
+    {
+      "path": "debian-upgrade.json",
+      "sha256": "62fe7a2bceb8782070b9d5cf6446178d7bd2c1a7c92dca48fbe712b5071b10f5",
+      "bytes": 768
+    },
+    {
+      "path": "ubuntu-upgrade.log",
+      "sha256": "85bda2d7d8716da1e095830c9adc77e9a9c499ff6faa26d38a74bd9e175da1a9",
+      "bytes": 3776
+    },
+    {
+      "path": "ubuntu-upgrade.json",
+      "sha256": "423ba7b23d0d59827cac703161e700a50751f5d677da33fbcc23b81fa7d77200",
+      "bytes": 767
+    },
+    {
+      "path": "debian-startup.log",
+      "sha256": "41099b0bc9fa37d4a71b268a62770cd175f501e9ae23258d5e73cd369bf0ccc9",
+      "bytes": 4133
+    },
+    {
+      "path": "debian-startup.json",
+      "sha256": "93d6d4709023fb0fa855c89699b12ceff0af3fc8a28903ccf581950972fef26a",
+      "bytes": 2100
+    },
+    {
+      "path": "ubuntu-startup.log",
+      "sha256": "c507c53f9f17e497eddbacd6fed324675c4e8358b37a912b704cafa8f343182d",
+      "bytes": 6177
+    },
+    {
+      "path": "ubuntu-startup.json",
+      "sha256": "fd6c1db76ef6ad99ece0330f1f05b92c72165b8ee7c43103a2c385847262af92",
+      "bytes": 2100
+    },
+    {
+      "path": "debian-portable.log",
+      "sha256": "18befe3619b2b2a108f4fb942833fb1696b12bd8a10c7b918ad99b7beb0ac403",
+      "bytes": 894
+    },
+    {
+      "path": "debian-portable.json",
+      "sha256": "7c434b6f0740d7f48f5a22db46b4af679fa4d89f3d9ded07fbe21846f109b4aa",
+      "bytes": 946
+    },
+    {
+      "path": "ubuntu-portable.log",
+      "sha256": "18befe3619b2b2a108f4fb942833fb1696b12bd8a10c7b918ad99b7beb0ac403",
+      "bytes": 894
+    },
+    {
+      "path": "ubuntu-portable.json",
+      "sha256": "7c434b6f0740d7f48f5a22db46b4af679fa4d89f3d9ded07fbe21846f109b4aa",
+      "bytes": 946
+    },
+    {
+      "path": "debian-flatpak-refusal.log",
+      "sha256": "9a99440c835909212ccdb43e681b01d7e322650760d89045287c1252a6c4a88f",
+      "bytes": 286
+    },
+    {
+      "path": "debian-flatpak-refusal.json",
+      "sha256": "6ae2e4b02c25e66a4c2fb5f1506c07dfde472ba9463c1ebd94f3ac796e7d9f97",
+      "bytes": 298
+    },
+    {
+      "path": "ubuntu-flatpak-refusal.log",
+      "sha256": "9a99440c835909212ccdb43e681b01d7e322650760d89045287c1252a6c4a88f",
+      "bytes": 286
+    },
+    {
+      "path": "ubuntu-flatpak-refusal.json",
+      "sha256": "6ae2e4b02c25e66a4c2fb5f1506c07dfde472ba9463c1ebd94f3ac796e7d9f97",
+      "bytes": 298
+    },
+    {
+      "path": "debian-startup-missing-user.log",
+      "sha256": "95428205ee10585fefb434eca9d21b8af4dae4e87c0306ca016252c1d9aecde9",
+      "bytes": 276
+    },
+    {
+      "path": "debian-startup-proc-namespace-failure.log",
+      "sha256": "9c44c9cee8bbd74bb1b309f7cf8c70ff78f7df7bab3a32143aa9dace2e58d972",
+      "bytes": 2757
+    },
+    {
+      "path": "debian-startup-proc-namespace-failure.json",
+      "sha256": "8c27f7c047eafd911402fbc89c7dd6c0461e94d6f4444f724bb088bc27842eca",
+      "bytes": 1039
+    },
+    {
+      "path": "debian-startup-catalog-race.log",
+      "sha256": "1ccface436a21f714d39599855f5f0e1a09e38edc27faba3e4f4cef5c2e00ab4",
+      "bytes": 2664
+    },
+    {
+      "path": "debian-startup-catalog-race.json",
+      "sha256": "419457dec2c7e8ab38dfa9849817e90979181b806db901e4b1b49b398e940e52",
+      "bytes": 1052
+    },
+    {
+      "path": "package-startup-proc-namespace-failure.py",
+      "sha256": "ec6118cdea82cf61d81952df485fb17b1c2ee51039cfec6a75475af369fa65f3",
+      "bytes": 5798
+    },
+    {
+      "path": "package-startup-catalog-race.py",
+      "sha256": "b294d560ff45b35293a8262feb8ee62489c656fe47c300e44d6602aec787c142",
+      "bytes": 6034
+    },
+    {
+      "path": "environment.sh",
+      "sha256": "20431d3d29411ac0ec0177d7cade6c679b30c9986c048929663d662a23b7476c",
+      "bytes": 264
+    },
+    {
+      "path": "build-candidate.sh",
+      "sha256": "cc1bb4fa44a12cc7d3c9c2c58af03fc6d1416b718191c358446d3749742ca6a0",
+      "bytes": 1496
+    },
+    {
+      "path": "verify-staged-source.py",
+      "sha256": "3b8c9d95f7f551e068be2a062fc3285302533b664d7df84135a2003e94cf3a4e",
+      "bytes": 1023
+    },
+    {
+      "path": "record-artifacts.py",
+      "sha256": "4847a60f924c795d8c5df347dd144ef17608f10872729f5660f313a9cadb0eea",
+      "bytes": 2979
+    },
+    {
+      "path": "consumer-lifecycle-valid.sh",
+      "sha256": "25e9e40593d20f907b69dd3f2727edad9ea4a661b0a242291dd17b626784da05",
+      "bytes": 2509
+    },
+    {
+      "path": "consumer-upgrade.sh",
+      "sha256": "b9b67568e8b2ff018eb0bf4804926052cfb905a5c680755455eb244c1546005f",
+      "bytes": 941
+    },
+    {
+      "path": "portable-consumer-valid.py",
+      "sha256": "4744deed1002c61434781cfb9f5166d95ff9c47e9b425c164c61f7d63a917073",
+      "bytes": 4982
+    },
+    {
+      "path": "package-startup.py",
+      "sha256": "3ffa10e3f99ca96d00731dc05b9f1ce42f49a9a056fa2f297456b8cea3d094c3",
+      "bytes": 6313
+    },
+    {
+      "path": "package-startup.sh",
+      "sha256": "860b98d03ffb2e3b9304f2ab64538d4f36122d25059a5eefc52856dec0f6da89",
+      "bytes": 510
+    },
+    {
+      "path": "package-flatpak-refusal.py",
+      "sha256": "079a1cbd332ec912895939393432666c8b6b27d21b64862e0a87090959f8faf5",
+      "bytes": 922
+    },
+    {
+      "path": "installed-browser-smoke.mjs",
+      "sha256": "c7a902476ccb9cb460d9657c3eb83366ac9fb9f4c1991aac3d47bb650b278f71",
+      "bytes": 4063
+    }
+  ],
+  "remaining_scope": [
+    "Local candidate packages have no CI build-provenance attestation",
+    "No fresh Ubuntu GNOME Wayland visible L1-L9 against these package bytes and matching store adapter",
+    "No submitted store ZIP or clean-machine store installation acceptance in this lane",
+    "No physical host reboot in this round",
+    "Flatpak opt-in remains home-visible/default-root only; /usr/bin is refused and no Flatpak acceptance is claimed here",
+    "Desktop-stripped MCP callers remain unready under bounded cooldown; corrected caller context is required",
+    "No release or package publication performed"
+  ]
+}
