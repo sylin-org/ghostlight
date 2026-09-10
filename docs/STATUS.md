@@ -10,6 +10,16 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
+The focused Bluefin follow-up starts from ac1becab in the ordinary repository.
+Its [Flatpak activation proposal](design/flatpak-host-activation.md) identifies a
+single app-wide named D-Bus talk grant as the smallest recommended route for review.
+No grant or activation implementation has been applied. An accepted ADR and explicit
+trust decision are needed before implementing it; warm open/read is still not cold
+support. The proposal carries the shared-lifecycle interface notes for Alpine.
+The [milestone evidence](testing/flatpak-activation-milestone-2026-09-09.md) records
+unchanged installed identities and passing format, Clippy, 542 Rust and 222 extension
+checks on the integrated source baseline. No new activation was deployed.
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
