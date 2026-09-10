@@ -10,6 +10,21 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Four-machine acceptance campaign (2026-09-09)
 
+## Windows focused acceptance round (2026-09-09)
+
+The ordinary Windows repository starts at integrated `ac1becab` on
+`codex/fleet-windows-acceptance`. The existing installation and previous worktree
+are preserved. No adapter is connected; loading the current unpacked extension
+in ordinary Chrome is the remaining human step before browser acceptance.
+Four executable NSIS install-hook cases pass, covering owned lock cleanup,
+foreign-marker preservation, invalid sibling refusal, and post-acquisition
+failure. The existing authority survives. All 533 Windows Rust tests, 222
+extension tests, formatting, and Clippy pass. The final installed-uninstall
+restriction remains in force. See the [round-two report](testing/windows-fleet-round2-2026-09-09.md)
+for exact source/artifact identities and the fixture's narrower evidence boundary.
+
+## Four-machine acceptance campaign history (2026-09-09)
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
