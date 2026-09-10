@@ -8,11 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.5] - Unreleased
 
 Source candidate. The service and its package artifacts advance to 1.3.5; Chrome adapter 1.1.2
-was submitted for Google review on 2026-09-08 with publication deferred. Public release records
+was submitted for Google review on 2026-09-08 with publication deferred. Adapter 1.1.3 is
+prepared locally for the later human-browsing fixes; it has not been submitted. Public release records
 remain at service 1.3.4 and adapter 1.1.1 until the corresponding releases are observable.
 
 ### Fixed
 
+- Keep human navigation and tab creation outside Ghostlight control, policy and activity;
+  stale agent references silently and govern the next actual agent request (adapter 1.1.3).
+- Preserve atomic document-bound target typing and name the destination of blocked agent work.
+- Bound concurrent desktop startup, reap failed owned children, and publish discovery only
+  after desktop readiness. Preserve retained-client recovery during executable replacement.
+- Repair Linux portable extraction and retained-client package upgrades, and Windows installer
+  native-host paths and deployment-lock ownership.
 - Record real JavaScript dialog-opening events before optional before-unload handling, so the
   adapter reports and retains prompts until they are answered or dismissed (adapter 1.1.2).
 - Preserve truthful script/flow effects, document-specific coverage, bounded diagnostics and
@@ -22,6 +30,10 @@ remain at service 1.3.4 and adapter 1.1.1 until the corresponding releases are o
 
 ### Changed
 
+- Add explicit Flatpak Chromium activation for home-resident installations on default data
+  roots, with one named bus permission and owned registration/removal. System-package
+  Flatpak integration remains deferred; setup never restarts the user's browser.
+- Forward live desktop-context variable names in owned Linux Codex configuration.
 - Configure host and capability authority through policy; retire caller-supplied restrictions
   and flow dry-run. Use `browser_flow` in place of the retired `browser_sequence` tool (ADR-0162).
 - Show grouped incremental action history and expandable action details from At a glance.

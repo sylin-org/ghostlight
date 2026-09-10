@@ -1,14 +1,22 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-09 (service/package 1.3.5 prepared; adapter 1.1.2 submitted for Google review;
+Last updated: 2026-09-09 (service/package 1.3.5 prepared; adapter 1.1.3 prepared locally;
 published versions remain service 1.3.4 and adapter 1.1.1).
 
 Google's live update feed was checked on 2026-09-09 and still serves adapter 1.1.1.
 The submitted 1.1.2 ZIP has automatic publication disabled; its current review state could not
 be verified because API credentials are absent and dashboard browser access was unavailable.
-The human-browsing extension fixes below postdate that ZIP and have not been submitted.
+The human-browsing extension fixes below postdate that ZIP. They are now numbered
+1.1.3 locally and have not been submitted. The public listing independently confirms
+1.1.1. The owner's conditional package-publication instruction has not been triggered.
 
-The focused four-machine round is complete with recorded limits. All fixes and final
+The owner wrapped the campaign before the next
+[Linux offerings round](testing/linux-offerings-round-2026-09.md) was dispatched.
+Its six topics and proposed machine ownership are saved as deferred work. No new
+assignment or monitor was created. The [release wrap-up](testing/release-wrap-2026-09-09.md)
+captures the source, version decisions, evidence, remaining limits and deployment steps.
+
+The preceding focused four-machine round is complete with recorded limits. All fixes and final
 package/installed evidence are integrated on `codex/fleet-next`; runtime source is
 `0129ff15`. Both fleet monitors are deleted. No owner-branch merge or public release
 was performed. See the
