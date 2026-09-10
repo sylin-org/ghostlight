@@ -8,6 +8,21 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Combined native-musl compatibility complete (2026-09-09)
+
+Test-03 verified exact combined candidate `0129ff15` in its ordinary repository on
+`codex/fleet-test-03-combined`. The new Linux activation dependencies compile and
+run with the established dynamic-musl settings. Formatting, Clippy, 564 Rust tests,
+222 extension tests, fresh-bin process/startup recovery and the explicit private-bus
+mechanism test pass. All three changed consumers were deployed to the installation
+in place. Actual configured Codex cold startup, normal native Chromium rejoin,
+extension reload, fresh open/read and one native workbench pass with one stable
+authority and Doctor Ready. Saved configuration, native registration and loaded
+adapter source are unchanged. Alpine has no Flatpak registration or grant; no
+product repair, physical reboot or support expansion was needed. The
+[combined Alpine record](testing/alpine-combined-musl-2026-09-09.md) carries exact
+source/binary identities and the evidence boundaries.
+
 ## Integrated Linux package validation complete (2026-09-09)
 
 These packages contain ac1becab. The later startup and Flatpak repairs below need
