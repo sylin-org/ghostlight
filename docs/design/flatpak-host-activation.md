@@ -1,6 +1,8 @@
 # Flatpak host activation: bounded proposal
 
-Status: Proposed, not accepted or implemented. Date: 2026-09-09.
+Status: Historical proposal, accepted for implementation by ADR-0165. Date: 2026-09-09.
+The proposal below is preserved; [ADR-0165](../adr/0165-flatpak-host-desktop-activation.md)
+records the coordinator's subsequent delegated decision and acceptance limits.
 Baseline: ac1becab78e5a8a6b89e553e82f6779d93dcb39c.
 Lane: codex/fleet-test-02-flatpak-activation, ordinary Ghostlight repository.
 

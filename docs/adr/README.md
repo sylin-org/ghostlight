@@ -185,6 +185,8 @@ history live here.
 
 ## Conventions
 
+| [0165](0165-flatpak-host-desktop-activation.md) | One explicitly granted named host activation route for Flatpak Chromium; no supervisor or product methods on D-Bus | Accepted for implementation; installed acceptance pending |
+
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.
 - Status is one of `Proposed`, `Accepted`, `Superseded by ADR-XXXX`, or `Supersedes ADR-YYYY`.
 - A decision that changes an earlier one gets a **new** ADR; the old one is marked Superseded rather
