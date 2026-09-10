@@ -83,7 +83,18 @@ function Copy-WithRetry {
             if ($attempt -ge 30) {
                 throw
             }
-            Start-Sleep -Milliseconds 200
+            # A client or Chromium may respawn its connector while the deployment lock keeps
+            # authority startup quiesced. Retrying a copy alone can never replace that live image.
+            # Re-check only this selected destination, then retry immediately after its exit.
+            $respawned = @(Get-ExactImageProcesses -ImagePaths @($Destination))
+            foreach ($process in $respawned) {
+                Write-Output "Stopping respawned exact live process: pid=$($process.Id) path=$($process.Path)"
+                Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+                Wait-Process -Id $process.Id -Timeout 2 -ErrorAction SilentlyContinue
+            }
+            if ($respawned.Count -eq 0) {
+                Start-Sleep -Milliseconds 200
+            }
         }
     }
 }

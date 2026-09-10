@@ -150,6 +150,13 @@ the owner wants, and what this project learned the hard way.
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
   the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
   keeps the Applications entry and `ghostlight open`; there is no service-only launch mode.
+- **A held lease is not desktop readiness.** Serialize launch-to-ready separately from lifetime
+  custody, publish discovery only after the native interaction route exists, and reap failed
+  owned children before allowing another attempt. Concurrent reconnect workers need a shared
+  bounded cooldown or they simply take turns spawning failures (ADR-0166).
+- **A deployment lock does not stop clients respawning connectors.** After a locked-executable
+  copy failure, recheck and stop only the selected exact destination before retrying. Waiting
+  alone cannot replace an image that the harness keeps alive. Keep neighboring images running.
 - **One process does not prove one workbench.** A startup/Open race created two responsive native
   windows inside one authority. Publish activation only after startup construction finishes;
   Tauri's label lookup does not reserve a window under construction. Native lifecycle acceptance
