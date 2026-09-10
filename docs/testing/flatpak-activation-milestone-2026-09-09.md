@@ -232,3 +232,60 @@ uninstall refreshes even after custody was already removed. A regression proves 
 failure/retry state, and the private-bus fixture now uses the product refresh helper.
 Required format, Clippy, all 564 Rust tests and 222 extension tests pass. Unassisted
 installed remove/reinstall and cold activation will be repeated on this correction.
+
+## Corrected installed acceptance -- PASS (21:37-21:39 local)
+
+Final source authority: f7470bb7, including controller ca7ab60c and installer
+review ee06f3d7. These are local debug engineering builds, not release artifacts.
+The original installation paths and unpacked adapter location are unchanged.
+
+| Installed sibling | Final SHA-256 |
+| --- | --- |
+| ghostlight | 40b9ab773355f26cf9badf54ed01adb99fcdb4b3ee9840af82e9047cd290479e |
+| ghostlight-mcp-connector | cd568efb71d463a6eeb3c35a9b6d07ebd2fc96fe2cf72de852d7d94921c21335 |
+| ghostlight-browser-connector | 703e8ccc180a5c7a374be859a38566d7bd8245c0f3b3d120f2f8095472798c97 |
+
+The final cache-refresh change affects the installer, not connector behavior, so
+the second locked deployment replaced only the authority. The host controller
+stopped its exact prior PID 67631 and left it stopped for acceptance.
+
+- Owned uninstall, repeated uninstall, install and repeated install passed through
+  the actual installed CLI. Removal deleted owned native registration, activation
+  registration and custody. ListActivatableNames lost and regained the name with
+  the product commands alone. No manual ReloadConfig was used in this repeat.
+- The pre-existing per-app permission remained byte-identical to its original
+  baseline (SHA-256 96163eff74ba4dd4644cad70ce7572f102ca17a590970c42b52b9721eb2a95f3).
+  Browser Preferences were byte-identical across the removal/reinstall sequence.
+  Installer-added grant rollback and later unrelated edits remain fixture evidence;
+  the real machine's prior grant is correctly user-owned, not claimed by setup.
+- With no installed authority or bus-name owner, the normal Flatpak launcher opened
+  the same existing profile with session restoration. Browser-led activation reached
+  host authority PID 75782 and its ready bus name in 1,904 ms. The observed authority
+  peak was one, and its process root has no .flatpak-info. No MCP process warmed it.
+- Installed open/read passed after cold activation. Preserve-tabs blocked close as
+  intended. Disposable test pages remain visible; no bypass or preference change
+  was used to remove them.
+- Stopping only the exact authority produced replacement PID 75970 through the
+  existing browser relay. Browser PID 75614 stayed unchanged, with one authority.
+  New installed open/read passed after recovery.
+- Stopping only native relay PID 75774 produced relay PID 76116 through ordinary
+  extension reconnection. Browser PID 75614 and the authority remained unchanged.
+  New installed open/read passed again.
+- Product diagnostics retain browser_621618e3d6c34cde97293afe3904dc3c across both
+  browser restarts and both recovery cases. Final doctor reports Ready, connected
+  and idle. No second authority, alternate profile or extension tree was used.
+
+Ignored evidence: .tmp/flatpak/cold-result.json, installed-lifecycle-result.json,
+recover-authority.json, recover-relay.json, installed-page-result.json and subsequent
+installed-page-*.json. Installed content-free diagnostics retain the failure, manual
+diagnostic refresh and corrected unassisted run separately. The first broad process
+snapshot counted Chromium children before its command-line classifier was corrected;
+exact main-process selection was verified before either graceful browser shutdown.
+
+The scoped Flatpak assignment now passes cold startup, installed work, idle recovery
+and owned registration lifecycle. Limits remain explicit: this Bluefin/GNOME lane
+uses home-visible executables and default data roots; first-time talk permission
+requires a new sandbox; customer setup never forces restart. No new physical reboot,
+native-window visual inspection, system package layout or public release is claimed.
+Uncertain in-flight non-replay remains covered by the real-process journey, not these
+idle installed recovery cases. Native Chromium acceptance is the next separate lane.

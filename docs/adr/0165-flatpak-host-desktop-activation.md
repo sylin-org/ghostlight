@@ -1,6 +1,6 @@
 # ADR-0165: Named host desktop activation for Flatpak Chromium
 
-- Status: Accepted for implementation; installed acceptance pending.
+- Status: Accepted; bounded Bluefin installed acceptance passed (see amendment below).
 - Date: 2026-09-09
 - Authority: coordinator engineering decision under the owner's delegated control
   of the dedicated fleet machines. This is not separately obtained owner approval.
@@ -64,3 +64,19 @@ installation promise, record the exact limitation for coordinator review.
 This decision does not advertise Flatpak as supported. Update active support claims
 only after cold activation, recovery and ownership evidence pass on the installed
 graph. Native platforms retain their existing launch path and authenticated Open.
+
+## 2026-09-09 installed-evidence amendment
+
+The coordinator accepted the measured static-grant limitation and authorized
+controlled restarts on the dedicated test machine, preserving its existing profile.
+Customer setup reports the need for a new sandbox and never restarts the browser.
+Warm authenticated work remains available. This is not a hot permission update.
+
+The [milestone record](../testing/flatpak-activation-milestone-2026-09-09.md) now proves
+unassisted browser-led host startup, open/read, idle authority/relay recovery and
+owned remove/reinstall on the existing Bluefin/GNOME Flatpak Chromium installation.
+Explicit setup must refresh the session-bus activation cache after registration
+changes; the first installed failure established that a file write alone is not
+enough. Refresh is bounded and failure reports persisted state truthfully.
+This scope does not establish other package layouts, general Flatpak compatibility,
+visual desktop acceptance or a release-ready artifact.

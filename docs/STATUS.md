@@ -58,6 +58,18 @@ directory, admit only that path in the ignored host controller, and keep all new
 work in the ordinary repository. Ownership/name-claim review is complete with 563
 Rust tests and the existing gates passing. Installed deployment proceeds next.
 
+The corrected installed Flatpak lane now passes on f7470bb7. Actual cold activation
+started one host desktop in 1.9 seconds; open/read, authority recovery, native-relay
+recovery and owned remove/reinstall passed with the same browser profile and adapter
+identity. The installer now refreshes the session activation cache after writes,
+fixing a real first-install ServiceUnknown failure retained in the milestone record.
+Permissions and Preferences were unchanged by removal/reinstall; preserve-tabs
+remains enabled. All 564 Rust tests, 222 extension tests, required source checks,
+private-bus proof and fresh real-process journey pass. The existing installation
+is Ready on local debug builds, not release artifacts. First-time Flatpak permission
+still needs a new sandbox; setup never forces restart. Native Chromium and visual
+desktop acceptance remain separate work, not implied by this bounded pass.
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof
