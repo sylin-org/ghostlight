@@ -52,6 +52,9 @@ pub mod event {
     pub const DEMAND_START_ATTEMPT: &str = "demand_start_attempt";
     pub const DEMAND_START_SPAWNED: &str = "demand_start_spawned";
     pub const DEMAND_START_ALREADY_RUNNING: &str = "demand_start_already_running";
+    pub const DEMAND_START_PENDING: &str = "demand_start_pending";
+    pub const DEMAND_START_RETRY_DEFERRED: &str = "demand_start_retry_deferred";
+    pub const DEMAND_START_ACTIVATED: &str = "demand_start_activated";
     pub const DEMAND_START_DEPLOYMENT_IN_PROGRESS: &str = "demand_start_deployment_in_progress";
     pub const DEMAND_START_FAILED: &str = "demand_start_failed";
     pub const SERVICE_CONNECTED: &str = "service_connected";

@@ -816,9 +816,10 @@ fn start_or_activate_desktop() -> anyhow::Result<()> {
     }
     match ghostlight::desktop::run() {
         Ok(()) => Ok(()),
-        Err(start_error) => {
+        Err(start_error) if start_error.is::<ghostlight::service::AuthorityAlreadyRunning>() => {
             finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
         }
+        Err(start_error) => Err(start_error),
     }
 }
 
@@ -1102,6 +1103,7 @@ mod tests {
         std::fs::create_dir(&directory).unwrap();
         let runtime = directory.join("runtime.json");
         let host = ghostlight::service::ServiceHost::start(&runtime).unwrap();
+        host.publish_ready().unwrap();
         assert!(!ghostlight::service::request_workbench_activation(&runtime).unwrap());
         let timeout_started = std::time::Instant::now();
         let timeout = super::wait_for_workbench_activation_until(

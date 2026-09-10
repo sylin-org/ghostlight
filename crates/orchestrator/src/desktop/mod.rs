@@ -103,11 +103,10 @@ pub fn run() -> Result<()> {
             eprintln!("Ghostlight could not reconcile the packaged browser connector: {error}");
         }
     }
-    let host = ServiceHost::start(&ghostlight_bridge::runtime::runtime_file())?;
-    eprintln!(
-        "Ghostlight 1.0 ready on local ports {} and {}",
-        host.endpoint.service_port, host.endpoint.browser_port
-    );
+    let host = Arc::new(ServiceHost::start(
+        &ghostlight_bridge::runtime::runtime_file(),
+    )?);
+    let ready_host = Arc::clone(&host);
     let workbench = host.workbench.clone();
     let setup_workbench = workbench.clone();
     let tray_available = Arc::new(AtomicBool::new(false));
@@ -168,12 +167,19 @@ pub fn run() -> Result<()> {
             Ok(())
         });
 
-    let app = match catch_unwind(AssertUnwindSafe(|| {
+    let built = catch_unwind(AssertUnwindSafe(|| {
         builder.build(tauri::generate_context!())
-    })) {
+    }));
+    let app = match built {
         Ok(Ok(app)) => app,
-        Ok(Err(error)) => return Err(error.into()),
-        Err(_) => anyhow::bail!("Ghostlight desktop authority failed during startup"),
+        Ok(Err(error)) => {
+            record_desktop_failure(&host, "native desktop construction failed");
+            return Err(error.into());
+        }
+        Err(_) => {
+            record_desktop_failure(&host, "native desktop initialization panicked; check the caller's desktop session environment");
+            anyhow::bail!("Ghostlight desktop authority failed during startup");
+        }
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         app.run_return(move |app, event| match event {
@@ -190,6 +196,10 @@ pub fn run() -> Result<()> {
                     Err(error) => {
                         eprintln!("Ghostlight workbench is unavailable: {error}");
                         if !tray_available.load(Ordering::SeqCst) {
+                            record_desktop_failure(
+                                &ready_host,
+                                "neither tray nor workbench could be constructed",
+                            );
                             eprintln!("Ghostlight has no desktop interaction route and will stop");
                             app.exit(1);
                             return;
@@ -203,6 +213,13 @@ pub fn run() -> Result<()> {
                 app.state::<DesktopState>()
                     .workbench
                     .attach_presentation(Arc::new(NativePresentation { app: app.clone() }));
+                if let Err(error) = ready_host.publish_ready() {
+                    record_desktop_failure(&ready_host, "desktop-ready runtime publication failed");
+                    eprintln!("Ghostlight could not publish desktop readiness: {error}");
+                    app.exit(1);
+                    return;
+                }
+                eprintln!("Ghostlight {} desktop ready", env!("CARGO_PKG_VERSION"));
             }
             RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
                 api.prevent_exit();
@@ -212,9 +229,24 @@ pub fn run() -> Result<()> {
     }));
     match outcome {
         Ok(0) => Ok(()),
-        Ok(code) => anyhow::bail!("Ghostlight desktop authority exited with status {code}"),
-        Err(_) => anyhow::bail!("Ghostlight desktop authority stopped unexpectedly"),
+        Ok(code) => {
+            record_desktop_failure(&host, "desktop event loop exited unsuccessfully");
+            anyhow::bail!("Ghostlight desktop authority exited with status {code}");
+        }
+        Err(_) => {
+            record_desktop_failure(&host, "desktop event loop panicked");
+            anyhow::bail!("Ghostlight desktop authority stopped unexpectedly");
+        }
     }
+}
+
+fn record_desktop_failure(host: &ServiceHost, detail: &str) {
+    host.diagnostics.sink().emit(
+        ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+        ghostlight_bridge::diagnostics::Level::Error,
+        None,
+        detail,
+    );
 }
 
 fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {

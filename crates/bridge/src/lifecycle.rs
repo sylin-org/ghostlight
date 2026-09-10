@@ -5,19 +5,24 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 
-use crate::runtime::{runtime_discovery, RuntimeDiscovery};
+use crate::runtime::{read_runtime, runtime_discovery, RuntimeDiscovery, RuntimeEndpoint};
 
 /// Presence marker used to quiesce demand-start during a sibling replacement.
 pub const DEPLOY_LOCK_FILE: &str = "deploy.lock";
 const DEPLOY_LOCK_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 const SERVICE_LOCK_EXTENSION: &str = "lock";
+const STARTUP_LOCK_EXTENSION: &str = "startup";
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const STARTUP_POLL: Duration = Duration::from_millis(25);
+const FAILED_START_COOLDOWN: Duration = Duration::from_secs(5);
 
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -73,15 +78,54 @@ fn lock_is_contended(error: &io::Error) -> bool {
 /// Result of asking the local lifecycle seam to make the orchestrator available.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StartDisposition {
-    /// A detached sibling orchestrator was started.
+    /// A detached sibling was spawned and desktop-ready discovery became available.
     Spawned {
         /// Operating-system process id returned by the spawn.
         process_id: u32,
     },
     /// A service lease is already held, so the caller should keep reconnecting.
     AlreadyRunning,
+    /// Another caller owns the bounded startup exchange; keep reconnecting.
+    Starting,
+    /// A recent failed startup is cooling down; keep reconnecting without spawning.
+    RetryDeferred,
+    /// A named OS activation request completed and desktop-ready discovery became available.
+    ActivationRequested,
     /// A fresh deployment lock is deliberately quiescing automatic startup.
     DeploymentInProgress,
+}
+
+impl StartDisposition {
+    /// Content-free operational event and detail shared by every lifecycle caller.
+    pub fn diagnostic(&self) -> (&'static str, String) {
+        use crate::diagnostics::event;
+        match self {
+            Self::Spawned { process_id } => (
+                event::DEMAND_START_SPAWNED,
+                format!("desktop ready after spawning pid {process_id}"),
+            ),
+            Self::AlreadyRunning => (
+                event::DEMAND_START_ALREADY_RUNNING,
+                "authority lease held; retrying connection".into(),
+            ),
+            Self::Starting => (
+                event::DEMAND_START_PENDING,
+                "startup exchange in progress; retrying connection".into(),
+            ),
+            Self::RetryDeferred => (
+                event::DEMAND_START_RETRY_DEFERRED,
+                "recent startup failed; five-second cooldown".into(),
+            ),
+            Self::ActivationRequested => (
+                event::DEMAND_START_ACTIVATED,
+                "desktop ready after OS activation".into(),
+            ),
+            Self::DeploymentInProgress => (
+                event::DEMAND_START_DEPLOYMENT_IN_PROGRESS,
+                "deploy lock present; startup quiesced".into(),
+            ),
+        }
+    }
 }
 
 /// Ask the trusted sibling `ghostlight` executable to start its desktop authority.
@@ -95,12 +139,67 @@ pub fn request_orchestrator_start() -> io::Result<StartDisposition> {
     request_orchestrator_start_from(&current_executable, &runtime_discovery(), SystemTime::now())
 }
 
+/// Ask a narrowly authorized OS activation route to start the elected desktop authority.
+///
+/// The callback runs once after shared startup admission and must itself be bounded. The bridge
+/// then waits for new desktop-ready discovery. It neither invents a child PID nor executes a
+/// fallback command. Deployment quiescence, authority custody and failed-start cooldown are the
+/// same as native sibling startup. The activation provider owns any platform-specific consent.
+pub fn request_orchestrator_activation(
+    activate: impl FnOnce() -> io::Result<()>,
+) -> io::Result<StartDisposition> {
+    let discovery = runtime_discovery();
+    let current = env::current_exe()?;
+    let executable = resolved_orchestrator(&current, &discovery)?;
+    request_start(
+        &executable,
+        &discovery,
+        SystemTime::now(),
+        STARTUP_TIMEOUT,
+        || {
+            activate()?;
+            Ok(Launch::Activation)
+        },
+    )
+}
+
 fn request_orchestrator_start_from(
     current_executable: &Path,
     discovery: &RuntimeDiscovery,
     now: SystemTime,
 ) -> io::Result<StartDisposition> {
     let service_executable = resolved_orchestrator(current_executable, discovery)?;
+    request_start(&service_executable, discovery, now, STARTUP_TIMEOUT, || {
+        if !service_executable.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "trusted sibling orchestrator is missing: {}",
+                    service_executable.display()
+                ),
+            ));
+        }
+        let directory = service_executable
+            .parent()
+            .expect("validated service directory");
+        orchestrator_command(&service_executable, directory)
+            .spawn()
+            .map(Launch::Child)
+    })
+}
+
+enum Launch {
+    Child(Child),
+    Activation,
+}
+
+fn request_start(
+    service_executable: &Path,
+    discovery: &RuntimeDiscovery,
+    now: SystemTime,
+    timeout: Duration,
+    launch: impl FnOnce() -> io::Result<Launch>,
+) -> io::Result<StartDisposition> {
     let service_directory = service_executable.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -114,24 +213,157 @@ fn request_orchestrator_start_from(
     let Some(lease) = ServiceLease::try_acquire(&discovery.path)? else {
         return Ok(StartDisposition::AlreadyRunning);
     };
-    // The child must acquire the lifetime lease itself. Releasing immediately before spawn leaves
-    // a narrow benign race: concurrent children may start, but only one can pass ServiceHost::start.
     drop(lease);
-
-    if !service_executable.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "trusted sibling orchestrator is missing: {}",
-                service_executable.display()
-            ),
-        ));
+    let Some(mut startup) = StartupAdmission::try_acquire(&discovery.path)? else {
+        return Ok(StartDisposition::Starting);
+    };
+    // Recheck custody under startup admission: another launcher may have won since our probe.
+    let Some(lease) = ServiceLease::try_acquire(&discovery.path)? else {
+        return Ok(StartDisposition::AlreadyRunning);
+    };
+    drop(lease);
+    if deploy_lock_present(service_directory, SystemTime::now())? {
+        return Ok(StartDisposition::DeploymentInProgress);
     }
-    let mut command = orchestrator_command(&service_executable, service_directory);
-    let child = command.spawn()?;
-    let process_id = child.id();
-    drop(child);
-    Ok(StartDisposition::Spawned { process_id })
+    if startup.cooling_down(now)? {
+        return Ok(StartDisposition::RetryDeferred);
+    }
+    // A stale document is not a completed launch. Only publication of a new token under an
+    // authority lease can complete this exchange. Its contents never enter startup diagnostics.
+    let previous = read_runtime(&discovery.path).ok();
+    let result = launch().and_then(|mut launched| {
+        if let Err(error) = wait_for_startup(
+            &mut launched,
+            &discovery.path,
+            service_directory,
+            previous.as_ref(),
+            timeout,
+        ) {
+            if let Launch::Child(child) = &mut launched {
+                if child.try_wait()?.is_none() {
+                    child.kill()?;
+                }
+                child.wait()?;
+            }
+            return if error.kind() == io::ErrorKind::Interrupted {
+                Ok(StartDisposition::DeploymentInProgress)
+            } else {
+                Err(error)
+            };
+        }
+        Ok(match launched {
+            Launch::Activation => StartDisposition::ActivationRequested,
+            Launch::Child(mut child) => {
+                let process_id = child.id();
+                // Failed launches were already reaped synchronously. A healthy Unix child still
+                // needs wait() when it eventually quits. This waiter makes no restart decisions.
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                StartDisposition::Spawned { process_id }
+            }
+        })
+    });
+    match result {
+        Ok(disposition) => {
+            startup.file.set_len(0)?;
+            Ok(disposition)
+        }
+        Err(error) => {
+            startup.record_failure(SystemTime::now())?;
+            Err(error)
+        }
+    }
+}
+
+struct StartupAdmission {
+    file: File,
+}
+
+impl StartupAdmission {
+    fn try_acquire(runtime: &Path) -> io::Result<Option<Self>> {
+        let path = runtime.with_extension(STARTUP_LOCK_EXTENSION);
+        let mut options = OpenOptions::new();
+        options.create(true).read(true).write(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path)?;
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => Ok(Some(Self { file })),
+            Err(error) if lock_is_contended(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn cooling_down(&mut self, now: SystemTime) -> io::Result<bool> {
+        self.file.seek(SeekFrom::Start(0))?;
+        let mut bytes = [0; 9];
+        if self.file.read(&mut bytes)? != 8 {
+            return Ok(false);
+        }
+        let millis = u64::from_le_bytes(bytes[..8].try_into().expect("eight timestamp bytes"));
+        let Some(recorded) = UNIX_EPOCH.checked_add(Duration::from_millis(millis)) else {
+            return Ok(false);
+        };
+        // A backwards clock or stale/corrupt timestamp must not suppress recovery indefinitely.
+        Ok(now
+            .duration_since(recorded)
+            .is_ok_and(|age| age < FAILED_START_COOLDOWN))
+    }
+
+    fn record_failure(&mut self, now: SystemTime) -> io::Result<()> {
+        let millis = now
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let millis = u64::try_from(millis).unwrap_or(u64::MAX);
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file.write_all(&millis.to_le_bytes())?;
+        self.file.set_len(8)
+    }
+}
+
+fn wait_for_startup(
+    launch: &mut Launch,
+    runtime: &Path,
+    service_directory: &Path,
+    previous: Option<&RuntimeEndpoint>,
+    timeout: Duration,
+) -> io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if deploy_lock_present(service_directory, SystemTime::now())? {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "deployment quiesced startup",
+            ));
+        }
+        let exited = match launch {
+            Launch::Child(child) => child.try_wait()?,
+            Launch::Activation => None,
+        };
+        if read_runtime(runtime)
+            .is_ok_and(|current| previous.is_none_or(|old| old.token != current.token))
+            && ServiceLease::try_acquire(runtime)?.is_none()
+        {
+            return Ok(());
+        }
+        if let Some(status) = exited {
+            return Err(io::Error::other(format!(
+                "orchestrator exited {status} before desktop readiness; retry is delayed briefly"
+            )));
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "orchestrator did not publish desktop readiness in time; retry is delayed briefly",
+            ));
+        }
+        thread::sleep(STARTUP_POLL.min(deadline.saturating_duration_since(Instant::now())));
+    }
 }
 
 fn orchestrator_command(executable: &Path, directory: &Path) -> Command {
@@ -225,6 +457,176 @@ mod tests {
         service_lock_file, ServiceLease, DEPLOY_LOCK_FILE, DEPLOY_LOCK_MAX_AGE,
     };
     use crate::runtime::RuntimeDiscovery;
+
+    fn discovery(directory: &Path) -> RuntimeDiscovery {
+        RuntimeDiscovery {
+            path: directory.join("runtime.json"),
+            service_directory: Some(directory.into()),
+        }
+    }
+
+    fn endpoint(token: &str) -> crate::runtime::RuntimeEndpoint {
+        crate::runtime::RuntimeEndpoint {
+            service_port: 1,
+            browser_port: 2,
+            token: token.into(),
+            service_bridge_major: 2,
+            browser_relay_major: 2,
+            service_version: "test".into(),
+        }
+    }
+
+    #[test]
+    fn concurrent_callers_share_failed_start_cooldown_and_recover_after_expiry() {
+        use super::{request_start, StartDisposition, FAILED_START_COOLDOWN};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Barrier,
+        };
+        let directory = temporary_directory("startup-concurrency");
+        let barrier = Arc::new(Barrier::new(12));
+        let launches = Arc::new(AtomicUsize::new(0));
+        let threads: Vec<_> = (0..12)
+            .map(|_| {
+                let directory = directory.clone();
+                let barrier = barrier.clone();
+                let launches = launches.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    request_start(
+                        &directory.join(orchestrator_file_name()),
+                        &discovery(&directory),
+                        SystemTime::now(),
+                        Duration::from_millis(100),
+                        || {
+                            launches.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(Duration::from_millis(50));
+                            Err(std::io::Error::other("launch failed"))
+                        },
+                    )
+                })
+            })
+            .collect();
+        for thread in threads {
+            let _ = thread.join().unwrap();
+        }
+        assert_eq!(launches.load(Ordering::SeqCst), 1);
+        let result = request_start(
+            &directory.join(orchestrator_file_name()),
+            &discovery(&directory),
+            SystemTime::now(),
+            Duration::from_millis(100),
+            || panic!("cooldown must suppress launch"),
+        );
+        assert_eq!(result.unwrap(), StartDisposition::RetryDeferred);
+        let mut lease = None;
+        let result = request_start(
+            &directory.join(orchestrator_file_name()),
+            &discovery(&directory),
+            SystemTime::now() + FAILED_START_COOLDOWN,
+            Duration::from_millis(100),
+            || {
+                lease = ServiceLease::try_acquire(&discovery(&directory).path)?;
+                crate::runtime::write_runtime(&discovery(&directory).path, &endpoint("ready"))?;
+                Ok(super::Launch::Activation)
+            },
+        );
+        assert_eq!(result.unwrap(), StartDisposition::ActivationRequested);
+        drop(lease);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stale_discovery_does_not_complete_an_activation_and_deploy_suppresses_it() {
+        use super::{request_start, Launch, StartDisposition};
+        let directory = temporary_directory("activation-stale");
+        let runtime = discovery(&directory);
+        crate::runtime::write_runtime(&runtime.path, &endpoint("stale")).unwrap();
+        let result = request_start(
+            &directory.join(orchestrator_file_name()),
+            &runtime,
+            SystemTime::now(),
+            Duration::from_millis(30),
+            || Ok(Launch::Activation),
+        );
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        fs::write(directory.join(DEPLOY_LOCK_FILE), "deploy").unwrap();
+        assert_eq!(
+            request_start(
+                &directory.join(orchestrator_file_name()),
+                &runtime,
+                SystemTime::now(),
+                Duration::from_millis(30),
+                || panic!("deployment forbids activation")
+            )
+            .unwrap(),
+            StartDisposition::DeploymentInProgress
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_or_future_cooldown_cannot_disable_startup_indefinitely() {
+        let directory = temporary_directory("startup-clock");
+        let runtime = discovery(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let mut guard = super::StartupAdmission::try_acquire(&runtime.path)
+            .unwrap()
+            .unwrap();
+        guard
+            .record_failure(SystemTime::now() + Duration::from_secs(60))
+            .unwrap();
+        assert!(!guard.cooling_down(SystemTime::now()).unwrap());
+        guard.file.set_len(1).unwrap();
+        assert!(!guard.cooling_down(SystemTime::now()).unwrap());
+        drop(guard);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_and_stalled_children_are_reaped_before_admission_reopens() {
+        use super::{request_start, Launch};
+        for (name, command, args, kind) in [
+            (
+                "early-exit",
+                "/bin/sh",
+                vec!["-c", "exit 7"],
+                std::io::ErrorKind::Other,
+            ),
+            (
+                "stalled",
+                "/bin/sleep",
+                vec!["20"],
+                std::io::ErrorKind::TimedOut,
+            ),
+        ] {
+            let directory = temporary_directory(name);
+            let mut pid = 0;
+            let result = request_start(
+                &directory.join(orchestrator_file_name()),
+                &discovery(&directory),
+                SystemTime::now(),
+                Duration::from_millis(50),
+                || {
+                    let child = std::process::Command::new(command).args(&args).spawn()?;
+                    pid = child.id();
+                    Ok(Launch::Child(child))
+                },
+            );
+            assert_eq!(result.unwrap_err().kind(), kind);
+            assert!(
+                !Path::new(&format!("/proc/{pid}")).exists(),
+                "owned child must be reaped"
+            );
+            assert!(
+                super::StartupAdmission::try_acquire(&discovery(&directory).path)
+                    .unwrap()
+                    .is_some()
+            );
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
 
     fn temporary_directory(name: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(

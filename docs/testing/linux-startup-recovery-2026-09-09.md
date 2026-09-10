@@ -82,3 +82,41 @@ workbench. Pure regressions cover failed spawn, early child exit, stalled startu
 concurrent admission, cooldown, private readiness publication and typed contention.
 Run the ordinary gates plus real process journeys with the explicit fresh binary
 directory. No physical reboot is planned unless a remaining question needs one.
+
+
+## Native source milestone: failure and recovery pass
+
+Baseline native-musl workspace gates and build passed before implementation.
+`tests/linux/startup-recovery.mjs --record-before` preserved four real connector
+callers creating 32 transient authorities in four seconds. Runtime discovery was
+observed and retained diagnostics included three premature publications. This is
+an isolated process lane using fresh executables, not another installed product.
+The original installed binaries remain unchanged at this source milestone.
+
+After the implementation, four sanitized callers ran for 11.5 seconds. They made
+three failed attempts, with peak one transient authority, zero runtime publications,
+zero completed MCP initialization and three factual native-startup failure events.
+After replacing those callers with corrected-context callers, all four completed
+MCP initialization against one authority in 5874 ms, including remaining cooldown.
+No endpoint token or environment value appears in the report.
+
+The ordinary format, warnings-denied Clippy, Rust workspace and 222 extension
+checks pass. The real process journey also passes, including reconnect, audit
+recovery, uncertain-effect preservation, and cold-start policy explanation. The
+first after-test attempt overlapped that journey's shared deployment lock and
+correctly spawned nothing; it could not measure retry cadence. Its failed record
+is preserved as `after-deploy-lock-overlap`. The lanes were then run separately.
+The new driver detects that interference explicitly rather than counting it as a
+startup success or an unexplained product failure.
+
+Source API is now implemented exactly as the composition milestone above.
+`StartDisposition::diagnostic()` owns the shared content-free event/detail mapping,
+so both shores stay generic when a platform activation disposition is added.
+ADR-0166 records custody, deadlines, cooldown, private readiness and scope.
+Installed deployment and Codex/browser/workbench acceptance are the next step.
+
+Evidence under `.tmp/linux-startup-recovery/`: `baseline.json`, `baseline-*`,
+`before/result.json`, `after/result.json`, `fixed-gates.json`, `fixed-*.log`,
+`bridge-tests.log` and `process-journey.log`. The before/after JSON files record
+all three exact binary hashes. The build directory is `.target-fleet-startup`
+with explicit `x86_64-unknown-linux-musl` and `-C target-feature=-crt-static`.

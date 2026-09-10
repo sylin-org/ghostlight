@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use ghostlight_bridge::diagnostics::{event, Level, Sink};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
-use ghostlight_bridge::lifecycle::{request_orchestrator_start, StartDisposition};
+use ghostlight_bridge::lifecycle::request_orchestrator_start;
 use ghostlight_bridge::runtime::runtime_file;
 use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, ToolDefinition,
@@ -117,20 +117,7 @@ fn reconnect_loop(
         let Ok((stream, reader, server, catalog)) = connection else {
             match request_orchestrator_start() {
                 Ok(disposition) => {
-                    let note = match &disposition {
-                        StartDisposition::Spawned { process_id } => (
-                            event::DEMAND_START_SPAWNED,
-                            format!("orchestrator pid {process_id}"),
-                        ),
-                        StartDisposition::AlreadyRunning => (
-                            event::DEMAND_START_ALREADY_RUNNING,
-                            "lease held; retrying connection".into(),
-                        ),
-                        StartDisposition::DeploymentInProgress => (
-                            event::DEMAND_START_DEPLOYMENT_IN_PROGRESS,
-                            "deploy lock present; startup quiesced".into(),
-                        ),
-                    };
+                    let note = disposition.diagnostic();
                     let marker = format!("{}|{}", note.0, note.1);
                     if reported_disposition.as_deref() != Some(marker.as_str()) {
                         reported_disposition = Some(marker);
