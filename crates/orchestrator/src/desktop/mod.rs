@@ -255,6 +255,21 @@ fn claim_desktop_activation_name(app: &AppHandle) {
     let (Some(home), Ok(executable)) = (std::env::var_os("HOME"), std::env::current_exe()) else {
         return;
     };
+    // Optional activation must not claim an identity whose registration is shadowed.
+    // A failure here leaves the ready desktop and authenticated warm route available.
+    let registration = ghostlight_bridge::desktop_activation::registration_path(Path::new(&home));
+    if !registration.exists() {
+        return;
+    }
+    match crate::install::flatpak::FlatpakRegistry::discover().and_then(|registry| registry.check())
+    {
+        Ok(report) if report.registration_current => {}
+        Ok(_) => return,
+        Err(error) => {
+            eprintln!("Ghostlight desktop activation registration is unavailable: {error}");
+            return;
+        }
+    }
     match ghostlight_bridge::desktop_activation::claim_ready_name(Path::new(&home), &executable) {
         Ok(lease) => {
             *app.state::<DesktopState>()

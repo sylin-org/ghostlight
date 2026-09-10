@@ -64,10 +64,18 @@ impl FlatpakRegistry {
         {
             return Err(invalid("Flatpak setup requires the host's home-resident installation and default data/runtime roots"));
         }
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| {
+                invalid(
+                    "the host session runtime directory is required to check activation precedence",
+                )
+            })?;
         Ok(Self {
             home,
             executable,
-            runtime: std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+            runtime: Some(runtime),
         })
     }
 
@@ -164,9 +172,17 @@ impl FlatpakRegistry {
                 .and_then(registered_executable)
                 .as_ref()
                 != Some(&custody.executable)
+                || manifest.as_deref().is_some_and(|bytes| {
+                    native_host::owned_manifest_connector(bytes)
+                        != Some(
+                            custody
+                                .executable
+                                .with_file_name("ghostlight-browser-connector"),
+                        )
+                })
             {
                 return Err(invalid(
-                    "activation custody does not match its registration; preserved",
+                    "activation custody does not match its registrations; preserved",
                 ));
             }
         }
@@ -651,5 +667,20 @@ mod tests {
             assert!(!registry.manifest().exists());
             fs::remove_dir_all(registry.home).unwrap();
         }
+    }
+
+    #[test]
+    fn changed_native_owner_blocks_upgrade_without_overwriting_it() {
+        let registry = fixture();
+        registry.install(true).unwrap();
+        let other =
+            native_host::manifest_bytes(&registry.home.join("other/ghostlight-browser-connector"))
+                .unwrap();
+        fs::write(registry.manifest(), &other).unwrap();
+        let custody = fs::read(registry.custody()).unwrap();
+        assert!(registry.install(false).is_err());
+        assert_eq!(fs::read(registry.manifest()).unwrap(), other);
+        assert_eq!(fs::read(registry.custody()).unwrap(), custody);
+        fs::remove_dir_all(registry.home).unwrap();
     }
 }

@@ -53,6 +53,10 @@ The installed graph remains unchanged. The existing external installation confli
 with the dev-loop's repository-local build/live path guard and the owner's new-work
 location preference; no guard bypass or unapproved migration was performed. The
 milestone record names that layout decision and remaining installed acceptance.
+The coordinator subsequently resolved the layout: preserve the exact installed
+directory, admit only that path in the ignored host controller, and keep all new
+work in the ordinary repository. Ownership/name-claim review is complete with 563
+Rust tests and the existing gates passing. Installed deployment proceeds next.
 
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,

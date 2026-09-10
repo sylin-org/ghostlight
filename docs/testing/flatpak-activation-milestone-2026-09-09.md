@@ -188,3 +188,25 @@ tree. This checkpoint does not bypass that guard, manually swap live images, or 
 the installation. A deliberate layout decision is needed before deployed acceptance.
 Installer precedence/name-claim review and actual cold/recovery/remove/reinstall
 acceptance remain open; this does not finish the Flatpak assignment.
+
+## Deployment scope resolved and ownership review
+
+The coordinator authorized the existing exact live sibling directory as a scoped
+exception in the ignored host controller. New builds, drivers and evidence remain
+in the ordinary repository. No migration or generic external-directory switch is
+needed. Registration, installed hashes and exact authority process custody were
+verified before preparing the controller; the existing profile/session and binary
+baseline is preserved opaquely in .tmp/flatpak/before-live.
+
+Review now requires the host runtime directory before setup can certify activation
+precedence. The desktop also checks current paired registration and precedence
+before claiming the optional name; failure leaves its warm authenticated route
+available. An upgrade refuses native registration changed to another installation,
+including when the activation registration still matches prior custody. The new
+regression and all 563 Rust tests pass, as do format, Clippy, 222 extension tests,
+the private-bus gate and the fresh real-process journey.
+
+The controller incorporates Alpine f3396e31's exact-destination connector recheck
+on copy retry. This keeps browser respawn from pinning an obsolete connector image
+through a locked deployment. Product and controller source are checkpointed before
+the installed swap; no installed activation pass is implied by these source gates.
