@@ -39,6 +39,8 @@ const CHANGE_EVENT: &str = "ghostlight://change";
 struct DesktopState {
     workbench: WorkbenchFacade,
     window_lifecycle: Mutex<WindowLifecycle>,
+    #[cfg(target_os = "linux")]
+    activation_name: Mutex<Option<ghostlight_bridge::desktop_activation::ActivationNameLease>>,
 }
 
 #[derive(Default)]
@@ -123,6 +125,8 @@ pub fn run() -> Result<()> {
         .manage(DesktopState {
             workbench,
             window_lifecycle: Mutex::new(WindowLifecycle::default()),
+            #[cfg(target_os = "linux")]
+            activation_name: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
@@ -220,6 +224,8 @@ pub fn run() -> Result<()> {
                     return;
                 }
                 eprintln!("Ghostlight {} desktop ready", env!("CARGO_PKG_VERSION"));
+                #[cfg(target_os = "linux")]
+                claim_desktop_activation_name(app);
             }
             RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
                 api.prevent_exit();
@@ -237,6 +243,41 @@ pub fn run() -> Result<()> {
             record_desktop_failure(&host, "desktop event loop panicked");
             anyhow::bail!("Ghostlight desktop authority stopped unexpectedly");
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn claim_desktop_activation_name(app: &AppHandle) {
+    // A sandbox process may never claim the host's activation identity.
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        return;
+    }
+    let (Some(home), Ok(executable)) = (std::env::var_os("HOME"), std::env::current_exe()) else {
+        return;
+    };
+    // Optional activation must not claim an identity whose registration is shadowed.
+    // A failure here leaves the ready desktop and authenticated warm route available.
+    let registration = ghostlight_bridge::desktop_activation::registration_path(Path::new(&home));
+    if !registration.exists() {
+        return;
+    }
+    match crate::install::flatpak::FlatpakRegistry::discover().and_then(|registry| registry.check())
+    {
+        Ok(report) if report.registration_current => {}
+        Ok(_) => return,
+        Err(error) => {
+            eprintln!("Ghostlight desktop activation registration is unavailable: {error}");
+            return;
+        }
+    }
+    match ghostlight_bridge::desktop_activation::claim_ready_name(Path::new(&home), &executable) {
+        Ok(lease) => {
+            *app.state::<DesktopState>()
+                .activation_name
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = lease;
+        }
+        Err(error) => eprintln!("Ghostlight desktop activation is unavailable: {error}"),
     }
 }
 

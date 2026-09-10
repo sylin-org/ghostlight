@@ -136,7 +136,28 @@ impl StartDisposition {
 /// harmless, and a fresh deploy lock suppresses self-heal while binaries are swapped.
 pub fn request_orchestrator_start() -> io::Result<StartDisposition> {
     let current_executable = env::current_exe()?;
+    #[cfg(target_os = "linux")]
+    if use_flatpak_activation(env::var_os("FLATPAK_ID").as_deref())? {
+        let home = env::var_os("HOME")
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "host HOME is unavailable"))?;
+        let executable = resolved_orchestrator(&current_executable, &runtime_discovery())?;
+        return request_orchestrator_activation(|| {
+            crate::desktop_activation::request_registered_start(Path::new(&home), &executable)
+        });
+    }
     request_orchestrator_start_from(&current_executable, &runtime_discovery(), SystemTime::now())
+}
+
+#[cfg(target_os = "linux")]
+fn use_flatpak_activation(app: Option<&std::ffi::OsStr>) -> io::Result<bool> {
+    match app {
+        None => Ok(false),
+        Some(app) if app == crate::desktop_activation::FLATPAK_APP => Ok(true),
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this Flatpak app has no authorized host desktop activation route",
+        )),
+    }
 }
 
 /// Ask a narrowly authorized OS activation route to start the elected desktop authority.
@@ -457,6 +478,25 @@ mod tests {
         service_lock_file, ServiceLease, DEPLOY_LOCK_FILE, DEPLOY_LOCK_MAX_AGE,
     };
     use crate::runtime::RuntimeDiscovery;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_the_explicit_flatpak_app_uses_host_activation_without_native_fallback() {
+        use std::ffi::OsStr;
+        assert!(!super::use_flatpak_activation(None).unwrap());
+        assert!(super::use_flatpak_activation(Some(OsStr::new(
+            crate::desktop_activation::FLATPAK_APP
+        )))
+        .unwrap());
+        for app in ["", "org.chromium.Other", "org.chromium.Chromium.beta"] {
+            assert_eq!(
+                super::use_flatpak_activation(Some(OsStr::new(app)))
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::Unsupported
+            );
+        }
+    }
 
     fn discovery(directory: &Path) -> RuntimeDiscovery {
         RuntimeDiscovery {

@@ -10,6 +10,9 @@ The human-browsing extension fixes below postdate that ZIP and have not been sub
 
 ## Integrated Linux package validation complete (2026-09-09)
 
+These packages contain ac1becab. The later startup and Flatpak repairs below need
+fresh affected-package checks before claiming the same candidate coverage.
+
 Test-01 rebuilt exact integrated baseline `ac1becab` on Ubuntu 22.04. All siblings
 require at most GLIBC_2.34. The exact Debian candidate passed Debian 12 and Ubuntu
 24.04 lifecycle, owned/foreign registration checks and retained-MCP 1.3.4 upgrades;
@@ -64,6 +67,18 @@ the generic retry amplification and premature readiness defects are repaired.
 Bluefin owns the named Flatpak activation implementation and ADR-0165.
 
 ## Four-machine acceptance campaign (2026-09-09)
+
+Bluefin's `46577c6d` completes bounded installed Flatpak Chromium acceptance, now
+integrated with Alpine's startup repair. The opt-in CLI installs paired registrations
+and an explicitly selected app-wide named activation grant, preserves permission
+ownership, and refreshes the session-bus cache. Actual browser-led cold startup took
+1,904 ms with one host authority; installed open/read, authority recovery, native relay
+recovery and owned remove/reinstall pass. The initial cache failure is retained beside
+the corrected unassisted proof. All 564 Linux Rust and 222 extension tests pass.
+See the [Flatpak record](testing/flatpak-activation-milestone-2026-09-09.md).
+This scope is home-resident binaries with default data roots on Bluefin/GNOME;
+new talk permissions require a new browser sandbox. Customer setup never restarts it.
+No system-package Flatpak support, physical reboot or public release is claimed.
 
 The owner authorized a new focused implementation round after the completed campaign.
 All four assignments start at `ac1becab`; coordination uses the ordinary repository on

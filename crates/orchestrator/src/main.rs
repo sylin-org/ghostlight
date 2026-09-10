@@ -48,6 +48,11 @@ enum LaunchMode {
     Policy(ghostlight::governance::inspection::Command),
     /// The narrow package-facing Chromium registration seam (ADR-0115).
     NativeHost(NativeHostCommand),
+    #[cfg(target_os = "linux")]
+    FlatpakNativeHost {
+        command: NativeHostCommand,
+        allow_activation: bool,
+    },
     /// Install the browser and selected MCP-client integrations.
     Install(SetupOptions),
     /// Remove only Ghostlight-owned browser and MCP-client integrations.
@@ -100,6 +105,25 @@ fn main() -> anyhow::Result<()> {
         LaunchMode::Diagnostics(command) => ghostlight::cli::diagnostics::run(&command),
         LaunchMode::Policy(command) => run_policy(&command),
         LaunchMode::NativeHost(command) => run_native_host(command),
+        #[cfg(target_os = "linux")]
+        LaunchMode::FlatpakNativeHost {
+            command,
+            allow_activation,
+        } => {
+            let registry = ghostlight::install::flatpak::FlatpakRegistry::discover()?;
+            let report = match command {
+                NativeHostCommand::Check => registry.check()?,
+                NativeHostCommand::Install => {
+                    if allow_activation {
+                        eprintln!("Selected app-wide permission: Flatpak Chromium may start the one installed Ghostlight host application. No general host execution is granted. Existing browser sandboxes need a restart for this new permission; Ghostlight will not restart them.");
+                    }
+                    registry.install(allow_activation)?
+                }
+                NativeHostCommand::Uninstall => registry.uninstall()?,
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         LaunchMode::Install(options) => run_setup(true, &options),
         LaunchMode::Uninstall(options) => run_setup(false, &options),
         LaunchMode::Doctor { fix, json } => run_doctor(fix, json),
@@ -808,6 +832,12 @@ fn wait_for_runtime(runtime: &Path) {
 }
 
 fn start_or_activate_desktop() -> anyhow::Result<()> {
+    #[cfg(target_os = "linux")]
+    if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
+        // A bus launch requests existence, never Open. In a cold-start race a losing
+        // process must exit at the lifetime lease instead of revealing the winner's UI.
+        return ghostlight::desktop::run();
+    }
     let runtime = ghostlight_bridge::runtime::runtime_file();
     match ghostlight::service::request_workbench_activation(&runtime) {
         Ok(true) => return Ok(()),
@@ -821,6 +851,11 @@ fn start_or_activate_desktop() -> anyhow::Result<()> {
         }
         Err(start_error) => Err(start_error),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn desktop_bus_start(bus_type: Option<&std::ffi::OsStr>) -> bool {
+    bus_type.is_some_and(|value| value == "session")
 }
 
 fn open_desktop() -> anyhow::Result<()> {
@@ -917,6 +952,24 @@ fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<
             Some("uninstall") => NativeHostCommand::Uninstall,
             _ => anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>"),
         };
+        #[cfg(target_os = "linux")]
+        if arguments
+            .get(2)
+            .is_some_and(|value| value == "--flatpak-chromium")
+        {
+            let allow_activation = arguments
+                .get(3)
+                .is_some_and(|value| value == "--allow-flatpak-activation");
+            if arguments.len() != if allow_activation { 4 } else { 3 }
+                || (allow_activation && command != NativeHostCommand::Install)
+            {
+                anyhow::bail!("usage: ghostlight native-host <check|install|uninstall> --flatpak-chromium [--allow-flatpak-activation (install only)]");
+            }
+            return Ok(LaunchMode::FlatpakNativeHost {
+                command,
+                allow_activation,
+            });
+        }
         if arguments.len() != 2 {
             anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>");
         }
@@ -1061,6 +1114,50 @@ fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn flatpak_permission_selection_is_explicit_and_install_only() {
+        assert!(matches!(
+            super::launch_mode(
+                [
+                    "native-host",
+                    "install",
+                    "--flatpak-chromium",
+                    "--allow-flatpak-activation"
+                ]
+                .map(Into::into)
+            )
+            .unwrap(),
+            super::LaunchMode::FlatpakNativeHost {
+                allow_activation: true,
+                ..
+            }
+        ));
+        for command in ["check", "uninstall"] {
+            assert!(super::launch_mode(
+                [
+                    "native-host",
+                    command,
+                    "--flatpak-chromium",
+                    "--allow-flatpak-activation"
+                ]
+                .map(Into::into)
+            )
+            .is_err());
+        }
+        assert!(super::launch_mode(
+            ["native-host", "install", "--flatpak-chromium", "typo"].map(Into::into)
+        )
+        .is_err());
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_bus_launch_means_start_without_workbench_reveal() {
+        use std::ffi::OsStr;
+        assert!(super::desktop_bus_start(Some(OsStr::new("session"))));
+        assert!(!super::desktop_bus_start(Some(OsStr::new("system"))));
+        assert!(!super::desktop_bus_start(None));
+    }
     use std::path::PathBuf;
 
     use ghostlight::install::browser_package::BrowserPackage;

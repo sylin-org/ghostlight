@@ -17,5 +17,10 @@ uuid.workspace = true
 [target.'cfg(windows)'.dependencies]
 ghostlight-win-peer = { path = "../win-peer" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+async-io = "=2.6.0"
+futures-lite = "=2.6.1"
+zbus = "=5.19.0"
+
 [lints]
 workspace = true

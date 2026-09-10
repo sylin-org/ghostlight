@@ -47,14 +47,14 @@ override enforced tool restrictions or authorize alternate routes around rejecte
 
 ## Milestones received
 
-- Bluefin `e1b771c6`: accepted ADR-0165, bounded named activation, opt-in installer
-  ownership and shared lifecycle composition with Alpine d67e3b33; 562 Rust and 222
-  extension tests, private-bus and real-process fixtures pass. Existing Chromium
-  does not inherit the exact talk grant until a new sandbox starts. Live cold/recovery
-  and installed remove/reinstall proofs remain unfinished. The coordinator authorized
-  an ignored local controller adaptation for the verified existing live directory
-  `/var/home/test/ghostlight-fleet-test-02/source/target/release`, retaining deployment
-  locking and exact-image custody. The agent is continuing host-side acceptance.
+- Bluefin `46577c6d`: bounded named activation and opt-in installer now pass actual
+  installed cold startup, open/read, idle authority/relay recovery and owned
+  remove/reinstall. Cold startup took 1,904 ms with one host authority. The first
+  cache-refresh failure led to an installer correction; the unassisted repeated
+  lifecycle passed. All 564 Linux Rust and 222 extension tests, private-bus and
+  process fixtures pass. Existing profile, identity, permission and preserve-tabs
+  choices remain intact. New talk permissions need a new sandbox; setup never
+  restarts the browser. The home-resident/default-root scope remains explicit.
 - Windows `13e378de` and `e4a972d4`: production NSIS hooks exercised through an isolated fixture.
   Empty destination, foreign deployment marker, executable-path obstruction, explicit
   failure cleanup and unrelated authority preservation pass. Product hooks are unchanged.
@@ -77,8 +77,8 @@ override enforced tool restrictions or authorize alternate routes around rejecte
 
 CachyOS and Windows evidence, Windows hook fixtures and Alpine's startup/deployment
 repairs are integrated on this branch. Required central checks pass with 537 Rust and
-222 extension tests. Bluefin's activation implementation remains on its own branch
-pending live acceptance and central review. Packages previously verified at ac1becab
+222 extension tests. Bluefin's reviewed activation implementation is also integrated.
+Packages previously verified at ac1becab
 do not contain the new startup repair; affected package checks follow the combined
 Linux candidate rather than rebuilding once for every intermediate milestone.
 

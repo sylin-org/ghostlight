@@ -183,7 +183,9 @@ history live here.
 
 | [0164](0164-govern-only-ghostlight-work.md) | Human browsing produces no Ghostlight work; passive events invalidate references only, opener-based adoption and automatic regrouping are removed | Accepted |
 
-| [0166](0166-bounded-desktop-startup-custody.md) | Shared bounded startup admission and retry cooldown, desktop-ready discovery, typed contention, and named OS activation composition | Accepted; native process validation passes, installed acceptance pending |
+| [0165](0165-flatpak-host-desktop-activation.md) | Explicit named host activation for Flatpak Chromium, bounded shared startup and owned installation permissions | Accepted; bounded Bluefin installed cold/recovery and registration lifecycle pass |
+
+| [0166](0166-bounded-desktop-startup-custody.md) | Shared bounded startup admission and retry cooldown, desktop-ready discovery, typed contention, and named OS activation composition | Accepted; native process and installed Alpine acceptance pass |
 
 ## Conventions
 
