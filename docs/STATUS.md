@@ -20,6 +20,13 @@ The [milestone evidence](testing/flatpak-activation-milestone-2026-09-09.md) rec
 unchanged installed identities and passing format, Clippy, 542 Rust and 222 extension
 checks on the integrated source baseline. No new activation was deployed.
 
+The coordinator subsequently accepted ADR-0165 and authorized test-02's exact named
+grant. The mechanism and post-desktop-readiness name hook are implemented, with a
+passing private-bus fixture; generic lifecycle wiring and installer ownership remain
+in progress. Static grant inspection proves the running browser does not receive a
+new talk permission until a new sandbox is created. No browser restart or deployed
+activation is claimed, and first-time hot-install support remains an open limitation.
+
 Campaign execution and credential provisioning are complete, with explicit failed and blocked
 lanes retained below. All four machines independently verified local Git as `lbotinelly`,
 repository push access, owner commit identity and secure storage. Alpine's post-reboot proof

@@ -808,6 +808,12 @@ fn wait_for_runtime(runtime: &Path) {
 }
 
 fn start_or_activate_desktop() -> anyhow::Result<()> {
+    #[cfg(target_os = "linux")]
+    if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
+        // A bus launch requests existence, never Open. In a cold-start race a losing
+        // process must exit at the lifetime lease instead of revealing the winner's UI.
+        return ghostlight::desktop::run();
+    }
     let runtime = ghostlight_bridge::runtime::runtime_file();
     match ghostlight::service::request_workbench_activation(&runtime) {
         Ok(true) => return Ok(()),
@@ -820,6 +826,11 @@ fn start_or_activate_desktop() -> anyhow::Result<()> {
             finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn desktop_bus_start(bus_type: Option<&std::ffi::OsStr>) -> bool {
+    bus_type.is_some_and(|value| value == "session")
 }
 
 fn open_desktop() -> anyhow::Result<()> {
@@ -1060,6 +1071,14 @@ fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOptions> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_bus_launch_means_start_without_workbench_reveal() {
+        use std::ffi::OsStr;
+        assert!(super::desktop_bus_start(Some(OsStr::new("session"))));
+        assert!(!super::desktop_bus_start(Some(OsStr::new("system"))));
+        assert!(!super::desktop_bus_start(None));
+    }
     use std::path::PathBuf;
 
     use ghostlight::install::browser_package::BrowserPackage;

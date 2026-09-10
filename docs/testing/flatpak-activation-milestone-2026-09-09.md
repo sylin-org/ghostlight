@@ -67,3 +67,48 @@ The coordinator can approve or reject the proposed narrow trust boundary and all
 the ADR number. If approved, registration, activation and lifecycle acceptance follow
 the proposal's exact scope, with Alpine retaining generic retry suppression ownership.
 Until then, implementing or exercising the grant would exceed the unresolved decision.
+
+## Authorized mechanism implementation checkpoint
+
+The coordinator subsequently authorized the controlled test-02 grant and accepted
+ADR-0165 under the owner's delegated fleet authority (41cb6d91). No separate owner
+approval is claimed. The earlier proposal and measurements above remain historical.
+
+The exact single-name user override was added after confirming there was no prior
+per-app user override file and no per-app system override. It contains only
+org.sylin.ghostlight=talk in Session Bus Policy. No blanket permission was added.
+The running Chromium sandbox's /.flatpak-info lacks the new name; a fresh command-only
+sandbox contains it. Therefore this route cannot provide first-time cold activation
+to the already-running browser without a new sandbox. The browser was not restarted.
+The first-time hot-install promise needs an explicit disposition before support claims.
+
+Source now contains the Linux-only named-activation mechanism and a desktop readiness
+hook. The authority claims its exact registered name only after RunEvent::Ready has
+constructed/backgrounded the workbench and attached authenticated presentation.
+No registration means no bus connection. Name acquisition neither queues nor replaces
+an owner. Requests verify byte-exact selected registration and return no invented PID.
+The request helper is not yet wired into Alpine's shared lifecycle admission gate;
+crates/bridge/src/lifecycle.rs remains untouched. No installed binary was replaced.
+Customer registration/permission ownership and installed cold/recovery proofs remain
+unfinished. This is a mechanism checkpoint, not completed Flatpak support.
+
+The private-session-bus gate starts a test-only no-argument fixture from a path with
+spaces, verifies its ready marker before activation returns, verifies the owning PID,
+reuses the same owner on a repeated request, refuses another installation, and proves
+name release. It creates no host session-bus registration or product installation.
+Toolbox initially failed this gate because dbus-run-session is absent (exit 101);
+the same fresh Rust-only test executable passed on the host, where it is installed.
+The failed run's .tmp/private-activation-* directory was retained, not overwritten.
+
+Run this opt-in gate with cargo test -p ghostlight-bridge --test desktop_activation --
+--ignored --nocapture in an environment with dbus-run-session. It is separate from
+the actual installed Tauri/native-host acceptance still owed above.
+
+Mechanism source gates pass: format, all-target Clippy with warnings denied,
+547 Rust tests and 222 extension tests. The opt-in private-bus test is separately
+passed on the host, not counted as an ordinary workspace pass. The no-argument
+session-bus launch also bypasses the normal reveal-existing-workbench branch, so
+a losing cold-start process cannot turn a bus activation into an Open intent.
+The real-process journey also passed with GHOSTLIGHT_BIN_DIR=target/debug after a
+fresh workspace build. It exercises normal relays/recovery with test adapters;
+it is not the installed Flatpak cold-start proof.

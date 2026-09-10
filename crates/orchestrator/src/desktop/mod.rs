@@ -39,6 +39,8 @@ const CHANGE_EVENT: &str = "ghostlight://change";
 struct DesktopState {
     workbench: WorkbenchFacade,
     window_lifecycle: Mutex<WindowLifecycle>,
+    #[cfg(target_os = "linux")]
+    activation_name: Mutex<Option<ghostlight_bridge::desktop_activation::ActivationNameLease>>,
 }
 
 #[derive(Default)]
@@ -124,6 +126,8 @@ pub fn run() -> Result<()> {
         .manage(DesktopState {
             workbench,
             window_lifecycle: Mutex::new(WindowLifecycle::default()),
+            #[cfg(target_os = "linux")]
+            activation_name: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             workbench_snapshot,
@@ -203,6 +207,8 @@ pub fn run() -> Result<()> {
                 app.state::<DesktopState>()
                     .workbench
                     .attach_presentation(Arc::new(NativePresentation { app: app.clone() }));
+                #[cfg(target_os = "linux")]
+                claim_desktop_activation_name(app);
             }
             RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
                 api.prevent_exit();
@@ -214,6 +220,26 @@ pub fn run() -> Result<()> {
         Ok(0) => Ok(()),
         Ok(code) => anyhow::bail!("Ghostlight desktop authority exited with status {code}"),
         Err(_) => anyhow::bail!("Ghostlight desktop authority stopped unexpectedly"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn claim_desktop_activation_name(app: &AppHandle) {
+    // A sandbox process may never claim the host's activation identity.
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        return;
+    }
+    let (Some(home), Ok(executable)) = (std::env::var_os("HOME"), std::env::current_exe()) else {
+        return;
+    };
+    match ghostlight_bridge::desktop_activation::claim_ready_name(Path::new(&home), &executable) {
+        Ok(lease) => {
+            *app.state::<DesktopState>()
+                .activation_name
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = lease;
+        }
+        Err(error) => eprintln!("Ghostlight desktop activation is unavailable: {error}"),
     }
 }
 

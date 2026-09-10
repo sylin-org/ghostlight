@@ -2,6 +2,8 @@
 
 pub mod browser;
 pub mod client;
+#[cfg(target_os = "linux")]
+pub mod desktop_activation;
 pub mod diagnostics;
 pub mod framing;
 pub mod lifecycle;
