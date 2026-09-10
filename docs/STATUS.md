@@ -8,6 +8,15 @@ The submitted 1.1.2 ZIP has automatic publication disabled; its current review s
 be verified because API credentials are absent and dashboard browser access was unavailable.
 The human-browsing extension fixes below postdate that ZIP and have not been submitted.
 
+## Final combined Linux package validation in progress (2026-09-09)
+
+Test-01 is rebuilding exact `0129ff15` with the integrated startup/readiness and
+Flatpak activation changes. All 1,045 staged source blobs match; 564 Rust tests,
+222 extension tests, formatting, Clippy, the process journey and selected-image
+copy-retry regression pass. Candidate consumer/deployment results remain pending
+in the [focused record](testing/linux-combined-packaging-2026-09-09.md).
+Prior artifacts, failures and installed paths are preserved.
+
 ## Integrated Linux package validation complete (2026-09-09)
 
 These packages contain ac1becab. The later startup and Flatpak repairs below need
