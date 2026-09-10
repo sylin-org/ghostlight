@@ -86,6 +86,17 @@ pub fn request_registered_start(home: &Path, executable: &Path) -> io::Result<()
     })
 }
 
+/// Refresh the host session bus after explicit installation changes its activation files.
+pub fn refresh_registration_cache() -> io::Result<()> {
+    within_deadline(CALL_TIMEOUT, async {
+        let connection = zbus::Connection::session().await.map_err(bus_error)?;
+        let proxy = zbus::fdo::DBusProxy::new(&connection)
+            .await
+            .map_err(bus_error)?;
+        proxy.reload_config().await.map_err(bus_error)
+    })
+}
+
 /// Lifetime of the installed activation name, held only by a ready host desktop authority.
 pub struct ActivationNameLease {
     _connection: zbus::Connection,

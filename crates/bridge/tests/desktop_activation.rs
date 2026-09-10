@@ -103,7 +103,7 @@ fn bus() {
     fs::write(&registration, registration_bytes(&executable).unwrap()).unwrap();
     let connection = zbus::blocking::Connection::session().unwrap();
     let proxy = zbus::blocking::fdo::DBusProxy::new(&connection).unwrap();
-    proxy.reload_config().unwrap();
+    ghostlight_bridge::desktop_activation::refresh_registration_cache().unwrap();
     assert!(!proxy.name_has_owner(BUS_NAME.try_into().unwrap()).unwrap());
     let deploy = executable.with_file_name("deploy.lock");
     fs::write(&deploy, "fixture deployment").unwrap();

@@ -47,6 +47,7 @@ pub struct FlatpakRegistry {
     home: PathBuf,
     executable: PathBuf,
     runtime: Option<PathBuf>,
+    refresh: fn() -> io::Result<()>,
 }
 
 impl FlatpakRegistry {
@@ -76,6 +77,7 @@ impl FlatpakRegistry {
             home,
             executable,
             runtime: Some(runtime),
+            refresh: ghostlight_bridge::desktop_activation::refresh_registration_cache,
         })
     }
 
@@ -231,6 +233,7 @@ impl FlatpakRegistry {
             ),
         ];
         apply(&changes)?;
+        self.refresh_bus()?;
         self.check()
     }
 
@@ -239,6 +242,7 @@ impl FlatpakRegistry {
         let _lock = self.lock()?;
         let custody_before = read(&self.custody())?;
         let Some(custody_bytes) = custody_before.as_deref() else {
+            self.refresh_bus()?;
             return self.check();
         };
         let custody = parse_custody(custody_bytes)?;
@@ -276,7 +280,14 @@ impl FlatpakRegistry {
             Change::new(self.permission(), permission, permission_after),
             Change::new(self.custody(), custody_before, None),
         ])?;
+        self.refresh_bus()?;
         self.check()
+    }
+
+    fn refresh_bus(&self) -> io::Result<()> {
+        (self.refresh)().map_err(|error| io::Error::other(format!(
+            "registration files were updated but the session bus could not refresh them: {error}; repeat the explicit setup command"
+        )))
     }
 
     fn verify_precedence(&self) -> io::Result<()> {
@@ -511,6 +522,7 @@ mod tests {
             home,
             executable,
             runtime: None,
+            refresh: || Ok(()),
         }
     }
 
@@ -617,6 +629,7 @@ mod tests {
             home: old.home.clone(),
             executable: old.home.join("upgrade/ghostlight"),
             runtime: None,
+            refresh: old.refresh,
         };
         fs::create_dir_all(new.executable.parent().unwrap()).unwrap();
         fs::write(&new.executable, b"fixture").unwrap();
@@ -681,6 +694,25 @@ mod tests {
         assert!(registry.install(false).is_err());
         assert_eq!(fs::read(registry.manifest()).unwrap(), other);
         assert_eq!(fs::read(registry.custody()).unwrap(), custody);
+        fs::remove_dir_all(registry.home).unwrap();
+    }
+
+    #[test]
+    fn failed_bus_refresh_reports_persisted_state_and_repeat_repairs_it() {
+        let mut registry = fixture();
+        registry.refresh = || Err(io::Error::other("fixture bus unavailable"));
+        let error = registry.install(true).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("registration files were updated"));
+        assert!(registry.check().unwrap().registration_current);
+        registry.refresh = || Ok(());
+        assert!(registry.install(false).unwrap().registration_current);
+        registry.refresh = || Err(io::Error::other("fixture bus unavailable"));
+        assert!(registry.uninstall().is_err());
+        assert!(!registry.check().unwrap().registration_current);
+        registry.refresh = || Ok(());
+        registry.uninstall().unwrap();
         fs::remove_dir_all(registry.home).unwrap();
     }
 }

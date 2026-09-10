@@ -210,3 +210,25 @@ The controller incorporates Alpine f3396e31's exact-destination connector rechec
 on copy retry. This keeps browser respawn from pinning an obsolete connector image
 through a locked deployment. Product and controller source are checkpointed before
 the installed swap; no installed activation pass is implied by these source gates.
+
+## First installed failure and cache-refresh correction
+
+The scoped controller deployed ca7ab60c's debug build into the existing live sibling
+directory. The original browser exited gracefully and the normal Flatpak launcher
+restored its existing profile. Authority absence and no activation-name owner were
+observed before launch. The fresh browser sandbox contains the authorized talk grant.
+
+Cold activation initially failed with ServiceUnknown: the name was not activatable.
+The host's ListActivatableNames omitted the newly created registration. A diagnostic
+ReloadConfig made it visible; the unchanged browser relay then recovered through its
+ordinary retry, producing host authority PID 67631 and the same persisted adapter
+identity. Installed open/read passed and preserve-tabs refused cleanup as expected.
+This assisted first run is a failure/recovery finding, not unassisted setup acceptance.
+
+Explicit install and uninstall now refresh the host session-bus cache through the
+same bounded full-exchange mechanism. If refresh fails, the error reports that files
+were updated and directs a repeat; no false rollback or success is claimed. Repeated
+uninstall refreshes even after custody was already removed. A regression proves that
+failure/retry state, and the private-bus fixture now uses the product refresh helper.
+Required format, Clippy, all 564 Rust tests and 222 extension tests pass. Unassisted
+installed remove/reinstall and cold activation will be repeated on this correction.
