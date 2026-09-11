@@ -48,6 +48,7 @@ const PROCESS_BROWSER = "browser_processjourney";
 // product's bounded startup contract so a cold CI desktop can initialize without making the
 // process journey flaky; later protocol waits retain their tighter five-second default.
 const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
+const MCP_COLD_START_TIMEOUT_MS = SERVICE_STARTUP_TIMEOUT_MS + 10_000;
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -159,10 +160,10 @@ class McpPeer {
     return this.beginRequest(method, params).promise;
   }
 
-  beginRequest(method, params = {}) {
+  beginRequest(method, params = {}, timeoutMs = 10_000) {
     const id = this.nextId++;
     const promise = new Promise((resolvePromise, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timed out waiting for MCP ${method}`)), 10000);
+      const timer = setTimeout(() => reject(new Error(`Timed out waiting for MCP ${method}`)), timeoutMs);
       this.pending.set(JSON.stringify(id), (value) => { clearTimeout(timer); resolvePromise(value); });
     });
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -498,7 +499,7 @@ try {
       "io.modelcontextprotocol/clientInfo": { name: "acceptance", version: "1" },
       "io.modelcontextprotocol/clientCapabilities": {}
     }
-  });
+  }, MCP_COLD_START_TIMEOUT_MS);
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
