@@ -127,3 +127,17 @@ narrows the supported operating-system matrix to Windows and Linux
 ([1.0/ACCEPTANCE.md](../1.0/ACCEPTANCE.md)). macOS mentions above describe the scope considered at
 decision time; macOS remains a later row of the platform table, deferred for want of test hardware,
 not removed from the product's future.
+
+## 1.0 implementation record (2026-09-11)
+
+The clean-room thin connectors restore this accepted lifecycle at the shared bridge seam.
+`ghostlight-bridge` owns one connector shutdown coordinator and the parent-death detector.
+Linux binds the observed parent relationship to its `/proc` start time. Windows delegates
+the audited process snapshot, creation-time identity and signalled-handle liveness check to
+`ghostlight-win-peer`. Both `ghostlight-mcp-connector` and
+`ghostlight-browser-connector` use that seam.
+
+There is deliberately no inactivity timer. A live client may remain silent indefinitely.
+`tests/connector-parent-lifecycle.mjs` proves that both connectors survive inactivity while
+their parent lives, exit on ordinary stdin EOF, and exit after the exact parent dies even
+when another process keeps stdin open.

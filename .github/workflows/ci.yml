@@ -131,6 +131,7 @@ jobs:
         with:
           node-version: "22"
       - run: cargo build --workspace --locked
+      - run: node tests/connector-parent-lifecycle.mjs
       - if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
       - if: runner.os == 'Windows'

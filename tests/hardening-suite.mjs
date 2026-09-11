@@ -89,6 +89,7 @@ if (built) {
 }
 if (lane !== "browser") {
   for (const [name, file] of [
+    ["connector-parent", "connector-parent-lifecycle.mjs"],
     ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
     ["history-compatibility", "history-compatibility.mjs"],
     ["provenance", "provenance-journey.mjs"], ["cli", "cli-journey.mjs"],

@@ -30,12 +30,56 @@ pub struct PeerIdentity {
     pub image_name: String,
 }
 
+/// Stable identity for one Windows process across process-id reuse.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessIdentity {
+    /// Operating-system process id.
+    pub process_id: u32,
+    /// Windows process creation time, expressed as the raw FILETIME value.
+    pub created: u64,
+}
+
 #[cfg(target_os = "windows")]
 mod image;
 #[cfg(target_os = "windows")]
 mod private_file;
 #[cfg(target_os = "windows")]
+mod process;
+#[cfg(target_os = "windows")]
 mod table;
+
+/// Capture the current process's parent with creation time bound to its process id.
+#[must_use]
+pub fn parent_process() -> Option<ProcessIdentity> {
+    #[cfg(target_os = "windows")]
+    return process::parent();
+    #[cfg(not(target_os = "windows"))]
+    None
+}
+
+/// Capture one process with creation time bound to its process id.
+#[must_use]
+pub fn process_identity(process_id: u32) -> Option<ProcessIdentity> {
+    #[cfg(target_os = "windows")]
+    return process::identity(process_id);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = process_id;
+        None
+    }
+}
+
+/// Return whether the exact captured Windows process is still running.
+#[must_use]
+pub fn process_is_alive(process: ProcessIdentity) -> bool {
+    #[cfg(target_os = "windows")]
+    return process::is_alive(process);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = process;
+        false
+    }
+}
 
 /// Create a new file with a protected current-user/SYSTEM DACL before it can contain secrets.
 /// Existing paths are refused. Runtime publication belongs to the caller (ADR-0160).

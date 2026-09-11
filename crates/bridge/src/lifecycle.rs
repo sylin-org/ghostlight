@@ -8,11 +8,14 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 
+use crate::diagnostics::{event, Level, Sink};
+use crate::parent_process::ParentProcess;
 use crate::runtime::{read_runtime, runtime_discovery, RuntimeDiscovery, RuntimeEndpoint};
 
 /// Presence marker used to quiesce demand-start during a sibling replacement.
@@ -23,6 +26,7 @@ const STARTUP_LOCK_EXTENSION: &str = "startup";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_POLL: Duration = Duration::from_millis(25);
 const FAILED_START_COOLDOWN: Duration = Duration::from_secs(5);
+const PARENT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -30,6 +34,60 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 #[cfg(windows)]
 const ERROR_LOCK_VIOLATION: i32 = 33;
+
+enum ConnectorExit {
+    InputClosed(&'static str),
+    ParentExited,
+}
+
+/// One ordered exit path for a connector's normal input closure and parent-death detector.
+pub struct ConnectorShutdown {
+    exit: mpsc::SyncSender<ConnectorExit>,
+}
+
+impl ConnectorShutdown {
+    /// Start the connector exit coordinator and, where available, its parent-death detector.
+    pub fn start(diagnostics: Arc<Sink>) -> io::Result<Self> {
+        let (exit, requests) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("ghostlight-connector-shutdown".into())
+            .spawn(move || {
+                let Ok(reason) = requests.recv() else {
+                    return;
+                };
+                let detail = match reason {
+                    ConnectorExit::InputClosed(detail) => detail,
+                    ConnectorExit::ParentExited => "spawning client process exited",
+                };
+                diagnostics.emit(event::PROCESS_EXITED, Level::Info, None, detail);
+                std::process::exit(0);
+            })?;
+
+        if let Some(parent) = ParentProcess::capture() {
+            let parent_exit = exit.clone();
+            thread::Builder::new()
+                .name("ghostlight-parent-watchdog".into())
+                .spawn(move || loop {
+                    thread::sleep(PARENT_POLL_INTERVAL);
+                    if !parent.is_alive() {
+                        let _ = parent_exit.send(ConnectorExit::ParentExited);
+                        return;
+                    }
+                })?;
+        }
+        Ok(Self { exit })
+    }
+
+    /// Complete a normal connector input closure through the shared ordered exit path.
+    pub fn finish(self, detail: &'static str) -> ! {
+        self.exit
+            .send(ConnectorExit::InputClosed(detail))
+            .expect("connector exit coordinator remains available");
+        loop {
+            thread::park();
+        }
+    }
+}
 
 /// Exclusive lifetime lease for the one orchestrator that may publish a runtime endpoint.
 #[derive(Debug)]

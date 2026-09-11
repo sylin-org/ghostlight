@@ -17,6 +17,21 @@ See [adapter custody](testing/adapter-1.1.4-2026-09-10.md) for artifact and subm
 The publication monitor was deleted after observing 1.1.2. Service 1.3.5 remains
 unpublished with the recorded package acceptance limits; no fleet work restarted.
 
+Release candidate run `34561200774` passed from exact source `a228c345`, including
+both native packages, Debian 12 and Ubuntu 24.04 package lifecycles, the immutable
+18-artifact manifest and every-file provenance attestation. It remains unpublished
+and untagged because the release branch moved during the run. The late change tried
+to reap abandoned MCP connectors after 30 minutes of silence. Silence is not client
+death, so that heuristic could interrupt a healthy idle editor and is not a release
+fix. The replacement follows ADR-0029: both thin connectors now observe the exact
+spawning process and exit only when it ends, while ordinary inactivity is unlimited.
+Windows binds pid to creation time and tests signalled-handle liveness; Linux binds
+the parent relationship to `/proc` start time. A cross-process regression keeps stdin
+open after the parent exits and proves reaping without treating inactivity as death.
+The full Windows workspace, extension, formatting, Clippy, lifecycle regression and
+repository-integrity gates pass. A fresh candidate from the corrected revision is
+required before publication.
+
 The owner wrapped the campaign before the next
 [Linux offerings round](testing/linux-offerings-round-2026-09.md) was dispatched.
 Its six topics and proposed machine ownership are saved as deferred work. No new

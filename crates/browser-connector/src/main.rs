@@ -13,7 +13,7 @@ use ghostlight_bridge::diagnostics::{event, Component, Level, Sink};
 use ghostlight_bridge::framing::{
     read_length_frame, read_native, write_length_frame, write_native,
 };
-use ghostlight_bridge::lifecycle::request_orchestrator_start;
+use ghostlight_bridge::lifecycle::{request_orchestrator_start, ConnectorShutdown};
 use ghostlight_bridge::relay::{
     BrowserRelayRequest, BrowserRelayResponse, BrowserRelayStatus, BROWSER_RELAY_MAJOR,
 };
@@ -42,22 +42,21 @@ fn main() -> Result<()> {
         None,
         "browser native relay starting",
     );
+    let shutdown =
+        ConnectorShutdown::start(Arc::clone(&diagnostics)).context("start connector lifecycle")?;
     let result = run(&diagnostics);
-    match &result {
-        Ok(()) => diagnostics.emit(
-            event::PROCESS_EXITED,
-            Level::Info,
-            None,
-            "native relay exited",
-        ),
-        Err(error) => diagnostics.emit(
-            event::PROCESS_FAILED,
-            Level::Error,
-            None,
-            &format!("{error:#}"),
-        ),
+    match result {
+        Ok(()) => shutdown.finish("browser native input closed"),
+        Err(error) => {
+            diagnostics.emit(
+                event::PROCESS_FAILED,
+                Level::Error,
+                None,
+                &format!("{error:#}"),
+            );
+            Err(error)
+        }
     }
-    result
 }
 
 fn run(diagnostics: &Sink) -> Result<()> {
