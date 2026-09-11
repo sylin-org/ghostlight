@@ -1,6 +1,7 @@
 # Adapter 1.1.4 custody -- 2026-09-10
 
-Status: Prepared for store submission. No upload or submission completed.
+Status: Uploaded and submitted through Google's API; 1.1.4 is PENDING_REVIEW
+with STAGED_PUBLISH (deferred publication). Public 1.1.3 remains published.
 The owner authorized renumbering the prepared fixes to 1.1.4 and pushing them
 after personally rolling back the public extension.
 
@@ -30,15 +31,25 @@ the manifest version differs. Formatting, Clippy with warnings denied, all 537
 Windows Rust tests, all 222 extension tests and offline public/compatibility
 checks pass. No runtime or extension JavaScript source changed in this revision.
 
-## Submission boundary
+## API submission evidence
 
-The Chrome publisher API configuration is absent. The browser tool rejected
-developer-dashboard access with `Not allowed`; no alternate control path was used.
-No store upload, submission or publication occurred in this attempt.
-The owner can upload the exact ZIP above to the existing Ghostlight in Browser item
-`lejccfmoeogmhemakeknjjdhkfkgncdl` and submit 1.1.4 for review with deferred publication.
-Do not upload the historical local 1.1.3 ZIP. Record Google's actual confirmation
-before changing this status to submitted.
+The owner authorized API upload and submission after browser tooling rejected
+developer-dashboard navigation. The owner completed production OAuth setup and
+consent. The missing publisher ID was recovered from a recent dashboard URL in
+browser history. Credential locations and recovery notes are recorded under
+owner-authorized, gitignored `local/`; no credential values belong in this record.
+
+The existing `scripts/publish-extension.ps1` used the exact ZIP and SHA-256 above
+with the explicit local credential file. Google's API returned:
+
+- Before upload: public 1.1.3 PUBLISHED, with no submitted revision.
+- Upload: SUCCEEDED, draft version 1.1.4.
+- Submit: PENDING_REVIEW, publish type STAGED_PUBLISH.
+- Independent status read after submission: public 1.1.3 PUBLISHED and submitted
+  1.1.4 PENDING_REVIEW, both with distribution percentage 100.
+
+The item is `lejccfmoeogmhemakeknjjdhkfkgncdl`. Review approval does not publish this
+staged submission automatically. Do not upload the historical local 1.1.3 ZIP.
 
 The prior publication monitor remains deleted. No service package publication,
 live binary swap or new Linux assignment is part of this renumbering.
