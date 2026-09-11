@@ -13,8 +13,8 @@ after personally rolling back the public extension.
 - Public rollback 1.1.3 follows the 1.1.1 compatibility range, service 1.3.3-1.3.5.
 - The unsubmitted local 1.1.3 ZIP from September 9 contains newer fixes, not the
   rollback payload. Preserve it as historical evidence; never upload it.
-- New fixes use 1.1.4 and retain their service 1.3.5 compatibility. Service and
-  package versions are unchanged. Public metadata now reflects observed 1.1.3.
+- New fixes use 1.1.4 and cover services 1.3.4-1.3.5. Service and package versions
+  are unchanged. Public metadata now reflects observed 1.1.4.
 
 ## New artifact
 
@@ -53,6 +53,18 @@ reported a submitted revision; it reported public 1.1.4 PUBLISHED at 100 percent
 `scripts/reconcile-chrome-store.ps1` independently observed 1.1.4 in Google's public
 update feed and updated `docs/public-status.json`. Do not upload the historical local
 1.1.3 ZIP.
+
+## Service 1.3.4 compatibility
+
+The first 1.3.5 candidate build after publication exposed that the 1.1.4 row had
+been recorded with an unnecessarily narrow 1.3.5 minimum. The public 1.1.2 adapter
+already covered service 1.3.4. Comparing its exact adapter contract at `85ecfb06`
+with 1.1.4 shows the same protocol major, capability names and capability revisions.
+The intervening adapter changes retain the existing wire commands while correcting
+typing, human-tab ownership, diagnostics and options behavior. Service 1.3.4 accepts
+additional well-formed capabilities and dispatches only commands 1.1.4 still handles.
+The compatibility row therefore truthfully covers services 1.3.4-1.3.5; this is a
+contract correction, not a release-transition bypass.
 
 The prior publication monitor remains deleted. No service package publication,
 live binary swap or new Linux assignment is part of this renumbering.

@@ -6,7 +6,8 @@ Google's live feed served 1.1.2 on September 10. The owner then rolled back to
 1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3
 ZIP contains different code and must not be uploaded. Its human-browsing, typing
 and diagnostics fixes now use 1.1.4. Compatibility for rollback 1.1.3 follows
-the original 1.1.1 row; new 1.1.4 targets service 1.3.5.
+the original 1.1.1 row. Adapter 1.1.4 covers services 1.3.4-1.3.5: it retains
+1.1.2's protocol and capability contract while fixing adapter-internal behavior.
 Google's API and independent public update feed now confirm adapter 1.1.4 PUBLISHED
 at 100 percent distribution. Public metadata was reconciled from the observed feed.
 The owner authorized starting the service/package 1.3.5 publication sequence after
