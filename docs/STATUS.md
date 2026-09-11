@@ -1,14 +1,15 @@
 # STATUS -- Ghostlight 1.0 source candidate
 
-Last updated: 2026-09-09 (service/package 1.3.5 prepared; adapter 1.1.3 prepared locally;
-published versions remain service 1.3.4 and adapter 1.1.1).
+Last updated: 2026-09-10 (service/package 1.3.5 prepared; adapter fixes renumbered 1.1.4).
 
-Google's live update feed was checked on 2026-09-09 and still serves adapter 1.1.1.
-The submitted 1.1.2 ZIP has automatic publication disabled; its current review state could not
-be verified because API credentials are absent and dashboard browser access was unavailable.
-The human-browsing extension fixes below postdate that ZIP. They are now numbered
-1.1.3 locally and have not been submitted. The public listing independently confirms
-1.1.1. The owner's conditional package-publication instruction has not been triggered.
+Google's live feed served 1.1.2 on September 10. The owner then rolled back to
+1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3
+ZIP contains different code and must not be uploaded. Its human-browsing, typing
+and diagnostics fixes now use 1.1.4. Compatibility for rollback 1.1.3 follows
+the original 1.1.1 row; new 1.1.4 targets service 1.3.5.
+See [adapter custody](testing/adapter-1.1.4-2026-09-10.md) for artifact and submission state.
+The publication monitor was deleted after observing 1.1.2. Service 1.3.5 remains
+unpublished with the recorded package acceptance limits; no fleet work restarted.
 
 The owner wrapped the campaign before the next
 [Linux offerings round](testing/linux-offerings-round-2026-09.md) was dispatched.

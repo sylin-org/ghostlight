@@ -1,5 +1,10 @@
 # Fleet wrap and release preparation -- 2026-09-09
 
+September 10 update: this record describes the original wrap. Google subsequently
+served 1.1.2, and the owner rolled back to 1.1.1 code under Google's new version
+1.1.3. The unsubmitted local 1.1.3 ZIP below is superseded and must not be uploaded.
+The fixes now use 1.1.4; see [the new custody record](adapter-1.1.4-2026-09-10.md).
+
 Status: Prepared locally; no public release or live deployment in this wrap-up.
 The owner stopped the next Linux round before dispatch and authorized preparing
 the bump/deployment, with package publication conditional on Google's publication
