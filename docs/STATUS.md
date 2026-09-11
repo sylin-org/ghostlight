@@ -36,6 +36,14 @@ rotated DNS proof, and public lookup returns 1.3.5. The
 [candidate custody record](testing/candidate-custody-2026-09-11.md) retains exact hashes,
 workflow evidence, publication receipts and remaining public-install limits.
 
+The post-publication [Windows consumer smoke](testing/windows-public-1.3.5-smoke-2026-09-11.md)
+resolved npm `latest` as 1.3.5, downloaded and hash-verified all three public binaries,
+installed them in an isolated profile, returned a 23-tool MCP catalog, and observed the
+connector exit 1 ms after its client closed. Final isolated process inventory was empty.
+The install temporarily used the per-user native-messaging registrations and restored their
+prior owned paths. A separate Windows user or VM remains necessary for a truly side-by-side
+registration test.
+
 The owner wrapped the campaign before the next
 [Linux offerings round](testing/linux-offerings-round-2026-09.md) was dispatched.
 Its six topics and proposed machine ownership are saved as deferred work. No new

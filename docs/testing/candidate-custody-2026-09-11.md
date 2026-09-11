@@ -52,7 +52,12 @@ for exact hash comparison before publication.
   independently report it, as recorded in
   [adapter custody](adapter-1.1.4-2026-09-10.md).
 
-Candidate-derived Scoop and WinGet metadata remain unpublished. A public clean-install smoke on
-the newly returned second Windows machine remains pending until Codex registers it as a connected
-host with a Ghostlight project. Existing Windows, CachyOS, Bluefin, Alpine, Debian 12, and Ubuntu
-24.04 evidence remains bounded by its dated reports; this publication does not widen those claims.
+Candidate-derived Scoop and WinGet metadata remain unpublished. A post-publication
+[Windows consumer smoke](windows-public-1.3.5-smoke-2026-09-11.md) independently resolved npm
+`latest` as 1.3.5, downloaded and hash-verified all three public binaries, installed them in an
+isolated profile, returned a 23-tool MCP catalog, and observed the connector exit 1 ms after its
+client closed. Final isolated process inventory was empty. Windows native-messaging registration
+is per-user, so the host restored its prior owned registrations; a fully side-by-side registration
+test still needs a separate Windows user or VM. Existing CachyOS, Bluefin, Alpine, Debian 12, and
+Ubuntu 24.04 evidence remains bounded by its dated reports; this publication does not widen those
+claims.
