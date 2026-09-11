@@ -99,9 +99,9 @@ mod tests {
             .spawn()
             .expect("spawn long-lived child");
         let process = super::identity(child.id()).expect("child process identity");
-        assert!(process.is_alive());
+        assert_eq!(super::identity(child.id()), Some(process));
         child.kill().expect("terminate child");
         child.wait().expect("reap child status");
-        assert!(!process.is_alive());
+        assert_eq!(super::identity(child.id()), None);
     }
 }
