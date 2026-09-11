@@ -44,6 +44,10 @@ let createdDeployLock = false;
 const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
 const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
 const PROCESS_BROWSER = "browser_processjourney";
+// Desktop readiness is deliberately published after native presentation is available. Match the
+// product's bounded startup contract so a cold CI desktop can initialize without making the
+// process journey flaky; later protocol waits retain their tighter five-second default.
+const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
 
 function executable(name) {
   const path = join(binDir, `${name}${executableSuffix}`);
@@ -500,7 +504,7 @@ try {
   assert.equal(browserConnector.exitCode, null);
 
   let service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile);
+  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
   const endpoint = JSON.parse(readFileSync(runtimeFile, "utf8"));
   assert.equal(endpoint.service_bridge_major, 2);
   assert.equal(endpoint.browser_relay_major, 1);
@@ -572,7 +576,7 @@ try {
 
   const reconnected = native.waitFor((frame) => frame.kind === "hello_accepted", 10000);
   service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile);
+  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
   const secondBrowserHello = await reconnected;
   assert.equal(secondBrowserHello.kind, "hello_accepted");
   assert.notEqual(secondBrowserHello.service_epoch, browserHello.service_epoch);
@@ -1169,7 +1173,7 @@ try {
   renameSync(auditFile, auditBackup);
   mkdirSync(auditFile);
   service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile);
+  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
   const coldConnector = start(executable("ghostlight-mcp-connector"));
   const coldMcp = new McpPeer(coldConnector);
   await coldMcp.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H7 cold failure", version: "1" } });
