@@ -132,23 +132,23 @@ jobs:
           node-version: "22"
       - run: cargo build --workspace --locked
       - if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/process-journey.mjs
+        run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/process-journey.mjs
       - if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/local-resilience-journey.mjs
+        run: dbus-run-session -- xvfb-run -a node tests/local-resilience-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/local-resilience-journey.mjs
       - if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/provenance-journey.mjs
+        run: dbus-run-session -- xvfb-run -a node tests/provenance-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/provenance-journey.mjs
       - if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/cli-journey.mjs
+        run: dbus-run-session -- xvfb-run -a node tests/cli-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/cli-journey.mjs
       - if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/cli-powershell-journey.mjs
+        run: dbus-run-session -- xvfb-run -a node tests/cli-powershell-journey.mjs
       - if: runner.os == 'Windows'
         run: node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
