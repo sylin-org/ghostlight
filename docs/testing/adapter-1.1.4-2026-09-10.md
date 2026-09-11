@@ -1,7 +1,7 @@
 # Adapter 1.1.4 custody -- 2026-09-10
 
-Status: Uploaded and submitted through Google's API; 1.1.4 is PENDING_REVIEW
-with STAGED_PUBLISH (deferred publication). Public 1.1.3 remains published.
+Status: Published. On 2026-09-11 Google's API reported 1.1.4 PUBLISHED at 100
+percent distribution, and the independent public update feed served 1.1.4.
 The owner authorized renumbering the prepared fixes to 1.1.4 and pushing them
 after personally rolling back the public extension.
 
@@ -48,8 +48,11 @@ with the explicit local credential file. Google's API returned:
 - Independent status read after submission: public 1.1.3 PUBLISHED and submitted
   1.1.4 PENDING_REVIEW, both with distribution percentage 100.
 
-The item is `lejccfmoeogmhemakeknjjdhkfkgncdl`. Review approval does not publish this
-staged submission automatically. Do not upload the historical local 1.1.3 ZIP.
+The item is `lejccfmoeogmhemakeknjjdhkfkgncdl`. On 2026-09-11 the API no longer
+reported a submitted revision; it reported public 1.1.4 PUBLISHED at 100 percent.
+`scripts/reconcile-chrome-store.ps1` independently observed 1.1.4 in Google's public
+update feed and updated `docs/public-status.json`. Do not upload the historical local
+1.1.3 ZIP.
 
 The prior publication monitor remains deleted. No service package publication,
 live binary swap or new Linux assignment is part of this renumbering.

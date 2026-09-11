@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.5] - Unreleased
 
-Source candidate. The service and its package artifacts advance to 1.3.5; Chrome adapter 1.1.2
-was submitted for Google review on 2026-09-08 and observed public on 2026-09-10.
-The owner then rolled it back to 1.1.1 code, republished by Google as 1.1.3.
-The later human-browsing and typing fixes are prepared as adapter 1.1.4, superseding
-the unsubmitted local 1.1.3 ZIP. Public service records remain at 1.3.4.
+Source candidate. The service and its package artifacts advance to 1.3.5. Chrome adapter 1.1.2
+was submitted for Google review on 2026-09-08 and observed public on 2026-09-10. The owner then
+rolled it back to 1.1.1 code, republished by Google as 1.1.3. Adapter 1.1.4 supersedes the
+unsubmitted local 1.1.3 ZIP and was observed public on 2026-09-11. Public service records remain
+at 1.3.4 until the 1.3.5 package publication completes.
 
 ### Fixed
 
