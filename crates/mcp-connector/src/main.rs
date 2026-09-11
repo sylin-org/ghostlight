@@ -5,9 +5,12 @@ mod mcp_2026_07_28;
 mod service_session;
 
 use std::collections::HashMap;
+use std::env;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use ghostlight_bridge::diagnostics::{event, Component, Level, Sink};
@@ -24,6 +27,19 @@ type Output = Arc<Mutex<io::Stdout>>;
 struct PendingCall {
     mcp_id: Value,
     mcp_key: String,
+}
+
+/// Environmental override for the abandoned-client reap window, in seconds.
+const ENV_IDLE_SECS: &str = "GHOSTLIGHT_MCP_IDLE_SECS";
+/// Default reap window: a client this silent, with nothing in flight, is gone.
+const DEFAULT_IDLE_SECS: u64 = 1800;
+
+fn idle_limit() -> Duration {
+    let secs = env::var(ENV_IDLE_SECS)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| *secs >= 1);
+    Duration::from_secs(secs.unwrap_or(DEFAULT_IDLE_SECS))
 }
 
 fn main() -> Result<()> {
@@ -117,14 +133,54 @@ fn main() -> Result<()> {
         ),
     );
 
+    // Clean stdin EOF (the `Ok(None)` arm below) is the normal exit path, but a client that
+    // abandons this process without closing its pipe leaves it blocked on stdin forever --
+    // failed validation cycles and closed windows accumulated dozens of such instances. This
+    // watchdog reaps a session whose client has been silent for a generous window with nothing
+    // in flight; a live client simply gets a respawned server on its next call. The main thread
+    // cannot be interrupted from a blocked read, so the watchdog owns the exit: it records the
+    // lifecycle event first, then ends the process.
+    let last_message = Arc::new(Mutex::new(Instant::now()));
+    {
+        let limit = idle_limit();
+        let tick = (limit / 10).clamp(Duration::from_secs(1), Duration::from_secs(30));
+        let last_message = Arc::clone(&last_message);
+        let pending = Arc::clone(&pending);
+        let diagnostics = Arc::clone(&diagnostics);
+        thread::Builder::new()
+            .name("ghostlight-mcp-idle-watchdog".into())
+            .spawn(move || loop {
+                thread::sleep(tick);
+                if !lock(&pending).is_empty() {
+                    // In-flight work defers the reap decision by one full window.
+                    *lock(&last_message) = Instant::now();
+                    continue;
+                }
+                if lock(&last_message).elapsed() >= limit {
+                    diagnostics.emit(
+                        event::PROCESS_EXITED,
+                        Level::Info,
+                        None,
+                        "mcp stdio client idle; reaping abandoned session",
+                    );
+                    std::process::exit(0);
+                }
+            })
+            .context("spawn idle watchdog")?;
+    }
+
     loop {
         let message: Value = match read_json_line(&mut input) {
             Ok(None) => break,
-            Ok(Some(value)) => value,
+            Ok(Some(value)) => {
+                *lock(&last_message) = Instant::now();
+                value
+            }
             // A malformed line -- including one that is not valid UTF-8, which used to be a hard
             // `io::Error` that ended the process via `?` -- is answered like any other JSON-RPC
             // parse failure and the session continues.
             Err(FrameError::Json(error)) => {
+                *lock(&last_message) = Instant::now();
                 write_mcp(
                     &output,
                     mcp_2025_11_25::rpc_error(
