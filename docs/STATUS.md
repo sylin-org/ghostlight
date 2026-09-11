@@ -1,6 +1,6 @@
-# STATUS -- Ghostlight 1.0 source candidate
+# STATUS -- Ghostlight 1.3.5 published
 
-Last updated: 2026-09-11 (service/package 1.3.5 publication started; adapter 1.1.4 public).
+Last updated: 2026-09-11 (service/package 1.3.5 and adapter 1.1.4 public).
 
 Google's live feed served 1.1.2 on September 10. The owner then rolled back to
 1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3
@@ -10,27 +10,31 @@ the original 1.1.1 row. Adapter 1.1.4 covers services 1.3.4-1.3.5: it retains
 1.1.2's protocol and capability contract while fixing adapter-internal behavior.
 Google's API and independent public update feed now confirm adapter 1.1.4 PUBLISHED
 at 100 percent distribution. Public metadata was reconciled from the observed feed.
-The owner authorized starting the service/package 1.3.5 publication sequence after
-this condition cleared. Production OAuth API access remains available; credential
-locations are in owner-authorized local notes.
+The owner authorized the service/package 1.3.5 publication sequence after this
+condition cleared. Production OAuth API access remains available; credential locations
+are in owner-authorized local notes.
 See [adapter custody](testing/adapter-1.1.4-2026-09-10.md) for artifact and submission state.
-The publication monitor was deleted after observing 1.1.2. Service 1.3.5 remains
-unpublished with the recorded package acceptance limits; no fleet work restarted.
+The obsolete Chrome publication monitor is deleted. No fleet work restarted.
 
-Release candidate run `34561200774` passed from exact source `a228c345`, including
-both native packages, Debian 12 and Ubuntu 24.04 package lifecycles, the immutable
-18-artifact manifest and every-file provenance attestation. It remains unpublished
-and untagged because the release branch moved during the run. The late change tried
-to reap abandoned MCP connectors after 30 minutes of silence. Silence is not client
-death, so that heuristic could interrupt a healthy idle editor and is not a release
-fix. The replacement follows ADR-0029: both thin connectors now observe the exact
-spawning process and exit only when it ends, while ordinary inactivity is unlimited.
-Windows binds pid to creation time and tests signalled-handle liveness; Linux binds
-the parent relationship to `/proc` start time. A cross-process regression keeps stdin
-open after the parent exits and proves reaping without treating inactivity as death.
-The full Windows workspace, extension, formatting, Clippy, lifecycle regression and
-repository-integrity gates pass. A fresh candidate from the corrected revision is
-required before publication.
+Release candidate run [`34564815508`](https://github.com/sylin-org/ghostlight/actions/runs/34564815508)
+passed from exact source `88aa7c3c8485ba9ce97cdc19d0270650407112bc`, including both native
+packages, Debian 12 and Ubuntu 24.04 package lifecycles, the immutable 18-artifact
+manifest and every-file provenance attestation. Tag `v1.3.5` binds that exact source.
+The prior inactivity heuristic was replaced before the candidate: both thin connectors
+observe the exact spawning process and exit only when it ends, while ordinary inactivity
+is unlimited. Windows binds pid to creation time and tests signalled-handle liveness;
+Linux binds the parent relationship to `/proc` start time. A cross-process regression
+keeps stdin open after the parent exits and proves reaping without treating inactivity
+as death.
+
+Ghostlight 1.3.5 is public on [GitHub](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.5),
+npm (`ghostlight@1.3.5`, also `latest`), and the official MCP Registry
+(`org.sylin/ghostlight 1.3.5`, marked latest). The GitHub publisher verified and
+re-downloaded all 20 release files. An independent npm download matches the candidate
+SHA-256. The registry publisher validated `server.json`, authenticated through the
+rotated DNS proof, and public lookup returns 1.3.5. The
+[candidate custody record](testing/candidate-custody-2026-09-11.md) retains exact hashes,
+workflow evidence, publication receipts and remaining public-install limits.
 
 The owner wrapped the campaign before the next
 [Linux offerings round](testing/linux-offerings-round-2026-09.md) was dispatched.

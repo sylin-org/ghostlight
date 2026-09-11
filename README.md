@@ -35,9 +35,9 @@ browser work and its controls on your machine.
 ## Where it stands today
 
 The published release is 1.3. It is available as the GitHub release
-[`v1.3.2`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.2), the npm package
-`ghostlight@1.3.2`, the Chrome Web Store adapter v1.0.0 (adapter 1.1.0 is in review), and the
-MCP Registry record `org.sylin/ghostlight 1.3.2`, all observed on 2026-09-02 and recorded in
+[`v1.3.5`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.5), the npm package
+`ghostlight@1.3.5`, the Chrome Web Store adapter v1.1.4, and the MCP Registry record
+`org.sylin/ghostlight 1.3.5`, all observed on 2026-09-11 and recorded in
 [`docs/public-status.json`](docs/public-status.json).
 
 ## What you get
@@ -208,8 +208,8 @@ executables.
 browsers on development hosts; the clean installed-product evidence lanes continue after
 publication. macOS has no 1.0 artifact yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v1.0.0, matching the published
-1.0.0 service line.
+**Extension state.** The Chrome Web Store listing serves adapter v1.1.4, compatible with the
+published 1.3.4-1.3.5 service line.
 
 The service and Chrome adapter version independently. The
 [compatibility map](compatibility.json) is authoritative, and the
