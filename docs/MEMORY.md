@@ -10,6 +10,16 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Use the existing Chrome release API setup.** The owner requested durable production
+  OAuth credentials under ignored `local/.ghostlight-release.env` and authorized their use
+  for release work. This is a specific exception to the general no-secrets-in-local rule.
+  Read `local/CHROME-RELEASE.md` for account/client identity and recovery; follow
+  [the release procedure](RELEASE.md#chrome-api-procedure) for commands. Always pass
+  `-CredentialFile local/.ghostlight-release.env`; script defaults still point to HOME.
+  Check saved settings before asking the owner for IDs or new credentials. Reuse existing
+  release authorization from the conversation; this storage directive alone does not
+  authorize a new publication.
+
 - **Keep local work in the ordinary Ghostlight repository.** The owner rejected
   separate fleet folders/worktrees on 2026-09-09. The existing acceptance layout
   may remain for its current run; new work uses the main repository and existing

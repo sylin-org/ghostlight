@@ -23,3 +23,13 @@ What does NOT belong here:
   separately gitignored `/private/`.
 - Secrets. Not even gitignored ones; this directory is covered by whatever backs up the
   working tree.
+
+## Owner-authorized Chrome release exception
+
+On 2026-09-10 the owner explicitly requested durable Chrome release credentials here.
+`local/.ghostlight-release.env` is the authorized exception to the secrets rule above;
+keep it ignored, restrict its filesystem permissions, and never print its values.
+Agents doing authorized Chrome release work may read that file and
+`local/CHROME-RELEASE.md`, which records account identity and recovery steps.
+The shared procedure is in [docs/RELEASE.md](../docs/RELEASE.md#chrome-api-procedure).
+This exception does not authorize reading unrelated local or founder-private material.

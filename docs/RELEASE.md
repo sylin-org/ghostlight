@@ -51,7 +51,7 @@ name, store identity, artwork, settings, and permissions.
 Before spending a candidate build, inspect release access without exposing credential values:
 
 ```powershell
-pwsh -File scripts/check-release-access.ps1 -Online
+pwsh -File scripts/check-release-access.ps1 -CredentialFile local/.ghostlight-release.env -Online
 ```
 
 The command is read-only. GitHub and npm access are required for their publication channels. MCP
@@ -225,6 +225,62 @@ metadata is not publishable. `Publish` requires `-Execute`, an exact verified ca
 versions, a publicly observable npm package at that exact version, successful official publisher
 validation, and the recovered DNS credential. It logs out in a `finally` block. Registry failure
 cannot hold up or roll back any other publication channel.
+
+## Chrome API procedure
+
+Use the existing API setup first for owner-authorized Chrome releases. The credential
+file is `local/.ghostlight-release.env`, an explicit owner-approved storage exception
+documented in [local/README.md](../local/README.md). Account, client, publisher identity
+and recovery details live in ignored `local/CHROME-RELEASE.md`. Historical references
+to `~/.ghostlight-release.env` are not the current machine's credential location.
+Do not ask the owner to supply IDs already saved there, or recreate working credentials.
+
+Run from the repository root in PowerShell 7. Select the already verified ZIP for the
+intended release; the version below is an example, not a standing release target.
+Compare the printed SHA-256 to the artifact's custody record before upload.
+
+```powershell
+$chromeRelease = @{
+    ZipPath = 'dist/ghostlight-extension-v1.1.4.zip'
+    CredentialFile = 'local/.ghostlight-release.env'
+}
+& scripts/publish-extension.ps1 @chromeRelease -Action Plan
+& scripts/publish-extension.ps1 @chromeRelease -Action Status -Execute
+& scripts/publish-extension.ps1 @chromeRelease -Action Upload -Execute
+& scripts/publish-extension.ps1 @chromeRelease -Action Submit -PublishType STAGED_PUBLISH -Execute
+& scripts/publish-extension.ps1 @chromeRelease -Action Status -Execute
+```
+
+Execute these individually and inspect each response before continuing:
+
+- Plan must report API automation ready and the intended ZIP version/hash. Plan makes
+  no API call. Missing settings can return exit code zero without making any request.
+- Status must identify the expected item and current published/submitted versions.
+  The current script requires `-Execute` even for this read-only action.
+- Upload must return SUCCEEDED and the intended draft version. Stop on another state.
+- Submit must confirm the review state and STAGED_PUBLISH. Review approval alone will
+  not publish this revision. Inspect unexpected errors or warnings before retrying.
+- The final independent Status must show the intended submitted version and state.
+  Record these results, the ZIP hash and publish type in the dated custody document
+  and `docs/STATUS.md`; keep tokens and secrets out of evidence.
+
+If an existing review prevents upload, inspect its version and authorization before
+using the script's Cancel action. Do not automatically cancel or replace a submission.
+If a response is uncertain, read Status before repeating a mutation.
+
+After approval, use `-Action Publish -Execute` only within owner authorization for
+public publication. Then verify public delivery with
+`scripts/reconcile-chrome-store.ps1 -WriteObservedState` before updating public claims.
+Keep package publication and its compatibility requirements coordinated with the adapter.
+
+Recovery starts with the saved local file and runbook. The existing PKCE helper is
+`scripts/get-cws-refresh-token.ps1 -CredentialFile local/.ghostlight-release.env`.
+The successful recovery used Google Auth Platform In production before minting an
+offline refresh token; do not return to Testing to repair credentials. Access-token
+expiry is normal and handled by the scripts; it does not require new user consent.
+Refresh tokens can still expire or be revoked. Request user interaction only for an
+actual login, consent or credential-management step that requires it. If a tool blocks
+dashboard navigation, respect the restriction and use the authorized API route.
 
 ## Rollback
 
