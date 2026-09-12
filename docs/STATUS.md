@@ -18,8 +18,19 @@ npm (`ghostlight@1.3.6`, also `latest`), and the official MCP Registry
 release files and verified exact hashes. An independent npm download matches the candidate
 SHA-256. The registry publisher validated and published the candidate-bound npm record; public
 lookup independently returns 1.3.6. Chrome adapter 1.1.4 is unchanged. The direct Scoop manifest
-now resolves to the public v1.3.6 Windows archive. See the
+now resolves to the public v1.3.6 Windows archive. Website commit `5464298` is live, and GitHub
+Pages deployment run
+[34708699520](https://github.com/sylin-org/ghostlight/actions/runs/34708699520) refreshed the
+canonical redirect. WinGet PR
+[#433822](https://github.com/microsoft/winget-pkgs/pull/433822) is open, mergeable, and CLA-green;
+Microsoft review is pending. The online truth check reports GitHub, npm, Chrome, the MCP Registry,
+and the website in agreement. See the
 [candidate custody record](testing/candidate-custody-2026-09-12.md).
+
+The [Windows public consumer smoke](testing/windows-public-1.3.6-smoke-2026-09-12.md) downloaded
+and hash-verified the three public executables. The public 1.3.6 connector honored the machine's
+development selection, returned the 23-tool catalog, reached the already connected browser, and
+left no release-cache process behind. Final inventory retained one development authority.
 
 ## One user installation (ADR-0167)
 

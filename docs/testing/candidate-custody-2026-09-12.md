@@ -50,6 +50,19 @@ publisher then re-downloaded all 20 release files and compared exact hashes befo
   upload, submission, or browser restart occurred for this service release.
 - `packaging/scoop/ghostlight.json` resolves directly to the public Windows archive and records
   the candidate hash above. Central Scoop Extras eligibility remains unchanged.
+- Website commit `54642988858b0e750413e316a9aa961c75a02cde` is live at
+  `https://sylin.org/ghostlight/`. The page names software 1.3.6; the Markdown install route serves
+  the 1.3.6 command and current `browser_flow` guidance.
+- GitHub Pages deployment run
+  [34708699520](https://github.com/sylin-org/ghostlight/actions/runs/34708699520) passed from public
+  truth commit `87dc92f14b5cbbc83cb569cf3a608c62774d2470`; its fallback points to the canonical site.
+- WinGet PR [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) carries the locally
+  validated candidate-generated manifests. It is open, mergeable, and CLA-green; Microsoft review
+  and public catalog ingestion remain pending.
 
-The public website, GitHub Pages redirect and WinGet submission are separate downstream publication
-steps. Their receipts and the public consumer smoke belong in this record after completion.
+The [Windows public consumer smoke](windows-public-1.3.6-smoke-2026-09-12.md) downloaded and
+hash-verified all three public executables. Its public connector routed to the selected development
+authority, returned the current 23-tool catalog, reached the connected browser, exited cleanly, and
+left no cached release process. The final process inventory contained one serving authority. The
+online public-surface check reports GitHub, npm, Chrome, the official MCP Registry, and the website
+in agreement.
