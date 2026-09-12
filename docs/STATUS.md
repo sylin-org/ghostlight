@@ -11,6 +11,11 @@ and verification must precede immutable publication. npm login is verified as `l
 owner-private, gitignored `local/.npmrc`; the rejected home-directory token was removed. GitHub
 and Chrome access are also verified. No new publication is claimed yet.
 
+Candidate workflow 34705695934 passed its source and process quality gate. The ordinary CI
+workflow had a pre-existing invalid job-level `runner` expression, so GitHub rejected it before
+running any checks. The expression now uses the declared OS matrix; its full suite must run
+before publication. Candidate binaries remain bound to `fa4edd8891d08cbc5e7f2af09dbcd1c0b7c019a9`.
+
 ## One user installation (ADR-0167)
 
 The owner's delight mandate now governs deployment: package and development artifacts resolve

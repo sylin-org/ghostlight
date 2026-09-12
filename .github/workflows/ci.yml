@@ -173,7 +173,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci-browser
       # Only disposable test profiles use this flag. No installed browser is changed.
-      GHOSTLIGHT_TEST_NO_SANDBOX: ${{ runner.os == 'Linux' && '1' || '0' }}
+      GHOSTLIGHT_TEST_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
