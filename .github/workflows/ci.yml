@@ -207,7 +207,7 @@ jobs:
           "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/hardening-suite.mjs --lane=browser
+        run: dbus-run-session -- xvfb-run -a node tests/hardening-suite.mjs --lane=browser
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Windows'
         run: node tests/hardening-suite.mjs --lane=browser
@@ -216,6 +216,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: hardening-browser-${{ matrix.os }}
+          include-hidden-files: true
           path: |
             .tmp/hardening-suite/
             .tmp/h6-browser-evidence.json
