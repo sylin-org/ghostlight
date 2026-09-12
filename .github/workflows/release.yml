@@ -41,6 +41,10 @@ jobs:
       - run: sh -n scripts/*.sh
       - run: node tests/connector-parent-lifecycle.mjs
       - run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
+      - name: Verify one user installation across executable directories
+        env:
+          GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION: "1"
+        run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
       - run: dbus-run-session -- xvfb-run -a node tests/cli-journey.mjs
       - run: dbus-run-session -- xvfb-run -a node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs

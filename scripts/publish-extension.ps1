@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
-    [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$CredentialFile = (Join-Path $PSScriptRoot "../local/.ghostlight-release.env"),
     [string]$PublisherId,
     [ValidateSet("Plan", "Upload", "Submit", "Cancel", "Status", "Publish")]
     [string]$Action = "Plan",

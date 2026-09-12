@@ -222,8 +222,15 @@ try {
   for (let i = 0; i < 256; i++) nonreader.send({ kind: "catalog" });
   await delay(3000);
   assert.equal((await b.result(b.invoke("browser_read"), 2000)).status, "succeeded");
-  nonreader.socket.resume();
-  await until(() => nonreader.socket.destroyed, "stalled response peer retired", 4000);
+  // Keep the peer unread until retirement. Resuming after a fixed sleep can relieve
+  // backpressure before the writer has stalled on a slower host. A bounded stream
+  // of small requests fills platform-specific receive buffers and observes the
+  // server's shutdown through a subsequent write, without draining its responses.
+  await until(() => {
+    if (nonreader.socket.destroyed) return true;
+    nonreader.send({ kind: "catalog" });
+    return false;
+  }, "stalled response peer retired while unread", 15000);
   const fresh = await client("H8 recovered connection");
   assert.equal((await fresh.result(fresh.invoke("policy_explain"))).status, "succeeded");
   console.log("PASS stalled response delivery retires only its connection; future work succeeds");

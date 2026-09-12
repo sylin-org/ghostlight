@@ -9,14 +9,14 @@ official MCP Registry.
 
 ## 1. Complete the user-visible installation
 
-1. Ask the user to run `npx -y ghostlight@1.0.0 install`, or install the matching native
+1. Ask the user to run `npx -y ghostlight@1.3.6 install`, or install the matching native
    package.
 2. Ask the user to install the `Ghostlight in Browser` store adapter.
 3. Reconnect or restart the MCP client if it does not refresh its tool catalog. Ghostlight changes
    only owned entries, creates a backup before client-config replacement, and preserves unrelated
    JSONC or TOML.
 
-Use `npx -y ghostlight@1.0.0 doctor` only if the connection needs recovery. It is not a required
+Use `npx -y ghostlight@1.3.6 doctor` only if the connection needs recovery. It is not a required
 second installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
@@ -49,8 +49,7 @@ extension, and visible browser path. On failure, ask the user to open **Status**
   target with `browser_find`.
 - Prefer a semantic target for click, hover, scroll, fill, type, drag, and upload. Use screenshot
   coordinates only with the current `view` returned by `browser_screenshot`.
-- Use `browser_sequence` only for a short, fully specified sequence whose later inputs do not
-  depend on earlier page results.
+- Use `browser_flow` for a short, fully specified batch or when later steps need earlier results.
 - Use `browser_execute` only when explicit execute authority and page JavaScript are genuinely
   required.
 - Use `browser_wait` for an explicit observable condition and `browser_dialog` for the

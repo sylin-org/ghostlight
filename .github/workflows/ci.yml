@@ -173,7 +173,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci-browser
       # Only disposable test profiles use this flag. No installed browser is changed.
-      GHOSTLIGHT_TEST_NO_SANDBOX: ${{ runner.os == 'Linux' && '1' || '0' }}
+      GHOSTLIGHT_TEST_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
@@ -207,7 +207,7 @@ jobs:
           "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/hardening-suite.mjs --lane=browser
+        run: dbus-run-session -- xvfb-run -a node tests/hardening-suite.mjs --lane=browser
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Windows'
         run: node tests/hardening-suite.mjs --lane=browser
@@ -216,6 +216,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: hardening-browser-${{ matrix.os }}
+          include-hidden-files: true
           path: |
             .tmp/hardening-suite/
             .tmp/h6-browser-evidence.json

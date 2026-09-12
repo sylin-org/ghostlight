@@ -1,8 +1,7 @@
 //! Local runtime endpoint discovery shared by the three native processes.
 //!
-//! An explicit `GHOSTLIGHT_RUNTIME_FILE` elects both the endpoint document and the directory
-//! whose authority demand-start launches (ADR-0150); without it, each installation resolves
-//! beside its own executable (ADR-0124).
+//! Ordinary launches share the user's installation (ADR-0167). An explicit
+//! `GHOSTLIGHT_RUNTIME_FILE` retains isolated test discovery and demand-start.
 
 use std::env;
 use std::fs;
@@ -31,70 +30,37 @@ pub struct RuntimeEndpoint {
     pub service_version: String,
 }
 
-/// Where local runtime discovery resolves for this process: the endpoint document's path and,
-/// when an explicit override chose that document, the directory holding the trusted sibling
-/// authority that demand-start must launch (ADR-0150).
+/// Shared endpoint and selected authority directory (ADR-0167).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeDiscovery {
     /// The runtime endpoint document the running service publishes.
     pub path: PathBuf,
-    /// The elected authority directory when `GHOSTLIGHT_RUNTIME_FILE` set the path; `None`
-    /// keeps the default per-installation resolution beside this executable (ADR-0124).
+    /// Selected authority directory, or the explicit fixture's directory.
+    /// `None` means the user's installation has not yet been bootstrapped.
     pub service_directory: Option<PathBuf>,
 }
 
 /// Resolve local runtime discovery shared by the three native processes: the endpoint document
 /// and, under an explicit override, the directory electing the demand-start authority.
-pub fn runtime_discovery() -> RuntimeDiscovery {
-    runtime_discovery_from(
-        env::var_os("GHOSTLIGHT_RUNTIME_FILE").map(PathBuf::from),
-        env::current_exe().ok(),
-        env::var_os("HOME").map(PathBuf::from),
-        &env::temp_dir(),
-        cfg!(target_os = "linux"),
-    )
-}
-
-fn runtime_discovery_from(
-    explicit: Option<PathBuf>,
-    executable: Option<PathBuf>,
-    home: Option<PathBuf>,
-    temporary_directory: &Path,
-    linux: bool,
-) -> RuntimeDiscovery {
-    match explicit {
-        Some(path) => RuntimeDiscovery {
+pub fn runtime_discovery() -> io::Result<RuntimeDiscovery> {
+    if let Some(path) = env::var_os("GHOSTLIGHT_RUNTIME_FILE").map(PathBuf::from) {
+        return Ok(RuntimeDiscovery {
             service_directory: path.parent().map(Path::to_path_buf),
             path,
-        },
-        None => RuntimeDiscovery {
-            service_directory: None,
-            path: runtime_file_from(None, executable, home, temporary_directory, linux),
-        },
+        });
     }
+    let path = crate::installation::production_runtime()?;
+    let service_directory =
+        crate::installation::read(&path)?.map(|record| record.directory().to_path_buf());
+    Ok(RuntimeDiscovery {
+        path,
+        service_directory,
+    })
 }
 
 /// Resolve the runtime endpoint shared by the active sibling installation.
-pub fn runtime_file() -> PathBuf {
-    runtime_discovery().path
-}
-
-fn runtime_file_from(
-    explicit: Option<PathBuf>,
-    executable: Option<PathBuf>,
-    home: Option<PathBuf>,
-    temporary_directory: &Path,
-    linux: bool,
-) -> PathBuf {
-    explicit
-        .or_else(|| {
-            let directory = executable.as_deref().and_then(Path::parent)?;
-            if linux && directory == Path::new("/usr/bin") {
-                return home.map(|home| home.join(".cache/ghostlight/ghostlight-runtime.json"));
-            }
-            Some(directory.join("ghostlight-runtime.json"))
-        })
-        .unwrap_or_else(|| temporary_directory.join("ghostlight-runtime.json"))
+pub fn runtime_file() -> io::Result<PathBuf> {
+    Ok(runtime_discovery()?.path)
 }
 
 /// Read the running service endpoint.
@@ -116,13 +82,18 @@ pub fn read_runtime(path: &Path) -> io::Result<RuntimeEndpoint> {
 
 /// Atomically replace the running service endpoint with owner-private permissions where supported.
 pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> {
+    let bytes = serde_json::to_vec(endpoint)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    write_private_document(path, &bytes)
+}
+
+/// Publish a private local lifecycle document with the runtime writer's custody rules.
+pub(crate) fn write_private_document(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "runtime path has no parent"))?;
     fs::create_dir_all(parent)?;
     let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-    let bytes = serde_json::to_vec(endpoint)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     #[cfg(target_os = "windows")]
     let mut file = ghostlight_win_peer::create_private_file(&temporary)?;
     #[cfg(not(target_os = "windows"))]
@@ -137,21 +108,11 @@ pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> 
         options.open(&temporary)?
     };
     let published = (|| {
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
-        if let Err(error) = fs::rename(&temporary, path) {
-            if path.exists()
-                && matches!(
-                    error.kind(),
-                    io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
-                )
-            {
-                fs::remove_file(path)?;
-                fs::rename(&temporary, path)?;
-            } else {
-                return Err(error);
-            }
-        }
+        // Both supported platforms replace atomically. A sharing/permission failure must
+        // preserve the old record, never unlink the last good selection to retry publication.
+        fs::rename(&temporary, path)?;
         Ok(())
     })();
     if published.is_err() {
@@ -164,11 +125,7 @@ pub fn write_runtime(path: &Path, endpoint: &RuntimeEndpoint) -> io::Result<()> 
 mod tests {
     use std::fs;
 
-    use std::path::{Path, PathBuf};
-
-    use super::{
-        read_runtime, runtime_discovery_from, runtime_file_from, write_runtime, RuntimeEndpoint,
-    };
+    use super::{read_runtime, write_runtime, RuntimeEndpoint};
 
     fn endpoint(port: u16) -> RuntimeEndpoint {
         RuntimeEndpoint {
@@ -211,93 +168,5 @@ mod tests {
         }
         fs::remove_file(legacy_temporary).unwrap();
         fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn portable_sibling_processes_converge_beside_the_installation() {
-        let installation = Path::new("/opt/ghostlight");
-        let expected = installation.join("ghostlight-runtime.json");
-        for executable in [
-            "ghostlight",
-            "ghostlight-mcp-connector",
-            "ghostlight-browser-connector",
-        ] {
-            assert_eq!(
-                runtime_file_from(
-                    None,
-                    Some(installation.join(executable)),
-                    Some(PathBuf::from("/home/person")),
-                    Path::new("/tmp"),
-                    true,
-                ),
-                expected
-            );
-        }
-        assert_eq!(
-            runtime_file_from(
-                Some(PathBuf::from("/explicit/runtime.json")),
-                None,
-                None,
-                Path::new("/tmp"),
-                true,
-            ),
-            PathBuf::from("/explicit/runtime.json")
-        );
-    }
-
-    #[test]
-    fn an_explicit_runtime_file_elects_its_own_directory() {
-        let discovery = runtime_discovery_from(
-            Some(PathBuf::from("/dev/tree/ghostlight-runtime.json")),
-            Some(PathBuf::from("/installed/ghostlight-mcp-connector")),
-            None,
-            Path::new("/tmp"),
-            true,
-        );
-        assert_eq!(
-            discovery.path,
-            PathBuf::from("/dev/tree/ghostlight-runtime.json")
-        );
-        assert_eq!(
-            discovery.service_directory,
-            Some(PathBuf::from("/dev/tree"))
-        );
-    }
-
-    #[test]
-    fn the_default_resolution_elects_no_foreign_directory() {
-        let discovery = runtime_discovery_from(
-            None,
-            Some(PathBuf::from("/installed/ghostlight-mcp-connector")),
-            Some(PathBuf::from("/home/person")),
-            Path::new("/tmp"),
-            true,
-        );
-        assert_eq!(
-            discovery.path,
-            PathBuf::from("/installed/ghostlight-runtime.json")
-        );
-        assert_eq!(discovery.service_directory, None);
-    }
-
-    #[test]
-    fn linux_system_package_siblings_converge_in_the_user_cache() {
-        let expected = PathBuf::from("/home/person/.cache/ghostlight/ghostlight-runtime.json");
-        for executable in [
-            "ghostlight",
-            "ghostlight-mcp-connector",
-            "ghostlight-browser-connector",
-        ] {
-            assert_eq!(
-                runtime_file_from(
-                    None,
-                    Some(Path::new("/usr/bin").join(executable)),
-                    Some(PathBuf::from("/home/person")),
-                    Path::new("/tmp"),
-                    true,
-                ),
-                expected
-            );
-        }
     }
 }

@@ -2,6 +2,7 @@
 
 pub mod browser_package;
 pub mod command_path;
+pub mod deployment;
 pub mod desktop_entry;
 #[cfg(target_os = "linux")]
 pub mod flatpak;
@@ -426,7 +427,7 @@ impl HarnessContext {
             env::var_os("CODEX_HOME").map(PathBuf::from),
             windows,
         );
-        let connector = env::current_exe()
+        let connector = ghostlight_bridge::installation::selected_executable()
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_default()

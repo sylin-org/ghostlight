@@ -49,7 +49,7 @@ async function until(check, label, timeout = 15000) {
 }
 function start(executable, args = []) {
   const child = spawn(executable, args, { env: environment, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  child.stderr.on("data", () => {});
+  child.stderr.on("data", data => { child.logs = ((child.logs || "") + data).slice(-4000); });
   child.on("error", (error) => { child.startError = error; });
   children.push(child);
   return child;
@@ -112,8 +112,13 @@ try {
     grants: [{ id: "fixture", hosts: { allow: ["127.0.0.1"] }, allowed: ["read", "action", "write", "execute"] }],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
   }));
-  startGhostlight("ghostlight");
-  await until(() => existsSync(runtimeFile), "isolated service startup");
+  const authority = startGhostlight("ghostlight");
+  await until(() => {
+    if (authority.startError) throw authority.startError;
+    assert.equal(authority.exitCode, null, `Authority exited before readiness: ${authority.logs || ""}`);
+    assert.equal(authority.signalCode, null, `Authority was terminated before readiness: ${authority.logs || ""}`);
+    return existsSync(runtimeFile);
+  }, "isolated service startup");
   const relay = startGhostlight("ghostlight-browser-connector");
   const writeNative = (frame) => {
     const data = Buffer.from(JSON.stringify(frame));

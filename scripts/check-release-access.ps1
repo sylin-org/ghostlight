@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 param(
-    [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$CredentialFile = (Join-Path $PSScriptRoot "../local/.ghostlight-release.env"),
     [string]$PublisherId,
     [switch]$Online,
     [switch]$RequireReady
@@ -78,7 +78,7 @@ if ($Online) {
         [void]$problems.Add("GitHub authentication is invalid")
     }
 
-    & npm whoami *> $null
+    & npm whoami --userconfig (Join-Path $repo "local/.npmrc") *> $null
     $npmState = if ($LASTEXITCODE -eq 0) { "valid" } else { "invalid" }
     if ($npmState -ne "valid") {
         [void]$problems.Add("npm authentication is invalid")

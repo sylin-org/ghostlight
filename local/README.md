@@ -12,7 +12,7 @@ to publish:
   owner and working context, credential *locations*, and session handoffs. Any local agent may
   read and update it. Its non-sensitive counterpart is the tracked `docs/MEMORY.md`.
 - Scratch notes, session handoffs, personal to-do lists tied to this checkout.
-- *Locations* of credentials (e.g. "npm token lives in ~/.npmrc") -- never credential
+- *Locations* of credentials (e.g. "npm login uses local/.npmrc") -- never credential
   values themselves.
 
 What does NOT belong here:
@@ -33,3 +33,12 @@ Agents doing authorized Chrome release work may read that file and
 `local/CHROME-RELEASE.md`, which records account identity and recovery steps.
 The shared procedure is in [docs/RELEASE.md](../docs/RELEASE.md#chrome-api-procedure).
 This exception does not authorize reading unrelated local or founder-private material.
+
+## Owner-authorized repo-local release authentication
+
+On 2026-09-12 the owner required release credentials to stay in this repo's gitignored
+local folder, not shared home configuration. npm login uses `local/.npmrc`; Chrome and
+MCP publication use `local/.ghostlight-release.env`. These are explicit exceptions to
+the general secrets rule above. Keep them owner-private, excluded from shared backups,
+and out of Git, tool output, and public artifacts. Release helpers default to these
+locations. Run `npm login --userconfig local/.npmrc` to refresh npm access.

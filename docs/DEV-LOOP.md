@@ -13,6 +13,36 @@ and an agent-launched browser can share a redirected filesystem view and conceal
 
 ## Build
 
+ADR-0167 makes every ordinary executable use one user installation. A build directory is not
+a second serving installation. Deploying with the script below selects development durably;
+running a package afterwards still reaches that development authority. Do not set
+`GHOSTLIGHT_RUNTIME_FILE` for the normal dev loop. The first upgrade to ADR-0167 must deploy all
+three binaries because every process imports the changed lifecycle seam.
+
+```powershell
+scripts/dev-loop.ps1 -Action Deploy -Component orchestrator,mcp-connector,browser-connector -RegisterNativeHost
+```
+
+The loop quiesces the shared production control root and the replaced directory, stops exact
+selected images, copies built binaries, and records development selection before resuming.
+Package setup remembers a release without taking development custody. To leave development,
+use `scripts/dev-loop.ps1 -Action Restore`; it requires an installed, complete release supporting
+ADR-0167, stops the selected authority, switches custody and refreshes native-host registration.
+It preserves policy, diagnostics and history locations. Published pre-ADR-0167 binaries are not
+valid restore candidates: update the package first. No automatic download is performed.
+
+The cross-directory process lane runs the ordinary process journey with package-side connectors,
+a selected development authority and an isolated user profile, without a runtime override:
+
+```powershell
+$env:GHOSTLIGHT_BIN_DIR = "$PWD/.target-dev-loop/debug"
+$env:GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION = "1"
+node tests/process-journey.mjs
+```
+
+This proves process routing and reconnect with a synthetic browser, not installed Chrome or a
+reboot. Keep those acceptance claims separate.
+
 ```powershell
 cargo build --workspace
 ```

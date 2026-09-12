@@ -39,6 +39,15 @@ orchestrator start initializes this desktop authority; there is no service-only 
 
 ## Local lifecycle
 
+Production has one installation per OS user, not one per executable directory (ADR-0167).
+The user profile's `.ghostlight` directory owns durable executable selection and the shared
+runtime, startup admission and lifetime lease. Package copies are inactive artifacts; both
+connectors and CLI invocations resolve the selected authority. Explicit development selection
+survives package installation and service restart. `GHOSTLIGHT_RUNTIME_FILE` is only an explicit
+isolated fixture/deployment seam. Selected history, diagnostics and policy paths survive binary
+selection changes. Installer registrations target the selected set; inactive uninstall preserves
+them. Malformed selection or missing selected binaries never elect an alternative authority.
+
 The orchestrator acquires an operating-system lifetime lease beside its runtime document before
 opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
 admits the single local authority. Concurrent launch losers exit before creating a second runtime

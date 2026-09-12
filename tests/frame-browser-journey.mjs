@@ -119,8 +119,13 @@ const server = createServer(async (request, response) => {
 let socket, cdp, chromium;
 try {
   await new Promise((done) => server.listen(0, "127.0.0.1", done)); port = server.address().port;
-  policy(); start(executable("ghostlight"));
-  await until(() => existsSync(runtimeFile), "service startup");
+  policy(); const authority = start(executable("ghostlight"));
+  await until(() => {
+    if (authority.startError) throw authority.startError;
+    assert.equal(authority.exitCode, null, `Authority exited before readiness: ${authority.logs || ""}`);
+    assert.equal(authority.signalCode, null, `Authority was terminated before readiness: ${authority.logs || ""}`);
+    return existsSync(runtimeFile);
+  }, "service startup");
   relay = start(executable("ghostlight-browser-connector"));
   let buffer = Buffer.alloc(0);
   relay.stdout.on("data", (chunk) => {

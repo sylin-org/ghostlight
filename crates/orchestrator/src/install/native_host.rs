@@ -226,7 +226,7 @@ impl NativeHostContext {
             env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             &home,
         );
-        let connector = env::current_exe()
+        let connector = ghostlight_bridge::installation::selected_executable()
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_default()

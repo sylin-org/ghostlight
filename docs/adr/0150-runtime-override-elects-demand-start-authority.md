@@ -1,6 +1,6 @@
 # ADR-0150: The runtime override elects the demand-start authority
 
-- Status: Accepted
+- Status: Production election superseded by ADR-0167; explicit isolation remains accepted
 - Date: 2026-09-02
 - Amends: ADR-0124 Decision 1 (an explicit `GHOSTLIGHT_RUNTIME_FILE` is now authoritative for
   the demand-start identity as well as the endpoint document)

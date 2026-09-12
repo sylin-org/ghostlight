@@ -106,7 +106,7 @@ pub fn run() -> Result<()> {
         }
     }
     let host = Arc::new(ServiceHost::start(
-        &ghostlight_bridge::runtime::runtime_file(),
+        &ghostlight_bridge::runtime::runtime_file()?,
     )?);
     let ready_host = Arc::clone(&host);
     let workbench = host.workbench.clone();

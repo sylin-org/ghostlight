@@ -38,9 +38,7 @@ fresh screenshot.
 
 - `browser_fill_form` fills 1 to 30 fields in one call and proves a contained submit before
   clicking `submit_target`; it never submits without one. Use it over repeated typing.
-  It requires `read + write` even for unsent drafts; submit also requires `action`. Usually omit
-  `restrict_capabilities`: a supplied list must include every required capability, and does not
-  distinguish drafts from submissions. A request-restriction refusal names the supplied field.
+  It requires `read + write` even for unsent drafts; submit also requires `action`.
 - `browser_type_text` sends real per-character events, with `focused: true` to type into
   whatever is focused and `clear_first` to replace. Use it when keystroke events matter.
 - `browser_click` takes a target or a view point; `click_count` covers double and triple.
@@ -54,19 +52,17 @@ fresh screenshot.
 
 ## Composing steps
 
-- `browser_sequence` runs 2 to 8 fixed steps (click, fill, type_text, press_key, scroll,
-  hover, wait) on one tab, stopping at the first failure. Use it for a known, stable journey.
 - `browser_flow` runs 1 to 20 steps of any non-composite tool and lets later steps reference
   earlier envelopes with `{"flow_ref": {"step": "id", "pointer": "/facts/..."}}`. Use
-  `dry_run: true` to decode and classify the whole plan before anything dispatches.
-  Compose journeys here when step outputs feed later inputs (open, then reuse the found
-  handle, then wait for its text).
+  it for both fixed batches and journeys whose later inputs depend on earlier results. Set
+  `on_error` to `continue` only when later steps remain useful after a failed child; otherwise
+  the default is `stop`.
 - Every step is classified and audited independently under the invocation's authority;
   composite wrappers add no power of their own.
 
 ## Waiting and dialogs
 
-- `browser_wait` on `load_ready`, `url_contains`, `text_present` or `text_absent`,
+- Use `browser_wait` on `load_ready`, `url_contains`, `text_present` or `text_absent`,
   `target_present` or `target_absent`, or `selector_present`. Bounded executor-side sleeps use
   `duration` (0 to 10000 ms). A false condition is a decisive failed answer, not "unknown" --
   do not retry blindly; observe instead.

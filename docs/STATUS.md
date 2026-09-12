@@ -1,6 +1,41 @@
 # STATUS -- Ghostlight 1.3.5 published
 
-Last updated: 2026-09-11 (service/package 1.3.5 and adapter 1.1.4 public).
+Last updated: 2026-09-12 (1.3.6 release preparation authorized; public versions unchanged).
+
+## Release 1.3.6 in progress
+
+The owner authorized commit, version bump, changelog, push and publication across the established
+distribution channels. Source is 1.3.6; observed public service remains 1.3.5 and browser adapter
+1.1.4 remains unchanged. Release notes are in `docs/release/notes-v1.3.6.md`. Candidate assembly
+and verification must precede immutable publication. npm login is verified as `lbotinelly` with
+owner-private, gitignored `local/.npmrc`; the rejected home-directory token was removed. GitHub
+and Chrome access are also verified. No new publication is claimed yet.
+
+Candidate workflow 34705695934 passed its source and process quality gate. The ordinary CI
+workflow had a pre-existing invalid job-level `runner` expression, so GitHub rejected it before
+running any checks. The expression now uses the declared OS matrix; its full suite must run
+before publication. Candidate binaries remain bound to `fa4edd8891d08cbc5e7f2af09dbcd1c0b7c019a9`.
+
+## One user installation (ADR-0167)
+
+The owner's delight mandate now governs deployment: package and development artifacts resolve
+one durable per-user serving selection. All three binaries use the same production runtime and
+lifetime lease. Package setup preserves development custody; inactive removal preserves active
+registrations. The dev loop adopts the complete sibling set automatically on first migration or
+directory change. History, diagnostics and canonical physical policy custody survive selection.
+
+The Windows development stack is migrated and Ready. The stray cached 1.3.5 authority was stopped;
+its artifacts were retained. Separate-directory CLI and initialized MCP access reached the existing
+Chrome instance. Authority crash recovery retained the native connector and the same initialized
+MCP stream. The complete pre-migration history prefix survived byte-for-byte.
+
+See [verification and limits](testing/one-user-installation-2026-09-12.md). This is not a public
+release: already published 1.3.5 binaries do not implement ADR-0167. Public package publication,
+Linux physical acceptance, reboot, and installed release-to-development-to-release acceptance
+remain separate work. Clients whose old connector process was replaced need a reconnect for this
+one-time migration. No extension changes or Chrome restart were needed.
+
+## Published release
 
 Google's live feed served 1.1.2 on September 10. The owner then rolled back to
 1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3

@@ -42,7 +42,7 @@ The published release is 1.3. It is available as the GitHub release
 
 ## What you get
 
-- **24 catalog tools**: 23 browser tools covering tabs, navigation, reading a page, screenshots,
+- **23 catalog tools**: 22 browser tools covering tabs, navigation, reading a page, screenshots,
   semantic clicks and hovers, form input, file upload, scripts, waits, short sequences, and
   dialogs, plus one policy tool that explains the authority in force. One call carries
   the intent; Ghostlight performs the browser steps behind it.

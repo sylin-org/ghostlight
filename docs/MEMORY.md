@@ -10,12 +10,22 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Release credentials stay repo-local and gitignored.** The owner requires npm credentials
+  in `local/.npmrc`, not the shared home-directory npm configuration. Run login and release
+  commands with that explicit user config; preserve owner-private file permissions. The existing
+  Chrome/MCP release credentials remain in `local/.ghostlight-release.env`. Never publish values.
+
+- **Ghostlight usage MUST be delightful.** Deployment-induced split authorities are a product
+  defect, not browser troubleshooting for the user. One production installation per OS user;
+  installing or invoking a package on a development machine must use the selected development
+  authority. ADR-0167 records the mandate and supersedes installation-local production election.
+
 - **Use the existing Chrome release API setup.** The owner requested durable production
   OAuth credentials under ignored `local/.ghostlight-release.env` and authorized their use
   for release work. This is a specific exception to the general no-secrets-in-local rule.
   Read `local/CHROME-RELEASE.md` for account/client identity and recovery; follow
   [the release procedure](RELEASE.md#chrome-api-procedure) for commands. Always pass
-  `-CredentialFile local/.ghostlight-release.env`; script defaults still point to HOME.
+  `-CredentialFile local/.ghostlight-release.env`; release script defaults also use this repo-local file.
   Check saved settings before asking the owner for IDs or new credentials. Reuse existing
   release authorization from the conversation; this storage directive alone does not
   authorize a new publication.

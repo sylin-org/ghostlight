@@ -16,7 +16,8 @@ repository=$(cd "$(dirname "$0")/.." && pwd)
 expected_version=$(awk '/^\[workspace\.package\]/{found=1} found && /^version = "/{sub(/^version = "/, ""); sub(/"$/, ""); print; exit}' "$repository/Cargo.toml")
 test -n "$expected_version"
 test_home=/home/ghostlight-package-test-$state_label
-runtime=$test_home/.cache/ghostlight/ghostlight-runtime.json
+runtime=$test_home/.ghostlight/ghostlight-runtime.json
+legacy_state=$test_home/.cache/ghostlight
 authority_pid=
 
 cleanup_authority() {
@@ -95,6 +96,8 @@ test -z "$(find /usr/bin/ghostlight /usr/bin/ghostlight-mcp-connector \
     -type f -perm -0002 -print)"
 
 install -d -m 0700 -o 1000 -g 1000 "$test_home" "$test_home/run"
+install -d -m 0700 -o 1000 -g 1000 "$test_home/.cache" "$legacy_state"
+install -m 0600 -o 1000 -g 1000 /dev/null "$legacy_state/diagnostics.on"
 setpriv --reuid=1000 --regid=1000 --clear-groups \
     env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" \
     xvfb-run -a ghostlight >"$test_home/authority.log" 2>&1 &
@@ -106,6 +109,10 @@ for attempt in $(seq 1 100); do
 done
 test -s "$runtime"
 test "$(stat -c %a "$runtime")" = "600"
+jq -e --arg state "$legacy_state" \
+    '.state_directory == $state and .serving_directory == "/usr/bin"' \
+    "$test_home/.ghostlight/ghostlight-runtime.installation.json" >/dev/null
+test -f "$legacy_state/diagnostics.on"
 setpriv --reuid=1000 --regid=1000 --clear-groups \
     env HOME="$test_home" XDG_RUNTIME_DIR="$test_home/run" ghostlight status |
     grep -F 'running' >/dev/null
@@ -138,4 +145,5 @@ for directory in \
     test ! -e "$directory/org.sylin.ghostlight.json"
 done
 test -s "$runtime"
+test -f "$legacy_state/diagnostics.on"
 echo 'result=PASS'
