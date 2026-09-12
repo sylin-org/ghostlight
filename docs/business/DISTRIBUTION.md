@@ -72,10 +72,10 @@ winget/scoop templates place them together in one directory. MCP-client entries 
       PR is clean with its submission check green. mcp.so now requires a $39 submission fee and
       needs separate spending approval. PulseMCP says official-registry records are ingested daily
       and processed weekly, so recheck after one week before emailing.
-- [ ] **Winget.** v0.7.3 is publicly discoverable. The v0.8.0 manifest validates locally, and PR
-      [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) is open with the CLA check
-      green. Microsoft controls review and merge.
-- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v0.8.0 and can be
+- [ ] **Winget.** v0.8.0 is publicly discoverable after PR
+      [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) merged. The v1.3.6 manifest
+      validates locally; Microsoft controls review and merge of the new submission.
+- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.6 and can be
       installed directly by URL. The central Extras package-request template currently requires
       at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would
       require a false attestation and was not opened.

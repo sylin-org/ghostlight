@@ -5,7 +5,11 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.6] - Unreleased
+## [1.3.6] - 2026-09-12
+
+Published as GitHub release `v1.3.6`, npm package `ghostlight@1.3.6`, and MCP Registry version
+`org.sylin/ghostlight 1.3.6`. Chrome adapter 1.1.4 is unchanged and remains public in the Chrome
+Web Store.
 
 ### Fixed
 

@@ -58,7 +58,7 @@ foreach ($directory in @($scoopDirectory, $wingetDirectory)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
-$scoop = Expand-Template "packaging/scoop/ghostlight.json"
+$scoop = Expand-Template "packaging/scoop/ghostlight.template.json"
 [void]($scoop | ConvertFrom-Json)
 [System.IO.File]::WriteAllText((Join-Path $scoopDirectory "ghostlight.json"), $scoop, $utf8)
 

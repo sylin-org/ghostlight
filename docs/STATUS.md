@@ -1,20 +1,25 @@
-# STATUS -- Ghostlight 1.3.5 published
+# STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-12 (1.3.6 release preparation authorized; public versions unchanged).
+Last updated: 2026-09-12 (service 1.3.6 published; adapter 1.1.4 unchanged).
 
-## Release 1.3.6 in progress
+## Release 1.3.6 published
 
 The owner authorized commit, version bump, changelog, push and publication across the established
-distribution channels. Source is 1.3.6; observed public service remains 1.3.5 and browser adapter
-1.1.4 remains unchanged. Release notes are in `docs/release/notes-v1.3.6.md`. Candidate assembly
-and verification must precede immutable publication. npm login is verified as `lbotinelly` with
-owner-private, gitignored `local/.npmrc`; the rejected home-directory token was removed. GitHub
-and Chrome access are also verified. No new publication is claimed yet.
+distribution channels. Candidate workflow
+[34705695934](https://github.com/sylin-org/ghostlight/actions/runs/34705695934) passed all seven
+jobs. The exact 18-artifact candidate is bound to source
+`fa4edd8891d08cbc5e7f2af09dbcd1c0b7c019a9` and immutable tag `v1.3.6`. Two independent local
+copies passed candidate, roster, SHA-256 and GitHub provenance verification. PR
+[#89](https://github.com/sylin-org/ghostlight/pull/89) merged after all 11 ordinary CI jobs passed.
 
-Candidate workflow 34705695934 passed its source and process quality gate. The ordinary CI
-workflow had a pre-existing invalid job-level `runner` expression, so GitHub rejected it before
-running any checks. The expression now uses the declared OS matrix; its full suite must run
-before publication. Candidate binaries remain bound to `fa4edd8891d08cbc5e7f2af09dbcd1c0b7c019a9`.
+Ghostlight 1.3.6 is public on [GitHub](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.6),
+npm (`ghostlight@1.3.6`, also `latest`), and the official MCP Registry
+(`org.sylin/ghostlight 1.3.6`, active and latest). The GitHub publisher re-downloaded all 20
+release files and verified exact hashes. An independent npm download matches the candidate
+SHA-256. The registry publisher validated and published the candidate-bound npm record; public
+lookup independently returns 1.3.6. Chrome adapter 1.1.4 is unchanged. The direct Scoop manifest
+now resolves to the public v1.3.6 Windows archive. See the
+[candidate custody record](testing/candidate-custody-2026-09-12.md).
 
 ## One user installation (ADR-0167)
 
@@ -29,19 +34,19 @@ its artifacts were retained. Separate-directory CLI and initialized MCP access r
 Chrome instance. Authority crash recovery retained the native connector and the same initialized
 MCP stream. The complete pre-migration history prefix survived byte-for-byte.
 
-See [verification and limits](testing/one-user-installation-2026-09-12.md). This is not a public
-release: already published 1.3.5 binaries do not implement ADR-0167. Public package publication,
-Linux physical acceptance, reboot, and installed release-to-development-to-release acceptance
-remain separate work. Clients whose old connector process was replaced need a reconnect for this
-one-time migration. No extension changes or Chrome restart were needed.
+See [verification and limits](testing/one-user-installation-2026-09-12.md). Service 1.3.6 now
+publishes ADR-0167. Linux physical acceptance, reboot, and installed
+release-to-development-to-release acceptance remain separate work. Clients whose old connector
+process was replaced need a reconnect for this one-time migration. No extension changes or Chrome
+restart were needed.
 
-## Published release
+## Prior release 1.3.5
 
 Google's live feed served 1.1.2 on September 10. The owner then rolled back to
 1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3
 ZIP contains different code and must not be uploaded. Its human-browsing, typing
 and diagnostics fixes now use 1.1.4. Compatibility for rollback 1.1.3 follows
-the original 1.1.1 row. Adapter 1.1.4 covers services 1.3.4-1.3.5: it retains
+the original 1.1.1 row. Adapter 1.1.4 covers services 1.3.4-1.3.6: it retains
 1.1.2's protocol and capability contract while fixing adapter-internal behavior.
 Google's API and independent public update feed now confirm adapter 1.1.4 PUBLISHED
 at 100 percent distribution. Public metadata was reconciled from the observed feed.
@@ -62,9 +67,10 @@ Linux binds the parent relationship to `/proc` start time. A cross-process regre
 keeps stdin open after the parent exits and proves reaping without treating inactivity
 as death.
 
-Ghostlight 1.3.5 is public on [GitHub](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.5),
-npm (`ghostlight@1.3.5`, also `latest`), and the official MCP Registry
-(`org.sylin/ghostlight 1.3.5`, marked latest). The GitHub publisher verified and
+Ghostlight 1.3.5 remains public on
+[GitHub](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.5), npm
+(`ghostlight@1.3.5`), and the official MCP Registry (`org.sylin/ghostlight 1.3.5`).
+The GitHub publisher verified and
 re-downloaded all 20 release files. An independent npm download matches the candidate
 SHA-256. The registry publisher validated `server.json`, authenticated through the
 rotated DNS proof, and public lookup returns 1.3.5. The
