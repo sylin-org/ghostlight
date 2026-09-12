@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopt all three native binaries on the first development deployment, and support
   deliberate release restore through the development loop.
 - Keep Chrome adapter 1.1.4 unchanged; it remains compatible with service 1.3.6.
+- Refresh the bundled browser-control skill for the current 23-tool catalog and publish
+  plugin metadata 1.0.1.
 
 ## [1.3.5] - 2026-09-11
 

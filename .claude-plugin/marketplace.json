@@ -9,7 +9,7 @@
       "name": "ghostlight",
       "source": "./packaging/plugin/ghostlight",
       "description": "Governed, semantic browser control for coding agents.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "category": "developer-tools"
     }
   ]

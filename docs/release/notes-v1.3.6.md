@@ -11,6 +11,7 @@ browser, instead of starting an unrelated authority with no browser.
   remove active browser registrations.
 - History, diagnostics and policy locations survive selection and restart.
 - CLI calls recover from stale runtime discovery and report startup failures.
+- The bundled agent guide uses the current `browser_flow` catalog and no retired inputs.
 
 ## Development and upgrade
 
