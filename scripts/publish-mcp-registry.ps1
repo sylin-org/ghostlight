@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CandidateDirectory,
     [string]$ServerFile = "server.json",
-    [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$CredentialFile = (Join-Path $PSScriptRoot "../local/.ghostlight-release.env"),
     [ValidateSet("Plan", "Publish")]
     [string]$Action = "Plan",
     [switch]$Execute

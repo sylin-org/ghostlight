@@ -25,7 +25,7 @@ the owner wants, and what this project learned the hard way.
   for release work. This is a specific exception to the general no-secrets-in-local rule.
   Read `local/CHROME-RELEASE.md` for account/client identity and recovery; follow
   [the release procedure](RELEASE.md#chrome-api-procedure) for commands. Always pass
-  `-CredentialFile local/.ghostlight-release.env`; script defaults still point to HOME.
+  `-CredentialFile local/.ghostlight-release.env`; release script defaults also use this repo-local file.
   Check saved settings before asking the owner for IDs or new credentials. Reuse existing
   release authorization from the conversation; this storage directive alone does not
   authorize a new publication.

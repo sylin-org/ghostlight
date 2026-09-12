@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 param(
-    [string]$CredentialFile = (Join-Path $HOME ".ghostlight-release.env"),
+    [string]$CredentialFile = (Join-Path $PSScriptRoot "../local/.ghostlight-release.env"),
     [ValidateRange(1024, 65535)]
     [int]$Port = 8976
 )
