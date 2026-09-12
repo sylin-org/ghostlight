@@ -5,6 +5,25 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - Unreleased
+
+### Fixed
+
+- Use one serving Ghostlight installation per OS user. Package and development
+  launches share authority instead of splitting the connected browser from MCP.
+- Preserve development selection through package setup and cold startup. Inactive
+  package removal leaves the active browser registration intact.
+- Retain history, diagnostics and physical policy paths across binary selection.
+  Preserve the Linux system package's existing user history during migration.
+- Recover CLI calls from stale runtime discovery without hiding startup failures.
+
+### Changed
+
+- Add durable development/release selection and selected-authority diagnostics.
+- Adopt all three native binaries on the first development deployment, and support
+  deliberate release restore through the development loop.
+- Keep Chrome adapter 1.1.4 unchanged; it remains compatible with service 1.3.6.
+
 ## [1.3.5] - 2026-09-11
 
 Published as GitHub release `v1.3.5`, npm package `ghostlight@1.3.5`, and MCP Registry version

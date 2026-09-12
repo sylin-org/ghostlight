@@ -10,6 +10,11 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Release credentials stay repo-local and gitignored.** The owner requires npm credentials
+  in `local/.npmrc`, not the shared home-directory npm configuration. Run login and release
+  commands with that explicit user config; preserve owner-private file permissions. The existing
+  Chrome/MCP release credentials remain in `local/.ghostlight-release.env`. Never publish values.
+
 - **Ghostlight usage MUST be delightful.** Deployment-induced split authorities are a product
   defect, not browser troubleshooting for the user. One production installation per OS user;
   installing or invoking a package on a development machine must use the selected development

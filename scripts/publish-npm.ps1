@@ -9,6 +9,7 @@ param(
     [string]$Mode = "Plan",
     [string]$Repository = "sylin-org/ghostlight",
     [string]$ExpectedSha256,
+    [string]$NpmConfig = (Join-Path $PSScriptRoot "../local/.npmrc"),
     [switch]$Execute
 )
 
@@ -64,7 +65,10 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "GitHub provenance verification failed for the npm tarball"
 }
-& npm publish $Package --access public
+if (-not (Test-Path -LiteralPath $NpmConfig -PathType Leaf)) {
+    throw "Repo-local npm authentication is missing. Run npm login --userconfig local/.npmrc"
+}
+& npm publish $Package --access public --userconfig $NpmConfig
 if ($LASTEXITCODE -ne 0) {
     throw "npm publish failed"
 }

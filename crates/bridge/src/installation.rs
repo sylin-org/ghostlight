@@ -172,6 +172,11 @@ pub fn select_locked(
         }
     }
     let directory = fs::canonicalize(directory)?;
+    let legacy_state = legacy_state_directory(
+        &directory,
+        env::var_os("HOME").map(PathBuf::from).as_deref(),
+        cfg!(target_os = "linux"),
+    );
     let initial_policy_directory = if previous.is_none() {
         let canonical = legacy_policy_directory().map(fs::canonicalize).transpose();
         match canonical {
@@ -195,10 +200,10 @@ pub fn select_locked(
         release_directory: None,
         development_directory: None,
         // Adoption retains the old journal and diagnostic marker without rewriting either.
-        state_directory: if directory.join("audit.jsonl").exists()
-            || directory.join("diagnostics.on").exists()
+        state_directory: if legacy_state.join("audit.jsonl").exists()
+            || legacy_state.join("diagnostics.on").exists()
         {
-            directory.clone()
+            legacy_state
         } else {
             runtime
                 .parent()
@@ -345,6 +350,15 @@ fn legacy_policy_directory() -> Option<PathBuf> {
     }
 }
 
+fn legacy_state_directory(directory: &Path, home: Option<&Path>, linux: bool) -> PathBuf {
+    if linux && directory == Path::new("/usr/bin") {
+        if let Some(home) = home {
+            return home.join(".cache/ghostlight");
+        }
+    }
+    directory.to_path_buf()
+}
+
 /// Platform-specific spelling of a native Ghostlight executable.
 pub fn executable_name(name: &str) -> String {
     if cfg!(windows) {
@@ -365,6 +379,26 @@ fn invalid(message: &str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_package_adoption_preserves_its_legacy_user_history_directory() {
+        assert_eq!(
+            legacy_state_directory(
+                Path::new("/usr/bin"),
+                Some(Path::new("/home/example")),
+                true
+            ),
+            PathBuf::from("/home/example/.cache/ghostlight")
+        );
+        assert_eq!(
+            legacy_state_directory(
+                Path::new("/home/example/bin"),
+                Some(Path::new("/home/example")),
+                true
+            ),
+            PathBuf::from("/home/example/bin")
+        );
+    }
 
     #[test]
     fn package_launch_and_update_preserve_development_and_history() {

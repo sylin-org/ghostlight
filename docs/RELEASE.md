@@ -56,7 +56,11 @@ pwsh -File scripts/check-release-access.ps1 -CredentialFile local/.ghostlight-re
 
 The command is read-only. GitHub and npm access are required for their publication channels. MCP
 Registry and Chrome API credentials enable optional automation and are reported without becoming
-release blockers. Chrome can always be submitted through its Developer Dashboard, which is the
+release blockers. npm authentication lives only in the gitignored, owner-private `local/.npmrc`.
+Use `npm login --userconfig local/.npmrc` to refresh it. The access check and npm publisher use
+that repo-local configuration; do not write release tokens into the shared home npm config.
+
+Chrome can always be submitted through its Developer Dashboard, which is the
 fallback used by 0.8. API V2 automation requires `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`,
 `CWS_REFRESH_TOKEN`, `CWS_ITEM_ID`, and `CWS_PUBLISHER_ID`. If desired, a revoked refresh token can
 be replaced with `scripts/get-cws-refresh-token.ps1`; the helper validates OAuth state and PKCE,
