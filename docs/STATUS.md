@@ -7,8 +7,9 @@ Last updated: 2026-09-12 (1.3.6 release preparation authorized; public versions 
 The owner authorized commit, version bump, changelog, push and publication across the established
 distribution channels. Source is 1.3.6; observed public service remains 1.3.5 and browser adapter
 1.1.4 remains unchanged. Release notes are in `docs/release/notes-v1.3.6.md`. Candidate assembly
-and verification must precede immutable publication. npm access currently returns 401 for the
-saved token; GitHub and Chrome access are verified. No new publication is claimed yet.
+and verification must precede immutable publication. npm login is verified as `lbotinelly` with
+owner-private, gitignored `local/.npmrc`; the rejected home-directory token was removed. GitHub
+and Chrome access are also verified. No new publication is claimed yet.
 
 ## One user installation (ADR-0167)
 
