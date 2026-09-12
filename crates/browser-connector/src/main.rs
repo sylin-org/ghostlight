@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     let diagnostics = Sink::birth(
         Component::BrowserConnector,
         env!("CARGO_PKG_VERSION"),
-        &runtime_file(),
+        &runtime_file()?,
     );
     diagnostics.emit(
         event::PROCESS_STARTED,
@@ -251,7 +251,7 @@ fn connect_adapter(
 }
 
 fn connect_once(adapter_hello: &[u8]) -> Result<(TcpStream, Vec<u8>)> {
-    let endpoint = read_runtime(&runtime_file()).context("read current Ghostlight runtime")?;
+    let endpoint = read_runtime(&runtime_file()?).context("read current Ghostlight runtime")?;
     if endpoint.browser_relay_major != BROWSER_RELAY_MAJOR {
         anyhow::bail!(
             "browser relay major {} is incompatible with required {}",

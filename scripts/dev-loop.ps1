@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 param(
-    [ValidateSet("Plan", "Deploy")]
+    [ValidateSet("Plan", "Deploy", "Restore")]
     [string]$Action = "Plan",
     [ValidateSet("orchestrator", "mcp-connector", "browser-connector")]
     [string[]]$Component = @("orchestrator"),
@@ -51,14 +51,22 @@ function Assert-RepositoryPath {
 function Get-ExactImageProcesses {
     param([string[]]$ImagePaths)
 
-    $resolved = @($ImagePaths | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
+    function Comparable-ImagePath([string]$Path) {
+        $full = [System.IO.Path]::GetFullPath($Path)
+        if ($full.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return '\\' + $full.Substring(8)
+        }
+        if ($full.StartsWith('\\?\', [System.StringComparison]::Ordinal)) { return $full.Substring(4) }
+        return $full
+    }
+    $resolved = @($ImagePaths | ForEach-Object { Comparable-ImagePath $_ })
     return @(Get-Process | ForEach-Object {
         $process = $_
         try {
             if ([string]::IsNullOrWhiteSpace($process.Path)) {
                 return
             }
-            $processPath = [System.IO.Path]::GetFullPath($process.Path)
+            $processPath = Comparable-ImagePath $process.Path
             if (@($resolved | Where-Object { $processPath.Equals($_, $comparison) }).Count -gt 0) {
                 $process
             }
@@ -117,6 +125,19 @@ $definitions = [ordered]@{
         binary = "ghostlight-browser-connector$extension"
     }
 }
+$controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
+$selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
+$adoptingDevelopment = -not (Test-Path -LiteralPath $selectionFile)
+if (-not $adoptingDevelopment) {
+    $existingSelection = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
+    $existingDirectory = ([string]$existingSelection.serving_directory) -replace '^\\\\\?\\', ''
+    $adoptingDevelopment = -not $existingDirectory.Equals($LiveDirectory, $comparison)
+}
+if ($adoptingDevelopment) {
+    # A first adoption or a directory change cannot leave legacy shores on their old election.
+    $Component = @($definitions.Keys)
+    $RegisterNativeHost = $true
+}
 $selected = @($Component | Select-Object -Unique)
 $sourceRoot = Join-Path $TargetDirectory $Profile
 $transfers = @($selected | ForEach-Object {
@@ -154,6 +175,44 @@ if ($Action -eq "Plan") {
     return
 }
 
+if ($env:GHOSTLIGHT_RUNTIME_FILE) {
+    throw "The development loop selects the production installation. Remove the isolated GHOSTLIGHT_RUNTIME_FILE override first."
+}
+
+if ($Action -eq "Restore") {
+    $controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
+    $selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
+    $record = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
+    if (-not $record.release_directory) { throw "No packaged release is available to restore." }
+    $currentAuthority = Join-Path $record.serving_directory "ghostlight$extension"
+    $releaseAuthority = Join-Path $record.release_directory "ghostlight$extension"
+    foreach ($name in $definitions.Keys) {
+        $path = Join-Path $record.release_directory $definitions[$name].binary
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Release is incomplete: $path" }
+    }
+    $marker = Join-Path $controlDirectory "deploy.lock"
+    $markerStream = [System.IO.File]::Open($marker, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+    try {
+        foreach ($process in @(Get-ExactImageProcesses -ImagePaths @($currentAuthority))) {
+            Stop-Process -Id $process.Id
+            Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
+        }
+        & $currentAuthority deployment restore
+        if ($LASTEXITCODE -ne 0) { throw "Release restore failed with exit code $LASTEXITCODE" }
+        & $releaseAuthority native-host install
+        if ($LASTEXITCODE -ne 0) { throw "Release native-host registration failed with exit code $LASTEXITCODE" }
+    } finally {
+        $markerStream.Dispose()
+        Remove-Item -LiteralPath $marker -Force
+    }
+    if (-not $NoStart) {
+        if ($IsWindows) { Start-Process -FilePath $releaseAuthority -WindowStyle Hidden }
+        else { Start-Process -FilePath $releaseAuthority }
+    }
+    Write-Output "Restored packaged authority: $releaseAuthority"
+    return
+}
+
 $cargoArguments = @("build", "--locked", "--target-dir", $TargetDirectory)
 foreach ($name in $selected) {
     $cargoArguments += @("-p", $definitions[$name].package)
@@ -179,10 +238,19 @@ foreach ($transfer in $transfers) {
 }
 
 [System.IO.Directory]::CreateDirectory($LiveDirectory) | Out-Null
+$controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
+[System.IO.Directory]::CreateDirectory($controlDirectory) | Out-Null
+$controlDeploymentLock = Join-Path $controlDirectory "deploy.lock"
+$selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
+$selectedAuthority = if (Test-Path -LiteralPath $selectionFile) {
+    $record = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
+    Join-Path $record.serving_directory "ghostlight$extension"
+} else { Join-Path $LiveDirectory "ghostlight$extension" }
 $deploymentLock = Join-Path $LiveDirectory "deploy.lock"
-[System.IO.File]::WriteAllText($deploymentLock, "dev-loop`n")
+$controlMarkerStream = [System.IO.File]::Open($controlDeploymentLock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
 try {
-    $running = @(Get-ExactImageProcesses -ImagePaths @($transfers.destination))
+    [System.IO.File]::WriteAllText($deploymentLock, "dev-loop`n")
+    $running = @(Get-ExactImageProcesses -ImagePaths (@($transfers.destination) + @($selectedAuthority)))
     foreach ($process in $running) {
         Write-Output "Stopping exact live process: pid=$($process.Id) path=$($process.Path)"
         Stop-Process -Id $process.Id
@@ -194,6 +262,12 @@ try {
     foreach ($transfer in $transfers) {
         Copy-WithRetry -Source $transfer.source -Destination $transfer.destination
         Write-Output "Replaced: $($transfer.destination)"
+    }
+
+    $orchestrator = Join-Path $LiveDirectory "ghostlight$extension"
+    & $orchestrator deployment development
+    if ($LASTEXITCODE -ne 0) {
+        throw "Development selection failed with exit code $LASTEXITCODE"
     }
 
     if ($RegisterNativeHost) {
@@ -208,14 +282,22 @@ try {
     }
 }
 finally {
+    $controlMarkerStream.Dispose()
     if (Test-Path -LiteralPath $deploymentLock -PathType Leaf) {
         Remove-Item -LiteralPath $deploymentLock -Force
+    }
+    if (Test-Path -LiteralPath $controlDeploymentLock -PathType Leaf) {
+        Remove-Item -LiteralPath $controlDeploymentLock -Force
     }
 }
 
 if (-not $NoStart -and $selected -contains "orchestrator") {
     $orchestrator = Join-Path $LiveDirectory "ghostlight$extension"
-    Start-Process -FilePath $orchestrator -WorkingDirectory $LiveDirectory
+    if ($IsWindows) {
+        Start-Process -FilePath $orchestrator -WorkingDirectory $LiveDirectory -WindowStyle Hidden
+    } else {
+        Start-Process -FilePath $orchestrator -WorkingDirectory $LiveDirectory
+    }
     Write-Output "Started: $orchestrator"
 }
 if ($selected -contains "browser-connector") {

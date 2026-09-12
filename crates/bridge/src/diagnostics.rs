@@ -137,13 +137,15 @@ impl Activation {
     }
 }
 
-/// The path of the activation marker beside the runtime discovery file.
+/// The activation marker in the selected installation's preserved state directory.
 pub fn marker_path(runtime_path: &Path) -> PathBuf {
-    runtime_path.with_file_name(MARKER_FILE_NAME)
+    crate::installation::state_directory(runtime_path)
+        .map(|directory| directory.join(MARKER_FILE_NAME))
+        .unwrap_or_else(|_| runtime_path.with_file_name(MARKER_FILE_NAME))
 }
 
-/// The default log directory: a `logs` folder beside the runtime discovery file, never the
-/// application root itself. This is where logs go when the marker layer activates, and where
+/// The default log directory: a `logs` folder beside the installation's activation marker.
+/// This is where logs go when the marker layer activates, and where
 /// retained logs remain readable after they are turned off.
 pub fn default_directory(runtime_path: &Path) -> PathBuf {
     match marker_path(runtime_path).parent() {

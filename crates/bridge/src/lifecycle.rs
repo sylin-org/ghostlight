@@ -1,7 +1,7 @@
 //! Shared local-process lifecycle for the one Ghostlight engine.
 //!
-//! Demand-start launches the sibling of runtime discovery: beside this executable by default,
-//! or in the directory an explicit `GHOSTLIGHT_RUNTIME_FILE` elects (ADR-0150).
+//! Demand-start launches the user's selected authority (ADR-0167), or the directory
+//! an explicit `GHOSTLIGHT_RUNTIME_FILE` elects for an isolated fixture (ADR-0150).
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -16,7 +16,7 @@ use fs2::FileExt;
 
 use crate::diagnostics::{event, Level, Sink};
 use crate::parent_process::ParentProcess;
-use crate::runtime::{read_runtime, runtime_discovery, RuntimeDiscovery, RuntimeEndpoint};
+use crate::runtime::{read_runtime, RuntimeDiscovery, RuntimeEndpoint};
 
 /// Presence marker used to quiesce demand-start during a sibling replacement.
 pub const DEPLOY_LOCK_FILE: &str = "deploy.lock";
@@ -188,22 +188,36 @@ impl StartDisposition {
 
 /// Ask the trusted sibling `ghostlight` executable to start its desktop authority.
 ///
-/// Callers invoke this only after a connection attempt fails. The authority is the sibling of
-/// the runtime discovery: beside this executable by default, or in the directory elected by an
-/// explicit `GHOSTLIGHT_RUNTIME_FILE` (ADR-0150). The service lease makes concurrent requests
+/// Callers invoke this after a connection failure or to ensure a CLI's authority is available.
+/// Production uses the durable selection; an explicit `GHOSTLIGHT_RUNTIME_FILE` elects an
+/// isolated directory (ADR-0150). The service lease makes concurrent requests
 /// harmless, and a fresh deploy lock suppresses self-heal while binaries are swapped.
 pub fn request_orchestrator_start() -> io::Result<StartDisposition> {
+    if production_deployment_in_progress()? {
+        return Ok(StartDisposition::DeploymentInProgress);
+    }
     let current_executable = env::current_exe()?;
+    let (_selection_guard, discovery) = crate::installation::startup_selection()?;
+    if production_deployment_in_progress()? {
+        return Ok(StartDisposition::DeploymentInProgress);
+    }
     #[cfg(target_os = "linux")]
     if use_flatpak_activation(env::var_os("FLATPAK_ID").as_deref())? {
         let home = env::var_os("HOME")
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "host HOME is unavailable"))?;
-        let executable = resolved_orchestrator(&current_executable, &runtime_discovery())?;
-        return request_orchestrator_activation(|| {
-            crate::desktop_activation::request_registered_start(Path::new(&home), &executable)
-        });
+        let executable = resolved_orchestrator(&current_executable, &discovery)?;
+        return request_start(
+            &executable,
+            &discovery,
+            SystemTime::now(),
+            STARTUP_TIMEOUT,
+            || {
+                crate::desktop_activation::request_registered_start(Path::new(&home), &executable)?;
+                Ok(Launch::Activation)
+            },
+        );
     }
-    request_orchestrator_start_from(&current_executable, &runtime_discovery(), SystemTime::now())
+    request_orchestrator_start_from(&current_executable, &discovery, SystemTime::now())
 }
 
 #[cfg(target_os = "linux")]
@@ -227,7 +241,10 @@ fn use_flatpak_activation(app: Option<&std::ffi::OsStr>) -> io::Result<bool> {
 pub fn request_orchestrator_activation(
     activate: impl FnOnce() -> io::Result<()>,
 ) -> io::Result<StartDisposition> {
-    let discovery = runtime_discovery();
+    if production_deployment_in_progress()? {
+        return Ok(StartDisposition::DeploymentInProgress);
+    }
+    let (_selection_guard, discovery) = crate::installation::startup_selection()?;
     let current = env::current_exe()?;
     let executable = resolved_orchestrator(&current, &discovery)?;
     request_start(
@@ -490,6 +507,17 @@ fn orchestrator_file_name() -> &'static str {
 
 fn service_lock_file(runtime_path: &Path) -> PathBuf {
     runtime_path.with_extension(SERVICE_LOCK_EXTENSION)
+}
+
+/// Whether the production deployment is deliberately quiescing all entry points.
+pub fn production_deployment_in_progress() -> io::Result<bool> {
+    if env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_some() {
+        return Ok(false);
+    }
+    deploy_lock_present(
+        &crate::installation::control_directory()?,
+        SystemTime::now(),
+    )
 }
 
 fn deploy_lock_present(directory: &Path, now: SystemTime) -> io::Result<bool> {

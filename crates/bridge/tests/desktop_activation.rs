@@ -63,7 +63,7 @@ fn root() -> PathBuf {
 fn owner() {
     let root = root();
     let executable = root.join("bin with spaces/ghostlight");
-    let runtime = runtime_discovery();
+    let runtime = runtime_discovery().unwrap();
     let _authority = ServiceLease::try_acquire(&runtime.path).unwrap().unwrap();
     fs::write(root.join("desktop-ready"), std::process::id().to_string()).unwrap();
     write_runtime(

@@ -10,6 +10,11 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Ghostlight usage MUST be delightful.** Deployment-induced split authorities are a product
+  defect, not browser troubleshooting for the user. One production installation per OS user;
+  installing or invoking a package on a development machine must use the selected development
+  authority. ADR-0167 records the mandate and supersedes installation-local production election.
+
 - **Use the existing Chrome release API setup.** The owner requested durable production
   OAuth credentials under ignored `local/.ghostlight-release.env` and authorized their use
   for release work. This is a specific exception to the general no-secrets-in-local rule.

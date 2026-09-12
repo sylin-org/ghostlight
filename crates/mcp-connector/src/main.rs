@@ -31,7 +31,7 @@ fn main() -> Result<()> {
     let diagnostics = Sink::birth(
         Component::McpConnector,
         env!("CARGO_PKG_VERSION"),
-        &runtime_file(),
+        &runtime_file()?,
     );
     diagnostics.emit(
         event::PROCESS_STARTED,

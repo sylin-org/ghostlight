@@ -55,7 +55,7 @@ impl FlatpakRegistry {
     pub fn discover() -> io::Result<Self> {
         let home =
             PathBuf::from(std::env::var_os("HOME").ok_or_else(|| invalid("HOME is unavailable"))?);
-        let executable = std::env::current_exe()?;
+        let executable = ghostlight_bridge::installation::selected_executable()?;
         if std::env::var_os("FLATPAK_ID").is_some()
             || !executable.starts_with(&home)
             || std::env::var_os("XDG_DATA_HOME")

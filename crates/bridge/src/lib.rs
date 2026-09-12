@@ -6,6 +6,7 @@ pub mod client;
 pub mod desktop_activation;
 pub mod diagnostics;
 pub mod framing;
+pub mod installation;
 pub mod lifecycle;
 mod parent_process;
 pub mod relay;

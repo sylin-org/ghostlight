@@ -1,6 +1,6 @@
 # ADR-0124: User-writable runtime discovery for the Linux system package
 
-- Status: Accepted
+- Status: Superseded for production discovery by ADR-0167; retained as historical evidence
 - Date: 2026-08-15
 - Amends: ADR-0104 Decision 2 and ADR-0123 acceptance evidence 5
 - Builds on: ADR-0115 and ADR-0123

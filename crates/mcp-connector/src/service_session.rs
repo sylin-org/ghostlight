@@ -207,7 +207,7 @@ fn connect(
     // Negotiation lives once in the bridge (ADR-0105 Decision 4); the edge keeps only its
     // reconnect loop, event pump, and concurrent-request plumbing.
     let connection = ghostlight_bridge::client::connect_split(
-        &runtime_file(),
+        &runtime_file()?,
         client_label,
         IntakeChannel::Mcp,
         // The MCP edge keeps its workspace bound to the connection: a client that goes away

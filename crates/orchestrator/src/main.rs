@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const ACTIVATION_RETRY_COUNT: usize = 20;
+const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 // Native window construction can outlast service publication without indicating a failure.
 const WORKBENCH_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -37,6 +37,8 @@ const SUBCOMMANDS: &[&str] = &[
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LaunchMode {
+    /// Local package/development lifecycle seam, never a model-facing tool.
+    Deployment(ghostlight_bridge::installation::Selection),
     Desktop,
     /// Explicit local-human intent to make the workbench visible.
     Open,
@@ -99,6 +101,11 @@ enum ActivationState {
 
 fn main() -> anyhow::Result<()> {
     match launch_mode(std::env::args_os().skip(1))? {
+        LaunchMode::Deployment(selection) => {
+            let record = ghostlight::install::deployment::select(selection)?;
+            println!("{}", serde_json::to_string(&record)?);
+            Ok(())
+        }
         LaunchMode::Desktop => start_or_activate_desktop(),
         LaunchMode::Open => open_desktop(),
         LaunchMode::Call => run_call(),
@@ -110,6 +117,16 @@ fn main() -> anyhow::Result<()> {
             command,
             allow_activation,
         } => {
+            if command == NativeHostCommand::Install {
+                ghostlight::install::deployment::select(
+                    ghostlight_bridge::installation::Selection::Release,
+                )?;
+            } else if command == NativeHostCommand::Uninstall
+                && !ghostlight::install::deployment::owns_registration()?
+            {
+                println!("The active Ghostlight Flatpak registration is preserved.");
+                return Ok(());
+            }
             let registry = ghostlight::install::flatpak::FlatpakRegistry::discover()?;
             let report = match command {
                 NativeHostCommand::Check => registry.check()?,
@@ -144,6 +161,15 @@ fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use ghostlight::install::native_host::{NativeHostRegistry, NativeHostState};
     use ghostlight::install::{HarnessAction, HarnessRegistry};
 
+    if install && !options.dry_run {
+        ghostlight::install::deployment::select(
+            ghostlight_bridge::installation::Selection::Release,
+        )?;
+    } else if !install && !ghostlight::install::deployment::owns_registration()? {
+        println!("The active Ghostlight installation is preserved; this package owns no active registrations.");
+        return Ok(());
+    }
+    ghostlight_bridge::runtime::runtime_discovery()?;
     let native_hosts = NativeHostRegistry::discover();
     let mut install_usable = false;
     let initial_browser_report = native_hosts.check()?;
@@ -443,6 +469,7 @@ fn select_harnesses(
 /// The text and JSON renderings read the same values, so a script and a person cannot be told
 /// different things about the same machine.
 struct DoctorObservation {
+    installation: Option<ghostlight_bridge::installation::Installation>,
     environment: ghostlight::language::environment::Environment,
     binaries: Vec<(PathBuf, bool)>,
     sibling_set_ready: bool,
@@ -462,7 +489,7 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     use ghostlight::install::HarnessRegistry;
     use ghostlight::language::environment;
 
-    let executable = std::env::current_exe()?;
+    let executable = ghostlight_bridge::installation::selected_executable()?;
     let directory = executable
         .parent()
         .ok_or_else(|| anyhow::anyhow!("the Ghostlight executable has no parent directory"))?;
@@ -478,14 +505,16 @@ fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         sibling_set_ready &= ready;
         binaries.push((path, ready));
     }
-    let runtime = observe_runtime();
+    let runtime = observe_runtime()?;
     let readiness = if runtime.running {
         ghostlight::service::request_readiness(&runtime.path).ok()
     } else {
         None
     };
-    let diagnostics = ghostlight::diagnostics::observe(&ghostlight_bridge::runtime::runtime_file());
+    let diagnostics =
+        ghostlight::diagnostics::observe(&ghostlight_bridge::runtime::runtime_file()?);
     Ok(DoctorObservation {
+        installation: ghostlight_bridge::installation::read(&runtime.path)?,
         // Same module as the install summary, so the two can never describe this machine
         // differently.
         environment: environment::current(),
@@ -509,6 +538,14 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
+    if let Some(installation) = &observation.installation {
+        println!(
+            "Selected authority: {} -- {}",
+            installation.directory().display(),
+            installation.source()
+        );
+        println!("Shared runtime: {}", observation.runtime.path.display());
+    }
     println!(
         "Environment: {} -- {}",
         observation.environment.label(),
@@ -559,7 +596,7 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
             report.used_bytes
         ),
         (layer, None) => println!(
-            "Process diagnostics: {layer} -- set GHOSTLIGHT_DIAGNOSTICS_DIR or create diagnostics.on beside the runtime file to turn them on"
+            "Process diagnostics: {layer} -- run ghostlight diagnostics on to turn them on"
         ),
     }
     if fix {
@@ -573,6 +610,12 @@ fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
 fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
     serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "installation": {
+            "runtime_file": observation.runtime.path,
+            "selection": observation.installation,
+            "source": observation.installation.as_ref().map(|selection| selection.source()),
+            "invoking_executable": std::env::current_exe().ok(),
+        },
         "environment": {
             "label": observation.environment.label(),
             "location": observation.environment.location(),
@@ -606,7 +649,7 @@ fn run_status(json: bool) -> anyhow::Result<()> {
     if !json {
         println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
     }
-    render_runtime_status(&observe_runtime(), json, false);
+    render_runtime_status(&observe_runtime()?, json, false);
     Ok(())
 }
 
@@ -619,9 +662,9 @@ struct RuntimeObservation {
     running: bool,
 }
 
-fn observe_runtime() -> RuntimeObservation {
-    let path = ghostlight_bridge::runtime::runtime_file();
-    match ghostlight_bridge::runtime::read_runtime(&path) {
+fn observe_runtime() -> anyhow::Result<RuntimeObservation> {
+    let path = ghostlight_bridge::runtime::runtime_file()?;
+    Ok(match ghostlight_bridge::runtime::read_runtime(&path) {
         Ok(runtime) => {
             let running = TcpStream::connect_timeout(
                 &SocketAddrV4::new(Ipv4Addr::LOCALHOST, runtime.service_port).into(),
@@ -643,7 +686,7 @@ fn observe_runtime() -> RuntimeObservation {
             browser_relay_major: None,
             running: false,
         },
-    }
+    })
 }
 
 /// The `status --json` document. Its shape is consumed by scripts and does not change here.
@@ -750,6 +793,17 @@ fn print_help() {
 fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
     use ghostlight::install::native_host::{NativeHostRegistry, NativeHostState};
 
+    if command == NativeHostCommand::Install {
+        ghostlight::install::deployment::select(
+            ghostlight_bridge::installation::Selection::Release,
+        )?;
+    } else if command == NativeHostCommand::Uninstall
+        && !ghostlight::install::deployment::owns_registration()?
+    {
+        println!("The active Ghostlight browser registration is preserved.");
+        return Ok(());
+    }
+    ghostlight_bridge::runtime::runtime_discovery()?;
     let registry = NativeHostRegistry::discover();
     let (verb, changed, report, migration) = match command {
         NativeHostCommand::Check => ("checked", false, registry.check()?, None),
@@ -807,11 +861,19 @@ fn run_call() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
-    let runtime = ghostlight_bridge::runtime::runtime_file();
-    if ghostlight_bridge::runtime::read_runtime(&runtime).is_err() {
-        let _ = ghostlight_bridge::lifecycle::request_orchestrator_start();
-        wait_for_runtime(&runtime);
+    let runtime = match ghostlight_bridge::runtime::runtime_file() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    if ghostlight_bridge::lifecycle::request_orchestrator_start()?
+        == ghostlight_bridge::lifecycle::StartDisposition::DeploymentInProgress
+    {
+        anyhow::bail!("Ghostlight is being updated; retry when deployment finishes");
     }
+    wait_for_runtime(&runtime)?;
     let mut out = std::io::stdout().lock();
     let code = ghostlight::cli::run(command, &runtime, &mut out);
     std::process::exit(code);
@@ -822,23 +884,45 @@ fn run_policy(command: &ghostlight::governance::inspection::Command) -> anyhow::
     ghostlight::governance::inspection::run(command, &mut out)
 }
 
-fn wait_for_runtime(runtime: &Path) {
-    for _ in 0..ACTIVATION_RETRY_COUNT {
-        if ghostlight_bridge::runtime::read_runtime(runtime).is_ok() {
-            return;
+fn wait_for_runtime(runtime: &Path) -> anyhow::Result<()> {
+    let deadline = Instant::now() + SERVICE_READY_TIMEOUT;
+    while Instant::now() < deadline {
+        if ghostlight::service::request_readiness(runtime).is_ok() {
+            return Ok(());
         }
         thread::sleep(ACTIVATION_RETRY_DELAY);
     }
+    anyhow::bail!("The selected Ghostlight authority did not become ready in time; run ghostlight doctor for its deployment details")
 }
 
 fn start_or_activate_desktop() -> anyhow::Result<()> {
+    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
+        anyhow::bail!("Ghostlight is being updated; it will be available when deployment finishes");
+    }
+    if std::env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_none() {
+        let runtime = ghostlight_bridge::installation::production_runtime()?;
+        let selection = ghostlight_bridge::installation::read(&runtime)?;
+        if selection.as_ref().is_none_or(|record| {
+            record.development_directory.is_none()
+                && record
+                    .release_directory
+                    .as_ref()
+                    .is_some_and(|release| release != record.directory())
+        }) {
+            let _selection = ghostlight_bridge::installation::startup_selection()?;
+        }
+        let selected = ghostlight_bridge::installation::selected_executable()?;
+        if std::fs::canonicalize(selected)? != std::fs::canonicalize(std::env::current_exe()?)? {
+            return open_desktop();
+        }
+    }
     #[cfg(target_os = "linux")]
     if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
         // A bus launch requests existence, never Open. In a cold-start race a losing
         // process must exit at the lifetime lease instead of revealing the winner's UI.
         return ghostlight::desktop::run();
     }
-    let runtime = ghostlight_bridge::runtime::runtime_file();
+    let runtime = ghostlight_bridge::runtime::runtime_file()?;
     match ghostlight::service::request_workbench_activation(&runtime) {
         Ok(true) => return Ok(()),
         Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
@@ -861,7 +945,7 @@ fn desktop_bus_start(bus_type: Option<&std::ffi::OsStr>) -> bool {
 fn open_desktop() -> anyhow::Result<()> {
     use ghostlight_bridge::lifecycle::StartDisposition;
 
-    let runtime = ghostlight_bridge::runtime::runtime_file();
+    let runtime = ghostlight_bridge::runtime::runtime_file()?;
     match ghostlight::service::request_workbench_activation(&runtime) {
         Ok(true) => return Ok(()),
         Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
@@ -915,6 +999,19 @@ fn finish_activation(
 
 fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<LaunchMode> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "deployment")
+    {
+        use ghostlight_bridge::installation::Selection;
+        let selection = match arguments.get(1).and_then(|argument| argument.to_str()) {
+            Some("development") if arguments.len() == 2 => Selection::Development,
+            Some("release") if arguments.len() == 2 => Selection::Release,
+            Some("restore") if arguments.len() == 2 => Selection::Restore,
+            _ => anyhow::bail!("usage: ghostlight deployment <development|release|restore>"),
+        };
+        return Ok(LaunchMode::Deployment(selection));
+    }
     if arguments.is_empty() {
         return Ok(LaunchMode::Desktop);
     }

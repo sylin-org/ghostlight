@@ -87,6 +87,7 @@ impl ServiceHost {
         let lease = ServiceLease::try_acquire(path)
             .context("open the orchestrator service lease")?
             .ok_or(AuthorityAlreadyRunning)?;
+        ghostlight_bridge::installation::verify_serving_executable(path)?;
         let service_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .context("bind service bridge")?;
         let browser_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
@@ -133,7 +134,11 @@ impl ServiceHost {
         )));
         let audit_path = env::var_os("GHOSTLIGHT_AUDIT_FILE")
             .map(PathBuf::from)
-            .unwrap_or_else(|| path.with_file_name("audit.jsonl"));
+            .map(Ok)
+            .unwrap_or_else(|| {
+                ghostlight_bridge::installation::state_directory(path)
+                    .map(|directory| directory.join("audit.jsonl"))
+            })?;
         let projection = WorkbenchProjection::default();
         let _ = projection.load_history(&audit_path);
         let durable_audit = Arc::new(JsonlAuditSink::new(&audit_path));

@@ -1,6 +1,27 @@
 # STATUS -- Ghostlight 1.3.5 published
 
-Last updated: 2026-09-11 (service/package 1.3.5 and adapter 1.1.4 public).
+Last updated: 2026-09-12 (ADR-0167 implemented and deployed locally; public versions unchanged).
+
+## One user installation (ADR-0167)
+
+The owner's delight mandate now governs deployment: package and development artifacts resolve
+one durable per-user serving selection. All three binaries use the same production runtime and
+lifetime lease. Package setup preserves development custody; inactive removal preserves active
+registrations. The dev loop adopts the complete sibling set automatically on first migration or
+directory change. History, diagnostics and canonical physical policy custody survive selection.
+
+The Windows development stack is migrated and Ready. The stray cached 1.3.5 authority was stopped;
+its artifacts were retained. Separate-directory CLI and initialized MCP access reached the existing
+Chrome instance. Authority crash recovery retained the native connector and the same initialized
+MCP stream. The complete pre-migration history prefix survived byte-for-byte.
+
+See [verification and limits](testing/one-user-installation-2026-09-12.md). This is not a public
+release: already published 1.3.5 binaries do not implement ADR-0167. Public package publication,
+Linux physical acceptance, reboot, and installed release-to-development-to-release acceptance
+remain separate work. Clients whose old connector process was replaced need a reconnect for this
+one-time migration. No extension changes or Chrome restart were needed.
+
+## Published release
 
 Google's live feed served 1.1.2 on September 10. The owner then rolled back to
 1.1.1 code, which Google republishes as 1.1.3. The old, unsubmitted local 1.1.3

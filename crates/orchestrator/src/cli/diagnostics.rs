@@ -87,7 +87,7 @@ pub fn parse(arguments: &[String]) -> anyhow::Result<Command> {
 
 /// Run one parsed command.
 pub fn run(command: &Command) -> anyhow::Result<()> {
-    let runtime = ghostlight_bridge::runtime::runtime_file();
+    let runtime = ghostlight_bridge::runtime::runtime_file()?;
     match command {
         Command::Path => run_path(&runtime),
         Command::Show {

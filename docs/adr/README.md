@@ -187,6 +187,8 @@ history live here.
 
 | [0166](0166-bounded-desktop-startup-custody.md) | Shared bounded startup admission and retry cooldown, desktop-ready discovery, typed contention, and named OS activation composition | Accepted; native process and installed Alpine acceptance pass |
 
+| [0167](0167-one-user-installation.md) | One production installation per user, durable development/release selection, shared runtime and startup custody, preserved state and authority diagnostics | Accepted; implemented; Windows installed evidence recorded |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

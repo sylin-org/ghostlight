@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, renameSync, rmdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, renameSync, rmdirSync, linkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
+const singleInstallation = process.env.GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION === "1";
+const installationFixture = join(repository, ".tmp", `single-installation-${process.pid}`);
+const selectedBinDir = singleInstallation ? join(installationFixture, "development") : binDir;
+const packageBinDir = singleInstallation ? join(installationFixture, "package") : binDir;
 // ADR-0150: the runtime override elects the authority directory, so it points inside the build
 // under test and the deploy.lock beside it keeps quiescing demand-start.
-const runtimeFile = join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
+const runtimeFile = singleInstallation
+  ? join(installationFixture, "home", ".ghostlight", "ghostlight-runtime.json")
+  : join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
 const runtimeLease = `${runtimeFile.replace(/\.json$/, "")}.lock`;
 const auditBackup = join(repository, `tests/.ghostlight-audit-backup-${process.pid}.jsonl`);
 const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
@@ -19,7 +25,7 @@ const auditException = "PRIVATE_AUDIT_EXCEPTION";
 const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
 const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
 const nativeHostDir = join(repository, `tests/.ghostlight-native-host-${process.pid}`);
-const deployLock = join(binDir, "deploy.lock");
+const deployLock = join(selectedBinDir, "deploy.lock");
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
@@ -30,6 +36,15 @@ const environment = {
   // (ADR-0149 makes recovery repair owned registrations toward the running tree).
   GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
 };
+if (singleInstallation) {
+  delete environment.GHOSTLIGHT_RUNTIME_FILE;
+  Object.assign(environment, {
+    HOME: join(installationFixture, "home"), USERPROFILE: join(installationFixture, "home"),
+    APPDATA: join(installationFixture, "roaming"), LOCALAPPDATA: join(installationFixture, "local"),
+    XDG_CONFIG_HOME: join(installationFixture, "config"), XDG_STATE_HOME: join(installationFixture, "state"),
+    CODEX_HOME: join(installationFixture, "codex")
+  });
+}
 for (const generated of [auditFile, auditBackup, nativeHostDir, diagnosticsDir]) {
   assert.equal(dirname(resolve(generated)), join(repository, "tests"));
 }
@@ -51,7 +66,7 @@ const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
 const MCP_COLD_START_TIMEOUT_MS = SERVICE_STARTUP_TIMEOUT_MS + 10_000;
 
 function executable(name) {
-  const path = join(binDir, `${name}${executableSuffix}`);
+  const path = join(name === "ghostlight" ? selectedBinDir : packageBinDir, `${name}${executableSuffix}`);
   if (!existsSync(path)) throw new Error(`Missing ${path}; build the workspace first.`);
   return path;
 }
@@ -456,6 +471,43 @@ async function waitForNoBrowsers(mcp, timeoutMs = 5000) {
 }
 
 try {
+  if (singleInstallation) {
+    for (const directory of [selectedBinDir, packageBinDir]) {
+      mkdirSync(directory, { recursive: true });
+      for (const name of ["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"]) {
+        linkSync(join(binDir, `${name}${executableSuffix}`), join(directory, `${name}${executableSuffix}`));
+      }
+    }
+    const lifecycle = (directory, ...args) => {
+      const result = spawnSync(join(directory, `ghostlight${executableSuffix}`), args, { env: environment, encoding: "utf8", windowsHide: true, timeout: 15000 });
+      assert.equal(result.status, 0, result.stderr || result.error?.message);
+      return JSON.parse(result.stdout);
+    };
+    const dev = lifecycle(selectedBinDir, "deployment", "development");
+    const release = lifecycle(packageBinDir, "deployment", "release");
+    assert.equal(release.serving_directory, dev.serving_directory);
+    assert.equal(release.policy_directory, dev.policy_directory);
+    const restored = lifecycle(selectedBinDir, "deployment", "restore");
+    assert.equal(restored.serving_directory, release.release_directory);
+    assert.equal(restored.state_directory, dev.state_directory);
+    assert.equal(restored.policy_directory, dev.policy_directory);
+    lifecycle(selectedBinDir, "deployment", "development");
+    // Inactive removal must stop before consulting any registration IO. Do not install into
+    // Windows' shared isolated registry namespace from a parallel process fixture.
+    mkdirSync(nativeHostDir, { recursive: true });
+    writeFileSync(join(nativeHostDir, "registration-sentinel.json"), JSON.stringify({ path: executable("ghostlight-browser-connector") }));
+    const manifests = readdirSync(nativeHostDir, { recursive: true }).filter((name) => name.endsWith(".json"));
+    assert.ok(manifests.length > 0);
+    const before = manifests.map((name) => readFileSync(join(nativeHostDir, name), "utf8"));
+    const inactiveRemoval = spawnSync(join(packageBinDir, `ghostlight${executableSuffix}`), ["native-host", "uninstall"], { env: environment, encoding: "utf8", windowsHide: true, timeout: 15000 });
+    assert.equal(inactiveRemoval.status, 0, inactiveRemoval.stderr);
+    assert.deepEqual(manifests.map((name) => readFileSync(join(nativeHostDir, name), "utf8")), before);
+    const packageDoctor = lifecycle(packageBinDir, "doctor", "--json");
+    assert.equal(packageDoctor.installation.source, "development");
+    assert.equal(resolve(packageDoctor.installation.runtime_file), resolve(runtimeFile));
+    assert.equal(packageDoctor.installation.selection.serving_directory, dev.serving_directory);
+    console.log("single installation: package CLI and both foreign connectors select development without a runtime override");
+  }
   rmSync(runtimeFile, { force: true });
   rmSync(auditFile, { force: true, recursive: true });
   rmSync(auditBackup, { force: true });
@@ -512,6 +564,13 @@ try {
   const browserHello = await native.next();
   assert.equal(browserHello.kind, "hello_accepted");
   assert.equal(browserHello.control_state, "active");
+  if (singleInstallation) {
+    const concurrentLaunches = Array.from({ length: 3 }, () => start(join(packageBinDir, `ghostlight${executableSuffix}`)));
+    await Promise.all(concurrentLaunches.map((child) => waitForExit(child, 20000)));
+    assert.equal(JSON.parse(readFileSync(runtimeFile, "utf8")).token, endpoint.token);
+    assert.equal(existsSync(join(packageBinDir, "ghostlight-runtime.json")), false);
+    console.log("single installation: restore preserves state; inactive uninstall preserves native registration; concurrent foreign desktop launches reuse the authority");
+  }
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
   assert.deepEqual(await native.next(), { kind: "control_state", state: "held", diagnostics: { layer: "explicit" } });
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
@@ -1194,6 +1253,7 @@ try {
   for (const child of children.reverse()) {
     if (!child.killed) child.kill();
   }
+  await Promise.all(children.map((child) => waitForExit(child)));
   rmSync(runtimeFile, { force: true });
   rmSync(nativeHostDir, { force: true, recursive: true });
   rmSync(auditFile, { force: true, recursive: true });
@@ -1202,4 +1262,8 @@ try {
   rmSync(diagnosticsDir, { recursive: true, force: true });
   if (createdDeployLock) rmSync(deployLock, { force: true });
   rmSync(runtimeLease, { force: true });
+  // Retain the isolated installation as evidence, like the other installed lanes. Windows
+  // WebView profile cleanup is not a reliable synchronous operation after desktop termination.
+  // Child exit above is mandatory; retaining files must never conceal a live test authority.
+  if (singleInstallation) console.log(`single-installation evidence retained: ${installationFixture}`);
 }

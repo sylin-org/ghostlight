@@ -14,6 +14,18 @@ const USER_POLICY_FILE: &str = "user-policy.json";
 /// The per-user state directory, when this environment names one.
 #[must_use]
 pub(super) fn state_directory() -> Option<PathBuf> {
+    if env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_none() {
+        if let Some(record) = ghostlight_bridge::installation::production_runtime()
+            .ok()
+            .and_then(|runtime| {
+                ghostlight_bridge::installation::read(&runtime)
+                    .ok()
+                    .flatten()
+            })
+        {
+            return Some(record.policy_directory);
+        }
+    }
     #[cfg(target_os = "windows")]
     {
         env::var_os("LOCALAPPDATA")
