@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Chrome adapter [1.1.6] - 2026-09-13
 
-Prepared for Chrome Web Store submission. Adapter 1.1.5 was the local investigation
-version; 1.1.6 carries the verified correction. Service versions are unchanged.
+Submitted to the Chrome Web Store and pending Google review, with automatic publication
+after approval. Adapter 1.1.5 was the local investigation version; 1.1.6 carries the
+verified correction. Service versions are unchanged. Public adapter remains 1.1.4.
 
 ### Fixed
 

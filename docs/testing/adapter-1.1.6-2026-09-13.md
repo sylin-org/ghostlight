@@ -1,6 +1,6 @@
 # Adapter 1.1.6 custody -- 2026-09-13
 
-Status: Prepared; upload and submission not yet performed.
+Status: Submitted; Google review pending. Automatic publication is enabled after approval.
 
 The owner authorized a version bump and submission to Google Chrome for deployment.
 The source version advances from local investigation build 1.1.5 to 1.1.6. The
@@ -13,6 +13,7 @@ changes are included.
 - Path: `dist/ghostlight-extension-v1.1.6.zip`.
 - SHA-256: `3779689cd12ccd2f3b0d012144710026c61fe6f65ec0d63cf1663f8829b22eef`.
 - Implementation commit: `f82793ea`.
+- Release source commit: `21aa99b08197c3cb5272ae867ea879b0b099f875`.
 - The existing deterministic packager reproduced the same ZIP hash twice. All 39
   non-manifest entries match their source files byte-for-byte. The packager checks
   the complete allowed surface, license files, version, and removed development key.
@@ -37,8 +38,17 @@ file. No secrets belong in this record. Item: `lejccfmoeogmhemakeknjjdhkfkgncdl`
 
 - Plan: API ready; version and SHA-256 match the artifact above.
 - Before upload: public 1.1.4 PUBLISHED at 100 percent, no submitted revision.
-- Intended publish type: DEFAULT_PUBLISH, because the owner authorized deployment.
+- Upload: SUCCEEDED, draft version 1.1.6.
+- Submit: PENDING_REVIEW, publish type DEFAULT_PUBLISH.
+- Independent status read on 2026-09-13 at 17:11 UTC: submitted 1.1.6 PENDING_REVIEW
+  at 100 percent distribution; public 1.1.4 PUBLISHED at 100 percent distribution.
+- Selected publish type: DEFAULT_PUBLISH, because the owner authorized deployment.
   Google review remains required; approval permits automatic public publication.
+
+The Status script prints its default PublishType argument (STAGED_PUBLISH) before
+the API response; this is not an observed submission setting. The actual Submit
+request and response above used DEFAULT_PUBLISH. No cancellation or review bypass
+was requested.
 
 No service package, npm, GitHub release, or parallel local deployment is included.
 Public delivery must be observed independently before updating public version claims.

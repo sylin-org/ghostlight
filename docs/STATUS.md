@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.6 prepared for Chrome submission).
+Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.6 pending Google review).
 
 ## Chrome adapter 1.1.6 release (2026-09-13)
 
@@ -9,8 +9,10 @@ the locally verified 1.1.5 fixes below. The deterministic ZIP reproduces exactly
 all 39 non-manifest payload entries match source. The 265 extension tests, Rust
 formatting, Clippy, workspace tests, JavaScript syntax, and offline public/integrity
 checks pass. Compatibility remains service 1.3.4-1.3.6; service versions and browser
-permissions are unchanged. Chrome's API reports public 1.1.4 and no pending review.
-The intended submission uses DEFAULT_PUBLISH, enabling deployment after approval.
+permissions are unchanged. Upload returned SUCCEEDED for 1.1.6. Submission returned
+PENDING_REVIEW with DEFAULT_PUBLISH, enabling deployment after approval. An independent
+API status read at 17:11 UTC confirmed submitted 1.1.6 PENDING_REVIEW at 100 percent
+distribution and public 1.1.4 PUBLISHED. The release source commit is `21aa99b0`.
 See the [custody record](testing/adapter-1.1.6-2026-09-13.md) for artifact identity
 and submission evidence. Public metadata remains at the observed 1.1.4.
 
