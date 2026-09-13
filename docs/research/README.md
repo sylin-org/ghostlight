@@ -79,6 +79,11 @@ The Linux packaging expansion shortlist is recorded in
 evidence, OS/desktop candidate matrix, current implementation limits, and proposed machine/package
 priorities. It is research input, not a support declaration or new release gate.
 
+The clean-room [ChatGPT browser extension package study](28-chatgpt-browser-extension-2026-09.md)
+records the exact official CRX identity, the extension/native-runtime boundary, the live retained
+form behavior, and lifecycle practices worth evaluating. It copies no package source and makes no
+product decision.
+
 The project-agnostic practitioner artifact derived from Research 20 is
 [Getting an open-source project out and about](../guides/open-source-publication.md). It turns the
 case findings into a reusable end-to-end publication, adoption, community, security, funding, and

@@ -120,6 +120,14 @@ render and observes the original value return. The Ghostlight fill must update t
 through trusted native input and survive the same later render, for both an input and textarea,
 with zero submissions. Unit coverage also pins the single native edit and refusal behavior.
 
+At the owner's request, the exact official ChatGPT Chrome extension v1.26.901.11451 was downloaded
+from Google's update service and inspected outside the repository. It exposes `set_value`,
+`type_text`, and Playwright locator-fill commands, but delegates locator execution to the native
+OpenAI runtime and provides a generic CDP relay. The package therefore confirms the layered
+control boundary but does not disclose the host-side fill algorithm. The package identity, hash,
+clean-room limits, and transferable lifecycle findings are in
+[Research 28](../research/28-chatgpt-browser-extension-2026-09.md).
+
 The extension source has not been reloaded into the installed adapter. The published adapter
 version and reviewed release artifacts are unchanged. Formatting, warnings-denied Clippy, the full
 Rust workspace, changed JavaScript syntax, and all 242 extension tests pass. The isolated

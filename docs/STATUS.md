@@ -24,6 +24,11 @@ rich-editor path. A controlled-form fixture rejects the former setter/event mech
 later model render, and requires native edits and retained values without submission. The 242-test
 extension suite passes. Formatting, warnings-denied Clippy, the full Rust workspace, changed
 JavaScript syntax, and the 69-check Chrome/MV3 frame journey also pass.
+The exact official ChatGPT Chrome extension v1.26.901.11451 was also downloaded from the Chrome Web
+Store update service and inspected outside the repository. It delegates Playwright-style locator
+fill to the native OpenAI runtime, so its package does not reveal the fill algorithm. Its exact
+hash, clean-room boundary, and reusable lifecycle findings are recorded in
+[Research 28](research/28-chatgpt-browser-extension-2026-09.md).
 Temporary probes and test values were removed; nothing was submitted. The installed extension
 has not been reloaded. Verification and the reproduction handoff are recorded in the
 [investigation note](testing/form-reset-diagnostics-2026-09-12.md).
