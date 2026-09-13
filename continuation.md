@@ -1,7 +1,9 @@
 # Continuation record: retained form-fill fix verified
 
 The implementation and installed verification are complete. The older handoff is preserved below
-as investigation history; do not restart its superseded experiments. Publication is not authorized.
+as investigation history; do not restart its superseded experiments. The owner subsequently
+authorized a version bump and Chrome Web Store deployment on September 13. Adapter 1.1.6
+release progress is recorded in docs/STATUS.md.
 
 ## September 13 implementation update -- scoped focus approved
 

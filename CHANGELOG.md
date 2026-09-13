@@ -5,6 +5,23 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Chrome adapter [1.1.6] - 2026-09-13
+
+Prepared for Chrome Web Store submission. Adapter 1.1.5 was the local investigation
+version; 1.1.6 carries the verified correction. Service versions are unchanged.
+
+### Fixed
+
+- Preserve controlled form drafts across tab switches while Ghostlight control is
+  active, by emulating focus on retained tabs. Restore ordinary focus behavior on
+  pause, stop, disconnect, and release.
+- Recover controlled-tab ownership on explicit agent work after extension reload.
+- Use native browser input for form replacement and semantic clicks, with complete
+  keyboard descriptors and readback. Improve opt-in form diagnostics.
+
+No new browser permissions. Compatibility remains service 1.3.4-1.3.6. Sites can
+still reset unsaved drafts after Ghostlight control ends.
+
 ## [1.3.6] - 2026-09-12
 
 Published as GitHub release `v1.3.6`, npm package `ghostlight@1.3.6`, and MCP Registry version

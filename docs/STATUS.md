@@ -1,6 +1,18 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.5 verified locally).
+Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.6 prepared for Chrome submission).
+
+## Chrome adapter 1.1.6 release (2026-09-13)
+
+The owner authorized the version bump and Chrome deployment. Adapter 1.1.6 carries
+the locally verified 1.1.5 fixes below. The deterministic ZIP reproduces exactly;
+all 39 non-manifest payload entries match source. The 265 extension tests, Rust
+formatting, Clippy, workspace tests, JavaScript syntax, and offline public/integrity
+checks pass. Compatibility remains service 1.3.4-1.3.6; service versions and browser
+permissions are unchanged. Chrome's API reports public 1.1.4 and no pending review.
+The intended submission uses DEFAULT_PUBLISH, enabling deployment after approval.
+See the [custody record](testing/adapter-1.1.6-2026-09-13.md) for artifact identity
+and submission evidence. Public metadata remains at the observed 1.1.4.
 
 ## Controlled-tab focus implementation (2026-09-13)
 
