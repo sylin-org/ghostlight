@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js", "lib/connection-log.js");
+importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js", "lib/connection-log.js", "lib/form-diagnostics.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
@@ -31,6 +31,8 @@ const connectionLog = globalThis.GhostlightConnectionLog.create({
     extension_id: chrome.runtime.id, browser_version: navigator.userAgent }
 });
 connectionLog.record(connectionEvents.WORKER_STARTED);
+const formDiagnosticsApi = globalThis.GhostlightFormDiagnostics;
+const formLog = formDiagnosticsApi.createLog({ storage: chrome.storage.local, debugKey: stateApi.DEBUG_KEY });
 let connectionAttemptNumber = 0;
 const operationEngine = globalThis.GhostlightOperationEngine.create({
   load: async () => (await chrome.storage.session.get(stateApi.OPERATIONS_KEY))[stateApi.OPERATIONS_KEY],
@@ -597,7 +599,7 @@ async function dispatch(request) {
     if (await tabPreservationEnabled()) {
       // A released close comes from a dead workspace: the person's interlock keeps the tab, and
       // the tab is no longer owned by anything, so it becomes adoptable again (ADR-0137).
-      if (command.released) topology.forget(command.tab_id).catch(() => {});
+      if (command.released) topology.forget(command.tab_id).then(() => syncFormDiagnostics(command.tab_id)).catch(() => {});
       throw Object.assign(
         new Error("Ghostlight is preserving controlled tabs by local browser choice."),
         { code: "local_interlock" }
@@ -1234,6 +1236,7 @@ async function setRecordingPresentation(tabId, active) {
 }
 
 async function syncPresentationState(tabId) {
+  await syncFormDiagnostics(tabId);
   await content(tabId, { kind: "managed_scope", active: true }, true);
   await setRecordingPresentation(tabId, Boolean(recording.activeForTab(tabId)));
 }
@@ -1254,6 +1257,7 @@ async function applyRuntimeState(controlState) {
   if (controlState === "ended") {
     await debuggerLifecycle.detachAll();
   }
+  refreshFormDiagnostics().catch(() => {});
   await broadcastRuntimeState(controlState);
 }
 
@@ -1287,6 +1291,7 @@ async function openTab(correlation, workspace, command) {
           await chrome.windows.update(openedTab.windowId, { focused: true });
         }
         await retainManagedDebugger(openedTab.id);
+        syncFormDiagnostics(openedTab.id).catch(() => {});
         const landed = await waitForReady(openedTab.id, correlation);
         return { outcome: "tab_opened", tab: physicalTab(landed), committed_urls: commits, reused: true };
       }
@@ -1296,6 +1301,7 @@ async function openTab(correlation, workspace, command) {
       navigationWatchers.set(tab.id, { correlation, commits });
     });
     await retainManagedDebugger(openedTab.id);
+    syncFormDiagnostics(openedTab.id).catch(() => {});
     const landed = await waitForReady(openedTab.id, correlation);
     return { outcome: "tab_opened", tab: physicalTab(landed), committed_urls: commits };
   } catch (error) {
@@ -2050,6 +2056,31 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
+// Developer tracing is an adapter-local observation, not a browser action. It
+// neither discovers/adopts tabs nor sends a native event or page payload.
+function formDiagnosticsEnabled(tabId) {
+  return preferences.diagnostics && liveState.control_state !== "ended" && Boolean(topology.workspaceFor(tabId));
+}
+
+function formDiagnosticsSender(sender) {
+  return sender?.id === chrome.runtime.id && sender.frameId === frames.TOP_FRAME_ID
+    && formDiagnosticsApi.validIdentity({ tab_id: sender.tab?.id, document_id: sender.documentId });
+}
+
+async function syncFormDiagnostics(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      kind: formDiagnosticsApi.STATE_MESSAGE_KIND, enabled: formDiagnosticsEnabled(tabId)
+    }, { frameId: frames.TOP_FRAME_ID });
+  } catch { /* Old or unloaded documents have no receiver; never reload a draft. */ }
+}
+
+async function refreshFormDiagnostics() {
+  // Include released tabs so an old observer can be stopped on the next toggle.
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(tabs.filter(tab => Number.isInteger(tab.id)).map(tab => syncFormDiagnostics(tab.id)));
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Encoder traffic belongs to the offscreen document. Answering it here would race the real
   // handler and turn a working encode into "Unknown extension message."
@@ -2057,9 +2088,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   Promise.resolve().then(async () => {
     if (message?.kind === "ui_state_changed") return null;
     if (message?.kind === "ui_snapshot") return uiSnapshot();
+    if (message?.kind === formDiagnosticsApi.STATE_MESSAGE_KIND) {
+      return { enabled: formDiagnosticsSender(_sender) && formDiagnosticsEnabled(_sender.tab.id) };
+    }
+    if (message?.kind === formDiagnosticsApi.MESSAGE_KIND) {
+      if (formDiagnosticsSender(_sender) && formDiagnosticsEnabled(_sender.tab.id)) {
+        // Sender tab/document identity is supplied by Chromium, never by the page row.
+        await formLog.record(message.row, { tab_id: _sender.tab.id, document_id: _sender.documentId });
+      }
+      return null;
+    }
     if (message?.kind === "connection_diagnostics") {
-      if (_sender.url !== chrome.runtime.getURL("options.html")) throw new Error("Open extension options to export connection diagnostics.");
-      return connectionLog.snapshot();
+      if (_sender.id !== chrome.runtime.id || _sender.url !== chrome.runtime.getURL("options.html")) throw new Error("Open extension options to export developer diagnostics.");
+      return { ...await connectionLog.snapshot(), form_diagnostics: await formLog.snapshot() };
     }
     if (message?.kind === "runtime_control") {
       requestRuntimeControl(message.intent);
@@ -2097,6 +2138,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       preferences = stateApi.preferences(message.preferences);
       await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
       await connectionLog.setEnabled(preferences.diagnostics);
+      await formLog.setEnabled(preferences.diagnostics);
+      refreshFormDiagnostics().catch(() => {});
       connectionLog.record(connectionEvents.PREFERENCES_CHANGED);
       return preferences;
     }

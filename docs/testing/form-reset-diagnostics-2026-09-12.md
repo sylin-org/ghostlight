@@ -1,0 +1,83 @@
+# Unsaved form reset investigation
+
+Date: 2026-09-12. Status: diagnostic instrumentation; cause not established.
+
+## Observed reproduction
+
+The owner requested a test draft at `hackathon.genai.works/profile#profile`, with no submission.
+Ghostlight reused the existing tab but returned `document_unavailable` for inspection,
+screenshots, and diagnostics. CUA could inspect the same tab and filled empty profile fields
+with sample values. A screenshot and accessibility state showed the unsaved draft. After the
+owner switched to another browser tab, returned, and clicked a field, the draft disappeared.
+A subsequent inspection showed the original saved profile and empty previously edited fields.
+
+This establishes the reported reset after a CUA fill. It does not establish a Ghostlight fill
+defect, a particular framework event mismatch, or a page refetch/reinitialization cause.
+No submission, page setter patch, application-state replacement, or profile save was performed.
+
+## Instrumentation
+
+The existing extension Developer diagnostics preference controls a separate local structural
+form trace in already-controlled top documents. It is independent of the native connection,
+the process diagnostics marker, and `browser_diagnose` page console/network capture.
+
+- Up to 100 ordinary controls; ten minutes per activation; 250 ms checks for changes.
+- At most 400 persisted rows, re-projected on restoration and export.
+- Focus, visibility, pagehide/pageshow, reset, empty-state and node-set changes.
+- Coalesced input/beforeinput/change flags, including trusted versus synthetic input evidence.
+- Explicit Ghostlight fill/type/clear start and completion markers.
+- Chromium tab/document identifiers, closed states, counts, and times only.
+- No values, lengths/hashes, labels, selectors, page URLs, event data/keys, or page logs.
+
+Credential controls are excluded. Observers never write to the page, intercept page setters,
+dispatch events, or move focus. New rows stop when disabled or ownership is released; old
+rows remain available for the local export. ADR-0145 records the narrow metadata scope.
+
+The trace detects nonempty-to-empty changes and control replacement. It does not compare
+nonempty text or identify a framework state owner. Input flags indicate observations between
+checkpoints, not definitive attribution. Embedded-frame forms are outside this trace.
+
+## Reproduce with the owner
+
+1. Reload the unpacked source extension. Refresh the profile only after confirming there is
+   no draft to preserve; extension reload alone does not reinject existing documents.
+2. Open/adopt the profile through Ghostlight so it is a controlled tab. No save or submit.
+3. In Ghostlight extension Options, turn on Developer diagnostics. This is separate from the
+   popup's Process diagnostics log. The owner is enabling this flag.
+4. Fill the test draft, switch browser tabs, return, and click a field. Also compare a small
+   draft typed natively, with the same focus transition, without submitting either draft.
+5. Choose Save developer diagnostics in Options. The JSON contains `form_diagnostics` beside
+   the connection report. Turn the flag off afterwards. Off/on starts a fresh observation
+   period if ten minutes have elapsed.
+
+Use document identity to distinguish a new document from a same-document reset. Inspect the
+empty-state changes and node replacements near window/visibility/focus events and operation
+markers. A missing trace is missing evidence, especially on an old document without a receiver.
+
+## Verification
+
+Formatting, workspace Clippy with warnings denied, all workspace Rust tests, all 241 extension
+tests, changed JavaScript syntax, and diff whitespace checks pass. The extension tests exercise
+the actual worker routing and content initialization race, privacy projection/restoration,
+credential exclusion, bounded retention, expiry, coalescing, cleanup, and failure containment.
+
+A disposable HTTP fixture in the user's normal Chrome ran the observer source. Native typing
+produced trusted input evidence; silent clearing recorded two newly empty controls without
+input flags; replacing two input nodes recorded two additions and two removals. After disabling,
+further native typing left the row count unchanged. Sentinel field contents/attributes were
+absent from the trace and the submission count stayed zero. Browser control did not produce
+actual tab-visibility transitions in this fixture, so that physical lane remains with the owner.
+The temporary fixture tabs and local server were closed.
+
+The owner then requested direct JavaScript instrumentation of the affected live page. The same
+observer was attached temporarily as `window.__ghostlightFormResetProbe`, without changing the
+extension flag or patching page setters. It initially observed 17 ordinary controls, three
+nonempty. Four test fields were refilled without submission; the trace recorded synthetic
+input/change events and seven nonempty controls. The owner's next manual tab-switch/reset is
+pending. `read()` returns only the bounded metadata rows, `stop()` ends observation, and
+`remove()` also removes the temporary global. Automatic observation expires after ten minutes;
+reloading the page removes it. No trace has been exported from the live profile.
+
+The extension source has not been reloaded into the installed adapter. The published adapter
+version and reviewed release artifacts are unchanged. No reset fix or causal attribution is
+claimed.

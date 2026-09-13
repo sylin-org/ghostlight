@@ -21,6 +21,25 @@
   let nextLocator = 1;
   let dragObservation = null;
   let captureMask = null;
+  // Local structural diagnostics never enter the service's work or audit stream.
+  // The worker supplies the human flag and existing tab ownership; only the top
+  // document observes. No page setters or event behavior are changed.
+  const formDiagnosticsApi = globalThis.GhostlightFormDiagnostics;
+  let diagnosticsStateVersion = 0;
+  const formDiagnostics = formDiagnosticsApi.createObserver({
+    document, window,
+    queryControls: () => queryAll("input,textarea,select,[contenteditable='true']"),
+    credentialClass,
+    emit: (row) => chrome.runtime.sendMessage({ kind: formDiagnosticsApi.MESSAGE_KIND, row }).catch(() => {})
+  });
+  if (IS_TOP) {
+    const requestedVersion = diagnosticsStateVersion;
+    chrome.runtime.sendMessage({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND })
+      .then((response) => {
+        if (requestedVersion === diagnosticsStateVersion) formDiagnostics.setEnabled(response?.ok && response.value?.enabled === true);
+      })
+      .catch(() => {});
+  }
 
   function clearCaptureMask() {
     const state = captureMask;
@@ -663,6 +682,12 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.kind === formDiagnosticsApi.STATE_MESSAGE_KIND) {
+      diagnosticsStateVersion++;
+      formDiagnostics.setEnabled(IS_TOP && message.enabled === true);
+      sendResponse({ ok: true, result: { enabled: IS_TOP && message.enabled === true } });
+      return false;
+    }
     // Activation replies before it dispatches. A click whose handler opens a page-blocking
     // dialog (window.prompt, confirm, alert) freezes this page's main thread inside the
     // dispatch, so a reply that waited for the dispatch to finish could never arrive. Every
@@ -689,7 +714,7 @@
     if (message.kind === "fill") {
       try {
         const { elements, submitElement } = prepareFill(message);
-        elements.forEach((element, index) => fillElement(element, message.fields[index].value));
+        formDiagnostics.run("fill", () => elements.forEach((element, index) => fillElement(element, message.fields[index].value)));
         sendResponse({ ok: true, result: { filled_count: message.fields.length, submitted: Boolean(submitElement) } });
         if (submitElement) submitElement.click();
       } catch (error) {
@@ -737,8 +762,8 @@
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "query_semantic") return querySemanticTargets(message);
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
-      if (message.kind === "clear_focused") return clearText(deepestActiveElement());
-      if (message.kind === "type_text") return typeText(resolve(message.locator), message.text, message.clear_first);
+      if (message.kind === "clear_focused") return formDiagnostics.run("clear", () => clearText(deepestActiveElement()));
+      if (message.kind === "type_text") return formDiagnostics.run("type", () => typeText(resolve(message.locator), message.text, message.clear_first));
       if (message.kind === "drop_files") {
         const dropTarget = deepestElementFromPoint(document, message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");
@@ -787,7 +812,7 @@
       }
       if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
       if (message.kind === "focus") { const element = requireActionable(resolve(message.locator), "focus"); const subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center" }); element.focus({ preventScroll: true }); return { focused: true, subject }; }
-      if (message.kind === "clear") return clearText(resolve(message.locator));
+      if (message.kind === "clear") return formDiagnostics.run("clear", () => clearText(resolve(message.locator)));
       if (message.kind === "scroll") {
         let subject = null;
         if (message.locator) { const element = requireActionable(resolve(message.locator), "scroll"); subject = actionSubject(element); element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); }

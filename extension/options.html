@@ -58,12 +58,12 @@
         <div class="row">
           <div class="text">
             <h2>Developer diagnostics</h2>
-            <p>Saves bounded startup, connection, and retry details across browser restarts. Off by default. No page contents are recorded.</p>
+            <p>Saves bounded connection details and form-reset traces in controlled tabs. Form tracing runs for up to 10 minutes per page; turn this off and on to start another trace. Records focus, input activity, and empty-field counts, never field contents. Off by default.</p>
           </div>
           <label class="switch"><input type="checkbox" id="debug" aria-label="Developer diagnostics"><span class="slider"></span></label>
         </div>
         <div class="card-actions">
-          <button id="export-connection-log" class="action-button" type="button">Save connection diagnostics</button>
+          <button id="export-connection-log" class="action-button" type="button">Save developer diagnostics</button>
           <p id="connection-log-status" class="action-status" role="status"></p>
         </div>
       </section>

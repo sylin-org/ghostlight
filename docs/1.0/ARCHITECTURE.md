@@ -493,8 +493,13 @@ correlated event is not proof of agent authorship. The executor governs its requ
 and returned landings at the existing boundaries. ADR-0164 owns this distinction.
 
 The service worker persists only the installation id, adapter-local preferences, enough opaque
-topology to recover after worker suspension, and a bounded content-free operation disposition
-journal. URLs, page content, form values, scripts, file data, screenshots, receipts, and policy are
+topology to recover after worker suspension, a bounded content-free operation disposition
+journal, and opt-in structural developer diagnostics (ADR-0145). The developer flag enables
+connection evidence plus a separate 400-record form trace in already-controlled top documents.
+Form observation stops after ten minutes or when disabled/released, examines at most 100 ordinary
+controls, and retains only emptiness/node counts and coalesced input/focus/lifecycle flags. It
+never patches page behavior or turns human browsing into service work. The Options export
+includes both local rings. URLs, page content, form values, scripts, file data, screenshots, receipts, and policy are
 never stored. Popup status is derived from live native connection state, relay availability, and
 service-published control state. The service's negotiated heartbeat supplies the end-to-end
 availability fact and ordinary local traffic that keeps the idle adapter shore observable. The

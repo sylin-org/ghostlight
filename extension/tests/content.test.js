@@ -210,7 +210,8 @@ function contentHarness() {
   }
 
   const context = {
-    chrome: { runtime: { onMessage: { addListener(value) { listener = value; } } } },
+    chrome: { runtime: { sendMessage: async () => ({ ok: true, value: { enabled: false } }),
+      onMessage: { addListener(value) { listener = value; } } } },
     document,
     location: { href: "https://example.test/" },
     window: {
@@ -261,6 +262,7 @@ function contentHarness() {
       ...sharedModule,
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
+    GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},

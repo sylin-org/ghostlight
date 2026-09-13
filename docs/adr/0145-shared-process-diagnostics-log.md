@@ -18,6 +18,36 @@
 
 ## Context
 
+### Amendment: opt-in structural form tracing (2026-09-12)
+
+The owner reproduced an unsaved profile draft disappearing after switching browser tabs
+and requested debugging points behind the extension's existing Developer diagnostics flag.
+The reproduced fill used another browser adapter after Ghostlight document inspection failed;
+this is not evidence that Ghostlight caused the reset.
+
+That flag may also enable a bounded, browser-local structural form trace in already-controlled
+top-level documents. Keep at most 400 projected records in a separate local ring. Observe at
+most 100 ordinary controls for ten minutes per activation, with a 250 ms change check. A live
+off/on toggle starts another trace. Record only closed lifecycle/operation events, Chromium
+tab/document identity, times, counts, visibility/focus states, and coalesced input-event flags.
+Compare emptiness and node identity only. Never retain values, value lengths/hashes, DOM names,
+labels, selectors, URLs, event data/keys, page exceptions, or console/network payloads. Credential
+controls are excluded before their values are read.
+
+The observer never patches setters, dispatches events, changes focus, or restores a value.
+Turning the flag off or releasing the controlled tab stops observation. The content script and
+worker project the closed metadata separately; sender identity and existing tab ownership are
+checked at the worker. Sink failures cannot fail form operations. The existing Options export
+includes this ring, even while the service is disconnected. No native event, tool invocation,
+governance decision, action history, ownership, or presentation arises from passive observation
+(ADR-0164). The separate `browser_diagnose` console/network ring remains volatile (ADR-0107).
+
+This trace can show that controls became empty, disappeared, or were replaced near a focus
+transition or Ghostlight operation. It cannot identify a framework's authoritative state or
+attribute a programmatic reset to a particular page script. Nonempty-to-nonempty value changes
+and embedded-frame forms are outside its scope. Extension reload still requires a fresh page
+document before content-script observation is available; never refresh an unsaved draft blindly.
+
 ### Amendment: failed native startup before a service connection (2026-09-08)
 
 The owner requested persistent diagnostics across a reboot after Chromium repeatedly reported

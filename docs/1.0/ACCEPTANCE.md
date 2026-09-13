@@ -294,6 +294,14 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 10. No extension storage key contains URL, title, page text, target name, locator, form value,
    script, file path, file bytes, screenshot, recording frame, GIF, dialog text, console entry,
    network entry, or policy.
+11. Developer diagnostics form tracing stays off by default, observes only already-controlled
+    top documents, stops on disable/release or after ten minutes, and examines at most 100
+    ordinary controls. Empty-state changes, control replacement, reset/focus/visibility events,
+    and explicit Ghostlight fill/type/clear boundaries produce only closed structural metadata.
+    Input activity is coalesced without per-key counts. Credential values are never read;
+    unique values, attribute names, event data, and key sentinels never enter the 400-record
+    persisted/exported ring. Storage or observer failure cannot change an action's return or
+    throw, focus, form values, or submission count. Passive traces never become service work.
 
 ## Desktop workbench gates
 
