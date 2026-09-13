@@ -73,6 +73,17 @@ test("form text fill uses document-local focus and complete keyboard packets bef
   assert.equal(calls.at(-1).kind, "detach");
 });
 
+test("multiline fill preserves Enter character payload only on key down", async () => {
+  const { calls, sandbox } = fixture();
+  await sandbox.fill("fill", { tab_id: 7, fields: [{ locator: "locator_1", value: "A\r\n\rB\n" }] });
+  const enter = calls.filter(call => call.kind === "Input.dispatchKeyEvent" && call.params.key === "Enter");
+  assert.equal(enter.length, 6);
+  assert.ok(enter.filter(call => call.params.type === "keyDown")
+    .every(call => call.params.text === "\r" && call.params.unmodifiedText === "\r"));
+  assert.ok(enter.filter(call => call.params.type === "keyUp")
+    .every(call => !Object.hasOwn(call.params, "text") && !Object.hasOwn(call.params, "unmodifiedText")));
+});
+
 test("failed text focus stops keyboard input and releases the debugger", async () => {
   const { calls, sandbox } = fixture();
   const contentIn = sandbox.contentIn;

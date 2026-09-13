@@ -123,7 +123,7 @@ test("modifier masks match the CDP vocabulary", () => {
 });
 
 test("named keys receive physical CDP codes", () => {
-  assert.deepEqual(shared.keyDescriptor("Enter"), { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+  assert.deepEqual(shared.keyDescriptor("Enter"), { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
   assert.deepEqual(shared.keyDescriptor("x"), { key: "x", code: "KeyX", windowsVirtualKeyCode: 88, nativeVirtualKeyCode: 88, text: "x", unmodifiedText: "x" });
   assert.deepEqual(shared.keyDescriptor("G"), { key: "G", code: "KeyG", windowsVirtualKeyCode: 71, nativeVirtualKeyCode: 71, modifiers: 8, text: "G", unmodifiedText: "g" });
   assert.deepEqual(shared.keyDescriptor("7"), { key: "7", code: "Digit7", windowsVirtualKeyCode: 55, nativeVirtualKeyCode: 55, text: "7", unmodifiedText: "7" });

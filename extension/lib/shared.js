@@ -88,7 +88,11 @@
     };
     if (named[key]) {
       const [code, virtualKey] = named[key];
-      return { key: key === "Space" ? " " : key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey };
+      // Chromium needs Enter's character payload to perform its editing default action.
+      // A physical key packet alone fires keyboard events but drops textarea line breaks.
+      const text = key === "Enter" ? "\r" : undefined;
+      return { key: key === "Space" ? " " : key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey,
+        ...(text === undefined ? {} : { text, unmodifiedText: text }) };
     }
     const shiftBase = {
       "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",

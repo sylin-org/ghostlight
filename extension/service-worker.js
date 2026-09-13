@@ -1502,7 +1502,7 @@ async function replaceFocusedText(tabId, frameId, value) {
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...selectAll, modifiers: 2 }, frameId);
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...control }, frameId);
 
-  const text = String(value).replaceAll("\r\n", "\n");
+  const text = String(value).replace(/\r\n?/g, "\n");
   const characters = Array.from(text);
   if (!characters.length) characters.push("Backspace");
   for (const character of characters) {

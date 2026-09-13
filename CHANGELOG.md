@@ -5,6 +5,18 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Chrome adapter [1.1.7] - 2026-09-13
+
+Prepared to replace the pending 1.1.6 Chrome submission with the multiline correction.
+Service versions and browser permissions are unchanged.
+
+### Fixed
+
+- Preserve textarea line breaks during native form filling. Enter now carries the
+  character payload Chromium requires.
+- Normalize Windows and lone-carriage-return line endings consistently during
+  textarea input and value verification.
+
 ## Chrome adapter [1.1.6] - 2026-09-13
 
 Submitted to the Chrome Web Store and pending Google review, with automatic publication

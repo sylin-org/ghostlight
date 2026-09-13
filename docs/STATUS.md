@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.6 pending Google review).
 
+## Multiline input correction (2026-09-13)
+
+A subsequent agent report exposed missing textarea line breaks in the 1.1.6 code.
+The production replacement function reproduced `First job\nSecond job` as
+`First jobSecond job` in Chromium. Enter lacked its CDP character payload. The
+shared descriptor now includes it, and textarea readback normalizes CRLF/lone CR
+consistently with browser editing. All 267 extension tests and six real Chromium
+replacement cases pass, including leading/trailing/blank lines, CRLF, lone CR,
+single-line text and clearing. Every case checks DOM, an input-listener model,
+trusted input, blur and no submission. This is a component browser test, not a
+new installed-profile acceptance claim. No user profile was changed by the test.
+
+Adapter 1.1.7 is prepared to replace our pending 1.1.6 submission under the owner's
+existing deployment authorization. See the [custody record](testing/adapter-1.1.7-2026-09-13.md).
+
 ## Chrome adapter 1.1.6 release (2026-09-13)
 
 The owner authorized the version bump and Chrome deployment. Adapter 1.1.6 carries

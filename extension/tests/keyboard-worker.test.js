@@ -70,3 +70,14 @@ test("plain printable keys keep their text packet", async () => {
 
   assert.equal(calls[0].params.text, "x");
 });
+
+test("Enter preserves its editing payload while shortcut and key-up packets omit it", async () => {
+  for (const modifiers of [[], ["Shift"], ["Control"]]) {
+    const { calls, sandbox } = fixture();
+    sandbox.shared = require("../lib/shared.js");
+    await sandbox.pressKey("press", { tab_id: 7, key: "Enter", modifiers });
+    assert.equal(calls[0].params.text, modifiers.includes("Control") ? undefined : "\r");
+    assert.equal(Object.hasOwn(calls[1].params, "text"), false);
+    assert.equal(Object.hasOwn(calls[1].params, "unmodifiedText"), false);
+  }
+});

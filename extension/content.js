@@ -613,7 +613,8 @@
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
     }
-    return String(value);
+    // The textarea API normalizes both CRLF and lone CR to LF.
+    return element instanceof HTMLTextAreaElement ? String(value).replace(/\r\n?/g, "\n") : String(value);
   }
 
   async function verifyStableFillValue(element, value) {
