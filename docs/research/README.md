@@ -84,6 +84,12 @@ records the exact official CRX identity, the extension/native-runtime boundary, 
 form behavior, and lifecycle practices worth evaluating. It copies no package source and makes no
 product decision.
 
+The [form-retention and focus study](29-form-retention-focus-and-frameworks-2026-09.md) corrects
+the initial input-only diagnosis with actual form-model evidence, the observed Codex focus
+emulation difference, and matching Playwright, React Hook Form, and WebMCP reports. Its controlled
+follow-up identifies a site-triggered reset that affects both tools under normal tab lifecycle.
+The site remains unchanged.
+
 The project-agnostic practitioner artifact derived from Research 20 is
 [Getting an open-source project out and about](../guides/open-source-publication.md). It turns the
 case findings into a reusable end-to-end publication, adoption, community, security, funding, and

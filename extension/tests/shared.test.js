@@ -19,34 +19,6 @@ test("credential metadata is classified without inspecting values", () => {
   assert.equal(shared.isCredentialMetadata({ type: "text", name: "display_name" }), false);
 });
 
-test("a plain primary click plans the native dispatch", () => {
-  assert.deepEqual(shared.activationPlan({ button: "primary", click_count: 1, modifiers: [] }), { native: true, clicks: [] });
-});
-
-test("modified and repeated clicks plan synthetic events with the right geometry", () => {
-  const double = shared.activationPlan({ button: "primary", click_count: 2, modifiers: [] });
-  assert.equal(double.native, false);
-  assert.equal(double.clicks.length, 2);
-  for (const init of double.clicks) {
-    assert.equal(init.button, 0);
-    assert.equal(init.detail, 2);
-    assert.equal(init.bubbles, true);
-    assert.equal(init.cancelable, true);
-    assert.equal(init.composed, true);
-  }
-  const right = shared.activationPlan({ button: "right", click_count: 1, modifiers: [] });
-  assert.deepEqual(right.clicks, [{ bubbles: true, cancelable: true, composed: true, button: 2, detail: 1, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }]);
-  const middle = shared.activationPlan({ button: "middle", click_count: 3, modifiers: [] });
-  assert.equal(middle.clicks.length, 3);
-  assert.ok(middle.clicks.every((init) => init.button === 1 && init.detail === 3));
-});
-
-test("modifier keys ride every planned synthetic click", () => {
-  const plan = shared.activationPlan({ button: "primary", click_count: 1, modifiers: ["Control", "Shift"] });
-  assert.equal(plan.native, false);
-  assert.deepEqual(plan.clicks, [{ bubbles: true, cancelable: true, composed: true, button: 0, detail: 1, ctrlKey: true, metaKey: false, shiftKey: true, altKey: false }]);
-});
-
 test("presentation labels are fixed and content-free", () => {
   assert.equal(shared.presentationLabel("start"), "Ghostlight starting");
   assert.equal(shared.presentationLabel("attention"), "Ghostlight needs you");
@@ -152,7 +124,9 @@ test("modifier masks match the CDP vocabulary", () => {
 
 test("named keys receive physical CDP codes", () => {
   assert.deepEqual(shared.keyDescriptor("Enter"), { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
-  assert.deepEqual(shared.keyDescriptor("x"), { key: "x", text: "x" });
+  assert.deepEqual(shared.keyDescriptor("x"), { key: "x", code: "KeyX", windowsVirtualKeyCode: 88, nativeVirtualKeyCode: 88, text: "x", unmodifiedText: "x" });
+  assert.deepEqual(shared.keyDescriptor("G"), { key: "G", code: "KeyG", windowsVirtualKeyCode: 71, nativeVirtualKeyCode: 71, modifiers: 8, text: "G", unmodifiedText: "g" });
+  assert.deepEqual(shared.keyDescriptor("7"), { key: "7", code: "Digit7", windowsVirtualKeyCode: 55, nativeVirtualKeyCode: 55, text: "7", unmodifiedText: "7" });
 });
 
 test("drag packets hold the left button through movement and always release", () => {
@@ -365,12 +339,13 @@ test("browser actions return the subject in the effect receipt without a describ
   const content = readFileSync(join(root, "content.js"), "utf8");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
 
-  assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject \} \}\)/);
+  assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject, rectangle: viewportRectangle\(element\) \} \}\)/);
   assert.match(
-    content,
-    /sendResponse\(\{ ok: true, result: \{ activated: true, subject \} \}\)[\s\S]*?element\.click\(\)/,
-    "the activation reply must cross to the worker before the blocking dispatch runs"
+    worker,
+    /async function activate\([\s\S]*?await dispatchClick\([\s\S]*?subject: result\.subject/,
+    "target activation must use a trusted browser pointer and retain the resolved subject"
   );
+  assert.doesNotMatch(content.slice(content.indexOf('if (message.kind === "activate")'), content.indexOf('if (message.kind === "fill")')), /element\.click\(\)|dispatchEvent/);
   assert.match(
     content,
     /sendResponse\(\{ ok: true, result: \{ filled_count: message\.fields\.length, submitted: Boolean\(submitElement\) \} \}\)[\s\S]*?submitElement\.click\(\)/,
@@ -544,7 +519,7 @@ test("model-driven close obeys the local preserve-tabs interlock", () => {
   // it later (ADR-0137).
   assert.match(
     worker,
-    /if \(command\.released\) topology\.forget\(command\.tab_id\)[\s\S]*?code: "local_interlock"/
+    /if \(command\.released\) \{[\s\S]*?topology\.forget\(command\.tab_id\)[\s\S]*?code: "local_interlock"/
   );
   assert.match(options, /id="preserve-tabs"/);
   assert.match(options, /You can always close tabs yourself\./);

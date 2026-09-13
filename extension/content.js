@@ -16,6 +16,11 @@
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
   const CAPTURE_MASK_TTL_MS = 10_000;
+  const FILL_DOCUMENT_MIN_AGE_MS = 6_000;
+  const FILL_STABLE_MS = 750;
+  const FILL_SETTLE_LIMIT_MS = 8_000;
+  const FILL_FIELD_STABLE_MS = 250;
+  const FILL_FIELD_SETTLE_LIMIT_MS = 2_000;
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
@@ -471,6 +476,11 @@
     if (setter) setter.call(element, value); else element.value = value;
   }
 
+  function setNativeChecked(element, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")?.set;
+    if (setter) setter.call(element, value); else element.checked = value;
+  }
+
   // Browser editing preserves an editor's input transaction and undo state. A DOM assignment
   // followed by an untrusted generic event can be discarded by a controlled rich-text editor.
   function replaceEditableText(element, value) {
@@ -499,26 +509,38 @@
     return { cleared: true, subject };
   }
 
-  // Keep targeted typing inside its document. A tab-wide Input.insertText depends on
-  // desktop focus and can refuse after an earlier clear. Select the replacement range
-  // without deleting it, then ask the browser for one native editing transaction.
-  function typeText(element, text, clearFirst) {
-    function validate() {
-      requireActionable(element, "type");
-      if (credentialClass(element)) throw credentialHandoffError(element);
-      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
-        throw new Error("target is not text-editable");
-      }
-      if (element instanceof HTMLInputElement && !TEXT_INPUT_TYPES.has(element.type)) {
-        throw new Error("target is not text-editable");
-      }
+  function validateTextEditElement(element) {
+    requireActionable(element, "type");
+    if (credentialClass(element)) throw credentialHandoffError(element);
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
+      throw new Error("target is not text-editable");
     }
-    validate();
+    if (element instanceof HTMLInputElement && !TEXT_INPUT_TYPES.has(element.type)) {
+      throw new Error("target is not text-editable");
+    }
+  }
+
+  function prepareBrowserText(element) {
+    validateTextEditElement(element);
     const subject = actionSubject(element);
-    if (!text && !clearFirst) return { typed: true, subject };
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
-    validate();
+    verifyBrowserTextFocus(element);
+    return { subject };
+  }
+
+  function verifyBrowserTextFocus(element) {
+    validateTextEditElement(element);
+    if (deepestActiveElement() !== element) throw new Error("target did not retain browser input focus");
+    return { focused: true };
+  }
+
+  function prepareTextEdit(element, clearFirst) {
+    validateTextEditElement(element);
+    const subject = actionSubject(element);
+    element.scrollIntoView({ block: "center", inline: "center" });
+    element.focus({ preventScroll: true });
+    validateTextEditElement(element);
     if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
     if (clearFirst) {
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.select();
@@ -531,13 +553,19 @@
         selection.addRange(range);
       }
     }
-    validate();
+    validateTextEditElement(element);
     if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
-    if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject };
+    return { subject };
+  }
+
+  function typeText(element, text, clearFirst) {
+    const prepared = prepareTextEdit(element, clearFirst);
+    if (!text && !clearFirst) return { typed: true, subject: prepared.subject };
+    if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject: prepared.subject };
     if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
       throw new Error("browser could not type into editable target");
     }
-    return { typed: true, subject };
+    return { typed: true, subject: prepared.subject };
   }
 
   function validateFillElement(element, value) {
@@ -565,7 +593,72 @@
       const owner = elements[0]?.closest?.("form") ?? null;
       if (!owner || !owner.contains(submitElement)) throw new Error("submit control is not contained in the resolved form");
     }
-    return { elements, submitElement };
+    return { elements, submitElement, fieldKinds: elements.map((element) =>
+      element instanceof HTMLTextAreaElement
+        || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
+        || element.isContentEditable ? "browser_text" : "local") };
+  }
+
+  function fillStateSignature(elements) {
+    return JSON.stringify(elements.map((element) => fillControlValue(element)));
+  }
+
+  function fillControlValue(element) {
+    if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) return element.checked;
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return element.value;
+    return element.textContent ?? "";
+  }
+
+  function expectedFillValue(element, value) {
+    if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
+      return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
+    }
+    return String(value);
+  }
+
+  async function verifyStableFillValue(element, value) {
+    validateFillElement(element, value);
+    const expected = expectedFillValue(element, value);
+    const started = performance.now();
+    let stableSince = null;
+    while (true) {
+      const now = performance.now();
+      if (fillControlValue(element) === expected) {
+        if (stableSince === null) stableSince = now;
+        if (now - stableSince >= FILL_FIELD_STABLE_MS) return { retained: true };
+      } else {
+        stableSince = null;
+      }
+      if (now - started >= FILL_FIELD_SETTLE_LIMIT_MS) throw new Error("target did not retain filled value");
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    }
+  }
+
+  // A browser document can be ready while a client-rendered form is still hydrating from an
+  // API response. Editing during that window produces real trusted events and a temporary dirty
+  // state, then the hydration result replaces the draft. Require both a minimum document age and
+  // a stable target set before the worker begins its irreversible browser input sequence.
+  async function prepareStableFill(message) {
+    const started = performance.now();
+    let stableSince = started;
+    let signature = null;
+    while (true) {
+      const prepared = prepareFill(message);
+      const nextSignature = fillStateSignature(prepared.elements);
+      const now = performance.now();
+      if (nextSignature !== signature) {
+        signature = nextSignature;
+        stableSince = now;
+      }
+      const ready = document.readyState === "interactive" || document.readyState === "complete";
+      if (ready && now >= FILL_DOCUMENT_MIN_AGE_MS && now - stableSince >= FILL_STABLE_MS) {
+        return prepared;
+      }
+      if (now - started >= FILL_SETTLE_LIMIT_MS) {
+        throw new Error("form did not settle before fill");
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    }
   }
 
   function fillElement(element, value) {
@@ -575,11 +668,8 @@
     if (element instanceof HTMLSelectElement) {
       element.value = option.value;
     } else if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
-      element.checked = ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
+      setNativeChecked(element, ["true", "1", "yes", "on"].includes(String(value).toLowerCase()));
     } else if (element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))) {
-      // A setter plus generic synthetic events can light a page's dirty indicator while its
-      // framework model remains stale. The next render then erases the apparent fill. Use the
-      // same native editing transaction as targeted typing so ordinary controlled forms retain it.
       typeText(element, String(value), true);
       return;
     } else if (element instanceof HTMLInputElement) {
@@ -592,6 +682,14 @@
     }
     element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  }
+
+  function fillLocalElement(element, value) {
+    const textual = element instanceof HTMLTextAreaElement
+      || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
+      || element.isContentEditable;
+    if (textual) throw new Error("text target requires browser input");
+    fillElement(element, value);
   }
 
   function requireActionable(element, intent) {
@@ -692,35 +790,43 @@
       sendResponse({ ok: true, result: { enabled: IS_TOP && message.enabled === true } });
       return false;
     }
-    // Activation replies before it dispatches. A click whose handler opens a page-blocking
-    // dialog (window.prompt, confirm, alert) freezes this page's main thread inside the
-    // dispatch, so a reply that waited for the dispatch to finish could never arrive. Every
-    // step that can fail or throw runs first; sendResponse crosses to the service worker while
-    // the thread is still live; only the validated dispatch follows.
+    // Resolve and scroll inside the owning document, then return the exact live geometry. The
+    // worker performs the click through Chromium's trusted pointer path. Page-generated clicks
+    // can take a different framework path and have erased otherwise valid controlled-form edits.
     if (message.kind === "activate") {
       try {
         const element = requireActionable(resolve(message.locator), "activate");
         const subject = actionSubject(element);
         element.scrollIntoView({ block: "center", inline: "center" });
-        const plan = shared.activationPlan(message);
-        sendResponse({ ok: true, result: { activated: true, subject } });
-        if (plan.native) element.click();
-        else for (const init of plan.clicks) element.dispatchEvent(new MouseEvent("click", init));
+        requireActionable(element, "activate");
+        sendResponse({ ok: true, result: { activated: true, subject, rectangle: viewportRectangle(element) } });
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message ?? error) });
       }
       return false;
     }
-    // Form fill with a submit control follows the same rule as activation: the submit click is
-    // the dispatch tail, and a submit handler that opens a page-blocking dialog would freeze
-    // this thread mid-click. Everything that can fail or throw runs first; the reply crosses to
-    // the service worker while the thread is still live; only the verified submit follows.
+    // Retain the single-message primitive for content-level contract tests. The worker splits
+    // production fills so textual values cross the trusted browser input seam.
     if (message.kind === "fill") {
       try {
         const { elements, submitElement } = prepareFill(message);
         formDiagnostics.run("fill", () => elements.forEach((element, index) => fillElement(element, message.fields[index].value)));
         sendResponse({ ok: true, result: { filled_count: message.fields.length, submitted: Boolean(submitElement) } });
         if (submitElement) submitElement.click();
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message ?? error) });
+      }
+      return false;
+    }
+    // Form submission follows the same rule as activation: the submit click is the dispatch
+    // tail, and a handler that opens a page-blocking dialog would freeze this thread mid-click.
+    if (message.kind === "submit_fill") {
+      try {
+        const { elements, submitElement } = prepareFill(message);
+        void elements;
+        if (!submitElement) throw new Error("submit control is required");
+        sendResponse({ ok: true, result: { submitted: true } });
+        submitElement.click();
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message ?? error) });
       }
@@ -735,7 +841,32 @@
       if (message.kind === "capture_mask") return installCaptureMask(message);
       if (message.kind === "capture_mask_check") return verifyCaptureMask();
       if (message.kind === "capture_mask_clear") return clearCaptureMask();
-      if (message.kind === "prepare_fill") { prepareFill(message); return { prepared: true }; }
+      if (message.kind === "prepare_fill") {
+        const prepared = await prepareStableFill(message);
+        return { prepared: true, field_kinds: prepared.fieldKinds };
+      }
+      if (message.kind === "prepare_text_fill") {
+        const element = resolve(message.field.locator);
+        validateFillElement(element, message.field.value);
+        const textual = element instanceof HTMLTextAreaElement
+          || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
+          || element.isContentEditable;
+        if (!textual) throw new Error("target does not use browser text input");
+        return formDiagnostics.run("fill", () => prepareBrowserText(element));
+      }
+      if (message.kind === "verify_text_fill_focus") {
+        const element = resolve(message.field.locator);
+        return verifyBrowserTextFocus(element);
+      }
+      if (message.kind === "verify_fill_value") {
+        const element = resolve(message.field.locator);
+        return verifyStableFillValue(element, message.field.value);
+      }
+      if (message.kind === "fill_local") {
+        const element = resolve(message.field.locator);
+        formDiagnostics.run("fill", () => fillLocalElement(element, message.field.value));
+        return { filled: true };
+      }
       if (message.kind === "document_route") {
         if (message.focused) {
           const element = deepestActiveElement();

@@ -279,6 +279,11 @@ so controlled forms and editors retain the replacement across later renders. Sel
 and radios keep their semantic control setters. Empty values clear only the named control. Filling
 never activates a submit control unless the caller supplied `submit_target`.
 
+Active controlled tabs emulate focus between calls to avoid focus-triggered refresh interrupting
+automation (ADR-0168). Pause, stop, disconnection, and release restore normal browser lifecycle.
+An application can still reset its own form, especially after control ends; a fill result does
+not claim that the draft was saved or will survive future application refreshes.
+
 Semantic selectors and target handles can address the same ordinary controls, including editors
 outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.
 An explicit `submit_target` is still checked against the first resolved field's containing form.

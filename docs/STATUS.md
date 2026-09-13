@@ -1,6 +1,63 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-12 (service 1.3.6 published; adapter 1.1.4 unchanged).
+Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.5 verified locally).
+
+## Controlled-tab focus implementation (2026-09-13)
+
+The owner approved the Ghostlight-side compatibility fix in
+[ADR-0168](adr/0168-controlled-tab-focus-emulation.md). Focus emulation now follows retained
+controlled tabs while the compatible service reports active runtime control. It survives tool
+calls and is restored on pause, attention, disconnection, stop, and release. Preserving a tab
+from a released workspace now also removes debugger custody. Chrome lifecycle commands are
+serialized per tab, and uncertain cleanup remains tracked for retry.
+
+All 265 extension tests pass, including runtime wiring, plural-tab cleanup, release races, and
+failure recovery. Formatting, warnings-denied Clippy, and the full Rust workspace tests pass.
+The first installed attempt exposed a reload gap: Chrome cleared the adapter's session cache,
+leaving service-owned tabs without debugger retention. The correction restores opaque ownership
+from explicit service requests without moving tabs. After the second reload, installed Ghostlight
+filled all five profile fields without submission. Both DOM and actual React Hook Form model
+retained every test value through 81.465 seconds in an inactive tab, return, a field click, and
+a further 29.159 seconds. The page correctly reported visible/focused while physically inactive.
+Only Ghostlight browser tools were used; no external automation focus override or page hook was
+added. The verified draft remains unsaved. The
+[installed record](testing/controlled-tab-focus-installed-2026-09-13.json) binds these observations
+to the source hashes and distinguishes lifecycle regression coverage from the live retention test.
+
+No parallel deployment, form submission, or publication has occurred. The site's reset behavior
+after control ends is unchanged and is not covered by an indefinite draft-retention promise.
+
+## Form-retention diagnosis corrected (2026-09-13)
+
+The follow-up comparison has now confirmed the reset cause. Ghostlight and Codex both retain
+all five fields with focus emulation enabled and both lose them after a real tab return with
+emulation disabled. In the decisive Codex run, no field click occurred: visibility/focus handlers
+refreshed the user, the profile effect fetched saved data, and React Hook Form `reset()` erased
+the edits 502.5 ms after the visible event. Loaded source confirms the effect depends on the
+entire refreshed user object and does not preserve dirty fields. This is a site-side reset after
+valid input. Emulated focus hides the trigger; it does not fix normal user browsing.
+
+The [comparison record](testing/form-retention-focus-comparison-2026-09-13.json) contains only
+test-value comparisons and structural timing/source evidence. All added diagnostic probes,
+logpoints, and the focus override were removed. No form submission, product-code change, or
+publication occurred in the follow-up. The third-party site remains unchanged.
+
+The installed 1.1.5 source now uses document-local focus preparation before native form editing.
+All 246 extension tests pass, but the full live tab-away/return/click journey still loses the
+draft. Native keyboard and whole-value native insertion both reached the actual React Hook Form
+model before the page later restored saved values through its registration/ref path. The older
+claim below that this isolated the failure to synthetic input is superseded.
+
+Codex browser control kept an inactive tab reporting visible/focused in the observed session.
+Disabling focus emulation restored ordinary visibility behavior. Playwright documents the same
+emulation, and public React Hook Form reports reproduce draft loss after focus-triggered refresh.
+The earlier unknown model-reset caller is now identified above. A fixture also demonstrated that
+a wrapper in an old React props object can miss later handler calls.
+
+[Research 29](research/29-form-retention-focus-and-frameworks-2026-09.md) records the evidence,
+Playwright and WebMCP prior art, limitations, and the completed controlled comparison. No form was
+submitted and no fix is claimed complete. The passive profile probe was removed and the temporary
+fixture server stopped. No parallel deployment or publication was made.
 
 ## Form-reset investigation (2026-09-12)
 

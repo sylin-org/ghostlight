@@ -66,6 +66,16 @@ that has since landed makes a narrower answer correct:
    owning frame, so the person still sees exactly what the agent touched when that thing lives
    in an embed.
 
+### Amendment 2026-09-13 -- semantic activation uses browser pointer input
+
+Decision 4's coordinate-free activation statement is superseded for ordinary clicks. Content
+still resolves, scrolls, and checks the exact semantic target in its owning document, but returns
+its live geometry. The worker composes the existing frame offsets and dispatches a trusted CDP
+pointer click. This changes the browser mechanism, not target naming, frame authority, or the
+model-facing tool. Text fill prepares exact document-local focus without a pointer click, then
+uses native browser editing under the existing document checks. ADR-0088 owns input fidelity and
+ADR-0168 owns the retained debugger's focus lifetime.
+
 ### Rejected alternatives
 
 - **Coordinate-only guidance ("click by screenshot points").** It works today but spends

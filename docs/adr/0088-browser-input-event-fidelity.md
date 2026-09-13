@@ -121,6 +121,13 @@ retention evidence. The real-browser regression forces a later framework-style m
 requires the filled value to survive. This is the same page-local physical mechanism already used
 for controlled rich editors; it does not move product policy into the extension.
 
+### Evidence correction 2026-09-13
+
+Research 29 supersedes the input-only explanation in the September 12 amendment. Native input
+also reached the actual form model before a focus-triggered application refresh reset valid
+edits. The native editing contract remains; ADR-0168 adds scoped focus emulation and its cleanup
+boundaries. Neither input fidelity nor emulation guarantees retention after a site's later reset.
+
 ## Consequences
 
 - Ordinary and protected fields both receive printable `computer.key` characters, while ADR-0087

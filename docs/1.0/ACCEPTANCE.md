@@ -180,6 +180,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    A controlled ordinary input and textarea must receive native editing evidence and retain their
    values after a later framework-style model render. The fixture first proves that prototype
    setters plus generic synthetic events are rejected by the same render. Neither path submits.
+   On a page that resets drafts after focus/visibility refresh, retained controlled tabs emulate
+   focus between calls. Fill without submission, leave the physical tab inactive for at least
+   45 seconds, return, click a field, and verify every value. Separately verify normal focus is
+   restored on pause, stop, disconnect, and release, and unowned tabs are unaffected. Do not use
+   emulated-focus retention as evidence of retention after handoff (ADR-0168).
 5. Wait for success and timeout branches of each condition family.
 6. Run click plus wait directly and as a flow with omitted step IDs; observe the same executor behavior.
 7. Accept, dismiss, and supply non-secret prompt text to a visible dialog.

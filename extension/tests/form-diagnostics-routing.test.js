@@ -168,7 +168,7 @@ test("content state survives delayed startup responses and embedded documents st
     };
     vm.createContext(sandbox);
     const startup = section(source, "  const formDiagnosticsApi =", "  function clearCaptureMask(");
-    const receiver = section(source, "  chrome.runtime.onMessage.addListener(", "    // Activation replies before");
+    const receiver = section(source, "  chrome.runtime.onMessage.addListener(", "    // Resolve and scroll inside");
     vm.runInContext(startup + receiver + "return false;\n});", sandbox);
     assert.equal(Boolean(resolveStartup), isTop, "only the top document requests observation state");
     listener({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND, enabled }, {}, () => {});

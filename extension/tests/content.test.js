@@ -469,7 +469,7 @@ test("action names preserve rendered spacing inside a label", async () => {
   );
 });
 
-test("the activation receipt names the physical element it used", async () => {
+test("activation preparation names and locates the physical element", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
   harness.input.type = "submit";
@@ -485,26 +485,28 @@ test("the activation receipt names the physical element it used", async () => {
 
   assert.equal(activated.result.subject.role, "button");
   assert.equal(activated.result.subject.name, "Save changes");
-  assert.deepEqual(harness.input.events, ["click"]);
+  assert.equal(typeof activated.result.rectangle.left, "number");
+  assert.equal(typeof activated.result.rectangle.width, "number");
+  assert.deepEqual(harness.input.events, []);
 });
 
-test("the activation reply crosses to the worker before the dispatch runs", async () => {
+test("activation preparation never dispatches a page-generated click", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
   harness.input.type = "submit";
   harness.input.setAttribute("value", "Save changes");
   const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
 
-  const order = [];
-  harness.input.click = () => order.push("dispatch");
+  let clicked = false;
+  harness.input.click = () => { clicked = true; };
   const response = await harness.send(
-    { kind: "activate", locator: inspected.result.targets[0].locator, button: "primary", click_count: 1 },
-    (phase) => order.push(phase)
+    { kind: "activate", locator: inspected.result.targets[0].locator, button: "primary", click_count: 1 }
   );
 
-  assert.deepEqual(order, ["reply", "dispatch"]);
+  assert.equal(clicked, false);
   assert.equal(response.result.activated, true);
   assert.equal(response.result.subject.name, "Save changes");
+  assert.ok(response.result.rectangle);
 });
 
 test("an unactionable activation target still refuses before any reply", async () => {
@@ -526,6 +528,27 @@ test("an unactionable activation target still refuses before any reply", async (
   assert.match(refused.error, /disabled/);
 });
 
+test("browser fill preparation focuses the exact control without editing or clicking", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  harness.input.value = "Existing draft";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const field = { locator: inspected.result.targets[0].locator, value: "Replacement" };
+  const prepared = await harness.send({ kind: "prepare_text_fill", field });
+  assert.equal(prepared.ok, true);
+  assert.equal(harness.document.activeElement, harness.input);
+  assert.equal(harness.input.value, "Existing draft");
+  assert.deepEqual(harness.input.events, []);
+  assert.deepEqual(harness.edits, []);
+  harness.document.activeElement = harness.document.body;
+  harness.input.focus = () => {};
+  const refused = await harness.send({ kind: "prepare_text_fill", field });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /did not retain browser input focus/);
+  assert.equal(harness.input.value, "Existing draft");
+});
+
 test("form fill and clear use native edits for an ordinary field without a submit", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
@@ -540,7 +563,7 @@ test("form fill and clear use native edits for an ordinary field without a submi
   assert.equal(harness.input.value, "Aurora Drop 01");
   assert.deepEqual(harness.edits.map(({ command, value }) => ({ command, value })),
     [{ command: "insertText", value: "Aurora Drop 01" }]);
-  assert.deepEqual(harness.input.events, ["input"], "fill does not fabricate input/change after native editing");
+  assert.deepEqual(harness.input.events, ["input"]);
 
   const cleared = await harness.send({ kind: "clear", locator });
   assert.equal(cleared.ok, true);
@@ -754,6 +777,7 @@ test("successful fill preparation changes nothing and final mixed native fields 
   const fields = inspected.result.targets.map((target) => ({ locator: target.locator, value: "Replacement draft" }));
   const prepared = await harness.send({ kind: "prepare_fill", fields });
   assert.equal(prepared.result.prepared, true);
+  assert.ok(harness.delays.reduce((sum, delay) => sum + delay, 0) >= 6000);
   assert.equal(harness.input.value, "Original input"); assert.equal(editor.textContent, "Original rich draft");
   assert.deepEqual(harness.edits, []); assert.deepEqual(harness.input.events, []);
   const filled = await harness.send({ kind: "fill", fields });

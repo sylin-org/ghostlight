@@ -304,12 +304,30 @@ Every one of these cost something to learn.
   editing preserves the editor's transaction; regression fixtures must reject the old mechanism,
   and installed verification must read the retained editor value or inspect a screenshot.
 - **A dirty indicator is not proof that an ordinary form retained the draft.** A React profile
-  form accepted prototype-set input values plus synthetic input/change events and showed unsaved
-  changes, then reconciled the same nodes from its stale model about 40 seconds later. The tab
-  switch only exposed the loss. A real keyboard edit made the form model authoritative and kept
-  a synthetic sibling too; the embedded Codex browser control retained its form fill as well.
-  Verify ordinary input and textarea retention across a later framework render; immediate DOM
-  readback and event delivery are insufficient (2026-09-12 live incident).
+  form lost synthetic edits, but later native edits also reached the actual React Hook Form model
+  before the page replaced that model. Absence of a DOM reset event does not exclude a library
+  reset. The site's focus-triggered user refresh changed an object dependency and reran profile
+  initialization, which reset valid edits. Both Ghostlight and Codex reproduced it under normal
+  tab lifecycle. The initial input-only diagnosis was too strong. Verify retained values through a later
+  framework render and real tab lifecycle, not just immediate DOM readback or event delivery.
+- **Automation focus emulation can invalidate a tab-switch comparison.** An inactive Codex-controlled
+  tab reported visible/focused until focus emulation was disabled. Playwright intentionally uses
+  this mechanism too. A controlled comparison passed with emulation and failed without it for
+  both tools. Verify browser tab state and document visibility together, and restore
+  ordinary lifecycle behavior before declaring a draft retained for the user.
+- **Framework diagnostics must follow current state.** A wrapper in one React props object can
+  log only the first change while later renders replace that object and the current handler
+  continues updating the model. Use an authored real-framework fixture and current state reads.
+  See [Research 29](research/29-form-retention-focus-and-frameworks-2026-09.md) for the September
+  13 correction, live evidence, and matching upstream reports.
+- **Controlled-tab focus has an explicit lifetime.** The owner approved focus emulation while
+  controlled debugger tabs have active runtime control (ADR-0168). Keep it between tool calls;
+  restore normal behavior on pause, stop, disconnect, or release. A model's final response is
+  not a workspace release. Do not claim that unsaved drafts will survive later site refreshes.
+- **Extension session storage survives worker suspension, not extension reload.** Chrome clears
+  `storage.session` on reload/update/disable and browser restart. The orchestrator can still own
+  tabs afterward. Restore the adapter's opaque cache from explicit service work, without using
+  group labels, opener relationships, or passive browser events as ownership (ADR-0168).
 - **Guardrail tests must prove permitted work too.** A caller supplying exactly the advertised
   capability set must complete the operation, including its landing and export checks. Assert
   actual retained values, effect counts, and captured pixels independently of receipts. Form-batch

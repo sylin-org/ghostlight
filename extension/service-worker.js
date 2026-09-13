@@ -13,9 +13,10 @@ const documents = globalThis.GhostlightDocuments.create({
   frames
 });
 
-async function sendDebugger(target, method, params) {
+async function sendDebugger(target, method, params, targetedFrameId = null) {
   if (method.startsWith("Input.") || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
-    await documents.input(target.tabId, method, params);
+    if (method.startsWith("Input.") && targetedFrameId !== null) await documents.targetedInput(target.tabId, targetedFrameId);
+    else await documents.input(target.tabId, method, params);
   }
   return chrome.debugger.sendCommand(target, method, params);
 }
@@ -278,8 +279,11 @@ chrome.webNavigation.onCommitted.addListener((details) => {
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (recordingDocuments.has(details.tabId)) recording.interruptTab(details.tabId, "document_boundary");
   if (diagnosticDocuments.delete(details.tabId)) {
+    // Keep an explicitly enabled diagnostic lease across the boundary so the navigation
+    // itself remains observable. Start a fresh volatile ring for the new document while
+    // leaving its Runtime and Network domains enabled.
     diagnostics.forget(details.tabId);
-    disableDiagnosticCapture([details.tabId]).catch(() => {});
+    diagnostics.enable(details.tabId);
   }
 });
 
@@ -438,9 +442,13 @@ async function disableDiagnosticCapture(tabIds) {
 
 async function settleServiceBoundaryState() {
   commandChunks.clear();
-  await interruptAllRecordings("service_disconnected");
-  await disableDiagnosticCapture(diagnostics.clearAll());
-  diagnosticDocuments.clear();
+  try {
+    await debuggerLifecycle.setFocusEmulationEnabled(false);
+  } finally {
+    await interruptAllRecordings("service_disconnected");
+    await disableDiagnosticCapture(diagnostics.clearAll());
+    diagnosticDocuments.clear();
+  }
 }
 
 async function readDiagnostics(command) {
@@ -449,8 +457,13 @@ async function readDiagnostics(command) {
   }
   const currentDocuments = documents.context(command.tab_id)?.documents;
   if (currentDocuments && !globalThis.GhostlightDocuments.same(diagnosticDocuments.get(command.tab_id), currentDocuments)) {
-    diagnostics.forget(command.tab_id);
-    await disableDiagnosticCapture([command.tab_id]);
+    // An absent binding is the expected first read after a tracked navigation. Its ring
+    // began at onBeforeNavigate and already contains the load evidence the caller asked for.
+    // A different existing binding means scope changed without that boundary and must reset.
+    if (diagnosticDocuments.has(command.tab_id)) {
+      diagnostics.forget(command.tab_id);
+      await disableDiagnosticCapture([command.tab_id]);
+    }
     diagnosticDocuments.set(command.tab_id, currentDocuments);
   }
   const captureStarted = diagnostics.enable(command.tab_id);
@@ -584,6 +597,14 @@ async function dispatch(request) {
     return { outcome: "cancelled" };
   }
   if (cancelled.delete(request.correlation)) return { outcome: "cancelled" };
+  // Extension reload clears storage.session, but not the orchestrator's workspace.
+  // Relearn its authoritative association from explicit work, never from a page event.
+  // Inventory, document discovery, and released-tab cleanup do not acquire custody.
+  const controlledTabId = command.tab_id ?? command.destination?.tab_id;
+  if (Number.isSafeInteger(controlledTabId) && request.workspace && command.command !== "close_tab") {
+    await topology.remember(controlledTabId, request.workspace);
+    await retainManagedDebugger(controlledTabId);
+  }
   if (command.command === "list_tabs") return { outcome: "tabs", tabs: (await chrome.tabs.query({})).map(physicalTab) };
   if (command.command === "focus_tab") {
     const tab = await chrome.tabs.update(command.tab_id, { active: true });
@@ -599,7 +620,14 @@ async function dispatch(request) {
     if (await tabPreservationEnabled()) {
       // A released close comes from a dead workspace: the person's interlock keeps the tab, and
       // the tab is no longer owned by anything, so it becomes adoptable again (ADR-0137).
-      if (command.released) topology.forget(command.tab_id).then(() => syncFormDiagnostics(command.tab_id)).catch(() => {});
+      if (command.released) {
+        try {
+          await debuggerLifecycle.unretain(command.tab_id);
+        } finally {
+          await topology.forget(command.tab_id);
+          await syncFormDiagnostics(command.tab_id);
+        }
+      }
       throw Object.assign(
         new Error("Ghostlight is preserving controlled tabs by local browser choice."),
         { code: "local_interlock" }
@@ -1250,15 +1278,21 @@ async function broadcastRuntimeState(controlState) {
 
 async function applyRuntimeState(controlState) {
   setConnection({ control_state: controlState });
-  if (controlState !== "active") {
-    await interruptAllRecordings("runtime_held");
-    await disableDiagnosticCapture(diagnostics.clearAll());
+  try {
+    await debuggerLifecycle.setFocusEmulationEnabled(
+      controlState === "active" && liveState.connected && liveState.compatible
+    );
+  } finally {
+    if (controlState !== "active") {
+      await interruptAllRecordings("runtime_held");
+      await disableDiagnosticCapture(diagnostics.clearAll());
+    }
+    if (controlState === "ended") {
+      await debuggerLifecycle.detachAll();
+    }
+    refreshFormDiagnostics().catch(() => {});
+    await broadcastRuntimeState(controlState);
   }
-  if (controlState === "ended") {
-    await debuggerLifecycle.detachAll();
-  }
-  refreshFormDiagnostics().catch(() => {});
-  await broadcastRuntimeState(controlState);
 }
 
 async function waitForReady(tabId, correlation, timeoutMs = 8000) {
@@ -1436,10 +1470,17 @@ async function observeAcrossFrames(command) {
 }
 
 async function activate(correlation, command) {
+  await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
     const result = await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count, modifiers: command.modifiers ?? [] });
+    const frameId = frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID;
+    const offset = await frameViewportOffset(command.tab_id, frameId);
+    await dispatchClick(command.tab_id, {
+      x: result.rectangle.left + result.rectangle.width / 2 + offset.x,
+      y: result.rectangle.top + result.rectangle.height / 2 + offset.y
+    }, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []));
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -1447,7 +1488,32 @@ async function activate(correlation, command) {
   } catch (error) {
     error.effectUnknown = true;
     throw error;
-  } finally { navigationWatchers.delete(command.tab_id); }
+  } finally {
+    navigationWatchers.delete(command.tab_id);
+    await detachDebugger(command.tab_id);
+  }
+}
+
+async function replaceFocusedText(tabId, frameId, value) {
+  const control = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  const selectAll = { key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 };
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...control, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...selectAll, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...selectAll, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...control }, frameId);
+
+  const text = String(value).replaceAll("\r\n", "\n");
+  const characters = Array.from(text);
+  if (!characters.length) characters.push("Backspace");
+  for (const character of characters) {
+    const descriptor = shared.keyDescriptor(character === "\n" ? "Enter" : character);
+    await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor }, frameId);
+    const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
+    await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp }, frameId);
+  }
+  const tab = shared.keyDescriptor("Tab");
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...tab }, frameId);
+  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...tab }, frameId);
 }
 
 async function fill(correlation, command) {
@@ -1471,24 +1537,51 @@ async function fill(correlation, command) {
     }
     let filledCount = 0;
     let submitted = false;
+    const preparedGroups = [];
     // Validate every frame before entering any edit. A later frame's known readonly,
     // hidden, invalid-option, or submit failure must not leave an earlier frame half filled.
     for (const [frameId, fields] of groups) {
-      await contentIn(command.tab_id, frameId, {
+      const prepared = await contentIn(command.tab_id, frameId, {
         kind: "prepare_fill",
         fields,
         submit_locator: submitFrame === frameId ? frames.localOf(command.submit_locator) : undefined
       });
+      if (!Array.isArray(prepared.field_kinds) || prepared.field_kinds.length !== fields.length
+        || prepared.field_kinds.some((kind) => !["browser_text", "local"].includes(kind))) {
+        throw new Error("content primitive returned an invalid fill plan");
+      }
+      preparedGroups.push({ frameId, fields, fieldKinds: prepared.field_kinds });
     }
-    for (const [frameId, fields] of groups) {
+    const needsBrowserInput = preparedGroups.some((group) => group.fieldKinds.includes("browser_text"));
+    if (needsBrowserInput) await ensureDebugger(command.tab_id);
+    try {
+      for (const { frameId, fields, fieldKinds } of preparedGroups) {
+        for (let index = 0; index < fields.length; index += 1) {
+          const field = fields[index];
+          dispatched = true;
+          if (fieldKinds[index] === "browser_text") {
+            await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field });
+            await contentIn(command.tab_id, frameId, { kind: "verify_text_fill_focus", field });
+            await replaceFocusedText(command.tab_id, frameId, field.value);
+          } else {
+            await contentIn(command.tab_id, frameId, { kind: "fill_local", field });
+          }
+          await contentIn(command.tab_id, frameId, { kind: "verify_fill_value", field });
+          filledCount += 1;
+        }
+      }
+    } finally {
+      if (needsBrowserInput) await detachDebugger(command.tab_id);
+    }
+    if (command.submit_locator) {
       dispatched = true;
-      const result = await contentIn(command.tab_id, frameId, {
-        kind: "fill",
+      const fields = groups.get(submitFrame);
+      const result = await contentIn(command.tab_id, submitFrame, {
+        kind: "submit_fill",
         fields,
-        submit_locator: submitFrame === frameId ? frames.localOf(command.submit_locator) : undefined
+        submit_locator: frames.localOf(command.submit_locator)
       });
-      filledCount += result.filled_count;
-      submitted = submitted || Boolean(result.submitted);
+      submitted = Boolean(result.submitted);
     }
     await new Promise((resolve) => setTimeout(resolve, submitted ? 250 : 25));
     const tab = await chrome.tabs.get(command.tab_id);
@@ -1697,6 +1790,9 @@ async function evaluateScript(correlation, command) {
 }
 
 async function ensureDebugger(tabId) {
+  // A new explicit operation may reacquire a tab after the person released the
+  // local debugger sessions. Passive browsing never restores an attachment.
+  if (topology.workspaceFor(tabId)) await debuggerLifecycle.retain(tabId);
   await debuggerLifecycle.acquire(tabId);
 }
 
@@ -1935,9 +2031,16 @@ async function pressKey(correlation, command) {
   try {
     const modifiers = shared.modifierMask(command.modifiers);
     const descriptor = shared.keyDescriptor(command.key);
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor, modifiers });
-    const { text: _text, ...keyUp } = descriptor;
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers });
+    // Text overrides turn modified printable keys into literal insertion. Omit the override for
+    // shortcut chords so Control-a, Meta-c, and similar combinations reach the browser command.
+    const { text: descriptorText, unmodifiedText: descriptorUnmodifiedText, ...physicalDescriptor } = descriptor;
+    const combinedModifiers = modifiers | (descriptor.modifiers ?? 0);
+    const keyDown = modifiers & 7 ? physicalDescriptor : descriptor;
+    void descriptorText;
+    void descriptorUnmodifiedText;
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...keyDown, modifiers: combinedModifiers });
+    const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
+    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers: combinedModifiers });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };

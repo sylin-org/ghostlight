@@ -1,6 +1,15 @@
 # Unsaved form reset investigation
 
-Date: 2026-09-12. Status: cause established; source correction implemented.
+Date: 2026-09-12. Status: historical investigation; input-only diagnosis superseded.
+
+September 13 correction: a controlled comparison and debugger call trace established that both
+Ghostlight and Codex update the actual form model, then lose edits when ordinary tab focus causes
+the site's user refresh to rerun profile initialization and call React Hook Form `reset()`.
+Both retain edits with focus emulation enabled. No field click is required for the reset.
+The site remains unchanged. See the current
+[research and cause analysis](../research/29-form-retention-focus-and-frameworks-2026-09.md) and
+[comparison evidence](form-retention-focus-comparison-2026-09-13.json). The findings below preserve
+the earlier observations; their synthetic-input-only interpretation is no longer authoritative.
 
 ## Observed reproduction
 

@@ -90,7 +90,43 @@
       const [code, virtualKey] = named[key];
       return { key: key === "Space" ? " " : key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey };
     }
-    return { key, text: key };
+    const shiftBase = {
+      "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+      "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "~": "`"
+    };
+    const punctuationCodes = {
+      ";": ["Semicolon", 186], "=": ["Equal", 187], ",": ["Comma", 188], "-": ["Minus", 189],
+      ".": ["Period", 190], "/": ["Slash", 191], "`": ["Backquote", 192], "[": ["BracketLeft", 219],
+      "\\": ["Backslash", 220], "]": ["BracketRight", 221], "'": ["Quote", 222], " ": ["Space", 32]
+    };
+    let base = key;
+    let modifiers = 0;
+    if (/^[A-Z]$/.test(key)) {
+      base = key.toLowerCase();
+      modifiers = 8;
+    } else if (shiftBase[key]) {
+      base = shiftBase[key];
+      modifiers = 8;
+    }
+    let code;
+    let virtualKey;
+    if (/^[a-z]$/i.test(base)) {
+      const upper = base.toUpperCase();
+      code = `Key${upper}`;
+      virtualKey = upper.charCodeAt(0);
+    } else if (/^[0-9]$/.test(base)) {
+      code = `Digit${base}`;
+      virtualKey = base.charCodeAt(0);
+    } else if (punctuationCodes[base]) {
+      [code, virtualKey] = punctuationCodes[base];
+    }
+    return {
+      key,
+      ...(code ? { code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey } : {}),
+      ...(modifiers ? { modifiers } : {}),
+      text: key,
+      unmodifiedText: base
+    };
   }
 
   function dragPackets(start, end, steps = 12) {
@@ -203,25 +239,6 @@
     return { kind: "heartbeat_ack", sequence: frame.sequence };
   }
 
-  // Plan one activation's dispatch without touching the DOM, so the content script can send its
-  // reply before the click runs: a handler that opens a page-blocking dialog freezes the page's
-  // main thread inside the dispatch, and a reply that waited for the dispatch to finish could
-  // then never arrive. `native` selects element.click(); otherwise each entry in `clicks` is a
-  // plain MouseEventInit-shaped object for new MouseEvent("click", init).
-  function activationPlan(message) {
-    const modifiers = Array.isArray(message.modifiers) ? message.modifiers : [];
-    if (message.button === "primary" && message.click_count === 1 && modifiers.length === 0) {
-      return { native: true, clicks: [] };
-    }
-    const modifierInit = { ctrlKey: modifiers.includes("Control"), metaKey: modifiers.includes("Meta"), shiftKey: modifiers.includes("Shift"), altKey: modifiers.includes("Alt") };
-    const button = message.button === "middle" ? 1 : message.button === "right" ? 2 : 0;
-    const clicks = [];
-    for (let count = 0; count < message.click_count; count += 1) {
-      clicks.push({ bubbles: true, cancelable: true, composed: true, button, detail: message.click_count, ...modifierInit });
-    }
-    return { native: false, clicks };
-  }
-
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
@@ -232,7 +249,6 @@
     modifierMask,
     keyDescriptor,
     dragPackets,
-    activationPlan,
     presentationLabel,
     activityLabel,
     browserEventFrame,

@@ -2007,7 +2007,11 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
     }
 }
 
-const WAIT_RECEIPT_RESERVE_MS: u64 = 250;
+// A wait's physical timer must finish early enough for the extension, native relay, browser
+// port, executor, and MCP edge to return one decisive unsatisfied receipt. A quarter second was
+// too narrow on a live cache-bypassing reload and turned a normal loading timeout into an
+// uncertain after-dispatch deadline.
+const WAIT_RECEIPT_RESERVE_MS: u64 = 750;
 
 fn observation_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
     let available = remaining.saturating_sub(Duration::from_millis(WAIT_RECEIPT_RESERVE_MS));
@@ -3903,7 +3907,7 @@ mod tests {
     fn observation_budget_preserves_time_for_the_physical_receipt() {
         assert_eq!(
             observation_budget_ms(3_000, Duration::from_millis(3_000)),
-            2_750
+            2_250
         );
         assert_eq!(observation_budget_ms(100, Duration::from_millis(100)), 0);
         assert_eq!(

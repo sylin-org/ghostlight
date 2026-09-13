@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "date": "2026-09-13",
+  "site": "https://hackathon.genai.works/profile#profile",
+  "adapter_version": "1.1.5",
+  "method": "Installed unpacked extension, reloaded by owner. All browser actions and observations used Ghostlight; no Codex browser/CDP focus override was added.",
+  "fill": {
+    "status": "succeeded",
+    "filled_count": 5,
+    "submitted": false
+  },
+  "fields": [
+    "first_name",
+    "last_name",
+    "current_position",
+    "city",
+    "bio"
+  ],
+  "away_duration_ms": 81465,
+  "physical_tab_inactive_before_return": true,
+  "observations": {
+    "after_fill": {
+      "fields": {
+        "bio": {
+          "dom": true,
+          "model": true
+        },
+        "city": {
+          "dom": true,
+          "model": true
+        },
+        "current_position": {
+          "dom": true,
+          "model": true
+        },
+        "first_name": {
+          "dom": true,
+          "model": true
+        },
+        "last_name": {
+          "dom": true,
+          "model": true
+        }
+      },
+      "focused": true,
+      "formModelFound": true,
+      "time": 1789318794667,
+      "visibility": "visible"
+    },
+    "after_switch_away": {
+      "fields": {
+        "bio": {
+          "dom": true,
+          "model": true
+        },
+        "city": {
+          "dom": true,
+          "model": true
+        },
+        "current_position": {
+          "dom": true,
+          "model": true
+        },
+        "first_name": {
+          "dom": true,
+          "model": true
+        },
+        "last_name": {
+          "dom": true,
+          "model": true
+        }
+      },
+      "focused": true,
+      "formModelFound": true,
+      "time": 1789318802394,
+      "visibility": "visible"
+    },
+    "before_return": {
+      "fields": {
+        "bio": {
+          "dom": true,
+          "model": true
+        },
+        "city": {
+          "dom": true,
+          "model": true
+        },
+        "current_position": {
+          "dom": true,
+          "model": true
+        },
+        "first_name": {
+          "dom": true,
+          "model": true
+        },
+        "last_name": {
+          "dom": true,
+          "model": true
+        }
+      },
+      "focused": true,
+      "formModelFound": true,
+      "time": 1789318876077,
+      "visibility": "visible"
+    },
+    "after_field_click": {
+      "fields": {
+        "bio": {
+          "dom": true,
+          "model": true
+        },
+        "city": {
+          "dom": true,
+          "model": true
+        },
+        "current_position": {
+          "dom": true,
+          "model": true
+        },
+        "first_name": {
+          "dom": true,
+          "model": true
+        },
+        "last_name": {
+          "dom": true,
+          "model": true
+        }
+      },
+      "focused": true,
+      "formModelFound": true,
+      "time": 1789318884229,
+      "visibility": "visible"
+    },
+    "delayed_after_field_click": {
+      "fields": {
+        "bio": {
+          "dom": true,
+          "model": true
+        },
+        "city": {
+          "dom": true,
+          "model": true
+        },
+        "current_position": {
+          "dom": true,
+          "model": true
+        },
+        "first_name": {
+          "dom": true,
+          "model": true
+        },
+        "last_name": {
+          "dom": true,
+          "model": true
+        }
+      },
+      "focused": true,
+      "formModelFound": true,
+      "time": 1789318913388,
+      "visibility": "visible"
+    }
+  },
+  "delayed_after_click_ms": 29159,
+  "click_status": "succeeded",
+  "source_sha256": {
+    "extension/lib/debugger.js": "3D09EEE578EEDDEF57B655AFD815FF9E2CAA86973656C60AA98754AABD2F16F6",
+    "extension/lib/topology.js": "C6EB82E0AD45577083BD855DE0B6892367522EBB059977E784FDE6CD1CF81F89",
+    "extension/service-worker.js": "1E0FA738AB7BBF387B2942514D0476B4784B9CB6415EEDB90B032674E62B2EB9",
+    "extension/content.js": "E200C86DE1BA4BD86D36726382A847683A3867FAC819A157B3F0E40E4062B44A"
+  },
+  "boundaries": {
+    "submitted": false,
+    "site_code_patched": false,
+    "diagnostic_hooks_added": false,
+    "parallel_deployment": false,
+    "published": false,
+    "draft_left_unsaved": true,
+    "scope": "Retention while Ghostlight controls the tab. No indefinite retention promise after control ends.",
+    "cleanup_validation": "Pause, stop, attention, disconnect, workspace release, and debugger release were exercised in extension lifecycle/worker regressions. The final unsaved profile was not released to exercise its known site reset."
+  },
+  "checks": {
+    "extension_tests": {
+      "passed": 265,
+      "failed": 0
+    },
+    "cargo_fmt": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": "passed",
+    "javascript_syntax": "passed",
+    "git_diff_check": "passed"
+  }
+}

@@ -104,7 +104,7 @@
       const metadata = METADATA_KINDS.has(message.kind);
       if (!metadata && !context.scope.allowed.includes(frame.documentId)) throw changed();
       try {
-        if (["activate", "fill", "focus", "clear", "clear_focused", "type_text", "scroll", "scroll_point", "hover", "drop_files"].includes(message.kind)) context.dispatched = true;
+        if (["activate", "fill", "fill_local", "prepare_text_fill", "submit_fill", "focus", "clear", "clear_focused", "type_text", "scroll", "scroll_point", "hover", "drop_files"].includes(message.kind)) context.dispatched = true;
         const result = await sendDocument(tabId, frame.documentId, message);
         if (result?.error) throw new Error(result.error);
         if (!metadata) context.visited.add(frame.documentId);
@@ -149,8 +149,17 @@
       if (context) context.dispatched = true;
     }
 
+    async function targetedInput(tabId, frameId) {
+      const context = active.get(tabId);
+      if (!context) return;
+      await verify(tabId);
+      const frame = context.raw.find((item) => item.frameId === frameId);
+      if (!frame || !context.scope.allowed.includes(frame.documentId)) throw changed();
+      context.dispatched = true;
+    }
+
     function limit(tabId) { const context = active.get(tabId); if (context) context.limited = true; }
-    return { describe, run, route, frameIds, locator, verify, verifyInput, input, limit, context: (tabId) => active.get(tabId), current };
+    return { describe, run, route, frameIds, locator, verify, verifyInput, input, targetedInput, limit, context: (tabId) => active.get(tabId), current };
   }
   return { create, inventory, same, changed, DOCUMENT_LIMIT };
 });

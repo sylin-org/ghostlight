@@ -159,6 +159,16 @@
       return serialized(() => assignInternal(tabId, workspace, requestedTitle));
     }
 
+    // A trusted service request can restore an opaque association lost on extension
+    // reload. This is cache repair only: no grouping, movement, or ownership inference.
+    async function remember(tabId, workspace) {
+      return serialized(async () => {
+        if (tabWorkspaces.get(tabId) === workspace) return;
+        tabWorkspaces.set(tabId, workspace);
+        await persist();
+      });
+    }
+
     async function open(url, workspace, requestedTitle, onCreated) {
       return serialized(async () => {
         const title = resolvedTitle(workspace, requestedTitle);
@@ -255,7 +265,7 @@
       );
     }
 
-    return Object.freeze({ restore, open, assign, forget, findReusable, workspaceFor, titleFor, tabsFor });
+    return Object.freeze({ restore, open, assign, remember, forget, findReusable, workspaceFor, titleFor, tabsFor });
   }
 
   return Object.freeze({ GROUP_PREFIX, GROUP_COLOR, validTitle, create });

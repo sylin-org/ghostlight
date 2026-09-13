@@ -189,6 +189,8 @@ history live here.
 
 | [0167](0167-one-user-installation.md) | One production installation per user, durable development/release selection, shared runtime and startup custody, preserved state and authority diagnostics | Accepted; implemented; Windows installed evidence recorded |
 
+| [0168](0168-controlled-tab-focus-emulation.md) | Focus emulation follows active controlled-tab custody; pause, stop, disconnect, and release restore normal lifecycle | Accepted; installed retention verified, cleanup regressions pass |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

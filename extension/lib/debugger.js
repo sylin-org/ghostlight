@@ -11,6 +11,9 @@
     }
 
     const tabs = new Map();
+    // The worker supplies the negotiated runtime state. Restored tabs start with
+    // ordinary focus until the service confirms that browser work is active.
+    let focusEmulationEnabled = false;
 
     function tabState(tabId) {
       let state = tabs.get(tabId);
@@ -19,8 +22,12 @@
           leases: 0,
           retained: false,
           attached: false,
-          attaching: null,
-          detaching: null,
+          pending: Promise.resolve(),
+          pendingCount: 0,
+          closing: false,
+          generation: 0,
+          focusEmulated: false,
+          focusAttempted: false,
           dialog: null,
           domains: new Set()
         };
@@ -30,60 +37,98 @@
     }
 
     function prune(tabId, state) {
-      if (!state.retained && !state.attached && !state.attaching && !state.detaching && state.leases === 0 && !state.dialog) {
+      if (tabs.get(tabId) === state && !state.retained && !state.attached && state.pendingCount === 0 && state.leases === 0 && !state.dialog) {
         tabs.delete(tabId);
       }
     }
 
-    async function ensureAttached(tabId, state) {
-      if (state.detaching) await state.detaching;
-      if (state.attached) return;
-      if (!state.attaching) {
-        state.attaching = (async () => {
-          await debuggerApi.attach({ tabId }, protocolVersion);
-          state.attached = true;
-          try {
-            await debuggerApi.sendCommand({ tabId }, "Page.enable");
-            state.domains.add("Page");
-          } catch (error) {
-            try { await debuggerApi.detach({ tabId }); } catch (_detachError) { /* already detached */ }
-            state.attached = false;
-            throw error;
-          }
-        })();
+    // Serialize Chrome lifecycle commands for one tab. Ownership and control flags
+    // change immediately, so a queued enable cannot overtake a later pause/release.
+    function enqueue(tabId, state, action) {
+      state.pendingCount += 1;
+      const result = state.pending.then(action).finally(() => {
+        state.pendingCount -= 1;
+        prune(tabId, state);
+      });
+      state.pending = result.catch(() => {});
+      return result;
+    }
+
+    function clearAttachment(state) {
+      state.attached = false;
+      state.focusEmulated = false;
+      state.focusAttempted = false;
+      state.generation += 1;
+      state.domains.clear();
+    }
+
+    async function detachSession(tabId, state) {
+      if (!state.attached) return;
+      if (state.focusEmulated || state.focusAttempted) {
+        try {
+          await debuggerApi.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false });
+          state.focusEmulated = false;
+          state.focusAttempted = false;
+        } catch (_error) { /* detachment also removes the override */ }
       }
       try {
-        await state.attaching;
-      } finally {
-        state.attaching = null;
-        prune(tabId, state);
+        await debuggerApi.detach({ tabId });
+      } catch (error) {
+        // An external onDetach may already have confirmed removal. Otherwise keep
+        // the state for cleanup retry instead of claiming that an override is gone.
+        if (state.attached) throw error;
+      }
+      clearAttachment(state);
+    }
+
+    async function syncFocus(tabId, state) {
+      while (state.attached) {
+        const enabled = focusEmulationEnabled && state.retained && !state.closing;
+        if (state.focusEmulated === enabled) return;
+        const generation = state.generation;
+        state.focusAttempted = true;
+        try {
+          await debuggerApi.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled });
+        } catch (error) {
+          // A failed command may have taken effect. Release the session rather than
+          // leave an override whose state we cannot confirm.
+          await detachSession(tabId, state);
+          throw error;
+        }
+        if (state.generation !== generation) return;
+        state.focusEmulated = enabled;
+        state.focusAttempted = false;
+      }
+    }
+
+    async function ensureAttached(tabId, state) {
+      if (state.closing) throw new Error("The debugger session was released.");
+      try {
+        if (!state.attached) {
+          await debuggerApi.attach({ tabId }, protocolVersion);
+          state.attached = true;
+          await debuggerApi.sendCommand({ tabId }, "Page.enable");
+          state.domains.add("Page");
+        }
+        await syncFocus(tabId, state);
+        if (!state.attached || state.closing) throw new Error("The debugger session was released during setup.");
+      } catch (error) {
+        await detachSession(tabId, state);
+        throw error;
       }
     }
 
     async function settle(tabId, state) {
-      if (state.retained || state.leases > 0 || state.dialog || !state.attached || state.attaching) return;
-      if (!state.detaching) {
-        state.detaching = (async () => {
-          try { await debuggerApi.detach({ tabId }); } catch (_error) { /* already detached */ }
-          state.attached = false;
-          state.domains.clear();
-        })();
-      }
-      try {
-        await state.detaching;
-      } finally {
-        state.detaching = null;
-        prune(tabId, state);
-      }
+      if (!state.retained && state.leases === 0 && !state.dialog) await detachSession(tabId, state);
     }
 
     async function acquire(tabId) {
       const state = tabState(tabId);
       state.leases += 1;
       try {
-        await ensureAttached(tabId, state);
+        await enqueue(tabId, state, () => ensureAttached(tabId, state));
       } catch (error) {
-        state.leases -= 1;
+        state.leases = Math.max(0, state.leases - 1);
         prune(tabId, state);
         throw error;
       }
@@ -92,14 +137,32 @@
     async function retain(tabId) {
       const state = tabState(tabId);
       state.retained = true;
-      await ensureAttached(tabId, state);
+      await enqueue(tabId, state, () => ensureAttached(tabId, state));
+    }
+
+    async function unretain(tabId) {
+      const state = tabs.get(tabId);
+      if (!state) return;
+      state.retained = false;
+      await enqueue(tabId, state, async () => {
+        await syncFocus(tabId, state);
+        await settle(tabId, state);
+      });
+    }
+
+    async function setFocusEmulationEnabled(enabled) {
+      focusEmulationEnabled = Boolean(enabled);
+      const results = await Promise.allSettled(Array.from(tabs, ([tabId, state]) =>
+        enqueue(tabId, state, () => syncFocus(tabId, state))));
+      const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+      if (errors.length) throw new AggregateError(errors, "Could not update controlled-tab focus.");
     }
 
     async function release(tabId) {
       const state = tabs.get(tabId);
       if (!state || state.leases === 0) return;
       state.leases -= 1;
-      await settle(tabId, state);
+      await enqueue(tabId, state, () => settle(tabId, state));
     }
 
     function openDialog(tabId, type) {
@@ -110,7 +173,7 @@
       const state = tabs.get(tabId);
       if (!state) return;
       state.dialog = null;
-      await settle(tabId, state);
+      await enqueue(tabId, state, () => settle(tabId, state));
     }
 
     function currentDialog(tabId) {
@@ -120,51 +183,58 @@
 
     async function enableDomain(tabId, domain) {
       const state = tabState(tabId);
-      await ensureAttached(tabId, state);
-      if (state.domains.has(domain)) return false;
-      await debuggerApi.sendCommand({ tabId }, `${domain}.enable`);
-      state.domains.add(domain);
-      return true;
+      return enqueue(tabId, state, async () => {
+        await ensureAttached(tabId, state);
+        if (state.domains.has(domain)) return false;
+        await debuggerApi.sendCommand({ tabId }, `${domain}.enable`);
+        state.domains.add(domain);
+        return true;
+      });
     }
 
     async function disableDomain(tabId, domain) {
       const state = tabs.get(tabId);
-      if (!state?.attached || !state.domains.has(domain) || domain === "Page") return;
-      try {
-        await debuggerApi.sendCommand({ tabId }, `${domain}.disable`);
-      } finally {
-        state.domains.delete(domain);
-      }
+      if (!state || domain === "Page") return;
+      await enqueue(tabId, state, async () => {
+        if (!state.attached || !state.domains.has(domain)) return;
+        try {
+          await debuggerApi.sendCommand({ tabId }, `${domain}.disable`);
+        } finally {
+          state.domains.delete(domain);
+        }
+      });
     }
 
     function detached(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
-      state.attached = false;
-      state.domains.clear();
+      clearAttachment(state);
       prune(tabId, state);
     }
 
     function forget(tabId) {
+      const state = tabs.get(tabId);
+      if (state) {
+        state.closing = true;
+        clearAttachment(state);
+      }
       tabs.delete(tabId);
     }
 
     async function detachAll() {
-      await Promise.all(Array.from(tabs, async ([tabId, state]) => {
+      const results = await Promise.allSettled(Array.from(tabs, async ([tabId, state]) => {
         state.retained = false;
+        state.closing = true;
         state.dialog = null;
         state.leases = 0;
-        if (state.attaching) {
-          try { await state.attaching; } catch (_error) { /* attachment already failed */ }
-        }
-        if (state.detaching) await state.detaching;
-        if (state.attached) {
-          try { await debuggerApi.detach({ tabId }); } catch (_error) { /* already detached */ }
-          state.attached = false;
-          state.domains.clear();
+        try {
+          await enqueue(tabId, state, () => detachSession(tabId, state));
+        } finally {
+          if (!state.attached && tabs.get(tabId) === state) tabs.delete(tabId);
         }
       }));
-      tabs.clear();
+      const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+      if (errors.length) throw new AggregateError(errors, "Could not release every debugger session.");
     }
 
     function attachedCount() {
@@ -174,6 +244,8 @@
     return Object.freeze({
       acquire,
       retain,
+      unretain,
+      setFocusEmulationEnabled,
       release,
       openDialog,
       closeDialog,

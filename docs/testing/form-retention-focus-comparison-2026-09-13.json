@@ -1,0 +1,74 @@
+{
+  "date": "2026-09-13",
+  "submitted": false,
+  "site": "hackathon.genai.works/profile",
+  "phases": [
+    {
+      "fill": "Ghostlight browser_fill_form",
+      "focusEmulation": true,
+      "awaySecondsAtLeast": 62,
+      "domRetained": true,
+      "modelRetained": true,
+      "retainedAfterClick": true
+    },
+    {
+      "fill": "same Ghostlight draft",
+      "focusEmulation": false,
+      "hiddenSeconds": 72.787,
+      "domRetainedBeforeReturn": true,
+      "modelRetainedBeforeReturn": true,
+      "domRetainedAfterReturn": false,
+      "modelRetainedAfterReturn": false,
+      "resetAfterVisibleMs": 429.9
+    },
+    {
+      "fill": "Codex browser setValue",
+      "focusEmulation": true,
+      "awaySecondsAtLeast": 71,
+      "domRetained": true,
+      "modelRetained": true,
+      "retainedAfterClick": true
+    },
+    {
+      "fill": "same Codex draft",
+      "focusEmulation": false,
+      "hiddenSeconds": 78.948,
+      "domRetainedBeforeReturn": true,
+      "modelRetainedBeforeReturn": true,
+      "domRetainedAfterReturn": false,
+      "modelRetainedAfterReturn": false,
+      "resetAfterVisibleMs": 502.5,
+      "clickedAfterReturn": false
+    }
+  ],
+  "functions": {
+    "refreshSource": "/_next/static/chunks/0bmxgjjbyvnvw.js:1:11168",
+    "visibilityHandler": "/_next/static/chunks/0bmxgjjbyvnvw.js:1:12579",
+    "focusHandler": "/_next/static/chunks/0bmxgjjbyvnvw.js:1:12519",
+    "resetCaller": "/_next/static/chunks/0t~veiw0ik-.2.js:1:40482"
+  },
+  "returnTimelineMs": {
+    "visible": 0,
+    "refreshFromVisibility": 5.4,
+    "refreshFromFocus": 34.4,
+    "profileReset": 502.5
+  },
+  "profileRequests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me/",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me/",
+      "status": 200
+    }
+  ],
+  "limits": [
+    "One continuous live document, sequential comparison, same test values across phases.",
+    "Codex fill itself is opaque; focus was explicitly set before the measured lifecycle.",
+    "No claim that focus emulation makes drafts survive later normal user browsing.",
+    "No private response bodies or headers retained."
+  ]
+}

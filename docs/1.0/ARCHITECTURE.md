@@ -498,6 +498,17 @@ never authorize browsing, hold tabs, write action history, or produce presentati
 correlated event is not proof of agent authorship. The executor governs its requested operations
 and returned landings at the existing boundaries. ADR-0164 owns this distinction.
 
+Controlled debugger attachments emulate a focused page while the connected, compatible service
+reports active runtime control (ADR-0168). This keeps focus-triggered page refreshes from
+interrupting automation between calls. The existing debugger lifecycle owns per-tab serialization,
+retention, and restoration. Pause, attention, and disconnection remove the override; stop and local
+debugger release also detach. A released workspace loses debugger retention even when its tab is
+preserved. Passive browser events never acquire this custody. The scope can outlive a model turn,
+and unsaved values are not guaranteed to survive normal page lifecycle after release.
+Extension reload clears session storage. The next explicit tab-scoped service request repairs
+the opaque workspace association from that authoritative request before retaining its debugger;
+it does not regroup or move the tab. Inventory and released-tab cleanup do not acquire custody.
+
 The service worker persists only the installation id, adapter-local preferences, enough opaque
 topology to recover after worker suspension, a bounded content-free operation disposition
 journal, and opt-in structural developer diagnostics (ADR-0145). The developer flag enables

@@ -53,6 +53,13 @@ same class of form edit, while Ghostlight's synthetic setter path did not. That 
 Ghostlight's independent keyboard A/B test and supports the native-edit correction. It does not
 prove which OpenAI host-side CDP or Playwright sequence produced the retained value.
 
+September 13 correction: further tests showed that Ghostlight's native input reached the actual
+form model and was later lost too. The Codex comparison also involved emulated focus that kept
+an inactive tab reporting visible/focused. The earlier behavior comparison does not isolate the
+remaining failure to the input algorithm. See
+[Research 29](29-form-retention-focus-and-frameworks-2026-09.md) for the updated evidence and
+matching Playwright, React Hook Form, and WebMCP reports.
+
 ## Practices worth evaluating
 
 These package techniques are mature enough to test against Ghostlight's existing contracts. They
