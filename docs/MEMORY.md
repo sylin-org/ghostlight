@@ -303,6 +303,13 @@ Every one of these cost something to learn.
   `textContent` plus generic synthetic input while Ghostlight reported success. Native browser
   editing preserves the editor's transaction; regression fixtures must reject the old mechanism,
   and installed verification must read the retained editor value or inspect a screenshot.
+- **A dirty indicator is not proof that an ordinary form retained the draft.** A React profile
+  form accepted prototype-set input values plus synthetic input/change events and showed unsaved
+  changes, then reconciled the same nodes from its stale model about 40 seconds later. The tab
+  switch only exposed the loss. A real keyboard edit made the form model authoritative and kept
+  a synthetic sibling too; the embedded Codex browser control retained its form fill as well.
+  Verify ordinary input and textarea retention across a later framework render; immediate DOM
+  readback and event delivery are insufficient (2026-09-12 live incident).
 - **Guardrail tests must prove permitted work too.** A caller supplying exactly the advertised
   capability set must complete the operation, including its landing and export checks. Assert
   actual retained values, effect counts, and captured pixels independently of receipts. Form-batch

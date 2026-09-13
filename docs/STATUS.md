@@ -13,10 +13,15 @@ At the owner's request, the source adapter now adds bounded structural form trac
 Options -> Developer diagnostics. It records focus/visibility/reset events, empty-state and
 control-node changes, coalesced input flags, and explicit Ghostlight fill/type/clear boundaries.
 The existing local export includes the separate content-free form ring. Trace activation is
-left to the owner. Source gates and a normal-Chrome observer fixture pass. At the owner's next
-request, the observer was also injected temporarily into the live profile and four fields were
-refilled without submission; the next manual tab-switch reset is pending. The installed
-extension has not been reloaded. Verification and the reproduction handoff are recorded in the
+left to the owner. Source gates and a normal-Chrome observer fixture pass. Direct live-page
+instrumentation established that React reconciled the same four controls to empty about 40.25
+seconds after each synthetic fill, before the tab was hidden and with no input/reset/navigation,
+node replacement, or network refresh. One native keyboard edit made it and a synthetic sibling
+survive the next cycle, establishing a stale form-model failure rather than a tab-switch reset.
+The owner's embedded Codex browser control also fills the same form without loss, further
+isolating the defect to the synthetic setter path.
+Temporary probes and test values were removed; nothing was submitted. The installed extension
+has not been reloaded. Verification and the reproduction handoff are recorded in the
 [investigation note](testing/form-reset-diagnostics-2026-09-12.md).
 
 ## Release 1.3.6 published

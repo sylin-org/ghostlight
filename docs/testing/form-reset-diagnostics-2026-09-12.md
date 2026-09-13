@@ -73,11 +73,39 @@ The owner then requested direct JavaScript instrumentation of the affected live 
 observer was attached temporarily as `window.__ghostlightFormResetProbe`, without changing the
 extension flag or patching page setters. It initially observed 17 ordinary controls, three
 nonempty. Four test fields were refilled without submission; the trace recorded synthetic
-input/change events and seven nonempty controls. The owner's next manual tab-switch/reset is
-pending. `read()` returns only the bounded metadata rows, `stop()` ends observation, and
-`remove()` also removes the temporary global. Automatic observation expires after ten minutes;
-reloading the page removes it. No trace has been exported from the live profile.
+input/change events and seven nonempty controls.
+
+The owner switched away, returned, clicked a field, and again found the draft empty. The trace
+showed all four test controls becoming empty together 40.25 seconds after the synthetic fill,
+while the document was still visible and focused. The tab became hidden 22 seconds later. The
+same document and the same 17 control nodes remained; no input, change, reset, navigation, or
+network-resource event accompanied the clear.
+
+A second temporary wrapper around the existing per-control value setters captured the call site
+without retaining values. React's reconciler wrote the four input/textarea values to empty from
+the loaded Next.js chunks. `HTMLFormElement.reset()` was not called. Repeating the synthetic fill
+produced the same four React assignments after 40.26 seconds. The user-visible tab switch exposed
+the loss but did not trigger it.
+
+An A/B check then entered one field through real keyboard input and one through the synthetic
+setter. Both survived the next 45-second cycle. This indicates that a native editing transaction
+updates or initializes the form's authoritative model; a later synthetic sibling can then be
+retained with that state. The exact private framework state remains opaque, but the physical
+failure is established: setter plus synthetic generic events can produce an immediate DOM and
+dirty indicator that React later reconciles away.
+
+The owner separately confirmed that the embedded Codex browser control fills this form without
+the loss. That agrees with the live native-keyboard control and distinguishes a site-wide form or
+tab-lifecycle defect from the failing synthetic setter path. The correction belongs at the
+browser input mechanism: ordinary input and textarea filling must create a native editing
+transaction and prove retention across a later React render.
+
+`read()` returned only bounded metadata rows. The temporary setter trace added source call sites
+only to memory and was not part of the persisted product diagnostic schema. Both probes were
+removed after capture. The final two A/B values were cleared through real key input, which also
+removed the page's unsaved-change indicator. No form was submitted and no live trace was
+exported.
 
 The extension source has not been reloaded into the installed adapter. The published adapter
-version and reviewed release artifacts are unchanged. No reset fix or causal attribution is
-claimed.
+version and reviewed release artifacts are unchanged. The diagnostic source is implemented;
+the form-input correction has not been implemented.
