@@ -1,6 +1,6 @@
 # Adapter 1.1.7 custody -- 2026-09-13
 
-Status: Correction prepared; replacement submission not yet performed.
+Status: Submitted; Google review pending with automatic publication after approval.
 
 The owner reported another agent's multiline form failure immediately after the
 authorized Chrome deployment submission. This revision continues that release
@@ -43,6 +43,7 @@ observable protocol technique informed this correction; no external source was c
 ## Artifact and Chrome status
 
 - Path: `dist/ghostlight-extension-v1.1.7.zip`.
+- Source commit: `8f2d19813f029ecab273104d272d4cae3484902c`.
 - SHA-256: `3375a2599e3a3957c5a31c1d553659c993eb40f145b8642b7360baf4951d5715`.
 - The deterministic packager reproduced this exact hash twice; its package-surface,
   license, manifest-version and development-key checks passed.
@@ -51,3 +52,15 @@ observable protocol technique informed this correction; no external source was c
 - The existing deployment authorization covers this correction to the same release.
   Preserve the prior artifact and submission record; replace only the matching
   pending revision after inspection.
+
+The existing API script then returned these results, inspected individually:
+
+- Cancel submission: HTTP 200. Independent status confirmed 1.1.6 CANCELLED.
+- Upload: SUCCEEDED, draft version 1.1.7, with the exact artifact hash above.
+- Submit: PENDING_REVIEW, DEFAULT_PUBLISH.
+- Independent final status at 2026-09-13 17:37 UTC: submitted 1.1.7 PENDING_REVIEW
+  at 100 percent distribution; public 1.1.4 PUBLISHED at 100 percent distribution.
+
+The same existing item and credentials were used. No review bypass, new listing,
+service deployment, npm publication or GitHub release was performed. Public metadata
+remains at 1.1.4 until the higher version is independently observed as delivered.

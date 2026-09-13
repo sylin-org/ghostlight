@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; adapter 1.1.6 pending Google review).
+Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
 
 ## Multiline input correction (2026-09-13)
 
@@ -14,8 +14,12 @@ single-line text and clearing. Every case checks DOM, an input-listener model,
 trusted input, blur and no submission. This is a component browser test, not a
 new installed-profile acceptance claim. No user profile was changed by the test.
 
-Adapter 1.1.7 is prepared to replace our pending 1.1.6 submission under the owner's
-existing deployment authorization. See the [custody record](testing/adapter-1.1.7-2026-09-13.md).
+Adapter 1.1.7 replaced our pending 1.1.6 submission under the owner's existing
+deployment authorization. Google confirmed 1.1.6 CANCELLED, uploaded 1.1.7 successfully,
+and accepted 1.1.7 PENDING_REVIEW with DEFAULT_PUBLISH. The independent status read
+at 17:37 UTC confirmed pending 1.1.7 and public 1.1.4. Source commit: `8f2d1981`.
+See the [custody record](testing/adapter-1.1.7-2026-09-13.md). The installed unpacked
+extension still needs reload to use the changed source; no reload was performed.
 
 ## Chrome adapter 1.1.6 release (2026-09-13)
 

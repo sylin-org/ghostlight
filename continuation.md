@@ -3,7 +3,11 @@
 The implementation and installed verification are complete. The older handoff is preserved below
 as investigation history; do not restart its superseded experiments. The owner subsequently
 authorized a version bump and Chrome Web Store deployment on September 13. Adapter 1.1.6
-release progress is recorded in docs/STATUS.md.
+release progress is recorded in docs/STATUS.md. A subsequent multiline report exposed
+missing Enter character payloads. The correction is committed as `8f2d1981`; 267 tests
+and six real Chromium editing cases pass. Adapter 1.1.7 replaced the cancelled 1.1.6
+review and is pending Google review with automatic publication enabled. The installed
+unpacked extension has not yet been reloaded for this multiline correction.
 
 ## September 13 implementation update -- scoped focus approved
 

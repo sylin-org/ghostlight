@@ -1,6 +1,8 @@
 # Adapter 1.1.6 custody -- 2026-09-13
 
-Status: Submitted; Google review pending. Automatic publication is enabled after approval.
+Status: Superseded. On September 13 the pending review was cancelled and replaced
+by adapter 1.1.7 after a multiline-input defect was reproduced. See the
+[correction record](adapter-1.1.7-2026-09-13.md). The original submission evidence follows.
 
 The owner authorized a version bump and submission to Google Chrome for deployment.
 The source version advances from local investigation build 1.1.5 to 1.1.6. The

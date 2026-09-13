@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Chrome adapter [1.1.7] - 2026-09-13
 
-Prepared to replace the pending 1.1.6 Chrome submission with the multiline correction.
-Service versions and browser permissions are unchanged.
+Replaced the pending 1.1.6 Chrome submission with the multiline correction. Google
+review is pending with automatic publication after approval. Service versions and
+browser permissions are unchanged; the public adapter remains 1.1.4.
 
 ### Fixed
 
@@ -19,9 +20,9 @@ Service versions and browser permissions are unchanged.
 
 ## Chrome adapter [1.1.6] - 2026-09-13
 
-Submitted to the Chrome Web Store and pending Google review, with automatic publication
-after approval. Adapter 1.1.5 was the local investigation version; 1.1.6 carries the
-verified correction. Service versions are unchanged. Public adapter remains 1.1.4.
+Submitted to the Chrome Web Store, then cancelled and replaced by 1.1.7 after the
+multiline defect was reproduced. Adapter 1.1.5 was the local investigation version;
+1.1.6 carried the verified focus correction. Service versions are unchanged.
 
 ### Fixed
 
