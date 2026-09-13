@@ -177,6 +177,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    and magnify one bounded view region, then repeat against the returned view.
 4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
    described target is credential-class.
+   A controlled ordinary input and textarea must receive native editing evidence and retain their
+   values after a later framework-style model render. The fixture first proves that prototype
+   setters plus generic synthetic events are rejected by the same render. Neither path submits.
 5. Wait for success and timeout branches of each condition family.
 6. Run click plus wait directly and as a flow with omitted step IDs; observe the same executor behavior.
 7. Accept, dismiss, and supply non-secret prompt text to a visible dialog.
@@ -302,6 +305,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     unique values, attribute names, event data, and key sentinels never enter the 400-record
     persisted/exported ring. Storage or observer failure cannot change an action's return or
     throw, focus, form values, or submission count. Passive traces never become service work.
+12. Ordinary text input and textarea fill/clear use one native browser edit on the named control.
+    If that edit is unavailable, the operation refuses with the existing draft intact and without
+    synthetic input/change events or submission.
 
 ## Desktop workbench gates
 
@@ -455,7 +461,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    every export destination. Source-bound overflow is explicit rather than silent eviction.
 5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
    All-open scripts keep browser behavior without an inferred sandbox or website network filter.
-6. `tests/frame-browser-journey.mjs` passes 29 Chrome/MV3 checks using the live Sylin iframe demo
+6. `tests/frame-browser-journey.mjs` passes 69 Chrome/MV3 checks using the live Sylin iframe demo
    and its form content on distinct local hosts, with real orchestrator and connector processes.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
    separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.

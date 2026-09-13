@@ -6,8 +6,7 @@ Last updated: 2026-09-12 (service 1.3.6 published; adapter 1.1.4 unchanged).
 
 The owner reproduced the GenAI.Works unsaved profile form clearing after switching browser
 tabs and clicking a field. The draft was filled through CUA fallback because Ghostlight's
-document inspection returned `document_unavailable`; attribution remains open. No form was
-submitted and no reset fix is claimed.
+document inspection returned `document_unavailable`. No form was submitted.
 
 At the owner's request, the source adapter now adds bounded structural form tracing behind
 Options -> Developer diagnostics. It records focus/visibility/reset events, empty-state and
@@ -19,7 +18,12 @@ seconds after each synthetic fill, before the tab was hidden and with no input/r
 node replacement, or network refresh. One native keyboard edit made it and a synthetic sibling
 survive the next cycle, establishing a stale form-model failure rather than a tab-switch reset.
 The owner's embedded Codex browser control also fills the same form without loss, further
-isolating the defect to the synthetic setter path.
+isolating the defect to the synthetic setter path. Source `browser_fill_form` now uses one native
+browser editing transaction for ordinary textual inputs and textareas, matching the established
+rich-editor path. A controlled-form fixture rejects the former setter/event mechanism, forces a
+later model render, and requires native edits and retained values without submission. The 242-test
+extension suite passes. Formatting, warnings-denied Clippy, the full Rust workspace, changed
+JavaScript syntax, and the 69-check Chrome/MV3 frame journey also pass.
 Temporary probes and test values were removed; nothing was submitted. The installed extension
 has not been reloaded. Verification and the reproduction handoff are recorded in the
 [investigation note](testing/form-reset-diagnostics-2026-09-12.md).

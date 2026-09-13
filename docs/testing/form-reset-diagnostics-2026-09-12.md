@@ -1,6 +1,6 @@
 # Unsaved form reset investigation
 
-Date: 2026-09-12. Status: diagnostic instrumentation; cause not established.
+Date: 2026-09-12. Status: cause established; source correction implemented.
 
 ## Observed reproduction
 
@@ -11,9 +11,9 @@ with sample values. A screenshot and accessibility state showed the unsaved draf
 owner switched to another browser tab, returned, and clicked a field, the draft disappeared.
 A subsequent inspection showed the original saved profile and empty previously edited fields.
 
-This establishes the reported reset after a CUA fill. It does not establish a Ghostlight fill
-defect, a particular framework event mismatch, or a page refetch/reinitialization cause.
-No submission, page setter patch, application-state replacement, or profile save was performed.
+This established the reported reset after a CUA fill. At that point it did not establish a
+particular framework event mismatch or page refetch/reinitialization cause. No submission,
+application-state replacement, or profile save was performed.
 
 ## Instrumentation
 
@@ -56,7 +56,7 @@ markers. A missing trace is missing evidence, especially on an old document with
 
 ## Verification
 
-Formatting, workspace Clippy with warnings denied, all workspace Rust tests, all 241 extension
+Formatting, workspace Clippy with warnings denied, all workspace Rust tests, all 242 extension
 tests, changed JavaScript syntax, and diff whitespace checks pass. The extension tests exercise
 the actual worker routing and content initialization race, privacy projection/restoration,
 credential exclusion, bounded retention, expiry, coalescing, cleanup, and failure containment.
@@ -106,6 +106,23 @@ removed after capture. The final two A/B values were cleared through real key in
 removed the page's unsaved-change indicator. No form was submitted and no live trace was
 exported.
 
+## Correction
+
+Source `browser_fill_form` and ordinary clear operations now route textual inputs and textareas
+through the page-local native editing transaction already used for targeted typing. Selects,
+checkboxes, radios, and file inputs retain their distinct semantic setters. If native editing is
+unavailable, Ghostlight refuses with the prior draft intact and does not fabricate input/change
+events.
+
+The controlled-form real-browser fixture includes a negative control that uses the former
+prototype setter plus generic synthetic input/change events, then forces a framework-style model
+render and observes the original value return. The Ghostlight fill must update the fixture's model
+through trusted native input and survive the same later render, for both an input and textarea,
+with zero submissions. Unit coverage also pins the single native edit and refusal behavior.
+
 The extension source has not been reloaded into the installed adapter. The published adapter
-version and reviewed release artifacts are unchanged. The diagnostic source is implemented;
-the form-input correction has not been implemented.
+version and reviewed release artifacts are unchanged. Formatting, warnings-denied Clippy, the full
+Rust workspace, changed JavaScript syntax, and all 242 extension tests pass. The isolated
+Chrome/MV3 frame journey passes 69 checks with Chrome 152.0.7977.82, including the synthetic
+negative control, trusted input and textarea edits, a forced later model render, retained values,
+and zero submissions.

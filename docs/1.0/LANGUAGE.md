@@ -274,9 +274,10 @@ for checkboxes and radios, or a finite number for numeric inputs; optional `tab`
 `submit_target`; optional `timeout_ms`; optional `expect` postcondition.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
-Rich-text controls use the browser's editing transaction so controlled editors can retain the
-replacement. Empty values clear only the named editor. Filling never activates a submit control
-unless the caller supplied `submit_target`.
+Ordinary textual inputs, textareas, and rich-text controls use the browser's editing transaction
+so controlled forms and editors retain the replacement across later renders. Selects, checkboxes,
+and radios keep their semantic control setters. Empty values clear only the named control. Filling
+never activates a submit control unless the caller supplied `submit_target`.
 
 Semantic selectors and target handles can address the same ordinary controls, including editors
 outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.

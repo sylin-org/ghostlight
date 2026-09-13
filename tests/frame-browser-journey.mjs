@@ -546,15 +546,36 @@ try {
   }
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 20 });
   const editorTargets = new Map(result.facts.items.map((item) => [item.name, item.target]));
+  await rawPage(`(() => {
+    const element = document.querySelector("#ordinary");
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setter.call(element, "DOM-only replacement");
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    window.renderOrdinaryModel();
+    return true;
+  })()`);
+  const rejectedOrdinary = await rawPage("editorEvidence()");
+  assert.equal(rejectedOrdinary.ordinary, "Original input");
+  assert.equal(rejectedOrdinary.ordinaryModel.synthetic, 1);
+  assert.equal(rejectedOrdinary.ordinaryModel.native, 0);
+  check("generic setter events do not prove an ordinary controlled form retained its draft");
   result = await call("browser_fill_form", { tab, fields: [
     { target: editorTargets.get("Ordinary draft"), value: "Ordinary replacement" },
     { target: editorTargets.get("Multiline draft"), value: "Ordinary first line\nOrdinary second line" }
   ] });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.filled_count, 2); assert.equal(result.facts.submitted, false);
+  await rawPage("window.renderOrdinaryModel(); true");
   const ordinaryFilled = await rawPage("editorEvidence()");
   assert.equal(ordinaryFilled.ordinary, "Ordinary replacement");
   assert.equal(ordinaryFilled.multiline, "Ordinary first line\nOrdinary second line");
+  assert.equal(ordinaryFilled.ordinaryModel.value, "Ordinary replacement");
+  assert.equal(ordinaryFilled.multilineModel.value, "Ordinary first line\nOrdinary second line");
+  assert.ok(ordinaryFilled.ordinaryModel.native > 0);
+  assert.ok(ordinaryFilled.multilineModel.native > 0);
+  assert.equal(ordinaryFilled.ordinaryModel.synthetic, 1);
+  assert.equal(ordinaryFilled.multilineModel.synthetic, 0);
   assert.equal(ordinaryFilled.submissions, 0);
   check("Read+Write fills ordinary input and textarea without submitting");
   for (const name of ["Read only draft", "Disabled draft", "Hidden draft helper"]) {

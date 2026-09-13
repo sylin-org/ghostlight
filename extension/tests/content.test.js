@@ -526,7 +526,7 @@ test("an unactionable activation target still refuses before any reply", async (
   assert.match(refused.error, /disabled/);
 });
 
-test("form fill reports the verified fields without a submit", async () => {
+test("form fill and clear use native edits for an ordinary field without a submit", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
   harness.input.type = "text";
@@ -537,6 +537,37 @@ test("form fill reports the verified fields without a submit", async () => {
 
   assert.equal(filled.result.filled_count, 1);
   assert.equal(filled.result.submitted, false);
+  assert.equal(harness.input.value, "Aurora Drop 01");
+  assert.deepEqual(harness.edits.map(({ command, value }) => ({ command, value })),
+    [{ command: "insertText", value: "Aurora Drop 01" }]);
+  assert.deepEqual(harness.input.events, ["input"], "fill does not fabricate input/change after native editing");
+
+  const cleared = await harness.send({ kind: "clear", locator });
+  assert.equal(cleared.ok, true);
+  assert.equal(harness.input.value, "");
+  assert.deepEqual(harness.edits.map(({ command, value }) => ({ command, value })), [
+    { command: "insertText", value: "Aurora Drop 01" },
+    { command: "delete", value: "" }
+  ]);
+  assert.deepEqual(harness.input.events, ["input", "input"]);
+});
+
+test("ordinary form fill preserves the existing draft when native editing is unavailable", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  harness.input.value = "Retained draft";
+  harness.document.execCommand = () => false;
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+
+  const result = await harness.send({ kind: "fill", fields: [
+    { locator: inspected.result.targets[0].locator, value: "Lost replacement" }
+  ] });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /could not type/);
+  assert.equal(harness.input.value, "Retained draft");
+  assert.deepEqual(harness.input.events, []);
 });
 
 test("rich editor fills and clears use one native edit scoped to the chosen editor", async () => {

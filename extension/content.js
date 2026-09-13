@@ -493,11 +493,9 @@
     if (credentialClass(element)) throw credentialHandoffError(element);
     const subject = actionSubject(element);
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      setNativeValue(element, "");
-      element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    } else if (element.isContentEditable) {
-      replaceEditableText(element, "");
-    } else throw new Error("target is not text-editable");
+      typeText(element, "", true);
+    } else if (element.isContentEditable) replaceEditableText(element, "");
+    else throw new Error("target is not text-editable");
     return { cleared: true, subject };
   }
 
@@ -578,7 +576,13 @@
       element.value = option.value;
     } else if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       element.checked = ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
-    } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    } else if (element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))) {
+      // A setter plus generic synthetic events can light a page's dirty indicator while its
+      // framework model remains stale. The next render then erases the apparent fill. Use the
+      // same native editing transaction as targeted typing so ordinary controlled forms retain it.
+      typeText(element, String(value), true);
+      return;
+    } else if (element instanceof HTMLInputElement) {
       setNativeValue(element, value);
     } else if (element.isContentEditable) {
       replaceEditableText(element, value);

@@ -37,11 +37,31 @@
       if (text(editor) !== model[name].value) editor.textContent = model[name].value;
     }).observe(editor, { subtree: true, childList: true, characterData: true });
   }
+  const ordinaryControls = {
+    ordinary: document.querySelector("#ordinary"),
+    multiline: document.querySelector("#multiline")
+  };
+  for (const [name, control] of Object.entries(ordinaryControls)) {
+    model[name] = { value: control.value, native: 0, synthetic: 0 };
+    control.addEventListener("input", (event) => {
+      if (event instanceof InputEvent && event.isTrusted) {
+        model[name].value = control.value;
+        model[name].native++;
+      } else model[name].synthetic++;
+    });
+  }
+  window.renderOrdinaryModel = () => {
+    for (const [name, control] of Object.entries(ordinaryControls)) {
+      if (control.value !== model[name].value) control.value = model[name].value;
+    }
+  };
   window.editorEvidence = () => ({
     reply: { ...model.reply, rendered: text(editors.reply) },
     shadow: { ...model.shadow, rendered: text(editors.shadow) },
     ordinary: document.querySelector("#ordinary").value,
     multiline: document.querySelector("#multiline").value,
+    ordinaryModel: { ...model.ordinary },
+    multilineModel: { ...model.multiline },
     readonly: document.querySelector("#readonly").value,
     disabled: document.querySelector("#disabled").value,
     submissions

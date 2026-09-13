@@ -343,6 +343,12 @@ frame order under one page-wide character or node ceiling. Explicit article mode
 top document first and uses the composed full-page read when no useful article exists. Closed
 shadow roots stay closed, and child-frame origins do not become result or audit fields.
 
+Ordinary textual form fills and rich-editor replacements use one
+page-local browser editing transaction so a framework receives an authoritative edit; semantic
+setters remain for select, toggle, and file controls. Submission remains a separate explicit
+action. A failed native edit refuses without fabricating input/change events or replacing the
+existing draft.
+
 Pointer geometry follows the same composed surface. Frame-box discovery reaches embeds inside open
 roots. Point hit testing descends through open roots, then the service worker follows the embed at
 the point through Chromium's parent-frame tree. CDP effects keep top-viewport coordinates while

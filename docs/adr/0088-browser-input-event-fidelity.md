@@ -106,6 +106,21 @@ Semantic form and file setters remain distinct mechanisms. Setting a value or `F
 by input/change events is correct for those APIs and is not expected to synthesize keyboard or
 native operating-system events.
 
+#### Amendment 2026-09-12 -- ordinary textual form values require browser editing
+
+The semantic-setter statement above remains true for selects, checkboxes, radios, and file inputs.
+It is superseded for ordinary textual inputs and textareas. A live React form accepted prototype
+value setters plus generic synthetic input/change events, showed an unsaved indicator, and then
+reconciled the same controls from its stale model about 40 seconds later. Native keyboard editing
+and the embedded Codex browser control both retained the same form draft.
+
+`browser_fill_form` and clear operations therefore replace ordinary textual values through one
+browser editing transaction. They select only the named control, keep submission explicit, and
+refuse if the browser cannot perform the edit. Immediate DOM readback and event delivery are not
+retention evidence. The real-browser regression forces a later framework-style model render and
+requires the filled value to survive. This is the same page-local physical mechanism already used
+for controlled rich editors; it does not move product policy into the extension.
+
 ## Consequences
 
 - Ordinary and protected fields both receive printable `computer.key` characters, while ADR-0087
@@ -117,6 +132,8 @@ native operating-system events.
 - Drag interception cannot remain enabled as page-wide ambient state after an action completes.
 - Unicode typing receipts match user-perceived code points rather than UTF-16 storage units.
 - Callers can distinguish a dispatched coordinate drop from page-signaled handling.
+- Ordinary textual form fills survive a later controlled-form render instead of reporting a
+  DOM-only draft as retained.
 - Browser-vendor adapters can later translate these semantic plans without moving policy or
   orchestration into the extension.
 
