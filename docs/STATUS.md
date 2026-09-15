@@ -1,6 +1,15 @@
-# STATUS -- Ghostlight 1.3.6 published
+# STATUS -- Ghostlight 1.3.7 candidate prepared
 
-Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.7 published; adapter 1.1.8 prepared for Chrome Web Store review).
+Last updated: 2026-09-15 (service 1.3.7 candidate prepared; service 1.3.6 and adapter 1.1.7 published; adapter 1.1.8 pending Google review).
+
+## Ghostlight 1.3.7 candidate prepared (2026-09-15)
+
+Prepared release candidate v1.3.7 under owner direction (service bump and changelog complete; holding publication pending Chrome Web Store adapter 1.1.8 approval):
+
+- Workspace version bumped to `1.3.7` in `Cargo.toml`, `tauri.conf.json`, `packaging/npm/package.json`, `packaging/npm/checksums.json`, `packaging/mcpb/manifest.json`, `packaging/linux/changelog`, and Linux man pages.
+- Release notes prepared in `docs/release/notes-v1.3.7.md`.
+- `CHANGELOG.md` updated with `[1.3.7]` section documenting modular CLI decomposition, universal execution templates, settle policy value objects, sane visual settlement defaults, and first-class workspace switching.
+- Compatibility validated: adapter 1.1.8 covers service 1.3.4--1.3.7 (`scripts/adapter-compatibility.ps1`).
 
 ## Chrome adapter 1.1.8 packaged and prepared for Chrome Web Store review (2026-09-15)
 

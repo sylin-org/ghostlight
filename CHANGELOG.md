@@ -5,6 +5,41 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-09-15
+
+Prepared candidate for service release v1.3.7. Compatible with Chrome adapter 1.1.4
+through 1.1.8. Chrome adapter 1.1.7 is published in the Chrome Web Store; adapter 1.1.8
+is in review.
+
+### Added
+
+- Add 24th MCP catalog tool `browser_workspace` with `list` and `switch` actions, enabling
+  zero-argument discovery of admitted workspaces and dynamic live session rebinding (ADR-0175).
+- Add autonomous visual and layout settlement defaults (`visual_settle: true`) to
+  `browser_screenshot` and composite `browser_wait` conditions (ADR-0174).
+- Add cross-workspace tab discovery attribution (`owner_workspace`) and actionable guidance
+  when a tab handle belongs to another admitted workspace (ADR-0172).
+- Add agnostic visual settlement heuristic in `GhostlightSensor` observing CSS transitions,
+  bounding box geometry, and scroll dimensions with continuous spinner bypass (ADR-0173).
+- Add typed `SettlePolicy` value object in bridge contracts for wire serialization and
+  settle behavior control (ADR-0176).
+
+### Changed
+
+- Decompose monolithic orchestrator entry point `crates/orchestrator/src/main.rs` into five
+  modular, single-responsibility CLI modules under `ghostlight::cli::`: `parse`, `setup`,
+  `doctor`, `status`, and `desktop` with unified intent dispatch (ADR-0177).
+- Introduce universal execution templates `with_authorized_tab`, `with_authorized_target`, and
+  `with_authorized_optional_target` on `ApplicationExecutor`, standardizing target resolution
+  and governance checks across all operation modules (ADR-0176, ADR-0177).
+- Centralize catalog invariants and tool count (`CATALOG_TOOL_COUNT`) across language definitions
+  and test suites, eliminating magic numbers (ADR-0176).
+
+### Fixed
+
+- Verify multiline contenteditable form input reliably in adapter content scripts.
+- Ensure strict ASCII encoding and format validation across all repository and test surfaces.
+
 ## Chrome adapter [1.1.8] - 2026-09-15
 
 Prepared for Chrome Web Store submission with multiline contenteditable value
