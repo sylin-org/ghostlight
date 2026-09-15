@@ -397,6 +397,7 @@
     browser_flow: "workwheel",
     browser_record: "camera",
     browser_diagnose: "scan",
+    browser_workspace: "scan",
     policy_explain: "scan"
   };
 

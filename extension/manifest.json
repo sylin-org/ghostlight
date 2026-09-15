@@ -35,6 +35,7 @@
         "lib/form-diagnostics.js",
         "lib/presentation-css.js",
         "lib/presentation.js",
+        "lib/sensor.js",
         "content.js"
       ],
       "run_at": "document_start",

@@ -122,7 +122,7 @@ test("terminal persistence failure never turns a completed effect into failure",
     async load() { return null; },
     async save() {
       writes += 1;
-      if (writes === 4) throw new Error("storage unavailable after effect");
+      if (writes === 3) throw new Error("storage unavailable after effect");
     }
   });
   await engine.activate("service_one");

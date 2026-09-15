@@ -70,11 +70,10 @@
       const promise = (async () => {
         try {
           try {
-            await persist();
             record.phase = "dispatched";
             await persist();
           } catch (error) {
-            record.phase = "accepted";
+            records.delete(id);
             throw error;
           }
 
@@ -120,7 +119,7 @@
         throw recoveryError("The browser operation recovery ledger is full.");
       }
 
-      return run({ phase: "accepted", result: undefined, promise: null }, id, operation);
+      return run({ phase: "dispatched", result: undefined, promise: null }, id, operation);
     }
 
     async function acknowledge(id) {

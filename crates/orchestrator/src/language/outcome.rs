@@ -206,6 +206,10 @@ pub enum SavedTo {
 pub enum Outcome {
     /// The workspace's bound tabs were listed, read live from the browser.
     TabsListed { count: usize },
+    /// Available workspaces were listed.
+    WorkspacesListed { count: usize },
+    /// Switched session active workspace.
+    WorkspaceSwitched { workspace: String },
     /// The authority in force was explained to the model (ADR-0136).
     PolicyExplained { capabilities: usize, layers: usize },
     /// A semantic selector matched zero or several visible controls.
@@ -398,6 +402,15 @@ impl Outcome {
             }
             Self::TabsListed { count } => {
                 format!("Listed {}.", counted(*count, "bound tab", "bound tabs"))
+            }
+            Self::WorkspacesListed { count } => {
+                format!(
+                    "Listed {}.",
+                    counted(*count, "admitted workspace", "admitted workspaces")
+                )
+            }
+            Self::WorkspaceSwitched { workspace } => {
+                format!("Switched session to workspace {workspace}.")
             }
             Self::PolicyExplained {
                 capabilities,
@@ -677,6 +690,21 @@ impl Outcome {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
+            Self::TabsListed { count: 0 } => vec![
+                "Call browser_navigate with url (and optional new_tab: true) to open a page in this workspace.".into(),
+            ],
+            Self::TabAlreadyClosed => vec![
+                "Call browser_tabs with action list to see remaining open tabs.".into(),
+            ],
+            Self::TargetsListed { count: 0, .. } => vec![
+                "Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls.".into(),
+            ],
+            Self::TextRead { words: 0, .. } => vec![
+                "Wait for the page to finish rendering with browser_wait, or inspect controls with browser_inspect.".into(),
+            ],
+            Self::DocumentInspected { nodes: 0, .. } => vec![
+                "Wait for the page to finish loading with browser_wait, or inspect without a root selector.".into(),
+            ],
             Self::DocumentInspected {
                 truncated: true, ..
             } => vec!["Narrow the subtree root or depth to capture the rest.".into()],
@@ -690,6 +718,9 @@ impl Outcome {
                 "Read or inspect the page to see its current state before choosing another action."
                     .into(),
             ],
+            Self::DialogObserved { present: true } => vec![
+                "Call browser_dialog with accept: true or accept: false to resolve the dialog before continuing.".into(),
+            ],
             Self::DiagnosticsRead {
                 count: 0,
                 capture_started: true,
@@ -697,6 +728,9 @@ impl Outcome {
             } => vec![
                 "Reproduce the problem or reload the page, then call browser_diagnose again."
                     .into(),
+            ],
+            Self::WorkspaceSwitched { .. } => vec![
+                "Call browser_tabs with action list to inspect tabs in the switched workspace.".into(),
             ],
             _ => vec![],
         }
@@ -710,6 +744,11 @@ impl Outcome {
                 count: measured(*count),
                 ..Observed::default()
             },
+            Self::WorkspacesListed { count } => Observed {
+                count: measured(*count),
+                ..Observed::default()
+            },
+            Self::WorkspaceSwitched { .. } => Observed::default(),
             Self::PolicyExplained {
                 capabilities: count,
                 ..
@@ -1123,7 +1162,7 @@ impl Refusal {
 }
 
 /// Stable language reason for an unusable workspace resource.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceReason {
     /// No current unambiguous controlled tab matched.
@@ -1137,7 +1176,7 @@ pub enum WorkspaceReason {
     /// Another invocation owns the workspace lease.
     WorkspaceBusy,
     /// The selected resource belongs elsewhere.
-    OwnershipMismatch,
+    OwnershipMismatch { owner: Option<String> },
     /// The workspace is no longer admitted.
     WorkspaceClosed,
 }
@@ -1145,36 +1184,42 @@ pub enum WorkspaceReason {
 impl WorkspaceReason {
     /// Say which handle went stale and how, rather than that something is "not usable".
     #[must_use]
-    pub fn summary(self) -> String {
+    pub fn summary(&self) -> String {
         match self {
-            Self::TabUnavailable => "That tab is no longer open.",
-            Self::StaleTarget => "That target belongs to an older version of the page.",
-            Self::StaleView => "The page has moved since that screenshot was taken.",
-            Self::TabHeld => "Ghostlight is paused on that tab.",
-            Self::WorkspaceBusy => "Another Ghostlight action is already using this session.",
-            Self::OwnershipMismatch => "That handle belongs to a different Ghostlight session.",
-            Self::WorkspaceClosed => "This Ghostlight session has ended.",
+            Self::TabUnavailable => "That tab is no longer open.".into(),
+            Self::StaleTarget => "That target belongs to an older version of the page.".into(),
+            Self::StaleView => "The page has moved since that screenshot was taken.".into(),
+            Self::TabHeld => "Ghostlight is paused on that tab.".into(),
+            Self::WorkspaceBusy => {
+                "Another Ghostlight action is already using this session.".into()
+            }
+            Self::OwnershipMismatch { owner: Some(owner) } => {
+                format!("That tab handle belongs to {owner}.")
+            }
+            Self::OwnershipMismatch { owner: None } => {
+                "That handle belongs to a different Ghostlight session.".into()
+            }
+            Self::WorkspaceClosed => "This Ghostlight session has ended.".into(),
         }
-        .into()
     }
 
     /// Render the stable structured fact value.
     #[must_use]
-    pub const fn as_fact(self) -> &'static str {
+    pub const fn as_fact(&self) -> &'static str {
         match self {
             Self::TabUnavailable => "tab_unavailable",
             Self::StaleTarget => "stale_target",
             Self::StaleView => "stale_view",
             Self::TabHeld => "tab_held",
             Self::WorkspaceBusy => "workspace_busy",
-            Self::OwnershipMismatch => "ownership_mismatch",
+            Self::OwnershipMismatch { .. } => "ownership_mismatch",
             Self::WorkspaceClosed => "workspace_closed",
         }
     }
 
     /// Render zero or one safe contextual recovery actions for this reason.
     #[must_use]
-    pub fn next_steps(self) -> Vec<String> {
+    pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
@@ -1192,7 +1237,10 @@ impl WorkspaceReason {
             Self::WorkspaceBusy => {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]
             }
-            Self::OwnershipMismatch => {
+            Self::OwnershipMismatch { owner: Some(_) } => {
+                vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace.".into()]
+            }
+            Self::OwnershipMismatch { owner: None } => {
                 vec!["Collect fresh handles from this session, then continue with those.".into()]
             }
             Self::WorkspaceClosed => vec![
@@ -1221,7 +1269,7 @@ impl From<WorkspaceError> for WorkspaceReason {
             | WorkspaceError::TargetTabMismatch
             | WorkspaceError::ViewTabMismatch
             | WorkspaceError::PhysicalTabOwned
-            | WorkspaceError::BrowserPinned => Self::OwnershipMismatch,
+            | WorkspaceError::BrowserPinned => Self::OwnershipMismatch { owner: None },
             WorkspaceError::UnknownWorkspace => Self::WorkspaceClosed,
         }
     }
@@ -1344,6 +1392,11 @@ fn waited(condition: &str, elapsed_ms: u64, satisfied: bool, host: &Option<Strin
             Some("The selector"),
             "matched a control",
             "matched no control",
+        ),
+        "visual_settle" | "layout_stable" => (
+            Some("The view"),
+            "settled visually",
+            "never settled visually",
         ),
         _ => (Some("The condition"), "was met", "was never met"),
     };
@@ -2253,8 +2306,22 @@ mod tests {
             vec!["Wait for the active Ghostlight invocation to finish."]
         );
         assert_eq!(
-            WorkspaceReason::OwnershipMismatch.next_steps(),
+            WorkspaceReason::OwnershipMismatch { owner: None }.next_steps(),
             vec!["Collect fresh handles from this session, then continue with those."]
+        );
+        assert_eq!(
+            WorkspaceReason::OwnershipMismatch {
+                owner: Some("Workspace B".into())
+            }
+            .next_steps(),
+            vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace."]
+        );
+        assert_eq!(
+            WorkspaceReason::OwnershipMismatch {
+                owner: Some("Workspace B".into())
+            }
+            .summary(),
+            "That tab handle belongs to Workspace B."
         );
         assert_eq!(
             WorkspaceReason::WorkspaceClosed.next_steps(),
@@ -2265,6 +2332,61 @@ mod tests {
     /// Outcome guidance leads with the recovery action and stays truthful about partial work.
     #[test]
     fn outcome_next_steps_teach_the_fix() {
+        assert_eq!(
+            Outcome::TabsListed { count: 0 }.next_steps(),
+            vec!["Call browser_navigate with url (and optional new_tab: true) to open a page in this workspace."]
+        );
+        assert!(Outcome::TabsListed { count: 2 }.next_steps().is_empty());
+        assert_eq!(
+            Outcome::TabAlreadyClosed.next_steps(),
+            vec!["Call browser_tabs with action list to see remaining open tabs."]
+        );
+        assert_eq!(
+            Outcome::TargetsListed {
+                noun: TargetNoun::Control,
+                count: 0,
+                host: None,
+            }
+            .next_steps(),
+            vec!["Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls."]
+        );
+        assert!(Outcome::TargetsListed {
+            noun: TargetNoun::Control,
+            count: 3,
+            host: None,
+        }
+        .next_steps()
+        .is_empty());
+        assert_eq!(
+            Outcome::TextRead {
+                words: 0,
+                host: None,
+            }
+            .next_steps(),
+            vec!["Wait for the page to finish rendering with browser_wait, or inspect controls with browser_inspect."]
+        );
+        assert!(Outcome::TextRead {
+            words: 42,
+            host: None,
+        }
+        .next_steps()
+        .is_empty());
+        assert_eq!(
+            Outcome::DialogObserved { present: true }.next_steps(),
+            vec!["Call browser_dialog with accept: true or accept: false to resolve the dialog before continuing."]
+        );
+        assert!(Outcome::DialogObserved { present: false }
+            .next_steps()
+            .is_empty());
+        assert_eq!(
+            Outcome::DocumentInspected {
+                nodes: 0,
+                truncated: false,
+                compared: false,
+            }
+            .next_steps(),
+            vec!["Wait for the page to finish loading with browser_wait, or inspect without a root selector."]
+        );
         assert_eq!(
             Outcome::SelectorUnresolved { matched: 0 }.next_steps(),
             vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
@@ -2311,6 +2433,16 @@ mod tests {
             .next_steps(),
             vec!["Narrow the subtree root or depth to capture the rest."]
         );
+        assert_eq!(
+            Outcome::WorkspaceSwitched {
+                workspace: "workspace_abc".into(),
+            }
+            .next_steps(),
+            vec!["Call browser_tabs with action list to inspect tabs in the switched workspace."]
+        );
+        assert!(Outcome::WorkspacesListed { count: 2 }
+            .next_steps()
+            .is_empty());
     }
 
     #[test]
@@ -2332,27 +2464,27 @@ mod tests {
             (WorkspaceError::Busy, WorkspaceReason::WorkspaceBusy),
             (
                 WorkspaceError::NotOwnedTab,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::NotOwnedTarget,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::NotOwnedView,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::TargetTabMismatch,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::ViewTabMismatch,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::PhysicalTabOwned,
-                WorkspaceReason::OwnershipMismatch,
+                WorkspaceReason::OwnershipMismatch { owner: None },
             ),
             (
                 WorkspaceError::UnknownWorkspace,

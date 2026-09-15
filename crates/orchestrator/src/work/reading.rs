@@ -349,6 +349,7 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 region,
                 expected_viewport: view.viewport,
+                visual_settle: value.visual_settle,
             };
             (selected, command, CaptureKind::Region)
         } else {
@@ -372,6 +373,7 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 locator,
                 full_page: value.full_page,
+                visual_settle: value.visual_settle,
             };
             (selected, command, scope)
         };
@@ -420,7 +422,14 @@ impl ApplicationExecutor {
                     width,
                     height,
                 };
-                let mut facts = json!({"tab":selected.handle.as_str(),"view":view.as_str(),"mime_type":mime_type,"width":width,"height":height});
+                let mut facts = json!({
+                    "tab": selected.handle.as_str(),
+                    "view": view.as_str(),
+                    "mime_type": mime_type,
+                    "width": width,
+                    "height": height,
+                    "visual_settle": value.visual_settle.unwrap_or(true),
+                });
                 if let Some(image) = &image_handle {
                     facts["image"] = json!(image.as_str());
                 }

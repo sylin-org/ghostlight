@@ -1,6 +1,92 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-13 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
+Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
+
+## Delight through sane defaults & first-class workspace switching (2026-09-15)
+
+Implemented ADR-0174 and ADR-0175 under owner direction, enshrining the principle "Delight through sane defaults":
+
+- Autonomous Settle on Screenshots & Composite Waits (ADR-0174):
+  - browser_screenshot: Defaults visual_settle to true (with explicit opt-out via visual_settle: false). Performs bounded visual and layout settlement before capturing images or regions, ensuring stable captures free from mid-transition animation or layout shifts.
+  - browser_wait: Composite conditions (load_ready, target_present, selector_present, duration) default visual_settle to true unless explicitly set to false.
+  - Extension & Service Alignment: Passed visual_settle through bridge contracts (Screenshot, ScreenshotRegion), FakeBrowser mocks, and Chrome extension CDP pipeline.
+- First-Class Workspace Discovery & Switching (ADR-0175):
+  - browser_workspace: Added a 24th MCP catalog tool with actions "list" (zero-argument discovery of all admitted workspaces, their connection counts, tab counts, and active status) and "switch" (rebinds the live MCP connection to a target workspace).
+  - Cross-Workspace Ownership Resolution: When ownership_mismatch refusals occur, agents can autonomously discover workspaces and switch without disconnecting or restarting the MCP session.
+  - Dynamic Session Rebinding: The orchestrator session dynamically updates its active_workspace across worker threads via Arc<Mutex<WorkspaceId>> while ensuring proper admission and unowned workspace pruning on teardown.
+  - Capability Authorization: Explicitly authorized under Capability::Read for governance audit logs and policy consistency.
+- Quality Gates & Invariants:
+  - All 283 extension tests and 547 workspace Rust tests pass cleanly.
+  - cargo fmt --check and cargo clippy --workspace --all-targets -- -D warnings pass with zero warnings.
+  - Multi-process journeys (tests/process-journey.mjs and tests/live-journey.mjs) pass with updated 24-tool catalog invariants.
+  - Real Chromium stress test suite (tests/stress-journey.mjs) passes 5/5 test cases.
+
+## Cross-workspace tab discovery & visual settle heuristic (2026-09-14)
+
+Implemented two key LLM agent delight enhancements under owner direction:
+
+- Cross-Workspace Tab Discovery (ADR-0172):
+  - When an agent passes a tab handle that belongs to another admitted workspace, Ghostlight now returns explicit attribution ("That tab handle belongs to <workspace>.") and structured guidance ("Switch workspace or call browser_tabs with action list to see tabs in the current workspace.").
+  - Added structured facts: "owner_workspace": "<workspace>" in addition to "reason": "ownership_mismatch".
+  - Audited via Refusal::WorkspaceUnusable with WorkspaceReason::OwnershipMismatch { owner } without exposing tab URLs or private session contents across boundaries.
+- Visual Settle Heuristic (ADR-0173):
+  - Agnostic visual settlement sensor: Extended GhostlightSensor with settleVisual(target, options) observing bounding box metrics, document scroll dimensions, and running CSS animations/transitions via document.getAnimations().
+  - Spinner/ticker immunity: Ignores infinite animations (iterations === Infinity) so continuous loading indicators or pulsing icons do not deadlock the sensor.
+  - Quiet window stability: Samples metrics across consecutive requestAnimationFrame ticks with a hybrid timer fallback, ensuring uninterrupted sampling even in background or hidden tabs.
+  - First-class wait condition: browser_wait natively supports condition: "visual_settle" and "layout_stable", targeting an element or the entire document.
+  - Composite wait chaining: browser_wait supports visual_settle: true composite flag on other conditions (load_ready, target_present, selector_present, duration), verifying visual stability with remaining timeout budget after the primary condition is met.
+- Rigorous Stress Testing:
+  - Real Chromium stress journey (tests/stress-journey.mjs): Tested GhostlightSensor.settleVisual against real headless Chromium for Testing across static layouts, finite CSS animations (transform/opacity transitions), infinite spinners (continuous rotation bypass), continuous layout shifts, and 20 concurrent parallel animation targets.
+  - Extension stress suite (extension/tests/sensor.test.js): Exercised 20 staggered finite animations alongside 5 permanent spinners, fluctuating geometry stabilization, and 15 parallel multi-target settlements.
+  - Multi-workspace permutation stress (crates/orchestrator/src/work/tests/execution.rs): Exercised a 25-permutation matrix across 5 concurrent workspaces and tabs, verifying 100% accurate ownership attribution and zero boundary leakage.
+  - Composite wait timeout & chaining stress: Validated tight-budget exhaustion and multi-poll semantic selector chaining.
+- Green gates: All 283 extension tests and all 546 workspace Rust tests pass cleanly. cargo fmt and cargo clippy --workspace --all-targets -- -D warnings pass with zero warnings.
+
+## Load-sensitive settle sensor (2026-09-14)
+
+Adopted ADR-0171 to eliminate single-page application hydration races and false empty states across DOM reading and inspection:
+
+- Agnostic Settle Sensor: Implemented `GhostlightSensor` in `extension/lib/sensor.js` using bounded `MutationObserver` settlement with an interval fallback.
+- Hot-Path Zero-Latency Invariant: When content or controls exist on initial evaluation, the sensor resolves immediately on tick zero with 0ms added latency and zero observer allocation.
+- Adaptive Mutation Settlement: When initial candidates are empty (0 words, 0 matches), the sensor attaches a mutation observer and resolves as soon as content arrives and stabilizes over a 50ms quiet window.
+- Animation and Ticker Immunity: Resolves immediately upon satisfaction without stalling on perpetual background animations, CSS spinners, or clock tickers.
+- Integrated Operations: Wired into `read_text` (`browser_read`), `find` (`browser_find`), `inspect` and `inspect_tree` (`browser_inspect`), and `query_semantic`.
+- Full Gate Pass: All 276 extension tests (including 9 dedicated unit and stress tests) and all 541 workspace Rust tests pass cleanly. Verified live via MCP on dynamic hydration scenarios.
+
+## Service pipeline and resource hygiene (2026-09-14)
+
+Adopted ADR-0170 to eliminate spin-wait polling loops, clean compiler suppressions, and decouple monolithic modules:
+
+- TCP accept loopback unblock: Replaced 20ms non-blocking polling loops on service and browser TCP listeners with blocking `accept()`. Clean shutdown connects a loopback probe to immediately unblock listener threads without CPU churn.
+- Event-driven audit recovery: Replaced 250ms mutex-polling loop in `AuditRecorder` with a condition variable (`Condvar`), waking immediately on disk write failure or service shutdown.
+- Policy catalog watcher idle wait: Replaced 250ms sleep-diff loop with `SessionQueue::wait_idle_or_timeout(Duration::from_secs(1))`, waking instantly on session disconnection.
+- Workspace lease condition variable: Replaced 5ms lease acquisition spin-wait with `WorkspaceStore::acquire_until(...)` and a condition variable, eliminating 200 events/sec UI presentation event flooding during lease contention.
+- Compiler and Clippy suppression cleanup: Removed `#[allow(unreachable_code)]` in `install/mod.rs` by using mutually exclusive target configs, and removed `#[allow(clippy::result_large_err)]` in `work/mod.rs` by boxing the `Terminal` error payload.
+- Test decoupling: Extracted over 5,000 lines of inlined tests into dedicated submodules (`work/tests/execution.rs`, `governance/tests.rs`, `workbench/tests.rs`, `browser/contract_tests/relay.rs`).
+- Green gates: All 528+ Rust tests and all 267 extension tests pass cleanly. `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` pass with zero warnings.
+
+## Extension pipeline and resource hygiene (2026-09-14)
+
+Adopted ADR-0169 to eliminate pipeline latency traps, redundant asynchronous round trips,
+and memory leaks in the Chrome extension:
+
+- Form fill navigation delay removed: Removed the artificial `FILL_DOCUMENT_MIN_AGE_MS = 6000`
+  delay in `content.js`, saving up to 6 seconds per form fill. Ready state and DOM stability
+  checks remain authoritative without arbitrary sleep.
+- Streamlined pre-dispatch storage: Operations in `lib/engine.js` persist directly to `dispatched`
+  before executing, eliminating the redundant `accepted` storage write and halving pre-dispatch
+  storage IPC overhead.
+- Input verification deduplication: In `lib/documents.js` and `service-worker.js`, low-level CDP
+  sub-packets for composite actions (`click`, `drag`, `wheel`, `type`) reuse verified point,
+  focus, and admitted-frame state instead of repeating `describe` queries and frame inspections
+  on every micro-event.
+- Detached DOM locator pruning: Added periodic cleanup of disconnected elements (`!element.isConnected`)
+  in `content.js` `locators` cache, preventing memory leaks during single-page application re-renders.
+- Fast reconnect loop: Service worker now supplements `chrome.alarms` with an in-memory 3-second
+  retry loop while active, avoiding Chromium's 60-second minimum alarm clamp for packaged extensions.
+- API and dead code hygiene: Removed obsolete `range.detach?.()` calls and cleaned unused `void`
+  variable suppressions across extension scripts.
+- All 267 extension tests pass cleanly. Workspace Rust tests and Clippy remain green.
 
 ## Multiline input correction (2026-09-13)
 

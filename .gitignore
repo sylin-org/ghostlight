@@ -39,6 +39,7 @@ Thumbs.db
 
 # Local Claude Code settings (machine-specific paths, personal permission grants). Not shared.
 /.claude/
+/.zcode/
 
 # Founder-personal stash (entity/legal/insurance planning, personal to-dos, account notes).
 # Deliberately untracked: never pushed, never published. Backed up only by whatever covers

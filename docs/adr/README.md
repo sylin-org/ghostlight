@@ -191,6 +191,20 @@ history live here.
 
 | [0168](0168-controlled-tab-focus-emulation.md) | Focus emulation follows active controlled-tab custody; pause, stop, disconnect, and release restore normal lifecycle | Accepted; installed retention verified, cleanup regressions pass |
 
+| [0169](0169-extension-pipeline-and-resource-hygiene.md) | Extension pipeline and resource hygiene: remove form fill artificial delay, single-step pre-dispatch storage, composite input verification, detached locator pruning, and hybrid alarm reconnect | Accepted |
+
+| [0170](0170-service-pipeline-and-resource-hygiene.md) | Service pipeline and resource hygiene: blocking TCP listeners with loopback shutdown, bounded audit recovery, workspace lease Condvar wait, inline test decoupling, and warning cleanup | Accepted |
+
+| [0171](0171-load-sensitive-settle-sensor.md) | Load-sensitive settle sensor for browser DOM operations: agnostic settlement sensor for reading and inspection, hot-path zero latency, and ticker immunity | Accepted |
+
+| [0172](0172-cross-workspace-tab-discovery.md) | Cross-workspace tab discovery and informative ownership refusals: identifying owning workspace identity and actionable next steps | Accepted |
+
+| [0173](0173-visual-settle-heuristic.md) | Visual quiescence and layout-stability settlement sensor: animation introspection, geometry stability, and first-class visual wait | Accepted |
+
+| [0174](0174-delight-through-sane-defaults.md) | Delight through sane defaults: autonomous settle on screenshots, default visual stabilization on composite wait conditions, and zero-overhead opt-out | Accepted |
+
+| [0175](0175-first-class-workspace-switching.md) | First-class workspace discovery and switching: browser_workspace tool, zero-friction session rebinding, and cross-workspace tab handoff | Accepted |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

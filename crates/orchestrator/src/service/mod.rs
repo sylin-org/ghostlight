@@ -3,7 +3,7 @@
 mod admission;
 
 use std::env;
-use std::io::{self, BufReader};
+use std::io::BufReader;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,15 +24,18 @@ use ghostlight_bridge::service::{
 use ghostlight_bridge::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use uuid::Uuid;
 
+use serde_json::Value;
+
 use crate::audit::AuditRecorder;
 use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
+use crate::work::result::Status;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
-use crate::workspace::{ReleasedTabs, WorkspaceStore};
+use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
@@ -47,6 +50,7 @@ pub struct ServiceHost {
     pub workbench: WorkbenchFacade,
     /// The process-diagnostics hub this authority owns.
     pub diagnostics: Arc<DiagnosticsHub>,
+    audit: Arc<AuditRecorder>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     runtime_path: PathBuf,
@@ -92,12 +96,6 @@ impl ServiceHost {
             .context("bind service bridge")?;
         let browser_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .context("bind browser bridge")?;
-        service_listener
-            .set_nonblocking(true)
-            .context("configure service listener")?;
-        browser_listener
-            .set_nonblocking(true)
-            .context("configure browser listener")?;
         let token = format!("runtime_{}", Uuid::new_v4().simple());
         let endpoint = RuntimeEndpoint {
             service_port: service_listener.local_addr()?.port(),
@@ -168,10 +166,10 @@ impl ServiceHost {
 
         let stop = Arc::new(AtomicBool::new(false));
         let audit_stop = stop.clone();
+        let audit_for_thread = Arc::clone(&audit);
         let audit_thread = std::thread::spawn(move || {
             while !audit_stop.load(Ordering::SeqCst) {
-                audit.recover_if_due();
-                std::thread::sleep(Duration::from_millis(250));
+                audit_for_thread.wait_for_recovery(&audit_stop);
             }
         });
         let service_thread = spawn_service_listener(
@@ -195,6 +193,7 @@ impl ServiceHost {
             endpoint,
             workbench,
             diagnostics,
+            audit,
             stop,
             threads: vec![service_thread, browser_thread, audit_thread],
             runtime_path: path.into(),
@@ -227,6 +226,9 @@ impl ServiceHost {
 
     fn join(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.audit.wake();
+        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.endpoint.service_port));
+        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.endpoint.browser_port));
         for handle in self.threads.drain(..) {
             let _ = handle.join();
         }
@@ -316,6 +318,9 @@ fn spawn_service_listener(
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
                         let Some(handshake) = handshakes.acquire(1) else {
                             continue;
                         };
@@ -350,10 +355,11 @@ fn spawn_service_listener(
                                 }
                             });
                     }
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(20))
+                    Err(_) => {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
                     }
-                    Err(_) => thread::sleep(Duration::from_millis(50)),
                 }
             }
         })
@@ -373,6 +379,9 @@ fn spawn_browser_listener(
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
                         let Some(handshake) = handshakes.acquire(1) else {
                             continue;
                         };
@@ -388,10 +397,11 @@ fn spawn_browser_listener(
                                 }
                             });
                     }
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(20))
+                    Err(_) => {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
                     }
-                    Err(_) => thread::sleep(Duration::from_millis(50)),
                 }
             }
         })
@@ -628,7 +638,9 @@ fn serve_session(
             .spawn(move || {
                 let mut generation = 1_u64;
                 while !stop.load(Ordering::SeqCst) {
-                    thread::sleep(Duration::from_millis(250));
+                    if !queue.wait_idle_or_timeout(Duration::from_secs(1)) {
+                        break;
+                    }
                     queue.advance_cancelled();
                     for job in queue.jobs() {
                         executor.show_waiting(&workspace, &job.prepared);
@@ -669,6 +681,7 @@ fn serve_session(
     // each of them used to leave through `?` before the release ran. The workspace and every tab
     // it held then survived with nothing able to collect them: an unowned workspace has no owning
     // process to look up, so the reaper cannot see it either.
+    let active_workspace = Arc::new(Mutex::new(workspace.clone()));
     let served = (|| -> Result<()> {
         if catalog_watch.is_err() {
             bail!("session watcher could not start");
@@ -676,19 +689,29 @@ fn serve_session(
         for independent in [false, true] {
             let queue = queue.clone();
             let executor = executor.clone();
-            let workspace = workspace.clone();
+            let active_workspace = active_workspace.clone();
             let writer = writer.clone();
             workers.push(
                 thread::Builder::new()
                     .name("ghostlight-session-work".into())
                     .spawn(move || {
                         while let Some(job) = queue.next(independent) {
+                            let current_workspace = lock(&active_workspace).clone();
                             let result = executor.execute_prepared(
-                                &workspace,
+                                &current_workspace,
                                 &job.prepared,
                                 &job.cancellation,
                                 false,
                             );
+                            if result.status == Status::Succeeded {
+                                if let Some(target) = result
+                                    .facts
+                                    .get("switched_workspace")
+                                    .and_then(Value::as_str)
+                                {
+                                    *lock(&active_workspace) = WorkspaceId::from(target);
+                                }
+                            }
                             deliver_result(&writer, &job.id, result);
                             queue.complete(&job.id);
                         }
@@ -741,8 +764,9 @@ fn serve_session(
                             },
                         ),
                         Err(Refused::Full) => {
+                            let current_workspace = lock(&active_workspace).clone();
                             let result = executor.execute_prepared(
-                                &workspace,
+                                &current_workspace,
                                 &job.prepared,
                                 &job.cancellation,
                                 true,
@@ -777,8 +801,9 @@ fn serve_session(
     for worker in workers {
         let _ = worker.join();
     }
+    let final_workspace = lock(&active_workspace).clone();
     workspaces.disconnect(
-        &workspace,
+        &final_workspace,
         connection
             .attribution()
             .connection_id
@@ -787,9 +812,16 @@ fn serve_session(
     );
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
-    if !workspaces.is_owned(&workspace) {
+    if !workspaces.is_owned(&workspace) && !workspaces.has_connections(&workspace) {
         let released = workspaces.release(&workspace);
         cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
+    }
+    if final_workspace != workspace
+        && !workspaces.is_owned(&final_workspace)
+        && !workspaces.has_connections(&final_workspace)
+    {
+        let released = workspaces.release(&final_workspace);
+        cleanup_released_tabs(final_workspace.as_str(), &released, browser.as_ref());
     }
     diagnostics.sink().emit(
         ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,

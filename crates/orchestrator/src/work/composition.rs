@@ -420,6 +420,8 @@ mod tests {
                 invocation: "parent",
                 workspace: &workspace,
                 requested_browser: None,
+                requested_tab: None,
+                requested_target: None,
                 snapshot: &snapshot,
                 deadline: Instant::now(),
                 cancellation: &token,

@@ -57,6 +57,12 @@ the owner wants, and what this project learned the hard way.
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
   agent references when the page changes; govern the next actual agent request (ADR-0164).
 
+- **Delight through sane defaults.** Anticipate the caller's intent with intelligent, safe defaults
+  rather than demanding boilerplate configuration. Screenshots and composite wait operations default to
+  visual quiescence and layout settlement (`visual_settle: true`, ADR-0174) with zero-cost opt-out.
+  Cross-workspace operations provide discovery and smooth session rebinding (`browser_workspace`, ADR-0175)
+  instead of unresolvable error walls.
+
 - **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
   optional information, and unavailable nonessential components. Use safe defaults and bounded
   automatic recovery; keep unaffected work available instead of rejecting the whole operation or
@@ -529,7 +535,32 @@ Every one of these cost something to learn.
   make is team package access (org settings, developers team, add existing package), which
   does not change the public maintainers list. Finishing a transfer takes a recovery code
   or an npm support request; pin the maintainer assertion in the online truth check only
-  after the flip is observable.
+- **Heuristic timing delays become dead debt once root causes are resolved.** During GenAI.Works
+  debugging, a 6-second navigation delay (`FILL_DOCUMENT_MIN_AGE_MS`) was added to guard form hydration
+  before ADR-0168 identified that site-side React Hook Form visibility handlers caused draft resets
+  (which was cured by CDP focus emulation). The artificial delay remained as dead latency on all form
+  fills across all sites until ADR-0169 removed it. When a root cause is resolved by an authoritative
+  browser mechanism, audit and retire temporary timing heuristics immediately.
+- **Packaged Chrome extensions clamp alarms to 60 seconds.** `chrome.alarms` enforces a minimum 1-minute
+  delay in packaged extensions regardless of smaller fractional values like 0.05m (3s). Active background
+  workers need in-memory timers (`setTimeout`) for fast sub-minute retry loops, with alarms serving as the
+  cold wakeup fallback.
+- **Loopback probes unblock blocking TCP accept loops cleanly without sleep-spin polling.** Rust standard
+  `std::net::TcpListener` lacks a timeout on `accept()`, tempting short sleep loops with nonblocking sockets.
+  Connecting a brief loopback probe (`TcpStream::connect`) during shutdown wakes the blocking listener thread
+  immediately with zero idle CPU wakeups during service lifetime.
+- **Condition variables prevent presentation event flooding during resource contention.** Polling with
+  short sleeps to wait for exclusive workspace leases generated 200 events/second of "Waiting for workspace..."
+  activity updates to clients. Condvar notification upon lease drop wakes waiting callers immediately without
+  spurious status churn.
+- **Autonomous settle defaults eliminate visual race artifacts without caller overhead.** Defaulting
+  `visual_settle: true` on `browser_screenshot` and composite `browser_wait` conditions ensures LLMs and users
+  capture rendered layouts rather than mid-transition frames, without requiring explicit configuration on
+  every call (ADR-0174).
+- **Workspace transitions must rebind dynamically without connection churn.** When an agent encounters
+  cross-workspace tab ownership mismatches, forcing a disconnect and reconnect loses context and session history.
+  A dedicated discovery and switching seam (`browser_workspace`, ADR-0175) with thread-safe atomic session
+  rebinding (`Arc<Mutex<WorkspaceId>>`) resolves multi-workspace routing cleanly inside the live MCP session.
 
 ## Where to look
 

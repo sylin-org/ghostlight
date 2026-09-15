@@ -263,6 +263,7 @@ function contentHarness() {
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
     GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
+    GhostlightSensor: require("../lib/sensor.js"),
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},
@@ -777,7 +778,8 @@ test("successful fill preparation changes nothing and final mixed native fields 
   const fields = inspected.result.targets.map((target) => ({ locator: target.locator, value: "Replacement draft" }));
   const prepared = await harness.send({ kind: "prepare_fill", fields });
   assert.equal(prepared.result.prepared, true);
-  assert.ok(harness.delays.reduce((sum, delay) => sum + delay, 0) >= 6000);
+  const totalDelay = harness.delays.reduce((sum, delay) => sum + delay, 0);
+  assert.ok(totalDelay >= 750 && totalDelay < 6000);
   assert.equal(harness.input.value, "Original input"); assert.equal(editor.textContent, "Original rich draft");
   assert.deepEqual(harness.edits, []); assert.deepEqual(harness.input.events, []);
   const filled = await harness.send({ kind: "fill", fields });

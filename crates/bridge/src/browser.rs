@@ -670,12 +670,16 @@ pub enum BrowserCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         locator: Option<String>,
         full_page: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visual_settle: Option<bool>,
     },
     /// Capture and magnify one page rectangle resolved from a governed view handle.
     ScreenshotRegion {
         tab_id: u64,
         region: PhysicalRectangle,
         expected_viewport: ViewportGeometry,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visual_settle: Option<bool>,
     },
     /// Recheck credential classification immediately before a fill.
     DescribeTargets { tab_id: u64, locators: Vec<String> },
@@ -1746,6 +1750,7 @@ mod tests {
                     zoom: 1.0,
                     output_scale: 1.0,
                 },
+                visual_settle: None,
             }
             .required_capability(),
             adapter_capability::CAPTURE
@@ -1838,6 +1843,7 @@ mod tests {
                 tab_id: 1,
                 locator: Some("2:locator_1".into()),
                 full_page: false,
+                visual_settle: None,
             }
             .required_revision(),
             adapter_capability::CAPTURE_REVISION_COMPOSED_GEOMETRY
@@ -1847,6 +1853,7 @@ mod tests {
                 tab_id: 1,
                 locator: None,
                 full_page: true,
+                visual_settle: None,
             }
             .required_revision(),
             1
@@ -1877,6 +1884,7 @@ mod tests {
                 zoom: 1.0,
                 output_scale: 0.5,
             },
+            visual_settle: None,
         };
         let encoded = serde_json::to_value(&command).expect("region command serializes");
         assert_eq!(encoded["command"], "screenshot_region");

@@ -168,9 +168,9 @@ impl Refusal {
             Self::CancelledAfterDispatch => AuditRefusal::CancelledAfterDispatch,
             Self::EffectUnknown => AuditRefusal::EffectUnknown,
             Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
-            Self::WorkspaceUnusable { reason } => {
-                AuditRefusal::WorkspaceUnusable { cause: *reason }
-            }
+            Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {
+                cause: reason.clone(),
+            },
             Self::FilesUnreadable => AuditRefusal::FilesUnreadable,
             Self::CaptureTooLarge => AuditRefusal::CaptureTooLarge,
             Self::NoDialogVisible => AuditRefusal::NoDialogVisible,

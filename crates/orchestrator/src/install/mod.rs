@@ -2246,10 +2246,12 @@ fn is_executable_file(path: &Path, windows: bool) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0);
+        fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
     }
-    #[allow(unreachable_code)]
-    false
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 /// If `path` is itself a symlink, resolve it to the real file it points at, so a subsequent

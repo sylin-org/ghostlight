@@ -137,9 +137,21 @@
       await verify(tabId);
       if (method.startsWith("Input.")) {
         const point = Number.isFinite(params?.x) && Number.isFinite(params?.y);
-        const subject = await describe({ tab_id: tabId, locators: [],
-          points: point ? [{ x: params.x, y: params.y }] : [], focused: !point, viewport: true });
-        if (subject.unresolved || subject.subjects.some((id) => !context.scope.allowed.includes(id))) throw changed();
+        if (point) {
+          if (context.verifiedPoint && context.verifiedPoint.x === params.x && context.verifiedPoint.y === params.y) {
+            return;
+          }
+          const subject = await describe({ tab_id: tabId, locators: [],
+            points: [{ x: params.x, y: params.y }], focused: false, viewport: true });
+          if (subject.unresolved || subject.subjects.some((id) => !context.scope.allowed.includes(id))) throw changed();
+          context.verifiedPoint = { x: params.x, y: params.y };
+        } else {
+          if (context.verifiedFocus) return;
+          const subject = await describe({ tab_id: tabId, locators: [],
+            points: [], focused: true, viewport: true });
+          if (subject.unresolved || subject.subjects.some((id) => !context.scope.allowed.includes(id))) throw changed();
+          context.verifiedFocus = true;
+        }
       }
     }
 
@@ -152,9 +164,13 @@
     async function targetedInput(tabId, frameId) {
       const context = active.get(tabId);
       if (!context) return;
-      await verify(tabId);
-      const frame = context.raw.find((item) => item.frameId === frameId);
-      if (!frame || !context.scope.allowed.includes(frame.documentId)) throw changed();
+      if (!context.verifiedFrames?.has(frameId)) {
+        await verify(tabId);
+        const frame = context.raw.find((item) => item.frameId === frameId);
+        if (!frame || !context.scope.allowed.includes(frame.documentId)) throw changed();
+        if (!context.verifiedFrames) context.verifiedFrames = new Set();
+        context.verifiedFrames.add(frameId);
+      }
       context.dispatched = true;
     }
 

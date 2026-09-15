@@ -26,7 +26,7 @@ impl ApplicationExecutor {
         let location = if let Some(selector) = &value.selector {
             match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok((tab, target)) => ResolvedLocation::Target { tab, target },
-                Err(terminal) => return terminal,
+                Err(terminal) => return *terminal,
             }
         } else {
             match self.resolve_location(

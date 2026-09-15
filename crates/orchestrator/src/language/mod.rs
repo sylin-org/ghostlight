@@ -126,6 +126,8 @@ pub enum Operation {
     Record(Record),
     /// Read bounded opt-in browser diagnostics.
     Diagnose(Diagnose),
+    /// Manage session workspace discovery and switching (ADR-0175).
+    ManageWorkspace(ManageWorkspace),
 
     /// Explain the authority in force (ADR-0136).
     ExplainPolicy(ExplainPolicy),
@@ -158,9 +160,18 @@ impl Operation {
             Self::HandleDialog(_) => "browser_dialog",
             Self::Record(_) => "browser_record",
             Self::Diagnose(_) => "browser_diagnose",
+            Self::ManageWorkspace(_) => "browser_workspace",
             Self::ExplainPolicy(_) => "policy_explain",
         }
     }
+}
+
+/// Model input for workspace discovery and switching (ADR-0175).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ManageWorkspace {
+    pub action: String,
+    #[serde(default)]
+    pub workspace: Option<String>,
 }
 
 /// Model input for the cohesive tab controller.
@@ -394,6 +405,9 @@ pub struct TakeScreenshot {
     pub width: Option<f64>,
     #[serde(default)]
     pub height: Option<f64>,
+    /// Optional layout-stability and visual quiescence check before capturing (defaults to true).
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
 }
@@ -683,6 +697,9 @@ pub struct Wait {
     /// control, without pre-resolving any handle.
     #[serde(default)]
     pub selector: Option<SemanticSelector>,
+    /// Optional layout-stability and visual quiescence check before completing.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
 }
@@ -875,6 +892,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "y",
                 "width",
                 "height",
+                "visual_settle",
                 "timeout_ms",
             ],
             validate_screenshot,
@@ -1008,6 +1026,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "value",
                 "target",
                 "selector",
+                "visual_settle",
                 "timeout_ms",
             ],
             validate_wait,
@@ -1018,6 +1037,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_dialog" => decode_dialog(input),
         "browser_record" => decode_record(input),
         "browser_diagnose" => decode_diagnose(input),
+        "browser_workspace" => decode_workspace(input),
         "policy_explain" => decode_explain_policy(input),
         other => Err(LanguageError::UnknownTool(other.into())),
     }
@@ -1335,6 +1355,35 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
 fn decode_explain_policy(input: Value) -> Result<Operation, LanguageError> {
     let value: ExplainPolicy = parse(input, &[], |_| Ok(()))?;
     Ok(Operation::ExplainPolicy(value))
+}
+
+fn decode_workspace(input: Value) -> Result<Operation, LanguageError> {
+    let value: ManageWorkspace = parse(
+        input,
+        &["action", "workspace"],
+        |value: &ManageWorkspace| {
+            validate_choice(&value.action, &["list", "switch"], "action")?;
+            match value.action.as_str() {
+                "list" if value.workspace.is_some() => {
+                    return Err(LanguageError::Invalid(
+                        "workspace is not valid when action is list".into(),
+                    ))
+                }
+                "switch" => validate_handle(
+                    value.workspace.as_deref().ok_or_else(|| {
+                        LanguageError::Invalid(
+                            "action switch needs a workspace: the handle of the workspace to switch to"
+                                .into(),
+                        )
+                    })?,
+                    "workspace_",
+                )?,
+                _ => {}
+            }
+            Ok(())
+        },
+    )?;
+    Ok(Operation::ManageWorkspace(value))
 }
 
 fn has_field(input: &Value, field: &str) -> bool {
@@ -2030,6 +2079,8 @@ fn validate_condition(
             "text_absent",
             "target_present",
             "target_absent",
+            "visual_settle",
+            "layout_stable",
             "duration",
         ],
         "condition",
@@ -2055,6 +2106,17 @@ fn validate_condition(
         "load_ready" if value.is_some() || target.is_some() => Err(LanguageError::Invalid(
             "load_ready accepts neither value nor target".into(),
         )),
+        "visual_settle" | "layout_stable" => {
+            if value.is_some() {
+                return Err(LanguageError::Invalid(format!(
+                    "{condition} does not accept value"
+                )));
+            }
+            if let Some(target) = target {
+                validate_handle(target, "target_")?;
+            }
+            Ok(())
+        }
         "url_contains" | "text_present" | "text_absent" => {
             let value = value
                 .ok_or_else(|| LanguageError::Invalid(format!("{condition} requires value")))?;
@@ -2253,11 +2315,11 @@ mod tests {
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 23);
+        assert_eq!(catalog.len(), 24);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
             assert!(tool.output_schema.is_some());

@@ -13,9 +13,16 @@ const documents = globalThis.GhostlightDocuments.create({
   frames
 });
 
+const INPUT_DISPATCH_METHODS = new Set([
+  "Input.dispatchMouseEvent",
+  "Input.dispatchKeyEvent",
+  "Input.dispatchDragEvent",
+  "Input.insertText"
+]);
+
 async function sendDebugger(target, method, params, targetedFrameId = null) {
-  if (method.startsWith("Input.") || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
-    if (method.startsWith("Input.") && targetedFrameId !== null) await documents.targetedInput(target.tabId, targetedFrameId);
+  if (INPUT_DISPATCH_METHODS.has(method) || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
+    if (INPUT_DISPATCH_METHODS.has(method) && targetedFrameId !== null) await documents.targetedInput(target.tabId, targetedFrameId);
     else await documents.input(target.tabId, method, params);
   }
   return chrome.debugger.sendCommand(target, method, params);
@@ -232,6 +239,10 @@ async function establishNativeConnection() {
     });
     connectionLog.record(helloSent ? connectionEvents.NATIVE_HELLO_SENT : connectionEvents.NATIVE_HELLO_SKIPPED,
       { attempt, browser_id: browserId });
+    if (helloSent) {
+      clearNativeRetryTimer();
+      chrome.alarms.clear("ghostlight-reconnect").catch(() => {});
+    }
   } catch (error) {
     nativePort = null;
     setConnection({ connected: false, service_version: null, last_error: shared.bounded(error?.message ?? error, 500) });
@@ -240,7 +251,24 @@ async function establishNativeConnection() {
   }
 }
 
+let activeRetryTimer = null;
+
+function clearNativeRetryTimer() {
+  if (activeRetryTimer) {
+    clearTimeout(activeRetryTimer);
+    activeRetryTimer = null;
+  }
+}
+
+function onNativeRetryTimeout() {
+  activeRetryTimer = null;
+  if (!nativePort) connectNative("retry_timer");
+}
+
 function scheduleNativeRetry(attempt) {
+  if (!activeRetryTimer) {
+    activeRetryTimer = setTimeout(onNativeRetryTimeout, 3_000);
+  }
   Promise.resolve().then(() => chrome.alarms.create("ghostlight-reconnect", { delayInMinutes: 0.05 }))
     .then(() => chrome.alarms.get("ghostlight-reconnect"))
     .then(alarm => connectionLog.record(connectionEvents.RETRY_SCHEDULED, { attempt, scheduled_time: alarm?.scheduledTime ?? 0 }))
@@ -262,6 +290,7 @@ chrome.runtime.onStartup.addListener(() => {
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== "ghostlight-reconnect") return;
+  clearNativeRetryTimer();
   connectionLog.record(connectionEvents.ALARM_FIRED, { scheduled_time: alarm.scheduledTime });
   connectNative("alarm");
 });
@@ -1439,8 +1468,19 @@ async function firstFrameAnswer(tabId, message) {
 }
 
 async function observeAcrossFrames(command) {
+  if (command.condition === "visual_settle" || command.condition === "layout_stable") {
+    const frameId = command.locator ? (frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID) : frames.TOP_FRAME_ID;
+    return contentIn(command.tab_id, frameId, {
+      kind: "observe",
+      condition: command.condition,
+      value: command.value,
+      locator: command.locator ? frames.localOf(command.locator) : undefined,
+      timeout_ms: command.timeout_ms,
+      visual_settle: command.visual_settle
+    });
+  }
   if (command.condition === "load_ready" || command.condition === "url_contains") {
-    return contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms });
+    return contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms, visual_settle: command.visual_settle });
   }
   if (command.condition === "target_present" || command.condition === "target_absent") {
     return contentIn(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID, {
@@ -1448,7 +1488,8 @@ async function observeAcrossFrames(command) {
       condition: command.condition,
       value: command.value,
       locator: frames.localOf(command.locator),
-      timeout_ms: command.timeout_ms
+      timeout_ms: command.timeout_ms,
+      visual_settle: command.visual_settle
     });
   }
   const wantsPresence = command.condition === "text_present";
@@ -1457,7 +1498,7 @@ async function observeAcrossFrames(command) {
     contentIn(
       command.tab_id,
       frameId,
-      { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms }
+      { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms, visual_settle: command.visual_settle }
     ).catch(() => ({ satisfied: !wantsPresence, elapsed_ms: 0 }))
   ));
   const satisfied = wantsPresence ? settled.some((entry) => entry.satisfied) : settled.every((entry) => entry.satisfied);
@@ -1841,6 +1882,17 @@ async function prepareCaptureMasks(tabId) {
 async function screenshot(command) {
   await ensureDebugger(command.tab_id);
   await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
+  if (command.visual_settle !== false) {
+    try {
+      await contentIn(command.tab_id, frames.TOP_FRAME_ID, {
+        kind: "observe",
+        condition: "visual_settle",
+        timeout_ms: 1000,
+      });
+    } catch (_) {
+      // Sane default visual settle: best-effort quiescence before capture.
+    }
+  }
   let masks;
   try {
     const metrics = await sendDebugger({ tabId: command.tab_id }, "Page.getLayoutMetrics");
@@ -2033,11 +2085,9 @@ async function pressKey(correlation, command) {
     const descriptor = shared.keyDescriptor(command.key);
     // Text overrides turn modified printable keys into literal insertion. Omit the override for
     // shortcut chords so Control-a, Meta-c, and similar combinations reach the browser command.
-    const { text: descriptorText, unmodifiedText: descriptorUnmodifiedText, ...physicalDescriptor } = descriptor;
+    const { text: _descriptorText, unmodifiedText: _descriptorUnmodifiedText, ...physicalDescriptor } = descriptor;
     const combinedModifiers = modifiers | (descriptor.modifiers ?? 0);
     const keyDown = modifiers & 7 ? physicalDescriptor : descriptor;
-    void descriptorText;
-    void descriptorUnmodifiedText;
     await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...keyDown, modifiers: combinedModifiers });
     const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
     await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers: combinedModifiers });
@@ -2059,9 +2109,8 @@ async function dropImageAt(correlation, command) {
       y: point.local_y,
       files: [command.file]
     });
-    const tab = await chrome.tabs.get(command.tab_id);
+    await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
-    void tab;
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: point.subject };
   } catch (error) { error.effectUnknown = true; throw error; }
   finally { await detachDebugger(command.tab_id); }

@@ -61,7 +61,7 @@ impl ApplicationExecutor {
                     selector,
                 ) {
                     Ok(value) => value,
-                    Err(terminal) => return terminal,
+                    Err(terminal) => return *terminal,
                 }
             } else {
                 match self.resolve_target(
@@ -186,7 +186,7 @@ impl ApplicationExecutor {
         let (selected, target) = if let Some(selector) = &value.selector {
             match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok(value) => value,
-                Err(terminal) => return terminal,
+                Err(terminal) => return *terminal,
             }
         } else {
             match self.resolve_target(context, lease, value.tab.as_deref(), &value.target) {
@@ -308,7 +308,7 @@ impl ApplicationExecutor {
                     let role = target.role;
                     (tab, Some(locator), Some(role), None)
                 }
-                Err(terminal) => return terminal,
+                Err(terminal) => return *terminal,
             }
         } else {
             match self.resolve_target(
@@ -694,21 +694,66 @@ impl ApplicationExecutor {
                 ));
             }
             let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let should_settle = value.visual_settle != Some(false);
+            let (final_satisfied, final_elapsed_ms) = if should_settle {
+                let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                let remaining_deadline = context.deadline.saturating_duration_since(Instant::now());
+                let settle_timeout = observation_budget_ms(remaining_budget, remaining_deadline);
+                match self.dispatch(
+                    context,
+                    BrowserCommand::Observe {
+                        tab_id: selected.physical_id,
+                        condition: "visual_settle".into(),
+                        value: None,
+                        locator: locator.clone(),
+                        timeout_ms: settle_timeout,
+                    },
+                ) {
+                    Ok(BrowserOutcome::Observed {
+                        tab_id: settle_tab_id,
+                        satisfied: settle_satisfied,
+                        elapsed_ms: settle_elapsed_ms,
+                        readiness: settle_readiness,
+                    }) if settle_tab_id == selected.physical_id => {
+                        let _ = lease.update_readiness(&selected.handle, settle_readiness);
+                        (
+                            settle_satisfied,
+                            elapsed_ms.saturating_add(settle_elapsed_ms),
+                        )
+                    }
+                    _ => (false, elapsed_ms),
+                }
+            } else {
+                (true, elapsed_ms)
+            };
+            let status = if final_satisfied {
+                Status::Succeeded
+            } else {
+                Status::Failed
+            };
             let outcome = Outcome::Waited {
                 condition: value.condition.clone(),
-                elapsed_ms,
-                satisfied: true,
+                elapsed_ms: final_elapsed_ms,
+                satisfied: final_satisfied,
                 host: observed_host(&selected.url),
             };
+            let facts = json!({
+                "tab": selected.handle.as_str(),
+                "condition": "duration",
+                "satisfied": final_satisfied,
+                "elapsed_ms": final_elapsed_ms,
+                "readiness": readiness(selected.readiness),
+                "visual_settle": should_settle,
+            });
             return Terminal {
                 result: InvocationResult::new(
                     context.invocation,
-                    Status::Succeeded,
+                    status,
                     Effect::None,
                     readiness(selected.readiness),
                     true,
                     outcome.summary().as_str(),
-                    json!({"tab":selected.handle.as_str(),"condition":"duration","satisfied":true,"elapsed_ms":elapsed_ms,"readiness":readiness(selected.readiness)}),
+                    facts,
                     outcome.next_steps(),
                 ),
                 decision,
@@ -779,17 +824,56 @@ impl ApplicationExecutor {
                 ));
             }
             let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let status = if satisfied {
+            let should_settle = value.visual_settle != Some(false);
+            let (final_satisfied, final_elapsed_ms) = if satisfied && should_settle {
+                let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                let remaining_deadline = context.deadline.saturating_duration_since(Instant::now());
+                let settle_timeout = observation_budget_ms(remaining_budget, remaining_deadline);
+                match self.dispatch(
+                    context,
+                    BrowserCommand::Observe {
+                        tab_id: selected.physical_id,
+                        condition: "visual_settle".into(),
+                        value: None,
+                        locator: locator.clone(),
+                        timeout_ms: settle_timeout,
+                    },
+                ) {
+                    Ok(BrowserOutcome::Observed {
+                        tab_id: settle_tab_id,
+                        satisfied: settle_satisfied,
+                        elapsed_ms: settle_elapsed_ms,
+                        readiness: settle_readiness,
+                    }) if settle_tab_id == selected.physical_id => {
+                        let _ = lease.update_readiness(&selected.handle, settle_readiness);
+                        (
+                            settle_satisfied,
+                            elapsed_ms.saturating_add(settle_elapsed_ms),
+                        )
+                    }
+                    _ => (false, elapsed_ms),
+                }
+            } else {
+                (satisfied, elapsed_ms)
+            };
+            let status = if final_satisfied {
                 Status::Succeeded
             } else {
                 Status::Failed
             };
             let outcome = Outcome::Waited {
                 condition: value.condition.clone(),
-                elapsed_ms,
-                satisfied,
+                elapsed_ms: final_elapsed_ms,
+                satisfied: final_satisfied,
                 host: observed_host(&selected.url),
             };
+            let facts = json!({
+                "tab": selected.handle.as_str(),
+                "condition": "selector_present",
+                "satisfied": final_satisfied,
+                "elapsed_ms": final_elapsed_ms,
+                "visual_settle": should_settle,
+            });
             return Terminal {
                 result: InvocationResult::new(
                     context.invocation,
@@ -798,7 +882,7 @@ impl ApplicationExecutor {
                     readiness(selected.readiness),
                     true,
                     outcome.summary().as_str(),
-                    json!({"tab":selected.handle.as_str(),"condition":"selector_present","satisfied":satisfied,"elapsed_ms":elapsed_ms}),
+                    facts,
                     outcome.next_steps(),
                 ),
                 decision,
@@ -813,7 +897,7 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 condition: value.condition.clone(),
                 value: value.value.clone(),
-                locator,
+                locator: locator.clone(),
                 timeout_ms: observation_budget_ms(
                     value.timeout_ms,
                     context.deadline.saturating_duration_since(Instant::now()),
@@ -827,7 +911,51 @@ impl ApplicationExecutor {
                 readiness: browser_readiness,
             }) if tab_id == selected.physical_id => {
                 let _ = lease.update_readiness(&selected.handle, browser_readiness);
-                let status = if satisfied {
+                let is_composite_default =
+                    value.condition == "load_ready" || value.condition == "target_present";
+                let should_settle = if is_composite_default {
+                    value.visual_settle != Some(false)
+                } else {
+                    value.visual_settle == Some(true)
+                };
+                let (final_satisfied, final_elapsed_ms) = if satisfied
+                    && should_settle
+                    && value.condition != "visual_settle"
+                    && value.condition != "layout_stable"
+                {
+                    let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                    let remaining_deadline =
+                        context.deadline.saturating_duration_since(Instant::now());
+                    let settle_timeout =
+                        observation_budget_ms(remaining_budget, remaining_deadline);
+                    match self.dispatch(
+                        context,
+                        BrowserCommand::Observe {
+                            tab_id: selected.physical_id,
+                            condition: "visual_settle".into(),
+                            value: None,
+                            locator: locator.clone(),
+                            timeout_ms: settle_timeout,
+                        },
+                    ) {
+                        Ok(BrowserOutcome::Observed {
+                            tab_id: settle_tab_id,
+                            satisfied: settle_satisfied,
+                            elapsed_ms: settle_elapsed_ms,
+                            readiness: settle_readiness,
+                        }) if settle_tab_id == selected.physical_id => {
+                            let _ = lease.update_readiness(&selected.handle, settle_readiness);
+                            (
+                                settle_satisfied,
+                                elapsed_ms.saturating_add(settle_elapsed_ms),
+                            )
+                        }
+                        _ => (false, elapsed_ms),
+                    }
+                } else {
+                    (satisfied, elapsed_ms)
+                };
+                let status = if final_satisfied {
                     Status::Succeeded
                 } else {
                     Status::Failed
@@ -836,13 +964,21 @@ impl ApplicationExecutor {
                 // condition joins the sentence that reaches audit.
                 let outcome = Outcome::Waited {
                     condition: value.condition.clone(),
-                    elapsed_ms,
-                    satisfied,
+                    elapsed_ms: final_elapsed_ms,
+                    satisfied: final_satisfied,
                     host: observed_host(&selected.url),
                 };
                 let summary = outcome.summary();
                 let next_steps = outcome.next_steps();
                 let outcome_observed = outcome.observed();
+                let facts = json!({
+                    "tab": selected.handle.as_str(),
+                    "condition": value.condition,
+                    "satisfied": final_satisfied,
+                    "elapsed_ms": final_elapsed_ms,
+                    "readiness": readiness(browser_readiness),
+                    "visual_settle": should_settle,
+                });
                 Terminal {
                     result: InvocationResult::new(
                         context.invocation,
@@ -851,7 +987,7 @@ impl ApplicationExecutor {
                         readiness(browser_readiness),
                         true,
                         &summary,
-                        json!({"tab":selected.handle.as_str(),"condition":value.condition,"satisfied":satisfied,"elapsed_ms":elapsed_ms,"readiness":readiness(browser_readiness)}),
+                        facts,
                         next_steps,
                     ),
                     decision,

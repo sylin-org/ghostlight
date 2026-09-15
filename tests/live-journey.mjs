@@ -188,7 +188,7 @@ try {
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
-  assert.equal(listed.result.tools.length, 23);
+  assert.equal(listed.result.tools.length, 24);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   const authority = await call("policy_explain", {});
   assert.equal(authority.status, "succeeded", JSON.stringify(authority));

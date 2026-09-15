@@ -2,6 +2,7 @@
   "use strict";
 
   const shared = globalThis.GhostlightShared;
+  const sensor = globalThis.GhostlightSensor;
   // Frame transparency (ADR-0138): this instance may live in an embedded frame. Perpetual
   // visuals belong to the top document only; target-anchored transients render wherever
   // their element lives, because that is what the person should see.
@@ -16,11 +17,11 @@
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
   const CAPTURE_MASK_TTL_MS = 10_000;
-  const FILL_DOCUMENT_MIN_AGE_MS = 6_000;
   const FILL_STABLE_MS = 750;
   const FILL_SETTLE_LIMIT_MS = 8_000;
   const FILL_FIELD_STABLE_MS = 250;
   const FILL_FIELD_SETTLE_LIMIT_MS = 2_000;
+  const MAX_LOCATORS = 500;
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
@@ -144,9 +145,16 @@
       : { started: false, cancelled: false };
   }
 
+  function pruneDisconnectedLocators() {
+    for (const [loc, el] of locators) {
+      if (!el.isConnected) locators.delete(loc);
+    }
+  }
+
   function locatorFor(element) {
     let locator = reverse.get(element);
     if (!locator) {
+      if (locators.size >= MAX_LOCATORS) pruneDisconnectedLocators();
       locator = `locator_${nextLocator++}`;
       reverse.set(element, locator);
       locators.set(locator, element);
@@ -156,7 +164,10 @@
 
   function resolve(locator) {
     const element = locators.get(locator);
-    if (!element || !element.isConnected) throw new Error("stale browser locator");
+    if (!element || !element.isConnected) {
+      if (element) locators.delete(locator);
+      throw new Error("stale browser locator");
+    }
     return element;
   }
 
@@ -360,7 +371,6 @@
         if (range) {
           range.selectNodeContents(node);
           const rendered = range.getClientRects().length > 0;
-          range.detach?.();
           if (!rendered) return;
         }
         append(node.nodeValue);
@@ -637,8 +647,8 @@
 
   // A browser document can be ready while a client-rendered form is still hydrating from an
   // API response. Editing during that window produces real trusted events and a temporary dirty
-  // state, then the hydration result replaces the draft. Require both a minimum document age and
-  // a stable target set before the worker begins its irreversible browser input sequence.
+  // state, then the hydration result replaces the draft. Require a stable target set and
+  // ready state before the worker begins its irreversible browser input sequence.
   async function prepareStableFill(message) {
     const started = performance.now();
     let stableSince = started;
@@ -652,7 +662,7 @@
         stableSince = now;
       }
       const ready = document.readyState === "interactive" || document.readyState === "complete";
-      if (ready && now >= FILL_DOCUMENT_MIN_AGE_MS && now - stableSince >= FILL_STABLE_MS) {
+      if (ready && now - stableSince >= FILL_STABLE_MS) {
         return prepared;
       }
       if (now - started >= FILL_SETTLE_LIMIT_MS) {
@@ -768,6 +778,21 @@
   async function observe(message) {
     const started = performance.now();
     const deadline = started + message.timeout_ms;
+
+    if (message.condition === "visual_settle" || message.condition === "layout_stable") {
+      const targetElement = message.locator ? locators.get(message.locator) : document;
+      const visual = await GhostlightSensor.settleVisual(targetElement, {
+        document,
+        timeout_ms: message.timeout_ms,
+        now: () => performance.now()
+      });
+      return {
+        satisfied: visual.settled,
+        elapsed_ms: Math.round(performance.now() - started),
+        readiness: document.readyState === "complete" ? "complete" : "interactive"
+      };
+    }
+
     while (true) {
       let satisfied = false;
       if (message.condition === "load_ready") satisfied = document.readyState === "interactive" || document.readyState === "complete";
@@ -776,7 +801,25 @@
       if (message.condition === "text_absent") satisfied = !composedVisibleText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(message.value);
       if (message.condition === "target_present") satisfied = Boolean(locators.get(message.locator)?.isConnected);
       if (message.condition === "target_absent") satisfied = !locators.get(message.locator)?.isConnected;
-      if (satisfied) return { satisfied: true, elapsed_ms: Math.round(performance.now() - started), readiness: document.readyState === "complete" ? "complete" : "interactive" };
+      if (satisfied) {
+        if (message.visual_settle === true) {
+          const remaining = Math.max(0, deadline - performance.now());
+          const targetElement = message.locator ? locators.get(message.locator) : document;
+          const visual = await GhostlightSensor.settleVisual(targetElement, {
+            document,
+            timeout_ms: remaining,
+            now: () => performance.now()
+          });
+          if (!visual.settled) {
+            return {
+              satisfied: false,
+              elapsed_ms: Math.round(performance.now() - started),
+              readiness: document.readyState === "complete" ? "complete" : "interactive"
+            };
+          }
+        }
+        return { satisfied: true, elapsed_ms: Math.round(performance.now() - started), readiness: document.readyState === "complete" ? "complete" : "interactive" };
+      }
       const remaining = deadline - performance.now();
       if (remaining <= 0) break;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(100, remaining)));
@@ -823,8 +866,7 @@
     // tail, and a handler that opens a page-blocking dialog would freeze this thread mid-click.
     if (message.kind === "submit_fill") {
       try {
-        const { elements, submitElement } = prepareFill(message);
-        void elements;
+        const { submitElement } = prepareFill(message);
         if (!submitElement) throw new Error("submit control is required");
         sendResponse({ ok: true, result: { submitted: true } });
         submitElement.click();
@@ -882,21 +924,43 @@
         return { x, y, embed: embed ? { src: String(element.src), left: rectangle.left + element.clientLeft, top: rectangle.top + element.clientTop } : null };
       }
       if (message.kind === "read_text") {
-        const result = message.locator
+        const extract = () => message.locator
           ? composedVisibleText(resolve(message.locator), message.max_chars)
           : message.mode === "article"
             ? extractArticle(message.max_chars)
             : composedVisibleText(document.body || document.documentElement, message.max_chars);
+        const result = sensor
+          ? await sensor.settle(extract, (res) => Boolean(res?.text && res.text.trim().length > 0))
+          : extract();
         return { ...result, title: shared.bounded(document.title, 500), url: location.href };
       }
       if (message.kind === "inspect_tree") {
         const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
-        return inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
+        const extract = () => inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
+        const result = sensor
+          ? await sensor.settle(extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0))
+          : extract();
+        return result;
       }
-      if (message.kind === "inspect") return inspect(message.inspect_kind, message.max_items);
-      if (message.kind === "find") return findTargets(message.text, message.find_kind, message.max_results);
+      if (message.kind === "inspect") {
+        const extract = () => inspect(message.inspect_kind, message.max_items);
+        return sensor
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+          : extract();
+      }
+      if (message.kind === "find") {
+        const extract = () => findTargets(message.text, message.find_kind, message.max_results);
+        return sensor
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+          : extract();
+      }
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
-      if (message.kind === "query_semantic") return querySemanticTargets(message);
+      if (message.kind === "query_semantic") {
+        const extract = () => querySemanticTargets(message);
+        return sensor
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+          : extract();
+      }
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
       if (message.kind === "clear_focused") return formDiagnostics.run("clear", () => clearText(deepestActiveElement()));
       if (message.kind === "type_text") return formDiagnostics.run("type", () => typeText(resolve(message.locator), message.text, message.clear_first));

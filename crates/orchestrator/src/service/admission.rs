@@ -3,6 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use crate::work::{CancellationToken, PreparedInvocation};
 
@@ -214,6 +215,18 @@ impl SessionQueue {
             active.job.cancellation.cancel();
         }
         self.available.notify_all();
+    }
+
+    pub(super) fn wait_idle_or_timeout(&self, timeout: Duration) -> bool {
+        let state = super::lock(&self.state);
+        if state.stopped {
+            return false;
+        }
+        let (state, _) = self
+            .available
+            .wait_timeout(state, timeout)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !state.stopped
     }
 }
 

@@ -3,7 +3,8 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -127,6 +128,7 @@ pub struct AuditRecorder {
     sink: Arc<dyn AuditSink>,
     projection: WorkbenchProjection,
     state: Mutex<RecorderState>,
+    notify: Condvar,
 }
 
 impl AuditRecorder {
@@ -146,6 +148,7 @@ impl AuditRecorder {
             sink,
             projection,
             state: Mutex::new(state),
+            notify: Condvar::new(),
         }
     }
 
@@ -168,6 +171,7 @@ impl AuditRecorder {
             Storage::Unconfirmed
         } else if let Err(error) = self.sink.record(record) {
             fail(&mut state, &error);
+            self.notify.notify_all();
             Storage::Unconfirmed
         } else {
             Storage::Saved
@@ -225,6 +229,45 @@ impl AuditRecorder {
             }
         }
         self.projection.audit_health_changed(state.health.clone());
+    }
+
+    /// Wait until recovery is due or stop is requested.
+    pub fn wait_for_recovery(&self, stop: &AtomicBool) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            if !state.health.unavailable() {
+                let (next, _) = self
+                    .notify
+                    .wait_timeout(state, RECOVERY_INTERVAL)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state = next;
+                continue;
+            }
+            let now = Instant::now();
+            if now < state.next_probe {
+                let wait = state.next_probe.saturating_duration_since(now);
+                let (next, _) = self
+                    .notify
+                    .wait_timeout(state, wait)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state = next;
+                continue;
+            }
+            drop(state);
+            self.recover_if_due();
+            return;
+        }
+    }
+
+    /// Wake any thread waiting for recovery.
+    pub fn wake(&self) {
+        self.notify.notify_all();
     }
 }
 

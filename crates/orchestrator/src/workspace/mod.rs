@@ -4,7 +4,8 @@ mod attention;
 pub use attention::{AttentionReason, SessionAttention};
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use ghostlight_bridge::browser::{
     BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalRectangle, PhysicalTab,
@@ -56,6 +57,18 @@ impl WorkspaceId {
 impl std::borrow::Borrow<str> for WorkspaceId {
     fn borrow(&self) -> &str {
         &self.0
+    }
+}
+
+impl From<String> for WorkspaceId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for WorkspaceId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
     }
 }
 
@@ -300,6 +313,7 @@ struct AggregateState {
 #[derive(Clone, Debug, Default)]
 pub struct WorkspaceStore {
     inner: Arc<Mutex<AggregateState>>,
+    leased: Arc<Condvar>,
 }
 
 impl WorkspaceStore {
@@ -476,6 +490,44 @@ impl WorkspaceStore {
             .is_some_and(|state| state.session.is_some())
     }
 
+    /// Whether this workspace is currently admitted in the aggregate.
+    #[must_use]
+    pub fn exists(&self, workspace: &WorkspaceId) -> bool {
+        self.lock().workspaces.contains_key(workspace)
+    }
+
+    /// Whether this workspace currently has any active connections.
+    #[must_use]
+    pub fn has_connections(&self, workspace: &WorkspaceId) -> bool {
+        self.lock()
+            .workspaces
+            .get(workspace)
+            .is_some_and(|state| !state.connections.is_empty())
+    }
+
+    /// Transfer or attach a connection from one workspace to another.
+    pub fn switch_connection(
+        &self,
+        from: &WorkspaceId,
+        to: &WorkspaceId,
+        connection_id: &str,
+    ) -> Result<(), WorkspaceError> {
+        let mut state = self.lock();
+        if !state.workspaces.contains_key(to) {
+            return Err(WorkspaceError::UnknownWorkspace);
+        }
+        if let Some(from_state) = state.workspaces.get(from) {
+            if let Some(evidence) = from_state.connections.get(connection_id).cloned() {
+                if let Some(to_state) = state.workspaces.get_mut(to) {
+                    to_state
+                        .connections
+                        .insert(connection_id.to_string(), evidence);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Release an MCP workspace and return the physical tabs it owned.
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
         self.lock()
@@ -502,6 +554,45 @@ impl WorkspaceStore {
         })
     }
 
+    /// Acquire exclusive mutation ownership for one invocation, waiting until available or deadline.
+    pub fn acquire_until(
+        &self,
+        workspace: &WorkspaceId,
+        deadline: Instant,
+        cancellation: &crate::work::CancellationToken,
+    ) -> Result<WorkspaceLease, WorkspaceError> {
+        let mut state = self.lock();
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(WorkspaceError::Busy);
+            }
+            let workspace_state = state
+                .workspaces
+                .get_mut(workspace)
+                .ok_or(WorkspaceError::UnknownWorkspace)?;
+            if !workspace_state.leased {
+                workspace_state.leased = true;
+                return Ok(WorkspaceLease {
+                    store: self.clone(),
+                    workspace: workspace.clone(),
+                    released: false,
+                });
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(WorkspaceError::Busy);
+            }
+            let wait = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(50));
+            let (next_state, _) = self
+                .leased
+                .wait_timeout(state, wait)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state = next_state;
+        }
+    }
+
     /// Return presentation-only client label without using it for routing or authority.
     pub fn client_label(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
         self.lock()
@@ -518,6 +609,44 @@ impl WorkspaceStore {
             .get(workspace)
             .map(|state| state.channel)
             .ok_or(WorkspaceError::UnknownWorkspace)
+    }
+
+    /// Look up the descriptive label or identifier of another admitted workspace that owns the
+    /// requested tab handle. Returns None if the handle does not belong to any other workspace.
+    #[must_use]
+    pub fn tab_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
+        let state = self.lock();
+        let handle = TabHandle(requested.into());
+        for (id, workspace) in &state.workspaces {
+            if id != current && workspace.tabs.contains_key(&handle) {
+                let label = if !workspace.client_label.is_empty() {
+                    workspace.client_label.clone()
+                } else {
+                    id.as_str().to_string()
+                };
+                return Some(label);
+            }
+        }
+        None
+    }
+
+    /// Look up the descriptive label or identifier of another admitted workspace that owns the
+    /// requested target handle. Returns None if the handle does not belong to any other workspace.
+    #[must_use]
+    pub fn target_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
+        let state = self.lock();
+        let handle = TargetHandle(requested.into());
+        for (id, workspace) in &state.workspaces {
+            if id != current && workspace.targets.contains_key(&handle) {
+                let label = if !workspace.client_label.is_empty() {
+                    workspace.client_label.clone()
+                } else {
+                    id.as_str().to_string()
+                };
+                return Some(label);
+            }
+        }
+        None
     }
 
     /// Apply an asynchronous committed landing through the aggregate before later content use.
@@ -726,6 +855,20 @@ impl WorkspaceLease {
             return Err(WorkspaceError::AmbiguousTab);
         }
         held_or_selected(handle, tab)
+    }
+
+    /// Look up the descriptive label or identifier of another admitted workspace that owns the
+    /// requested tab handle.
+    #[must_use]
+    pub fn tab_owner(&self, requested: &str) -> Option<String> {
+        self.store.tab_owner(&self.workspace, requested)
+    }
+
+    /// Look up the descriptive label or identifier of another admitted workspace that owns the
+    /// requested target handle.
+    #[must_use]
+    pub fn target_owner(&self, requested: &str) -> Option<String> {
+        self.store.target_owner(&self.workspace, requested)
     }
 
     /// Add a physical tab under a new opaque handle.
@@ -1330,6 +1473,7 @@ impl Drop for WorkspaceLease {
             workspace.leased = false;
         }
         self.released = true;
+        self.store.leased.notify_all();
     }
 }
 
@@ -1828,6 +1972,51 @@ mod tests {
             lease.take_image(first.as_str(), &landed),
             None,
             "commit stales assets"
+        );
+    }
+
+    #[test]
+    fn acquire_until_synchronizes_contention_via_condvar() {
+        use crate::work::CancellationToken;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let first_lease = store.acquire(&workspace).unwrap();
+
+        // 1. Contention with deadline expiry:
+        let cancellation = CancellationToken::default();
+        let short_deadline = Instant::now() + Duration::from_millis(30);
+        let expired = store.acquire_until(&workspace, short_deadline, &cancellation);
+        assert_eq!(expired.err(), Some(WorkspaceError::Busy));
+
+        // 2. Contention with cancellation:
+        let cancelled = CancellationToken::default();
+        cancelled.cancel();
+        let long_deadline = Instant::now() + Duration::from_secs(5);
+        let aborted = store.acquire_until(&workspace, long_deadline, &cancelled);
+        assert_eq!(aborted.err(), Some(WorkspaceError::Busy));
+
+        // 3. Contention resolved by dropping the active lease:
+        let store_clone = store.clone();
+        let workspace_clone = workspace.clone();
+        let waiter = thread::spawn(move || {
+            let cancellation = CancellationToken::default();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            store_clone.acquire_until(&workspace_clone, deadline, &cancellation)
+        });
+
+        // Give the waiter thread a moment to enter wait on Condvar
+        thread::sleep(Duration::from_millis(20));
+
+        // Drop the first lease, which notifies Condvar
+        drop(first_lease);
+
+        let acquired = waiter.join().unwrap();
+        assert!(
+            acquired.is_ok(),
+            "waiter successfully acquired lease after notification"
         );
     }
 }

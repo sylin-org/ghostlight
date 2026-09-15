@@ -399,7 +399,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         None,
         &["read"],
         json!({"condition":"load_ready"}),
-        vec![observed()],
+        vec![observed(), observed()],
     );
     // Wrappers need no capability of their own. Their concrete children still need Read.
     add(
@@ -407,7 +407,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         None,
         &["read"],
         json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":"browser_wait","arguments":{"condition":"load_ready"}}]}),
-        vec![observed()],
+        vec![observed(), observed()],
     );
     add(
         "browser_dialog",
@@ -516,6 +516,13 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             capture_started: true,
             omitted_count: 0,
         }],
+    );
+    add(
+        "browser_workspace",
+        None,
+        &["read"],
+        json!({"action":"list"}),
+        vec![],
     );
     add("policy_explain", None, &[], json!({}), vec![]);
     result

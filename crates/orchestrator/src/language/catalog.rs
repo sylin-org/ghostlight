@@ -170,6 +170,13 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_read(),
         ),
         tool(
+            "browser_workspace",
+            "Browser workspace",
+            "List admitted browser workspaces or switch the active session workspace to resolve cross-workspace tab ownership.",
+            workspace_schema(),
+            Hints::local_read(),
+        ),
+        tool(
             "policy_explain",
             "Explain policy",
             "Read the authority in force as one compiled answer: situation sentence, one line per capability with its deciding layer, the rules behind those lines, permanent ceilings, and each layer's document. Available under every authority, including all-open; use it to learn why another call was refused or what is allowed before acting.",
@@ -557,6 +564,10 @@ fn screenshot_schema() -> Value {
                         "full_page",
                         constant_bool(false, "Capture the visible viewport. Usually omit."),
                     ),
+                    (
+                        "visual_settle",
+                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
+                    ),
                     ("timeout_ms", timeout()),
                 ],
                 vec![],
@@ -567,6 +578,10 @@ fn screenshot_schema() -> Value {
                     (
                         "full_page",
                         constant_bool(true, "Capture the full document."),
+                    ),
+                    (
+                        "visual_settle",
+                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
                     ),
                     ("timeout_ms", timeout()),
                 ],
@@ -582,6 +597,10 @@ fn screenshot_schema() -> Value {
                     (
                         "full_page",
                         constant_bool(false, "Target capture is never full-page."),
+                    ),
+                    (
+                        "visual_settle",
+                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
                     ),
                     ("timeout_ms", timeout()),
                 ],
@@ -604,6 +623,10 @@ fn screenshot_schema() -> Value {
                     ("y", coordinate("Vertical image coordinate of the region.")),
                     ("width", extent("Region width in image pixels.")),
                     ("height", extent("Region height in image pixels.")),
+                    (
+                        "visual_settle",
+                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
+                    ),
                     ("timeout_ms", timeout()),
                 ],
                 vec!["view", "x", "y", "width", "height"],
@@ -998,6 +1021,18 @@ fn wait_schema() -> Value {
                 None,
                 Some("Current target that must disappear."),
             ),
+            wait_branch("visual_settle", None, None),
+            wait_branch(
+                "visual_settle",
+                None,
+                Some("Current target whose layout stability is observed."),
+            ),
+            wait_branch("layout_stable", None, None),
+            wait_branch(
+                "layout_stable",
+                None,
+                Some("Current target whose layout stability is observed."),
+            ),
             object(
                 vec![
                     (
@@ -1007,6 +1042,10 @@ fn wait_schema() -> Value {
                     ("tab", tab()),
                     ("timeout_ms", timeout()),
                     ("selector", semantic_selector()),
+                    (
+                        "visual_settle",
+                        boolean(true, "Optional layout-stability check before completing (defaults to true; set false to bypass)."),
+                    ),
                 ],
                 vec!["condition", "selector"],
             ),
@@ -1019,6 +1058,7 @@ fn wait_schema() -> Value {
         vec![
             json!({"condition":"load_ready"}),
             json!({"condition":"text_present","value":"Ready"}),
+            json!({"condition":"visual_settle"}),
         ],
     )
 }
@@ -1033,6 +1073,12 @@ fn wait_branch(
         ("tab", tab()),
         ("timeout_ms", timeout()),
     ];
+    if condition != "visual_settle" && condition != "layout_stable" {
+        fields.push((
+            "visual_settle",
+            boolean(true, "Optional layout-stability check before completing (defaults to true; set false to bypass)."),
+        ));
+    }
     let mut required = vec!["condition"];
     if let Some(description) = value_description {
         fields.push(("value", text(1, 2_000, description)));
@@ -1258,6 +1304,46 @@ fn diagnose_schema() -> Value {
     )
 }
 
+fn workspace_schema() -> Value {
+    union(
+        vec![
+            object(
+                vec![(
+                    "action",
+                    constant(
+                        "list",
+                        "List admitted browser workspaces and cross-workspace tab holdings.",
+                    ),
+                )],
+                vec!["action"],
+            ),
+            object(
+                vec![
+                    (
+                        "action",
+                        constant(
+                            "switch",
+                            "Switch the active session workspace to resolve tab ownership.",
+                        ),
+                    ),
+                    (
+                        "workspace",
+                        handle(
+                            "workspace_",
+                            "Target workspace handle to switch session authority to.",
+                        ),
+                    ),
+                ],
+                vec!["action", "workspace"],
+            ),
+        ],
+        vec![
+            json!({"action":"list"}),
+            json!({"action":"switch","workspace":"workspace_..."}),
+        ],
+    )
+}
+
 fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     raw_object(fields, required)
 }
@@ -1438,7 +1524,7 @@ mod tests {
     use super::{catalog, catalog_for};
     use crate::governance::GovernanceFacade;
 
-    const EXPECTED_TOOL_NAMES: [&str; 23] = [
+    const EXPECTED_TOOL_NAMES: [&str; 24] = [
         "browser_tabs",
         "browser_navigate",
         "browser_history",
@@ -1461,6 +1547,7 @@ mod tests {
         "browser_flow",
         "browser_record",
         "browser_diagnose",
+        "browser_workspace",
         "policy_explain",
     ];
 
@@ -1648,6 +1735,7 @@ mod tests {
             ("browser_flow", false, true, false, true),
             ("browser_record", false, true, false, true),
             ("browser_diagnose", true, false, true, true),
+            ("browser_workspace", true, false, true, false),
             ("policy_explain", true, false, true, false),
         ];
 
@@ -1690,6 +1778,10 @@ mod tests {
         assert!(
             description("browser_diagnose").contains("Observation begins with the first call"),
             "diagnose must teach when observation starts"
+        );
+        assert!(
+            description("browser_workspace").contains("switch the active session workspace"),
+            "workspace tool must teach its discovery and switching purpose"
         );
 
         let screenshot = tool_schema("browser_screenshot");
