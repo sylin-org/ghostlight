@@ -5,6 +5,25 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Chrome adapter [1.1.8] - 2026-09-15
+
+Prepared for Chrome Web Store submission with multiline contenteditable value
+verification, visual and layout settlement sensor heuristics, and background
+quiet-window stability. Service versions and browser permissions are unchanged;
+the public adapter is 1.1.7.
+
+### Fixed
+
+- Verify multiline contenteditable element values reliably by inspecting innerText
+  and textContent fallback, normalizing CRLF and lone CR to LF.
+- Preserve form focus custody and keyboard descriptors during rapid sequential input
+  across tab switches.
+
+### Added
+
+- Add load-sensitive and visual settlement sensor heuristics (GhostlightSensor) for
+  layout stability, finite CSS transition awareness, and quiet-window convergence.
+
 ## Chrome adapter [1.1.7] - 2026-09-13
 
 Replaced the pending 1.1.6 Chrome submission with the multiline correction. Google

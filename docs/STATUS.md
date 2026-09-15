@@ -1,6 +1,19 @@
 # STATUS -- Ghostlight 1.3.6 published
 
-Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
+Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.7 published; adapter 1.1.8 prepared for Chrome Web Store review).
+
+## Chrome adapter 1.1.8 packaged and prepared for Chrome Web Store review (2026-09-15)
+
+Packaged adapter revision 1.1.8 (`dist/ghostlight-extension-v1.1.8.zip`, SHA-256 `55169dc5f115d4d1a00b14c16171b64f4257e4d85715727d97f429599e3a3e7d`) under owner direction:
+
+- Multiline contenteditable verification: `verifyTargetValue` in `extension/content.js` inspects both `innerText` and `textContent` fallback, normalizing CRLF and lone CR to LF.
+- Load-sensitive and visual settlement sensor heuristics: `GhostlightSensor` in `extension/lib/sensor.js` observes layout bounding metrics, scroll geometry, and running CSS transitions/animations via `document.getAnimations()` with infinite spinner bypass and quiet-window convergence.
+- Gate verification:
+  - 283/283 extension tests passed (`npm test --prefix extension`).
+  - 5/5 real Chromium stress journey cases passed (`node tests/stress-journey.mjs`).
+  - 6/6 real Chromium keyboard replacement cases passed (`node tests/keyboard-browser-journey.mjs`).
+  - Compatibility verified: source adapter 1.1.8 covers service 1.3.4--1.3.7.
+  - Reconciliation: Chrome Web Store public adapter 1.1.7 confirmed published at 100 percent distribution (`docs/public-status.json`).
 
 ## Modular CLI decomposition and universal execution templates (2026-09-15)
 
