@@ -1,9 +1,9 @@
-# Release preflight -- 73d92918baa86e5d4e1d4001b820855ccabb5265
+# Release preflight -- 2801bd9e918599bd5eeb4e939c2d159d0919e6a1
 
 ```text
-date_utc: 2026-09-15T21:48:03Z
-source_revision: 73d92918baa86e5d4e1d4001b820855ccabb5265
-tree_dirty: true
+date_utc: 2026-09-15T22:08:03Z
+source_revision: 2801bd9e918599bd5eeb4e939c2d159d0919e6a1
+tree_dirty: false
 toolchain: rustc 1.95.0 (59807616e 2026-04-14); node v24.20.0
 host: Microsoft Windows 10.0.26200
 ```
@@ -15,13 +15,13 @@ from RELEASE-CHECKLIST.md G1, then delete this note.
 | Stage | Result | Detail |
 | --- | --- | --- |
 | cargo fmt --all -- --check | PASS |  |
-| cargo clippy --workspace --all-targets -D warnings | PASS |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.48s |
+| cargo clippy --workspace --all-targets -D warnings | PASS |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.50s |
 | cargo test --workspace | PASS | test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s;  |
-| extension tests (npm test) | PASS | 283 passed; duration_ms 2444 |
-| npm launcher tests (packaging/npm) | PASS | 10 passed; duration_ms 1909 |
-| MCPB launcher tests | PASS | 4 passed; duration_ms 91 |
+| extension tests (npm test) | PASS | ??? todo 0; ??? duration_ms 2505.4708 |
+| npm launcher tests (packaging/npm) | PASS | ??? todo 0; ??? duration_ms 2014.1602 |
+| MCPB launcher tests | PASS | ??? todo 0; ??? duration_ms 92.3228 |
 | shell script syntax (sh -n scripts/*.sh) | SKIP | no shell on this host; CI runs sh -n |
-| isolated workspace build (E:\repo\github\sylin-org\ghostlight\.target-ghostlight-1.0) | PASS |     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s |
+| isolated workspace build (E:\repo\github\sylin-org\ghostlight\.target-ghostlight-1.0) | PASS |    Compiling ghostlight-mcp-connector v1.3.7 (E:\repo\github\sylin-org\ghostlight\crates\mcp-connector);     Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.02s |
 | machine registration snapshot | PASS | real native-host registration captured before the journeys |
 | process journey | PASS | audit cold start ok: service and policy explanation remain available, browser work stops before recovery or launch; process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal |
 | CLI journey | PASS | [ghostlight] Ghostlight 1.3.7 desktop ready; cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal |
