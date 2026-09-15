@@ -1,6 +1,6 @@
 # Adapter 1.1.8 custody -- 2026-09-15
 
-Status: Packaged and staged; preflight verification passed; awaiting Chrome Web Store upload and review.
+Status: Submitted for Chrome Web Store review; PENDING_REVIEW with automatic publication after approval.
 
 This revision packages the multiline contenteditable form verification fix,
 the visual settlement sensor heuristics (GhostlightSensor), and background
@@ -39,3 +39,10 @@ currently serves adapter 1.1.7 publicly at 100 percent distribution.
 - SHA-256: `55169dc5f115d4d1a00b14c16171b64f4257e4d85715727d97f429599e3a3e7d`.
 - Packager: `scripts/package-extension.ps1 -Force`.
 - Chrome Web Store public adapter: 1.1.7 (reconciled in `docs/public-status.json`).
+
+The existing API script returned these results on 2026-09-15:
+- Upload: SUCCEEDED, draft version 1.1.8, with the exact artifact hash above.
+- Submit: PENDING_REVIEW, DEFAULT_PUBLISH.
+- Independent final status: submitted 1.1.8 PENDING_REVIEW at 100 percent distribution;
+  public 1.1.7 PUBLISHED at 100 percent distribution.
+
