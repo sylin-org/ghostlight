@@ -61,7 +61,8 @@ the owner wants, and what this project learned the hard way.
   rather than demanding boilerplate configuration. Screenshots and composite wait operations default to
   visual quiescence and layout settlement (`visual_settle: true`, ADR-0174) with zero-cost opt-out.
   Cross-workspace operations provide discovery and smooth session rebinding (`browser_workspace`, ADR-0175)
-  instead of unresolvable error walls.
+  instead of unresolvable error walls. Ergonomic pipeline templates (`with_authorized_tab`, ADR-0176)
+  and centralized catalog invariants (`CATALOG_TOOL_COUNT`) keep developer extension clean and error-free.
 
 - **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
   optional information, and unavailable nonessential components. Use safe defaults and bounded

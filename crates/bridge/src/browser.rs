@@ -585,6 +585,64 @@ pub enum PresentationKind {
     Attention,
 }
 
+/// Bounded visual settlement policy for operations that capture or inspect rendered pages (ADR-0176).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SettlePolicy {
+    /// Whether to wait for running finite animations and layout shifts to settle.
+    #[serde(default = "default_settle_true")]
+    pub visual_settle: bool,
+}
+
+const fn default_settle_true() -> bool {
+    true
+}
+
+impl Default for SettlePolicy {
+    fn default() -> Self {
+        Self {
+            visual_settle: true,
+        }
+    }
+}
+
+impl From<bool> for SettlePolicy {
+    fn from(visual_settle: bool) -> Self {
+        Self { visual_settle }
+    }
+}
+
+impl From<Option<bool>> for SettlePolicy {
+    fn from(opt: Option<bool>) -> Self {
+        Self {
+            visual_settle: opt.unwrap_or(true),
+        }
+    }
+}
+
+impl SettlePolicy {
+    /// Settle policy awaiting visual quiescence (the sane default).
+    #[must_use]
+    pub const fn settle() -> Self {
+        Self {
+            visual_settle: true,
+        }
+    }
+
+    /// Settle policy bypassing visual quiescence (explicit opt-out).
+    #[must_use]
+    pub const fn immediate() -> Self {
+        Self {
+            visual_settle: false,
+        }
+    }
+
+    /// Whether visual settle is active.
+    #[must_use]
+    pub const fn is_active(&self) -> bool {
+        self.visual_settle
+    }
+}
+
 /// A closed physical primitive request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -1376,7 +1434,7 @@ mod tests {
         PhysicalActionSubject, PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab,
         PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
         RecordingDestination, RecordingState, RecordingStopReason, RuntimeControlState,
-        ViewportGeometry, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
+        SettlePolicy, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
         COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS, RECORDING_LOCAL_MAX_BYTES,
         RECORDING_TRANSFER_MAX_BYTES,
     };
@@ -1960,5 +2018,19 @@ mod tests {
             "byte_count": 4_096
         });
         assert!(serde_json::from_value::<EncodedRecording>(partial).is_err());
+    }
+
+    #[test]
+    fn settle_policy_defaults_and_round_trips() {
+        assert!(SettlePolicy::default().visual_settle);
+        assert!(SettlePolicy::settle().is_active());
+        assert!(!SettlePolicy::immediate().is_active());
+        assert!(!SettlePolicy::from(false).is_active());
+        assert!(SettlePolicy::from(None).is_active());
+        assert!(!SettlePolicy::from(Some(false)).is_active());
+
+        let serialized = serde_json::to_string(&SettlePolicy::settle()).expect("serializes");
+        let deserialized: SettlePolicy = serde_json::from_str(&serialized).expect("deserializes");
+        assert_eq!(deserialized, SettlePolicy::settle());
     }
 }

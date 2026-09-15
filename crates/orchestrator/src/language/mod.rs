@@ -14,7 +14,7 @@ pub mod readiness;
 #[path = "catalog.rs"]
 mod tool_catalog;
 
-pub use tool_catalog::{catalog, catalog_for};
+pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 
 use std::path::Path;
 
@@ -2310,16 +2310,18 @@ mod tests {
     use super::decode_flow_step;
     use serde_json::json;
 
-    use super::{catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy};
+    use super::{
+        catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy, CATALOG_TOOL_COUNT,
+    };
 
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {
         let catalog = catalog();
-        assert_eq!(catalog.len(), 24);
+        assert_eq!(catalog.len(), CATALOG_TOOL_COUNT);
         let mut names: Vec<_> = catalog.iter().map(|tool| tool.name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), CATALOG_TOOL_COUNT);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
             assert!(tool.output_schema.is_some());

@@ -229,45 +229,36 @@ impl ApplicationExecutor {
         command: BrowserCommand,
         noun: TargetNoun,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
-            Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        let command = match command {
-            BrowserCommand::Inspect {
-                kind, max_items, ..
-            } => BrowserCommand::Inspect {
-                tab_id: selected.physical_id,
-                kind,
-                max_items,
-            },
-            BrowserCommand::Find {
-                text,
-                kind,
-                max_results,
-                ..
-            } => BrowserCommand::Find {
-                tab_id: selected.physical_id,
-                text,
-                kind,
-                max_results,
-            },
-            _ => unreachable!("target operations are closed"),
-        };
-        match self.dispatch(context, command) {
+        self.with_authorized_tab(
+            context,
+            lease,
+            requested_tab,
+            capability,
+            |selected, decision| {
+                let command = match command {
+                    BrowserCommand::Inspect {
+                        kind, max_items, ..
+                    } => BrowserCommand::Inspect {
+                        tab_id: selected.physical_id,
+                        kind,
+                        max_items,
+                    },
+                    BrowserCommand::Find {
+                        text,
+                        kind,
+                        max_results,
+                        ..
+                    } => BrowserCommand::Find {
+                        tab_id: selected.physical_id,
+                        text,
+                        kind,
+                        max_results,
+                    },
+                    _ => unreachable!("target operations are closed"),
+                };
+                match self.dispatch(context, command) {
             Ok(BrowserOutcome::Targets { tab_id, targets }) if tab_id == selected.physical_id => {
-                let mapped = match lease.register_targets(&selected, &targets) {
+                let mapped = match lease.register_targets(selected, &targets) {
                     Ok(mapped) => mapped,
                     Err(error) => return self.workspace_failure(context, error),
                 };
@@ -301,6 +292,7 @@ impl ApplicationExecutor {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         }
+    })
     }
 
     pub(super) fn screenshot(

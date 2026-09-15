@@ -2,6 +2,29 @@
 
 Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
 
+## Ergonomic pipeline simplification, invariant centralization, and settle policy unification (2026-09-15)
+
+Implemented ADR-0176 under owner direction to streamline the internal execution pipeline and eliminate magic numbers:
+
+- Centralized Catalog Invariants:
+  - Exported `pub const CATALOG_TOOL_COUNT: usize = EXPECTED_TOOL_NAMES.len();` and `EXPECTED_TOOL_NAMES` in `crates/orchestrator/src/language/catalog.rs`.
+  - Re-exported `CATALOG_TOOL_COUNT` in `crates/orchestrator/src/language/mod.rs`.
+  - Replaced hardcoded magic numbers (24) across language tests, desktop tests, and journey tests (`tests/process-journey.mjs` and `tests/live-journey.mjs`) with derived catalog counts.
+- Unified Settle Policy Value Object:
+  - Added `SettlePolicy` struct in `crates/bridge/src/browser.rs` with `From<bool>` and `From<Option<bool>>` conversions, default true, `settle()`, `immediate()`, and `is_active()`.
+  - Added unit test `settle_policy_defaults_and_round_trips` validating wire serialization and conversions.
+- Standardized Higher-Order Execution Helpers:
+  - Introduced `with_authorized_tab` and `with_authorized_target` on `ApplicationExecutor` in `crates/orchestrator/src/work/mod.rs`.
+  - Refactored `targets_operation` in `reading.rs`, `set_zoom` and `resize_window` in `pointer.rs`, and `handle_dialog` and `diagnose` in `interaction.rs` to use `with_authorized_tab`, eliminating repetitive 15-20 line authorization/lookup ceremony while preserving all governance checks and landing filters.
+- Quality Gates:
+  - `cargo fmt --check` passes cleanly.
+  - `cargo clippy --workspace --all-targets -- -D warnings` passes with 0 warnings.
+  - Workspace tests (library, binary, integration) pass cleanly.
+  - `npm test` in `extension/` passes all 283 tests.
+  - `node tests/stress-journey.mjs` passes 5/5 real Chromium tests.
+  - `node tests/process-journey.mjs` passes cleanly.
+
+
 ## Delight through sane defaults & first-class workspace switching (2026-09-15)
 
 Implemented ADR-0174 and ADR-0175 under owner direction, enshrining the principle "Delight through sane defaults":

@@ -26,6 +26,14 @@ const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.jso
 const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
 const nativeHostDir = join(repository, `tests/.ghostlight-native-host-${process.pid}`);
 const deployLock = join(selectedBinDir, "deploy.lock");
+const EXPECTED_TOOLS = [
+  "browser_tabs", "browser_navigate", "browser_history", "browser_window",
+  "browser_read", "browser_inspect", "browser_find", "browser_screenshot",
+  "browser_click", "browser_scroll", "browser_hover", "browser_fill_form",
+  "browser_type_text", "browser_press_key", "browser_drag", "browser_wait",
+  "browser_dialog", "browser_upload", "browser_execute", "browser_flow",
+  "browser_record", "browser_diagnose", "browser_workspace", "policy_explain"
+];
 const environment = {
   ...process.env,
   GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
@@ -593,7 +601,7 @@ try {
   mcp.notify("notifications/initialized");
 
   const listed = await mcp.request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
+  assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_workspace"), true);
@@ -644,7 +652,7 @@ try {
   assert.equal(connector.exitCode, null);
   assert.equal(browserConnector.exitCode, null);
   const relisted = await waitForMcpReady(mcp);
-  assert.equal(relisted.result.tools.length, 24);
+  assert.equal(relisted.result.tools.length, EXPECTED_TOOLS.length);
 
   const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
   assert.equal(reopened.status, "succeeded");

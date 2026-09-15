@@ -13,6 +13,14 @@ const connectorPath = join(binDir, `ghostlight-mcp-connector${executableSuffix}`
 const evidencePath = resolve(process.env.GHOSTLIGHT_LIVE_EVIDENCE || join(repository,
   `.tmp/installed-browser/${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.json`));
 const MAX_INVOCATION_RECORDS = 256;
+const EXPECTED_TOOLS = [
+  "browser_tabs", "browser_navigate", "browser_history", "browser_window",
+  "browser_read", "browser_inspect", "browser_find", "browser_screenshot",
+  "browser_click", "browser_scroll", "browser_hover", "browser_fill_form",
+  "browser_type_text", "browser_press_key", "browser_drag", "browser_wait",
+  "browser_dialog", "browser_upload", "browser_execute", "browser_flow",
+  "browser_record", "browser_diagnose", "browser_workspace", "policy_explain"
+];
 const checks = [];
 const evidence = [];
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -188,7 +196,7 @@ try {
   notify("notifications/initialized");
 
   const listed = await request("tools/list");
-  assert.equal(listed.result.tools.length, 24);
+  assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   const authority = await call("policy_explain", {});
   assert.equal(authority.status, "succeeded", JSON.stringify(authority));

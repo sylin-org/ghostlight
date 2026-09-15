@@ -11,6 +11,37 @@ use super::{
     DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
 };
 
+/// Canonical tool names in the complete catalog.
+pub const EXPECTED_TOOL_NAMES: [&str; 24] = [
+    "browser_tabs",
+    "browser_navigate",
+    "browser_history",
+    "browser_window",
+    "browser_read",
+    "browser_inspect",
+    "browser_find",
+    "browser_screenshot",
+    "browser_click",
+    "browser_scroll",
+    "browser_hover",
+    "browser_fill_form",
+    "browser_type_text",
+    "browser_press_key",
+    "browser_drag",
+    "browser_wait",
+    "browser_dialog",
+    "browser_upload",
+    "browser_execute",
+    "browser_flow",
+    "browser_record",
+    "browser_diagnose",
+    "browser_workspace",
+    "policy_explain",
+];
+
+/// Canonical tool count for the complete catalog.
+pub const CATALOG_TOOL_COUNT: usize = EXPECTED_TOOL_NAMES.len();
+
 /// Return the complete native Ghostlight language in deterministic order.
 #[must_use]
 pub fn catalog() -> Vec<ToolDefinition> {
@@ -1521,39 +1552,13 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use super::{catalog, catalog_for};
+    use super::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
     use crate::governance::GovernanceFacade;
-
-    const EXPECTED_TOOL_NAMES: [&str; 24] = [
-        "browser_tabs",
-        "browser_navigate",
-        "browser_history",
-        "browser_window",
-        "browser_read",
-        "browser_inspect",
-        "browser_find",
-        "browser_screenshot",
-        "browser_click",
-        "browser_scroll",
-        "browser_hover",
-        "browser_fill_form",
-        "browser_type_text",
-        "browser_press_key",
-        "browser_drag",
-        "browser_wait",
-        "browser_dialog",
-        "browser_upload",
-        "browser_execute",
-        "browser_flow",
-        "browser_record",
-        "browser_diagnose",
-        "browser_workspace",
-        "policy_explain",
-    ];
 
     #[test]
     fn catalog_is_exact_deterministic_and_fully_described() {
         let tools = catalog();
+        assert_eq!(tools.len(), CATALOG_TOOL_COUNT);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(names, EXPECTED_TOOL_NAMES);
         for tool in tools {

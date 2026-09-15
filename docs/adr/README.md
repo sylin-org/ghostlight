@@ -205,6 +205,8 @@ history live here.
 
 | [0175](0175-first-class-workspace-switching.md) | First-class workspace discovery and switching: browser_workspace tool, zero-friction session rebinding, and cross-workspace tab handoff | Accepted |
 
+| [0176](0176-ergonomic-pipeline-simplification.md) | Ergonomic pipeline simplification, invariant centralization, and settle policy unification | Accepted |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

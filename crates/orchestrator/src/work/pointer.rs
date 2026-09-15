@@ -332,52 +332,47 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         percent: u16,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
-            Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        match self.dispatch(
+        self.with_authorized_tab(
             context,
-            BrowserCommand::SetZoom {
-                tab_id: selected.physical_id,
-                zoom: f64::from(percent) / 100.0,
-            },
-        ) {
-            Ok(BrowserOutcome::Zoomed { tab_id, zoom }) if tab_id == selected.physical_id => {
-                if let Err(error) = lease.invalidate_views(&selected.handle) {
-                    return self.workspace_failure(context, error);
-                }
-                let actual_percent = (zoom * 100.0).round() as u16;
-                self.succeeded(
+            lease,
+            requested_tab,
+            Capability::Read,
+            |selected, decision| {
+                match self.dispatch(
                     context,
-                    decision,
-                    Some(tab_id),
-                    Effect::Applied,
-                    readiness(selected.readiness),
-                    true,
-                    Outcome::ZoomSet {
-                        percent: actual_percent,
-                        host: observed_host(&selected.url),
+                    BrowserCommand::SetZoom {
+                        tab_id: selected.physical_id,
+                        zoom: f64::from(percent) / 100.0,
                     },
-                    json!({"tab":selected.handle.as_str(),"action":"zoom","requested_percent":percent,"percent":actual_percent,"zoomed":true}),
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
+                ) {
+                    Ok(BrowserOutcome::Zoomed { tab_id, zoom })
+                        if tab_id == selected.physical_id =>
+                    {
+                        if let Err(error) = lease.invalidate_views(&selected.handle) {
+                            return self.workspace_failure(context, error);
+                        }
+                        let actual_percent = (zoom * 100.0).round() as u16;
+                        self.succeeded(
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::Applied,
+                            readiness(selected.readiness),
+                            true,
+                            Outcome::ZoomSet {
+                                percent: actual_percent,
+                                host: observed_host(&selected.url),
+                            },
+                            json!({"tab":selected.handle.as_str(),"action":"zoom","requested_percent":percent,"percent":actual_percent,"zoomed":true}),
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
+                }
+            },
+        )
     }
 
     pub(super) fn resize_window(
@@ -388,57 +383,50 @@ impl ApplicationExecutor {
         width: u32,
         height: u32,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
-            Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, CapabilitySet::EMPTY, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        match self.dispatch(
+        self.with_authorized_tab(
             context,
-            BrowserCommand::ResizeWindow {
-                tab_id: selected.physical_id,
-                width,
-                height,
-            },
-        ) {
-            Ok(BrowserOutcome::WindowResized {
-                tab_id,
-                width: observed_width,
-                height: observed_height,
-                affected_tab_ids,
-            }) if tab_id == selected.physical_id => {
-                if let Err(error) = lease.invalidate_views_for_physical(&affected_tab_ids) {
-                    return self.workspace_failure(context, error);
-                }
-                self.succeeded(
+            lease,
+            requested_tab,
+            CapabilitySet::EMPTY,
+            |selected, decision| {
+                match self.dispatch(
                     context,
-                    decision,
-                    Some(tab_id),
-                    Effect::Applied,
-                    readiness(selected.readiness),
-                    true,
-                    Outcome::WindowResized {
+                    BrowserCommand::ResizeWindow {
+                        tab_id: selected.physical_id,
+                        width,
+                        height,
+                    },
+                ) {
+                    Ok(BrowserOutcome::WindowResized {
+                        tab_id,
                         width: observed_width,
                         height: observed_height,
-                    },
-                    json!({"tab":selected.handle.as_str(),"action":"resize","requested_width":width,"requested_height":height,"width":observed_width,"height":observed_height,"resized":true}),
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
+                        affected_tab_ids,
+                    }) if tab_id == selected.physical_id => {
+                        if let Err(error) = lease.invalidate_views_for_physical(&affected_tab_ids) {
+                            return self.workspace_failure(context, error);
+                        }
+                        self.succeeded(
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::Applied,
+                            readiness(selected.readiness),
+                            true,
+                            Outcome::WindowResized {
+                                width: observed_width,
+                                height: observed_height,
+                            },
+                            json!({"tab":selected.handle.as_str(),"action":"resize","requested_width":width,"requested_height":height,"width":observed_width,"height":observed_height,"resized":true}),
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
+                }
+            },
+        )
     }
 
     pub(super) fn perform_hover(

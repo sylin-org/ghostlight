@@ -623,6 +623,68 @@ impl ApplicationExecutor {
         )
     }
 
+    /// Authorize and resolve one controlled tab, executing the closure only when allowed (ADR-0176).
+    fn with_authorized_tab<F>(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        capability: impl Into<CapabilitySet>,
+        f: F,
+    ) -> Terminal
+    where
+        F: FnOnce(&SelectedTab, Decision) -> Terminal,
+    {
+        let selected = match lease.select_tab(requested_tab) {
+            Ok(tab) => tab,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason": decision.reason.as_str()}),
+            );
+        }
+        f(&selected, decision)
+    }
+
+    /// Authorize and resolve one controlled tab and target, executing the closure only when allowed (ADR-0176).
+    #[allow(dead_code)]
+    fn with_authorized_target<F>(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        target: &str,
+        capability: impl Into<CapabilitySet>,
+        f: F,
+    ) -> Terminal
+    where
+        F: FnOnce(&SelectedTab, &SelectedTarget, Decision) -> Terminal,
+    {
+        let (selected, target) = match self.resolve_target(context, lease, requested_tab, target) {
+            Ok(pair) => pair,
+            Err(error) => return self.workspace_failure(context, error),
+        };
+        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason": decision.reason.as_str()}),
+            );
+        }
+        f(&selected, &target, decision)
+    }
+
     fn resolve_optional_target(
         &self,
         context: &InvocationContext<'_>,
