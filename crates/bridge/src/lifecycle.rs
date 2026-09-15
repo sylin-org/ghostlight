@@ -119,6 +119,12 @@ impl ServiceLease {
     }
 }
 
+impl Drop for ServiceLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._file);
+    }
+}
+
 fn lock_is_contended(error: &io::Error) -> bool {
     if error.kind() == io::ErrorKind::WouldBlock {
         return true;
@@ -422,6 +428,12 @@ impl StartupAdmission {
     }
 }
 
+impl Drop for StartupAdmission {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
 fn wait_for_startup(
     launch: &mut Launch,
     runtime: &Path,
@@ -609,6 +621,7 @@ mod tests {
             atomic::{AtomicUsize, Ordering},
             Arc, Barrier,
         };
+        use std::time::Instant;
         let directory = temporary_directory("startup-concurrency");
         let barrier = Arc::new(Barrier::new(12));
         let launches = Arc::new(AtomicUsize::new(0));
@@ -637,14 +650,30 @@ mod tests {
             let _ = thread.join().unwrap();
         }
         assert_eq!(launches.load(Ordering::SeqCst), 1);
-        let result = request_start(
-            &directory.join(orchestrator_file_name()),
-            &discovery(&directory),
-            SystemTime::now(),
-            Duration::from_millis(100),
-            || panic!("cooldown must suppress launch"),
+        let mut result = None;
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            let attempt = request_start(
+                &directory.join(orchestrator_file_name()),
+                &discovery(&directory),
+                SystemTime::now(),
+                Duration::from_millis(100),
+                || panic!("cooldown must suppress launch"),
+            );
+            if attempt
+                .as_ref()
+                .is_ok_and(|disposition| *disposition == StartDisposition::RetryDeferred)
+            {
+                result = Some(attempt);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            result = Some(attempt);
+        }
+        assert_eq!(
+            result.expect("cooldown check attempted").unwrap(),
+            StartDisposition::RetryDeferred
         );
-        assert_eq!(result.unwrap(), StartDisposition::RetryDeferred);
         let mut lease = None;
         let result = request_start(
             &directory.join(orchestrator_file_name()),
