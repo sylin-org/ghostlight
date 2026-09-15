@@ -164,84 +164,73 @@ impl ApplicationExecutor {
         if let Some(view_handle) = value.view.as_deref() {
             return self.perform_wheel(context, lease, value, view_handle);
         }
-        let (selected, locator, revealed_role) = match self.resolve_optional_target(
+        self.with_authorized_optional_target(
             context,
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
-        ) {
-            Ok(value) => value,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        match self.dispatch(
-            context,
-            BrowserCommand::Scroll {
-                tab_id: selected.physical_id,
-                locator,
-                direction: value
-                    .target
-                    .is_none()
-                    .then(|| value.direction.clone().unwrap_or_else(|| "down".into())),
-                amount: value
-                    .target
-                    .is_none()
-                    .then(|| value.amount.clone().unwrap_or_else(|| "medium".into())),
-            },
-        ) {
-            Ok(BrowserOutcome::Scrolled {
-                tab_id,
-                x,
-                y,
-                subject,
-            }) if tab_id == selected.physical_id => {
-                if let Err(error) = lease.invalidate_views(&selected.handle) {
-                    return self.workspace_failure(context, error);
-                }
-                self.succeeded(
+            Capability::Read,
+            |selected, locator, revealed_role, decision| {
+                match self.dispatch(
                     context,
-                    decision,
-                    Some(tab_id),
-                    Effect::Applied,
-                    readiness(selected.readiness),
-                    value.target.is_some(),
-                    if value.target.is_some() {
-                        Outcome::TargetRevealed {
-                            host: observed_host(&selected.url),
-                            subject: action_subject(
-                                context,
-                                subject,
-                                Some(revealed_role.unwrap_or(TargetRole::Control)),
-                            )
-                            .expect("a semantic reveal has a fallback subject"),
-                        }
-                    } else {
-                        Outcome::PageScrolled {
-                            host: observed_host(&selected.url),
-                            direction: value
-                                .direction
-                                .clone()
-                                .unwrap_or_else(|| "down".into()),
-                        }
+                    BrowserCommand::Scroll {
+                        tab_id: selected.physical_id,
+                        locator,
+                        direction: value
+                            .target
+                            .is_none()
+                            .then(|| value.direction.clone().unwrap_or_else(|| "down".into())),
+                        amount: value
+                            .target
+                            .is_none()
+                            .then(|| value.amount.clone().unwrap_or_else(|| "medium".into())),
                     },
-                    json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
+                ) {
+                    Ok(BrowserOutcome::Scrolled {
+                        tab_id,
+                        x,
+                        y,
+                        subject,
+                    }) if tab_id == selected.physical_id => {
+                        if let Err(error) = lease.invalidate_views(&selected.handle) {
+                            return self.workspace_failure(context, error);
+                        }
+                        self.succeeded(
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::Applied,
+                            readiness(selected.readiness),
+                            value.target.is_some(),
+                            if value.target.is_some() {
+                                Outcome::TargetRevealed {
+                                    host: observed_host(&selected.url),
+                                    subject: action_subject(
+                                        context,
+                                        subject,
+                                        Some(revealed_role.unwrap_or(TargetRole::Control)),
+                                    )
+                                    .expect("a semantic reveal has a fallback subject"),
+                                }
+                            } else {
+                                Outcome::PageScrolled {
+                                    host: observed_host(&selected.url),
+                                    direction: value
+                                        .direction
+                                        .clone()
+                                        .unwrap_or_else(|| "down".into()),
+                                }
+                            },
+                            json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
+                }
+            },
+        )
     }
 
     fn perform_wheel(

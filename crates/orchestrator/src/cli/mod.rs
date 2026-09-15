@@ -4,10 +4,16 @@
 //! parsing, rendering, and exit codes, and makes no product decision: every call crosses the same
 //! service bridge, executor, governance facade, and completion path a model's call does.
 
+pub mod desktop;
 pub mod diagnostics;
+pub mod doctor;
+pub mod parse;
 pub mod session;
+pub mod setup;
+pub mod status;
 
 use std::io::{BufRead, Write};
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -279,6 +285,40 @@ fn exit_code(result: &Value) -> i32 {
 fn report_transport(error: &ClientError) -> i32 {
     eprintln!("{error}");
     EXIT_USAGE
+}
+
+/// Dispatch a parsed launch mode to its dedicated subcommand handler.
+pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
+    match mode {
+        parse::LaunchMode::Deployment(selection) => {
+            let record = crate::install::deployment::select(selection)?;
+            println!("{}", serde_json::to_string(&record)?);
+            Ok(())
+        }
+        parse::LaunchMode::Desktop => desktop::start_or_activate_desktop(),
+        parse::LaunchMode::Open => desktop::open_desktop(),
+        parse::LaunchMode::Call => desktop::run_call(),
+        parse::LaunchMode::Diagnostics(command) => diagnostics::run(&command),
+        parse::LaunchMode::Policy(command) => desktop::run_policy(&command),
+        parse::LaunchMode::NativeHost(command) => setup::run_native_host(command),
+        #[cfg(target_os = "linux")]
+        parse::LaunchMode::FlatpakNativeHost {
+            command,
+            allow_activation,
+        } => setup::run_flatpak_native_host(command, allow_activation),
+        parse::LaunchMode::Install(options) => setup::run_setup(true, &options),
+        parse::LaunchMode::Uninstall(options) => setup::run_setup(false, &options),
+        parse::LaunchMode::Doctor { fix, json } => doctor::run_doctor(fix, json),
+        parse::LaunchMode::Status { json } => status::run_status(json),
+        parse::LaunchMode::Help => {
+            parse::print_help();
+            Ok(())
+        }
+        parse::LaunchMode::Version => {
+            println!("ghostlight {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

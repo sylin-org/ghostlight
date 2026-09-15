@@ -2,7 +2,33 @@
 
 Last updated: 2026-09-15 (service 1.3.6 and adapter 1.1.4 published; corrected adapter 1.1.7 pending Google review).
 
+## Modular CLI decomposition and universal execution templates (2026-09-15)
+
+Implemented ADR-0177 under owner direction following an architectural DDD code quality evaluation:
+
+- Modular CLI Decomposition:
+  - Decomposed monolithic entry point `crates/orchestrator/src/main.rs` (1,693 lines) into five cohesive, single-responsibility modules under `crates/orchestrator/src/cli/`:
+    - `parse.rs`: Argument parsing, typed `LaunchMode`, `SetupOptions`, `NativeHostCommand`, help rendering, and shell completion compatibility guards.
+    - `setup.rs`: Native messaging host registration, browser package detection, MCP client configuration, command path links, desktop application entries, and extension handoff.
+    - `doctor.rs`: System-wide environment observation, readiness state gathering, diagnostic report formatting, and ownership-safe repairs.
+    - `status.rs`: Runtime endpoint observation, service port connectivity probing, and JSON/text status reporting.
+    - `desktop.rs`: Desktop lifecycle, single-instance workbench activation loops, Linux D-Bus startup detection, and local runners for `call` and `policy`.
+  - Added `ghostlight::cli::dispatch` in `crates/orchestrator/src/cli/mod.rs` to route parsed intents to their respective module handlers.
+  - Reduced `crates/orchestrator/src/main.rs` to a lean 13-line dispatcher delegating directly to `ghostlight::cli::parse::launch_mode` and `ghostlight::cli::dispatch`.
+- Universal Execution Templates:
+  - Added `with_authorized_optional_target` to `ApplicationExecutor` in `crates/orchestrator/src/work/mod.rs` to handle optional target resolution, authorization lookup, and terminal failure generation.
+  - Refactored `navigation.rs` (`navigate_history`, `reload_page`), `forms.rs` (`run_script`, `type_focused`, `perform_key`, `perform_wait`), `reading.rs` (`read_page`, `inspect_document`), and `pointer.rs` (`scroll_page`) using `with_authorized_tab` and `with_authorized_optional_target`, removing repetitive 15--20 line lookup ceremony while strictly preserving governance checks, outcome semantics, and audit events.
+- Quality Gates & Invariants:
+  - Strict ASCII maintained across all modified and new files.
+  - `cargo fmt --check` passes cleanly.
+  - `cargo clippy --workspace --all-targets -- -D warnings` passes with 0 warnings.
+  - All 469 Rust unit/integration tests in `crates/orchestrator` pass.
+  - `npm test` in `extension/` passes all 283 tests.
+  - `node tests/stress-journey.mjs` passes 5/5 real Chromium tests.
+  - `$env:GHOSTLIGHT_BIN_DIR="target/debug"; node tests/process-journey.mjs` passes cleanly.
+
 ## Ergonomic pipeline simplification, invariant centralization, and settle policy unification (2026-09-15)
+
 
 Implemented ADR-0176 under owner direction to streamline the internal execution pipeline and eliminate magic numbers:
 

@@ -685,6 +685,38 @@ impl ApplicationExecutor {
         f(&selected, &target, decision)
     }
 
+    /// Authorize and resolve one controlled tab and optional target, executing the closure only when allowed (ADR-0177).
+    fn with_authorized_optional_target<F>(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        requested_tab: Option<&str>,
+        target: Option<&str>,
+        capability: impl Into<CapabilitySet>,
+        f: F,
+    ) -> Terminal
+    where
+        F: FnOnce(&SelectedTab, Option<String>, Option<TargetRole>, Decision) -> Terminal,
+    {
+        let (selected, locator, role) =
+            match self.resolve_optional_target(context, lease, requested_tab, target) {
+                Ok(tuple) => tuple,
+                Err(error) => return self.workspace_failure(context, error),
+            };
+        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
+        if !decision.allowed {
+            return self.blocked(
+                context,
+                decision,
+                Some(selected.physical_id),
+                Effect::None,
+                true,
+                json!({"reason": decision.reason.as_str()}),
+            );
+        }
+        f(&selected, locator, role, decision)
+    }
+
     fn resolve_optional_target(
         &self,
         context: &InvocationContext<'_>,

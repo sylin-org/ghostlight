@@ -24,56 +24,69 @@ impl ApplicationExecutor {
         mode: Option<ReadMode>,
         max_chars: usize,
     ) -> Terminal {
-        let (selected, locator, _) =
-            match self.resolve_optional_target(context, lease, requested_tab, target) {
-                Ok(value) => value,
-                Err(error) => return self.workspace_failure(context, error),
-            };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        let command = if target.is_none() {
-            BrowserCommand::ReadDocument {
-                tab_id: selected.physical_id,
-                mode: mode.unwrap_or(ReadMode::Visible).as_str().to_string(),
-                max_chars,
-            }
-        } else {
-            BrowserCommand::ReadText {
-                tab_id: selected.physical_id,
-                locator,
-                max_chars,
-            }
-        };
-        match self.dispatch(context, command) {
-            Ok(BrowserOutcome::Text {
-                tab_id,
-                text,
-                truncated,
-                title,
-                url,
-            }) if tab_id == selected.physical_id => {
-                let landing = self.authorize_landing(context, Capability::Read, &url);
-                if !landing.allowed {
-                    let _ = lease.hold_tab(&selected.handle);
-                    return self.blocked_at(context, landing, Some(tab_id), Effect::None, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), observed_host(&url));
+        self.with_authorized_optional_target(
+            context,
+            lease,
+            requested_tab,
+            target,
+            Capability::Read,
+            |selected, locator, _, decision| {
+                let command = if target.is_none() {
+                    BrowserCommand::ReadDocument {
+                        tab_id: selected.physical_id,
+                        mode: mode.unwrap_or(ReadMode::Visible).as_str().to_string(),
+                        max_chars,
+                    }
+                } else {
+                    BrowserCommand::ReadText {
+                        tab_id: selected.physical_id,
+                        locator,
+                        max_chars,
+                    }
+                };
+                match self.dispatch(context, command) {
+                    Ok(BrowserOutcome::Text {
+                        tab_id,
+                        text,
+                        truncated,
+                        title,
+                        url,
+                    }) if tab_id == selected.physical_id => {
+                        let landing = self.authorize_landing(context, Capability::Read, &url);
+                        if !landing.allowed {
+                            let _ = lease.hold_tab(&selected.handle);
+                            return self.blocked_at(
+                                context,
+                                landing,
+                                Some(tab_id),
+                                Effect::None,
+                                false,
+                                json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
+                                observed_host(&url),
+                            );
+                        }
+                        let words = word_count(&text);
+                        self.succeeded(
+                            context,
+                            landing,
+                            Some(tab_id),
+                            Effect::None,
+                            readiness(selected.readiness),
+                            true,
+                            Outcome::TextRead {
+                                words,
+                                host: observed_host(&url),
+                            },
+                            json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}),
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
                 }
-                let words = word_count(&text);
-                self.succeeded(context, landing, Some(tab_id), Effect::None, readiness(selected.readiness), true, Outcome::TextRead { words, host: observed_host(&url) }, json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}))
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -114,7 +127,7 @@ impl ApplicationExecutor {
         )
     }
 
-    pub(super) fn inspect_document(
+    fn inspect_document(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
@@ -122,74 +135,67 @@ impl ApplicationExecutor {
         root: Option<&str>,
         max_depth: usize,
     ) -> Terminal {
-        let (selected, locator, _) =
-            match self.resolve_optional_target(context, lease, requested_tab, root) {
-                Ok(value) => value,
-                Err(error) => return self.workspace_failure(context, error),
-            };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        match self.dispatch(
+        self.with_authorized_optional_target(
             context,
-            BrowserCommand::InspectTree {
-                tab_id: selected.physical_id,
-                locator,
-                max_depth,
-            },
-        ) {
-            Ok(BrowserOutcome::DocumentTree {
-                tab_id,
-                tree,
-                truncated,
-            }) if tab_id == selected.physical_id => {
-                let parsed: Value = serde_json::from_str(&tree).unwrap_or(Value::Null);
-                let nodes = count_tree_nodes(&parsed);
-                let prior = lease.previous_snapshot(&selected);
-                let diff = prior.as_ref().map(|old| diff_trees(old, &parsed));
-                let handle = match lease.register_snapshot(&selected, parsed) {
-                    Ok(handle) => handle,
-                    Err(error) => return self.workspace_failure(context, error),
-                };
-                let mut facts = json!({
-                    "tab":selected.handle.as_str(),
-                    "snapshot":handle.as_str(),
-                    "nodes":nodes,
-                    "truncated":truncated,
-                    "document_generation":selected.generation,
-                });
-                if let Some((added, removed, changed, paths)) = &diff {
-                    facts["diff"] =
-                        json!({"added":added,"removed":removed,"changed":changed,"paths":paths});
-                }
-                self.succeeded(
+            lease,
+            requested_tab,
+            root,
+            Capability::Read,
+            |selected, locator, _, decision| {
+                match self.dispatch(
                     context,
-                    decision,
-                    Some(tab_id),
-                    Effect::None,
-                    readiness(selected.readiness),
-                    true,
-                    Outcome::DocumentInspected {
-                        nodes,
-                        truncated,
-                        compared: diff.is_some(),
+                    BrowserCommand::InspectTree {
+                        tab_id: selected.physical_id,
+                        locator,
+                        max_depth,
                     },
-                    facts,
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
+                ) {
+                    Ok(BrowserOutcome::DocumentTree {
+                        tab_id,
+                        tree,
+                        truncated,
+                    }) if tab_id == selected.physical_id => {
+                        let parsed: Value = serde_json::from_str(&tree).unwrap_or(Value::Null);
+                        let nodes = count_tree_nodes(&parsed);
+                        let prior = lease.previous_snapshot(selected);
+                        let diff = prior.as_ref().map(|old| diff_trees(old, &parsed));
+                        let handle = match lease.register_snapshot(selected, parsed) {
+                            Ok(handle) => handle,
+                            Err(error) => return self.workspace_failure(context, error),
+                        };
+                        let mut facts = json!({
+                            "tab":selected.handle.as_str(),
+                            "snapshot":handle.as_str(),
+                            "nodes":nodes,
+                            "truncated":truncated,
+                            "document_generation":selected.generation,
+                        });
+                        if let Some((added, removed, changed, paths)) = &diff {
+                            facts["diff"] =
+                                json!({"added":added,"removed":removed,"changed":changed,"paths":paths});
+                        }
+                        self.succeeded(
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::None,
+                            readiness(selected.readiness),
+                            true,
+                            Outcome::DocumentInspected {
+                                nodes,
+                                truncated,
+                                compared: diff.is_some(),
+                            },
+                            facts,
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
+                }
+            },
+        )
     }
 
     pub(super) fn find(

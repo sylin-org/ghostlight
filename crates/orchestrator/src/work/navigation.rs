@@ -429,39 +429,32 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         direction: &str,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
-            Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        let outcome = self.dispatch(
-            context,
-            BrowserCommand::TraverseHistory {
-                tab_id: selected.physical_id,
-                direction: direction.into(),
-            },
-        );
-        self.complete_navigation(
+        self.with_authorized_tab(
             context,
             lease,
-            &selected,
-            decision,
-            outcome,
-            |host| Outcome::HistoryTraversed {
-                direction: direction.into(),
-                host,
+            requested_tab,
+            Capability::Action,
+            |selected, decision| {
+                let outcome = self.dispatch(
+                    context,
+                    BrowserCommand::TraverseHistory {
+                        tab_id: selected.physical_id,
+                        direction: direction.into(),
+                    },
+                );
+                self.complete_navigation(
+                    context,
+                    lease,
+                    selected,
+                    decision,
+                    outcome,
+                    |host| Outcome::HistoryTraversed {
+                        direction: direction.into(),
+                        host,
+                    },
+                    json!({"action":direction}),
+                )
             },
-            json!({"action":direction}),
         )
     }
 
@@ -472,36 +465,29 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         bypass_cache: bool,
     ) -> Terminal {
-        let selected = match lease.select_tab(requested_tab) {
-            Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
-        }
-        let outcome = self.dispatch(
-            context,
-            BrowserCommand::Reload {
-                tab_id: selected.physical_id,
-                bypass_cache,
-            },
-        );
-        self.complete_navigation(
+        self.with_authorized_tab(
             context,
             lease,
-            &selected,
-            decision,
-            outcome,
-            |host| Outcome::PageReloaded { host },
-            json!({"action":"reload","bypass_cache":bypass_cache}),
+            requested_tab,
+            Capability::Action,
+            |selected, decision| {
+                let outcome = self.dispatch(
+                    context,
+                    BrowserCommand::Reload {
+                        tab_id: selected.physical_id,
+                        bypass_cache,
+                    },
+                );
+                self.complete_navigation(
+                    context,
+                    lease,
+                    selected,
+                    decision,
+                    outcome,
+                    |host| Outcome::PageReloaded { host },
+                    json!({"action":"reload","bypass_cache":bypass_cache}),
+                )
+            },
         )
     }
 
