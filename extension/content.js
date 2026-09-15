@@ -616,6 +616,7 @@
   function fillControlValue(element) {
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) return element.checked;
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return element.value;
+    if (element.isContentEditable) return element.innerText ?? element.textContent ?? "";
     return element.textContent ?? "";
   }
 
@@ -623,9 +624,12 @@
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
     }
-    // The textarea API normalizes both CRLF and lone CR to LF.
-    return element instanceof HTMLTextAreaElement ? String(value).replace(/\r\n?/g, "\n") : String(value);
+    // The textarea API and contenteditable innerText normalize both CRLF and lone CR to LF.
+    return (element instanceof HTMLTextAreaElement || element.isContentEditable)
+      ? String(value).replace(/\r\n?/g, "\n")
+      : String(value);
   }
+
 
   async function verifyStableFillValue(element, value) {
     validateFillElement(element, value);
