@@ -1,6 +1,24 @@
-# STATUS -- Ghostlight 1.3.7 candidate prepared
+# STATUS -- Ghostlight 1.3.7 GitHub release published; Chrome adapter 1.1.8 public
 
-Last updated: 2026-09-15 (service 1.3.7 candidate prepared; service 1.3.6 and adapter 1.1.7 published; adapter 1.1.8 pending Google review).
+Last updated: 2026-09-15 (service 1.3.7 GitHub release published; adapter 1.1.8 published on Chrome Web Store; npm and MCP registry publication pending npm authentication refresh).
+
+## Ghostlight 1.3.7 candidate built, verified, and GitHub release published (2026-09-15)
+
+Executed service release pipeline per `docs/RELEASE.md` under owner direction following public verification of Chrome adapter 1.1.8:
+
+- Addressed concurrent startup test lock race on Linux in `crates/bridge/src/lifecycle.rs` by adding explicit `FileExt::unlock` Drop implementations for `ServiceLease` and `StartupAdmission` and a bounded settling loop.
+- Maintained strict freeze invariants (`docs/release/freeze.json` bound to revision `653e95544ad756f8c612be00e494a68395361845`).
+- Passing preflight gates: 17 passed, 0 failed, 2 skipped (`docs/testing/release-preflight-2026-09-15.md`).
+- Passed all candidate quality gates and matrix packaging builds in CI (workflow run `35029454229`):
+  - `quality-gate` passed in 7m23s on Ubuntu 24.04.
+  - `native-packages` passed for both Linux Debian and Windows NSIS installer targets.
+  - `extension-artifact` built deterministic zip matching exact SHA-256 `55169dc5f115d4d1a00b14c16171b64f4257e4d85715727d97f429599e3a3e7d`.
+  - `linux-package-smoke` passed in Debian 12 and Ubuntu 24.04 containers.
+  - `candidate-bundle` assembled 18 candidate artifacts with 5 component CycloneDX SBOMs and keyless build-provenance attestations.
+- Verified candidate locally (`scripts/check-release-candidate.ps1`): 18 artifacts, source `cfe994aa45debfa47cc20dfff5897e26e1bd8388`.
+- Annotated tag `v1.3.7` pushed to `origin`.
+- Created GitHub draft release, verified provenance attestations on all 20 assets, and published release via `scripts/publish-github-release.ps1` (`https://github.com/sylin-org/ghostlight/releases/tag/v1.3.7`).
+- Downstream channels: `scripts/publish-npm.ps1` and `scripts/publish-mcp-registry.ps1` are staged and ready to execute upon user authentication via `npm login --userconfig local/.npmrc`.
 
 ## Ghostlight 1.3.7 candidate prepared (2026-09-15)
 

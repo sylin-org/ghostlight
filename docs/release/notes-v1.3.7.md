@@ -23,8 +23,8 @@ and first-class workspace discovery and switching.
 
 ## Compatibility
 
-Compatible with Chrome adapter 1.1.4 through 1.1.8. Chrome adapter 1.1.7 is
-published in the Chrome Web Store; adapter 1.1.8 is in review.
+Compatible with Chrome adapter 1.1.4 through 1.1.8. Chrome adapter 1.1.8 is
+published in the Chrome Web Store.
 
 ## Install
 
