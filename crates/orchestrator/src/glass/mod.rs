@@ -4,8 +4,7 @@
 //! allowing the orchestrator to inject the UI directly into the browser
 //! via WebDriver BiDi `addPreloadScript`, entirely bypassing the extension.
 
-/// The raw JavaScript for the Ghostlight overlay web component.
-pub const OVERLAY_SCRIPT: &str = include_str!("overlay.js");
+
 
 /// The raw JavaScript for the Ghostlight DOM sensor logic.
 pub const SENSOR_SCRIPT: &str = include_str!("sensor.js");
