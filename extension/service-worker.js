@@ -1202,9 +1202,17 @@ async function contentIn(tabId, frameId, message, optional = false) {
   }
   try {
     return await documents.route(tabId, frameId, message, async () => {
-      const response = await chrome.tabs.sendMessage(tabId, message, { frameId });
-      if (!response?.ok) throw new Error(response?.error || "content primitive failed");
-      return response.result;
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        world: "MAIN",
+        func: async (msg) => {
+          if (typeof window.__ghostlight_dispatch__ !== "function") throw new Error("Ghostlight UI not injected");
+          return await window.__ghostlight_dispatch__(msg);
+        },
+        args: [message]
+      });
+      if (!results || results.length === 0) throw new Error("content primitive failed (no result)");
+      return results[0].result;
     });
   } catch (error) {
     if (optional) return { presented: false };
