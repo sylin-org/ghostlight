@@ -996,7 +996,9 @@ impl BrowserCommand {
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
-            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } => capability::SCRIPT,
+            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } => {
+                capability::SCRIPT
+            }
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
             Self::ReadDiagnostics { .. } | Self::ClearDiagnostics { .. } => capability::DIAGNOSTICS,
@@ -1082,13 +1084,9 @@ pub enum BrowserOutcome {
         result: Box<BrowserOutcome>,
     },
     /// A raw WebDriver BiDi JSON-RPC response from the translation layer.
-    BiDi {
-        response: crate::bidi::Response,
-    },
+    BiDi { response: crate::bidi::Response },
     /// A raw CDP JSON-RPC response from the Chromium extension dumb shell.
-    Cdp {
-        result: serde_json::Value,
-    },
+    Cdp { result: serde_json::Value },
     /// Physical tab list.
     Tabs { tabs: Vec<PhysicalTab> },
     /// A physical tab and its window were focused.

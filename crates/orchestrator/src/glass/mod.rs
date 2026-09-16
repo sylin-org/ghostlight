@@ -25,7 +25,7 @@ pub fn inject_glass(writer: &ghostlight_bridge::transport::SocketWriter) {
             }),
         },
     };
-    
+
     let frame = ghostlight_bridge::browser::BrowserFrame::Request {
         request: ghostlight_bridge::browser::BrowserRequest {
             correlation: "glass-injection".into(),
@@ -33,6 +33,6 @@ pub fn inject_glass(writer: &ghostlight_bridge::transport::SocketWriter) {
             command,
         },
     };
-    
+
     let _ = writer.native(&frame);
 }

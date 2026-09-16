@@ -1,5 +1,5 @@
 //! W3C WebDriver BiDi protocol messages.
-//! 
+//!
 //! This module defines the JSON-RPC structures used for the Ghostlight BiDi translation layer.
 
 use serde::{Deserialize, Serialize};
