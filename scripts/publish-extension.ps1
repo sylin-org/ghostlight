@@ -245,7 +245,7 @@ $publishResponse = Invoke-WebRequest `
     -ContentType "application/json" `
     -Body $publishBody
 if ($publishResponse.StatusCode -lt 200 -or $publishResponse.StatusCode -ge 300) {
-    throw "Chrome submission failed with HTTP $($publishResponse.StatusCode)"
+    throw "Chrome submission failed with HTTP $($publishResponse.StatusCode): $($publishResponse.Content)"
 }
 $published = $publishResponse.Content | ConvertFrom-Json
 Write-Output "Chrome submission state: $($published.state)"
