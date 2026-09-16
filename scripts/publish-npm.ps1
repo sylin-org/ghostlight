@@ -10,6 +10,7 @@ param(
     [string]$Repository = "sylin-org/ghostlight",
     [string]$ExpectedSha256,
     [string]$NpmConfig = (Join-Path $PSScriptRoot "../local/.npmrc"),
+    [string]$Otp,
     [switch]$Execute
 )
 
@@ -68,7 +69,11 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path -LiteralPath $NpmConfig -PathType Leaf)) {
     throw "Repo-local npm authentication is missing. Run npm login --userconfig local/.npmrc"
 }
-& npm publish $Package --access public --userconfig $NpmConfig
+$publishArgs = @("publish", $Package, "--access", "public", "--userconfig", $NpmConfig)
+if ($Otp) {
+    $publishArgs += @("--otp", $Otp)
+}
+& npm @publishArgs
 if ($LASTEXITCODE -ne 0) {
     throw "npm publish failed"
 }
