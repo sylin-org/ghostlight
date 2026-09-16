@@ -263,7 +263,7 @@ function contentHarness() {
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
     GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
-    GhostlightSensor: require("../lib/sensor.js"),
+    GhostlightSensor: require("../../crates/orchestrator/src/glass/sensor.js"),
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},
@@ -274,7 +274,7 @@ function contentHarness() {
   };
   context.globalThis = context;
   vm.runInNewContext(
-    readFileSync(join(__dirname, "..", "content.js"), "utf8"),
+    readFileSync(join(__dirname, "../../crates/orchestrator/src/glass", "content.js"), "utf8"),
     context,
     { filename: "content.js" }
   );

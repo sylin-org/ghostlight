@@ -155,7 +155,7 @@ test("diagnostic storage and missing receivers cannot fail passive routing", asy
 });
 
 test("content state survives delayed startup responses and embedded documents stay disabled", async () => {
-  const source = readFileSync(join(__dirname, "../content.js"), "utf8");
+  const source = readFileSync(join(__dirname, "../../crates/orchestrator/src/glass/content.js"), "utf8");
   for (const isTop of [true, false]) for (const enabled of [true, false]) {
     const states = [];
     let resolveStartup, listener;

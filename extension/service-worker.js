@@ -615,6 +615,29 @@ async function dispatch(request) {
   if (command.command === "describe_documents") {
     return { outcome: "documents", tab_id: command.tab_id, inventory: await documents.describe(command) };
   }
+  if (command.command === "bidi") {
+    // For now, only handle script.addPreloadScript via chrome.scripting to inject the Glass UI.
+    if (command.payload.method === "script.addPreloadScript") {
+      const functionDeclaration = command.payload.params.functionDeclaration;
+      const injectedScript = `(${functionDeclaration})()`;
+      await chrome.scripting.registerContentScripts([{
+        id: `ghostlight-bidi-preload`,
+        matches: ["http://*/*", "https://*/*"],
+        js: [{ code: injectedScript }],
+        runAt: "document_start",
+        allFrames: true,
+        world: "ISOLATED"
+      }]);
+      return { outcome: "bidi", response: { type: "success", id: command.payload.id, result: { script: "ghostlight-bidi-preload" } } };
+    }
+    throw new Error("Unsupported bidi command via adapter translation: " + command.payload.method);
+  }
+  if (command.command === "cdp") {
+    // A raw CDP payload from the Rust translation bridge.
+    // The extension acts purely as a dumb transport for chrome.debugger.
+    const result = await chrome.debugger.sendCommand({ tabId: command.tab_id }, command.method, command.params);
+    return { outcome: "cdp", result: result ?? {} };
+  }
   if (command.command === "in_documents") {
     const primitive = command.primitive;
     if (primitive.command === "in_documents" || primitive.command === "describe_documents") throw globalThis.GhostlightDocuments.changed();

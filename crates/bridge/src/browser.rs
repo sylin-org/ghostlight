@@ -654,6 +654,17 @@ pub enum BrowserCommand {
         points: Vec<PhysicalPoint>,
         focused: bool,
     },
+    /// A raw WebDriver BiDi JSON-RPC command for the translation layer.
+    BiDi {
+        tab_id: u64,
+        payload: crate::bidi::Command,
+    },
+    /// A raw CDP JSON-RPC command for the Chromium extension dumb shell.
+    Cdp {
+        tab_id: u64,
+        method: String,
+        params: serde_json::Value,
+    },
     /// Run one primitive inside an application-selected physical document scope.
     InDocuments {
         scope: documents::DocumentScope,
@@ -985,7 +996,7 @@ impl BrowserCommand {
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
-            Self::EvaluateScript { .. } => capability::SCRIPT,
+            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } => capability::SCRIPT,
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
             Self::ReadDiagnostics { .. } | Self::ClearDiagnostics { .. } => capability::DIAGNOSTICS,
@@ -1069,6 +1080,14 @@ pub enum BrowserOutcome {
     InDocuments {
         observation: documents::DocumentObservation,
         result: Box<BrowserOutcome>,
+    },
+    /// A raw WebDriver BiDi JSON-RPC response from the translation layer.
+    BiDi {
+        response: crate::bidi::Response,
+    },
+    /// A raw CDP JSON-RPC response from the Chromium extension dumb shell.
+    Cdp {
+        result: serde_json::Value,
     },
     /// Physical tab list.
     Tabs { tabs: Vec<PhysicalTab> },

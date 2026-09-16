@@ -2,6 +2,16 @@
 
 Last updated: 2026-09-15 (service 1.3.7 GitHub release published; adapter 1.1.8 published on Chrome Web Store; npm and MCP registry publication pending npm authentication refresh).
 
+## Runtime Injection Architecture Verified (Chromium Pathway)
+
+Successfully completed the implementation and testing of the "Runtime Injection" architecture (ADR-0178) for the Chromium pathway under owner direction:
+
+- The Chromium extension's `manifest.json` was purged of all UI `content_scripts`.
+- UI scripts (`content.js`, `sensor.js`, `overlay.js`) were moved to `crates/orchestrator/src/glass/` and are now embedded directly in the Rust Orchestrator binary.
+- The Orchestrator injects the UI at runtime upon connection using BiDi's `script.addPreloadScript` payload routed over the Native Messaging bridge.
+- The extension's `service-worker.js` translates the incoming BiDi payload into global injections using `chrome.scripting.registerContentScripts` (which required adding the `scripting` permission).
+- The test harness (`extension/tests/` and `tests/process-journey.mjs`) has been updated and passes all assertions, proving that the Dumb Shell + Runtime Injector strategy is viable, massively reducing the footprint of the browser-specific adapter.
+
 ## Ghostlight 1.3.7 candidate built, verified, and GitHub release published (2026-09-15)
 
 Executed service release pipeline per `docs/RELEASE.md` under owner direction following public verification of Chrome adapter 1.1.8:

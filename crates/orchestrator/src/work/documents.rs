@@ -183,6 +183,8 @@ impl RequestScope {
             | BrowserCommand::DiscardRecording { .. }
             | BrowserCommand::Cancel { .. }
             | BrowserCommand::Present { .. }
+            | BrowserCommand::BiDi { .. }
+            | BrowserCommand::Cdp { .. }
             | BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::InDocuments { .. } => return None,
         };

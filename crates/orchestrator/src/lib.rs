@@ -9,6 +9,7 @@ pub mod cli;
 pub mod desktop;
 pub mod diagnostics;
 pub mod events;
+pub mod glass;
 pub mod governance;
 pub mod install;
 pub mod language;

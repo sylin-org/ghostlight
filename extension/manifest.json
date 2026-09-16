@@ -11,6 +11,7 @@
     "downloads",
     "nativeMessaging",
     "offscreen",
+    "scripting",
     "storage",
     "tabGroups",
     "tabs",
@@ -24,24 +25,6 @@
   "background": {
     "service_worker": "service-worker.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "lib/shared.js",
-        "lib/form-diagnostics.js",
-        "lib/presentation-css.js",
-        "lib/presentation.js",
-        "lib/sensor.js",
-        "content.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": true
-    }
-  ],
   "action": {
     "default_title": "Ghostlight in Browser",
     "default_popup": "popup.html",

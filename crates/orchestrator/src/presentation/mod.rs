@@ -343,7 +343,9 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         | BrowserCommand::ExportRecording { .. }
         | BrowserCommand::DiscardRecording { .. }
         | BrowserCommand::Cancel { .. }
-        | BrowserCommand::Present { .. } => None,
+        | BrowserCommand::Present { .. }
+        | BrowserCommand::BiDi { .. }
+        | BrowserCommand::Cdp { .. } => None,
     }
 }
 

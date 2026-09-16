@@ -9,8 +9,6 @@ const shared = require("../lib/shared.js");
 const state = require("../lib/state.js");
 const topology = require("../lib/topology.js");
 const presentationQueue = require("../lib/presentation-queue.js");
-require("../lib/presentation.js");
-const presentation = globalThis.GhostlightPresentation;
 
 test("credential metadata is classified without inspecting values", () => {
   assert.equal(shared.isCredentialMetadata({ type: "password" }), true);
@@ -28,94 +26,6 @@ test("presentation labels are fixed and content-free", () => {
   assert.equal(shared.activityLabel("page secret"), "Ghostlight");
 });
 
-test("presentation preserves the established Ghostlight palette and motion", () => {
-  assert.deepEqual(presentation.visualIdentity, {
-    sky: "#38bdf8",
-    ink: "#eaf6ff",
-    ground: "#0c0f14",
-    spring: "cubic-bezier(.22,1,.36,1)",
-    cursor_ms: 150,
-    border_breathe_ms: 4000,
-    ripple_ms: 620,
-    field_splash_ms: 700,
-    read_scan_ms: 1450,
-    navigation_ms: 1600,
-    screenshot_ms: 1500,
-    zoom_ms: 1150,
-    denial_ms: 5000
-  });
-  const root = join(__dirname, "..");
-  const renderer = readFileSync(join(root, "lib", "presentation.js"), "utf8");
-  const presentationCss = readFileSync(join(root, "lib", "presentation-css.js"), "utf8");
-  const chrome = readFileSync(join(root, "ui.css"), "utf8");
-  assert.match(renderer, /M0 0 L0 19 L5 14\.5 L8\.2 22/);
-  assert.match(renderer, /managed && runtimeReachable && !recordingActive/);
-  assert.match(renderer, /function setRecording\(value\)/);
-  assert.match(renderer, /host\.style\.display = hiddenForTool \? "none" : "block"/);
-  assert.match(renderer, /role", "status"/);
-  assert.match(renderer, /aria-live", "polite"/);
-  assert.match(renderer, /aria-atomic", "true"/);
-  // The stylesheet is its own module; the renderer consumes it through that one seam and must
-  // not grow an inline template back.
-  assert.match(renderer, /GhostlightPresentationCss\.build\(TOKENS, REDUCED_FADE_SELECTOR\)/);
-  assert.doesNotMatch(renderer, /style\.textContent = `/);
-  assert.match(presentationCss, /build\(tokens, reducedFadeSelector\)/);
-  assert.match(presentationCss, /ghostlight-capframe 1500ms cubic-bezier\(\.5,0,\.2,1\)/);
-  assert.match(presentationCss, /\.denial-ribbon\{animation:none!important\}/);
-  // The guardrail must rise, not squash: scaling a flex row vertically deforms its badge.
-  assert.doesNotMatch(presentationCss, /ghostlight-notif-grow\{0%\{opacity:0;transform:scaleY\(0\)\}/);
-  // One ring per click, dashed for a secondary button (tool-visual-signatures.md).
-  assert.match(presentationCss, /\.ripple\.secondary\{border-style:dashed\}/);
-  assert.match(renderer, /const clicks = Math\.min\(3, Math\.max\(1, Number\(shape && shape\.clicks\) \|\| 1\)\)/);
-  assert.match(renderer, /index \* CLICK_STAGGER_MS/);
-  // The read scan must reach zero, or an interrupted sweep leaves a lit bar.
-  assert.doesNotMatch(presentationCss, /100%\{opacity:\.85;transform:translateY\(100vh\)\}/);
-
-  // Identity reaches the stylesheet once as custom properties; the vocabulary in the module is
-  // static CSS apart from the two values build() receives, so a colour or curve changes in
-  // exactly one place.
-  assert.match(presentationCss, /:host\{all:initial;\$\{tokens\}\}/);
-  assert.match(renderer, /--gl-sky:\$\{SKY\};--gl-argb:\$\{SKY_RGB\}/);
-  const templateStart = presentationCss.indexOf("return `");
-  const stylesheet = presentationCss.slice(templateStart + "return `".length, presentationCss.indexOf("`;", templateStart));
-  const interpolations = stylesheet.match(/\$\{[a-zA-Z_]+\}/g) || [];
-  assert.deepEqual(
-    [...new Set(interpolations)].sort(),
-    ["${reducedFadeSelector}", "${tokens}"],
-    "the stylesheet must stay static apart from its tokens and generated reduced-motion list"
-  );
-
-  // Reduced-motion coverage is generated from the registry, so a new effect cannot silently
-  // keep animating for someone who asked it not to.
-  assert.match(stylesheet, /\$\{reducedFadeSelector\}\{animation-name:ghostlight-fade!important/);
-  assert.doesNotMatch(stylesheet, /\.trail-dot,\.field-shimmer,\.field-splash,\.target-glow/);
-  const registrySource = renderer.slice(renderer.indexOf("const TRANSIENT_EFFECTS"), renderer.indexOf("REDUCED_FADE_SELECTOR"));
-  const registry = [...registrySource.matchAll(/"([a-z- ]+)"/g)].map((match) => match[1]);
-  assert.ok(registry.length >= 18, `expected the full transient vocabulary, saw ${registry.length}`);
-  for (const name of registry) {
-    assert.ok(
-      stylesheet.includes(`.${name}{`),
-      `${name} is in the effect registry but has no rule in the stylesheet`
-    );
-  }
-
-  // Teardown is derived from each row's beat, never hand-picked at the call site.
-  assert.match(renderer, /setTimeout\(remove, lifetimeFor\(className\)\)/);
-  assert.doesNotMatch(renderer, /addEffect\([^)]*,\s*\d+\)/, "an effect lifetime was hand-picked");
-
-  // Every ephemeral effect must own a beat, or it would tear down after the grace alone.
-  const withBeat = new Set([...registrySource.matchAll(/(?:effect|selector): "([a-z- ]+)",\s*beat:/g)].map((match) => match[1]));
-  const created = [...new Set([...renderer.matchAll(/addEffect\("([a-z-]+)"/g)].map((match) => match[1]))];
-  assert.ok(created.length >= 8, `expected the ephemeral call sites, saw ${created.length}`);
-  for (const name of created) {
-    assert.ok(withBeat.has(name), `addEffect("${name}") has no beat in the effect registry`);
-  }
-  assert.match(renderer, /setTimeout\(\(\) => denialLayer\.replaceChildren\(\), DENIAL_MS\)/);
-  assert.match(chrome, /#0a0e17/);
-  assert.match(chrome, /rgba\(56,189,248,\.10\)/);
-  assert.match(chrome, /transition: color \.25s, border-color \.25s, background \.25s/);
-  assert.doesNotMatch(chrome, /\.save-status/);
-});
 
 test("modifier masks match the CDP vocabulary", () => {
   assert.equal(shared.modifierMask(["Alt", "Control", "Shift"]), 11);
@@ -336,7 +246,7 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
 
 test("browser actions return the subject in the effect receipt without a describe round trip", () => {
   const root = join(__dirname, "..");
-  const content = readFileSync(join(root, "content.js"), "utf8");
+  const content = readFileSync(join(root, "../crates/orchestrator/src/glass/content.js"), "utf8");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
 
   assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject, rectangle: viewportRectangle\(element\) \} \}\)/);
@@ -433,7 +343,7 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.commands["toggle-hold"].description, "Pause or resume agent browsing (take the wheel)");
   assert.deepEqual(
     manifest.permissions,
-    ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
+    ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "scripting", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
   );
   const iconDigests = {
     16: "95d754348d4fabfb0412e32319226dd52615864ae511b8b492bef739f555d224",

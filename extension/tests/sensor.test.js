@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const api = require("../lib/sensor.js");
+const api = require("../../crates/orchestrator/src/glass/sensor.js");
 
 function mockDocument() {
   const listeners = [];

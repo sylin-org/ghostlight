@@ -71,6 +71,17 @@ class NativePeer {
       if (this.buffer.length < length + 4) return;
       const value = JSON.parse(this.buffer.subarray(4, length + 4).toString("utf8"));
       this.buffer = this.buffer.subarray(length + 4);
+
+      if (value.kind === "request" && value.request?.correlation === "glass-injection") {
+        continue;
+      }
+
+      for (const observer of [...this.observers]) {
+        if (!observer.predicate(value)) continue;
+        this.observers.splice(this.observers.indexOf(observer), 1);
+        clearTimeout(observer.timer);
+        observer.resolve(value);
+      }
       const waiter = this.waiters.shift();
       if (waiter) waiter(value);
       else this.queue.push(value);

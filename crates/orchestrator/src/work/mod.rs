@@ -2341,6 +2341,8 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::RecordingNotFound
         | BrowserOutcome::Presented { .. }
         | BrowserOutcome::Cancelled
+        | BrowserOutcome::BiDi { .. }
+        | BrowserOutcome::Cdp { .. }
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
     }
 }
