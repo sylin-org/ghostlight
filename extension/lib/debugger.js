@@ -116,6 +116,7 @@
               await debuggerApi.sendCommand({ tabId }, "Runtime.evaluate", { expression: globalThis.ghostlightPreloadScript });
             } catch (e) {
               console.warn("Ghostlight preload injection failed:", e);
+              globalThis.lastPreloadError = String(e?.message || e);
             }
           }
         }

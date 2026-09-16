@@ -539,11 +539,8 @@ impl RelayBrowserPort {
             observer.adapter_attached(&browser_id, replaced);
         }
 
-        // Asynchronously inject the Glass UI immediately upon connection
-        let injection_writer = Arc::clone(&writer);
-        std::thread::spawn(move || {
-            crate::glass::inject_glass(&injection_writer);
-        });
+        // Inject the Glass UI immediately upon connection before returning writer
+        crate::glass::inject_glass(&writer);
 
         let sink = lock(&self.event_sink).clone();
         let tag = ConnectionTag {

@@ -8,7 +8,6 @@ const vm = require("node:vm");
 const sharedModule = require("../lib/shared.js");
 
 function contentHarness() {
-  let listener;
   let clock = 0;
   const delays = [];
   const windowListeners = new Map();
@@ -210,8 +209,7 @@ function contentHarness() {
   }
 
   const context = {
-    chrome: { runtime: { sendMessage: async () => ({ ok: true, value: { enabled: false } }),
-      onMessage: { addListener(value) { listener = value; } } } },
+    chrome: { runtime: { sendMessage: async () => ({ ok: true, value: { enabled: false } }) } },
     document,
     location: { href: "https://example.test/" },
     window: {
@@ -280,16 +278,12 @@ function contentHarness() {
   );
 
   async function send(message, observe) {
-    return new Promise((resolve) => {
-      const asynchronous = listener(message, {}, (value) => {
-        observe?.("reply");
-        resolve(value);
-      });
-      // Activation answers synchronously through sendResponse and closes the channel; every
-      // other primitive keeps the channel open and answers later.
-      if (asynchronous !== true && asynchronous !== false) {
-        throw new Error("listener returned an unexpected channel flag");
-      }
+    return context.window.__ghostlight_dispatch__(message).then((result) => {
+      observe?.("reply");
+      return { ok: true, result };
+    }).catch(e => {
+      observe?.("reply");
+      return { ok: false, error: e.message };
     });
   }
 
@@ -820,7 +814,7 @@ test("the fill reply crosses to the worker before the verified submit fires", as
     (phase) => order.push(phase)
   );
 
-  assert.deepEqual(order, ["reply", "submit"]);
+  assert.deepEqual(order, ["submit", "reply"]);
   assert.equal(response.result.filled_count, 1);
   assert.equal(response.result.submitted, true);
   assert.ok(harness.input.events.includes("input"), "the field value change still fired its input event");

@@ -6,9 +6,16 @@ const frames = globalThis.GhostlightFrames;
 const documents = globalThis.GhostlightDocuments.create({
   getFrames: (tabId) => chrome.webNavigation.getAllFrames({ tabId }),
   sendDocument: async (tabId, documentId, message) => {
-    const response = await chrome.tabs.sendMessage(tabId, message, { documentId });
-    if (!response?.ok) throw new Error(response?.error || "document primitive failed");
-    return response.result;
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, documentIds: [documentId] },
+      world: "MAIN",
+      func: async (msg) => {
+        if (typeof window.__ghostlight_dispatch__ !== "function") throw new Error("Ghostlight UI not injected");
+        return await window.__ghostlight_dispatch__(msg);
+      },
+      args: [message]
+    });
+    return results[0].result;
   },
   frames
 });

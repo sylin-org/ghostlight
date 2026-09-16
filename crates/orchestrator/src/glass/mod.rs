@@ -14,7 +14,7 @@ pub const SENSOR_SCRIPT: &str = include_str!("sensor.js");
 pub const CONTENT_SCRIPT: &str = include_str!("content.js");
 
 pub fn inject_glass(writer: &ghostlight_bridge::transport::SocketWriter) {
-    let script = format!("{}\n{}\n{}", SENSOR_SCRIPT, CONTENT_SCRIPT, OVERLAY_SCRIPT);
+    let script = format!("(() => {{\n{}\n{}\n{}\n}})();", SENSOR_SCRIPT, CONTENT_SCRIPT, OVERLAY_SCRIPT);
     
     let frame = ghostlight_bridge::browser::BrowserFrame::Request {
         request: ghostlight_bridge::browser::BrowserRequest {

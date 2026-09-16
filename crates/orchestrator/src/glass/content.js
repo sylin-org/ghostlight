@@ -36,12 +36,12 @@
     document, window,
     queryControls: () => queryAll("input,textarea,select,[contenteditable='true']"),
     credentialClass,
-    emit: (row) => chrome.runtime.sendMessage({ kind: formDiagnosticsApi.MESSAGE_KIND, row }).catch(() => {})
+    emit: (row) => chrome?.runtime?.sendMessage?.({ kind: formDiagnosticsApi.MESSAGE_KIND, row }).catch(() => {})
   });
   if (IS_TOP) {
     const requestedVersion = diagnosticsStateVersion;
-    chrome.runtime.sendMessage({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND })
-      .then((response) => {
+    chrome?.runtime?.sendMessage?.({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND })
+      ?.then((response) => {
         if (requestedVersion === diagnosticsStateVersion) formDiagnostics.setEnabled(response?.ok && response.value?.enabled === true);
       })
       .catch(() => {});
@@ -839,7 +839,7 @@
     return { satisfied: false, elapsed_ms: Math.round(performance.now() - started), readiness: document.readyState === "complete" ? "complete" : document.readyState === "interactive" ? "interactive" : "loading" };
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  window.__ghostlight_dispatch__ = function(message) { return new Promise((resolvePromise, rejectPromise) => { const sendResponse = (resp) => { if (resp.ok) resolvePromise(resp.result); else rejectPromise(new Error(resp.error)); };
     if (message?.kind === formDiagnosticsApi.STATE_MESSAGE_KIND) {
       diagnosticsStateVersion++;
       formDiagnostics.setEnabled(IS_TOP && message.enabled === true);
@@ -1067,6 +1067,6 @@
       if (message.kind === "runtime_state") { /* Removed legacy runtime state */ return { state: message.state }; }
       throw new Error("unknown content primitive");
     }).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
-    return true;
   });
+};
 })();
