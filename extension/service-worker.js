@@ -615,22 +615,9 @@ async function dispatch(request) {
   if (command.command === "describe_documents") {
     return { outcome: "documents", tab_id: command.tab_id, inventory: await documents.describe(command) };
   }
-  if (command.command === "bidi") {
-    // For now, only handle script.addPreloadScript via chrome.scripting to inject the Glass UI.
-    if (command.payload.method === "script.addPreloadScript") {
-      const functionDeclaration = command.payload.params.functionDeclaration;
-      const injectedScript = `(${functionDeclaration})()`;
-      await chrome.scripting.registerContentScripts([{
-        id: `ghostlight-bidi-preload`,
-        matches: ["http://*/*", "https://*/*"],
-        js: [{ code: injectedScript }],
-        runAt: "document_start",
-        allFrames: true,
-        world: "ISOLATED"
-      }]);
-      return { outcome: "bidi", response: { type: "success", id: command.payload.id, result: { script: "ghostlight-bidi-preload" } } };
-    }
-    throw new Error("Unsupported bidi command via adapter translation: " + command.payload.method);
+  if (command.command === "set_preload_script") {
+    globalThis.ghostlightPreloadScript = command.script;
+    return { outcome: "set_preload_script" };
   }
   if (command.command === "cdp") {
     // A raw CDP payload from the Rust translation bridge.

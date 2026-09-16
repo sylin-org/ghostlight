@@ -15,22 +15,14 @@ pub const CONTENT_SCRIPT: &str = include_str!("content.js");
 
 pub fn inject_glass(writer: &ghostlight_bridge::transport::SocketWriter) {
     let script = format!("{}\n{}\n{}", SENSOR_SCRIPT, CONTENT_SCRIPT, OVERLAY_SCRIPT);
-    let command = ghostlight_bridge::browser::BrowserCommand::BiDi {
-        tab_id: 0,
-        payload: ghostlight_bridge::bidi::Command {
-            id: 99999,
-            method: "script.addPreloadScript".into(),
-            params: serde_json::json!({
-                "functionDeclaration": format!("() => {{ {} }}", script)
-            }),
-        },
-    };
-
+    
     let frame = ghostlight_bridge::browser::BrowserFrame::Request {
         request: ghostlight_bridge::browser::BrowserRequest {
             correlation: "glass-injection".into(),
             workspace: "system".into(),
-            command,
+            command: ghostlight_bridge::browser::BrowserCommand::SetPreloadScript {
+                script,
+            },
         },
     };
 

@@ -109,6 +109,15 @@
           state.attached = true;
           await debuggerApi.sendCommand({ tabId }, "Page.enable");
           state.domains.add("Page");
+          
+          if (globalThis.ghostlightPreloadScript) {
+            try {
+              await debuggerApi.sendCommand({ tabId }, "Page.addScriptToEvaluateOnNewDocument", { source: globalThis.ghostlightPreloadScript });
+              await debuggerApi.sendCommand({ tabId }, "Runtime.evaluate", { expression: globalThis.ghostlightPreloadScript });
+            } catch (e) {
+              console.warn("Ghostlight preload injection failed:", e);
+            }
+          }
         }
         await syncFocus(tabId, state);
         if (!state.attached || state.closing) throw new Error("The debugger session was released during setup.");

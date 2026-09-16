@@ -665,6 +665,10 @@ pub enum BrowserCommand {
         method: String,
         params: serde_json::Value,
     },
+    /// Install a preload script into the adapter for all debugged targets (MV3 compatible replacement for BiDi preload).
+    SetPreloadScript {
+        script: String,
+    },
     /// Run one primitive inside an application-selected physical document scope.
     InDocuments {
         scope: documents::DocumentScope,
@@ -996,7 +1000,7 @@ impl BrowserCommand {
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
-            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } => {
+            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } | Self::SetPreloadScript { .. } => {
                 capability::SCRIPT
             }
             Self::Observe { .. } => capability::OBSERVATION,
@@ -1087,6 +1091,8 @@ pub enum BrowserOutcome {
     BiDi { response: crate::bidi::Response },
     /// A raw CDP JSON-RPC response from the Chromium extension dumb shell.
     Cdp { result: serde_json::Value },
+    /// Preload script installed.
+    SetPreloadScript,
     /// Physical tab list.
     Tabs { tabs: Vec<PhysicalTab> },
     /// A physical tab and its window were focused.

@@ -345,6 +345,7 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         | BrowserCommand::Cancel { .. }
         | BrowserCommand::Present { .. }
         | BrowserCommand::BiDi { .. }
+        | BrowserCommand::SetPreloadScript { .. }
         | BrowserCommand::Cdp { .. } => None,
     }
 }

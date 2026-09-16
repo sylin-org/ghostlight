@@ -2342,6 +2342,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::Presented { .. }
         | BrowserOutcome::Cancelled
         | BrowserOutcome::BiDi { .. }
+        | BrowserOutcome::SetPreloadScript
         | BrowserOutcome::Cdp { .. }
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
     }

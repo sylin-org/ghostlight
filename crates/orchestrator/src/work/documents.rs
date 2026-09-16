@@ -185,6 +185,7 @@ impl RequestScope {
             | BrowserCommand::Present { .. }
             | BrowserCommand::BiDi { .. }
             | BrowserCommand::Cdp { .. }
+            | BrowserCommand::SetPreloadScript { .. }
             | BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::InDocuments { .. } => return None,
         };
