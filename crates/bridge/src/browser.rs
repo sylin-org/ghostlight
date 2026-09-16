@@ -666,9 +666,7 @@ pub enum BrowserCommand {
         params: serde_json::Value,
     },
     /// Install a preload script into the adapter for all debugged targets (MV3 compatible replacement for BiDi preload).
-    SetPreloadScript {
-        script: String,
-    },
+    SetPreloadScript { script: String },
     /// Run one primitive inside an application-selected physical document scope.
     InDocuments {
         scope: documents::DocumentScope,
@@ -1000,9 +998,10 @@ impl BrowserCommand {
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
-            Self::EvaluateScript { .. } | Self::BiDi { .. } | Self::Cdp { .. } | Self::SetPreloadScript { .. } => {
-                capability::SCRIPT
-            }
+            Self::EvaluateScript { .. }
+            | Self::BiDi { .. }
+            | Self::Cdp { .. }
+            | Self::SetPreloadScript { .. } => capability::SCRIPT,
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
             Self::ReadDiagnostics { .. } | Self::ClearDiagnostics { .. } => capability::DIAGNOSTICS,

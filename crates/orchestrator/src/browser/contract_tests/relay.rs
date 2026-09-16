@@ -343,10 +343,16 @@ fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
             );
             ready.send(()).unwrap();
             // Answer exactly one request, naming which browser answered it.
-            let Some(BrowserFrame::Request { request }) =
-                read_native::<BrowserFrame>(&mut stream).unwrap()
-            else {
-                panic!("the adapter is asked for one primitive");
+            let request = loop {
+                let Some(frame) = read_native::<BrowserFrame>(&mut stream).unwrap() else {
+                    panic!("the adapter is asked for one primitive");
+                };
+                if let BrowserFrame::Request { request } = frame {
+                    if matches!(request.command, BrowserCommand::SetPreloadScript { .. }) {
+                        continue;
+                    }
+                    break request;
+                }
             };
             write_native(
                 &mut stream,

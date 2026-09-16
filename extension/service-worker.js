@@ -72,6 +72,7 @@ const navigationWatchers = new Map();
 const recordingDocuments = new Map();
 const diagnosticDocuments = new Map();
 const dragInterceptions = new Map();
+const dialogWaiters = new Map();
 const cancelled = new Set();
 // The per-frame semantic match cap lives in the content script; this is the same ceiling
 // applied to the merged cross-frame result so embedded frames cannot outbid the top one.
@@ -385,6 +386,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId) return;
   if (method === "Page.javascriptDialogOpening") {
     debuggerLifecycle.openDialog(source.tabId, params.type);
+    announceDialog(source.tabId, params.type);
     send(shared.browserEventFrame({ event: "dialog_changed", tab_id: source.tabId, present: true, dialog_type: params.type || "unknown" }));
     if (beforeUnloadAcceptors.get(source.tabId) && params.type === "beforeunload") {
       sendDebugger({ tabId: source.tabId }, "Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
@@ -2041,13 +2043,53 @@ async function viewportPoint(tabId, point) {
   return resolvePointContext(tabId, top.x, top.y);
 }
 
+// A native dialog blocks the renderer, so the input command that opened it never returns.
+// These let an in-flight dispatch learn that one appeared instead of waiting for a reply
+// that cannot come. The debugger stays attached while a dialog is open, so the dialog tool
+// can still answer it.
+function watchForDialog(tabId) {
+  let announce;
+  const opened = new Promise((resolve) => { announce = resolve; });
+  if (!dialogWaiters.has(tabId)) dialogWaiters.set(tabId, new Set());
+  dialogWaiters.get(tabId).add(announce);
+  return {
+    opened,
+    forget() {
+      const waiting = dialogWaiters.get(tabId);
+      if (!waiting) return;
+      waiting.delete(announce);
+      if (waiting.size === 0) dialogWaiters.delete(tabId);
+    }
+  };
+}
+
+function announceDialog(tabId, type) {
+  const waiting = dialogWaiters.get(tabId);
+  if (!waiting) return;
+  dialogWaiters.delete(tabId);
+  for (const announce of waiting) announce(type || "unknown");
+}
+
 async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
   const name = button === "middle" ? "middle" : button === "secondary" ? "right" : "left";
   const modifiers = modifierFlags ?? 0;
-  for (let count = 1; count <= clickCount; count += 1) {
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, button: name, modifiers });
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: name, clickCount: count, modifiers });
+  const dialog = watchForDialog(tabId);
+  try {
+    for (let count = 1; count <= clickCount; count += 1) {
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+        const params = { type, x: point.x, y: point.y, button: name, modifiers };
+        if (type !== "mouseMoved") params.clickCount = count;
+        // A page handler may open a native dialog, which blocks the renderer so this
+        // command never returns. The dialog is the proof the input landed, so stop
+        // waiting on it. Remaining events in the sequence are not dispatched: the
+        // renderer cannot receive them while it is blocked.
+        const sent = sendDebugger({ tabId }, "Input.dispatchMouseEvent", params).then(() => null);
+        sent.catch(() => {});
+        if (await Promise.race([sent, dialog.opened])) return;
+      }
+    }
+  } finally {
+    dialog.forget();
   }
 }
 
