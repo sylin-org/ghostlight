@@ -13,8 +13,11 @@ pub const SENSOR_SCRIPT: &str = include_str!("sensor.js");
 /// The raw JavaScript for the core Ghostlight content script.
 pub const CONTENT_SCRIPT: &str = include_str!("content.js");
 
+pub const SHARED_SCRIPT: &str = include_str!("../../../../extension/lib/shared.js");
+pub const FORM_DIAGNOSTICS_SCRIPT: &str = include_str!("../../../../extension/lib/form-diagnostics.js");
+
 pub fn inject_glass(writer: &ghostlight_bridge::transport::SocketWriter) {
-    let script = format!("(() => {{\n{}\n{}\n{}\n}})();", SENSOR_SCRIPT, CONTENT_SCRIPT, OVERLAY_SCRIPT);
+    let script = format!("(() => {{\n{}\n{}\n{}\n{}\n{}\n}})();", SHARED_SCRIPT, FORM_DIAGNOSTICS_SCRIPT, SENSOR_SCRIPT, CONTENT_SCRIPT, OVERLAY_SCRIPT);
     
     let frame = ghostlight_bridge::browser::BrowserFrame::Request {
         request: ghostlight_bridge::browser::BrowserRequest {
