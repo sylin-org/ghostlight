@@ -747,15 +747,7 @@
       } catch (_error) { /* target is optional presentation */ }
       if (!rectangle) return false;
     }
-    const overlay = window.installGhostlightOverlay();
-    
-    // For proof of concept, we only extract the narration part for now.
-    // Ripples and rectangle borders can be added to the Web Component.
-    if (signal.phase === "narration" || signal.invocation) {
-      overlay.presentNarration(signal.detail || signal.invocation || signal.phase);
-    }
-    
-    return true;
+    return globalThis.GhostlightPresentation.render(signal, preferences, rectangle);
   }
 
   function decodeFile(file) {
@@ -1061,10 +1053,10 @@
         if (!IS_TOP && !message.signal?.locator) return { presented: false };
         return { presented: renderPresentation(message.signal, message.preferences) };
       }
-      if (message.kind === "managed_scope") { window.installGhostlightOverlay().setAttribute('active', message.active ? '' : null); return { managed: Boolean(message.active) }; }
-      if (message.kind === "presentation_visibility") { window.installGhostlightOverlay().style.display = message.hidden ? 'none' : 'block'; return { hidden: Boolean(message.hidden) }; }
-      if (message.kind === "recording_state") { /* Removed legacy recording state for now */ return { recording: Boolean(message.active) }; }
-      if (message.kind === "runtime_state") { /* Removed legacy runtime state */ return { state: message.state }; }
+      if (message.kind === "managed_scope") { globalThis.GhostlightPresentation.setManaged(message.active); return { managed: Boolean(message.active) }; }
+      if (message.kind === "presentation_visibility") { globalThis.GhostlightPresentation.setHidden(message.hidden); return { hidden: Boolean(message.hidden) }; }
+      if (message.kind === "recording_state") { globalThis.GhostlightPresentation.setRecording(message.active); return { recording: Boolean(message.active) }; }
+      if (message.kind === "runtime_state") { globalThis.GhostlightPresentation.setRuntimeState(message.state); return { state: message.state }; }
       throw new Error("unknown content primitive");
     }).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
   });
