@@ -45,6 +45,11 @@
       "adapterVersion": "1.1.8",
       "minimumServiceVersion": "1.3.4",
       "maximumServiceVersion": "1.3.7"
+    },
+    {
+      "adapterVersion": "1.3.8",
+      "minimumServiceVersion": "1.3.4",
+      "maximumServiceVersion": "1.3.8"
     }
   ]
 }

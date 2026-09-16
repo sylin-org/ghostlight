@@ -13,6 +13,7 @@ const REQUIRED_SECTIONS: &[&str] = &[
     "downloads",
     "nativeMessaging",
     "offscreen",
+    "scripting",
     "storage",
     "tabGroups",
     "tabs",

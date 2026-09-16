@@ -35,6 +35,12 @@ The nativeMessaging permission connects the extension to the separately installe
 The offscreen permission creates a local extension document only while encoding an explicitly requested browser recording as an animated GIF. Manifest V3 service workers may be suspended during encoding, so the document provides the browser media environment needed to complete the operation reliably. It loads only code bundled in the reviewed extension, makes no network request, has no visible UI, and closes after encoding.
 ```
 
+## scripting
+
+```text
+The scripting permission dispatches local function executions to document contexts in controlled tabs to deliver visual presentation feedback and verify interaction targets without evaluating dynamic external code strings. It operates only in Ghostlight-controlled tabs during active operations.
+```
+
 ## storage
 
 ```text

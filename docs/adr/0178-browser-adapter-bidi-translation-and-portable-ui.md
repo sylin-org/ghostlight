@@ -10,7 +10,7 @@ Ghostlight's core architectural premise relies heavily on the `chrome.debugger` 
 1. No other browser family exposes an extension-bound debugger API.
 2. The industry has decisively standardized on W3C WebDriver BiDi as the cross-browser automation protocol (with Firefox retiring CDP entirely in 2025).
 
-Simultaneously, the visual layer of Ghostlight (the "Glass"—narrations, effects, borders, overlays) is tightly coupled to the Chromium extension's `content.js`, making it non-portable.
+Simultaneously, the visual layer of Ghostlight (the "Glass"--narrations, effects, borders, overlays) is tightly coupled to the Chromium extension's `content.js`, making it non-portable.
 
 We need an architecture that decouples the product's semantic intent from the vendor's browser engine, while preserving Ghostlight's fundamental user promise: **zero-configuration automation within the interactive user's established session.**
 

@@ -1,6 +1,29 @@
-# STATUS -- Ghostlight 1.3.7 GitHub release published; Chrome adapter 1.1.8 public
+# STATUS -- Ghostlight 1.3.7 GitHub release published; Chrome adapter 1.3.8 prepared
 
-Last updated: 2026-09-15 (service 1.3.7 GitHub release published; adapter 1.1.8 published on Chrome Web Store; npm and MCP registry publication pending npm authentication refresh).
+Last updated: 2026-09-16 (Chrome adapter 1.3.8 prepared and packaged for Chrome Web Store review; service 1.3.7 published).
+
+## Known Issue: Split-Version Authority State on Package Update (npx update)
+
+Reported 2026-09-16: When updating Ghostlight via package install or `npx` while an existing
+service instance and MCP client connectors are actively running, the environment can enter an
+odd split-version hung state. Specifically:
+- Pre-existing MCP clients stay connected to the older version's connector and service.
+- The browser connector spawns or reconnects using the newly installed adapter version.
+- Lingering processes from the predecessor installation are not cleanly disarmed or signaled
+  to re-bind to the new version authority.
+Investigation and remediation owed: ensure package upgrade paths detect running predecessor
+authorities, cleanly quiesce and terminate obsolete background connectors, and guide or
+automatically rebind active client sessions to the current authority.
+
+## Chrome adapter 1.3.8 packaged and prepared for Chrome Web Store review (2026-09-16)
+
+Packaged adapter revision 1.3.8 under owner direction:
+- Version Lockstep Amendment: Bumped adapter version directly to 1.3.8 to align with service
+  release lockstep for simplified visual identification across the stack.
+- Native Modal Dialog Race Resolution: Resolved `dispatchClick` timeout on `window.prompt`,
+  `window.alert`, and `window.confirm` by racing input dispatch against `Page.javascriptDialogOpening`.
+- Tested and verified: all 275 extension tests passing, whole workspace Rust tests green,
+  and offline compatibility verified via `scripts/adapter-compatibility.ps1`.
 
 ## Runtime Injection Architecture Verified (Chromium Pathway)
 

@@ -39,7 +39,6 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 try {
     $rootFiles = @(
-        "content.js",
         "manifest.json",
         "offscreen.html",
         "offscreen.js",

@@ -20,6 +20,16 @@ the owner wants, and what this project learned the hard way.
   installing or invoking a package on a development machine must use the selected development
   authority. ADR-0167 records the mandate and supersedes installation-local production election.
 
+- **Keep extension and service in version lockstep.** To simplify visual identification and user
+  mental models, Chrome Web Store extension versions align in lockstep with service release versions
+  (e.g. bumping directly to v1.3.8).
+
+- **Package updates must prevent split-version authority states (npx update / install).** When a user
+  upgrades Ghostlight via package install or npx while an existing service and client connectors are
+  running, older MCP connectors can remain connected to the old service while the browser connects to
+  the newly spawned adapter. Upgrades must cleanly quiesce/retire lingering predecessor processes and
+  redirect running clients.
+
 - **Use the existing Chrome release API setup.** The owner requested durable production
   OAuth credentials under ignored `local/.ghostlight-release.env` and authorized their use
   for release work. This is a specific exception to the general no-secrets-in-local rule.

@@ -40,6 +40,20 @@ is in review.
 - Verify multiline contenteditable form input reliably in adapter content scripts.
 - Ensure strict ASCII encoding and format validation across all repository and test surfaces.
 
+## Chrome adapter [1.3.8] - 2026-09-16
+
+Aligned Chrome Web Store extension version in lockstep with service release
+(v1.3.8). Prepared for Chrome Web Store submission with modal dialog input race
+resolution and native dialog event announcement.
+
+### Fixed
+
+- Resolve `dispatchClick` timeout when clicking targets that trigger synchronous
+  JavaScript modals (`prompt`, `alert`, `confirm`).
+- Race CDP mouse input against `Page.javascriptDialogOpening` so input dispatch
+  completes cleanly upon dialog arrival without waiting on unanswerable CDP
+  `mouseReleased` replies.
+
 ## Chrome adapter [1.1.8] - 2026-09-15
 
 Prepared for Chrome Web Store submission with multiline contenteditable value
