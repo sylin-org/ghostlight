@@ -574,6 +574,11 @@ Every one of these cost something to learn.
   cross-workspace tab ownership mismatches, forcing a disconnect and reconnect loses context and session history.
   A dedicated discovery and switching seam (`browser_workspace`, ADR-0175) with thread-safe atomic session
   rebinding (`Arc<Mutex<WorkspaceId>>`) resolves multi-workspace routing cleanly inside the live MCP session.
+- **Windows session shutdown messages require a top-level window, not a message-only window.**
+  Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
+  not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)
+  must maintain a hidden top-level window (`WS_POPUP`, `WS_EX_TOOLWINDOW`) to receive session termination
+  broadcasts, disarm exit prevention, and exit within the OS kill timeout (ADR-0180).
 
 ## Where to look
 

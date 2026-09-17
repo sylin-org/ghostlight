@@ -1,6 +1,14 @@
 # STATUS -- Ghostlight 1.3.8 candidate prepared; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-17 (Firefox extension onboarding parity and signed XPI).
+Last updated: 2026-09-17 (Windows system shutdown hygiene fix).
+
+## Windows System Shutdown Hygiene (2026-09-17)
+
+Resolved Windows system shutdown blocking issue per ADR-0180:
+- Hidden top-level session listener: Added `crates/win-peer/src/shutdown.rs` spawning a background thread with a hidden top-level window to receive Windows session broadcast messages (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), strictly confined to the audited FFI crate.
+- Exit retention disarming: Orchestrator desktop runner tracks `SYSTEM_SHUTDOWN_IN_PROGRESS` and disarms `should_prevent_desktop_exit()`, allowing immediate termination during OS shutdown instead of retaining the process in tray per ADR-0119.
+- Fallback exit guard: Added a 1.5-second fallback thread calling `std::process::exit(0)` on session end to ensure termination if Tao's event loop hangs on destroyed window targets, well within the 5-second OS kill timeout.
+- Console connector shutdown: Registered console control handler catching `CTRL_SHUTDOWN_EVENT` and `CTRL_LOGOFF_EVENT` for connector processes in `crates/bridge/src/lifecycle.rs`.
 
 ## Firefox Extension Onboarding Parity and Signed Distribution (2026-09-17)
 

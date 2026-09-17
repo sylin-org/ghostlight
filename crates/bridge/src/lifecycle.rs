@@ -38,11 +38,15 @@ const ERROR_LOCK_VIOLATION: i32 = 33;
 enum ConnectorExit {
     InputClosed(&'static str),
     ParentExited,
+    #[cfg(windows)]
+    SystemShutdown,
 }
 
 /// One ordered exit path for a connector's normal input closure and parent-death detector.
 pub struct ConnectorShutdown {
     exit: mpsc::SyncSender<ConnectorExit>,
+    #[cfg(windows)]
+    _console_shutdown: Option<ghostlight_win_peer::ConsoleShutdownGuard>,
 }
 
 impl ConnectorShutdown {
@@ -58,6 +62,8 @@ impl ConnectorShutdown {
                 let detail = match reason {
                     ConnectorExit::InputClosed(detail) => detail,
                     ConnectorExit::ParentExited => "spawning client process exited",
+                    #[cfg(windows)]
+                    ConnectorExit::SystemShutdown => "system shutting down",
                 };
                 diagnostics.emit(event::PROCESS_EXITED, Level::Info, None, detail);
                 std::process::exit(0);
@@ -75,7 +81,21 @@ impl ConnectorShutdown {
                     }
                 })?;
         }
-        Ok(Self { exit })
+
+        #[cfg(windows)]
+        let console_shutdown = {
+            let shutdown_exit = exit.clone();
+            ghostlight_win_peer::listen_for_console_shutdown(Box::new(move || {
+                let _ = shutdown_exit.send(ConnectorExit::SystemShutdown);
+            }))
+            .ok()
+        };
+
+        Ok(Self {
+            exit,
+            #[cfg(windows)]
+            _console_shutdown: console_shutdown,
+        })
     }
 
     /// Complete a normal connector input closure through the shared ordered exit path.

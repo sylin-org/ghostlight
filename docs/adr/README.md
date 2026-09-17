@@ -209,6 +209,7 @@ history live here.
 | [0177](0177-modular-cli-decomposition-and-execution-templates.md) | Modular CLI decomposition and universal execution templates | Accepted |
 | [0178](0178-browser-adapter-bidi-translation-and-portable-ui.md) | Browser adapter BiDi translation and portable UI: internal BiDi Rosetta Stone, dumb shell, and runtime-injected Glass Web Components | Accepted |
 | [0179](0179-hub-and-spoke-browser-adapters-and-firefox-registration.md) | Hub-and-spoke browser adapters and Firefox registration: platform discriminator, engine-agnostic core, and Mozilla native host integration | Accepted |
+| [0180](0180-windows-system-shutdown-hygiene.md) | Windows system shutdown hygiene: hidden top-level window session listener, non-blocking exit retention, and fallback exit guard | Accepted (builds on [0119](0119-durable-desktop-authority-disposable-workbench.md)) |
 
 
 ## Conventions

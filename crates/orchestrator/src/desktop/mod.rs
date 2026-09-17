@@ -185,6 +185,33 @@ pub fn run() -> Result<()> {
             anyhow::bail!("Ghostlight desktop authority failed during startup");
         }
     };
+    #[cfg(target_os = "windows")]
+    let _shutdown_listener = {
+        let app_handle = app.handle().clone();
+        ghostlight_win_peer::listen_for_system_shutdown(Box::new(move |event| match event {
+            ghostlight_win_peer::ShutdownEvent::Query => {
+                set_system_shutdown_in_progress(true);
+            }
+            ghostlight_win_peer::ShutdownEvent::Cancelled => {
+                set_system_shutdown_in_progress(false);
+            }
+            ghostlight_win_peer::ShutdownEvent::Terminating => {
+                set_system_shutdown_in_progress(true);
+                app_handle.exit(0);
+                std::thread::Builder::new()
+                    .name("ghostlight-shutdown-fallback".into())
+                    .spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                        std::process::exit(0);
+                    })
+                    .ok();
+            }
+        }))
+        .inspect_err(|error| {
+            eprintln!("Ghostlight could not start Windows shutdown listener: {error}");
+        })
+        .ok()
+    };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         app.run_return(move |app, event| match event {
             RunEvent::Ready => {
@@ -431,7 +458,20 @@ fn build_workbench(app: &AppHandle) -> Result<WebviewWindow, WorkbenchPresentati
     Ok(window)
 }
 
+static SYSTEM_SHUTDOWN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn is_system_shutdown_in_progress() -> bool {
+    SYSTEM_SHUTDOWN_IN_PROGRESS.load(Ordering::SeqCst)
+}
+
+pub(crate) fn set_system_shutdown_in_progress(in_progress: bool) {
+    SYSTEM_SHUTDOWN_IN_PROGRESS.store(in_progress, Ordering::SeqCst);
+}
+
 fn should_prevent_desktop_exit(code: Option<i32>) -> bool {
+    if is_system_shutdown_in_progress() {
+        return false;
+    }
     code.is_none()
 }
 
@@ -793,15 +833,22 @@ fn validate_search_query(query: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        should_prevent_desktop_exit, validate_policy_document, validate_search_query,
-        POLICY_DOCUMENT_LIMIT,
+        set_system_shutdown_in_progress, should_prevent_desktop_exit, validate_policy_document,
+        validate_search_query, POLICY_DOCUMENT_LIMIT,
     };
 
     #[test]
     fn only_implicit_window_loss_is_contained() {
+        set_system_shutdown_in_progress(false);
         assert!(should_prevent_desktop_exit(None));
         assert!(!should_prevent_desktop_exit(Some(0)));
         assert!(!should_prevent_desktop_exit(Some(1)));
+
+        set_system_shutdown_in_progress(true);
+        assert!(!should_prevent_desktop_exit(None));
+        assert!(!should_prevent_desktop_exit(Some(0)));
+        assert!(!should_prevent_desktop_exit(Some(1)));
+        set_system_shutdown_in_progress(false);
     }
 
     #[test]

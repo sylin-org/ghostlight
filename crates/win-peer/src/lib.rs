@@ -46,7 +46,46 @@ mod private_file;
 #[cfg(target_os = "windows")]
 mod process;
 #[cfg(target_os = "windows")]
+mod shutdown;
+#[cfg(target_os = "windows")]
 mod table;
+
+/// Session shutdown events from the operating system.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShutdownEvent {
+    /// System is querying whether session can end (WM_QUERYENDSESSION).
+    Query,
+    /// System cancelled the shutdown sequence (WM_ENDSESSION with wParam == FALSE).
+    Cancelled,
+    /// System is terminating (WM_ENDSESSION with wParam != FALSE or console shutdown).
+    Terminating,
+}
+
+#[cfg(target_os = "windows")]
+pub use shutdown::{
+    listen_for_console_shutdown, listen_for_system_shutdown, ConsoleShutdownGuard,
+    SystemShutdownListener,
+};
+
+#[cfg(not(target_os = "windows"))]
+pub struct SystemShutdownListener;
+
+#[cfg(not(target_os = "windows"))]
+pub struct ConsoleShutdownGuard;
+
+#[cfg(not(target_os = "windows"))]
+pub fn listen_for_system_shutdown(
+    _callback: Box<dyn Fn(ShutdownEvent) + Send + Sync + 'static>,
+) -> std::io::Result<SystemShutdownListener> {
+    Ok(SystemShutdownListener)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn listen_for_console_shutdown(
+    _callback: Box<dyn Fn() + Send + Sync + 'static>,
+) -> std::io::Result<ConsoleShutdownGuard> {
+    Ok(ConsoleShutdownGuard)
+}
 
 /// Capture the current process's parent with creation time bound to its process id.
 #[must_use]
