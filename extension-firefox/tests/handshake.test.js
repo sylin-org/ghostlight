@@ -36,7 +36,7 @@ test("Firefox extension emits valid BrowserFrame::Hello with ghostlight/gecko pl
         return mockPort;
       },
       getManifest() {
-        return { version: "1.3.8" };
+        return { version: "1.3.9" };
       }
     },
     windows: {
@@ -58,7 +58,7 @@ test("Firefox extension emits valid BrowserFrame::Hello with ghostlight/gecko pl
 
   assert.equal(hello.kind, "hello");
   assert.equal(hello.major, 2);
-  assert.equal(hello.adapter_version, "1.3.8");
+  assert.equal(hello.adapter_version, "1.3.9");
   assert.equal(hello.browser_name, "Firefox");
   assert.equal(hello.platform, "ghostlight/gecko");
   assert.equal(hello.attended, true);

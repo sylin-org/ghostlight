@@ -6,7 +6,6 @@
   const linkDot = document.getElementById("link-dot");
   const sessionStatus = document.getElementById("session-status");
   const sessionButton = document.getElementById("session-button");
-  const releaseDebuggerButton = document.getElementById("release-debugger-button");
   const diagnosticsRow = document.getElementById("diagnostics-row");
   const diagnosticsStatus = document.getElementById("diagnostics-status");
   const diagnosticsToggle = document.getElementById("diagnostics-toggle");
@@ -87,25 +86,11 @@
       : snapshot.link_state === HOST_ABSENT ? NOT_INSTALLED_HERE
         : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
     const recordingLine = snapshot.recording_tabs > 0 ? ` REC on ${snapshot.recording_tabs} tab(s).` : "";
-    sessionStatus.textContent = `${connectedLine} Debugger attached to ${snapshot.attached_tabs || 0} tab(s).${recordingLine}`;
+    sessionStatus.textContent = `${connectedLine} Controlling ${snapshot.attached_tabs || 0} tab(s).${recordingLine}`;
     sessionButton.textContent = "End session now";
     sessionButton.dataset.intent = "end_session";
     sessionButton.classList.add("kill");
     sessionButton.disabled = !snapshot.connected || !snapshot.compatible;
-  }
-
-  // Unlike "End session now", this never needs a live connection: it is a purely local release
-  // of Chrome's own debugger attachment, not a governance decision the orchestrator has to make.
-  // It exists specifically for the case "End session" cannot cover -- the service crashed, was
-  // uninstalled, or is simply not running -- which used to leave the automation banner stuck with
-  // no way to clear it short of Chrome's own infobar or closing every tab by hand.
-  function renderReleaseDebugger(snapshot) {
-    const attached = snapshot.attached_tabs || 0;
-    releaseDebuggerButton.hidden = attached === 0;
-    releaseDebuggerButton.disabled = attached === 0;
-    releaseDebuggerButton.textContent = attached === 1
-      ? "Release debugger session (1 tab)"
-      : `Release debugger sessions (${attached} tabs)`;
   }
 
   function attentionRecords(snapshot) {
@@ -170,7 +155,6 @@
     renderLink(snapshot);
     renderHold(snapshot);
     renderSession(snapshot);
-    renderReleaseDebugger(snapshot);
     renderAttention(snapshot);
     renderSetup(snapshot);
     renderDiagnostics(snapshot);
@@ -217,16 +201,6 @@
     sessionButton.disabled = true;
     await attentionAction(sessionButton.dataset.intent);
   });
-  releaseDebuggerButton.addEventListener("click", async () => {
-    releaseDebuggerButton.disabled = true;
-    try {
-      await request({ kind: "release_debugger_sessions" });
-    } catch (error) {
-      sessionStatus.textContent = String(error?.message ?? error);
-    } finally {
-      await refresh();
-    }
-  });
   diagnosticsToggle.addEventListener("click", async () => {
     diagnosticsToggle.disabled = true;
     try {
@@ -253,7 +227,7 @@
   // with no network at all.
   setupRoute.addEventListener("click", () => {
     const destination = navigator.onLine
-      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
+      ? "https://sylin.org/ghostlight/service/post-install/?browser=firefox"
       : chrome.runtime.getURL("setup.html");
     chrome.tabs.create({ url: destination }).catch(() => {});
   });

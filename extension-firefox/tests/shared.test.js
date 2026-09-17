@@ -48,3 +48,44 @@ test("linkState distinguishes connected, absent, and unreachable", () => {
     "unreachable"
   );
 });
+
+test("Firefox extension opens the service-first handoff on install", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(path.join(__dirname, "..", "background.js"), "utf8");
+  assert.match(
+    source,
+    /const SERVICE_INSTALL_URL = "https:\/\/sylin\.org\/ghostlight\/service\/post-install\/\?browser=firefox";/
+  );
+  assert.match(
+    source,
+    /if \(details\?\.reason === "install"\) \{\s+browserApi\.tabs\.create\(\{ url: SERVICE_INSTALL_URL \}\)/
+  );
+});
+
+test("Firefox popup and setup pages use Firefox-specific copy and post-install route", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const popupHtml = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
+  const popupJs = fs.readFileSync(path.join(__dirname, "..", "popup.js"), "utf8");
+  const setupHtml = fs.readFileSync(path.join(__dirname, "..", "setup.html"), "utf8");
+  const optionsJs = fs.readFileSync(path.join(__dirname, "..", "options.js"), "utf8");
+
+  assert.ok(!popupHtml.includes("chrome://extensions/shortcuts"), "popup.html must not reference chrome:// shortcuts");
+  assert.ok(popupHtml.includes("about:addons"), "popup.html must reference about:addons");
+  assert.ok(!popupHtml.includes("release-debugger-button"), "popup.html must not include debugger button");
+  assert.ok(!popupHtml.includes("Chrome profile"), "popup.html must not reference Chrome profile");
+  assert.ok(popupHtml.includes("Firefox profile"), "popup.html must reference Firefox profile");
+
+  assert.ok(popupJs.includes("https://sylin.org/ghostlight/service/post-install/?browser=firefox"));
+  assert.ok(!popupJs.includes("chromium-extension/post-install"));
+  assert.ok(popupJs.includes("Controlling "));
+  assert.ok(!popupJs.includes("Debugger attached to"));
+
+  assert.ok(!setupHtml.includes("Chrome"), "setup.html must not reference Chrome");
+  assert.ok(setupHtml.includes("Firefox"), "setup.html must reference Firefox");
+  assert.ok(setupHtml.includes("https://sylin.org/ghostlight/service/post-install/?browser=firefox"));
+
+  assert.ok(optionsJs.includes("https://sylin.org/ghostlight/service/post-install/?browser=firefox"));
+  assert.ok(!optionsJs.includes("Chrome profile"), "options.js must not reference Chrome profile");
+});

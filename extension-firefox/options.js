@@ -13,7 +13,7 @@
   if (!globalThis.chrome?.runtime?.id) {
     linkPill.className = "pill wait";
     linkText.textContent = "Open extension options";
-    linkSub.textContent = "This is a local file, not the installed extension. Open Ghostlight's options from Chrome's Extensions menu to see its connection and settings.";
+    linkSub.textContent = "This is a local file, not the installed extension. Open Ghostlight's options from the Firefox Add-ons manager to see its connection and settings.";
     document.querySelectorAll("input, button").forEach(control => { control.disabled = true; });
     return;
   }
@@ -31,7 +31,7 @@
 
   setupRoute.addEventListener("click", () => {
     const destination = navigator.onLine
-      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
+      ? "https://sylin.org/ghostlight/service/post-install/?browser=firefox"
       : chrome.runtime.getURL("setup.html");
     chrome.tabs.create({ url: destination }).catch(() => {});
   });
@@ -58,7 +58,7 @@
     } else if (snapshot.link_state === "host_absent") {
       linkPill.className = "pill wait";
       linkText.textContent = "Not installed here";
-      linkSub.textContent = "Ghostlight is not installed on this computer yet. The extension came with your Chrome profile. Install Ghostlight here to connect it.";
+      linkSub.textContent = "Ghostlight is not installed on this computer yet. The extension came with your Firefox profile. Install Ghostlight here to connect it.";
     } else {
       linkPill.className = "pill wait";
       linkText.textContent = snapshot.compatible ? "Waiting" : "Version mismatch";

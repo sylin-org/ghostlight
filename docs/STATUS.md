@@ -1,6 +1,15 @@
 # STATUS -- Ghostlight 1.3.8 candidate prepared; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-17 (Firefox extension automated signing and packaging pipeline implemented).
+Last updated: 2026-09-17 (Firefox extension onboarding parity and signed XPI).
+
+## Firefox Extension Onboarding Parity and Signed Distribution (2026-09-17)
+
+Refined the Firefox WebExtension to parity with the Chromium extension user experience and signed version 1.3.9 via Mozilla Add-ons (AMO):
+- First-install onboarding: Added `SERVICE_INSTALL_URL` (`https://sylin.org/ghostlight/service/post-install/?browser=firefox`) opening automatically when `details?.reason === "install"` in `extension-firefox/background.js`.
+- UI copy parity: Replaced residual Chrome-specific copy in `popup.html`, `popup.js`, `options.js`, and `setup.html` with Firefox equivalents (`about:addons`, "Firefox profile", and Linux package guidance). Updated session status to "Controlling X tab(s)." instead of debugger attachment.
+- Removed dead controls: Removed `release-debugger-button` and its event listeners from `popup.html` and `popup.js` as Firefox uses content scripts and WebExtension APIs without debugger infobars.
+- Automated AMO signing: Successfully packaged and signed version 1.3.9 via AMO API (`scripts/publish-extension-firefox.ps1 -Action SignUnlisted -Execute`), producing the signed distribution artifact `dist/ghostlight-firefox-extension-v1.3.9.signed.xpi` (1,365,151 bytes, SHA-256 `7ab6e00e9020098cc57a85143f723701ac7063eca4e743ed5a25dfea981416aa`).
+- Test suite: Added unit test assertions covering install handoff, copy parity, and absence of debugger buttons (10/10 tests green).
 
 ## Firefox Extension Automated Signing and Packaging Pipeline (2026-09-17)
 

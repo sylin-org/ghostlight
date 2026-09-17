@@ -25,6 +25,7 @@ const shared = typeof GhostlightShared !== "undefined"
 const HOST_NAME = shared?.NATIVE_HOST_NAME || "org.sylin.ghostlight";
 const BROWSER_PLATFORM = shared?.BROWSER_PLATFORM || "ghostlight/gecko";
 const BROWSER_NAME = shared?.BROWSER_NAME || "Firefox";
+const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/service/post-install/?browser=firefox";
 
 let nativePort = null;
 let nativeConnectionAttempt = null;
@@ -135,7 +136,7 @@ async function establishConnection() {
       scheduleReconnect(attempt);
     });
 
-    const manifestVersion = browserApi.runtime.getManifest()?.version || "1.3.8";
+    const manifestVersion = browserApi.runtime.getManifest()?.version || "1.3.9";
     const attended = await isWindowFocused();
 
     const helloSent = send({
@@ -559,9 +560,12 @@ if (browserApi.webNavigation?.onCommitted) {
 
 // Listen to extension lifecycle events
 if (browserApi.runtime?.onInstalled) {
-  browserApi.runtime.onInstalled.addListener(() => {
-    logDebug("browserApi.runtime.onInstalled fired");
+  browserApi.runtime.onInstalled.addListener((details) => {
+    logDebug("browserApi.runtime.onInstalled fired", details?.reason);
     connectNative("installed");
+    if (details?.reason === "install") {
+      browserApi.tabs.create({ url: SERVICE_INSTALL_URL }).catch(() => {});
+    }
   });
 }
 if (browserApi.runtime?.onStartup) {
