@@ -251,7 +251,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .queue-clear { height: 24px; padding: 0 9px; font: 500 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .queue { display: flex; flex-direction: column; }
 .row {
-  display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 132px 62px 52px 46px;
+  display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 116px 86px 62px 52px 46px;
   align-items: center; gap: 12px; overflow: hidden;
   min-height: 42px; grid-template-rows: 41px; row-gap: 0; padding: 0 12px 0 11px;
   border-bottom: 1px solid var(--line); border-left: 3px solid var(--cap, var(--cap-read));
@@ -268,6 +268,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .row-activity { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .row.blocked .row-activity { color: #fca5a5; }
 .row-client { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.row-browser { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-cap { color: var(--cap, var(--cap-read)); font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
 .row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .row-when { color: var(--faint); font: 400 10px/1 var(--mono); text-align: right; }
@@ -413,7 +414,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 /* Narrow: the capability already reads as the left edge, and the age matters least. */
 @media (max-width: 1040px) {
   .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 116px 52px; }
-  .row-cap, .row-when { display: none; }
+  .row-cap, .row-browser, .row-when { display: none; }
 }
 
 /* Narrowest: the intake goes last, after the client. Which tool ran and what it did outrank who

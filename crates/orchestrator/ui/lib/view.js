@@ -113,6 +113,14 @@
       return sessionFor(entry.workspace)?.client_label ?? shortId(entry.workspace);
     }
 
+    /** Browser that performed or is performing this action. */
+    function browserFor(entry) {
+      if (entry.browser) return entry.browser;
+      const session = sessionFor(entry.workspace);
+      if (session?.browser) return session.browser;
+      return "";
+    }
+
     /* -------------------------------- monitor ----------------------------- */
 
     // Expansion is disposable view state; new receipts never force a panel open.
@@ -261,6 +269,8 @@
       const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
       const meta = [];
       if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry))}</span>`);
+      const browser = browserFor(entry);
+      if (browser) meta.push(`<span><i></i>${escapeHtml(browser)}</span>`);
       // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
       if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
       if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
@@ -363,6 +373,7 @@
         + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
+        + `<div class="row-browser">${escapeHtml(browserFor(entry))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`

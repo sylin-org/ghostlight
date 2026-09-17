@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Ghostlight brand mark. Sky-blue #38BDF8 ghost silhouette, ADR-0021. -->
+  <!-- Regenerate PNGs (16/32/48/128) with @resvg/resvg-js: Resvg(svg, {fitTo:{mode:"width",value:N}}).render().asPng() -->
+  <path
+    d="M 24 64
+       A 40 40 0 1 1 104 64
+       L 104 104
+       A 13.333 13.333 0 0 1 77.333 104
+       A 13.333 13.333 0 0 1 50.667 104
+       A 13.333 13.333 0 0 1 24 104
+       Z"
+    fill="#38BDF8"
+    stroke="#0369A1"
+    stroke-width="4"
+    stroke-linejoin="round"
+  />
+  <ellipse cx="46" cy="58" rx="6" ry="8" fill="#0C4A6E" />
+  <ellipse cx="82" cy="58" rx="6" ry="8" fill="#0C4A6E" />
+</svg>

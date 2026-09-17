@@ -1919,6 +1919,9 @@ pub struct AuditRecord {
     /// Bounded original-connection evidence; claimed labels never enter this durable type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<crate::provenance::Attribution>,
+    /// Persistent browser family or product name that performed this work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -1973,7 +1976,15 @@ impl AuditRecord {
             channel: None,
             peer_image: None,
             provenance: None,
+            browser: None,
         }
+    }
+
+    /// Attach the browser family or product name that performed the work.
+    #[must_use]
+    pub fn with_browser(mut self, browser: Option<String>) -> Self {
+        self.browser = browser;
+        self
     }
 
     /// Attach the intake the work arrived on.

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use ghostlight_bridge::browser::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
-    BrowserReadiness, BrowserReceipt, PhysicalTab, ADAPTER_PROTOCOL_MAJOR,
+    BrowserPlatform, BrowserReadiness, BrowserReceipt, PhysicalTab, ADAPTER_PROTOCOL_MAJOR,
 };
 use ghostlight_bridge::framing::{read_native, write_native};
 
@@ -44,6 +44,7 @@ fn incompatible_browser_bridge_fails_during_hello() {
                 browser_id: "browser_test".into(),
                 adapter_epoch: "adapter_test".into(),
                 browser_name: None,
+                platform: None,
                 attended: false,
                 capabilities: vec![],
             },
@@ -539,4 +540,115 @@ fn routing_refuses_rather_than_guessing_or_failing_over() {
         choose_browser(None, None, &[]),
         Err(BrowserError::DisconnectedBeforeDispatch)
     );
+}
+
+#[test]
+fn gecko_browser_attaches_and_negotiates_platform_cleanly() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let port = RelayBrowserPort::new("service_test".into());
+
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        write_native(
+            &mut stream,
+            &BrowserFrame::Hello {
+                major: ADAPTER_PROTOCOL_MAJOR,
+                adapter_version: "1.3.8".into(),
+                browser_id: "browser_firefox_test".into(),
+                adapter_epoch: "adapter_test_gecko".into(),
+                browser_name: Some("Firefox".into()),
+                platform: Some(BrowserPlatform::Gecko),
+                attended: true,
+                capabilities: vec![
+                    capability(adapter_capability::TABS),
+                    capability(adapter_capability::ADAPTER_ATTENTION),
+                ],
+            },
+        )
+        .unwrap();
+
+        // Expect HelloAccepted
+        let accepted = read_native::<BrowserFrame>(&mut stream).unwrap().unwrap();
+        assert!(matches!(accepted, BrowserFrame::HelloAccepted { .. }));
+
+        // Expect SetPreloadScript (Glass injection)
+        let preload = read_native::<BrowserFrame>(&mut stream).unwrap().unwrap();
+        assert!(matches!(
+            preload,
+            BrowserFrame::Request {
+                request: ghostlight_bridge::browser::BrowserRequest {
+                    command: BrowserCommand::SetPreloadScript { .. },
+                    ..
+                }
+            }
+        ));
+
+        // Wait for ListTabs command and answer it
+        let request = loop {
+            let Some(frame) = read_native::<BrowserFrame>(&mut stream).unwrap() else {
+                panic!("expected request frame");
+            };
+            if let BrowserFrame::Request { request } = frame {
+                break request;
+            }
+        };
+
+        write_native(
+            &mut stream,
+            &BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: request.correlation,
+                    result: BrowserOutcome::Tabs {
+                        tabs: vec![PhysicalTab {
+                            tab_id: 101,
+                            title: "Firefox Home".into(),
+                            url: "about:home".into(),
+                            active: true,
+                            readiness: BrowserReadiness::Complete,
+                        }],
+                    },
+                },
+            },
+        )
+        .unwrap();
+    });
+
+    let (stream, _) = listener.accept().unwrap();
+    port.attach(stream).unwrap();
+
+    let summaries = port.connected_browsers();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].id, "browser_firefox_test");
+    assert_eq!(summaries[0].name.as_deref(), Some("Firefox"));
+    assert_eq!(summaries[0].platform, BrowserPlatform::Gecko);
+    assert!(summaries[0].attended);
+
+    let cancelled = AtomicBool::new(false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let outcome = port
+        .call(
+            "browser_firefox_test",
+            "workspace_test",
+            BrowserCommand::ListTabs,
+            deadline,
+            &cancelled,
+        )
+        .unwrap();
+
+    assert_eq!(
+        outcome,
+        BrowserOutcome::Tabs {
+            tabs: vec![PhysicalTab {
+                tab_id: 101,
+                title: "Firefox Home".into(),
+                url: "about:home".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            }],
+        }
+    );
+
+    client.join().unwrap();
 }

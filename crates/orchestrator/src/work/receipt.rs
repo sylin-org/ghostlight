@@ -127,7 +127,30 @@ impl ApplicationExecutor {
             .merged(terminal.observed.clone());
         // Unconsumed candidate sets belong only to stale-target failures; drop strays here so
         // nothing leaks across invocations.
-        let _ = self.take_stale_candidates(&terminal.result.invocation);
+        let browser_label = self
+            .workspaces
+            .browser_of(workspace.as_str())
+            .and_then(|id| {
+                self.browser
+                    .browsers()
+                    .into_iter()
+                    .find(|b| b.id == id)
+                    .map(|b| match b.platform {
+                        ghostlight_bridge::browser::BrowserPlatform::Gecko => {
+                            b.name.unwrap_or_else(|| "Firefox".into())
+                        }
+                        ghostlight_bridge::browser::BrowserPlatform::Chromium => {
+                            b.name.unwrap_or_else(|| "Chromium".into())
+                        }
+                    })
+                    .or_else(|| {
+                        if id.contains("firefox") || id.contains("gecko") {
+                            Some("Firefox".into())
+                        } else {
+                            Some("Chromium".into())
+                        }
+                    })
+            });
         let mut record = AuditRecord::now(
             &terminal.result.invocation,
             workspace.as_str(),
@@ -142,7 +165,8 @@ impl ApplicationExecutor {
         )
         .with_provenance(provenance.map(ConnectionEvidence::attribution))
         .with_policy(snapshot, terminal.decision)
-        .with_observation(observed);
+        .with_observation(observed)
+        .with_browser(browser_label);
         record.step = step;
         record.permissions = self.take_permissions(&terminal.result.invocation);
         let storage = self.audit.record_with_provenance(&record, provenance);

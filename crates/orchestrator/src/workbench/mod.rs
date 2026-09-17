@@ -448,11 +448,33 @@ impl WorkbenchFacade {
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
         let operations = self.projection.operations();
-        let sessions =
-            self.workspaces
-                .summaries()
-                .into_iter()
-                .map(|workspace| SessionSummary {
+        let browsers_list = self.browser.browsers();
+        let sessions = self
+            .workspaces
+            .summaries()
+            .into_iter()
+            .map(|workspace| {
+                let browser = self.workspaces.browser_of(&workspace.id).and_then(|id| {
+                    browsers_list
+                        .iter()
+                        .find(|b| b.id == id)
+                        .map(|b| match b.platform {
+                            ghostlight_bridge::browser::BrowserPlatform::Gecko => {
+                                b.name.clone().unwrap_or_else(|| "Firefox".into())
+                            }
+                            ghostlight_bridge::browser::BrowserPlatform::Chromium => {
+                                b.name.clone().unwrap_or_else(|| "Chromium".into())
+                            }
+                        })
+                        .or_else(|| {
+                            if id.contains("firefox") || id.contains("gecko") {
+                                Some("Firefox".into())
+                            } else {
+                                Some("Chromium".into())
+                            }
+                        })
+                });
+                SessionSummary {
                     active_operations: operations
                         .iter()
                         .filter(|operation| operation.workspace == workspace.id)
@@ -468,9 +490,11 @@ impl WorkbenchFacade {
                     leased: workspace.leased,
                     tab_count: workspace.tab_count,
                     held_tab_count: workspace.held_tab_count,
-                })
-                .collect::<Vec<_>>();
-        let browsers = self.browser_summary().into_iter().collect::<Vec<_>>();
+                    browser,
+                }
+            })
+            .collect::<Vec<_>>();
+        let browsers = self.browser_summary();
         let governance = self.governance.diagnostics();
         let mut diagnostics = vec![DiagnosticItem::passing(
             "service",
@@ -946,16 +970,27 @@ impl WorkbenchFacade {
         Ok(())
     }
 
-    fn browser_summary(&self) -> Option<BrowserInstanceSummary> {
-        self.browser.is_connected().then(|| BrowserInstanceSummary {
-            id: self
-                .browser
-                .browser_id()
-                .unwrap_or_else(|| "browser_unknown".into()),
-            family: "Chromium".into(),
-            adapter_version: self.browser.adapter_version(),
-            connected: true,
-        })
+    fn browser_summary(&self) -> Vec<BrowserInstanceSummary> {
+        self.browser
+            .browsers()
+            .into_iter()
+            .map(|browser| {
+                let family = match browser.platform {
+                    ghostlight_bridge::browser::BrowserPlatform::Chromium => {
+                        browser.name.unwrap_or_else(|| "Chromium".into())
+                    }
+                    ghostlight_bridge::browser::BrowserPlatform::Gecko => {
+                        browser.name.unwrap_or_else(|| "Firefox".into())
+                    }
+                };
+                BrowserInstanceSummary {
+                    id: browser.id,
+                    family,
+                    adapter_version: Some(browser.adapter_version),
+                    connected: true,
+                }
+            })
+            .collect()
     }
 }
 
@@ -1201,6 +1236,9 @@ pub struct SessionSummary {
     pub held_tab_count: usize,
     /// Current operation count.
     pub active_operations: usize,
+    /// Persistent browser family or product name this session's workspace is pinned to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
 }
 
 /// One current orchestrator operation.
@@ -1333,6 +1371,9 @@ pub struct HistoryItem {
     pub channel: Option<IntakeChannel>,
     /// Original connection evidence; claimed names are retained only in bounded live history.
     pub provenance: Option<crate::provenance::ConnectionDetails>,
+    /// Persistent browser family or product name that performed this work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
     /// Whether a terminal parent/direct receipt was recorded.
     pub complete: bool,
     /// The same safe composition account retained in audit.
@@ -1395,6 +1436,7 @@ impl From<AuditRecord> for HistoryItem {
             observed: value.observed,
             channel: value.channel,
             provenance,
+            browser: value.browser,
         }
     }
 }

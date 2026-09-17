@@ -121,6 +121,7 @@ try {
                 , @("Microsoft", "Edge")
                 , @("BraveSoftware", "Brave-Browser")
                 , @("Chromium")
+                , @("Mozilla")
             )) {
                 $key = "Registry::HKEY_CURRENT_USER\Software\$($vendor -join '\')\NativeMessagingHosts\org.sylin.ghostlight"
                 $value = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue)."(default)"
@@ -134,6 +135,10 @@ try {
                     (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
                 } else { "<absent>" }
             }
+            $mozillaManifest = Join-Path $HOME ".mozilla/native-messaging-hosts/org.sylin.ghostlight.json"
+            $parts += if (Test-Path -LiteralPath $mozillaManifest) {
+                (Get-FileHash -LiteralPath $mozillaManifest -Algorithm SHA256).Hash
+            } else { "<absent>" }
         }
         return ($parts -join "`n---`n")
     }

@@ -198,7 +198,6 @@ impl NativeHostRegistry {
 #[derive(Clone, Debug)]
 struct NativeHostContext {
     platform: NativeHostPlatform,
-    #[cfg(test)]
     home: PathBuf,
     config: PathBuf,
     local: PathBuf,
@@ -220,7 +219,7 @@ impl NativeHostContext {
         } else {
             NativeHostPlatform::Linux
         };
-        let (local, config, registry_isolated) = native_host_roots(
+        let (home, local, config, registry_isolated) = native_host_roots(
             env::var_os("GHOSTLIGHT_NATIVE_HOST_DIR").map(PathBuf::from),
             env::var_os("LOCALAPPDATA").map(PathBuf::from),
             env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
@@ -240,7 +239,6 @@ impl NativeHostContext {
         };
         Self {
             platform,
-            #[cfg(test)]
             home,
             config,
             local,
@@ -274,10 +272,11 @@ fn native_host_roots(
     local_appdata: Option<PathBuf>,
     xdg_config_home: Option<PathBuf>,
     home: &Path,
-) -> (PathBuf, PathBuf, bool) {
+) -> (PathBuf, PathBuf, PathBuf, bool) {
     match explicit {
-        Some(root) => (root.clone(), root, true),
+        Some(root) => (root.clone(), root.clone(), root, true),
         None => (
+            home.to_path_buf(),
             local_appdata.unwrap_or_else(|| home.join("AppData/Local")),
             xdg_config_home.unwrap_or_else(|| home.join(".config")),
             false,
@@ -290,8 +289,10 @@ struct BrowserSpec {
     id: &'static str,
     name: &'static str,
     windows_vendor: &'static [&'static str],
+    windows_directory: &'static [&'static str],
     windows_executable: &'static str,
     linux_directory: &'static str,
+    linux_home_relative: bool,
     package: BrowserPackageSpec,
 }
 
@@ -300,8 +301,10 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "chrome",
         name: "Google Chrome",
         windows_vendor: &["Google", "Chrome"],
+        windows_directory: &["Google", "Chrome", "Application"],
         windows_executable: "chrome.exe",
         linux_directory: "google-chrome/NativeMessagingHosts",
+        linux_home_relative: false,
         package: BrowserPackageSpec {
             executables: &["google-chrome", "google-chrome-stable"],
             snap_executable: "google-chrome",
@@ -312,8 +315,10 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "edge",
         name: "Microsoft Edge",
         windows_vendor: &["Microsoft", "Edge"],
+        windows_directory: &["Microsoft", "Edge", "Application"],
         windows_executable: "msedge.exe",
         linux_directory: "microsoft-edge/NativeMessagingHosts",
+        linux_home_relative: false,
         package: BrowserPackageSpec {
             executables: &["microsoft-edge", "microsoft-edge-stable"],
             snap_executable: "microsoft-edge",
@@ -324,8 +329,10 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "brave",
         name: "Brave",
         windows_vendor: &["BraveSoftware", "Brave-Browser"],
+        windows_directory: &["BraveSoftware", "Brave-Browser", "Application"],
         windows_executable: "brave.exe",
         linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+        linux_home_relative: false,
         package: BrowserPackageSpec {
             executables: &["brave-browser", "brave"],
             snap_executable: "brave",
@@ -336,12 +343,28 @@ const BROWSERS: &[BrowserSpec] = &[
         id: "chromium",
         name: "Chromium",
         windows_vendor: &["Chromium"],
+        windows_directory: &["Chromium", "Application"],
         windows_executable: "chrome.exe",
         linux_directory: "chromium/NativeMessagingHosts",
+        linux_home_relative: false,
         package: BrowserPackageSpec {
             executables: &["chromium", "chromium-browser"],
             snap_executable: "chromium",
             flatpak_ids: &["org.chromium.Chromium"],
+        },
+    },
+    BrowserSpec {
+        id: "firefox",
+        name: "Firefox",
+        windows_vendor: &["Mozilla"],
+        windows_directory: &["Mozilla Firefox"],
+        windows_executable: "firefox.exe",
+        linux_directory: ".mozilla/native-messaging-hosts",
+        linux_home_relative: true,
+        package: BrowserPackageSpec {
+            executables: &["firefox", "firefox-esr"],
+            snap_executable: "firefox",
+            flatpak_ids: &["org.mozilla.firefox"],
         },
     },
 ];
@@ -368,7 +391,19 @@ fn browser_executable(context: &NativeHostContext, browser: &BrowserSpec) -> Opt
             .windows_browser_roots
             .iter()
             .map(|root| windows_browser_executable_path(root, browser))
-            .find(|candidate| candidate.is_file()),
+            .find(|candidate| candidate.is_file())
+            .or_else(|| {
+                let app_alias = context
+                    .local
+                    .join("Microsoft")
+                    .join("WindowsApps")
+                    .join(browser.windows_executable);
+                if app_alias.is_file() {
+                    Some(app_alias)
+                } else {
+                    None
+                }
+            }),
         NativeHostPlatform::Linux => browser.package.executables.iter().find_map(|name| {
             browser_package::native_executable_path(&context.browser_packages, name)
         }),
@@ -377,10 +412,9 @@ fn browser_executable(context: &NativeHostContext, browser: &BrowserSpec) -> Opt
 
 fn windows_browser_executable_path(root: &Path, browser: &BrowserSpec) -> PathBuf {
     browser
-        .windows_vendor
+        .windows_directory
         .iter()
         .fold(root.to_path_buf(), |path, component| path.join(component))
-        .join("Application")
         .join(browser.windows_executable)
 }
 
@@ -409,18 +443,32 @@ struct HostManifest {
     path: PathBuf,
     #[serde(rename = "type")]
     connection_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_origins: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed_extensions: Vec<String>,
 }
 
 impl HostManifest {
-    fn expected(connector: &Path) -> Self {
+    fn expected_for_browser(connector: &Path, browser_id: &str) -> Self {
+        let (allowed_origins, allowed_extensions) = if browser_id == "firefox" {
+            (Vec::new(), expected_extensions())
+        } else {
+            (expected_origins(), Vec::new())
+        };
         Self {
             name: HOST_NAME.into(),
             description: HOST_DESCRIPTION.into(),
             path: normalize_path(connector),
             connection_type: "stdio".into(),
-            allowed_origins: expected_origins(),
+            allowed_origins,
+            allowed_extensions,
         }
+    }
+
+    #[cfg(any(test, target_os = "linux"))]
+    fn expected(connector: &Path) -> Self {
+        Self::expected_for_browser(connector, "chrome")
     }
 
     fn owned(&self) -> bool {
@@ -433,6 +481,7 @@ impl HostManifest {
             && same_path(&self.path, &expected.path, platform)
             && self.connection_type == expected.connection_type
             && self.allowed_origins == expected.allowed_origins
+            && self.allowed_extensions == expected.allowed_extensions
     }
 
     fn to_json(&self) -> Result<String, NativeHostError> {
@@ -440,11 +489,21 @@ impl HostManifest {
     }
 }
 
+const FIREFOX_STORE_EXTENSION_ID: &str = "ghostlight@sylin.org";
+const FIREFOX_DEVELOPMENT_EXTENSION_ID: &str = "ghostlight-dev@sylin.org";
+
 fn expected_origins() -> Vec<String> {
     [STORE_EXTENSION_ID, DEVELOPMENT_EXTENSION_ID]
         .into_iter()
         .map(|id| format!("chrome-extension://{id}/"))
         .collect()
+}
+
+fn expected_extensions() -> Vec<String> {
+    vec![
+        FIREFOX_STORE_EXTENSION_ID.into(),
+        FIREFOX_DEVELOPMENT_EXTENSION_ID.into(),
+    ]
 }
 
 /// Render the same fixed native host for an explicitly selected sandbox registration root.
@@ -529,12 +588,10 @@ fn inspect(
     context: &NativeHostContext,
     registration_io: &dyn RegistrationIo,
 ) -> Result<NativeHostReport, NativeHostError> {
-    let expected = HostManifest::expected(&context.connector);
     let browsers = BROWSERS
         .iter()
         .map(|browser| {
-            let (state, registered_connector) =
-                inspect_browser(context, registration_io, browser, &expected)?;
+            let (state, registered_connector) = inspect_browser(context, registration_io, browser)?;
             let package = browser_package::inspect(&context.browser_packages, browser.package);
             let detail = match state {
                 NativeHostState::OwnedElsewhere => {
@@ -562,8 +619,8 @@ fn inspect_browser(
     context: &NativeHostContext,
     registration_io: &dyn RegistrationIo,
     browser: &BrowserSpec,
-    expected: &HostManifest,
 ) -> Result<(NativeHostState, Option<PathBuf>), NativeHostError> {
+    let expected = HostManifest::expected_for_browser(&context.connector, browser.id);
     match context.platform {
         NativeHostPlatform::Windows => {
             let Some(registered_path) =
@@ -576,7 +633,7 @@ fn inspect_browser(
             let contents = registration_io.read_file(&registered_path)?;
             classify_manifest(
                 contents.as_deref(),
-                expected,
+                &expected,
                 context.platform,
                 // A packaged caller can read a virtual AppData path that an ordinary browser
                 // cannot. The registry must name the physical file, not merely a path that
@@ -586,7 +643,7 @@ fn inspect_browser(
                     .eq_ignore_ascii_case(&physical_path.to_string_lossy())
                     && same_path(
                         &physical_path,
-                        &windows_manifest_path(context),
+                        &browser_manifest_path(context, browser),
                         context.platform,
                     ),
             )
@@ -595,7 +652,7 @@ fn inspect_browser(
             let path = browser_manifest_path(context, browser);
             classify_manifest(
                 registration_io.read_file(&path)?.as_deref(),
-                expected,
+                &expected,
                 context.platform,
                 true,
             )
@@ -719,8 +776,6 @@ fn apply_install_for_mode(
         });
     }
 
-    let expected = HostManifest::expected(&context.connector);
-    let contents = expected.to_json()?;
     let changed = browsers.iter().any(|browser| {
         let observed = before
             .browsers
@@ -734,18 +789,7 @@ fn apply_install_for_mode(
     });
     match context.platform {
         NativeHostPlatform::Windows => {
-            let manifest_path = windows_manifest_path(context);
-            if let Some(existing) = registration_io.read_file(&manifest_path)? {
-                let parsed = serde_json::from_str::<HostManifest>(&existing).ok();
-                if !parsed.as_ref().is_some_and(HostManifest::owned) {
-                    return Err(NativeHostError::ForeignManifest(manifest_path));
-                }
-            }
-            registration_io.write_file(&manifest_path, &contents)?;
-            // Resolve after writing: MSIX can redirect creation into package-local storage.
-            // Chromium runs outside that context and needs the resulting physical path.
-            let manifest_path = normalize_path(&manifest_path);
-            let manifest_value = manifest_path.to_string_lossy();
+            let mut written_manifests = HashSet::new();
             for browser in browsers {
                 let observed = before
                     .browsers
@@ -753,6 +797,23 @@ fn apply_install_for_mode(
                     .find(|observed| observed.id == browser.id)
                     .expect("every browser specification has an inspection result");
                 if observed.state != NativeHostState::NeedsAttention {
+                    let manifest_path = browser_manifest_path(context, browser);
+                    if written_manifests.insert(manifest_path.clone()) {
+                        let expected =
+                            HostManifest::expected_for_browser(&context.connector, browser.id);
+                        let contents = expected.to_json()?;
+                        if let Some(existing) = registration_io.read_file(&manifest_path)? {
+                            let parsed = serde_json::from_str::<HostManifest>(&existing).ok();
+                            if !parsed.as_ref().is_some_and(HostManifest::owned) {
+                                return Err(NativeHostError::ForeignManifest(manifest_path));
+                            }
+                        }
+                        registration_io.write_file(&manifest_path, &contents)?;
+                    }
+                    // Resolve after writing: MSIX can redirect creation into package-local storage.
+                    // Chromium and Firefox run outside that context and need the resulting physical path.
+                    let physical_manifest = normalize_path(&manifest_path);
+                    let manifest_value = physical_manifest.to_string_lossy();
                     registration_io
                         .write_registry(&context.registry_key(browser), manifest_value.as_ref())?;
                 }
@@ -766,6 +827,9 @@ fn apply_install_for_mode(
                     .find(|observed| observed.id == browser.id)
                     .expect("every browser specification has an inspection result");
                 if observed.state != NativeHostState::NeedsAttention {
+                    let expected =
+                        HostManifest::expected_for_browser(&context.connector, browser.id);
+                    let contents = expected.to_json()?;
                     registration_io
                         .write_file(&browser_manifest_path(context, browser), &contents)?;
                 }
@@ -827,6 +891,7 @@ fn apply_uninstall_for(
                 }
             }
             owned_manifests.insert(windows_manifest_path(context));
+            owned_manifests.insert(windows_firefox_manifest_path(context));
         }
         NativeHostPlatform::Linux => {
             for browser in browsers {
@@ -912,13 +977,27 @@ fn windows_manifest_path(context: &NativeHostContext) -> PathBuf {
         .join(format!("{HOST_NAME}.json"))
 }
 
+fn windows_firefox_manifest_path(context: &NativeHostContext) -> PathBuf {
+    context
+        .local
+        .join("Ghostlight")
+        .join("NativeMessagingHosts")
+        .join(format!("{HOST_NAME}.firefox.json"))
+}
+
 fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> PathBuf {
     if context.platform == NativeHostPlatform::Windows {
+        if browser.id == "firefox" {
+            return windows_firefox_manifest_path(context);
+        }
         return windows_manifest_path(context);
     }
-    context
-        .config
-        .join(browser.linux_directory)
+    let base = if browser.linux_home_relative {
+        &context.home
+    } else {
+        &context.config
+    };
+    base.join(browser.linux_directory)
         .join(format!("{HOST_NAME}.json"))
 }
 
@@ -1076,7 +1155,7 @@ fn remove_registry_key(_key: &str) -> Result<(), NativeHostError> {
 #[derive(Debug, Error)]
 pub enum NativeHostError {
     /// A command named a browser outside the closed supported set.
-    #[error("unknown browser '{0}'; expected chrome, edge, brave, or chromium")]
+    #[error("unknown browser '{0}'; expected chrome, edge, brave, chromium, or firefox")]
     UnknownBrowser(String),
     /// The packaged sibling browser connector is unavailable.
     #[error("the sibling Ghostlight browser connector is missing: {0}")]
@@ -1261,28 +1340,31 @@ mod tests {
 
     #[test]
     fn an_explicit_native_host_root_isolates_both_platform_roots() {
-        let (local, config, isolated) = native_host_roots(
+        let (home, local, config, isolated) = native_host_roots(
             Some(PathBuf::from("/isolated")),
             Some(PathBuf::from("/real/Local")),
             Some(PathBuf::from("/real/config")),
             Path::new("/home/test"),
         );
+        assert_eq!(home, PathBuf::from("/isolated"));
         assert_eq!(local, PathBuf::from("/isolated"));
         assert_eq!(config, PathBuf::from("/isolated"));
         assert!(isolated);
 
-        let (local, config, isolated) = native_host_roots(
+        let (home, local, config, isolated) = native_host_roots(
             None,
             Some(PathBuf::from("/real/Local")),
             Some(PathBuf::from("/real/config")),
             Path::new("/home/test"),
         );
+        assert_eq!(home, PathBuf::from("/home/test"));
         assert_eq!(local, PathBuf::from("/real/Local"));
         assert_eq!(config, PathBuf::from("/real/config"));
         assert!(!isolated);
 
-        let (local, config, isolated) =
+        let (home, local, config, isolated) =
             native_host_roots(None, None, None, Path::new("/home/test"));
+        assert_eq!(home, PathBuf::from("/home/test"));
         assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
         assert_eq!(config, PathBuf::from("/home/test/.config"));
         assert!(!isolated);
@@ -1305,20 +1387,35 @@ mod tests {
 
     #[test]
     fn manifest_keeps_both_established_extension_identities() {
-        let expected = HostManifest::expected(Path::new("/opt/ghostlight/browser"));
-        assert_eq!(expected.name, HOST_NAME);
-        assert_eq!(expected.connection_type, "stdio");
+        let chrome =
+            HostManifest::expected_for_browser(Path::new("/opt/ghostlight/browser"), "chrome");
+        assert_eq!(chrome.name, HOST_NAME);
+        assert_eq!(chrome.connection_type, "stdio");
         assert_eq!(
-            expected.allowed_origins,
+            chrome.allowed_origins,
             vec![
                 format!("chrome-extension://{STORE_EXTENSION_ID}/"),
                 format!("chrome-extension://{DEVELOPMENT_EXTENSION_ID}/"),
             ]
         );
+        assert!(chrome.allowed_extensions.is_empty());
+
+        let firefox =
+            HostManifest::expected_for_browser(Path::new("/opt/ghostlight/browser"), "firefox");
+        assert_eq!(firefox.name, HOST_NAME);
+        assert_eq!(firefox.connection_type, "stdio");
+        assert!(firefox.allowed_origins.is_empty());
+        assert_eq!(
+            firefox.allowed_extensions,
+            vec![
+                "ghostlight@sylin.org".to_string(),
+                "ghostlight-dev@sylin.org".to_string(),
+            ]
+        );
     }
 
     #[test]
-    fn layouts_cover_the_four_browser_families_exactly() {
+    fn layouts_cover_the_five_browser_families_exactly() {
         let linux = NativeHostContext {
             platform: NativeHostPlatform::Linux,
             home: PathBuf::from("/home/test"),
@@ -1329,7 +1426,19 @@ mod tests {
             windows_browser_roots: Vec::new(),
             registry_isolated: false,
         };
-        assert_eq!(BROWSERS.len(), 4);
+        let windows = NativeHostContext {
+            platform: NativeHostPlatform::Windows,
+            home: PathBuf::from("/home/test"),
+            config: PathBuf::from("/home/test/.config"),
+            local: PathBuf::from(r"C:\Users\test\AppData\Local"),
+            connector: PathBuf::from(
+                r"C:\Users\test\AppData\Local\Ghostlight\bin\ghostlight-browser-connector.exe",
+            ),
+            browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
+            windows_browser_roots: Vec::new(),
+            registry_isolated: false,
+        };
+        assert_eq!(BROWSERS.len(), 5);
         assert_eq!(
             browser_manifest_path(&linux, &BROWSERS[0]),
             PathBuf::from(
@@ -1339,6 +1448,22 @@ mod tests {
         assert_eq!(
             windows_registry_key(&BROWSERS[2]),
             r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.sylin.ghostlight"
+        );
+        assert_eq!(
+            browser_manifest_path(&linux, &BROWSERS[4]),
+            PathBuf::from("/home/test/.mozilla/native-messaging-hosts/org.sylin.ghostlight.json")
+        );
+        assert_eq!(
+            windows_registry_key(&BROWSERS[4]),
+            r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight"
+        );
+        assert_eq!(
+            browser_manifest_path(&windows, &BROWSERS[0]),
+            windows_manifest_path(&windows)
+        );
+        assert_eq!(
+            browser_manifest_path(&windows, &BROWSERS[4]),
+            windows_firefox_manifest_path(&windows)
         );
     }
 
@@ -1351,7 +1476,7 @@ mod tests {
         fs::write(&decoy, b"portable browser").unwrap();
         assert_eq!(browser_executable(&context, &BROWSERS[0]), None);
 
-        let placements = [(0, 0), (1, 1), (2, 2), (3, 0)];
+        let placements = [(0, 0), (1, 1), (2, 2), (3, 0), (4, 1)];
         for (browser_index, root_index) in placements {
             let browser = &BROWSERS[browser_index];
             let expected = windows_browser_executable_path(
@@ -1681,7 +1806,8 @@ mod tests {
         let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
         assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
         assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
-        assert!(select_browsers(&["firefox".into()]).is_err());
+        assert!(select_browsers(&["firefox".into()]).is_ok());
+        assert!(select_browsers(&["safari".into()]).is_err());
 
         let _ = fs::remove_dir_all(context.home);
     }

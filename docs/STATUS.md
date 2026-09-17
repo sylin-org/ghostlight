@@ -1,6 +1,36 @@
 # STATUS -- Ghostlight 1.3.7 GitHub release published; Chrome adapter 1.3.8 prepared
 
-Last updated: 2026-09-16 (Chrome adapter 1.3.8 prepared and packaged for Chrome Web Store review; service 1.3.7 published).
+Last updated: 2026-09-16 (Firefox integration Phase 3 complete: real Firefox instance live control verified).
+
+## Real Firefox Live Browser Control Verified (Phase 3, 2026-09-16)
+
+Successfully connected and controlled a real Mozilla Firefox browser instance through Ghostlight orchestrator and native messaging:
+- Windows manifest schema separation: Separated Windows native messaging manifest files so Chromium hosts use `allowed_origins` (`org.sylin.ghostlight.json`) and Firefox uses `allowed_extensions` (`org.sylin.ghostlight.firefox.json`), resolving Firefox's strict `additionalProperties: false` manifest validation.
+- Event envelope compliance: Fixed window focus listener in `extension-firefox/background.js` to emit standard typed `BrowserEvent::Attended` frames (`{ event: "attended" }`) instead of custom JSON structures, preventing native stream deserialization breaks on tab focus changes. Added `tab_closed`, `readiness_changed`, and `document_committed` event delivery.
+- Document scope & tab settlement: Implemented `waitForReady` tab settlement and added `describe_documents` and `in_documents` handlers in the Firefox extension with `document_scope` capability revision 1, satisfying orchestrator governance preflights for navigation and capture.
+- Live verification: Connected live Firefox instance via `web-ext run` and native host registry, executing `browser_tabs`, `browser_navigate` (navigating to `https://example.com/`), and `browser_screenshot` (capturing the 2157x1068 viewport JPEG to disk).
+- Quality verification: All 8/8 tests in `extension-firefox/tests/`, 275/275 tests in `extension/`, and 551 workspace Rust tests passed green.
+
+## Firefox WebExtension Dumb Shell & Gecko Adapter Integration (Phase 2, 2026-09-16)
+
+Implemented Phase 2 of Firefox integration under owner direction:
+- Firefox WebExtension dumb shell: Created dedicated `extension-firefox/` package implementing Manifest V3 with `browser_specific_settings.gecko.id: "ghostlight@sylin.org"`, background event page, and native messaging communication with `org.sylin.ghostlight`.
+- Protocol negotiation: Firefox extension connects and emits `BrowserFrame::Hello` announcing `platform: "ghostlight/gecko"`, `browser_name: "Firefox"`, `major: 2`, and versioned capability set.
+- Runtime injection: Implemented `SetPreloadScript` handling via `browser.scripting.registerContentScripts` so orchestrator-embedded Glass Web Components are cleanly injected across web documents at `document_start`.
+- Tab & window management: Implemented native handlers for `list_tabs`, `open_tab`, `close_tab`, `navigate_tab`, `focus_tab`, `window_geometry`, and `capture_screenshot` via Firefox WebExtension APIs.
+- Packaging: Created `scripts/package-extension-firefox.ps1` producing deterministic store/distribution zips (`dist/ghostlight-firefox-extension-v1.3.8.zip`).
+- Orchestrator integration: Verified Gecko adapter connection, Glass UI injection, and command dispatch in `crates/orchestrator/src/browser/contract_tests/relay.rs`.
+- Quality verification: All 8/8 tests in `extension-firefox/tests/`, 275/275 tests in `extension/`, all 551 workspace Rust tests, and CLI journey passed green.
+
+## Hub-and-Spoke Browser Adapter Architecture & Firefox Registration (Phase 1, 2026-09-16)
+
+Implemented Phase 1 of Firefox integration under owner direction per ADR-0179:
+- Bridge protocol: Introduced `BrowserPlatform` (`ghostlight/chromium` [default], `ghostlight/gecko`) and extended `BrowserFrame::Hello` to negotiate the connecting browser engine family while preserving backward compatibility with existing extensions.
+- Browser registry: Enhanced orchestrator connection state and summaries to record and report the negotiated platform for hub-and-spoke dynamic adapter instance dispatch.
+- Native host manifest: Added `allowed_extensions` (`ghostlight@sylin.org`, `ghostlight-dev@sylin.org`) alongside `allowed_origins` to produce a single cross-browser manifest compatible with both Chromium and Gecko engines.
+- Firefox installation & discovery: Added Firefox to the closed supported browser set (`BROWSERS[4]`) supporting Windows directory resolution, WindowsApps/MSIX app execution aliases, and Linux packaging forms (`firefox`, `firefox-esr`, snap, flatpak) with registration path `~/.mozilla/native-messaging-hosts/org.sylin.ghostlight.json`.
+- CLI & test isolation: Updated `ghostlight install`, `ghostlight doctor`, and diagnostics to inspect and guide Firefox alongside Chrome, Edge, Brave, and Chromium; updated `tests/cli-journey.mjs` and `scripts/release-preflight.ps1` to include Mozilla registry keys and native messaging roots in machine isolation guards.
+- Quality verification: All Rust workspace tests (469 unit/integration tests), 275 extension tests, and CLI journey passed green.
 
 ## Known Issue: Split-Version Authority State on Package Update (npx update)
 

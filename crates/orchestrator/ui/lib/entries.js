@@ -17,6 +17,7 @@
       capability: operation.capability,
       provenance: operation.provenance ?? null,
       channel: operation.provenance?.channel ?? null,
+      browser: operation.browser ?? null,
       startedAt: operation.started_at_ms ?? Date.now(),
       phase: operation.phase,
       settled: false
@@ -55,6 +56,7 @@
       observed: record.observed ?? null,
       provenance: record.provenance ?? null,
       channel: record.channel ?? null,
+      browser: record.browser ?? existing?.browser ?? null,
       settled: record.complete !== false || !existing || existing.settled
     };
   }

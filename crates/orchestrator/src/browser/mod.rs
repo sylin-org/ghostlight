@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use ghostlight_bridge::browser::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-    BrowserOutcome, BrowserRequest, DiagnosticsState, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
-    COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
+    BrowserOutcome, BrowserPlatform, BrowserRequest, DiagnosticsState, RuntimeControlState,
+    ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
+    COMMAND_TRANSFER_MAX_CHUNKS,
 };
 use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
 use ghostlight_bridge::transport::{
@@ -181,6 +182,7 @@ struct Connection {
     writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     adapter_version: String,
+    platform: BrowserPlatform,
     browser_id: String,
     browser_name: Option<String>,
     capabilities: HashMap<String, u16>,
@@ -199,6 +201,8 @@ pub struct BrowserSummary {
     pub name: Option<String>,
     /// Adapter version currently serving this browser.
     pub adapter_version: String,
+    /// Target browser platform/engine family.
+    pub platform: BrowserPlatform,
     /// Whether this is the most recently attended connected browser.
     pub attended: bool,
 }
@@ -255,6 +259,7 @@ impl AdapterRegistry {
                 id: connection.browser_id.clone(),
                 name: connection.browser_name.clone(),
                 adapter_version: connection.adapter_version.clone(),
+                platform: connection.platform,
                 attended: attended.as_deref() == Some(connection.browser_id.as_str()),
             })
             .collect();
@@ -450,6 +455,7 @@ impl RelayBrowserPort {
             browser_id,
             adapter_epoch,
             browser_name,
+            platform,
             attended,
             capabilities,
         }) = reader
@@ -478,6 +484,7 @@ impl RelayBrowserPort {
         }
         let capabilities = validated_capabilities(capabilities)?;
         let browser_name = validated_browser_name(browser_name)?;
+        let platform = platform.unwrap_or_default();
         let reports_attention = capabilities
             .get(adapter_capability::ADAPTER_ATTENTION)
             .copied()
@@ -500,6 +507,7 @@ impl RelayBrowserPort {
             writer: Arc::clone(&writer),
             pending: Arc::clone(&pending),
             adapter_version,
+            platform,
             browser_id: browser_id.clone(),
             browser_name,
             capabilities,
@@ -1293,7 +1301,8 @@ mod contract_tests {
     use std::time::{Duration, Instant};
 
     use ghostlight_bridge::browser::{
-        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, ADAPTER_PROTOCOL_MAJOR,
+        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserPlatform,
+        ADAPTER_PROTOCOL_MAJOR,
     };
     use ghostlight_bridge::framing::{read_native, write_native};
 
@@ -1326,6 +1335,7 @@ mod contract_tests {
                 browser_id: browser_id.into(),
                 adapter_epoch: format!("adapter_{}", browser_id.replace("browser_", "")),
                 browser_name: None,
+                platform: Some(BrowserPlatform::Chromium),
                 attended,
                 capabilities,
             },
@@ -1352,7 +1362,9 @@ pub(crate) mod testing {
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
 
-    use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome, RuntimeControlState};
+    use ghostlight_bridge::browser::{
+        BrowserCommand, BrowserOutcome, BrowserPlatform, RuntimeControlState,
+    };
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
 
@@ -1396,6 +1408,7 @@ pub(crate) mod testing {
             id: id.into(),
             name: None,
             adapter_version: "1.0.0".into(),
+            platform: BrowserPlatform::Chromium,
             attended,
         }
     }

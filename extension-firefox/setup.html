@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Set up Ghostlight on this computer</title>
+    <link rel="stylesheet" href="ui.css">
+  </head>
+  <body class="popup-shell">
+    <main>
+      <header id="brand">
+        <img src="icons/icon48.png" alt="" width="22" height="22">
+        <h1>Set up Ghostlight on this computer</h1>
+      </header>
+
+      <p>Ghostlight is not installed on this computer yet. The extension came with your Chrome
+      profile. Install Ghostlight here to connect it.</p>
+
+      <p>The extension is one half of Ghostlight. The other half is a local program that runs on
+      this computer and talks to the extension directly. Chrome cannot install it for you, which is
+      why this step is yours.</p>
+
+      <hr>
+      <h2>Install it</h2>
+      <p>In a terminal:</p>
+      <pre><code>npx -y ghostlight install</code></pre>
+      <p>On Debian or Ubuntu you can install the package instead:</p>
+      <pre><code>sudo apt install ./ghostlight_&lt;version&gt;_amd64.deb</code></pre>
+      <p>Either route registers this browser and any MCP clients it finds. Nothing runs in the
+      background until an agent or your browser asks for it.</p>
+
+      <hr>
+      <h2>Then check it</h2>
+      <p>Run <code>ghostlight doctor</code>. It reports the whole chain: this extension, the native
+      messaging registration, the connector, and the local service. When it is green, this
+      extension's connection turns green on its own.</p>
+
+      <hr>
+      <h2>If your browser came from Snap or Flatpak</h2>
+      <p>A sandboxed browser package cannot start a program on your computer, so native messaging
+      will not work no matter what you install. Use a native Chrome, Edge, Brave, or Chromium
+      package instead.</p>
+
+      <hr>
+      <p>This page is bundled with the extension and needs no network. The full walkthrough,
+      with screenshots and platform detail, is at
+      <a href="https://sylin.org/ghostlight/chromium-extension/post-install/">sylin.org/ghostlight</a>.</p>
+    </main>
+  </body>
+</html>

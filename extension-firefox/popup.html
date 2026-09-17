@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ghostlight in Browser</title>
+    <link rel="stylesheet" href="ui.css">
+  </head>
+  <body class="popup-shell">
+    <main>
+      <header id="brand">
+        <img src="icons/icon48.png" alt="" width="22" height="22">
+        <h1>Ghostlight in Browser</h1>
+        <span id="link-dot" title="Checking connection..."></span>
+      </header>
+
+      <div id="status" aria-live="polite">Loading...</div>
+      <button id="toggle" type="button" disabled>Loading...</button>
+      <p id="shortcut-note">Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts</p>
+      <p id="local-note">Local only. No Ghostlight account or sign-in is required.</p>
+
+      <section id="setup-section" hidden aria-labelledby="setup-title">
+        <hr>
+        <h2 id="setup-title">Ghostlight is not installed on this computer yet.</h2>
+        <p id="setup-note">The extension came with your Chrome profile. Install Ghostlight here to connect it.</p>
+        <button id="setup-route" type="button">Set up Ghostlight</button>
+      </section>
+
+      <section id="attention-section" hidden aria-labelledby="attention-title">
+        <hr>
+        <h2 id="attention-title">A client needs your attention</h2>
+        <div id="attention-list"></div>
+      </section>
+
+      <hr>
+      <div id="session-status" aria-live="polite">Loading...</div>
+      <button id="session-button" type="button" disabled>Loading...</button>
+      <button id="release-debugger-button" type="button" class="link-button" disabled hidden>Release debugger sessions</button>
+
+      <section id="diagnostics-row" hidden>
+        <hr>
+        <div id="diagnostics-status" aria-live="polite"></div>
+        <button id="diagnostics-toggle" type="button" class="link-button"></button>
+      </section>
+
+      <hr>
+      <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
+      <p id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</p>
+      <button id="open-options" class="link-button" type="button">More settings</button>
+    </main>
+    <script src="lib/state.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

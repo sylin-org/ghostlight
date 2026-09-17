@@ -93,6 +93,18 @@ pub struct AdapterCapability {
     pub revision: u16,
 }
 
+/// Target browser platform/engine family.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum BrowserPlatform {
+    /// Chromium-family browsers (Chrome, Edge, Brave, etc.) using CDP.
+    #[serde(rename = "ghostlight/chromium")]
+    #[default]
+    Chromium,
+    /// Gecko-family browsers (Firefox) using WebDriver BiDi.
+    #[serde(rename = "ghostlight/gecko")]
+    Gecko,
+}
+
 /// Browser-local readiness observed by the adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1386,6 +1398,11 @@ pub enum BrowserFrame {
         /// it exists so a human or a model can tell two connected browsers apart.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         browser_name: Option<String>,
+        /// Target browser platform/engine family (e.g., `ghostlight/chromium`, `ghostlight/gecko`).
+        ///
+        /// Absent from an adapter that predates ADR-0179. Defaults to Chromium for backward compatibility.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        platform: Option<BrowserPlatform>,
         /// Whether this browser holds a focused window at the moment it connects.
         ///
         /// Attention is reported, never inferred from connection order (ADR-0084 D2). A browser
@@ -1451,10 +1468,10 @@ pub enum BrowserFrame {
 mod tests {
     use super::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-        BrowserOutcome, BrowserReceipt, BrowserRequest, CaptureScope, DiagnosticDetail,
-        DiagnosticEntry, DiagnosticSource, DiagnosticsLayer, DiagnosticsState, EncodedRecording,
-        PhysicalActionSubject, PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab,
-        PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
+        BrowserOutcome, BrowserPlatform, BrowserReceipt, BrowserRequest, CaptureScope,
+        DiagnosticDetail, DiagnosticEntry, DiagnosticSource, DiagnosticsLayer, DiagnosticsState,
+        EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalRectangle,
+        PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
         RecordingDestination, RecordingState, RecordingStopReason, RuntimeControlState,
         SettlePolicy, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
         COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS, RECORDING_LOCAL_MAX_BYTES,
@@ -1545,6 +1562,7 @@ mod tests {
             browser_id: "browser_test".into(),
             adapter_epoch: "adapter_test".into(),
             browser_name: Some("Chrome".into()),
+            platform: Some(BrowserPlatform::Chromium),
             attended: true,
             capabilities: vec![AdapterCapability {
                 name: adapter_capability::OPERATION_RECOVERY.into(),
@@ -1625,6 +1643,33 @@ mod tests {
                 browser_id: "browser_test".into(),
                 adapter_epoch: "adapter_test".into(),
                 browser_name: None,
+                platform: None,
+                attended: false,
+                capabilities: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn adapter_hello_platform_round_trip() {
+        let hello = serde_json::json!({
+            "kind": "hello",
+            "major": ADAPTER_PROTOCOL_MAJOR,
+            "adapter_version": "1.0.0",
+            "browser_id": "browser_test",
+            "adapter_epoch": "adapter_test",
+            "platform": "ghostlight/gecko",
+            "capabilities": []
+        });
+        assert_eq!(
+            serde_json::from_value::<BrowserFrame>(hello).expect("gecko hello deserializes"),
+            BrowserFrame::Hello {
+                major: ADAPTER_PROTOCOL_MAJOR,
+                adapter_version: "1.0.0".into(),
+                browser_id: "browser_test".into(),
+                adapter_epoch: "adapter_test".into(),
+                browser_name: None,
+                platform: Some(BrowserPlatform::Gecko),
                 attended: false,
                 capabilities: vec![],
             }

@@ -39,7 +39,8 @@ const REGISTRY_VENDORS = [
   ["Google", "Chrome"],
   ["Microsoft", "Edge"],
   ["BraveSoftware", "Brave-Browser"],
-  ["Chromium"]
+  ["Chromium"],
+  ["Mozilla"]
 ];
 const LINUX_MANIFEST_DIRECTORIES = [
   "google-chrome",
@@ -74,6 +75,11 @@ function machineRegistration() {
         readManifest(join(configHome, directory, "NativeMessagingHosts", "org.sylin.ghostlight.json"))
       );
     }
+    parts.push(
+      readManifest(
+        join(process.env.HOME || "", ".mozilla", "native-messaging-hosts", "org.sylin.ghostlight.json")
+      )
+    );
   }
   return parts.join("\n---\n");
 }

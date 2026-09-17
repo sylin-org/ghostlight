@@ -977,6 +977,7 @@ mod tests {
             duration_ms: 1200,
             observed: sample_observation(),
             channel: Some(ghostlight_bridge::service::IntakeChannel::Mcp),
+            browser: None,
         };
 
         for change in [
