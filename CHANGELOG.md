@@ -5,6 +5,32 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-09-17
+
+Unified service release in version lockstep with Chrome adapter 1.3.8. Introduces
+the Hub-and-Spoke browser adapter architecture and Mozilla Firefox integration
+(ADR-0179). Chrome adapter 1.3.8 is published in the Chrome Web Store.
+
+### Added
+
+- Hub-and-Spoke browser adapter architecture supporting multiple browser engines
+  through typed platform negotiation (`ghostlight/gecko` and `ghostlight/chromium`, ADR-0179).
+- Mozilla Firefox WebExtension dumb shell (`extension-firefox/`) with Manifest V3,
+  background event page, native messaging relay, tabs, scripting, capture, and window management.
+- Multi-browser native host registration across Chrome, Edge, Brave, Chromium, and
+  Mozilla Firefox (`ghostlight install`, `ghostlight check`, `ghostlight uninstall`).
+- Desktop workbench UI indicators for multi-browser status and connected adapter state.
+
+### Changed
+
+- Unified service and Chrome browser adapter versions in strict lockstep (v1.3.8).
+
+### Fixed
+
+- Prevent CDP input dispatch freeze on native modal dialogs (`window.prompt`, `window.alert`,
+  `window.confirm`) by racing click dispatch against dialog opening events.
+- Repair desktop workbench UI grid track media query so `.row-browser` stays hidden on narrow displays (<1040px).
+
 ## [1.3.7] - 2026-09-15
 
 Prepared candidate for service release v1.3.7. Compatible with Chrome adapter 1.1.4

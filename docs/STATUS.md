@@ -1,6 +1,15 @@
-# STATUS -- Ghostlight 1.3.7 GitHub release published; Chrome adapter 1.3.8 prepared
+# STATUS -- Ghostlight 1.3.8 candidate prepared; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-16 (Firefox integration Phase 3 complete: real Firefox instance live control verified).
+Last updated: 2026-09-17 (Ghostlight 1.3.8 release candidate prepared in lockstep with Chrome adapter 1.3.8).
+
+## Ghostlight 1.3.8 candidate prepared (2026-09-17)
+
+Prepared release candidate v1.3.8 under owner direction in version lockstep with Chrome adapter 1.3.8:
+- Chrome adapter 1.3.8 approved and published in the Chrome Web Store at 100% distribution.
+- Workspace version bumped to `1.3.8` in `Cargo.toml`, `Cargo.lock`, `tauri.conf.json`, `packaging/npm/package.json`, `packaging/npm/checksums.json`, `packaging/mcpb/manifest.json`, `packaging/linux/changelog`, and Linux man pages.
+- Release notes prepared in `docs/release/notes-v1.3.8.md`.
+- `CHANGELOG.md` updated with `[1.3.8]` section documenting Hub-and-Spoke browser adapters, Firefox integration (ADR-0179), modal dialog input freeze resolution, and desktop workbench grid track repairs.
+- Hub-and-Spoke browser adapters and Firefox integration (Phases 1-3) committed and passing 100% of workspace tests.
 
 ## Real Firefox Live Browser Control Verified (Phase 3, 2026-09-16)
 

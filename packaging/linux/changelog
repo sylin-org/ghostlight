@@ -1,3 +1,12 @@
+ghostlight (1.3.8) unstable; urgency=medium
+
+  * Hub-and-Spoke browser adapters and Firefox integration (ADR-0179).
+  * Align service release in version lockstep with Chrome Web Store extension.
+  * Resolve modal dialog input lock when window.prompt is triggered.
+  * Fix responsive workbench grid tracks for narrow viewport layouts.
+
+ -- Leonardo Botinelly <hello@sylin.org>  Thu, 17 Sep 2026 00:00:00 -0400
+
 ghostlight (1.3.7) unstable; urgency=medium
 
   * Decompose CLI entry points into single-responsibility modules (ADR-0177).
