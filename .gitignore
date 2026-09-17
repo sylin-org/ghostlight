@@ -15,6 +15,9 @@
 
 # Packaged extension zip (scripts/package-extension.ps1 output)
 /dist/
+/web-ext-artifacts/
+.amo-upload-uuid
+*.amo-upload-uuid
 
 # Extension signing key (private). The manifest "key" (public) pins a stable dev extension id;
 # this private half is only needed to pack a .crx and must never be committed. It must NOT live

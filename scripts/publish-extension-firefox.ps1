@@ -189,8 +189,11 @@ $signedAssets = @(Get-ChildItem -LiteralPath $ArtifactsDir -File -Filter "*.xpi"
 
 if ($signedAssets.Count -gt 0) {
     $latestXpi = $signedAssets[0]
-    $xpiHash = (Get-FileHash -LiteralPath $latestXpi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    Write-Output "Signed artifact: $($latestXpi.FullName)"
-    Write-Output "Size:            $($latestXpi.Length) bytes"
+    $canonicalXpi = Join-Path $ArtifactsDir "ghostlight-firefox-extension-v$version.signed.xpi"
+    Copy-Item -LiteralPath $latestXpi.FullName -Destination $canonicalXpi -Force
+    $xpiHash = (Get-FileHash -LiteralPath $canonicalXpi -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Output "Signed artifact: $canonicalXpi"
+    Write-Output "Raw download:    $($latestXpi.FullName)"
+    Write-Output "Size:            $((Get-Item -LiteralPath $canonicalXpi).Length) bytes"
     Write-Output "SHA-256:         $xpiHash"
 }
