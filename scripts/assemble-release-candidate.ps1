@@ -74,15 +74,22 @@ New-Item -ItemType Directory -Path $assetDirectory | Out-Null
 function Resolve-OneArtifact {
     param(
         [string]$DirectoryName,
-        [string]$Pattern
+        [string]$Pattern,
+        [bool]$Optional = $false
     )
 
     $directory = Join-Path $ArtifactRoot $DirectoryName
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        if ($Optional) {
+            return $null
+        }
         throw "Candidate input is missing artifact directory: $DirectoryName"
     }
     $matches = @(Get-ChildItem -LiteralPath $directory -File -Recurse -Filter $Pattern)
     if ($matches.Count -ne 1) {
+        if ($Optional -and $matches.Count -eq 0) {
+            return $null
+        }
         throw "Expected one $Pattern under $DirectoryName, found $($matches.Count)"
     }
     return $matches[0].FullName
@@ -126,6 +133,14 @@ $specifications = @(
         # names the ZIP from the manifest, and assembly preserves that name instead
         # of restamping it with the service version.
         name = ""
+    },
+    [ordered]@{
+        kind = "browser-adapter"
+        target = "firefox-addon"
+        directory = "firefox-extension"
+        pattern = "*.zip"
+        name = ""
+        optional = $true
     }
 )
 
@@ -161,9 +176,14 @@ foreach ($rawTarget in $rawTargets) {
 
 $artifacts = [System.Collections.Generic.List[object]]::new()
 foreach ($specification in $specifications) {
+    $isOptional = $specification.Contains("optional") -and [bool]$specification.optional
     $source = Resolve-OneArtifact `
         -DirectoryName $specification.directory `
-        -Pattern $specification.pattern
+        -Pattern $specification.pattern `
+        -Optional $isOptional
+    if ($null -eq $source) {
+        continue
+    }
     $assetName = if ($specification.name) { $specification.name } else { (Get-Item -LiteralPath $source).Name }
     $destination = Join-Path $assetDirectory $assetName
     Copy-Item -LiteralPath $source -Destination $destination

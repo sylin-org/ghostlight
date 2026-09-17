@@ -1,6 +1,15 @@
 # STATUS -- Ghostlight 1.3.8 candidate prepared; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-17 (Ghostlight 1.3.8 release candidate prepared in lockstep with Chrome adapter 1.3.8).
+Last updated: 2026-09-17 (Firefox extension automated signing and packaging pipeline implemented).
+
+## Firefox Extension Automated Signing and Packaging Pipeline (2026-09-17)
+
+Automated the packaging, validation, and signing pipeline for the Firefox WebExtension:
+- Manifest data collection compliance: Declared `data_collection_permissions: { required: ["none"] }` and set `strict_min_version: "142.0"` in `extension-firefox/manifest.json`, satisfying Mozilla AMO's mandatory policy and passing `npx web-ext lint` with zero errors, zero warnings, and zero notices.
+- Publishing & signing automation: Created `scripts/publish-extension-firefox.ps1` providing non-mutating `Plan` inspection and automated API signing (`SignUnlisted`, `SubmitListed`) via `web-ext sign` using developer credentials from `local/.ghostlight-release.env`.
+- Packaging enhancements: Updated `scripts/package-extension-firefox.ps1` with `-MakeXpi` switch to produce deterministic `.zip` and `.xpi` distribution archives.
+- Release candidate & preflight gates: Integrated Firefox extension into `scripts/assemble-release-candidate.ps1` (`firefox-addon` browser adapter) and added `web-ext lint` and Firefox unit test gates to `scripts/release-preflight.ps1`.
+- Legal & store listing documentation: Created `docs/legal/STORE_LISTING_FIREFOX.md` documenting AMO listing metadata, zero-telemetry declarations, and reviewer permission justifications.
 
 ## Ghostlight 1.3.8 candidate prepared (2026-09-17)
 

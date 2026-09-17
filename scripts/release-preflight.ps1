@@ -199,6 +199,17 @@ try {
         } finally { Pop-Location }
     } }
 
+    $stages += @{ Name = "Firefox extension tests (npm test)"; Skip = ""; Action = {
+        Push-Location extension-firefox
+        try {
+            Run-Gate { npm test } "Firefox extension tests failed"
+        } finally { Pop-Location }
+    } }
+
+    $stages += @{ Name = "Firefox extension linter (web-ext lint)"; Skip = ""; Action = {
+        Run-Gate { npx --yes web-ext lint --source-dir extension-firefox } "Firefox extension lint failed"
+    } }
+
     $stages += @{ Name = "npm launcher tests (packaging/npm)"; Skip = ""; Action = {
         Push-Location packaging/npm
         try {
