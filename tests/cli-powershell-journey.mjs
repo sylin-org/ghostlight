@@ -54,6 +54,7 @@ class NativePeer {
     this.buffer = Buffer.alloc(0);
     this.queue = [];
     this.waiters = [];
+    this.observers = [];
     child.stdout.on("data", (chunk) => this.receive(chunk));
   }
 
