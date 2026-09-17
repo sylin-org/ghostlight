@@ -2,6 +2,7 @@
 
 param(
     [string]$OutputPath,
+    [switch]$MakeXpi,
     [switch]$Force
 )
 
@@ -127,6 +128,12 @@ try {
     $hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash
     $size = (Get-Item -LiteralPath $OutputPath).Length
     Write-Host ("Packaged {0} ({1} bytes, SHA-256: {2})" -f $OutputPath, $size, $hash)
+
+    if ($MakeXpi) {
+        $xpiPath = [System.IO.Path]::ChangeExtension($OutputPath, ".xpi")
+        Copy-Item -LiteralPath $OutputPath -Destination $xpiPath -Force
+        Write-Host ("Created XPI: {0}" -f $xpiPath)
+    }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
