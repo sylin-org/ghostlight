@@ -38,7 +38,8 @@ One Ghostlight version comprises:
 - a platform-native package that installs and removes the browser native-messaging registration;
 - two portable archives, one-line installers, a self-contained Windows Claude Desktop MCPB, and
   candidate-derived Scoop and WinGet metadata;
-- the independently delivered but contract-matched `Ghostlight in Browser` adapter; and
+- the independently delivered but contract-matched `Ghostlight in Browser` adapters
+  for Chromium (Chrome Web Store) and Mozilla Firefox (AMO signed XPI and listing); and
 - checksums, GitHub build-provenance attestations, SBOM, license notices, source archive, and
   release notes.
 
@@ -75,6 +76,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm test --prefix extension
+npm test --prefix extension-firefox
+npx web-ext lint --source-dir extension-firefox
 npm test --prefix packaging/npm
 node --test packaging/mcpb/test/launcher.test.js
 cargo audit
@@ -86,6 +89,7 @@ node --check tests/workbench-preview-server.mjs
 pwsh -NoProfile -File scripts/check-public-surfaces.ps1
 pwsh -NoProfile -File scripts/check-repository-integrity.ps1
 pwsh -NoProfile -File scripts/package-extension.ps1
+pwsh -NoProfile -File scripts/package-extension-firefox.ps1 -MakeXpi
 ```
 
 CI runs the Rust, extension, and process tiers on Windows and Linux. The extension artifact
@@ -285,6 +289,52 @@ expiry is normal and handled by the scripts; it does not require new user consen
 Refresh tokens can still expire or be revoked. Request user interaction only for an
 actual login, consent or credential-management step that requires it. If a tool blocks
 dashboard navigation, respect the restriction and use the authorized API route.
+
+## Mozilla Firefox Add-on (AMO) procedure
+
+Firefox WebExtension signing and publication are automated via `scripts/publish-extension-firefox.ps1`.
+Standard release Firefox strictly requires Mozilla cryptographic signatures for permanent installation.
+Credentials (`AMO_JWT_ISSUER` and `AMO_JWT_SECRET`) live in the ignored repo-local file
+`local/.ghostlight-release.env`. Free developer API keys are generated at
+`https://addons.mozilla.org/developers/addon/api/key/`.
+
+Two distinct delivery channels are supported:
+
+### 1. Unlisted automated signing (self-distributed XPI)
+
+Produces a cryptographically signed `.xpi` file for direct download, GitHub release assets,
+and installer bundles without creating a public store listing on AMO.
+
+Run from the repository root in PowerShell 7:
+
+```powershell
+$firefoxRelease = @{
+    ZipPath = 'dist/ghostlight-firefox-extension-v1.3.8.zip'
+    CredentialFile = 'local/.ghostlight-release.env'
+}
+& scripts/publish-extension-firefox.ps1 @firefoxRelease -Action Plan
+& scripts/publish-extension-firefox.ps1 @firefoxRelease -Action SignUnlisted -Execute
+```
+
+1. **Plan** (default) packages the extension, runs `web-ext lint` preflight, computes the SHA-256 hash,
+   and verifies credentials without making network calls.
+2. **SignUnlisted** with `-Execute` uploads the package to Mozilla AMO via `web-ext sign --channel=unlisted`.
+   Mozilla's automated scanner validates the package, signs it with Mozilla's root certificate, and downloads
+   the signed `.xpi` to `dist/ghostlight-firefox-extension-v<version>.signed.xpi`.
+3. The resulting `.xpi` contains embedded Mozilla signatures (`META-INF/mozilla.rsa`) and installs
+   permanently in any consumer Firefox release across restarts.
+
+### 2. Listed store submission (public AMO directory)
+
+Submits the package to Mozilla for public directory listing on `addons.mozilla.org`:
+
+```powershell
+& scripts/publish-extension-firefox.ps1 @firefoxRelease -Action SubmitListed -Execute
+```
+
+Mozilla performs automated and human review before listing publicly. Listing metadata, descriptions,
+and permission justifications are documented in `docs/legal/STORE_LISTING_FIREFOX.md`. Unminified vanilla
+JavaScript in `extension-firefox/` satisfies Mozilla's source submission policy without extra archives.
 
 ## Rollback
 

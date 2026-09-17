@@ -94,7 +94,8 @@ process.
 | Orchestrator domain, workbench, or bundled UI | `cargo build -p ghostlight` | Restart `ghostlight`; no relay or extension change |
 | MCP connector protocol lifecycle | `cargo build -p ghostlight-mcp-connector` | Reconnect the MCP server in the harness |
 | Browser connector relay lifecycle | `cargo build -p ghostlight-browser-connector` | Reload the extension so Chromium respawns the native host |
-| Extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly |
+| Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
+| Firefox extension mechanism or presentation | none for JavaScript | Reload in `about:debugging` or re-install the signed XPI |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
