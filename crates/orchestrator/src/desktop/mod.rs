@@ -464,6 +464,7 @@ pub(crate) fn is_system_shutdown_in_progress() -> bool {
     SYSTEM_SHUTDOWN_IN_PROGRESS.load(Ordering::SeqCst)
 }
 
+#[allow(dead_code)]
 pub(crate) fn set_system_shutdown_in_progress(in_progress: bool) {
     SYSTEM_SHUTDOWN_IN_PROGRESS.store(in_progress, Ordering::SeqCst);
 }
