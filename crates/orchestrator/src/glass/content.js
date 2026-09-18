@@ -379,7 +379,19 @@
       if (node.nodeType !== 1 && node.nodeType !== 9 && node.nodeType !== 11) return;
       const tag = String(node.tagName ?? "").toLowerCase();
       if (node.nodeType === 1) {
-        if (!isComposedVisible(node) || TEXT_OMIT_TAGS.has(tag) || node.isContentEditable || node.getAttribute?.("contenteditable") === "true") return;
+        if (!isComposedVisible(node)) return;
+        if (tag === "input" || tag === "textarea") {
+          const type = String(node.type ?? "").toLowerCase();
+          if (type === "password") {
+            append(node.value ? "*".repeat(64) : (node.placeholder || ""));
+          } else if (type !== "hidden") {
+            append(node.value || node.placeholder || "");
+          }
+        } else if (tag === "select") {
+          const selectedText = Array.from(node.selectedOptions ?? []).map((opt) => opt.text).join(", ");
+          if (selectedText) append(selectedText);
+        }
+        if (TEXT_OMIT_TAGS.has(tag)) return;
         if (tag === "br") {
           lineBreak();
           return;

@@ -5,6 +5,12 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-09-18
+
+### Changed
+
+- `browser_read` now includes values from form controls (`input`, `textarea`, `select`) and `contenteditable` node text, aligning page text with visual presentation (ADR-0151 amended). Password fields remain strictly masked (`********`).
+
 ## [1.3.8] - 2026-09-17
 
 Unified service release in version lockstep with Chrome adapter 1.3.8. Introduces

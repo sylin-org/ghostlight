@@ -361,6 +361,43 @@ test("composed reads apply one exact character ceiling", async () => {
   assert.equal(read.result.truncated, true);
 });
 
+test("composed reads include form values and editable text while masking passwords", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  
+  const textInput = harness.element("input");
+  textInput.type = "text";
+  textInput.value = "John Doe";
+  
+  const emptyInput = harness.element("input");
+  emptyInput.type = "text";
+  emptyInput.placeholder = "Enter email";
+  
+  const passInput = harness.element("input");
+  passInput.type = "password";
+  passInput.value = "secret123";
+  
+  const selectNode = harness.element("select");
+  selectNode.selectedOptions = [{ text: "Option B" }];
+  
+  const editable = harness.element("div");
+  editable.isContentEditable = true;
+  editable.append(harness.text("Editable prose"));
+  
+  body.append(textInput, emptyInput, passInput, selectNode, editable);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
+  
+  assert.equal(read.ok, true);
+  assert.match(read.result.text, /John Doe/);
+  assert.match(read.result.text, /Enter email/);
+  assert.match(read.result.text, /\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*/);
+  assert.doesNotMatch(read.result.text, /secret123/);
+  assert.match(read.result.text, /Option B/);
+  assert.match(read.result.text, /Editable prose/);
+});
+
 test("explicit article reading can select useful prose inside an open shadow root", async () => {
   const harness = contentHarness();
   const body = harness.element("body");

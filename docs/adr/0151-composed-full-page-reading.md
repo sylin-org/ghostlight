@@ -102,6 +102,12 @@ embedded-host disclosure, and reliable capture handling remain open in the
 facts and filtering mechanisms; the orchestrator owns policy and language. No browser-wide
 network filtering or atomicity promise follows from these choices.
 
+## Amendment 2026-09-18 (form values and editable content)
+
+The original decision to omit form values and editable content (rejected alternative) created an artificial inconsistency: `TakeScreenshot` captures visible form states, meaning the data was already within Ghostlight's disclosure capability. 
+
+To align `browser_read` with the true visual state of the page, the content extractor now includes form values (`<input>`, `<textarea>`, `<select>`) and `contenteditable` node text. To maintain the boundary around true secrets, password fields (`<input type="password">`) remain explicitly masked (e.g., returning `********` or their placeholder).
+
 ## Consequences
 
 - The shortest read matches what a person means by the page, including ordinary web-component and
