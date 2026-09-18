@@ -1,4 +1,4 @@
-# STATUS -- Ghostlight 1.3.8 candidate prepared; Chrome adapter 1.3.8 published
+# STATUS -- Ghostlight 1.3.9 published; Chrome adapter 1.3.8 published
 
 Last updated: 2026-09-17 (Windows system shutdown hygiene fix).
 
@@ -3302,3 +3302,4 @@ test tab for direct closure.
   [`adr/0116-windows-and-linux-platform-scope.md`](adr/0116-windows-and-linux-platform-scope.md).
 - Effective harness configuration resolution:
   [`adr/0117-effective-harness-config-resolution.md`](adr/0117-effective-harness-config-resolution.md).
+
