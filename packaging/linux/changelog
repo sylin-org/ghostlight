@@ -1,4 +1,4 @@
-ghostlight (1.3.8) unstable; urgency=medium
+ghostlight (1.3.9) unstable; urgency=medium
 
   * Hub-and-Spoke browser adapters and Firefox integration (ADR-0179).
   * Align service release in version lockstep with Chrome Web Store extension.
