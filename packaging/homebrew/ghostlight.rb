@@ -1,6 +1,5 @@
-# Homebrew formula TEMPLATE for the sylin-org/homebrew-tap repository (Formula/ghostlight.rb).
-# Fill the four sha256 values from the release's .sha256 assets, then push to the tap.
-# Users: brew install sylin-org/tap/ghostlight
+# Historical 0.8.0 Homebrew formula template. The current 1.x line has no macOS artifact.
+# Do not publish this template as current package metadata.
 class Ghostlight < Formula
   desc "Visible browser automation in your signed-in Chromium profile"
   homepage "https://sylin.org/ghostlight/"

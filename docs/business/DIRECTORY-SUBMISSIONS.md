@@ -1,6 +1,7 @@
 # MCP directory submissions
 
-Last checked: 2026-08-07.
+Official MCP Registry and WinGet rechecked: 2026-09-25. Other directory observations retain their
+dated 2026-08-07 state.
 
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
 paths. It is not proof that a submission was sent or accepted.
@@ -14,15 +15,15 @@ history. Directory submissions remain owner-gated per surface.
 These are distribution observations, not user reception. The dated evidence and caveats live in
 [the August 2026 public-reception baseline](../research/public-reception-2026-08.md).
 
-| Surface | State observed 2026-08-07 |
+| Surface | Dated observation |
 | --- | --- |
-| Official MCP Registry | `org.sylin/ghostlight` 0.8.0 is active and latest with current copy. |
+| Official MCP Registry | `org.sylin/ghostlight` 1.3.10 is active and latest as of 2026-09-25. |
 | Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; explicit sync reached repository commit `9546875`. |
 | mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-07 refresh request was accepted. |
 | Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.8.0 and remains open. |
 | awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) is open, clean, and has its submission check green. |
 | GitHub MCP Registry | Public search returns one `Sylin Ghostlight` result by `sylin-org` with current copy. |
-| Winget | PR [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) is open with the CLA check green; Microsoft review is pending. |
+| WinGet | Version 1.3.6 is public after PR [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) merged on 2026-09-12; newer service releases have not been submitted as of 2026-09-25. |
 | PulseMCP | Its current form says official-registry entries are ingested daily and processed weekly. Recheck after one week before emailing. |
 | mcp.so | Its current submission path requires a $39 one-time fee. No spending was authorized. |
 
@@ -54,9 +55,10 @@ Commercial License) against an MIT-only form rule. [ADR-0140](../adr/0140-fully-
 (2026-08-25) relicensed the whole repository Apache-2.0 OR MIT, which resolves that concern at
 the source; the inquiry draft is kept only as history and should not be sent.
 
-The former mechanical gate is clear. The v0.8.0 release contains the self-contained MCPB, the
-launcher uses the package-host-safe installer mode, and the release asset passes the official
-MCPB validator. Licensing eligibility is the only current submission gate.
+The former mechanical and licensing gates are clear. The v0.8.0 release contains the historical
+self-contained MCPB that passed the official validator. Any new submission must rebuild and
+verify the MCPB against the current service release. Submission remains an owner-gated external
+action.
 
 ### Eligibility inquiry draft
 

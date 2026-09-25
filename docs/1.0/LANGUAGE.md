@@ -2,7 +2,7 @@
 
 ## Contract rules
 
-The 23 tools below are the complete 1.0 catalog. Input objects and nested objects set
+The 24 tools below are the complete 1.0 catalog. Input objects and nested objects set
 `additionalProperties` to `false`. Every input schema is a top-level object without root-level
 `oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
 Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
@@ -512,6 +512,22 @@ post data, query strings, and fragments. Results contain ordered bounded entries
 cursor, truncation and eviction facts, and counts of host-filtered entries. Diagnostic evidence is
 untrusted model-visible content. It is never policy input, audit payload, persistent storage, or
 page presentation.
+
+### `browser_workspace`
+
+List admitted browser workspaces or switch the active MCP session to another admitted workspace.
+Use it when a tab handle belongs to another workspace and the session must continue there without
+disconnecting or losing conversation context. Shortest call: `{"action":"list"}`.
+
+Inputs are one closed branch: `action: "list"` with no workspace, or `action: "switch"` with one
+opaque `workspace_` handle. Capability: `read`.
+
+Listing returns each workspace handle, client label, tab count, active state, lease state, and held
+tab count, plus the total count and active workspace. Switching first proves the target workspace
+still exists. An unknown or closed handle is refused without changing the active binding. A
+successful switch returns the previous and selected workspace handles; subsequent browser calls
+use the selected workspace. The operation is local and read-only: it dispatches no browser work
+and mutates no workspace state, although it changes which existing workspace the MCP session uses.
 
 ### `policy_explain`
 

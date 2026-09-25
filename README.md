@@ -34,18 +34,18 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-The published release is 1.3. It is available as the GitHub release
-[`v1.3.6`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.6), the npm package
-`ghostlight@1.3.6`, the Chrome Web Store adapter v1.1.4, and the MCP Registry record
-`org.sylin/ghostlight 1.3.6`, all observed on 2026-09-12 and recorded in
+The published release is 1.3.10. It is available as the GitHub release
+[`v1.3.10`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.10), the npm package
+`ghostlight@1.3.10`, the Chrome Web Store adapter v1.3.8, and the MCP Registry record
+`org.sylin/ghostlight 1.3.10`, all observed on 2026-09-25 and recorded in
 [`docs/public-status.json`](docs/public-status.json).
 
 ## What you get
 
-- **23 catalog tools**: 22 browser tools covering tabs, navigation, reading a page, screenshots,
-  semantic clicks and hovers, form input, file upload, scripts, waits, short sequences, and
-  dialogs, plus one policy tool that explains the authority in force. One call carries
-  the intent; Ghostlight performs the browser steps behind it.
+- **24 catalog tools**: 23 browser tools covering tabs, navigation, reading a page, screenshots,
+  semantic clicks and hovers, form input, file upload, scripts, waits, short flows, dialogs,
+  diagnostics, and workspace switching, plus one policy tool that explains the authority in
+  force. One call carries the intent; Ghostlight performs the browser steps behind it.
 - **One truthful answer per call**: what happened, what changed in the browser, what is ready, and
   whether running it again is safe. Ghostlight writes that answer, never the page, and adds at most
   two recovery steps of its own. When an effect is uncertain it says so rather than guessing, and
@@ -208,8 +208,8 @@ executables.
 browsers on development hosts; the clean installed-product evidence lanes continue after
 publication. macOS has no 1.0 artifact yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v1.1.4, compatible with the
-published 1.3.4-1.3.5 service line.
+**Extension state.** The Chrome Web Store listing serves adapter v1.3.8, compatible with the
+published 1.3.4-1.3.10 service line.
 
 The service and Chrome adapter version independently. The
 [compatibility map](compatibility.json) is authoritative, and the

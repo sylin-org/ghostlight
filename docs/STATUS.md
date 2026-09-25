@@ -2,6 +2,25 @@
 
 Last updated: 2026-09-25 (Ghostlight 1.3.10 publication).
 
+## Public Surface and MCP Registry Reconciliation (2026-09-25)
+
+Reconciled current release, install, trust, distribution, and model-language surfaces after the
+1.3.10 publication:
+
+- Confirmed the official MCP Registry already returns `org.sylin/ghostlight 1.3.10` as latest, so
+  no duplicate publication was attempted. The online public-surface check reports GitHub, npm,
+  Chrome's update feed, the MCP Registry, and the canonical website in agreement.
+- Updated current README, LLM install, installation, supply-chain, trust FAQ, and distribution
+  claims to service 1.3.10 and Chrome adapter 1.3.8. Historical release evidence remains dated and
+  unchanged.
+- Reconciled the active language contract to the source's 24-tool catalog and documented
+  `browser_workspace`, including its closed list/switch inputs and no-rebind-on-refusal guarantee.
+- Updated the direct Scoop manifest to the public 1.3.10 Windows archive and its custody-verified
+  SHA-256. WinGet remains publicly available at 1.3.6 after PR #433822 merged; no new submission
+  was made.
+- Strengthened repository checks so current public docs require exact release versions and active
+  catalog headings/counts must derive from `EXPECTED_TOOL_NAMES` in source order.
+
 ## Ghostlight 1.3.10 Published (2026-09-25)
 
 Published the Windows shutdown termination fix as service release 1.3.10 under the owner's

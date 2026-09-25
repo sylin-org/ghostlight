@@ -4,19 +4,20 @@ Ghostlight works in the user's visible, signed-in Chromium browser. Do not insta
 edit a harness configuration, or retry an uncertain browser effect without the user's knowledge.
 Policy denial and the extension's preserve-tabs refusal are boundaries to explain, not evade.
 
-Ghostlight 1.0 is the published release, observable on GitHub, npm, the Chrome Web Store, and the
-official MCP Registry.
+Ghostlight 1.3.10 is the published service release, observable on GitHub, npm, the Chrome Web
+Store, and the official MCP Registry. The public Chrome adapter is 1.3.8 and is compatible with
+that service release.
 
 ## 1. Complete the user-visible installation
 
-1. Ask the user to run `npx -y ghostlight@1.3.6 install`, or install the matching native
+1. Ask the user to run `npx -y ghostlight@1.3.10 install`, or install the matching native
    package.
 2. Ask the user to install the `Ghostlight in Browser` store adapter.
 3. Reconnect or restart the MCP client if it does not refresh its tool catalog. Ghostlight changes
    only owned entries, creates a backup before client-config replacement, and preserves unrelated
    JSONC or TOML.
 
-Use `npx -y ghostlight@1.3.6 doctor` only if the connection needs recovery. It is not a required
+Use `npx -y ghostlight@1.3.10 doctor` only if the connection needs recovery. It is not a required
 second installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio

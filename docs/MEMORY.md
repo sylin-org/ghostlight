@@ -8,6 +8,14 @@ One rule keeps this file short: **if the tree can tell you, this file does not.*
 machine-local facts under ignored `local/`. What is left here is what none of those can say: what
 the owner wants, and what this project learned the hard way.
 
+## Durable release learnings
+
+- **Guard exact public versions and derive catalog documentation from source.** A minor-line check
+  accepted README 1.3.6 while the public service had reached 1.3.10, and the implemented
+  `browser_workspace` tool raised the catalog to 24 while active language documents still said 23.
+  Current README, install, trust, and direct-package surfaces must match `docs/public-status.json`
+  exactly. The documented tool headings and counts must match `EXPECTED_TOOL_NAMES` in order.
+
 ## Standing owner directives
 
 - **Release credentials stay repo-local and gitignored.** The owner requires npm credentials

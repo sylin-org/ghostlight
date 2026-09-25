@@ -7,16 +7,16 @@ This guide covers the published package and the source-development path you can 
 
 ## Release installation journey
 
-1. Run `npx -y ghostlight@1.1.0 install`. The checksum-bound launcher downloads one exact sibling
+1. Run `npx -y ghostlight@1.3.10 install`. The checksum-bound launcher downloads one exact sibling
    set, registers detected native browsers for the current user, creates the Linux Applications
    entry, and connects detected MCP clients.
    A native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
-2. Install the matching `Ghostlight in Browser` 1.0 extension from its release listing.
+2. Install the compatible `Ghostlight in Browser` 1.3.8 extension from its store listing.
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
    Open Ghostlight from Applications whenever you want the workbench.
 
-That is the normal installation path. `npx -y ghostlight@1.1.0 doctor` is recovery when something
+That is the normal installation path. `npx -y ghostlight@1.3.10 doctor` is recovery when something
 does not connect; it is not another required setup step.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
@@ -24,17 +24,17 @@ it is absent. The complete desktop authority starts with its tray available and 
 backgrounded. Applications uses `ghostlight open`: it demand-starts that same authority when absent,
 then focuses the workbench instead of creating another one.
 
-Linux 1.0 supports x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
+Linux packages support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
 package. Snap and Flatpak browsers cannot start Ghostlight's host native-messaging connector.
 Install and doctor identify those package forms and name the native-package remedy. Use
 `--all-browsers` only when deliberately preparing registrations before browser installation.
 
-Only checksum-bound, provenance-verified 1.0 packages and the matching 1.0 extension satisfy this
-journey. Provenance verification, clean-machine install, upgrade, and uninstall are release gates,
-not claims made by this source tree.
+Only checksum-bound, provenance-verified packages and a compatible published extension satisfy
+this journey. Provenance verification, clean-machine install, upgrade, and uninstall are release
+gates, not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
-registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.1.0`
+registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.3.10`
 remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior

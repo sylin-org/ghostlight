@@ -1,6 +1,7 @@
 # Distribution runbook
 
-Last checked: 2026-08-07.
+Core release channels reconciled: 2026-09-25. Marketplace observations below retain their dated
+context unless a later date is stated.
 
 The distribution push (2026-07-07 session; agentic Tier 0-2 implemented in-repo, external
 submissions and Tier 3 are founder actions). Ordered: each step assumes the ones above it.
@@ -20,6 +21,8 @@ in the session record and docs/research/14 (P1 was "ship the distribution alread
 - README quick-install block with Cursor/VS Code deeplink buttons and the npx snippet.
 - `server.json` (MCP registry descriptor), plus `packaging/winget/` and `packaging/scoop/`
   templates whose hashes come from release assets.
+- `packaging/homebrew/ghostlight.rb` is retained as the historical 0.8.0 template. The current 1.x
+  line has no macOS artifact, so that formula is not a current publication target.
 
 ## Artifact shape after the ADR-0096 cutover release
 
@@ -32,15 +35,15 @@ winget/scoop templates place them together in one directory. MCP-client entries 
 
 ## Founder: accounts and publishes (order matters)
 
-- [x] **npm.** `ghostlight@0.8.0` is live at `latest`. The release pipeline publishes it and smoke
+- [x] **npm.** `ghostlight@1.3.10` is live at `latest`. The release pipeline publishes it and smoke
       tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v0.8.0 is public and byte-validated against the submitted
+- [x] **Chrome Web Store.** Adapter v1.3.8 is public and byte-validated against the submitted
       package. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Native submission is intentionally deferred because individual
       enrollment makes the owner's home address customer-visible. Edge users can install the
       Chrome listing through Microsoft's supported other-store path.
-- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v0.8.0 is active and
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v1.3.10 is active and
       latest. The release pipeline publishes each service version after npm.
 - [x] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
       onboarding request to `partnerships@github.com` on 2026-07-31. GitHub completed its review
@@ -72,12 +75,10 @@ winget/scoop templates place them together in one directory. MCP-client entries 
       PR is clean with its submission check green. mcp.so now requires a $39 submission fee and
       needs separate spending approval. PulseMCP says official-registry records are ingested daily
       and processed weekly, so recheck after one week before emailing.
-- [ ] **Winget.** v0.8.0 is publicly discoverable after PR
-      [#413601](https://github.com/microsoft/winget-pkgs/pull/413601) merged. The v1.3.6 manifest
-      validates locally. PR
-      [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) is open, mergeable, and
-      CLA-green; Microsoft controls review and merge.
-- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.6 and can be
+- [x] **Winget.** v1.3.6 is publicly discoverable after PR
+      [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) merged on 2026-09-12.
+      Newer service releases have not yet been submitted to WinGet.
+- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.10 and can be
       installed directly by URL. The central Extras package-request template currently requires
       at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would
       require a false attestation and was not opened.

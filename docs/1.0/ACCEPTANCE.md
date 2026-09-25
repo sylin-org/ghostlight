@@ -8,7 +8,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 
 ## Contract gates
 
-1. The catalog contains exactly the 23 tools in `LANGUAGE.md`, in documented order, with no
+1. The catalog contains exactly the 24 tools in `LANGUAGE.md`, in documented order, with no
    simultaneously advertised legacy dialect or client-selected profile. Page JavaScript is
    `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
 2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
@@ -249,6 +249,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     afterward, `doctor` names the owning directory and marks it removed when that installation
     no longer exists, and a deliberate `ghostlight install` from the adopting installation is
     what takes ownership (ADR-0149 amendment).
+24. List admitted workspaces, switch the active MCP session to another admitted workspace, and
+    prove later browser calls use that workspace without reconnecting. An unknown or closed
+    workspace handle refuses without changing the active binding (ADR-0175).
 
 ## Presentation gates
 
