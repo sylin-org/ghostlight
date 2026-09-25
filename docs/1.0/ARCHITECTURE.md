@@ -82,6 +82,12 @@ client's minimized state, so Linux Open coalesces, destroys any existing view, w
 destroyed event, and rebuilds from the canonical configuration. On Linux, abnormal WebKit renderer
 termination discards that exact window after the signal callback; the next explicit Open creates a
 fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority.
+On Windows, each long-lived Ghostlight process also owns a hidden top-level session-listener
+window. It accepts `WM_QUERYENDSESSION`; terminal session notification disarms ordinary desktop
+retention and arms a bounded process-exit fallback before asking the native event loop to exit.
+Connectors use this window route as well because loading `user32.dll` can suppress console logoff
+and shutdown notifications. The console handler is only a fallback and preserves Windows' default
+process termination.
 
 ## Fringe stability
 

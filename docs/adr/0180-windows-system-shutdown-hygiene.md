@@ -56,3 +56,31 @@ In `crates/bridge/src/lifecycle.rs`:
 - **Positive:** Ordinary desktop usage is preserved without regression: closing the workbench window continues to dispose the window and keep Ghostlight resident in the system tray per ADR-0119.
 - **Positive:** Unsafe Win32 FFI code remains 100 percent confined to `crates/win-peer`, preserving compile-time and test-suite safety guarantees.
 - **Positive:** The 1.5-second fallback exit guard insulates Ghostlight from upstream Tao event loop termination issues during session destruction.
+
+## 2026-09-25 Amendment: Make the Termination Guarantee Real
+
+Installed acceptance showed two gaps in the original implementation.
+
+First, the `WM_ENDSESSION` callback requested Tauri exit before it armed the 1.5-second fallback.
+Tao can already have destroyed its event target by that point. If the request into that target
+blocked, execution never reached the fallback thread and Ghostlight remained a shutdown blocker.
+The callback now arms the independent fallback first, then requests native exit. Failure to create
+the fallback thread terminates immediately because a bounded shutdown can no longer be promised.
+
+Second, the connectors relied only on `SetConsoleCtrlHandler`. Windows does not deliver
+`CTRL_LOGOFF_EVENT` or `CTRL_SHUTDOWN_EVENT` to a console process that it classifies as a Windows
+application after `user32.dll` or `gdi32.dll` is loaded. Ghostlight's Windows lifecycle code itself
+loads `user32.dll`, so the mechanism could disable the very signals it depended on. Every Windows
+process now owns the same hidden top-level session-listener window. The console handler remains a
+fallback and returns `FALSE` after notification so the default `ExitProcess` handler is never
+suppressed. Connector notification uses a non-blocking send so a full exit-coordinator channel
+cannot stall the window procedure. Failure to construct the mandatory listener fails process
+startup instead of silently running without the shutdown contract.
+
+The Windows desktop journey sends `WM_QUERYENDSESSION` and `WM_ENDSESSION` to both connectors and
+requires each exact owned process to exit with status zero inside four seconds. For the authority,
+it destroys the Tauri event target before notifying the dedicated listener and applies the same
+deadline. This is process evidence, not only callback evidence.
+
+Reference: [SetConsoleCtrlHandler](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
+documents the `user32.dll`/`gdi32.dll` exception and recommends a hidden window for session events.

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "release": "1.3.9",
+  "release": "1.3.10",
   "platformSummary": "Windows and Linux are the supported operating systems and are verified end to end against live browsers.",
   "extensionSummary": "The Chrome Web Store serves Chrome adapter v1.3.8. Compatibility is recorded in compatibility.json. Install the extension from the public listing.",
   "chromeStore": {
     "itemId": "lejccfmoeogmhemakeknjjdhkfkgncdl",
     "publicAdapterVersion": "1.3.8"
   },
-  "lastVerified": "2026-09-17"
+  "lastVerified": "2026-09-25"
 }

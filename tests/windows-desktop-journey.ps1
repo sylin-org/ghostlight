@@ -1,5 +1,5 @@
 # Exercise the real Windows workbench lifetime, including Open racing native startup.
-# All window operations address only the exact no-argument process spawned by this journey.
+# All window operations address only exact Ghostlight processes spawned by this journey.
 param(
     [string] $BinDir = $env:GHOSTLIGHT_BIN_DIR,
     [ValidateRange(1, 10)] [int] $StartupRounds = 3,
@@ -76,10 +76,37 @@ public static class GhostlightNativeJourney {
             if (!PostMessage(window, 0x0010, UIntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException("WM_CLOSE failed.");
         } else if (!ShowWindowAsync(window, 6)) throw new InvalidOperationException("Minimize failed.");
     }
+    public static void EndSession(int owner) {
+        IntPtr listener = IntPtr.Zero;
+        IntPtr workbench = IntPtr.Zero;
+        EnumWindows((window, data) => {
+            uint process;
+            GetWindowThreadProcessId(window, out process);
+            if (process != owner) return true;
+            var name = new StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            if (name.ToString().StartsWith("GhostlightShutdownListener_")) listener = window;
+            if (name.ToString() == "Tauri Window") workbench = window;
+            return true;
+        }, IntPtr.Zero);
+        if (listener == IntPtr.Zero) throw new InvalidOperationException("Shutdown listener window is unavailable.");
+
+        UIntPtr result;
+        if (SendMessageTimeout(listener, 0x0011, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out result) == IntPtr.Zero || result.ToUInt64() != 1)
+            throw new InvalidOperationException("WM_QUERYENDSESSION was not accepted promptly.");
+
+        // Exercise the worst order observed during a real shutdown: Tao can destroy its event
+        // target before the dedicated listener receives WM_ENDSESSION. These sends may race the
+        // expected process exit, so only the earlier query has a reply assertion.
+        if (workbench != IntPtr.Zero)
+            SendMessageTimeout(workbench, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
+        SendMessageTimeout(listener, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
+    }
 }
 '@
 
 $children = [Collections.Generic.List[Diagnostics.Process]]::new()
+$connectorChildren = [Collections.Generic.List[object]]::new()
 $observations = [Collections.Generic.List[object]]::new()
 $runtimeFiles = [Collections.Generic.List[string]]::new()
 $script:launch = 0
@@ -180,7 +207,49 @@ function Stop-OwnedProcess([Diagnostics.Process] $Child) {
     }
 }
 
+function Assert-ConnectorShutdown([string] $FileName) {
+    $image = (Resolve-Path -LiteralPath (Join-Path $BinDir $FileName)).Path
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $image
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $connector = [Diagnostics.Process]::new()
+    $connector.StartInfo = $info
+    if (-not $connector.Start()) { throw "Could not start $FileName." }
+    $connectorChildren.Add(@{ process=$connector; image=$image })
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $listenerReady = $false
+    do {
+        $connector.Refresh()
+        if ($connector.HasExited) { throw "$FileName exited before its shutdown listener was ready." }
+        try {
+            [GhostlightNativeJourney]::EndSession($connector.Id)
+            $listenerReady = $true
+            break
+        } catch {
+            if ($_.Exception.Message -notmatch 'Shutdown listener window is unavailable') { throw }
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $listenerReady) { throw "$FileName did not create its shutdown listener." }
+    if (-not $connector.WaitForExit(4000)) { throw "$FileName ignored WM_ENDSESSION." }
+    if ($connector.ExitCode -ne 0) { throw "$FileName ended session with status $($connector.ExitCode)." }
+    $observations.Add(@{ round=0; state='connector-shutdown-exit'; process=$FileName; pid=$connector.Id; windows=@() })
+    Write-Output "PASS process=$FileName system-shutdown-exit"
+}
+
 try {
+    $connectorRuntime = Join-Path $binaryDirectory ".ghostlight-native-$stamp-connectors.json"
+    $runtimeFiles.Add($connectorRuntime)
+    $runtimeFiles.Add([IO.Path]::ChangeExtension($connectorRuntime, '.lock'))
+    $env:GHOSTLIGHT_RUNTIME_FILE = $connectorRuntime
+    Assert-ConnectorShutdown 'ghostlight-mcp-connector.exe'
+    Assert-ConnectorShutdown 'ghostlight-browser-connector.exe'
+
     for ($round = 1; $round -le $StartupRounds; $round++) {
         # The runtime override stays beside the exact executable under test (ADR-0150).
         $runtime = Join-Path $binaryDirectory ".ghostlight-native-$stamp-$round.json"
@@ -223,7 +292,11 @@ try {
         Wait-OpenBurst $authority $openers
         $null = @(Wait-WindowState $authority 'restored')
         Record-State $round 'reopen-burst-one-replacement' $authority
-        Stop-OwnedProcess $authority
+        [GhostlightNativeJourney]::EndSession($authority.Id)
+        if (-not $authority.WaitForExit(4000)) { throw "Authority $($authority.Id) ignored WM_ENDSESSION." }
+        if ($authority.ExitCode -ne 0) { throw "Authority $($authority.Id) ended session with status $($authority.ExitCode)." }
+        $observations.Add(@{ round=$round; state='system-shutdown-exit'; pid=$authority.Id; windows=@() })
+        Write-Output "PASS round=$round system-shutdown-exit"
     }
     Write-Output "Windows native desktop journey passed: $($observations.Count) lifecycle checks."
 } catch {
@@ -235,6 +308,18 @@ try {
     for ($index = $children.Count - 1; $index -ge 0; $index--) {
         try { Stop-OwnedProcess $children[$index] }
         catch { $cleanupFailures += $_.Exception.Message }
+    }
+    for ($index = $connectorChildren.Count - 1; $index -ge 0; $index--) {
+        try {
+            $record = $connectorChildren[$index]
+            $process = $record.process
+            $process.Refresh()
+            if (-not $process.HasExited) {
+                if ($process.MainModule.FileName -ine $record.image) { throw 'Connector cleanup executable ownership changed.' }
+                Stop-Process -InputObject $process -Force
+                if (-not $process.WaitForExit(5000)) { throw "Owned connector $($process.Id) did not exit." }
+            }
+        } catch { $cleanupFailures += $_.Exception.Message }
     }
     if (-not $cleanupFailures.Count) {
         foreach ($runtime in $runtimeFiles) {

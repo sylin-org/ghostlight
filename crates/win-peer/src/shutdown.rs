@@ -106,11 +106,9 @@ extern "system" {
 }
 
 type SystemCallback = Arc<dyn Fn(ShutdownEvent) + Send + Sync + 'static>;
-type ConsoleCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 static NEXT_REGISTRATION_ID: AtomicUsize = AtomicUsize::new(1);
 static SYSTEM_LISTENERS: Mutex<Vec<(usize, SystemCallback)>> = Mutex::new(Vec::new());
-static CONSOLE_LISTENERS: Mutex<Vec<(usize, ConsoleCallback)>> = Mutex::new(Vec::new());
 
 fn dispatch_system_event(event: ShutdownEvent) {
     let listeners = {
@@ -119,16 +117,6 @@ fn dispatch_system_event(event: ShutdownEvent) {
     };
     for (_, callback) in listeners {
         callback(event);
-    }
-}
-
-fn dispatch_console_shutdown() {
-    let listeners = {
-        let guard = CONSOLE_LISTENERS.lock().unwrap_or_else(|p| p.into_inner());
-        guard.clone()
-    };
-    for (_, callback) in listeners {
-        callback();
     }
 }
 
@@ -169,11 +157,11 @@ unsafe extern "system" fn shutdown_window_proc(
 
 unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> i32 {
     if ctrl_type == CTRL_SHUTDOWN_EVENT || ctrl_type == CTRL_LOGOFF_EVENT {
-        dispatch_console_shutdown();
         dispatch_system_event(ShutdownEvent::Terminating);
-        return 1; // Handled
     }
-    0 // Pass to next handler
+    // Always continue to the default handler. Returning TRUE suppresses its ExitProcess call and
+    // can leave a connector alive if its coordinated cleanup stalls during session teardown.
+    0
 }
 
 fn ensure_console_ctrl_handler_registered() {
@@ -217,8 +205,10 @@ impl Drop for SystemShutdownListener {
 
 /// Start listening for Windows session shutdown messages.
 ///
-/// Creates a hidden top-level window on a dedicated message-loop thread and registers a
-/// console control handler so Ghostlight promptly detects when Windows shuts down or restarts.
+/// Creates a hidden top-level window on a dedicated message-loop thread and registers a console
+/// control fallback so every Ghostlight process promptly detects shutdown. The hidden window is
+/// required even for console processes: Windows can classify a process that loads `user32.dll`
+/// as a GUI application and omit `CTRL_LOGOFF_EVENT` and `CTRL_SHUTDOWN_EVENT`.
 pub fn listen_for_system_shutdown(
     callback: Box<dyn Fn(ShutdownEvent) + Send + Sync + 'static>,
 ) -> io::Result<SystemShutdownListener> {
@@ -322,31 +312,6 @@ pub fn listen_for_system_shutdown(
     })
 }
 
-/// RAII handle for an active console shutdown listener.
-pub struct ConsoleShutdownGuard {
-    registration_id: usize,
-}
-
-impl Drop for ConsoleShutdownGuard {
-    fn drop(&mut self) {
-        let mut listeners = CONSOLE_LISTENERS.lock().unwrap_or_else(|p| p.into_inner());
-        listeners.retain(|(id, _)| *id != self.registration_id);
-    }
-}
-
-/// Listen for Windows console shutdown signals (`CTRL_SHUTDOWN_EVENT`, `CTRL_LOGOFF_EVENT`).
-pub fn listen_for_console_shutdown(
-    callback: Box<dyn Fn() + Send + Sync + 'static>,
-) -> io::Result<ConsoleShutdownGuard> {
-    ensure_console_ctrl_handler_registered();
-    let registration_id = NEXT_REGISTRATION_ID.fetch_add(1, Ordering::SeqCst);
-    {
-        let mut listeners = CONSOLE_LISTENERS.lock().unwrap_or_else(|p| p.into_inner());
-        listeners.push((registration_id, Arc::from(callback)));
-    }
-    Ok(ConsoleShutdownGuard { registration_id })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +371,26 @@ mod tests {
         // Drop the listener handle and verify thread cleans up cleanly
         drop(listener);
         thread::sleep(Duration::from_millis(50));
+    }
+
+    #[test]
+    fn console_shutdown_fallback_notifies_without_suppressing_default_exit() {
+        let terminating_received = Arc::new(AtomicBool::new(false));
+        let terminating_clone = Arc::clone(&terminating_received);
+        let listener = listen_for_system_shutdown(Box::new(move |event| {
+            if event == ShutdownEvent::Terminating {
+                terminating_clone.store(true, Ordering::SeqCst);
+            }
+        }))
+        .expect("shutdown listener starts");
+
+        // SAFETY: This directly exercises our registered callback with a documented control code.
+        let handled = unsafe { console_ctrl_handler(CTRL_SHUTDOWN_EVENT) };
+        assert_eq!(
+            handled, 0,
+            "the default ExitProcess handler must remain enabled"
+        );
+        assert!(terminating_received.load(Ordering::SeqCst));
+        drop(listener);
     }
 }

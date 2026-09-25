@@ -1,6 +1,20 @@
-# STATUS -- Ghostlight 1.3.9 published; Chrome adapter 1.3.8 published
+# STATUS -- Ghostlight 1.3.10 candidate prepared; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-17 (Windows system shutdown hygiene fix).
+Last updated: 2026-09-25 (Windows shutdown termination guarantee).
+
+## Windows Shutdown Termination Guarantee (2026-09-25)
+
+Corrected two gaps in ADR-0180 after Ghostlight still blocked system shutdown:
+- Exit fallback ordering: The desktop authority now arms its independent 1.5-second process-exit
+  guard before calling Tauri's native exit route, which can block after Tao destroys its event target.
+- Connector session delivery: Both connectors now own the same hidden top-level session listener as
+  the authority. A console handler alone is unreliable after `user32.dll` is loaded and no longer
+  suppresses Windows' default process termination. Listener construction is mandatory at startup.
+- Non-blocking callbacks: Connector session notification uses `try_send`, so a competing exit reason
+  cannot fill the coordinator and stall the Win32 window procedure.
+- Process acceptance: The Windows desktop journey now sends end-session messages to both connectors,
+  simulates worst-case Tauri ordering for the authority, and requires every exact process to exit
+  successfully within four seconds.
 
 ## Windows System Shutdown Hygiene (2026-09-17)
 
@@ -8,7 +22,8 @@ Resolved Windows system shutdown blocking issue per ADR-0180:
 - Hidden top-level session listener: Added `crates/win-peer/src/shutdown.rs` spawning a background thread with a hidden top-level window to receive Windows session broadcast messages (`WM_QUERYENDSESSION`, `WM_ENDSESSION`), strictly confined to the audited FFI crate.
 - Exit retention disarming: Orchestrator desktop runner tracks `SYSTEM_SHUTDOWN_IN_PROGRESS` and disarms `should_prevent_desktop_exit()`, allowing immediate termination during OS shutdown instead of retaining the process in tray per ADR-0119.
 - Fallback exit guard: Added a 1.5-second fallback thread calling `std::process::exit(0)` on session end to ensure termination if Tao's event loop hangs on destroyed window targets, well within the 5-second OS kill timeout.
-- Console connector shutdown: Registered console control handler catching `CTRL_SHUTDOWN_EVENT` and `CTRL_LOGOFF_EVENT` for connector processes in `crates/bridge/src/lifecycle.rs`.
+- Initial connector attempt (superseded by the 2026-09-25 amendment): registered a console control
+  handler for `CTRL_SHUTDOWN_EVENT` and `CTRL_LOGOFF_EVENT`.
 
 ## Firefox Extension Onboarding Parity and Signed Distribution (2026-09-17)
 

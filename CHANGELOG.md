@@ -5,6 +5,17 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-09-25
+
+### Fixed
+
+- Honor Windows shutdown and logoff across the desktop authority, MCP connector, and browser
+  connector with mandatory hidden top-level session listeners.
+- Arm the independent 1.5-second exit guard before asking Tauri to exit, so a destroyed Tao event
+  target cannot prevent system shutdown.
+- Preserve Windows' default console-process termination and keep connector shutdown notification
+  non-blocking when another exit reason is already pending (ADR-0180 amendment).
+
 ## [1.3.9] - 2026-09-18
 
 ### Changed

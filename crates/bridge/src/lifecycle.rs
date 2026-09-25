@@ -46,7 +46,7 @@ enum ConnectorExit {
 pub struct ConnectorShutdown {
     exit: mpsc::SyncSender<ConnectorExit>,
     #[cfg(windows)]
-    _console_shutdown: Option<ghostlight_win_peer::ConsoleShutdownGuard>,
+    _system_shutdown: ghostlight_win_peer::SystemShutdownListener,
 }
 
 impl ConnectorShutdown {
@@ -83,18 +83,21 @@ impl ConnectorShutdown {
         }
 
         #[cfg(windows)]
-        let console_shutdown = {
+        let system_shutdown = {
             let shutdown_exit = exit.clone();
-            ghostlight_win_peer::listen_for_console_shutdown(Box::new(move || {
-                let _ = shutdown_exit.send(ConnectorExit::SystemShutdown);
-            }))
-            .ok()
+            ghostlight_win_peer::listen_for_system_shutdown(Box::new(move |event| {
+                if event == ghostlight_win_peer::ShutdownEvent::Terminating {
+                    // A window procedure must return promptly. If another exit reason already
+                    // filled the coordinator slot, that path is already terminating the process.
+                    let _ = shutdown_exit.try_send(ConnectorExit::SystemShutdown);
+                }
+            }))?
         };
 
         Ok(Self {
             exit,
             #[cfg(windows)]
-            _console_shutdown: console_shutdown,
+            _system_shutdown: system_shutdown,
         })
     }
 

@@ -203,8 +203,11 @@ PowerShell 7 and a Windows desktop. The journey launches an isolated authority, 
 Open requests during startup, counts its real native workbench windows, and checks responsiveness,
 minimize/restore, and close/reopen while the authority stays alive. It uses the fresh
 `GHOSTLIGHT_BIN_DIR` build and changes only its own processes, windows, runtime files, and WebView
-profile. It verifies the spawned WebView uses that isolated profile; the
-installed stack and browser registration stay intact. To run it directly after building:
+profile. It also starts both connectors with held input, delivers the Windows end-session sequence
+to all three exact processes, and requires bounded successful exit, including the worst ordering
+where Tao's event target ends before the authority's dedicated listener. It verifies the spawned
+WebView uses that isolated profile; the installed stack and browser registration stay intact. To
+run it directly after building:
 
 ```powershell
 pwsh -NoProfile -File tests/windows-desktop-journey.ps1

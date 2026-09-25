@@ -1,3 +1,11 @@
+ghostlight (1.3.10) unstable; urgency=medium
+
+  * Honor Windows shutdown and logoff for the desktop authority and both connectors.
+  * Arm bounded forced exit before requesting Tauri event-loop termination.
+  * Use mandatory hidden session listeners when console shutdown signals are unavailable.
+
+ -- Leonardo Botinelly <hello@sylin.org>  Fri, 25 Sep 2026 00:00:00 -0400
+
 ghostlight (1.3.9) unstable; urgency=medium
 
   * Hub-and-Spoke browser adapters and Firefox integration (ADR-0179).

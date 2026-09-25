@@ -188,29 +188,15 @@ pub fn run() -> Result<()> {
     #[cfg(target_os = "windows")]
     let _shutdown_listener = {
         let app_handle = app.handle().clone();
-        ghostlight_win_peer::listen_for_system_shutdown(Box::new(move |event| match event {
-            ghostlight_win_peer::ShutdownEvent::Query => {
-                set_system_shutdown_in_progress(true);
-            }
-            ghostlight_win_peer::ShutdownEvent::Cancelled => {
-                set_system_shutdown_in_progress(false);
-            }
-            ghostlight_win_peer::ShutdownEvent::Terminating => {
-                set_system_shutdown_in_progress(true);
-                app_handle.exit(0);
-                std::thread::Builder::new()
-                    .name("ghostlight-shutdown-fallback".into())
-                    .spawn(|| {
-                        std::thread::sleep(std::time::Duration::from_millis(1500));
-                        std::process::exit(0);
-                    })
-                    .ok();
-            }
+        ghostlight_win_peer::listen_for_system_shutdown(Box::new(move |event| {
+            handle_system_shutdown_event(event, arm_system_shutdown_fallback, || {
+                app_handle.exit(0)
+            });
         }))
-        .inspect_err(|error| {
-            eprintln!("Ghostlight could not start Windows shutdown listener: {error}");
-        })
-        .ok()
+        .map_err(|error| {
+            record_desktop_failure(&host, "Windows shutdown listener failed to start");
+            anyhow::anyhow!("Ghostlight could not start Windows shutdown listener: {error}")
+        })?
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         app.run_return(move |app, event| match event {
@@ -459,6 +445,8 @@ fn build_workbench(app: &AppHandle) -> Result<WebviewWindow, WorkbenchPresentati
 }
 
 static SYSTEM_SHUTDOWN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+const SYSTEM_SHUTDOWN_FALLBACK_MS: u64 = 1500;
 
 pub(crate) fn is_system_shutdown_in_progress() -> bool {
     SYSTEM_SHUTDOWN_IN_PROGRESS.load(Ordering::SeqCst)
@@ -467,6 +455,44 @@ pub(crate) fn is_system_shutdown_in_progress() -> bool {
 #[allow(dead_code)]
 pub(crate) fn set_system_shutdown_in_progress(in_progress: bool) {
     SYSTEM_SHUTDOWN_IN_PROGRESS.store(in_progress, Ordering::SeqCst);
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn handle_system_shutdown_event(
+    event: ghostlight_win_peer::ShutdownEvent,
+    arm_fallback: impl FnOnce(),
+    request_exit: impl FnOnce(),
+) {
+    match event {
+        ghostlight_win_peer::ShutdownEvent::Query => set_system_shutdown_in_progress(true),
+        ghostlight_win_peer::ShutdownEvent::Cancelled => set_system_shutdown_in_progress(false),
+        ghostlight_win_peer::ShutdownEvent::Terminating => {
+            set_system_shutdown_in_progress(true);
+            // Tao can destroy its event target while processing WM_ENDSESSION. Arm the
+            // independent exit before calling into that target so a blocked exit request cannot
+            // prevent Windows shutdown indefinitely.
+            arm_fallback();
+            request_exit();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn arm_system_shutdown_fallback() {
+    if std::thread::Builder::new()
+        .name("ghostlight-shutdown-fallback".into())
+        .spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(
+                SYSTEM_SHUTDOWN_FALLBACK_MS,
+            ));
+            std::process::exit(0);
+        })
+        .is_err()
+    {
+        // If the process cannot create its fallback thread during system teardown, there is no
+        // safe way to promise a bounded wait around the native event loop.
+        std::process::exit(0);
+    }
 }
 
 fn should_prevent_desktop_exit(code: Option<i32>) -> bool {
@@ -834,8 +860,8 @@ fn validate_search_query(query: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        set_system_shutdown_in_progress, should_prevent_desktop_exit, validate_policy_document,
-        validate_search_query, POLICY_DOCUMENT_LIMIT,
+        handle_system_shutdown_event, set_system_shutdown_in_progress, should_prevent_desktop_exit,
+        validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT,
     };
 
     #[test]
@@ -849,6 +875,19 @@ mod tests {
         assert!(!should_prevent_desktop_exit(None));
         assert!(!should_prevent_desktop_exit(Some(0)));
         assert!(!should_prevent_desktop_exit(Some(1)));
+        set_system_shutdown_in_progress(false);
+    }
+
+    #[test]
+    fn system_termination_arms_the_fallback_before_requesting_native_exit() {
+        let order = std::sync::Mutex::new(Vec::new());
+        handle_system_shutdown_event(
+            ghostlight_win_peer::ShutdownEvent::Terminating,
+            || order.lock().unwrap().push("fallback"),
+            || order.lock().unwrap().push("native_exit"),
+        );
+        assert_eq!(*order.lock().unwrap(), ["fallback", "native_exit"]);
+        assert!(!should_prevent_desktop_exit(None));
         set_system_shutdown_in_progress(false);
     }
 

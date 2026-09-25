@@ -577,8 +577,10 @@ Every one of these cost something to learn.
 - **Windows session shutdown messages require a top-level window, not a message-only window.**
   Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
   not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)
-  must maintain a hidden top-level window (`WS_POPUP`, `WS_EX_TOOLWINDOW`) to receive session termination
-  broadcasts, disarm exit prevention, and exit within the OS kill timeout (ADR-0180).
+  and connectors that load `user32.dll` must maintain a hidden top-level window (`WS_POPUP`,
+  `WS_EX_TOOLWINDOW`) to receive session termination broadcasts. A fallback must be armed before
+  calling into a native event loop that shutdown may already have destroyed; a console handler alone
+  is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment).
 
 ## Where to look
 
