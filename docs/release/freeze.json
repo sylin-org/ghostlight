@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "e90cd9b8015762e92e4ed10d2c4752dd93dd8a25",
-  "frozen_at_utc": "2026-09-17T04:15:03Z",
+  "revision": "6078e5425442aa0f0235baad52468b0bab57cf85",
+  "frozen_at_utc": "2026-09-25T14:44:55Z",
   "frozen_by": "Leo",
-  "note": "Ghostlight 1.3.8 release candidate"
+  "note": "Ghostlight 1.3.10 release candidate"
 }
