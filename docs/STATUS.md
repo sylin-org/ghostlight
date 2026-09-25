@@ -1,6 +1,30 @@
-# STATUS -- Ghostlight 1.3.10 candidate prepared; Chrome adapter 1.3.8 published
+# STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-25 (Windows shutdown termination guarantee).
+Last updated: 2026-09-25 (Ghostlight 1.3.10 publication).
+
+## Ghostlight 1.3.10 Published (2026-09-25)
+
+Published the Windows shutdown termination fix as service release 1.3.10 under the owner's
+explicit direction:
+- Frozen source `6078e5425442aa0f0235baad52468b0bab57cf85` is bound by annotated tag
+  `v1.3.10`. Release workflow run
+  [36149531433](https://github.com/sylin-org/ghostlight/actions/runs/36149531433) passed the full
+  quality gate, Windows and Linux packaging, Debian 12 and Ubuntu 24.04 package smokes, immutable
+  candidate assembly, SBOM generation, and GitHub provenance attestation.
+- The downloaded 18-artifact candidate passed freeze binding, deep candidate checks, SHA-256
+  recomputation, and provenance verification. The GitHub publisher then verified all 20 release
+  files and re-downloaded the draft for exact hash comparison before publication.
+- GitHub release [`v1.3.10`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.10), npm
+  `ghostlight@1.3.10`, and MCP Registry `org.sylin/ghostlight 1.3.10` are public. Chrome adapter
+  1.3.8 and Firefox adapter 1.3.9 remain unchanged and compatible.
+- Website commit
+  [`eb08c37f`](https://github.com/sylin-org/website/commit/eb08c37ffbf74d5932a7d3094d5fc8ec63c76470)
+  refreshed the public-status fallback. The live reconciliation reports GitHub, npm, Chrome's
+  update feed, the MCP Registry, and the canonical website in agreement.
+- The isolated [Windows public consumer smoke](testing/windows-public-1.3.10-smoke-2026-09-25.md)
+  downloaded, hash-verified, and executed all three public Windows binaries without using the
+  normal Ghostlight state directory. Full hashes and publication receipts are in the
+  [candidate custody record](testing/candidate-custody-2026-09-25.md).
 
 ## Windows Shutdown Termination Guarantee (2026-09-25)
 
