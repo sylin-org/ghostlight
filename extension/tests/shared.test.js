@@ -69,30 +69,31 @@ test("browser events use the nested typed bridge envelope", () => {
 });
 
 test("the adapter advertises stable versioned physical capabilities", () => {
-  assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 2);
-  const revisionFor = (name) => ({ script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, files: 3, navigation: 2, observation: 2 }[name] ?? 1);
-  assert.deepEqual(shared.ADAPTER_CAPABILITIES, [
-    "document_scope",
-    "tabs",
-    "atomic_tab_open",
-    "navigation",
-    "semantic_document",
-    "capture",
-    "pointer_input",
-    "keyboard_input",
-    "files",
-    "script",
-    "observation",
-    "dialogs",
-    "operation_recovery",
-    "presentation",
-    "window_geometry",
-    "diagnostics",
-    "recording",
-    "chunked_commands",
-    "adapter_liveness",
-    "adapter_attention"
-  ].map((name) => ({ name, revision: revisionFor(name) })));
+  assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 3);
+  assert.deepEqual(shared.adapterCapabilities({
+    install_page_runtime: { capability: "page_runtime", revision: 1 },
+    evaluate_script: { capability: "script", revision: 2 },
+    evaluate_script_legacy: { capability: "script", revision: 1 }
+  }, [{ capability: "adapter_liveness", revision: 1 }]), [
+    { name: "page_runtime", revision: 1 },
+    { name: "script", revision: 2 },
+    { name: "adapter_liveness", revision: 1 }
+  ]);
+});
+
+test("the production command table is the advertised handler inventory", () => {
+  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
+  const tableSource = worker.match(/const COMMAND_HANDLERS = Object\.freeze\((\{[^]*?\n\})\);/);
+  assert.ok(tableSource, "closed command table");
+  const handlers = Function(`"use strict"; return (${tableSource[1]});`)();
+  const capabilities = shared.adapterCapabilities(handlers);
+  assert.ok(capabilities.some((item) => item.name === "page_runtime" && item.revision === 1));
+  assert.ok(capabilities.some((item) => item.name === "semantic_document" && item.revision === 4));
+  assert.ok(!Object.hasOwn(handlers, "cdp"));
+  assert.ok(!Object.hasOwn(handlers, "bidi"));
+  for (const command of Object.keys(handlers)) {
+    assert.match(worker, new RegExp(`command\\.command === ["']${command}["']`), command);
+  }
 });
 
 test("adapter liveness acknowledgements echo only bounded heartbeat sequences", () => {
@@ -217,7 +218,7 @@ test("giving up on a stuck download cancels it before its blob URL is revoked", 
   );
 });
 
-test("adapter protocol two wires the new physical mechanisms at the Chrome seam", () => {
+test("adapter protocol three wires the closed physical mechanisms at the Chrome seam", () => {
   const root = join(__dirname, "..");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
   assert.match(worker, /command\.command === "resize_window"/);
@@ -246,7 +247,7 @@ test("adapter protocol two wires the new physical mechanisms at the Chrome seam"
 
 test("browser actions return the subject in the effect receipt without a describe round trip", () => {
   const root = join(__dirname, "..");
-  const content = readFileSync(join(root, "../crates/orchestrator/src/glass/content.js"), "utf8");
+  const content = readFileSync(join(root, "../crates/orchestrator/src/page_runtime/content.js"), "utf8");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
 
   assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject, rectangle: viewportRectangle\(element\) \} \}\)/);
@@ -335,7 +336,7 @@ test("the manifest declares the complete local product surface", () => {
   const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
   assert.equal(manifest.name, "Ghostlight in Browser");
   assert.equal(manifest.description, "Governed browser automation over your own authenticated session, for AI agents.");
-  assert.equal(manifest.minimum_chrome_version, "116");
+  assert.equal(manifest.minimum_chrome_version, "125");
   assert.equal(manifest.action.default_title, "Ghostlight in Browser");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.equal(manifest.options_ui.page, "options.html");

@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use crate::governance::AuthoritySnapshot;
 
 use super::{
-    DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
+    DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS,
+    MIN_TIMEOUT_MS, NAMED_KEYS,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -855,7 +856,7 @@ fn fill_schema() -> Value {
                 ("fields", json!({"type":"array","minItems":1,"maxItems":30,"description":"Ordinary form values to set. Each field provides exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_","Current form-control target."),"selector":semantic_selector(),"value":{"description":"Literal value, including an empty value to clear. Checkboxes and radios accept booleans; numeric inputs accept finite numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}})),
                 ("tab", tab()),
                 ("submit_target", handle("target_", "Optional current submit control. Supplying it may produce an external effect.")),
-                ("timeout_ms", timeout()),
+                ("timeout_ms", timeout_with_default(DEFAULT_FILL_TIMEOUT_MS)),
             ],
             vec!["fields"],
         ),
@@ -1535,7 +1536,11 @@ fn url() -> Value {
 }
 
 fn timeout() -> Value {
-    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":DEFAULT_TIMEOUT_MS,"description":"Maximum call time in milliseconds."})
+    timeout_with_default(DEFAULT_TIMEOUT_MS)
+}
+
+fn timeout_with_default(default: u64) -> Value {
+    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default,"description":"Maximum call time in milliseconds."})
 }
 
 fn coordinate(description: &str) -> Value {

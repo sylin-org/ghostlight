@@ -88,7 +88,7 @@ target/debug/ghostlight
 There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
 this same no-argument desktop authority.
 
-For browser development, load `extension/` unpacked in Chromium 116 or newer. Its pinned key
+For browser development, load `extension/` unpacked in Chromium 125 or newer. Its pinned key
 preserves the established development identity. The platform native-messaging host must point at
 the sibling source-built `ghostlight-browser-connector`; use the isolated procedure in
 [`../DEV-LOOP.md`](../DEV-LOOP.md) and never replace an installed stack you do not own.

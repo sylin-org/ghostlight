@@ -16,7 +16,7 @@ use crate::language::{
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    action_subject, bounded, load_physical_files, named_key, observation_budget_ms, observed_host,
+    action_subject, adapter_budget_ms, bounded, load_physical_files, named_key, observed_host,
     readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
     Status, Terminal,
 };
@@ -159,6 +159,10 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 fields,
                 submit_locator: submit.map(|target| target.locator),
+                timeout_ms: adapter_budget_ms(
+                    value.timeout_ms,
+                    context.deadline.saturating_duration_since(Instant::now()),
+                ),
             },
         ) {
             Ok(BrowserOutcome::Filled {
@@ -674,7 +678,7 @@ impl ApplicationExecutor {
                         let remaining_deadline =
                             context.deadline.saturating_duration_since(Instant::now());
                         let settle_timeout =
-                            observation_budget_ms(remaining_budget, remaining_deadline);
+                            adapter_budget_ms(remaining_budget, remaining_deadline);
                         match self.dispatch(
                             context,
                             BrowserCommand::Observe {
@@ -807,7 +811,7 @@ impl ApplicationExecutor {
                         let remaining_deadline =
                             context.deadline.saturating_duration_since(Instant::now());
                         let settle_timeout =
-                            observation_budget_ms(remaining_budget, remaining_deadline);
+                            adapter_budget_ms(remaining_budget, remaining_deadline);
                         match self.dispatch(
                             context,
                             BrowserCommand::Observe {
@@ -877,7 +881,7 @@ impl ApplicationExecutor {
                         condition: value.condition.clone(),
                         value: value.value.clone(),
                         locator: locator.clone(),
-                        timeout_ms: observation_budget_ms(
+                        timeout_ms: adapter_budget_ms(
                             value.timeout_ms,
                             context.deadline.saturating_duration_since(Instant::now()),
                         ),
@@ -906,7 +910,7 @@ impl ApplicationExecutor {
                             let remaining_deadline =
                                 context.deadline.saturating_duration_since(Instant::now());
                             let settle_timeout =
-                                observation_budget_ms(remaining_budget, remaining_deadline);
+                                adapter_budget_ms(remaining_budget, remaining_deadline);
                             match self.dispatch(
                                 context,
                                 BrowserCommand::Observe {

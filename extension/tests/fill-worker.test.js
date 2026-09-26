@@ -22,6 +22,7 @@ function fixture() {
       calls.push({ kind: message.kind });
       if (message.kind === "prepare_fill") return { field_kinds: ["browser_text"] };
       if (message.kind === "prepare_text_fill") return { subject: { role: "textbox", name: "Draft" } };
+      if (message.kind === "verify_fill_values") return { retained: true };
       return { focused: true };
     },
     sendDebugger: async (_target, method, params) => { calls.push({ kind: method, params }); },
@@ -29,10 +30,13 @@ function fixture() {
     detachDebugger: async () => { calls.push({ kind: "detach" }); },
     chrome: { tabs: { get: async id => ({ id, status: "complete" }) } },
     physicalTab: tab => tab,
+    FILL_RETAINED_STABLE_MS: 0,
+    FILL_RETAINED_LIMIT_MS: 1,
+    FILL_RETAINED_POLL_MS: 0,
     setTimeout
   };
   vm.createContext(sandbox);
-  const start = source.indexOf("async function replaceFocusedText(");
+  const start = source.indexOf("function requireFillBudget(");
   const end = source.indexOf("async function typeText(", start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end), sandbox);
@@ -43,6 +47,7 @@ test("form text fill uses document-local focus and complete keyboard packets bef
   const { calls, sandbox } = fixture();
   const result = await sandbox.fill("fill", {
     tab_id: 7,
+    timeout_ms: 1_000,
     fields: [{ locator: "locator_1", value: "Ab" }]
   });
 
@@ -69,13 +74,35 @@ test("form text fill uses document-local focus and complete keyboard packets bef
   const tabDown = calls.find(call => call.kind === "Input.dispatchKeyEvent"
     && call.params.type === "keyDown" && call.params.key === "Tab");
   assert.ok(tabDown);
-  assert.ok(calls.findIndex(call => call.kind === "verify_fill_value") > calls.findIndex(call => call === tabDown));
-  assert.equal(calls.at(-1).kind, "detach");
+  assert.ok(calls.findIndex(call => call.kind === "detach")
+    > calls.findIndex(call => call === tabDown));
+  assert.equal(calls.filter(call => call.kind === "verify_fill_values").length, 1);
+  assert.ok(calls.findIndex(call => call.kind === "verify_fill_values")
+    > calls.findIndex(call => call.kind === "detach"));
+});
+
+test("final batch verification catches a page rollback after browser input", async () => {
+  const { calls, sandbox } = fixture();
+  const contentIn = sandbox.contentIn;
+  sandbox.contentIn = async (...args) => {
+    if (args[2].kind === "verify_fill_values") {
+      calls.push({ kind: args[2].kind });
+      return { retained: false };
+    }
+    return contentIn(...args);
+  };
+
+  await assert.rejects(
+    sandbox.fill("fill", { tab_id: 7, timeout_ms: 1_000, fields: [{ locator: "locator_1", value: "Ab" }] }),
+    /did not retain/
+  );
+  assert.ok(calls.some(call => call.kind === "Input.dispatchKeyEvent"));
+  assert.ok(calls.some(call => call.kind === "detach"));
 });
 
 test("multiline fill preserves Enter character payload only on key down", async () => {
   const { calls, sandbox } = fixture();
-  await sandbox.fill("fill", { tab_id: 7, fields: [{ locator: "locator_1", value: "A\r\n\rB\n" }] });
+  await sandbox.fill("fill", { tab_id: 7, timeout_ms: 1_000, fields: [{ locator: "locator_1", value: "A\r\n\rB\n" }] });
   const enter = calls.filter(call => call.kind === "Input.dispatchKeyEvent" && call.params.key === "Enter");
   assert.equal(enter.length, 6);
   assert.ok(enter.filter(call => call.params.type === "keyDown")
@@ -91,7 +118,16 @@ test("failed text focus stops keyboard input and releases the debugger", async (
     if (args[2].kind === "prepare_text_fill") throw new Error("target did not retain browser input focus");
     return contentIn(...args);
   };
-  await assert.rejects(sandbox.fill("fill", { tab_id: 7, fields: [{ locator: "locator_1", value: "Ab" }] }), /input focus/);
+  await assert.rejects(sandbox.fill("fill", { tab_id: 7, timeout_ms: 1_000, fields: [{ locator: "locator_1", value: "Ab" }] }), /input focus/);
   assert.equal(calls.some(call => call.kind === "Input.dispatchKeyEvent"), false);
   assert.equal(calls.at(-1).kind, "detach");
+});
+
+test("an exhausted physical budget refuses before form observation or input", async () => {
+  const { calls, sandbox } = fixture();
+  await assert.rejects(
+    sandbox.fill("fill", { tab_id: 7, timeout_ms: 0, fields: [{ locator: "locator_1", value: "Ab" }] }),
+    /execution budget/
+  );
+  assert.deepEqual(calls, []);
 });

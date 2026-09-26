@@ -1,6 +1,70 @@
 # STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-25 (Ghostlight 1.3.10 publication).
+Last updated: 2026-09-26 (adapter architecture implementation after 1.3.10 publication).
+
+## Ghostlight 1.3.11 Source Version Prepared (2026-09-26, unpublished)
+
+The service, desktop, package-source manifests, and Chromium adapter now share version 1.3.11.
+This is the first compatible source unit for adapter protocol 3. Public-status, registry, and
+Scoop files remain pinned to the independently observable 1.3.10 service and 1.3.8 Chrome adapter
+until a coordinated release is actually published. The 1.3.11 Chrome adapter must remain staged
+rather than public until the matching 1.3.11 service is public; the store must not auto-update
+protocol-2 users into an incompatible adapter.
+
+## Firefox Withdrawn Until Ordinary-Session Full Parity (2026-09-26)
+
+ADR-0183 removes Firefox from the active product. The partial adapter could execute browser-shell
+operations but not Ghostlight's normal page work in the ordinary visible, authenticated Firefox
+session a person already uses. A managed remote-debugging launch or browser restart would replace
+that gap with a setup ritual and a second recovery topology, not user delight.
+
+- Removed the Firefox extension, native-host registration, package and candidate builders,
+  publisher entry point, CI jobs, current support claims, and platform branches.
+- The next install or uninstall removes a retired Firefox native-host registration only when its
+  manifest still proves Ghostlight ownership.
+- No 1.3.11 Firefox artifact will be submitted to Mozilla Add-ons.
+- Preserved the research, ADRs, release records, and Git history as evidence.
+- Firefox can return only when it passes the complete installed-product capability suite in an
+  ordinary already-running session without headless execution, a disposable profile, managed
+  launch, or restart ritual.
+
+## Capability-Negotiated Thin Adapters Implemented and Live Verified (2026-09-26, unpublished)
+
+Implemented ADR-0181 in the development tree. The published 1.3.10 service and published store
+adapters remain on their prior adapter protocol until a future coordinated release.
+
+- Removed the unused raw BiDi/CDP bridge module, command variants, outcomes, and Chromium raw-CDP
+  escape hatch. The closed Ghostlight browser mechanisms remain the only product contract.
+- Replaced fire-and-forget Glass injection with one process-reused `PageRuntimeBundle` carrying an
+  exact revision, SHA-256, and source. Chromium verifies and installs it through a correlated
+  request/receipt before browser discovery or `adapter_attached` publication.
+- Bumped the adapter protocol major to 3 for the breaking command cleanup and acknowledged runtime
+  bootstrap.
+- Derived Chromium capability declarations from its closed production handler inventory. Added
+  conformance coverage binding declarations to dispatch branches.
+- Renamed the embedded page layer from `glass` to `page_runtime`, updated active 1.0 contracts and
+  CI, and added the real embedded-runtime scripts to normal repository gates.
+- Removed every runnable headless launch option from the browser journeys. Real browser tests open
+  ordinary visible Chromium windows; CLI and migration tests retain only rejection checks proving
+  that the retired `--headless` input cannot return.
+- Replaced the form adapter's unrelated fixed timers and per-field stability loops with the one
+  budgeted physical transaction in ADR-0182: all-field preflight, input dispatch, lease release,
+  and one complete-batch retention check before optional submission. The normal form budget is 30
+  seconds and the adapter receives the orchestrator's remaining deadline-derived share.
+- Post-withdrawal verification is green: formatting, strict workspace clippy, 560 Rust tests, 283
+  Chromium adapter tests, launchers, portable packaging, policy grammar, repository integrity,
+  and the complete Windows hardening suite. Its browser lanes opened visible Chromium windows.
+  Evidence is under `.tmp/hardening-suite/2026-09-26T01-40-46-804Z-42584/`.
+- The 1.3.11 binaries were deployed into the selected development installation. The already-running
+  Chrome session reconnected without a browser restart. The installed Windows journey then passed
+  native registration removal and restoration, native-connector crash recovery, authority crash
+  recovery on the same native port, and installed invocations of all 24 advertised tools. The
+  seven-field Sylin form, local-only submission, native keyboard/pointer input, uploads, dialogs,
+  diagnostics, recording, history, workspace listing, and screenshots all completed through
+  installed MCP, the persistent service, registered native messaging, the MV3 extension, and the
+  same visible Chrome process. The retired Firefox registry key and manifest were absent after
+  deployment. Evidence is under `.tmp/installed-windows/20260926T014709870/`; it is development
+  evidence, not a claim that the unpublished protocol-three build is a release candidate.
 
 ## Public Surface and MCP Registry Reconciliation (2026-09-25)
 
@@ -35,7 +99,8 @@ explicit direction:
   files and re-downloaded the draft for exact hash comparison before publication.
 - GitHub release [`v1.3.10`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.10), npm
   `ghostlight@1.3.10`, and MCP Registry `org.sylin/ghostlight 1.3.10` are public. Chrome adapter
-  1.3.8 and Firefox adapter 1.3.9 remain unchanged and compatible.
+  1.3.8 and the then-current Firefox adapter 1.3.9 were unchanged and compatible at publication.
+  Firefox support was later withdrawn by ADR-0183.
 - Website commit
   [`eb08c37f`](https://github.com/sylin-org/website/commit/eb08c37ffbf74d5932a7d3094d5fc8ec63c76470)
   refreshed the public-status fallback. The live reconciliation reports GitHub, npm, Chrome's

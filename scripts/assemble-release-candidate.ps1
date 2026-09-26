@@ -133,14 +133,6 @@ $specifications = @(
         # names the ZIP from the manifest, and assembly preserves that name instead
         # of restamping it with the service version.
         name = ""
-    },
-    [ordered]@{
-        kind = "browser-adapter"
-        target = "firefox-addon"
-        directory = "firefox-extension"
-        pattern = "*.zip"
-        name = ""
-        optional = $true
     }
 )
 

@@ -8,39 +8,21 @@
   "use strict";
 
   const NATIVE_HOST_NAME = "org.sylin.ghostlight";
-  const ADAPTER_PROTOCOL_MAJOR = 2;
-  const ADAPTER_CAPABILITY_REVISIONS = Object.freeze({
-    script: 2,
-    pointer_input: 3,
-    keyboard_input: 2,
-    semantic_document: 4,
-    capture: 2,
-    navigation: 2,
-    files: 3,
-    observation: 2
-  });
-  const ADAPTER_CAPABILITIES = Object.freeze([
-    "document_scope",
-    "tabs",
-    "atomic_tab_open",
-    "navigation",
-    "semantic_document",
-    "capture",
-    "pointer_input",
-    "keyboard_input",
-    "files",
-    "script",
-    "observation",
-    "dialogs",
-    "operation_recovery",
-    "presentation",
-    "window_geometry",
-    "diagnostics",
-    "recording",
-    "chunked_commands",
-    "adapter_liveness",
-    "adapter_attention"
-  ].map((name) => Object.freeze({ name, revision: ADAPTER_CAPABILITY_REVISIONS[name] ?? 1 })));
+  const ADAPTER_PROTOCOL_MAJOR = 3;
+
+  function adapterCapabilities(commandHandlers, passiveHandlers = []) {
+    const revisions = new Map();
+    for (const handler of [...Object.values(commandHandlers), ...passiveHandlers]) {
+      if (!handler || typeof handler.capability !== "string" || handler.capability.length === 0) {
+        throw new TypeError("adapter handler capability must be a non-empty string");
+      }
+      if (!Number.isSafeInteger(handler.revision) || handler.revision < 1 || handler.revision > 0xffff) {
+        throw new RangeError("adapter handler revision must be a positive u16");
+      }
+      revisions.set(handler.capability, Math.max(revisions.get(handler.capability) ?? 0, handler.revision));
+    }
+    return Object.freeze(Array.from(revisions, ([name, revision]) => Object.freeze({ name, revision })));
+  }
   const CREDENTIAL_AUTOCOMPLETE = new Set([
     "current-password",
     "new-password",
@@ -246,7 +228,7 @@
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
-    ADAPTER_CAPABILITIES,
+    adapterCapabilities,
     bounded,
     readinessForStatus,
     isCredentialMetadata,

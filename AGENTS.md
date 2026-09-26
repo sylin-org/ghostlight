@@ -80,7 +80,7 @@ action / write / execute), and structured audit logging. The unconstrained engin
 
 ```
 MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight orchestrator
-    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
+    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Browser adapter
 ```
 
 It is a clean-room Rust build. The sole external reference is Anthropic's official Claude
@@ -98,7 +98,7 @@ The tree is a Rust workspace with four process/trust concerns:
 - `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
   rendering, never product decisions.
 - `crates/browser-connector/` -- the stable native-messaging/browser relay executable.
-- `extension/` -- the Manifest V3 browser adapter. It owns Chromium APIs, DOM-local observation,
+- `extension/` -- the Manifest V3 Chromium adapter. It owns Chromium APIs, DOM-local observation,
   browser-specific durability, and content-free presentation, but no policy or product journeys.
 - `docs/` -- the complete product history and current 1.0 contracts: SPEC, ADRs, guides, trust
   center, research, design records, task ledgers, and public material.

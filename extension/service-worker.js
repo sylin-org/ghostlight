@@ -26,6 +26,9 @@ const INPUT_DISPATCH_METHODS = new Set([
   "Input.dispatchDragEvent",
   "Input.insertText"
 ]);
+const FILL_RETAINED_STABLE_MS = 250;
+const FILL_RETAINED_LIMIT_MS = 2_000;
+const FILL_RETAINED_POLL_MS = 25;
 
 async function sendDebugger(target, method, params, targetedFrameId = null) {
   if (INPUT_DISPATCH_METHODS.has(method) || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
@@ -96,6 +99,69 @@ let liveState = {
   diagnostics: null,
   last_error: null
 };
+
+// This closed table is both dispatch admission and capability negotiation. A command cannot be
+// advertised unless it has an entry here and a production branch in dispatch below.
+const COMMAND_HANDLERS = Object.freeze({
+  install_page_runtime: { capability: "page_runtime", revision: 1 },
+  describe_documents: { capability: "document_scope", revision: 1 },
+  in_documents: { capability: "document_scope", revision: 1 },
+  list_tabs: { capability: "tabs", revision: 1 },
+  focus_tab: { capability: "tabs", revision: 1 },
+  close_tab: { capability: "tabs", revision: 1 },
+  set_zoom: { capability: "tabs", revision: 1 },
+  open_tab: { capability: "atomic_tab_open", revision: 1 },
+  navigate: { capability: "navigation", revision: 1 },
+  traverse_history: { capability: "navigation", revision: 1 },
+  reload: { capability: "navigation", revision: 1 },
+  navigate_discarding_before_unload: { capability: "navigation", revision: 2 },
+  read_text: { capability: "semantic_document", revision: 4 },
+  read_document: { capability: "semantic_document", revision: 4 },
+  inspect: { capability: "semantic_document", revision: 4 },
+  inspect_tree: { capability: "semantic_document", revision: 4 },
+  find: { capability: "semantic_document", revision: 4 },
+  describe_targets: { capability: "semantic_document", revision: 4 },
+  query_semantic: { capability: "semantic_document", revision: 4 },
+  screenshot: { capability: "capture", revision: 2 },
+  screenshot_region: { capability: "capture", revision: 1 },
+  activate: { capability: "pointer_input", revision: 1 },
+  scroll: { capability: "pointer_input", revision: 1 },
+  activate_point: { capability: "pointer_input", revision: 3 },
+  activate_modified: { capability: "pointer_input", revision: 3 },
+  activate_point_modified: { capability: "pointer_input", revision: 3 },
+  wheel_at: { capability: "pointer_input", revision: 3 },
+  hover: { capability: "pointer_input", revision: 3 },
+  hover_point: { capability: "pointer_input", revision: 3 },
+  drag: { capability: "pointer_input", revision: 3 },
+  drag_points: { capability: "pointer_input", revision: 3 },
+  fill: { capability: "keyboard_input", revision: 1 },
+  type_text: { capability: "keyboard_input", revision: 1 },
+  press_key: { capability: "keyboard_input", revision: 1 },
+  describe_focused: { capability: "keyboard_input", revision: 2 },
+  type_focused: { capability: "keyboard_input", revision: 2 },
+  upload_files: { capability: "files", revision: 1 },
+  drop_image_at: { capability: "files", revision: 3 },
+  evaluate_script: { capability: "script", revision: 2 },
+  observe: { capability: "observation", revision: 2 },
+  inspect_dialog: { capability: "dialogs", revision: 1 },
+  handle_dialog: { capability: "dialogs", revision: 1 },
+  read_diagnostics: { capability: "diagnostics", revision: 1 },
+  clear_diagnostics: { capability: "diagnostics", revision: 1 },
+  start_recording: { capability: "recording", revision: 1 },
+  status_recording: { capability: "recording", revision: 1 },
+  stop_recording: { capability: "recording", revision: 1 },
+  export_recording: { capability: "recording", revision: 1 },
+  discard_recording: { capability: "recording", revision: 1 },
+  cancel: { capability: "operation_recovery", revision: 1 },
+  present: { capability: "presentation", revision: 1 },
+  resize_window: { capability: "window_geometry", revision: 1 }
+});
+const PASSIVE_HANDLERS = Object.freeze([
+  { capability: "chunked_commands", revision: 1 },
+  { capability: "adapter_liveness", revision: 1 },
+  { capability: "adapter_attention", revision: 1 }
+]);
+const ADAPTER_CAPABILITIES = shared.adapterCapabilities(COMMAND_HANDLERS, PASSIVE_HANDLERS);
 
 const recording = globalThis.GhostlightRecording.create({
   onStop: (tabId) => {
@@ -195,6 +261,7 @@ async function retainManagedDebugger(tabId) {
     await debuggerLifecycle.retain(tabId);
   } catch (error) {
     setConnection({ last_error: shared.bounded(error?.message ?? error, 500) });
+    throw error;
   }
 }
 
@@ -243,7 +310,7 @@ async function establishNativeConnection() {
       adapter_epoch: adapterEpoch,
       browser_name: shared.browserName(navigator.userAgentData?.brands),
       attended: await holdsFocusedWindow(),
-      capabilities: shared.ADAPTER_CAPABILITIES
+      capabilities: ADAPTER_CAPABILITIES
     });
     connectionLog.record(helloSent ? connectionEvents.NATIVE_HELLO_SENT : connectionEvents.NATIVE_HELLO_SKIPPED,
       { attempt, browser_id: browserId });
@@ -619,21 +686,41 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
   }
 }
 
+async function sha256Text(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function installPageRuntime(command) {
+  if (!Number.isSafeInteger(command.revision) || command.revision !== 1) {
+    throw new Error("unsupported page runtime revision");
+  }
+  if (typeof command.script !== "string" || !/^[0-9a-f]{64}$/.test(command.sha256 ?? "")) {
+    throw new Error("invalid page runtime bundle");
+  }
+  const actualSha256 = await sha256Text(command.script);
+  if (actualSha256 !== command.sha256) throw new Error("page runtime checksum mismatch");
+  if (globalThis.ghostlightPageRuntime?.sha256 === command.sha256) {
+    return { outcome: "page_runtime_installed", revision: command.revision, sha256: command.sha256 };
+  }
+
+  await debuggerLifecycle.installPageRuntime(command.script);
+  globalThis.ghostlightPageRuntime = Object.freeze({
+    revision: command.revision,
+    sha256: command.sha256
+  });
+  return { outcome: "page_runtime_installed", revision: command.revision, sha256: command.sha256 };
+}
+
 async function dispatch(request) {
   const command = request.command;
+  if (typeof COMMAND_HANDLERS !== "undefined" && !Object.hasOwn(COMMAND_HANDLERS, command.command)) {
+    throw new Error("unknown browser primitive");
+  }
   if (command.command === "describe_documents") {
     return { outcome: "documents", tab_id: command.tab_id, inventory: await documents.describe(command) };
   }
-  if (command.command === "set_preload_script") {
-    globalThis.ghostlightPreloadScript = command.script;
-    return { outcome: "set_preload_script" };
-  }
-  if (command.command === "cdp") {
-    // A raw CDP payload from the Rust translation bridge.
-    // The extension acts purely as a dumb transport for chrome.debugger.
-    const result = await chrome.debugger.sendCommand({ tabId: command.tab_id }, command.method, command.params);
-    return { outcome: "cdp", result: result ?? {} };
-  }
+  if (command.command === "install_page_runtime") return installPageRuntime(command);
   if (command.command === "in_documents") {
     const primitive = command.primitive;
     if (primitive.command === "in_documents" || primitive.command === "describe_documents") throw globalThis.GhostlightDocuments.changed();
@@ -1562,7 +1649,12 @@ async function activate(correlation, command) {
   }
 }
 
-async function replaceFocusedText(tabId, frameId, value) {
+function requireFillBudget(deadline) {
+  if (Date.now() >= deadline) throw new Error("form fill exhausted its physical execution budget");
+}
+
+async function replaceFocusedText(tabId, frameId, value, deadline = Number.POSITIVE_INFINITY) {
+  requireFillBudget(deadline);
   const control = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
   const selectAll = { key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 };
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...control, modifiers: 2 }, frameId);
@@ -1574,17 +1666,54 @@ async function replaceFocusedText(tabId, frameId, value) {
   const characters = Array.from(text);
   if (!characters.length) characters.push("Backspace");
   for (const character of characters) {
+    requireFillBudget(deadline);
     const descriptor = shared.keyDescriptor(character === "\n" ? "Enter" : character);
     await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor }, frameId);
     const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
     await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp }, frameId);
   }
+  requireFillBudget(deadline);
   const tab = shared.keyDescriptor("Tab");
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...tab }, frameId);
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...tab }, frameId);
 }
 
+async function retainedFillNow(tabId, groups) {
+  const results = await Promise.all(groups.map(({ frameId, fields }) =>
+    contentIn(tabId, frameId, { kind: "verify_fill_values", fields })));
+  return results.every((result) => result?.retained === true);
+}
+
+async function verifyRetainedFill(tabId, groups, deadline) {
+  const started = Date.now();
+  const retentionDeadline = Math.min(deadline, started + FILL_RETAINED_LIMIT_MS);
+  let stableSince = null;
+  while (true) {
+    if (Date.now() >= retentionDeadline) {
+      throw new Error("target did not retain filled value within the physical execution budget");
+    }
+    if (await retainedFillNow(tabId, groups)) {
+      const now = Date.now();
+      if (stableSince === null) stableSince = now;
+      if (now - stableSince >= FILL_RETAINED_STABLE_MS) return;
+    } else {
+      stableSince = null;
+    }
+    const now = Date.now();
+    if (now >= retentionDeadline) {
+      throw new Error("target did not retain filled value");
+    }
+    await new Promise((resolve) => setTimeout(resolve,
+      Math.min(FILL_RETAINED_POLL_MS, retentionDeadline - now)));
+  }
+}
+
 async function fill(correlation, command) {
+  if (!Number.isSafeInteger(command.timeout_ms) || command.timeout_ms < 0) {
+    throw new Error("form fill requires a physical execution budget");
+  }
+  const deadline = Date.now() + command.timeout_ms;
+  requireFillBudget(deadline);
   const commits = [];
   let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
@@ -1609,6 +1738,7 @@ async function fill(correlation, command) {
     // Validate every frame before entering any edit. A later frame's known readonly,
     // hidden, invalid-option, or submit failure must not leave an earlier frame half filled.
     for (const [frameId, fields] of groups) {
+      requireFillBudget(deadline);
       const prepared = await contentIn(command.tab_id, frameId, {
         kind: "prepare_fill",
         fields,
@@ -1621,27 +1751,33 @@ async function fill(correlation, command) {
       preparedGroups.push({ frameId, fields, fieldKinds: prepared.field_kinds });
     }
     const needsBrowserInput = preparedGroups.some((group) => group.fieldKinds.includes("browser_text"));
+    requireFillBudget(deadline);
     if (needsBrowserInput) await ensureDebugger(command.tab_id);
     try {
       for (const { frameId, fields, fieldKinds } of preparedGroups) {
         for (let index = 0; index < fields.length; index += 1) {
+          requireFillBudget(deadline);
           const field = fields[index];
           dispatched = true;
           if (fieldKinds[index] === "browser_text") {
             await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field });
             await contentIn(command.tab_id, frameId, { kind: "verify_text_fill_focus", field });
-            await replaceFocusedText(command.tab_id, frameId, field.value);
+            await replaceFocusedText(command.tab_id, frameId, field.value, deadline);
           } else {
             await contentIn(command.tab_id, frameId, { kind: "fill_local", field });
           }
-          await contentIn(command.tab_id, frameId, { kind: "verify_fill_value", field });
           filledCount += 1;
         }
       }
     } finally {
       if (needsBrowserInput) await detachDebugger(command.tab_id);
     }
+    // Native input consequences can settle as the debugger detaches. A later field can also
+    // trigger page code that rolls back or disables an earlier edit. Confirm the complete visible
+    // batch at the same boundary the user receives before reporting success.
+    await verifyRetainedFill(command.tab_id, preparedGroups, deadline);
     if (command.submit_locator) {
+      requireFillBudget(deadline);
       dispatched = true;
       const fields = groups.get(submitFrame);
       const result = await contentIn(command.tab_id, submitFrame, {
@@ -1651,7 +1787,8 @@ async function fill(correlation, command) {
       });
       submitted = Boolean(result.submitted);
     }
-    await new Promise((resolve) => setTimeout(resolve, submitted ? 250 : 25));
+    const settleMs = Math.min(submitted ? 250 : 25, Math.max(0, deadline - Date.now()));
+    if (settleMs > 0) await new Promise((resolve) => setTimeout(resolve, settleMs));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "filled", tab: physicalTab(tab), filled_count: filledCount, submitted, committed_urls: commits };

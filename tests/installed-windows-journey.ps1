@@ -131,10 +131,15 @@ try {
             $registryKey.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String) {
             throw 'Refusing a native-host key containing additional or nonstandard state.'
         }
-        $path = $registryKey.GetValue('')
-        $expectedManifest = Join-Path $env:LOCALAPPDATA 'Ghostlight/NativeMessagingHosts/org.sylin.ghostlight.json'
-        if ([IO.Path]::GetFullPath($path) -ne [IO.Path]::GetFullPath($expectedManifest)) {
-            throw 'Requires the ordinary per-user manifest path.'
+        $path = [IO.Path]::GetFullPath($registryKey.GetValue(''))
+        $profile = [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        $manifestFile = Get-Item -LiteralPath $path
+        if (-not $path.StartsWith($profile + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            $manifestFile.Name -ne 'org.sylin.ghostlight.json' -or
+            $manifestFile.Directory.Name -ne 'NativeMessagingHosts' -or
+            $manifestFile.Directory.Parent.Name -ne 'Ghostlight') {
+            throw 'Requires a physical per-user Ghostlight manifest path.'
         }
         $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
         if ($manifest.name -ne 'org.sylin.ghostlight' -or $manifest.path -ne $connectorImage) {

@@ -94,6 +94,7 @@ impl RequestScope {
                 tab_id,
                 fields,
                 submit_locator,
+                ..
             } => {
                 scope
                     .locators
@@ -183,9 +184,7 @@ impl RequestScope {
             | BrowserCommand::DiscardRecording { .. }
             | BrowserCommand::Cancel { .. }
             | BrowserCommand::Present { .. }
-            | BrowserCommand::BiDi { .. }
-            | BrowserCommand::Cdp { .. }
-            | BrowserCommand::SetPreloadScript { .. }
+            | BrowserCommand::InstallPageRuntime { .. }
             | BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::InDocuments { .. } => return None,
         };

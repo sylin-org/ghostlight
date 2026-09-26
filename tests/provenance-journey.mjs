@@ -163,7 +163,7 @@ async function journey() {
     const a = await client(`${privateCanaries[0]}\nC:\\${privateCanaries[4]}\\secret.exe`);
     const browser = new Peer(endpoint.browser_port, true); peers.push(browser);
     browser.send({ kind: "hello", major: 1, token: endpoint.token });
-    browser.send({ kind: "hello", major: 2, adapter_version: "1.0.0", browser_id: "browser_c1", adapter_epoch: "adapter_c1",
+    browser.send({ kind: "hello", major: 3, adapter_version: "1.0.0", browser_id: "browser_c1", adapter_epoch: "adapter_c1",
       capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "presentation", "adapter_liveness"]
         .map(name => ({ name, revision: { navigation: 2, semantic_document: 4 }[name] ?? 1 })) });
     await browser.take(value => value.kind === "hello_accepted", "adapter negotiation");

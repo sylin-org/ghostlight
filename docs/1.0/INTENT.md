@@ -211,7 +211,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 - No hidden or headless browser.
 - No credential entry, secret storage, content inspection, or DLP.
-- No Firefox support.
+- No Firefox support until ordinary-session full parity satisfies ADR-0183.
 - No vendor-, model-, or client-specific language.
 - No remote multi-tenant service.
 - No generic workflow engine, actor framework, event bus, CQRS split, or event store.

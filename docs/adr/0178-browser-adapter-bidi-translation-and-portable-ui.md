@@ -1,6 +1,6 @@
 # ADR-0178: Browser Adapter BiDi Translation and Portable UI
 
-Date: 2026-09-16. Status: Accepted.
+Date: 2026-09-16. Status: Superseded by ADR-0181.
 
 Builds on ADR-0054, ADR-0112, and Dossier 19.
 

@@ -135,21 +135,8 @@ impl ApplicationExecutor {
                     .browsers()
                     .into_iter()
                     .find(|b| b.id == id)
-                    .map(|b| match b.platform {
-                        ghostlight_bridge::browser::BrowserPlatform::Gecko => {
-                            b.name.unwrap_or_else(|| "Firefox".into())
-                        }
-                        ghostlight_bridge::browser::BrowserPlatform::Chromium => {
-                            b.name.unwrap_or_else(|| "Chromium".into())
-                        }
-                    })
-                    .or_else(|| {
-                        if id.contains("firefox") || id.contains("gecko") {
-                            Some("Firefox".into())
-                        } else {
-                            Some("Chromium".into())
-                        }
-                    })
+                    .map(|b| b.name.unwrap_or_else(|| "Chromium".into()))
+                    .or_else(|| Some("Chromium".into()))
             });
         let mut record = AuditRecord::now(
             &terminal.result.invocation,

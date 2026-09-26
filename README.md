@@ -58,7 +58,7 @@ The published release is 1.3.10. It is available as the GitHub release
 
 ## Your first five minutes
 
-You need Chrome, Edge, Brave, or Chromium 116+, an MCP client, and Node.js for the installer. The
+You need Chrome, Edge, Brave, or Chromium 125+, an MCP client, and Node.js for the installer. The
 service you run afterward is native Rust.
 
 1. Install Ghostlight and register the MCP clients it finds:
@@ -168,7 +168,7 @@ Ghostlight exits instead of leaving an invisible authority.
 
 ## Build it from source
 
-Rust 1.82 or newer, plus Chromium 116 or newer for browser validation.
+Rust 1.82 or newer, plus Chromium 125 or newer for browser validation.
 
 ```sh
 cargo build --workspace

@@ -187,6 +187,7 @@ struct Connection {
     browser_name: Option<String>,
     capabilities: HashMap<String, u16>,
     liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
+    ready: bool,
 }
 
 /// One connected browser as the orchestrator, the workbench, and the model see it.
@@ -250,10 +251,11 @@ impl AdapterRegistry {
             .connections
             .values()
             .filter(|connection| {
-                connection
-                    .liveness
-                    .as_ref()
-                    .is_none_or(|liveness| lock(liveness).is_available(now, timeout))
+                connection.ready
+                    && connection
+                        .liveness
+                        .as_ref()
+                        .is_none_or(|liveness| lock(liveness).is_available(now, timeout))
             })
             .map(|connection| BrowserSummary {
                 id: connection.browser_id.clone(),
@@ -512,6 +514,7 @@ impl RelayBrowserPort {
             browser_name,
             capabilities,
             liveness: liveness.clone(),
+            ready: false,
         };
         let replaced = {
             let mut adapters = lock(&self.adapters);
@@ -542,25 +545,19 @@ impl RelayBrowserPort {
             self.detach_registered(&browser_id, &connection_id);
             return Err(BrowserError::Protocol(error.to_string()));
         }
-        let lifecycle = lock(&self.lifecycle).clone();
-        if let Some(observer) = lifecycle.as_ref() {
-            observer.adapter_attached(&browser_id, replaced);
-        }
-
-        // Inject the Glass UI immediately upon connection before returning writer
-        crate::glass::inject_glass(&writer);
-
         let sink = lock(&self.event_sink).clone();
         let tag = ConnectionTag {
             browser_id,
             connection_id,
         };
+        let announced = Arc::new(AtomicBool::new(false));
         let reader_adapters = Arc::clone(&self.adapters);
         let reader_tag = tag.clone();
         let reader_liveness = liveness.clone();
         let reader_notifications = AdapterNotifications {
             sink,
             lifecycle: lock(&self.lifecycle).clone(),
+            announced: Arc::clone(&announced),
         };
         let heartbeat_writer = Arc::clone(&writer);
         let heartbeat_pending = Arc::clone(&pending);
@@ -589,6 +586,49 @@ impl RelayBrowserPort {
             self.detach_registered(&tag.browser_id, &tag.connection_id);
             return Err(BrowserError::Protocol(error.to_string()));
         }
+
+        let installs_page_runtime = {
+            let adapters = lock(&self.adapters);
+            adapters
+                .connections
+                .get(&tag.browser_id)
+                .filter(|connection| connection.id == tag.connection_id)
+                .and_then(|connection| {
+                    connection
+                        .capabilities
+                        .get(adapter_capability::PAGE_RUNTIME)
+                })
+                .copied()
+                .unwrap_or_default()
+                >= crate::page_runtime::REVISION
+        };
+        if installs_page_runtime {
+            let cancelled = AtomicBool::new(false);
+            let installed = self.call(
+                &tag.browser_id,
+                "system",
+                crate::page_runtime::install_command(),
+                Instant::now() + EXCHANGE_TIMEOUT,
+                &cancelled,
+            );
+            match installed {
+                Ok(outcome) if crate::page_runtime::acknowledged(&outcome) => {}
+                Ok(_) => {
+                    self.detach_registered(&tag.browser_id, &tag.connection_id);
+                    return Err(BrowserError::Protocol(
+                        "adapter acknowledged a different page runtime".into(),
+                    ));
+                }
+                Err(error) => {
+                    self.detach_registered(&tag.browser_id, &tag.connection_id);
+                    return Err(error);
+                }
+            }
+        }
+        if !self.publish_ready(&tag, &announced, replaced) {
+            return Err(BrowserError::DisconnectedBeforeDispatch);
+        }
+
         if let Some(liveness) = liveness {
             let heartbeat_adapters = Arc::clone(&self.adapters);
             let settings = self.heartbeat;
@@ -619,6 +659,25 @@ impl RelayBrowserPort {
         Ok(())
     }
 
+    /// Publish one exact initialized connection to callers. A replaced connection can never
+    /// make its successor ready.
+    fn publish_ready(&self, tag: &ConnectionTag, announced: &AtomicBool, replaced: bool) -> bool {
+        let lifecycle = lock(&self.lifecycle).clone();
+        let mut adapters = lock(&self.adapters);
+        let Some(connection) = adapters.connections.get_mut(&tag.browser_id) else {
+            return false;
+        };
+        if connection.id != tag.connection_id {
+            return false;
+        }
+        connection.ready = true;
+        announced.store(true, Ordering::SeqCst);
+        if let Some(observer) = lifecycle.as_ref() {
+            observer.adapter_attached(&tag.browser_id, replaced);
+        }
+        true
+    }
+
     /// Remove a registered connection, but only the exact one named -- never a connection that
     /// has since replaced it. `attach` registers a connection before either of its threads is
     /// proven to actually run, so a spawn failure must undo exactly that registration, and
@@ -635,7 +694,13 @@ impl RelayBrowserPort {
             }
         };
         if let Some(connection) = removed {
+            let was_ready = connection.ready;
             retire(&connection);
+            if was_ready {
+                if let Some(observer) = lock(&self.lifecycle).clone().as_ref() {
+                    observer.adapter_detached(browser_id);
+                }
+            }
         }
     }
 
@@ -665,6 +730,9 @@ impl RelayBrowserPort {
             let Some(connection) = adapters.connections.get(browser) else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             };
+            if !connection.ready && !matches!(&command, BrowserCommand::InstallPageRuntime { .. }) {
+                return Err(BrowserError::DisconnectedBeforeDispatch);
+            }
             if connection.liveness.as_ref().is_some_and(|liveness| {
                 !lock(liveness).is_available(Instant::now(), self.heartbeat.timeout)
             }) {
@@ -956,6 +1024,7 @@ fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
 struct AdapterNotifications {
     sink: Option<Arc<dyn BrowserEventSink>>,
     lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
+    announced: Arc<AtomicBool>,
 }
 
 fn read_adapter(
@@ -1028,8 +1097,10 @@ fn read_adapter(
                     if let Some(sink) = &notifications.sink {
                         sink.on_event(browser_id, BrowserEvent::Disconnected);
                     }
-                    if let Some(observer) = &notifications.lifecycle {
-                        observer.adapter_detached(browser_id);
+                    if notifications.announced.load(Ordering::SeqCst) {
+                        if let Some(observer) = &notifications.lifecycle {
+                            observer.adapter_detached(browser_id);
+                        }
                     }
                 }
                 return;

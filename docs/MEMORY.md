@@ -237,6 +237,11 @@ the owner wants, and what this project learned the hard way.
   a pass. Isolated checks can supplement that evidence but cannot establish that installation,
   startup, or recovery works for the user. A separate build directory avoids locked files; it is
   not authorization to run a second desktop installation.
+- **Browser support means full ordinary-session capability.** Do not ship a partial adapter under a
+  browser-support label. Every advertised Ghostlight job must work in the user's visible,
+  authenticated, already-running browser without a headless mode, disposable profile, managed
+  launch, or restart ritual. A smaller honest capability list is still a poor regular-user
+  experience when normal work immediately requires another browser (ADR-0183).
 - **Live debugging uses the installation in place.** The owner does not want a second Ghostlight
   authority, an alternate diagnostic build running beside it, startup helpers, or diagnostic
   shortcuts scattered around the OS. Build away from locked files, deploy through the dev loop,

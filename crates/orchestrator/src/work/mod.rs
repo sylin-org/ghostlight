@@ -2179,14 +2179,13 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
     }
 }
 
-// A wait's physical timer must finish early enough for the extension, native relay, browser
-// port, executor, and MCP edge to return one decisive unsatisfied receipt. A quarter second was
-// too narrow on a live cache-bypassing reload and turned a normal loading timeout into an
-// uncertain after-dispatch deadline.
-const WAIT_RECEIPT_RESERVE_MS: u64 = 750;
+// Physical work must finish early enough for the extension, native relay, browser port, executor,
+// and MCP edge to return one decisive receipt. A quarter second was too narrow on a live
+// cache-bypassing reload and turned a normal timeout into an uncertain after-dispatch deadline.
+const ADAPTER_RECEIPT_RESERVE_MS: u64 = 750;
 
-fn observation_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
-    let available = remaining.saturating_sub(Duration::from_millis(WAIT_RECEIPT_RESERVE_MS));
+fn adapter_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
+    let available = remaining.saturating_sub(Duration::from_millis(ADAPTER_RECEIPT_RESERVE_MS));
     let available_ms = u64::try_from(available.as_millis()).unwrap_or(u64::MAX);
     requested_ms.min(available_ms)
 }
@@ -2341,9 +2340,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::RecordingNotFound
         | BrowserOutcome::Presented { .. }
         | BrowserOutcome::Cancelled
-        | BrowserOutcome::BiDi { .. }
-        | BrowserOutcome::SetPreloadScript
-        | BrowserOutcome::Cdp { .. }
+        | BrowserOutcome::PageRuntimeInstalled { .. }
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
     }
 }
@@ -2431,7 +2428,7 @@ mod tests {
     use crate::workspace::WorkspaceStore;
 
     use super::{
-        browser_reason, observation_budget_ms, observed_from, readiness_name, routing_refusal,
+        adapter_budget_ms, browser_reason, observed_from, readiness_name, routing_refusal,
         ApplicationExecutor, BrowserError, CancellationToken, Effect, Readiness, Status,
     };
 

@@ -93,7 +93,7 @@ try {
   }
   const a = await client("H8 A"), b = await client("H8 B");
   const browser = new Peer(endpoint.browser_port, true);
-  const adapterHello = { kind: "hello", major: 2, adapter_version: "1.0.0", browser_id: "browser_h8",
+  const adapterHello = { kind: "hello", major: 3, adapter_version: "1.0.0", browser_id: "browser_h8",
     adapter_epoch: "adapter_h8", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "presentation", "adapter_liveness"]
       .map(name => ({ name, revision: { navigation: 2, semantic_document: 4 }[name] ?? 1 })) };
   // Both hellos in one write pin preservation of buffered bytes across transport authentication.

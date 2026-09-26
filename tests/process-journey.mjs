@@ -130,12 +130,6 @@ class NativePeer {
       if (this.buffer.length < length + 4) return;
       const value = JSON.parse(this.buffer.subarray(4, length + 4).toString("utf8"));
       this.buffer = this.buffer.subarray(length + 4);
-      
-      // Filter out the automatic glass UI injection so it doesn't disrupt tests expecting specific frame sequences
-      if (value.kind === "request" && value.request?.correlation === "glass-injection") {
-        continue;
-      }
-      
       for (const observer of [...this.observers]) {
         if (!observer.predicate(value)) continue;
         this.observers.splice(this.observers.indexOf(observer), 1);
@@ -544,7 +538,7 @@ try {
   const native = new NativePeer(browserConnector);
   native.send({
     kind: "hello",
-    major: 2,
+    major: 3,
     adapter_version: "1.0.0",
     browser_id: PROCESS_BROWSER,
     adapter_epoch: "adapter_processjourney",

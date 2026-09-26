@@ -1,6 +1,5 @@
 //! Stable, versioned wire contracts shared across Ghostlight process boundaries.
 
-pub mod bidi;
 pub mod browser;
 pub mod client;
 #[cfg(target_os = "linux")]

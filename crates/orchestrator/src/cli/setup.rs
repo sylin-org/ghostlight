@@ -200,7 +200,7 @@ pub(crate) fn select_install_browsers(
                 .find(|browser| browser.id == *id)
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "unknown browser '{id}'; expected chrome, edge, brave, chromium, or firefox"
+                        "unknown browser '{id}'; expected chrome, edge, brave, or chromium"
                     )
                 })?;
             if browser.package.sandboxed() {
@@ -208,7 +208,7 @@ pub(crate) fn select_install_browsers(
             }
             if browser.package == BrowserPackage::NotDetected {
                 anyhow::bail!(
-                    "{} Install Chrome, Edge, Brave, Chromium, or Firefox as a native package, then run Ghostlight install again.",
+                    "{} Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again.",
                     browser.package_detail
                 );
             }
@@ -239,7 +239,7 @@ pub(crate) fn select_install_browsers(
         .collect::<Vec<_>>();
     if sandboxed.is_empty() {
         anyhow::bail!(
-            "No supported native browser was detected. Install Chrome, Edge, Brave, Chromium, or Firefox as a native package, then run Ghostlight install again."
+            "No supported native browser was detected. Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again."
         );
     }
     anyhow::bail!("{}", sandboxed.join(" "))

@@ -51,7 +51,7 @@ The sibling executables are:
 
 - `target/debug/ghostlight` -- orchestrator plus Tauri workbench;
 - `target/debug/ghostlight-mcp-connector` -- MCP stdio shore; and
-- `target/debug/ghostlight-browser-connector` -- Chromium native-messaging shore.
+- `target/debug/ghostlight-browser-connector` -- browser native-messaging shore.
 
 Run the product with its workbench:
 
@@ -95,7 +95,6 @@ process.
 | MCP connector protocol lifecycle | `cargo build -p ghostlight-mcp-connector` | Reconnect the MCP server in the harness |
 | Browser connector relay lifecycle | `cargo build -p ghostlight-browser-connector` | Reload the extension so Chromium respawns the native host |
 | Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
-| Firefox extension mechanism or presentation | none for JavaScript | Reload in `about:debugging` or re-install the signed XPI |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
@@ -260,7 +259,8 @@ node tests/script-browser-journey.mjs
 ```
 
 `GHOSTLIGHT_TEST_BROWSER` can name the browser executable; `GHOSTLIGHT_BIN_DIR` can name a
-different fresh build directory. The lane creates its own headless profile and HTTP fixture,
+different fresh build directory. The lane opens a visible browser with its own temporary profile
+and HTTP fixture,
 executes the shipped evaluator through Chromium CDP, and carries results through the real browser
 connector, orchestrator, and MCP connector. It checks effect counts, uncertain failures, and REPL
 compatibility. Native framing is a test adapter: this is not an installed MV3/native-host journey.

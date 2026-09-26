@@ -46,7 +46,7 @@ try {
   server.stdout.on("data", (data) => { address += data; });
   await until(() => address.includes("http://"), "preview server");
   const profile = join(scratch, "profile");
-  chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+  chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "about:blank"]);

@@ -55,6 +55,64 @@ test("a retained controlled tab stays attached between sequential operations", a
   assert.equal(lifecycle.attachedCount(), 0);
 });
 
+test("runtime installation reaches every execution context already present at attachment", async () => {
+  const commands = [];
+  const lifecycle = debuggerApi.create({
+    async attach() {},
+    async detach() {},
+    async sendCommand(target, method, params) {
+      commands.push({ tabId: target.tabId, method, params });
+    }
+  });
+  await lifecycle.installPageRuntime("globalThis.runtimeInstalled = true;");
+  await lifecycle.retain(81);
+
+  const installation = commands.find((command) => command.method === "Page.addScriptToEvaluateOnNewDocument");
+  assert.deepEqual(installation, {
+    tabId: 81,
+    method: "Page.addScriptToEvaluateOnNewDocument",
+    params: {
+      source: "globalThis.runtimeInstalled = true;",
+      runImmediately: true
+    }
+  });
+  assert.equal(commands.some((command) => command.method === "Runtime.evaluate"), false);
+  await lifecycle.detachAll();
+});
+
+test("runtime installation recursively covers an existing out-of-process iframe", async () => {
+  const commands = [];
+  let onEvent;
+  const lifecycle = debuggerApi.create({
+    onEvent: { addListener(listener) { onEvent = listener; } },
+    async attach() {},
+    async detach() {},
+    async sendCommand(target, method, params) {
+      commands.push({ target, method, params });
+      if (method === "Target.setAutoAttach" && !target.sessionId) {
+        onEvent(
+          { tabId: target.tabId },
+          "Target.attachedToTarget",
+          { sessionId: "child-1", targetInfo: { type: "iframe" }, waitingForDebugger: true }
+        );
+      }
+    }
+  });
+
+  await lifecycle.installPageRuntime("globalThis.runtimeInstalled = true;");
+  await lifecycle.retain(82);
+
+  const childCommands = commands.filter((command) => command.target.sessionId === "child-1");
+  assert.deepEqual(childCommands.map((command) => command.method), [
+    "Page.enable",
+    "Page.addScriptToEvaluateOnNewDocument",
+    "Target.setAutoAttach",
+    "Runtime.runIfWaitingForDebugger"
+  ]);
+  assert.equal(childCommands[1].params.runImmediately, true);
+  await lifecycle.detachAll();
+});
+
 test("terminal shutdown detaches retained controlled tabs", async () => {
   const chromeDebugger = fakeDebugger();
   const lifecycle = debuggerApi.create(chromeDebugger);

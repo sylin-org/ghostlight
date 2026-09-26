@@ -1503,16 +1503,13 @@ fn repeated_policy_denials_pause_browser_work_until_the_user_resumes() {
 }
 
 #[test]
-fn observation_budget_preserves_time_for_the_physical_receipt() {
+fn adapter_budget_preserves_time_for_the_physical_receipt() {
     assert_eq!(
-        observation_budget_ms(3_000, Duration::from_millis(3_000)),
+        adapter_budget_ms(3_000, Duration::from_millis(3_000)),
         2_250
     );
-    assert_eq!(observation_budget_ms(100, Duration::from_millis(100)), 0);
-    assert_eq!(
-        observation_budget_ms(500, Duration::from_millis(5_000)),
-        500
-    );
+    assert_eq!(adapter_budget_ms(100, Duration::from_millis(100)), 0);
+    assert_eq!(adapter_budget_ms(500, Duration::from_millis(5_000)), 500);
 }
 
 #[test]

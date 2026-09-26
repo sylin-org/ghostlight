@@ -19,8 +19,6 @@
   const CAPTURE_MASK_TTL_MS = 10_000;
   const FILL_STABLE_MS = 750;
   const FILL_SETTLE_LIMIT_MS = 8_000;
-  const FILL_FIELD_STABLE_MS = 250;
-  const FILL_FIELD_SETTLE_LIMIT_MS = 2_000;
   const MAX_LOCATORS = 500;
   const locators = new Map();
   const reverse = new WeakMap();
@@ -628,7 +626,7 @@
   function fillControlValue(element) {
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) return element.checked;
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return element.value;
-    if (element.isContentEditable) return element.innerText ?? element.textContent ?? "";
+    if (element.isContentEditable) return element.textContent ? (element.innerText ?? element.textContent) : "";
     return element.textContent ?? "";
   }
 
@@ -643,22 +641,12 @@
   }
 
 
-  async function verifyStableFillValue(element, value) {
-    validateFillElement(element, value);
-    const expected = expectedFillValue(element, value);
-    const started = performance.now();
-    let stableSince = null;
-    while (true) {
-      const now = performance.now();
-      if (fillControlValue(element) === expected) {
-        if (stableSince === null) stableSince = now;
-        if (now - stableSince >= FILL_FIELD_STABLE_MS) return { retained: true };
-      } else {
-        stableSince = null;
-      }
-      if (now - started >= FILL_FIELD_SETTLE_LIMIT_MS) throw new Error("target did not retain filled value");
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-    }
+  function fillValuesRetained(fields) {
+    return fields.every((field) => {
+      const element = resolve(field.locator);
+      validateFillElement(element, field.value);
+      return fillControlValue(element) === expectedFillValue(element, field.value);
+    });
   }
 
   // A browser document can be ready while a client-rendered form is still hydrating from an
@@ -917,9 +905,8 @@
         const element = resolve(message.field.locator);
         return verifyBrowserTextFocus(element);
       }
-      if (message.kind === "verify_fill_value") {
-        const element = resolve(message.field.locator);
-        return verifyStableFillValue(element, message.field.value);
+      if (message.kind === "verify_fill_values") {
+        return { retained: fillValuesRetained(message.fields) };
       }
       if (message.kind === "fill_local") {
         const element = resolve(message.field.locator);

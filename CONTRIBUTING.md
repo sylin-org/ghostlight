@@ -46,7 +46,8 @@ sign off your commits (`git commit -s`). Inbound = outbound, everywhere, includi
 
 Practical expectations for PRs: `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and
-`npm test --prefix extension` green; ASCII source and documentation; match the surrounding code's
+`npm test --prefix extension` green; ASCII source and
+documentation; match the surrounding code's
 style; and protect each distinct contract once at its narrowest seam. For anything larger than a
 small fix, open a Discussion or Issue first so nobody builds the wrong thing.
 
@@ -54,8 +55,8 @@ small fix, open a Discussion or Issue first so nobody builds the wrong thing.
 
 Ghostlight 1.0 runs one orchestrator with independently reconnecting MCP and browser shores. An
 orchestrator, workbench, or bundled-UI change rebuilds and restarts `ghostlight`; it does not
-require a relay or extension edit. A browser mechanism or presentation change requires an explicit
-Reload at `chrome://extensions`. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) has the exact refresh matrix
+require a relay or adapter edit. A privileged browser-mechanism change requires an explicit reload
+of the affected browser adapter. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) has the exact refresh matrix
 and isolated process journey.
 
 ### Running tests locally

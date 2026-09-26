@@ -344,9 +344,7 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         | BrowserCommand::DiscardRecording { .. }
         | BrowserCommand::Cancel { .. }
         | BrowserCommand::Present { .. }
-        | BrowserCommand::BiDi { .. }
-        | BrowserCommand::SetPreloadScript { .. }
-        | BrowserCommand::Cdp { .. } => None,
+        | BrowserCommand::InstallPageRuntime { .. } => None,
     }
 }
 

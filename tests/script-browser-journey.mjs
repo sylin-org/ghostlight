@@ -89,7 +89,7 @@ try {
   await new Promise((done) => fixture.listen(0, "127.0.0.1", done));
   const url = `http://127.0.0.1:${fixture.address().port}/`;
   const profile = join(scratch, "profile");
-  chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+  chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update",
     "--disable-sync", "about:blank"]);
@@ -177,7 +177,7 @@ try {
       void native(frame);
     }
   });
-  writeNative({ kind: "hello", major: 2,
+  writeNative({ kind: "hello", major: 3,
     adapter_version: JSON.parse(readFileSync(join(repository, "extension/manifest.json"), "utf8")).version,
     browser_id: "browser_scriptjourney",
     adapter_epoch: "adapter_scriptjourney", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "script",

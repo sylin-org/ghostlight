@@ -458,21 +458,8 @@ impl WorkbenchFacade {
                     browsers_list
                         .iter()
                         .find(|b| b.id == id)
-                        .map(|b| match b.platform {
-                            ghostlight_bridge::browser::BrowserPlatform::Gecko => {
-                                b.name.clone().unwrap_or_else(|| "Firefox".into())
-                            }
-                            ghostlight_bridge::browser::BrowserPlatform::Chromium => {
-                                b.name.clone().unwrap_or_else(|| "Chromium".into())
-                            }
-                        })
-                        .or_else(|| {
-                            if id.contains("firefox") || id.contains("gecko") {
-                                Some("Firefox".into())
-                            } else {
-                                Some("Chromium".into())
-                            }
-                        })
+                        .map(|b| b.name.clone().unwrap_or_else(|| "Chromium".into()))
+                        .or_else(|| Some("Chromium".into()))
                 });
                 SessionSummary {
                     active_operations: operations
@@ -975,14 +962,7 @@ impl WorkbenchFacade {
             .browsers()
             .into_iter()
             .map(|browser| {
-                let family = match browser.platform {
-                    ghostlight_bridge::browser::BrowserPlatform::Chromium => {
-                        browser.name.unwrap_or_else(|| "Chromium".into())
-                    }
-                    ghostlight_bridge::browser::BrowserPlatform::Gecko => {
-                        browser.name.unwrap_or_else(|| "Firefox".into())
-                    }
-                };
+                let family = browser.name.unwrap_or_else(|| "Chromium".into());
                 BrowserInstanceSummary {
                     id: browser.id,
                     family,

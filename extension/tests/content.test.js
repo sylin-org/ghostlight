@@ -261,7 +261,7 @@ function contentHarness() {
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
     GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
-    GhostlightSensor: require("../../crates/orchestrator/src/glass/sensor.js"),
+    GhostlightSensor: require("../../crates/orchestrator/src/page_runtime/sensor.js"),
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},
@@ -272,7 +272,7 @@ function contentHarness() {
   };
   context.globalThis = context;
   vm.runInNewContext(
-    readFileSync(join(__dirname, "../../crates/orchestrator/src/glass", "content.js"), "utf8"),
+    readFileSync(join(__dirname, "../../crates/orchestrator/src/page_runtime", "content.js"), "utf8"),
     context,
     { filename: "content.js" }
   );
@@ -648,6 +648,9 @@ test("rich editor fills and clears use one native edit scoped to the chosen edit
   const empty = await harness.send({ kind: "fill", fields: [{ locator, value: "" }] });
   assert.equal(empty.ok, true);
   assert.equal(harness.edits.length, 2, "an empty editor is already cleared");
+  editor.innerText = "\n";
+  const verified = await harness.send({ kind: "verify_fill_values", fields: [{ locator, value: "" }] });
+  assert.equal(verified.ok, true); assert.equal(verified.result.retained, true);
 });
 
 test("rich editor refusal prevents native editing and preserves the existing draft", async () => {
@@ -816,6 +819,8 @@ test("successful fill preparation changes nothing and final mixed native fields 
   const filled = await harness.send({ kind: "fill", fields });
   assert.equal(filled.result.filled_count, 2); assert.equal(filled.result.submitted, false);
   assert.equal(harness.input.value, "Replacement draft"); assert.equal(editor.textContent, "Replacement draft");
+  const verified = await harness.send({ kind: "verify_fill_values", fields });
+  assert.equal(verified.ok, true); assert.equal(verified.result.retained, true);
 });
 
 test("inspection distinguishes styled hidden controls from a visible rich editor", async () => {

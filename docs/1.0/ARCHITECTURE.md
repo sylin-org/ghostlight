@@ -11,9 +11,9 @@ MCP client
   -> ghostlight orchestrator service
   -> typed local browser bridge
   -> ghostlight-browser-connector
-  -> Chromium native messaging
-  -> policy-free extension
-  -> Chrome APIs and page-local observation
+  -> browser native messaging
+  -> policy-free Chromium adapter
+  -> advertised privileged browser mechanisms
 
 local human
   -> bundled Tauri workbench
@@ -26,8 +26,8 @@ local human
 - `crates/orchestrator` is the domain-driven modular monolith and service process.
 - `crates/mcp-connector` is the hand-rolled JSON-RPC MCP stdio edge.
 - `crates/browser-connector` is a frame relay between native messaging and the service.
-- `extension` implements typed physical primitives, browser topology mechanism, content-free
-  feedback, and the local toolbar/options experience.
+- `extension` implements the full Chromium physical mechanism set, page-runtime installation,
+  browser topology, content-free feedback, and the local toolbar/options experience.
 
 Only process, lifecycle, and trust boundaries justify these crates. Product contexts remain
 modules inside the orchestrator. The dependency direction points inward to `bridge` types and
@@ -95,10 +95,9 @@ Ghostlight's fringes are independently versioned compatibility products. Their s
 constrained; their reasons to change are. The MCP connector changes only for MCP negotiation and
 protocol compatibility and local service connection lifetime. The browser connector changes only
 for native messaging, local relay authentication, framing, discovery, and connection lifetime.
-The extension changes only for
-Chromium mechanisms, browser-execution integrity and recovery, or the preserved Ghostlight user
-experience. Any product feature expressible through existing physical browser capabilities changes
-only the orchestrator.
+Each browser adapter changes only for privileged browser mechanisms, browser-execution integrity
+and recovery, or the preserved Ghostlight user experience. Any product feature expressible through
+existing physical browser capabilities changes only the orchestrator.
 
 The browser connector treats adapter frames as opaque bounded bytes. A small relay protocol owns
 local authentication and backend availability separately from the adapter protocol. The relay
@@ -106,7 +105,7 @@ keeps Chromium's native port alive while the service is unavailable, reconnects 
 runtime endpoint, repeats only the relay and cached adapter handshakes, and never interprets or
 replays a physical operation.
 
-The extension is a policy-free browser execution engine, not merely a collection of API calls. It
+The adapter is a policy-free browser execution engine, not merely a collection of API calls. It
 owns browser-local operation state, safe mechanism retries, duplicate-operation suppression,
 physical observation, factual receipts, adapter resynchronization, and fail-safe local human
 control. It does not own model-facing tools, workspace authority, governance, product recovery, or
@@ -118,6 +117,20 @@ Compatibility uses separate axes for the external MCP revision, the service edge
 browser relay, and the adapter protocol. Adapter behavior is selected by explicitly advertised
 physical capabilities, never by parsing an implementation version. A new service may continue to
 use an older adapter for every capability that adapter advertises.
+
+Each adapter has one closed executable handler table. Its hello capability revisions are derived
+from that table and its passive frame handlers, never maintained as a second declaration. Platform
+is identity and presentation information; executor dispatch is capability-based. A vendor protocol
+such as CDP is private adapter technique, not a second bridge vocabulary.
+
+Page-local observation and presentation ship as one service-owned immutable `PageRuntimeBundle`.
+The process assembles and hashes it once. A runtime-capable adapter verifies and installs the exact
+revision and SHA-256 through the ordinary correlated request/receipt path. Such a connection stays
+private until that receipt arrives; browser discovery and `adapter_attached` publish only the ready
+connection. An adapter without the page-runtime capability remains usable only for independent
+shell mechanisms it advertises. Chromium recursively installs the runtime in its root page and
+flat out-of-process iframe sessions before readiness, and pauses a newly attached child only until
+that exact runtime is installed. This requires Chromium 125 or newer.
 
 ## Stable bridges
 
@@ -328,7 +341,8 @@ client success. Reactions are direct typed function calls over the closed enum, 
 
 ## Browser primitives
 
-The closed adapter vocabulary is: list tabs, focus tab, atomically open and group a URL, navigate,
+The closed adapter vocabulary is: install the service-owned page runtime, list tabs, focus tab,
+atomically open and group a URL, navigate,
 traverse history, reload, close tab, read text, read a composed document, inspect, find, screenshot,
 screenshot region, describe targets,
 activate a locator or physical point, scroll, set zoom, resize a window, hover, fill, type text,
@@ -338,8 +352,13 @@ present. Receipts state whether no effect, a committed effect, or an uncertain e
 Browser events report document commits, readiness, dialog state, child-tab creation, tab close,
 bounded diagnostic entries, control intent, and disconnect.
 
+Runtime installation is a system bootstrap mechanism, not model-facing work. Raw BiDi and raw CDP
+requests are not members of the vocabulary. The Chromium adapter may use CDP privately. A future
+browser adapter is not an active product until it can execute the complete capability set in the
+user's ordinary visible, authenticated, already-running session (ADR-0183).
+
 Ordinary product features compose these primitives only in the orchestrator. A bridge or adapter
-change requires a new physical Chromium capability or a bridge protocol requirement.
+change requires a new physical browser capability or a bridge protocol requirement.
 
 The composed semantic layer is the physical page-observation boundary. Inside each injected
 http(s) frame, the extension walks rendered elements and text through open shadow roots and assigned
@@ -349,11 +368,12 @@ frame order under one page-wide character or node ceiling. Explicit article mode
 top document first and uses the composed full-page read when no useful article exists. Closed
 shadow roots stay closed, and child-frame origins do not become result or audit fields.
 
-Ordinary textual form fills and rich-editor replacements use one
-page-local browser editing transaction so a framework receives an authoritative edit; semantic
-setters remain for select, toggle, and file controls. Submission remains a separate explicit
-action. A failed native edit refuses without fabricating input/change events or replacing the
-existing draft.
+Ordinary textual form fills and rich-editor replacements use one budgeted physical transaction.
+The orchestrator passes the adapter's remaining execution budget; the adapter preflights every
+field, performs native editing, releases its debugger lease, and verifies the complete batch once.
+Semantic setters remain for select, toggle, and file controls. Submission starts only after that
+terminal verification and remains an explicit action. A failed native edit refuses without
+fabricating input/change events or replacing the existing draft.
 
 Pointer geometry follows the same composed surface. Frame-box discovery reaches embeds inside open
 roots. Point hit testing descends through open roots, then the service worker follows the embed at

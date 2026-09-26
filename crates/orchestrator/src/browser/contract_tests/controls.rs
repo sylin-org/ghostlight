@@ -33,6 +33,7 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
                 platform: BrowserPlatform::Chromium,
                 capabilities: HashMap::from([(adapter_capability::TABS.into(), 1)]),
                 liveness: None,
+                ready: true,
             },
         );
         let cancelled = AtomicBool::new(false);

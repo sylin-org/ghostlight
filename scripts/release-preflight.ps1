@@ -121,7 +121,6 @@ try {
                 , @("Microsoft", "Edge")
                 , @("BraveSoftware", "Brave-Browser")
                 , @("Chromium")
-                , @("Mozilla")
             )) {
                 $key = "Registry::HKEY_CURRENT_USER\Software\$($vendor -join '\')\NativeMessagingHosts\org.sylin.ghostlight"
                 $value = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue)."(default)"
@@ -135,10 +134,6 @@ try {
                     (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
                 } else { "<absent>" }
             }
-            $mozillaManifest = Join-Path $HOME ".mozilla/native-messaging-hosts/org.sylin.ghostlight.json"
-            $parts += if (Test-Path -LiteralPath $mozillaManifest) {
-                (Get-FileHash -LiteralPath $mozillaManifest -Algorithm SHA256).Hash
-            } else { "<absent>" }
         }
         return ($parts -join "`n---`n")
     }
@@ -197,17 +192,6 @@ try {
         try {
             Run-Gate { npm test } "extension tests failed"
         } finally { Pop-Location }
-    } }
-
-    $stages += @{ Name = "Firefox extension tests (npm test)"; Skip = ""; Action = {
-        Push-Location extension-firefox
-        try {
-            Run-Gate { npm test } "Firefox extension tests failed"
-        } finally { Pop-Location }
-    } }
-
-    $stages += @{ Name = "Firefox extension linter (web-ext lint)"; Skip = ""; Action = {
-        Run-Gate { npx --yes web-ext lint --source-dir extension-firefox } "Firefox extension lint failed"
     } }
 
     $stages += @{ Name = "npm launcher tests (packaging/npm)"; Skip = ""; Action = {

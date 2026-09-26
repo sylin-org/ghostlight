@@ -13,7 +13,7 @@ const scratchRoot = join(root, ".tmp");
 mkdirSync(scratchRoot, { recursive: true });
 const scratch = mkdtempSync(join(scratchRoot, "keyboard-browser-"));
 const browser = process.env.GHOSTLIGHT_TEST_BROWSER || join(root, ".tmp/chrome-testing/chrome-win64/chrome.exe");
-const child = spawn(browser, ["--headless=new", "--remote-debugging-port=0",
+const child = spawn(browser, ["--remote-debugging-port=0",
   `--user-data-dir=${scratch}`, "--no-first-run", "--no-default-browser-check", "about:blank"],
 { windowsHide: true, stdio: "ignore" });
 child.on("error", error => { child.startError = error; });
@@ -60,13 +60,13 @@ try {
     sendDebugger: (_target, method, params) => send(method, params, sessionId) };
   vm.createContext(sandbox);
   const worker = readFileSync(join(root, "extension/service-worker.js"), "utf8");
-  const start = worker.indexOf("async function replaceFocusedText(");
+  const start = worker.indexOf("function requireFillBudget(");
   const end = worker.indexOf("async function fill(", start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(worker.slice(start, end), sandbox);
-  const content = readFileSync(join(root, "extension/content.js"), "utf8");
+  const content = readFileSync(join(root, "crates/orchestrator/src/page_runtime/content.js"), "utf8");
   const expectedStart = content.indexOf("  function expectedFillValue(");
-  const expectedEnd = content.indexOf("  async function verifyStableFillValue(", expectedStart);
+  const expectedEnd = content.indexOf("  function fillValuesRetained(", expectedStart);
   assert.ok(expectedStart >= 0 && expectedEnd > expectedStart);
   await evaluate(content.slice(expectedStart, expectedEnd));
   const cases = ["First job\nSecond job", "\nFirst\n\nLast\n", "First\r\nSecond\r\n", "First\rSecond\r", "Single line", ""];

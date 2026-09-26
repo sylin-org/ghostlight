@@ -46,11 +46,15 @@ troubleshooting. Platform-specific registration details remain in the installer 
 Ask the agent to *navigate to a page and take a screenshot*: the Ghostlight tab group opens
 and the screenshot returns.
 
-## Adapter protocol 2 mechanisms
+## Adapter protocol 3 mechanisms
 
-Protocol 2 adds independent physical capabilities for window resize, diagnostics, recording,
-chunked commands, end-to-end adapter liveness, and reported attention. The native host remains an
-opaque byte relay.
+Protocol 3 keeps the independent physical capabilities introduced by protocol 2 and adds
+correlated installation of the service-owned page runtime. The adapter verifies the runtime
+SHA-256 and acknowledges its exact revision and hash before the service publishes the browser as
+ready. Chromium 125 or newer recursively installs it in the root page and flat out-of-process
+iframe sessions, so an allowed embedded page works on first use. Capability revisions come from
+the closed production command table. Raw CDP is private adapter technique rather than a
+browser-bridge command. The native host remains an opaque byte relay.
 The extension answers a content-free heartbeat independently of browser work; the service sends
 one every 20 seconds and stops treating the adapter as available after 45 seconds without an
 acknowledgement.

@@ -85,7 +85,6 @@ jobs:
         run: sh -n scripts/*.sh
       - name: Check runtime JavaScript syntax
         run: |
-          node --check extension/content.js
           node --check extension/offscreen.js
           node --check extension/options.js
           node --check extension/popup.js
@@ -101,6 +100,8 @@ jobs:
           node --check extension/lib/shared.js
           node --check extension/lib/state.js
           node --check extension/lib/topology.js
+          node --check crates/orchestrator/src/page_runtime/content.js
+          node --check crates/orchestrator/src/page_runtime/sensor.js
       - name: Build the store extension artifact
         shell: pwsh
         run: ./scripts/package-extension.ps1 -OutputPath dist/ghostlight-extension.zip

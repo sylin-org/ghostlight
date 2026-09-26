@@ -177,6 +177,10 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    and magnify one bounded view region, then repeat against the returned view.
 4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
    described target is credential-class.
+   The physical fill carries the remaining invocation budget, uses one all-field preflight and one
+   terminal batch verification, and leaves enough time for a decisive receipt. The 30-second
+   default must support ordinary multi-field work without multiplying a fixed stability delay by
+   field count.
    A controlled ordinary input and textarea must receive native editing evidence and retain their
    values after a later framework-style model render. The fixture first proves that prototype
    setters plus generic synthetic events are rejected by the same render. Neither path submits.
@@ -278,34 +282,41 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    behavior is gated by those capabilities rather than the extension version string.
    An adapter that advertises attention reports it when a browser window gains focus and reports
    truthfully at hello whether it already holds one. Connecting alone never claims attention.
-4. The popup distinguishes disconnected, connected-active, held, attention-required, and ended
+   Advertised revisions are derived from the adapter's executable handler table. Every command in
+   an advertised revision has a production handler and conformance coverage.
+4. A runtime-capable adapter verifies the service-owned page-runtime SHA-256 and returns its exact
+   revision and hash through a correlated receipt. It is not discoverable and no attached event is
+   published before that receipt. Every already-loaded and future permitted frame, including an
+   out-of-process cross-origin iframe, has the exact runtime before work reaches it. A mismatch,
+   timeout, child-install failure, or disconnect retires the connection.
+5. The popup distinguishes disconnected, connected-active, held, attention-required, and ended
    states without reading page content.
-5. Popup pause, resume, end-session, and start-new-session actions become authoritative service
+6. Popup pause, resume, end-session, and start-new-session actions become authoritative service
    runtime state before the next physical effect. Ordinary resume cannot revive an ended session.
    The keyboard command uses the same intent path.
-6. Options preserve the established dark sky-blue UI and persist effects-on, captions-off,
+7. Options preserve the established dark sky-blue UI and persist effects-on, captions-off,
    diagnostics-off, and preserve-tabs-on defaults under local keys. Preserve tabs is a final
    physical interlock: it can refuse model-driven close but cannot edit, import, expand, or
    override authority. Human browser closure remains available.
-7. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
+8. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
    browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active
    window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. An opener
    does not grant ownership: child tabs and popups are not automatically adopted, grouped, or
    attached to a debugger. Manually moving tabs causes no regrouping; closing or moving tabs does
    not transfer ownership (ADR-0164).
-8. The established content-free visual language renders visibly, stays pointer-transparent except
+9. The established content-free visual language renders visibly, stays pointer-transparent except
    for attention controls, remains hidden from screenshots, and remounts after navigation. Its
    palette is sky `#38bdf8`, ink `#eaf6ff`, and governance ground `#0c0f14`; its spring curve is
    `cubic-bezier(.22,1,.36,1)`. The 150 ms cursor, four-second scope breath, 620 ms ripple, 700 ms
    field splash, 1450 ms read scan, 1600 ms navigation pill, 1500 ms capture frame, and 1150 ms
    zoom frame are protected product contracts, including their reduced-motion alternatives.
-9. The popup and options pages have useful empty, disconnected, error, and incompatible-version
+10. The popup and options pages have useful empty, disconnected, error, and incompatible-version
    states and are keyboard accessible.
-10. No extension storage key contains URL, title, page text, target name, locator, form value,
+11. No extension storage key contains URL, title, page text, target name, locator, form value,
    script, file path, file bytes, screenshot, recording frame, GIF, dialog text, console entry,
    network entry, or policy.
-11. Developer diagnostics form tracing stays off by default, observes only already-controlled
+12. Developer diagnostics form tracing stays off by default, observes only already-controlled
     top documents, stops on disable/release or after ten minutes, and examines at most 100
     ordinary controls. Empty-state changes, control replacement, reset/focus/visibility events,
     and explicit Ghostlight fill/type/clear boundaries produce only closed structural metadata.
@@ -313,7 +324,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     unique values, attribute names, event data, and key sentinels never enter the 400-record
     persisted/exported ring. Storage or observer failure cannot change an action's return or
     throw, focus, form values, or submission count. Passive traces never become service work.
-12. Ordinary text input and textarea fill/clear use one native browser edit on the named control.
+13. Ordinary text input and textarea fill/clear use one native browser edit on the named control.
     If that edit is unavailable, the operation refuses with the existing draft intact and without
     synthetic input/change events or submission.
 
@@ -472,8 +483,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    every export destination. Source-bound overflow is explicit rather than silent eviction.
 5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
    All-open scripts keep browser behavior without an inferred sandbox or website network filter.
-6. `tests/frame-browser-journey.mjs` passes 69 Chrome/MV3 checks using the live Sylin iframe demo
-   and its form content on distinct local hosts, with real orchestrator and connector processes.
+6. `tests/frame-browser-journey.mjs` passes 69 Chrome/MV3 checks in a visible browser using the live
+   Sylin iframe demo and its form content on distinct local hosts, with real orchestrator and
+   connector processes.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
    separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.
 

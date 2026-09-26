@@ -17,7 +17,6 @@ console.log("Starting Chromium for Testing at:", browser);
 const child = spawn(
   browser,
   [
-    "--headless=new",
     "--remote-debugging-port=0",
     `--user-data-dir=${scratch}`,
     "--no-first-run",
@@ -82,7 +81,7 @@ try {
   };
 
   // Inject sensor.js into the real Chromium page
-  const sensorSource = readFileSync(join(root, "extension/lib/sensor.js"), "utf8");
+  const sensorSource = readFileSync(join(root, "crates/orchestrator/src/page_runtime/sensor.js"), "utf8");
   await evaluate(sensorSource);
 
   const hasSensor = await evaluate("typeof GhostlightSensor !== 'undefined' && typeof GhostlightSensor.settleVisual === 'function'");

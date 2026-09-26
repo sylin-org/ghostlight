@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const api = require("../../crates/orchestrator/src/glass/sensor.js");
+const api = require("../../crates/orchestrator/src/page_runtime/sensor.js");
 
 function mockDocument() {
   const listeners = [];
@@ -433,5 +433,4 @@ test("settleVisual stress: concurrent multi-target settlement", async () => {
     assert.ok(res.elapsed_ms > 0, `task ${index} elapsed_ms must be positive`);
   }
 });
-
 

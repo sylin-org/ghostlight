@@ -152,7 +152,7 @@ try {
   };\n`;
   writeFileSync(worker, shim + readFileSync(worker, "utf8"));
   const profile = join(scratch, "profile");
-  chromium = start(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
+  chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     ...(!liveSylin ? ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"] : []),
     `--load-extension=${extension}`, "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
@@ -255,6 +255,11 @@ try {
   check("excluded Sylin form masked and original styles restored");
   policy("permitted_content", "all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
+  const runtimeCoverage = await rawWorker(`chrome.scripting.executeScript({
+    target: { tabId: ${physical}, allFrames: true }, world: "MAIN",
+    func: () => typeof window.__ghostlight_dispatch__
+  }).then(items => items.map(item => item.result))`);
+  assert.ok(runtimeCoverage.length >= 2 && runtimeCoverage.every((kind) => kind === "function"), JSON.stringify(runtimeCoverage));
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.match(JSON.stringify(result), /Project name/);
   check("same Sylin content fully available when allowed");
   for (const mode of ["permitted_content", "complete_operation", "complete_page"]) {
@@ -463,10 +468,10 @@ try {
     [replyTarget, "reply", ""], [replyTarget, "reply", ""], [shadowTarget, "shadow", ""]]) {
     const before = await rawPage("editorEvidence()");
     result = await call("browser_fill_form", { tab, fields: [{ target, value }] });
-    assert.equal(result.status, "succeeded", JSON.stringify(result));
-    assert.equal(result.facts.filled_count, 1); assert.equal(result.facts.submitted, false);
     await delay(50);
     const after = await rawPage("editorEvidence()");
+    assert.equal(result.status, "succeeded", JSON.stringify({ result, name, value, before, after }));
+    assert.equal(result.facts.filled_count, 1); assert.equal(result.facts.submitted, false);
     assert.equal(after[name].value, value);
     assert.equal(after[name].rendered, value);
     assert.equal(after[name].synthetic, before[name].synthetic);
@@ -516,6 +521,8 @@ try {
   assert.equal((await rawPage("editorEvidence()")).reply.rendered, "Typed replacement");
   result = await call("browser_fill_form", { tab, fields: [{ target: shadowTarget, value: "Focused draft" }] });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
+  result = await call("browser_click", { tab, target: shadowTarget });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
   result = await call("browser_type_text", { tab, focused: true, text: "", clear_first: true });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   await delay(50);
@@ -528,9 +535,13 @@ try {
     for (const focused of [false, true]) {
       result = await call("browser_fill_form", { tab, fields: [{ target, value: "Existing draft" }] });
       assert.equal(result.status, "succeeded", JSON.stringify(result));
-      const before = await rawPage("editorEvidence()");
-      const replacement = `${name} ${focused ? "focused" : "targeted"} action draft`;
-      result = await call("browser_type_text", { tab, ...(focused ? { focused: true } : { target }),
+    const before = await rawPage("editorEvidence()");
+    const replacement = `${name} ${focused ? "focused" : "targeted"} action draft`;
+    if (focused) {
+      result = await call("browser_click", { tab, target });
+      assert.equal(result.status, "succeeded", JSON.stringify(result));
+    }
+    result = await call("browser_type_text", { tab, ...(focused ? { focused: true } : { target }),
         text: replacement, clear_first: true, });
       assert.equal(result.status, "succeeded", JSON.stringify(result));
       assert.equal(result.effect, "applied");
@@ -602,6 +613,7 @@ try {
   // Page code can invalidate a later field after preparation. Preserve the first edit and
   // uncertainty in that case; preflight is not a transaction or permission to replay a batch.
   const beforeChangedField = await rawPage("editorEvidence()");
+  assert.notEqual(beforeChangedField.multiline, "MUST_NOT_CHANGE_LATER_FIELD");
   await rawPage("document.querySelector('#ordinary').addEventListener('input',()=>{document.querySelector('#multiline').readOnly=true;},{once:true}); true");
   result = await call("browser_fill_form", { tab, fields: [
     { target: editorTargets.get("Ordinary draft"), value: "PARTIAL_DRAFT_EFFECT" },
@@ -611,7 +623,7 @@ try {
   assert.equal(afterChangedField.ordinary, "PARTIAL_DRAFT_EFFECT");
   assert.equal(afterChangedField.multiline, beforeChangedField.multiline);
   assert.equal(afterChangedField.submissions, 0);
-  assert.equal(result.status, "unknown", JSON.stringify(result));
+  assert.equal(result.status, "unknown", JSON.stringify({ result, beforeChangedField, afterChangedField }));
   assert.equal(result.effect, "unknown"); assert.equal(result.repeat_safe, false);
   await rawPage("document.querySelector('#multiline').readOnly=false; true");
   check("a page change after the first edit preserves the partial draft and refuses replay");
@@ -677,13 +689,17 @@ try {
     writeFileSync(join(scratchRoot, `h6-visual-${name}.png`), Buffer.from(data, "base64"));
   };
   await rawWorker(`(() => {
-    globalThis.visualOriginalSendMessage=chrome.tabs.sendMessage.bind(chrome.tabs);
+    globalThis.visualOriginalExecuteScript=chrome.scripting.executeScript.bind(chrome.scripting);
     globalThis.visualPresentations=[]; globalThis.visualReadTarget=${targetVisual.physical};
-    chrome.tabs.sendMessage=async function(tabId,message,...rest) {
-      if(message.kind==='present') visualPresentations.push({tabId,signal:message.signal});
-      if(message.kind==='read_text' && tabId===visualReadTarget) await new Promise(resolve=>{globalThis.visualReleaseRead=resolve;});
-      return visualOriginalSendMessage(tabId,message,...rest);
-    }; return true;
+    chrome.scripting.executeScript=async function(details) {
+      const message=details?.args?.[0]; const tabId=details?.target?.tabId;
+      if(message?.kind==='present') visualPresentations.push({tabId,signal:message.signal});
+      if(message?.kind==='read_text' && tabId===visualReadTarget) {
+        await new Promise(resolve=>{globalThis.visualReleaseRead=resolve;});
+      }
+      return visualOriginalExecuteScript(details);
+    };
+    return true;
   })()`);
   const visualRequests = [];
   const beginVisual = (peer, name, args) => {
@@ -696,6 +712,7 @@ try {
     const reading = beginVisual(firstVisualPeer, "browser_read", { tab: targetVisual.handle });
     await until(async () => (await visualState(targetVisual.physical)).read > 0, "read scan on its background target", 5000);
     assert.equal((await visualState(unrelatedVisual.physical)).read, 0);
+    await until(() => rawWorker("typeof globalThis.visualReleaseRead==='function'"), "blocked visual read", 5000);
     await rawWorker("(visualReadTarget=null,visualReleaseRead(),true)");
     assert.equal((await reading.promise).structuredContent.status, "succeeded");
     const readDeliveries = await rawWorker("visualPresentations.filter(item=>item.signal.activity==='read' && item.signal.signal==='start').map(item=>item.tabId)");
@@ -774,7 +791,7 @@ try {
     assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
     check("hidden denied script clears its wheel while preserving its queued human notice");
   } finally {
-    await rawWorker("(()=>{chrome.tabs.sendMessage=visualOriginalSendMessage;globalThis.visualReleaseRead?.();if(globalThis.visualOriginalFrames)chrome.webNavigation.getAllFrames=visualOriginalFrames;globalThis.visualReleaseInventory?.();return true;})()");
+    await rawWorker("(()=>{chrome.scripting.executeScript=visualOriginalExecuteScript;globalThis.visualReleaseRead?.();if(globalThis.visualOriginalFrames)chrome.webNavigation.getAllFrames=visualOriginalFrames;globalThis.visualReleaseInventory?.();return true;})()");
     for (const request of visualRequests) request.peer.notify("notifications/cancelled", { requestId: request.id, reason: "visual fixture cleanup" });
     await Promise.allSettled(visualRequests.map(request => request.promise));
   }

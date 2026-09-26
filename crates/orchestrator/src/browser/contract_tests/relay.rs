@@ -1,8 +1,9 @@
 //! Relay and adapter contract tests.
 
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,10 +14,20 @@ use ghostlight_bridge::browser::{
 use ghostlight_bridge::framing::{read_native, write_native};
 
 use super::super::{
-    adapter_error, choose_browser, testing, AdapterRegistry, BrowserError, BrowserPort,
-    HeartbeatSettings, RelayBrowserPort,
+    adapter_error, choose_browser, testing, AdapterLifecycleObserver, AdapterRegistry,
+    BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort,
 };
 use super::{announce_adapter, announce_browser, capability, short_heartbeat, TEST_BROWSER};
+
+struct AttachedFlag(Arc<AtomicBool>);
+
+impl AdapterLifecycleObserver for AttachedFlag {
+    fn adapter_attached(&self, _browser_id: &str, _replaced: bool) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    fn adapter_detached(&self, _browser_id: &str) {}
+}
 
 #[test]
 fn adapter_local_interlock_is_a_decisive_typed_refusal() {
@@ -349,9 +360,6 @@ fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
                     panic!("the adapter is asked for one primitive");
                 };
                 if let BrowserFrame::Request { request } = frame {
-                    if matches!(request.command, BrowserCommand::SetPreloadScript { .. }) {
-                        continue;
-                    }
                     break request;
                 }
             };
@@ -543,10 +551,12 @@ fn routing_refuses_rather_than_guessing_or_failing_over() {
 }
 
 #[test]
-fn gecko_browser_attaches_and_negotiates_platform_cleanly() {
+fn runtime_capable_adapter_is_published_only_after_exact_installation_acknowledgement() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let attached = Arc::new(AtomicBool::new(false));
+    let observed_attached = Arc::clone(&attached);
+    let (release, hold) = mpsc::channel();
 
     let client = thread::spawn(move || {
         let mut stream = TcpStream::connect(address).unwrap();
@@ -555,58 +565,96 @@ fn gecko_browser_attaches_and_negotiates_platform_cleanly() {
             &BrowserFrame::Hello {
                 major: ADAPTER_PROTOCOL_MAJOR,
                 adapter_version: "1.3.8".into(),
-                browser_id: "browser_firefox_test".into(),
-                adapter_epoch: "adapter_test_gecko".into(),
-                browser_name: Some("Firefox".into()),
-                platform: Some(BrowserPlatform::Gecko),
-                attended: true,
+                browser_id: TEST_BROWSER.into(),
+                adapter_epoch: "adapter_runtime_test".into(),
+                browser_name: Some("Chrome".into()),
+                platform: Some(BrowserPlatform::Chromium),
+                attended: false,
                 capabilities: vec![
+                    capability(adapter_capability::PAGE_RUNTIME),
                     capability(adapter_capability::TABS),
-                    capability(adapter_capability::ADAPTER_ATTENTION),
                 ],
             },
         )
         .unwrap();
-
-        // Expect HelloAccepted
-        let accepted = read_native::<BrowserFrame>(&mut stream).unwrap().unwrap();
-        assert!(matches!(accepted, BrowserFrame::HelloAccepted { .. }));
-
-        // Expect SetPreloadScript (Glass injection)
-        let preload = read_native::<BrowserFrame>(&mut stream).unwrap().unwrap();
         assert!(matches!(
-            preload,
-            BrowserFrame::Request {
-                request: ghostlight_bridge::browser::BrowserRequest {
-                    command: BrowserCommand::SetPreloadScript { .. },
-                    ..
-                }
-            }
+            read_native::<BrowserFrame>(&mut stream).unwrap(),
+            Some(BrowserFrame::HelloAccepted { .. })
         ));
-
-        // Wait for ListTabs command and answer it
-        let request = loop {
-            let Some(frame) = read_native::<BrowserFrame>(&mut stream).unwrap() else {
-                panic!("expected request frame");
-            };
-            if let BrowserFrame::Request { request } = frame {
-                break request;
-            }
+        let BrowserFrame::Request { request } =
+            read_native::<BrowserFrame>(&mut stream).unwrap().unwrap()
+        else {
+            panic!("page runtime installation request");
         };
-
+        let BrowserCommand::InstallPageRuntime {
+            revision, sha256, ..
+        } = request.command
+        else {
+            panic!("closed page runtime mechanism");
+        };
+        assert!(!observed_attached.load(Ordering::SeqCst));
         write_native(
             &mut stream,
             &BrowserFrame::Receipt {
                 receipt: BrowserReceipt {
                     correlation: request.correlation,
-                    result: BrowserOutcome::Tabs {
-                        tabs: vec![PhysicalTab {
-                            tab_id: 101,
-                            title: "Firefox Home".into(),
-                            url: "about:home".into(),
-                            active: true,
-                            readiness: BrowserReadiness::Complete,
-                        }],
+                    result: BrowserOutcome::PageRuntimeInstalled { revision, sha256 },
+                },
+            },
+        )
+        .unwrap();
+        hold.recv().unwrap();
+    });
+
+    let (stream, _) = listener.accept().unwrap();
+    let port = RelayBrowserPort::new("service_test".into());
+    port.set_lifecycle_observer(Arc::new(AttachedFlag(Arc::clone(&attached))));
+    port.attach(stream).unwrap();
+    assert!(attached.load(Ordering::SeqCst));
+    assert!(port.is_connected());
+    release.send(()).unwrap();
+    client.join().unwrap();
+}
+
+#[test]
+fn mismatched_runtime_acknowledgement_retires_the_unpublished_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let attached = Arc::new(AtomicBool::new(false));
+
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        write_native(
+            &mut stream,
+            &BrowserFrame::Hello {
+                major: ADAPTER_PROTOCOL_MAJOR,
+                adapter_version: "1.3.8".into(),
+                browser_id: TEST_BROWSER.into(),
+                adapter_epoch: "adapter_runtime_mismatch".into(),
+                browser_name: Some("Chrome".into()),
+                platform: Some(BrowserPlatform::Chromium),
+                attended: false,
+                capabilities: vec![capability(adapter_capability::PAGE_RUNTIME)],
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_native::<BrowserFrame>(&mut stream).unwrap(),
+            Some(BrowserFrame::HelloAccepted { .. })
+        ));
+        let BrowserFrame::Request { request } =
+            read_native::<BrowserFrame>(&mut stream).unwrap().unwrap()
+        else {
+            panic!("page runtime installation request");
+        };
+        write_native(
+            &mut stream,
+            &BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: request.correlation,
+                    result: BrowserOutcome::PageRuntimeInstalled {
+                        revision: 1,
+                        sha256: "0".repeat(64),
                     },
                 },
             },
@@ -615,40 +663,13 @@ fn gecko_browser_attaches_and_negotiates_platform_cleanly() {
     });
 
     let (stream, _) = listener.accept().unwrap();
-    port.attach(stream).unwrap();
-
-    let summaries = port.connected_browsers();
-    assert_eq!(summaries.len(), 1);
-    assert_eq!(summaries[0].id, "browser_firefox_test");
-    assert_eq!(summaries[0].name.as_deref(), Some("Firefox"));
-    assert_eq!(summaries[0].platform, BrowserPlatform::Gecko);
-    assert!(summaries[0].attended);
-
-    let cancelled = AtomicBool::new(false);
-    let deadline = Instant::now() + Duration::from_secs(5);
-
-    let outcome = port
-        .call(
-            "browser_firefox_test",
-            "workspace_test",
-            BrowserCommand::ListTabs,
-            deadline,
-            &cancelled,
-        )
-        .unwrap();
-
-    assert_eq!(
-        outcome,
-        BrowserOutcome::Tabs {
-            tabs: vec![PhysicalTab {
-                tab_id: 101,
-                title: "Firefox Home".into(),
-                url: "about:home".into(),
-                active: true,
-                readiness: BrowserReadiness::Complete,
-            }],
-        }
-    );
-
+    let port = RelayBrowserPort::new("service_test".into());
+    port.set_lifecycle_observer(Arc::new(AttachedFlag(Arc::clone(&attached))));
+    assert!(matches!(
+        port.attach(stream),
+        Err(BrowserError::Protocol(_))
+    ));
+    assert!(!attached.load(Ordering::SeqCst));
+    assert!(!port.is_registered(TEST_BROWSER));
     client.join().unwrap();
 }

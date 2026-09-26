@@ -383,7 +383,10 @@ try {
   await succeed("browser_history", { tab: localTab, action: "back" });
   assert.match((await succeed("browser_read", { tab: localTab })).facts.text, /Installed interaction acceptance/);
   await succeed("browser_tabs", { action: "list" });
-  check("history restores the prior document and session tab listing remains usable");
+  const workspaces = await succeed("browser_workspace", { action: "list" });
+  assert.ok(workspaces.facts.count >= 1);
+  assert.ok(workspaces.facts.workspaces.some(workspace => workspace.active && workspace.tab_count >= 1));
+  check("history restores the prior document and live workspace listing remains usable");
 
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",

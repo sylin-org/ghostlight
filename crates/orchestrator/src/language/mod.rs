@@ -27,6 +27,7 @@ use url::Url;
 const DEFAULT_TIMEOUT_MS: u64 = 8_000;
 const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 30_000;
+pub(super) const DEFAULT_FILL_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
 pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
@@ -554,7 +555,7 @@ pub struct FillForm {
     /// Optional expectation checked after the applied effect.
     #[serde(default)]
     pub expect: Option<Postcondition>,
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_fill_timeout")]
     pub timeout_ms: u64,
 }
 
@@ -2270,6 +2271,9 @@ fn has_duplicates(values: &[String]) -> bool {
 fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT_MS
 }
+fn default_fill_timeout() -> u64 {
+    DEFAULT_FILL_TIMEOUT_MS
+}
 fn default_max_chars() -> usize {
     8_000
 }
@@ -2399,6 +2403,14 @@ mod tests {
         };
         assert_eq!(navigate.timeout_ms, 8_000);
         assert_eq!(navigate.reuse, ReusePolicy::Domain);
+        let Operation::FillForm(fill) = decode(
+            "browser_fill_form",
+            json!({"fields":[{"target":"target_example","value":"Ada"}]}),
+        )
+        .unwrap() else {
+            panic!("wrong operation")
+        };
+        assert_eq!(fill.timeout_ms, 30_000);
         let Operation::ReadPage(read) = decode("browser_read", json!({})).unwrap() else {
             panic!("wrong operation")
         };

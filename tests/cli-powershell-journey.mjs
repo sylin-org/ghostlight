@@ -73,10 +73,6 @@ class NativePeer {
       const value = JSON.parse(this.buffer.subarray(4, length + 4).toString("utf8"));
       this.buffer = this.buffer.subarray(length + 4);
 
-      if (value.kind === "request" && value.request?.correlation === "glass-injection") {
-        continue;
-      }
-
       for (const observer of [...this.observers]) {
         if (!observer.predicate(value)) continue;
         this.observers.splice(this.observers.indexOf(observer), 1);
@@ -193,7 +189,7 @@ try {
   native.send({
     kind: "hello",
     // The relay refuses a stale major outright, so this has to track ADAPTER_PROTOCOL_MAJOR.
-    major: 2,
+    major: 3,
     adapter_version: "1.0.0",
     browser_id: "browser_psjourney",
     adapter_epoch: "adapter_psjourney",

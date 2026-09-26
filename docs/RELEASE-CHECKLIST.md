@@ -263,15 +263,12 @@ Evidence: [2026-08-25 store resubmission](testing/extension-store-resubmission-2
 custody ZIP `9ae88e67...` uploaded over the canceled stale review (`f7b9a6ad...`), submitted
 STAGED_PUBLISH, now PENDING_REVIEW; public listing still serves 0.8.0.
 
-#### Mozilla Firefox adapter (AMO signing and XPI distribution)
+#### Withdrawn Firefox channel
 
-- [x] Lint `extension-firefox` (`npx web-ext lint --source-dir extension-firefox`) confirming zero
-  errors and zero warnings.
-- [x] Package deterministic ZIP and XPI archives via `scripts/package-extension-firefox.ps1 -MakeXpi`.
-- [x] Automate unlisted cryptographic signing with Mozilla Add-ons (AMO) via
-  `scripts/publish-extension-firefox.ps1 -Action SignUnlisted -Execute`.
-- [x] Verify signed artifact (`dist/ghostlight-firefox-extension-v<version>.signed.xpi`) carries Mozilla
-  root certificate signatures (`META-INF/mozilla.rsa`) and installs permanently into standard Firefox profiles.
+- [x] ADR-0183 removes Firefox from active install, CI, candidate assembly, signing, submission,
+  publication, and support claims until ordinary-session full parity is possible.
+- [x] No Firefox artifact is part of this release candidate. Do not submit an older or locally
+  generated XPI to Mozilla Add-ons.
 
 
 ### G4. Pass the Ubuntu GNOME Wayland installed-product lane

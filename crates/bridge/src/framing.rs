@@ -1,4 +1,4 @@
-//! Bounded newline and Chromium native-message framing.
+//! Bounded newline and browser native-message framing.
 
 use std::io::{self, BufRead, Read, Write};
 
@@ -79,7 +79,7 @@ pub fn write_json_line<T: Serialize>(writer: &mut impl Write, value: &T) -> Resu
     Ok(())
 }
 
-/// Read one Chromium native-message frame, or `None` at clean EOF.
+/// Read one browser native-message frame, or `None` at clean EOF.
 pub fn read_native<T: DeserializeOwned>(reader: &mut impl Read) -> Result<Option<T>, FrameError> {
     let Some(payload) = read_length_frame(reader)? else {
         return Ok(None);
@@ -108,7 +108,7 @@ pub fn read_length_frame(reader: &mut impl Read) -> Result<Option<Vec<u8>>, Fram
     Ok(Some(payload))
 }
 
-/// Write one Chromium native-message frame and flush it.
+/// Write one browser native-message frame and flush it.
 pub fn write_native<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), FrameError> {
     let payload = serde_json::to_vec(value)?;
     write_length_frame(writer, &payload)

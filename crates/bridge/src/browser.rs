@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod documents;
 
 /// Adapter protocol major negotiated end to end by the extension and orchestrator.
-pub const ADAPTER_PROTOCOL_MAJOR: u16 = 2;
+pub const ADAPTER_PROTOCOL_MAJOR: u16 = 3;
 
 /// Maximum decoded bytes carried by one host-to-extension command chunk.
 pub const COMMAND_CHUNK_PAYLOAD_BYTES: usize = 512 * 1024;
@@ -16,6 +16,8 @@ pub const COMMAND_TRANSFER_MAX_CHUNKS: u16 = 64;
 
 /// Stable names for independently negotiable physical browser capabilities.
 pub mod adapter_capability {
+    /// Installation of the service-owned page runtime.
+    pub const PAGE_RUNTIME: &str = "page_runtime";
     /// Document inventory and execution bound to exact browser document identities.
     pub const DOCUMENT_SCOPE: &str = "document_scope";
     /// Physical tab, window, grouping, and zoom mechanisms.
@@ -96,13 +98,10 @@ pub struct AdapterCapability {
 /// Target browser platform/engine family.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum BrowserPlatform {
-    /// Chromium-family browsers (Chrome, Edge, Brave, etc.) using CDP.
+    /// Chromium-family browsers (Chrome, Edge, Brave, etc.).
     #[serde(rename = "ghostlight/chromium")]
     #[default]
     Chromium,
-    /// Gecko-family browsers (Firefox) using WebDriver BiDi.
-    #[serde(rename = "ghostlight/gecko")]
-    Gecko,
 }
 
 /// Browser-local readiness observed by the adapter.
@@ -666,19 +665,12 @@ pub enum BrowserCommand {
         points: Vec<PhysicalPoint>,
         focused: bool,
     },
-    /// A raw WebDriver BiDi JSON-RPC command for the translation layer.
-    BiDi {
-        tab_id: u64,
-        payload: crate::bidi::Command,
+    /// Install the exact service-owned page runtime for future and already attached documents.
+    InstallPageRuntime {
+        revision: u16,
+        sha256: String,
+        script: String,
     },
-    /// A raw CDP JSON-RPC command for the Chromium extension dumb shell.
-    Cdp {
-        tab_id: u64,
-        method: String,
-        params: serde_json::Value,
-    },
-    /// Install a preload script into the adapter for all debugged targets (MV3 compatible replacement for BiDi preload).
-    SetPreloadScript { script: String },
     /// Run one primitive inside an application-selected physical document scope.
     InDocuments {
         scope: documents::DocumentScope,
@@ -850,6 +842,8 @@ pub enum BrowserCommand {
         fields: Vec<PhysicalField>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         submit_locator: Option<String>,
+        /// Adapter-side budget for the complete physical fill and its terminal verification.
+        timeout_ms: u64,
     },
     /// Type text through browser input events after credential preflight.
     TypeText {
@@ -1010,10 +1004,8 @@ impl BrowserCommand {
             | Self::TypeFocused { .. }
             | Self::PressKey { .. } => capability::KEYBOARD_INPUT,
             Self::UploadFiles { .. } | Self::DropImageAt { .. } => capability::FILES,
-            Self::EvaluateScript { .. }
-            | Self::BiDi { .. }
-            | Self::Cdp { .. }
-            | Self::SetPreloadScript { .. } => capability::SCRIPT,
+            Self::EvaluateScript { .. } => capability::SCRIPT,
+            Self::InstallPageRuntime { .. } => capability::PAGE_RUNTIME,
             Self::Observe { .. } => capability::OBSERVATION,
             Self::InspectDialog { .. } | Self::HandleDialog { .. } => capability::DIALOGS,
             Self::ReadDiagnostics { .. } | Self::ClearDiagnostics { .. } => capability::DIAGNOSTICS,
@@ -1098,12 +1090,8 @@ pub enum BrowserOutcome {
         observation: documents::DocumentObservation,
         result: Box<BrowserOutcome>,
     },
-    /// A raw WebDriver BiDi JSON-RPC response from the translation layer.
-    BiDi { response: crate::bidi::Response },
-    /// A raw CDP JSON-RPC response from the Chromium extension dumb shell.
-    Cdp { result: serde_json::Value },
-    /// Preload script installed.
-    SetPreloadScript,
+    /// The adapter installed and verified the exact service-owned page runtime.
+    PageRuntimeInstalled { revision: u16, sha256: String },
     /// Physical tab list.
     Tabs { tabs: Vec<PhysicalTab> },
     /// A physical tab and its window were focused.
@@ -1398,7 +1386,7 @@ pub enum BrowserFrame {
         /// it exists so a human or a model can tell two connected browsers apart.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         browser_name: Option<String>,
-        /// Target browser platform/engine family (e.g., `ghostlight/chromium`, `ghostlight/gecko`).
+        /// Target browser platform/engine family (`ghostlight/chromium`).
         ///
         /// Absent from an adapter that predates ADR-0179. Defaults to Chromium for backward compatibility.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1470,12 +1458,12 @@ mod tests {
         adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
         BrowserOutcome, BrowserPlatform, BrowserReceipt, BrowserRequest, CaptureScope,
         DiagnosticDetail, DiagnosticEntry, DiagnosticSource, DiagnosticsLayer, DiagnosticsState,
-        EncodedRecording, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalRectangle,
-        PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal, RecordingDelivery,
-        RecordingDestination, RecordingState, RecordingStopReason, RuntimeControlState,
-        SettlePolicy, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
-        COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS, RECORDING_LOCAL_MAX_BYTES,
-        RECORDING_TRANSFER_MAX_BYTES,
+        EncodedRecording, PhysicalActionSubject, PhysicalField, PhysicalRecordingSummary,
+        PhysicalRectangle, PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal,
+        RecordingDelivery, RecordingDestination, RecordingState, RecordingStopReason,
+        RuntimeControlState, SettlePolicy, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR,
+        COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
+        RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
     };
 
     #[test]
@@ -1658,18 +1646,18 @@ mod tests {
             "adapter_version": "1.0.0",
             "browser_id": "browser_test",
             "adapter_epoch": "adapter_test",
-            "platform": "ghostlight/gecko",
+            "platform": "ghostlight/chromium",
             "capabilities": []
         });
         assert_eq!(
-            serde_json::from_value::<BrowserFrame>(hello).expect("gecko hello deserializes"),
+            serde_json::from_value::<BrowserFrame>(hello).expect("chromium hello deserializes"),
             BrowserFrame::Hello {
                 major: ADAPTER_PROTOCOL_MAJOR,
                 adapter_version: "1.0.0".into(),
                 browser_id: "browser_test".into(),
                 adapter_epoch: "adapter_test".into(),
                 browser_name: None,
-                platform: Some(BrowserPlatform::Gecko),
+                platform: Some(BrowserPlatform::Chromium),
                 attended: false,
                 capabilities: vec![],
             }
@@ -1705,7 +1693,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_two_mechanisms_round_trip() {
+    fn protocol_three_mechanisms_round_trip() {
         let frames = [
             BrowserFrame::Request {
                 request: BrowserRequest {
@@ -1811,6 +1799,21 @@ mod tests {
                     },
                 },
             },
+            BrowserFrame::Request {
+                request: BrowserRequest {
+                    correlation: "physical-fill".into(),
+                    workspace: "workspace-1".into(),
+                    command: BrowserCommand::Fill {
+                        tab_id: 7,
+                        fields: vec![PhysicalField {
+                            locator: "locator-1".into(),
+                            value: "Ada".into(),
+                        }],
+                        submit_locator: None,
+                        timeout_ms: 29_250,
+                    },
+                },
+            },
             BrowserFrame::CommandChunk {
                 transfer_id: "chunk_1".into(),
                 correlation: "physical-upload".into(),
@@ -1832,6 +1835,15 @@ mod tests {
 
     #[test]
     fn new_commands_require_independent_physical_capabilities() {
+        assert_eq!(
+            BrowserCommand::InstallPageRuntime {
+                revision: 1,
+                sha256: "0".repeat(64),
+                script: "runtime".into(),
+            }
+            .required_capability(),
+            adapter_capability::PAGE_RUNTIME
+        );
         assert_eq!(
             BrowserCommand::ResizeWindow {
                 tab_id: 1,
@@ -1880,6 +1892,40 @@ mod tests {
             .required_capability(),
             adapter_capability::CAPTURE
         );
+    }
+
+    #[test]
+    fn page_runtime_installation_round_trips_with_exact_identity() {
+        let frames = [
+            BrowserFrame::Request {
+                request: BrowserRequest {
+                    correlation: "runtime-1".into(),
+                    workspace: "system".into(),
+                    command: BrowserCommand::InstallPageRuntime {
+                        revision: 1,
+                        sha256: "a".repeat(64),
+                        script: "globalThis.runtime = true;".into(),
+                    },
+                },
+            },
+            BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: "runtime-1".into(),
+                    result: BrowserOutcome::PageRuntimeInstalled {
+                        revision: 1,
+                        sha256: "a".repeat(64),
+                    },
+                },
+            },
+        ];
+        for frame in frames {
+            let encoded = serde_json::to_vec(&frame).expect("runtime frame serializes");
+            assert_eq!(
+                serde_json::from_slice::<BrowserFrame>(&encoded)
+                    .expect("runtime frame deserializes"),
+                frame
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # ADR-0179: Hub-and-Spoke Browser Adapters and Firefox Registration
 
-Date: 2026-09-16. Status: Accepted.
+Date: 2026-09-16. Status: Superseded by ADR-0183.
 
 Builds on ADR-0050, ADR-0061, ADR-0084, ADR-0114, ADR-0178, and Dossier 19.
 

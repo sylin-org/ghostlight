@@ -207,9 +207,12 @@ history live here.
 
 | [0176](0176-ergonomic-pipeline-simplification.md) | Ergonomic pipeline simplification, invariant centralization, and settle policy unification | Accepted |
 | [0177](0177-modular-cli-decomposition-and-execution-templates.md) | Modular CLI decomposition and universal execution templates | Accepted |
-| [0178](0178-browser-adapter-bidi-translation-and-portable-ui.md) | Browser adapter BiDi translation and portable UI: internal BiDi Rosetta Stone, dumb shell, and runtime-injected Glass Web Components | Accepted |
-| [0179](0179-hub-and-spoke-browser-adapters-and-firefox-registration.md) | Hub-and-spoke browser adapters and Firefox registration: platform discriminator, engine-agnostic core, and Mozilla native host integration | Accepted |
+| [0178](0178-browser-adapter-bidi-translation-and-portable-ui.md) | Browser adapter BiDi translation and portable UI: internal BiDi Rosetta Stone, dumb shell, and runtime-injected Glass Web Components | Superseded by [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md) |
+| [0179](0179-hub-and-spoke-browser-adapters-and-firefox-registration.md) | Hub-and-spoke browser adapters and Firefox registration: platform discriminator, engine-agnostic core, and Mozilla native host integration | Superseded by [0183](0183-withdraw-firefox-until-ordinary-session-parity.md) |
 | [0180](0180-windows-system-shutdown-hygiene.md) | Windows system shutdown hygiene: hidden top-level window session listener, non-blocking exit retention, and fallback exit guard | Accepted (builds on [0119](0119-durable-desktop-authority-disposable-workbench.md)) |
+| [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md) | Capability-negotiated thin adapters and an acknowledged page runtime: closed mechanisms, handler-derived declarations, exact runtime readiness, and truthful Firefox scope | Accepted (supersedes [0178](0178-browser-adapter-bidi-translation-and-portable-ui.md) Decisions 1 and 2; Decision 6 superseded by [0183](0183-withdraw-firefox-until-ordinary-session-parity.md)) |
+| [0182](0182-budgeted-form-fill-transaction.md) | One budgeted physical form-fill transaction: pass the remaining adapter budget across the bridge, preflight once, verify the complete batch once after native input, and give multi-field fills a realistic default | Accepted (amends [0036](0036-form-fill-tool.md) Decision 5 and [0169](0169-extension-pipeline-and-resource-hygiene.md) Decision 2; builds on [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md)) |
+| [0183](0183-withdraw-firefox-until-ordinary-session-parity.md) | Withdraw Firefox until every Ghostlight capability works in the user's ordinary visible, authenticated, already-running session | Accepted (supersedes [0179](0179-hub-and-spoke-browser-adapters-and-firefox-registration.md) and [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md) Decision 6) |
 
 
 ## Conventions

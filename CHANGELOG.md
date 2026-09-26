@@ -5,6 +5,41 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.11] - 2026-09-26
+
+### Added
+
+- Install one immutable, SHA-256-bound page runtime through an acknowledged browser command before
+  publishing a Chromium adapter connection. Existing and future out-of-process frames receive the
+  same runtime through one debugger-lifecycle seam (ADR-0181).
+- Derive Chromium capability negotiation from its executable handler inventory so the adapter
+  cannot advertise an unimplemented mechanism.
+
+### Changed
+
+- Align the service and Chromium adapter at version 1.3.11 and adapter protocol major 3 for the
+  breaking closed-command cleanup.
+- Execute form filling as one deadline-bound physical transaction: all-field preflight, native
+  input, debugger release, and one batch retention check before optional submission (ADR-0182).
+- Require Chromium 125 or newer for immediate page-runtime installation in existing documents.
+
+### Removed
+
+- Remove the unused raw BiDi/CDP bridge surface and Chromium raw-CDP command path.
+- Remove fire-and-forget preload injection and every runnable headless browser-test mechanism.
+- Withdraw the partial Firefox adapter, native-host registration, packaging, CI, publisher, and
+  current support claims. Firefox can return only with full Ghostlight capability parity in the
+  user's ordinary visible, authenticated, already-running session (ADR-0183).
+- Remove a retired Ghostlight-owned Firefox native-host registration on the next install or
+  uninstall while leaving foreign registration state untouched.
+
+### Fixed
+
+- Keep the adapter's form-fill work inside the orchestrator's remaining invocation budget instead
+  of multiplying fixed stability waits by field count.
+- Install the page runtime in out-of-process iframes before resuming their debugger targets.
+- Make installed acceptance invoke every advertised tool, including live workspace discovery.
+
 ## [1.3.10] - 2026-09-25
 
 ### Fixed

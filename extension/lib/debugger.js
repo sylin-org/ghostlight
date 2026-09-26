@@ -11,6 +11,13 @@
     }
 
     const tabs = new Map();
+    let pageRuntimeScript = null;
+    const iframeAutoAttach = Object.freeze({
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+      filter: Object.freeze([{ type: "iframe", exclude: false }])
+    });
     // The worker supplies the negotiated runtime state. Restored tabs start with
     // ordinary focus until the service confirms that browser work is active.
     let focusEmulationEnabled = false;
@@ -29,7 +36,10 @@
           focusEmulated: false,
           focusAttempted: false,
           dialog: null,
-          domains: new Set()
+          domains: new Set(),
+          runtimeScript: null,
+          runtimeError: null,
+          runtimeTasks: new Set()
         };
         tabs.set(tabId, state);
       }
@@ -60,7 +70,66 @@
       state.focusAttempted = false;
       state.generation += 1;
       state.domains.clear();
+      state.runtimeScript = null;
+      state.runtimeError = null;
+      state.runtimeTasks.clear();
     }
+
+    function trackRuntimeTask(state, generation, work) {
+      let guarded;
+      guarded = Promise.resolve(work)
+        .catch((error) => {
+          if (state.generation === generation) state.runtimeError = error;
+        })
+        .finally(() => state.runtimeTasks.delete(guarded));
+      state.runtimeTasks.add(guarded);
+      return guarded;
+    }
+
+    async function waitForRuntimeTasks(state) {
+      while (state.runtimeTasks.size) {
+        await Promise.all(Array.from(state.runtimeTasks));
+      }
+      if (state.runtimeError) throw state.runtimeError;
+    }
+
+    async function installRuntimeInSession(target, enablePage) {
+      if (enablePage) await debuggerApi.sendCommand(target, "Page.enable");
+      await debuggerApi.sendCommand(target, "Page.addScriptToEvaluateOnNewDocument", {
+        source: pageRuntimeScript,
+        runImmediately: true
+      });
+      await debuggerApi.sendCommand(target, "Target.setAutoAttach", iframeAutoAttach);
+    }
+
+    async function installRuntimeInTab(tabId, state) {
+      if (!pageRuntimeScript || state.runtimeScript === pageRuntimeScript) {
+        await waitForRuntimeTasks(state);
+        return;
+      }
+      state.runtimeError = null;
+      await installRuntimeInSession({ tabId }, false);
+      await waitForRuntimeTasks(state);
+      state.runtimeScript = pageRuntimeScript;
+    }
+
+    debuggerApi.onEvent?.addListener((source, method, params) => {
+      if (method !== "Target.attachedToTarget" || !source.tabId || !params?.sessionId) return;
+      const state = tabs.get(source.tabId);
+      if (!state?.attached || !pageRuntimeScript || params.targetInfo?.type !== "iframe") return;
+      const generation = state.generation;
+      const child = { ...source, sessionId: params.sessionId };
+      const work = (async () => {
+        try {
+          await installRuntimeInSession(child, true);
+        } finally {
+          if (params.waitingForDebugger) {
+            await debuggerApi.sendCommand(child, "Runtime.runIfWaitingForDebugger");
+          }
+        }
+      })();
+      trackRuntimeTask(state, generation, work);
+    });
 
     async function detachSession(tabId, state) {
       if (!state.attached) return;
@@ -109,17 +178,8 @@
           state.attached = true;
           await debuggerApi.sendCommand({ tabId }, "Page.enable");
           state.domains.add("Page");
-          
-          if (globalThis.ghostlightPreloadScript) {
-            try {
-              await debuggerApi.sendCommand({ tabId }, "Page.addScriptToEvaluateOnNewDocument", { source: globalThis.ghostlightPreloadScript });
-              await debuggerApi.sendCommand({ tabId }, "Runtime.evaluate", { expression: globalThis.ghostlightPreloadScript });
-            } catch (e) {
-              console.warn("Ghostlight preload injection failed:", e);
-              globalThis.lastPreloadError = String(e?.message || e);
-            }
-          }
         }
+        await installRuntimeInTab(tabId, state);
         await syncFocus(tabId, state);
         if (!state.attached || state.closing) throw new Error("The debugger session was released during setup.");
       } catch (error) {
@@ -251,6 +311,17 @@
       return Array.from(tabs.values()).filter((state) => state.attached).length;
     }
 
+    async function installPageRuntime(script) {
+      if (typeof script !== "string" || script.length === 0) {
+        throw new TypeError("page runtime script must be a non-empty string");
+      }
+      pageRuntimeScript = script;
+      const results = await Promise.allSettled(Array.from(tabs, ([tabId, state]) =>
+        state.attached ? enqueue(tabId, state, () => installRuntimeInTab(tabId, state)) : Promise.resolve()));
+      const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+      if (errors.length) throw new AggregateError(errors, "Could not install the page runtime in every attached tab.");
+    }
+
     return Object.freeze({
       acquire,
       retain,
@@ -265,7 +336,8 @@
       detached,
       forget,
       detachAll,
-      attachedCount
+      attachedCount,
+      installPageRuntime
     });
   }
 

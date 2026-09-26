@@ -1,12 +1,15 @@
-# Ghostlight in Browser: Mozilla Firefox Add-ons (AMO) listing
+# Withdrawn Firefox Add-ons Candidate
 
-Last updated: 2026-09-17
+Last updated: 2026-09-26
 
-This is repository-local candidate copy for Mozilla Add-ons (AMO) and self-distributed signed XPI
-packages. Do not change the public listing or submit a package until the owner approves the
-provenance-verified artifacts and compatibility evidence.
+Status: Withdrawn. Never submit or publish this copy.
 
-The extension ID is pinned as `ghostlight@sylin.org` in `extension-firefox/manifest.json`.
+ADR-0183 withdrew Firefox from the active product because this partial adapter could not deliver
+Ghostlight's normal page capabilities in the user's ordinary visible session. The former listing
+copy is retained below as historical evidence only. Its source path and publisher tooling were
+removed from the active tree and remain recoverable from Git history.
+
+The historical extension ID was `ghostlight@sylin.org`.
 
 ## Listing details
 
@@ -34,9 +37,14 @@ Developer Tools, Web Development
 Ghostlight gives compatible AI agents a controlled, visible workspace in the Firefox browser you
 already use, with your existing signed-in sessions and local human control.
 
-You can watch tab management, page reading, navigation, clicks, typing, form work, screenshots, and
-other requested actions; pause or resume the session at any time with keyboard shortcuts; and
-preserve controlled tabs as visible evidence.
+The Firefox adapter provides the browser-shell mechanisms it can execute completely: listing and
+focusing controlled tabs, navigation, history, reload, zoom, window sizing, attention, and tab
+closure when your local preserve-tabs choice allows it. Ghostlight negotiates these capabilities
+at connection time instead of pretending that unsupported page operations are available.
+
+Page reading, clicks, typing, form work, screenshots, scripts, and other document-local operations
+are not advertised by this Firefox adapter. Use a compatible Chromium adapter when those
+capabilities are needed.
 
 The extension is a thin, policy-free adapter for the separately installed Ghostlight native service.
 Policy, terminal receipts, governance, audit history, and model-facing tools stay in the local
@@ -84,16 +92,12 @@ https://sylin.org/ghostlight/privacy/
 | Permission | Purpose and justification |
 |---|---|
 | `nativeMessaging` | Required to exchange typed 32-bit framed JSON commands with the local Ghostlight service (`ghostlight-browser-connector`). This is the sole communication channel. |
-| `tabs` | Required to enumerate, open, focus, navigate, and close tabs explicitly controlled by the AI agent, and to capture tab screenshots via `tabs.captureTab`. |
+| `tabs` | Required to enumerate, focus, navigate, reload, traverse history, zoom, and close tabs explicitly controlled by the AI agent. The adapter does not read page content or capture screenshots. |
 | `webNavigation` | Required to observe document commitment and URL changes in controlled tabs to ensure governance preflights land on authorized origins. |
-| `scripting` | Required to register preload content scripts and inject Ghostlight Web Component visual cues (indicator ribbon, controlled border) at document start. |
-| `storage` | Required to persist the local extension-minted browser ID and user preferences (such as user hold states) across restarts. |
-| `activeTab` | Required to interact with the active tab when triggered by user toolbar popup or shortcut actions. |
-| `alarms` | Required for periodic reconnection and heartbeat retries to the local native connector when idle. |
-| `<all_urls>` | Required because the user may instruct their AI agent to navigate and automate tasks across arbitrary user-specified websites. |
+| `storage` | Required to persist the opaque local extension-minted browser ID and the preserve-tabs preference across restarts. It does not store URLs, titles, page content, or history. |
 
-## Source code submission
+## Historical source submission note
 
-The `extension-firefox/` package consists entirely of clean, human-readable vanilla JavaScript
-without transpilation, minification, or obfuscation. No supplementary source build archive is
-required by Mozilla policies.
+The removed `extension-firefox/` package consisted entirely of human-readable vanilla JavaScript
+without transpilation, minification, or obfuscation. This note does not authorize or describe a
+current submission.
