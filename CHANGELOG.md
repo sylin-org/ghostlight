@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Update `rustls` to 0.23.45 for RUSTSEC-2026-0285.
 - Keep the adapter's form-fill work inside the orchestrator's remaining invocation budget instead
   of multiplying fixed stability waits by field count.
 - Install the page runtime in out-of-process iframes before resuming their debugger targets.

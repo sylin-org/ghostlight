@@ -60,6 +60,8 @@ adapters remain on their prior adapter protocol until a future coordinated relea
   budgeted physical transaction in ADR-0182: all-field preflight, input dispatch, lease release,
   and one complete-batch retention check before optional submission. The normal form budget is 30
   seconds and the adapter receives the orchestrator's remaining deadline-derived share.
+- Updated the locked `rustls` dependency to 0.23.45 for RUSTSEC-2026-0285 after the live advisory
+  database rejected the earlier lockfile during CI.
 - Post-withdrawal verification is green: formatting, strict workspace clippy, 560 Rust tests, 283
   Chromium adapter tests, launchers, portable packaging, policy grammar, repository integrity,
   and the complete Windows hardening suite. Its browser lanes opened visible Chromium windows.

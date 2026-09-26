@@ -31,7 +31,7 @@ function fixture() {
     chrome: { tabs: { get: async id => ({ id, status: "complete" }) } },
     physicalTab: tab => tab,
     FILL_RETAINED_STABLE_MS: 0,
-    FILL_RETAINED_LIMIT_MS: 1,
+    FILL_RETAINED_LIMIT_MS: 100,
     FILL_RETAINED_POLL_MS: 0,
     setTimeout
   };
