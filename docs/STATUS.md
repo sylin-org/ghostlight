@@ -11,6 +11,15 @@ until a coordinated release is actually published. The 1.3.11 Chrome adapter mus
 rather than public until the matching 1.3.11 service is public; the store must not auto-update
 protocol-2 users into an incompatible adapter.
 
+## Chrome Adapter 1.3.11 Submitted for Staged Review (2026-09-26)
+
+The deterministic Chrome adapter ZIP with SHA-256
+`56ebf23d472afd876f01ff2765ee89bb03ef3b1f90057a680d4ab07ca5122714` uploaded successfully and
+was submitted with `STAGED_PUBLISH`. Chrome reports adapter 1.3.11 as `PENDING_REVIEW`; the public
+channel remains on compatible adapter 1.3.8. No Firefox upload, signing, or submission occurred.
+The custody and store-state record is
+[`docs/testing/chrome-store-submission-2026-09-26.md`](testing/chrome-store-submission-2026-09-26.md).
+
 ## Firefox Withdrawn Until Ordinary-Session Full Parity (2026-09-26)
 
 ADR-0183 removes Firefox from the active product. The partial adapter could execute browser-shell
