@@ -287,13 +287,6 @@ Refresh tokens can still expire or be revoked. Request user interaction only for
 actual login, consent or credential-management step that requires it. If a tool blocks
 dashboard navigation, respect the restriction and use the authorized API route.
 
-## Withdrawn Firefox channel
-
-ADR-0183 withdraws Firefox from the active product until it can provide full capability parity in
-an ordinary visible, authenticated, already-running session. Do not build, sign, submit, or publish
-a Firefox artifact. The former procedure and candidate copy remain in Git history and in the
-withdrawal-marked legal record; they are not release instructions.
-
 ## Rollback
 
 Published versions and tags remain immutable. If a release is defective, mark the affected channel

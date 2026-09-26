@@ -290,8 +290,7 @@ and publishes it as a release asset (introduced 2026-07; earlier releases carry 
 attestations but no SBOM), alongside per-file SHA-256 checksums and build-provenance
 attestations. You can verify what you downloaded against the published checksums and confirm its
 provenance with one command before deploying. The public service channels currently serve 1.3.10.
-The Chrome Web Store adapter serves 1.3.8 and is compatible with the service release. Firefox is
-not an active supported product (ADR-0183).
+The Chrome Web Store adapter serves 1.3.8 and is compatible with the service release.
 The workflow builds and attests a candidate without publishing it; each channel advances only after
 an explicit owner-approved operation and public reconciliation. The dependency tree is deliberately
 lean; managed HTTPS uses rustls with the pure-Rust ring provider.

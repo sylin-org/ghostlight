@@ -28,7 +28,7 @@ Choose another approach when its primary job matches yours more closely:
 
 ## Where Ghostlight is narrower
 
-Ghostlight is a local Chromium workspace product. It does not target Firefox, stealth automation,
+Ghostlight is a local Chromium workspace product. It does not target stealth automation,
 scraping farms, remote browser hosting, or a shared multi-tenant browser service. It is also not a
 replacement for Playwright test authoring or Chrome performance tooling.
 

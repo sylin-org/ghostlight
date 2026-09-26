@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-26 (adapter architecture implementation after 1.3.10 publication).
 
+## Chromium-Only Browser Offering (2026-09-26)
+
+ADR-0184 removes Firefox from the product offering and from active greenfield and public
+guidance. Chrome, Edge, Brave, and Chromium are the supported browsers. The former Firefox
+adapter, package, installer discovery, CI, and publisher paths were removed by ADR-0183.
+The ownership-checked native-host cleanup remains for older installations. Historical
+ADRs, research, release evidence, and withdrawn listing copy remain as records, not
+current product instructions. No future Firefox channel is promised.
+
 ## Ghostlight 1.3.11 Source Version Prepared (2026-09-26, unpublished)
 
 The service, desktop, package-source manifests, and Chromium adapter now share version 1.3.11.
@@ -20,7 +29,7 @@ channel remains on compatible adapter 1.3.8. No Firefox upload, signing, or subm
 The custody and store-state record is
 [`docs/testing/chrome-store-submission-2026-09-26.md`](testing/chrome-store-submission-2026-09-26.md).
 
-## Firefox Withdrawn Until Ordinary-Session Full Parity (2026-09-26)
+## Earlier Firefox Adapter Removal (2026-09-26)
 
 ADR-0183 removes Firefox from the active product. The partial adapter could execute browser-shell
 operations but not Ghostlight's normal page work in the ordinary visible, authenticated Firefox
@@ -33,9 +42,7 @@ that gap with a setup ritual and a second recovery topology, not user delight.
   manifest still proves Ghostlight ownership.
 - No 1.3.11 Firefox artifact will be submitted to Mozilla Add-ons.
 - Preserved the research, ADRs, release records, and Git history as evidence.
-- Firefox can return only when it passes the complete installed-product capability suite in an
-  ordinary already-running session without headless execution, a disposable profile, managed
-  launch, or restart ritual.
+- ADR-0184 later replaced the conditional return gate with a Chromium-only offering.
 
 ## Capability-Negotiated Thin Adapters Implemented and Live Verified (2026-09-26, unpublished)
 

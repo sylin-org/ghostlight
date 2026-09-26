@@ -4,7 +4,7 @@ ghostlight (1.3.11) unstable; urgency=medium
   * Install one acknowledged, checksum-bound page runtime across Chromium documents.
   * Remove raw browser escape hatches and every runnable headless test path.
   * Execute form fills as one deadline-bound physical transaction.
-  * Withdraw the partial Firefox adapter until ordinary-session full parity is possible.
+  * Remove the partial Firefox adapter from the browser offering.
 
  -- Leonardo Botinelly <hello@sylin.org>  Sat, 26 Sep 2026 00:00:00 -0400
 

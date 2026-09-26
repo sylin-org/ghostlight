@@ -2,7 +2,8 @@
 
 Last updated: 2026-09-26
 
-Status: Withdrawn. Never submit or publish this copy.
+Status: Historical, withdrawn. Never submit or publish this copy. ADR-0184 makes no
+commitment to a future Firefox channel.
 
 ADR-0183 withdrew Firefox from the active product because this partial adapter could not deliver
 Ghostlight's normal page capabilities in the user's ordinary visible session. The former listing

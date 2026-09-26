@@ -27,9 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove the unused raw BiDi/CDP bridge surface and Chromium raw-CDP command path.
 - Remove fire-and-forget preload injection and every runnable headless browser-test mechanism.
-- Withdraw the partial Firefox adapter, native-host registration, packaging, CI, publisher, and
-  current support claims. Firefox can return only with full Ghostlight capability parity in the
-  user's ordinary visible, authenticated, already-running session (ADR-0183).
+- Remove the partial Firefox adapter, native-host registration, packaging, CI, publisher, and
+  support claims from the Chromium-only browser offering (ADRs 0183 and 0184).
 - Remove a retired Ghostlight-owned Firefox native-host registration on the next install or
   uninstall while leaving foreign registration state untouched.
 

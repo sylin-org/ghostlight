@@ -1,6 +1,6 @@
 # ADR-0183: Withdraw Firefox Until Ordinary-Session Parity
 
-Date: 2026-09-26. Status: Accepted.
+Date: 2026-09-26. Status: Superseded by ADR-0184.
 
 Supersedes ADR-0179's Firefox product decision and ADR-0181 Decision 6. Builds on ADR-0003,
 ADR-0050, ADR-0093, ADR-0138, and the Firefox browser-adapter dossier.

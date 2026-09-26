@@ -263,14 +263,6 @@ Evidence: [2026-08-25 store resubmission](testing/extension-store-resubmission-2
 custody ZIP `9ae88e67...` uploaded over the canceled stale review (`f7b9a6ad...`), submitted
 STAGED_PUBLISH, now PENDING_REVIEW; public listing still serves 0.8.0.
 
-#### Withdrawn Firefox channel
-
-- [x] ADR-0183 removes Firefox from active install, CI, candidate assembly, signing, submission,
-  publication, and support claims until ordinary-session full parity is possible.
-- [x] No Firefox artifact is part of this release candidate. Do not submit an older or locally
-  generated XPI to Mozilla Add-ons.
-
-
 ### G4. Pass the Ubuntu GNOME Wayland installed-product lane
 
 Environment: a real Ubuntu GNOME Wayland session on a physical or attached display, with no

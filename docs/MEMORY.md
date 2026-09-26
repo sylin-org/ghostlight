@@ -18,6 +18,11 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **The browser offering is Chromium-only.** Chrome, Edge, Brave, and Chromium are the
+  supported browsers. Do not describe a Firefox adapter as paused, planned, or
+  awaiting parity in current product contracts or public guidance (ADR-0184). Preserve
+  the old records and the owned-registration migration cleanup.
+
 - **Release credentials stay repo-local and gitignored.** The owner requires npm credentials
   in `local/.npmrc`, not the shared home-directory npm configuration. Run login and release
   commands with that explicit user config; preserve owner-private file permissions. The existing
