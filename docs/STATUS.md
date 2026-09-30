@@ -1,6 +1,33 @@
-# STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
+# STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
 
-Last updated: 2026-09-30 (1.3.12 pushed and submitted for staged Chrome review).
+Last updated: 2026-09-30 (matching service published after the owner published Chrome 1.3.12).
+
+## Ghostlight 1.3.12 Service Published (2026-09-30)
+
+GitHub release `v1.3.12`, npm version and `latest` metadata, the official MCP Registry record,
+and public Chrome adapter 1.3.12 are independently observable. The matching protocol-3 release
+includes the unpublished 1.3.11 service changes and ADR-0185's passive browser feedback,
+request-only credential guidance, and removal of automatic session pauses. The release notes
+cover the complete update from public service 1.3.10.
+
+Candidate run [36722844820](https://github.com/sylin-org/ghostlight/actions/runs/36722844820)
+passed all seven jobs from frozen source `d67048bbe0914485771a2640ea0eef3e4b02ccaa`. Custody
+verification covered the 18-artifact unit, a separate local copy, checksums, and GitHub provenance.
+The publisher verified all 20 release files and re-downloaded the draft before making it public.
+
+The exact three candidate Windows executables now run in the selected development installation.
+Installation selection and native-host registrations were preserved, and the browser reconnected
+automatically. The unmodified installed journey rerun passed all 24 tools. Synthetic credential
+checks also proved guidance without a session hold and authorized fill, targeted typing, and
+focused typing with retained values. The initial first-read `document_unavailable` result remains
+recorded as an unexplained transient; the subsequent diagnostic and full rerun passed without
+source, adapter, service, or configuration changes. This is development-stack evidence, not a
+clean-package, loaded store-byte, or physical Linux browser claim.
+
+npm accepted publication before exposing the version, then briefly served a cached tarball 404.
+The public consumer and website reconciliation results will be added to the
+[release custody record](testing/candidate-custody-2026-09-30.md) after verification.
+Earlier submission and unpublished-source records below retain their original dated state.
 
 ## Ghostlight 1.3.12 Submitted for Staged Chrome Review (2026-09-30, unpublished)
 

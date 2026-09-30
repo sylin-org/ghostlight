@@ -4,20 +4,20 @@ Ghostlight works in the user's visible, signed-in Chromium browser. Do not insta
 edit a harness configuration, or retry an uncertain browser effect without the user's knowledge.
 Policy denial and the extension's preserve-tabs refusal are boundaries to explain, not evade.
 
-Ghostlight 1.3.10 is the published service release, observable on GitHub, npm, the Chrome Web
-Store, and the official MCP Registry. The public Chrome adapter is 1.3.8 and is compatible with
-that service release.
+Ghostlight 1.3.12 is the published service release, observable on GitHub, npm, and the official MCP
+Registry. The public Chrome adapter is 1.3.12, delivered through the Chrome Web Store. This
+release uses adapter protocol 3; upgrade the service and extension together.
 
 ## 1. Complete the user-visible installation
 
-1. Ask the user to run `npx -y ghostlight@1.3.10 install`, or install the matching native
+1. Ask the user to run `npx -y ghostlight@1.3.12 install`, or install the matching native
    package.
-2. Ask the user to install the `Ghostlight in Browser` store adapter.
+2. Ask the user to install the `Ghostlight in Browser` 1.3.12 store adapter.
 3. Reconnect or restart the MCP client if it does not refresh its tool catalog. Ghostlight changes
    only owned entries, creates a backup before client-config replacement, and preserves unrelated
    JSONC or TOML.
 
-Use `npx -y ghostlight@1.3.10 doctor` only if the connection needs recovery. It is not a required
+Use `npx -y ghostlight@1.3.12 doctor` only if the connection needs recovery. It is not a required
 second installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
@@ -74,7 +74,10 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
   whether any new action is safe. Never infer failure from a lost response.
 - **Blocked:** report the fixed reason and safe next steps. Do not reach for a lower-level tool to
   evade the same authority boundary.
-- **Attention required:** stop browser effects and wait for the user.
+- **Explicit human Pause/Stop:** respect the runtime hold in the Tauri workbench.
+- **Credential guidance:** the session remains available. When the user explicitly authorized
+  entry, set `user_authorized_credentials: true` on the fill or typing request. Earlier explicit
+  authorization is sufficient; no resume step is needed.
 - **Unknown or partial effect:** do not replay the call automatically.
 
 Ghostlight 1.0 uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no

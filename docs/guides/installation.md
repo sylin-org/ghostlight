@@ -7,16 +7,19 @@ This guide covers the published package and the source-development path you can 
 
 ## Release installation journey
 
-1. Run `npx -y ghostlight@1.3.10 install`. The checksum-bound launcher downloads one exact sibling
+1. Run `npx -y ghostlight@1.3.12 install`. The checksum-bound launcher downloads one exact sibling
    set, registers detected native browsers for the current user, creates the Linux Applications
    entry, and connects detected MCP clients.
-   A native package, Scoop, WinGet, the one-line installer, or the Claude Desktop
+   A native package, the Scoop direct manifest, the one-line installer, or the Claude Desktop
    MCPB may provide the same binaries instead.
-2. Install the compatible `Ghostlight in Browser` 1.3.8 extension from its store listing.
+2. Install the matching `Ghostlight in Browser` 1.3.12 extension from its store listing.
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
    Open Ghostlight from Applications whenever you want the workbench.
 
-That is the normal installation path. `npx -y ghostlight@1.3.10 doctor` is recovery when something
+Version 1.3.12 uses adapter protocol 3, so upgrade the service and extension together. WinGet
+still offers service 1.3.6; use one of the 1.3.12 routes above with the current store adapter.
+
+That is the normal installation path. `npx -y ghostlight@1.3.12 doctor` is recovery when something
 does not connect; it is not another required setup step.
 
 Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
@@ -34,7 +37,7 @@ this journey. Provenance verification, clean-machine install, upgrade, and unins
 gates, not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
-registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.3.10`
+registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.3.12`
 remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior

@@ -1,7 +1,8 @@
 # Chrome store submission -- 2026-09-30
 
-Status: 1.3.12 is `PENDING_REVIEW` with `STAGED_PUBLISH`. The public Chrome Web Store channel
-remains on adapter 1.3.8. Review approval cannot publish this revision automatically.
+Status: PUBLISHED. After the staged submission below, the owner published 1.3.12 on September 30.
+The publisher API and public update feed independently confirmed that version, at 100 percent
+rollout. The original submission sequence is retained below.
 
 ## Package custody
 
@@ -18,7 +19,8 @@ publish_type: STAGED_PUBLISH
 The package was reproduced independently before and after the signed-off source commit, with the
 same hash. The source commit was pushed to `main`. The service and source package versions remain
 in lockstep with adapter 1.3.12, and `compatibility.json` records that exact pair. The protocol-3
-adapter cannot be promoted publicly while the public service remains on 1.3.10/protocol 2.
+adapter requires the matching service instead of public service 1.3.10/protocol 2. At submission,
+the intended rollout was staged pending that matching service.
 
 ## Verification
 
@@ -71,5 +73,17 @@ declarations remain unchanged. The updated policy describes client-supplied form
 request-level acknowledgement for credential-class controls. Additional collection categories
 are not inferred solely from what an arbitrary input string could contain.
 
-The submitted version and state were independently verified. This is a staged review submission;
-public delivery still requires review approval and coordinated publication of the matching service.
+The submitted version and state above were independently verified at submission time.
+
+## Public delivery observed later on September 30
+
+After the owner reported publication, the publisher API confirmed public 1.3.12 at 100 percent
+with no submitted revision. The public Chrome update feed independently returned 1.3.12.
+The downloaded CRX has SHA-256
+`9365d4fe635632ff72c458b340133895d80d095e8a17ea1c4e7f9c3c9ce2c091`.
+All 38 non-manifest files match the submitted ZIP byte for byte. The only manifest change is
+Chrome's official `update_url`; the only extra file is `_metadata/verified_contents.json`.
+This verifies the public package, not the bytes loaded in an existing browser profile.
+
+The owner then requested publication of the matching service. Its release and installed-candidate
+evidence is recorded in [the service custody record](candidate-custody-2026-09-30.md).

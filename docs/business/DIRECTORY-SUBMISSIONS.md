@@ -1,7 +1,7 @@
 # MCP directory submissions
 
-Official MCP Registry and WinGet rechecked: 2026-09-25. Other directory observations retain their
-dated 2026-08-07 state.
+Official MCP Registry rechecked: 2026-09-30. The WinGet observation remains dated 2026-09-25.
+Other directory observations retain their dated 2026-08-07 state.
 
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
 paths. It is not proof that a submission was sent or accepted.
@@ -17,7 +17,7 @@ These are distribution observations, not user reception. The dated evidence and 
 
 | Surface | Dated observation |
 | --- | --- |
-| Official MCP Registry | `org.sylin/ghostlight` 1.3.10 is active and latest as of 2026-09-25. |
+| Official MCP Registry | `org.sylin/ghostlight` 1.3.12 is active and latest as of 2026-09-30. |
 | Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; explicit sync reached repository commit `9546875`. |
 | mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-07 refresh request was accepted. |
 | Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.8.0 and remains open. |

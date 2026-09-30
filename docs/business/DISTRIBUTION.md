@@ -1,6 +1,6 @@
 # Distribution runbook
 
-Core release channels reconciled: 2026-09-25. Marketplace observations below retain their dated
+Core release channels reconciled: 2026-09-30. Marketplace observations below retain their dated
 context unless a later date is stated.
 
 The distribution push (2026-07-07 session; agentic Tier 0-2 implemented in-repo, external
@@ -35,15 +35,15 @@ winget/scoop templates place them together in one directory. MCP-client entries 
 
 ## Founder: accounts and publishes (order matters)
 
-- [x] **npm.** `ghostlight@1.3.10` is live at `latest`. The release pipeline publishes it and smoke
+- [x] **npm.** `ghostlight@1.3.12` is live at `latest`. The release pipeline publishes it and smoke
       tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v1.3.8 is public and byte-validated against the submitted
+- [x] **Chrome Web Store.** Adapter v1.3.12 is public and byte-validated against the submitted
       package. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Native submission is intentionally deferred because individual
       enrollment makes the owner's home address customer-visible. Edge users can install the
       Chrome listing through Microsoft's supported other-store path.
-- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v1.3.10 is active and
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v1.3.12 is active and
       latest. The release pipeline publishes each service version after npm.
 - [x] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
       onboarding request to `partnerships@github.com` on 2026-07-31. GitHub completed its review
@@ -78,7 +78,7 @@ winget/scoop templates place them together in one directory. MCP-client entries 
 - [x] **Winget.** v1.3.6 is publicly discoverable after PR
       [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) merged on 2026-09-12.
       Newer service releases have not yet been submitted to WinGet.
-- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.10 and can be
+- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.12 and can be
       installed directly by URL. The central Extras package-request template currently requires
       at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would
       require a false attestation and was not opened.
