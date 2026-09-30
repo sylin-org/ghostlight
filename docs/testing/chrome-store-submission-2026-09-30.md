@@ -1,7 +1,7 @@
 # Chrome store submission -- 2026-09-30
 
-Status: Package upload succeeded for 1.3.12. Review submission is the next step. The public Chrome
-Web Store channel remains on adapter 1.3.8.
+Status: 1.3.12 is `PENDING_REVIEW` with `STAGED_PUBLISH`. The public Chrome Web Store channel
+remains on adapter 1.3.8. Review approval cannot publish this revision automatically.
 
 ## Package custody
 
@@ -12,7 +12,7 @@ artifact: dist/ghostlight-extension-v1.3.12.zip
 sha256: 9d5521b3f34562051ea6b07d9d5d0e07267ff6d7bacf274bd38234d43659a25d
 packaging_runtime: PowerShell 7.6.5
 item: lejccfmoeogmhemakeknjjdhkfkgncdl
-intended_publish_type: STAGED_PUBLISH
+publish_type: STAGED_PUBLISH
 ```
 
 The package was reproduced independently before and after the signed-off source commit, with the
@@ -45,6 +45,10 @@ replaced during this submission preparation.
    `Cancel` returned HTTP 200. Independent `Status` confirmed 1.3.11 `CANCELLED`; public 1.3.8
    remained unchanged.
 5. `Upload -Execute` returned `SUCCEEDED` and draft version 1.3.12.
+6. After verifying the updated public privacy policy, `Submit -PublishType STAGED_PUBLISH -Execute`
+   returned `PENDING_REVIEW`.
+7. Independent final `Status` confirmed submitted version 1.3.12 `PENDING_REVIEW`, with public
+   version 1.3.8 unchanged at 100 percent.
 
 Credentials came from the authorized ignored repository-local credential file. No credential
 value is recorded here.
@@ -58,10 +62,14 @@ and an independent HTTP read of the [public policy](https://sylin.org/ghostlight
 confirmed its September 30 date and credential-authorization disclosure. Unrelated local website
 commits and untracked work were left untouched.
 
+Website commit `5cd6958e72a36928dea776ab5ec762dbadd66994` refreshed the final generic-input wording
+before submission. Cloudflare Pages again passed, and the independent public HTTP read confirmed
+that Ghostlight processes client-supplied text for the requested edit.
+
 The current public listing declares Web history, User activity, and Website content. Those
 declarations remain unchanged. The updated policy describes client-supplied form text and the
 request-level acknowledgement for credential-class controls. Additional collection categories
 are not inferred solely from what an arbitrary input string could contain.
 
-After submission, independently verify the submitted version and state. Do not confuse a staged
-review submission with public delivery; coordinated service publication is still required.
+The submitted version and state were independently verified. This is a staged review submission;
+public delivery still requires review approval and coordinated publication of the matching service.

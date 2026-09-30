@@ -1,8 +1,8 @@
 # STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-30 (1.3.12 source pushed and Chrome package uploaded).
+Last updated: 2026-09-30 (1.3.12 pushed and submitted for staged Chrome review).
 
-## Ghostlight 1.3.12 Uploaded to Chrome (2026-09-30, unpublished)
+## Ghostlight 1.3.12 Submitted for Staged Chrome Review (2026-09-30, unpublished)
 
 The service, desktop, package-source manifests, and Chromium adapter now share version 1.3.12.
 The [release notes](release/notes-v1.3.12.md) and changelog describe ADR-0185's passive browser
@@ -31,9 +31,11 @@ Source commit `03a086004afb94a869b1c384df24f9eb24d60ce2` is pushed to `main`. Th
 staged submission prevented upload and was cancelled under the owner's request to replace it
 with the fix. Chrome then accepted the 1.3.12 ZIP with `SUCCEEDED`. The updated public privacy
 policy is live. Store disclosures continue to describe actual browser operations and data use;
-arbitrary client-supplied input does not by itself establish a separate data-collection category. The
+arbitrary client-supplied input does not by itself establish a separate data-collection category.
+Submission used `STAGED_PUBLISH`, and independent `Status` confirmed 1.3.12 `PENDING_REVIEW` while
+public 1.3.8 remained unchanged. Review approval will not make 1.3.12 public automatically. The
 [submission record](testing/chrome-store-submission-2026-09-30.md) preserves package custody,
-verification, the store sequence, and the remaining step.
+verification, and the store sequence. Public rollout still requires the matching service release.
 
 ## Explicit User Control and Passive Browser Feedback (2026-09-28, unpublished)
 
