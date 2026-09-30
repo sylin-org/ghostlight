@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.12] - 2026-09-30
 
+This version includes the 1.3.11 source changes recorded below; service 1.3.11 was not published.
+Compared with service 1.3.10, it also introduces the acknowledged page runtime and adapter protocol
+3, one budgeted form-fill transaction, Chromium-only support, and the `rustls` security update.
+Use the matching 1.3.12 service and Chromium adapter; service 1.3.10 and
+adapter 1.3.8 do not support the new protocol. Chromium 125 or newer is required.
+
 ### Changed
 
 - Keep browser feedback passive. Messages and animations remain, while interactive runtime
