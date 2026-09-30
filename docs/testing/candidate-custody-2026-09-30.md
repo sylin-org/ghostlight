@@ -1,8 +1,7 @@
 # 1.3.12 candidate custody -- 2026-09-30
 
-Status: PUBLISHED. GitHub, npm metadata, and the official MCP Registry independently serve 1.3.12.
-Chrome adapter 1.3.12 was published separately. Website and public consumer verification are
-recorded below as they complete.
+Status: PUBLISHED. GitHub, npm, and the official MCP Registry independently serve 1.3.12.
+Chrome adapter 1.3.12 was published separately. Public delivery and verification are recorded below.
 
 ## Build
 
@@ -105,7 +104,7 @@ the running adapter's store-byte identity, or visible Linux browser and desktop 
 - npm accepted the exact candidate tarball once, then reported asynchronous processing. Public
   version and `latest` endpoints first returned 1.3.12 at 14:15:13 UTC. The first fresh consumer
   attempt encountered a cached tarball 404. A cache-busted public download at 14:17:00 UTC matched
-  the candidate SHA-256; the ordinary consumer path remained pending at that observation.
+  the candidate SHA-256. The ordinary URL returned the same exact bytes at 14:19:36 UTC.
 - The official MCP Registry published `org.sylin/ghostlight 1.3.12` after npm metadata became
   observable. An independent latest-version query confirmed that exact record.
 - The public Chrome CRX matches all 38 non-manifest submitted files. Its manifest differs only
@@ -114,4 +113,19 @@ the running adapter's store-byte identity, or visible Linux browser and desktop 
 - Scoop metadata is derived from the exact Windows portable archive hash above. WinGet remains
   at its earlier published 1.3.6; no WinGet submission is claimed here.
 
-Website reconciliation and the ordinary public npm consumer result remain to be recorded.
+The [Windows public consumer smoke](windows-public-1.3.12-smoke-2026-09-30.md) then passed from
+a new empty cache: npm resolution, public download of all three binaries, independent candidate
+hash comparison, and CLI execution. The earlier processing/cache failures remain recorded.
+Website commit [9ae2e4f9](https://github.com/sylin-org/website/commit/9ae2e4f99df0f9fdb4b0ad7b35afd05f549d2371)
+updated only the public-status and installation-guide fallbacks from Ghostlight reconciliation
+commit `13272c65b78d7df015901765d4945015a323f408`. The isolated website verification passed
+`npm test`; Cloudflare Pages reported success. An independent public read at 14:23:58 UTC
+confirmed asset revision `9ae2e4f99df0`, static service version 1.3.12, and Chrome adapter 1.3.12.
+The public `install.md` returned `text/markdown; charset=utf-8` and the exact canonical SHA-256
+`64dcc395559c1b1ba63692414a957338f8d1d5372a2b31617e2cecce3097024a`.
+Unrelated local website work was preserved.
+
+The final `scripts/check-public-surfaces.ps1 -Online` passed: GitHub, npm, Chrome's update feed,
+the official MCP Registry, and the canonical website agree on the recorded public release.
+Formatting, strict workspace clippy, workspace tests, extension tests, and repository integrity
+also passed before the publication-record commits.

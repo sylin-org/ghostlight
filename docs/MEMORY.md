@@ -10,6 +10,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable release learnings
 
+- **npm acceptance, metadata, and tarball delivery can become visible separately.** A successful
+  publish can enter asynchronous processing; version and latest metadata can then appear while
+  the ordinary tarball URL still serves a cached 404. Keep the accepted publication, wait for
+  the public tarball, verify its candidate hash, and run a fresh consumer before calling delivery
+  complete. Do not republish the immutable version to repair propagation. The 1.3.12 custody
+  record preserves this observed sequence.
+
 - **Guard exact public versions and derive catalog documentation from source.** A minor-line check
   accepted README 1.3.6 while the public service had reached 1.3.10, and the implemented
   `browser_workspace` tool raised the catalog to 24 while active language documents still said 23.

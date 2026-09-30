@@ -25,8 +25,11 @@ source, adapter, service, or configuration changes. This is development-stack ev
 clean-package, loaded store-byte, or physical Linux browser claim.
 
 npm accepted publication before exposing the version, then briefly served a cached tarball 404.
-The public consumer and website reconciliation results will be added to the
-[release custody record](testing/candidate-custody-2026-09-30.md) after verification.
+After the ordinary URL became available, the fresh Windows public consumer passed and verified
+all three downloaded executable hashes against the candidate. The
+[release custody record](testing/candidate-custody-2026-09-30.md) preserves the sequence and
+the separate verification scopes. Website commit `9ae2e4f9` deployed successfully and public
+HTTP reads confirm service 1.3.12, Chrome adapter 1.3.12, and the exact updated install guide.
 Earlier submission and unpublished-source records below retain their original dated state.
 
 ## Ghostlight 1.3.12 Submitted for Staged Chrome Review (2026-09-30, unpublished)
