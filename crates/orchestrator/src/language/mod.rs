@@ -548,6 +548,9 @@ pub enum FormFieldValue {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct FillForm {
     pub fields: Vec<FormField>,
+    /// Acknowledge the user's explicit instruction to enter credentials in this request.
+    #[serde(default)]
+    pub user_authorized_credentials: bool,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -562,6 +565,9 @@ pub struct FillForm {
 /// Input for typing ordinary text through browser input events.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct TypeText {
+    /// Acknowledge the user's explicit instruction to enter credentials in this request.
+    #[serde(default)]
+    pub user_authorized_credentials: bool,
     #[serde(default)]
     pub target: String,
     /// Type into the currently focused editable control instead of `target`.
@@ -941,7 +947,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_fill_form" => Operation::FillForm(parse(
             input,
-            &["fields", "tab", "submit_target", "expect", "timeout_ms"],
+            &["fields", "tab", "submit_target", "user_authorized_credentials", "expect", "timeout_ms"],
             validate_fill,
         )?)
         .into_ok(),
@@ -954,6 +960,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "text",
                 "tab",
                 "clear_first",
+                "user_authorized_credentials",
                 "expect",
                 "timeout_ms",
             ],

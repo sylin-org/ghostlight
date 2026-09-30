@@ -305,32 +305,6 @@ impl WorkbenchProjection {
         }
     }
 
-    /// Publish one actual session transition; refused follow-up requests create no extra notice.
-    pub fn session_attention_changed(
-        &self,
-        workspace: &str,
-        label: &str,
-        attention: Option<crate::workspace::SessionAttention>,
-    ) {
-        let message = attention
-            .as_ref()
-            .map(|value| crate::language::control::attention(value.reason).to_owned());
-        if let Some(body) = &message {
-            if let Some(port) = lock(&self.presentation).clone() {
-                let _ = port.notify(WorkbenchNotification {
-                    kind: NotificationKind::Attention,
-                    title: format!("{label} needs your attention"),
-                    body: body.clone(),
-                });
-            }
-        }
-        self.publish(WorkbenchChange::SessionAttentionChanged {
-            workspace: workspace.into(),
-            attention,
-            message,
-        });
-    }
-
     #[cfg(test)]
     pub(crate) fn record(
         &self,
@@ -466,10 +440,6 @@ impl WorkbenchFacade {
                         .iter()
                         .filter(|operation| operation.workspace == workspace.id)
                         .count(),
-                    attention_message: workspace.attention.as_ref().map(|attention| {
-                        crate::language::control::attention(attention.reason).into()
-                    }),
-                    attention: workspace.attention,
                     id: workspace.id,
                     client_label: workspace.client_label,
                     connections: workspace.connections,
@@ -521,25 +491,16 @@ impl WorkbenchFacade {
         // A change published mid-assembly is re-delivered and applied idempotently by key.
         let seq = self.projection.current_seq();
         let runtime_state = self.governance.runtime_state();
-        let attention_count = sessions
-            .iter()
-            .filter(|session| session.attention.is_some())
-            .count();
         let audit_health = self.projection.audit_health();
         let required = self.governance.snapshot().requires_audit();
-        let mut readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
+        let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
             audit_required_unavailable: required && audit_health.unavailable(),
             browser_connected: !browsers.is_empty(),
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
-            needs_attention: runtime_state == RuntimeControlState::Attention || attention_count > 0,
+            needs_attention: runtime_state == RuntimeControlState::Attention,
             working: !operations.is_empty(),
         });
-        if readiness.state == readiness::Readiness::NeedsYou
-            && runtime_state != RuntimeControlState::Attention
-        {
-            readiness.detail = crate::language::control::sessions_needing_review(attention_count);
-        }
         diagnostics.push(if audit_health.quiet() {
             DiagnosticItem::passing("audit", "History", &audit_health.detail(required))
         } else {
@@ -592,28 +553,6 @@ impl WorkbenchFacade {
                 managed_policy: governance.managed_policy,
                 policy: self.governance.policy_chip(),
             },
-        }
-    }
-
-    /// Resume only the session incident explicitly reviewed by the human surface.
-    pub fn resume_session(&self, workspace: &str, incident: &str) -> WorkbenchIntentResult {
-        let state = self.governance.runtime_state();
-        let result = self.workspaces.resume_attention(workspace, incident);
-        let accepted = matches!(result, Ok(true));
-        if accepted {
-            self.projection
-                .session_attention_changed(workspace, "", None);
-        }
-        WorkbenchIntentResult {
-            accepted,
-            runtime_state: state,
-            browser_notified: false,
-            message: match result {
-                Ok(true) => crate::language::control::resumed(state),
-                Ok(false) => crate::language::control::STALE_REVIEW,
-                Err(_) => crate::language::control::SESSION_GONE,
-            }
-            .into(),
         }
     }
 
@@ -1020,12 +959,6 @@ pub enum WorkbenchChange {
     DocumentCoverageChanged {
         details: crate::language::coverage::HumanCoverage,
     },
-    /// A session entered human review or its current review was explicitly cleared.
-    SessionAttentionChanged {
-        workspace: String,
-        attention: Option<crate::workspace::SessionAttention>,
-        message: Option<String>,
-    },
     /// One operation entered the live set.
     OperationStarted {
         /// The newly tracked operation.
@@ -1198,10 +1131,6 @@ pub struct OverviewSummary {
 pub struct SessionSummary {
     /// Opaque workspace identity.
     pub id: String,
-    /// Session-local review state; global controls do not replace it.
-    pub attention: Option<crate::workspace::SessionAttention>,
-    /// Authored explanation displayed beside recovery.
-    pub attention_message: Option<String>,
     /// Presentation-only client label.
     pub client_label: String,
     /// Each current connection has its own observations and reported application.

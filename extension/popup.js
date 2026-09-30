@@ -10,8 +10,6 @@
   const diagnosticsRow = document.getElementById("diagnostics-row");
   const diagnosticsStatus = document.getElementById("diagnostics-status");
   const diagnosticsToggle = document.getElementById("diagnostics-toggle");
-  const attentionSection = document.getElementById("attention-section");
-  const attentionList = document.getElementById("attention-list");
   const setupSection = document.getElementById("setup-section");
   const setupRoute = document.getElementById("setup-route");
   const captions = document.getElementById("captions-toggle");
@@ -58,9 +56,7 @@
       return;
     }
     toggle.disabled = false;
-    // A person's pause and a policy's attention hold both stop work, but they are not the same
-    // thing and ADR-0126 Decision 6 keeps them apart. Saying "PAUSED" for a denial the user never
-    // asked for makes it look like their own doing.
+    // Preserve distinct labels for explicit attention and the person's Pause control.
     if (snapshot.control_state === "attention") {
       status.textContent = "Agent browsing is STOPPED and needs you.";
       toggle.textContent = "Resume agent browsing";
@@ -108,50 +104,6 @@
       : `Release debugger sessions (${attached} tabs)`;
   }
 
-  function attentionRecords(snapshot) {
-    if (snapshot.control_state !== "attention") return [];
-    const grouped = new Map();
-    for (const item of snapshot.activity || []) {
-      const key = item.workspace || "workspace";
-      const current = grouped.get(key) || { label: item.client_label || "MCP client", count: 0 };
-      current.count += 1;
-      grouped.set(key, current);
-    }
-    return grouped.size ? Array.from(grouped.values()) : [{ label: "MCP client", count: 1 }];
-  }
-
-  function renderAttention(snapshot) {
-    const records = attentionRecords(snapshot);
-    attentionSection.hidden = records.length === 0;
-    attentionList.replaceChildren(...records.map((record) => {
-      const item = document.createElement("div");
-      item.className = "attention-item";
-      const label = document.createElement("div");
-      label.className = "attention-label";
-      label.textContent = `${record.label} is paused`;
-      const meta = document.createElement("div");
-      meta.className = "attention-meta";
-      meta.textContent = `${record.count} blocked action${record.count === 1 ? "" : "s"}`;
-      const actions = document.createElement("div");
-      actions.className = "attention-actions";
-      for (const [intent, text, danger] of [
-        ["keep_paused", "Keep paused", false],
-        ["resume", "Resume", false],
-        ["resume_quiet", "Resume + quiet", false],
-        ["end_session", "End session", true]
-      ]) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = text;
-        if (danger) button.className = "danger";
-        button.addEventListener("click", () => attentionAction(intent));
-        actions.appendChild(button);
-      }
-      item.append(label, meta, actions);
-      return item;
-    }));
-  }
-
   // The service advertises diagnostics state in its hello; when it does not (an older
   // Ghostlight), the whole row stays hidden instead of offering a button that cannot work.
   function renderDiagnostics(snapshot) {
@@ -171,7 +123,6 @@
     renderHold(snapshot);
     renderSession(snapshot);
     renderReleaseDebugger(snapshot);
-    renderAttention(snapshot);
     renderSetup(snapshot);
     renderDiagnostics(snapshot);
   }
@@ -191,17 +142,8 @@
     }
   }
 
-  async function attentionAction(intent) {
+  async function runtimeAction(intent) {
     try {
-      if (intent === "keep_paused") return refresh();
-      if (intent === "resume_quiet") {
-        latestPreferences = await request({
-          kind: "set_preferences",
-          preferences: { ...latestPreferences, effects: false, captions: false }
-        });
-        captions.checked = false;
-        intent = "resume";
-      }
       await request({ kind: "runtime_control", intent });
       await refresh();
     } catch (error) {
@@ -211,11 +153,11 @@
 
   toggle.addEventListener("click", async () => {
     toggle.disabled = true;
-    await attentionAction(latestSnapshot?.control_state === "active" ? "hold" : "resume");
+    await runtimeAction(latestSnapshot?.control_state === "active" ? "hold" : "resume");
   });
   sessionButton.addEventListener("click", async () => {
     sessionButton.disabled = true;
-    await attentionAction(sessionButton.dataset.intent);
+    await runtimeAction(sessionButton.dataset.intent);
   });
   releaseDebuggerButton.addEventListener("click", async () => {
     releaseDebuggerButton.disabled = true;

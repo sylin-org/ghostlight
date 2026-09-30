@@ -5,6 +5,33 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.12] - 2026-09-30
+
+### Changed
+
+- Keep browser feedback passive. Messages and animations remain, while interactive runtime
+  controls belong in the Tauri workbench (ADR-0185).
+- Return credential guidance for the current request without holding the session. Fill and
+  typing accept `user_authorized_credentials: true` when the user explicitly authorized entry,
+  including in an earlier instruction. The acknowledgement applies only to that request;
+  configured policy and explicit human Pause/Stop still apply.
+- Allow explicitly requested uploads and recording attachments to file controls with
+  credential-like names.
+
+### Removed
+
+- Remove automatic session pauses after repeated policy refusals and the resulting review/resume
+  workflow. Later permitted work can proceed immediately.
+- Remove the injected attention dialog, its browser-page buttons, and the obsolete quiet-resume
+  action.
+
+### Fixed
+
+- Keep page feedback from taking focus or intercepting pointer input even when its stylesheet is
+  unavailable, and remove predecessor presentation roots during runtime replacement.
+- Carry credential authorization through grouped fill, targeted typing, and focused typing,
+  including final browser checks, without placing input values in receipts or diagnostics.
+
 ## [1.3.11] - 2026-09-26
 
 ### Added

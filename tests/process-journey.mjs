@@ -383,6 +383,7 @@ async function runAdapter(peer) {
       }
     } else if (command.command === "close_tab") result = { outcome: "tab_closed", tab_id: command.tab_id };
     else if (command.command === "cancel") result = { outcome: "cancelled" };
+    else if (command.command === "clear_diagnostics") result = { outcome: "diagnostics_cleared", cleared_count: 0 };
     else if (command.command === "read_document") {
       result = {
         outcome: "text",
@@ -1068,40 +1069,39 @@ try {
   await runDiagnosticsCli(["off"]);
   assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), false, "off removes the marker");
 
-  // H5: one actual MCP session reaches attention while another keeps using the same adapter.
+  // Policy refusals remain per request, including repeated work in the same MCP session.
   const troubledConnector = start(executable("ghostlight-mcp-connector"));
   const troubled = new McpPeer(troubledConnector);
-  await troubled.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H5 isolated session", version: "1" } });
+  await troubled.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Independent policy session", version: "1" } });
   troubled.notify("notifications/initialized");
-  const actionPolicy = JSON.parse(ordinaryPolicy);
-  actionPolicy.grants[0].allowed = ["action"];
-  writeFileSync(policyFile, JSON.stringify(actionPolicy));
-  const beforeAttention = physicalCommands.length;
-  const attentionResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
-    on_error: "continue", steps: Array.from({ length: 4 }, (_, index) => ({
-      id: `denied_${index}`, tool: "browser_tabs", arguments: { action: "list" }
+  const sitePolicy = JSON.parse(ordinaryPolicy);
+  sitePolicy.grants[0].hosts = { allow: ["example.com"] };
+  writeFileSync(policyFile, JSON.stringify(sitePolicy));
+  const beforeRefusals = physicalCommands.length;
+  const deniedResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
+    on_error: "continue", steps: Array.from({ length: 6 }, (_, index) => ({
+      id: `denied_${index}`, tool: "browser_navigate", arguments: { url: "https://denied.example/" }
     }))
   }});
-  const attention = structured(attentionResponse);
-  assert.equal(attentionResponse.result.isError, true);
-  assert.equal(attention.status, "attention_required");
-  assert.equal(attention.facts.steps[3].status, "not_run");
-  assert.equal(physicalCommands.length, beforeAttention);
+  const denied = structured(deniedResponse);
+  assert.equal(deniedResponse.result.isError, true);
+  assert.equal(denied.status, "blocked");
+  assert.equal(denied.facts.steps.length, 6);
+  assert.ok(denied.facts.steps.every((step) => step.status === "blocked"));
+  assert.equal(physicalCommands.length, beforeRefusals);
+  const explanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: {} }));
+  assert.equal(explanation.status, "succeeded");
+  const stillDenied = structured(await troubled.request("tools/call", { name: "browser_navigate", arguments: { url: "https://denied.example/" } }));
+  assert.equal(stillDenied.status, "blocked", "a later refusal still reports policy, with no session hold");
+  const permitted = structured(await troubled.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/", new_tab: true } }));
+  assert.equal(permitted.status, "succeeded", "permitted work needs no resume after repeated refusals");
   writeFileSync(policyFile, ordinaryPolicy);
+  assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
   assert.equal(structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
-  const resumeState = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  await resumeState;
-  const stillAttention = structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
-  assert.equal(stillAttention.status, "attention_required", "global Resume cannot clear a session review");
-  const attentionExplanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.equal(attentionExplanation.status, "succeeded", "the client can diagnose the configured policy while attention is held");
-  assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status,
-    "attention_required", "diagnostics never release session attention");
-  const attentionRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    .filter((record) => record.invocation === attention.invocation);
-  assert.equal(attentionRecords.filter((record) => record.step).length, 3);
-  assert.equal(attentionRecords.find((record) => !record.step).status, "attention_required");
+  const deniedRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    .filter((record) => record.invocation === denied.invocation);
+  assert.equal(deniedRecords.filter((record) => record.step).length, 6);
+  assert.equal(deniedRecords.find((record) => !record.step).status, "blocked");
   troubledConnector.kill();
   await waitForExit(troubledConnector);
 

@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
 
 use super::{
-    AuditRecord, AuthoringError, Capability, CapabilitySet, Decision, DenialAttention,
-    GovernanceFacade, ReasonCode,
+    AuditRecord, AuthoringError, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,
 };
 use crate::language::outcome::Observed;
 
@@ -1204,7 +1203,7 @@ fn stop_is_terminal_and_idempotent() {
     );
 }
 
-/// A policy attention hold is its own state, not the person's pause.
+/// Explicit runtime attention remains distinct from the person's pause.
 #[test]
 fn attention_stays_distinct_from_a_human_pause() {
     let facade = GovernanceFacade::new(None, None);
@@ -1259,49 +1258,4 @@ fn human_control_intents_are_authoritative_and_end_is_terminal() {
         facade.apply_runtime_intent(RuntimeControlIntent::StartSession),
         RuntimeControlState::Active
     );
-}
-
-#[test]
-fn repeated_matching_denials_require_attention_per_workspace() {
-    let mut attention = DenialAttention::default();
-    let denied = Decision::deny(ReasonCode::CapabilityDenied);
-
-    assert!(!attention.record("workspace_one", denied, 1_000));
-    assert!(!attention.record("workspace_two", denied, 10_000));
-    assert!(!attention.record("workspace_one", denied, 30_000));
-    assert!(attention.record("workspace_one", denied, 60_000));
-    assert!(!attention.record("workspace_one", denied, 61_000));
-    assert!(!attention.record("workspace_two", denied, 61_000));
-}
-
-#[test]
-fn five_distinct_enforced_denials_require_attention_and_old_attempts_expire() {
-    let mut attention = DenialAttention::default();
-    for (index, reason) in [
-        ReasonCode::CapabilityDenied,
-        ReasonCode::TabCloseDenied,
-        ReasonCode::HostDenied,
-        ReasonCode::ProtectedHost,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        assert!(!attention.record("workspace", Decision::deny(reason), index as u64 * 1_000));
-    }
-    assert!(attention.record(
-        "workspace",
-        Decision::deny(ReasonCode::InvalidAuthority),
-        4_000
-    ));
-
-    assert!(!attention.record(
-        "expired",
-        Decision::deny(ReasonCode::CapabilityDenied),
-        1_000
-    ));
-    assert!(!attention.record(
-        "expired",
-        Decision::deny(ReasonCode::CapabilityDenied),
-        122_000
-    ));
 }

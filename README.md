@@ -136,11 +136,14 @@ procurement evidence.
 ## What it will and will not do
 
 With no policy configured, HTTP(S) browsing is allowed, including localhost, loopback, and
-link-local destinations. Host restrictions belong to policy. Non-HTTP schemes, credential fields,
-and stale handles stay protected. Optional local and managed policy layers can only take
-capability away, and per-request restrictions narrow things further. Nothing hands access back.
+link-local destinations. Host restrictions belong to policy. Non-HTTP schemes and stale handles
+remain restricted. Optional local and managed policy layers can only take capability away.
 
-Credential-class fields come to you. Ghostlight does not type secrets.
+Credential input requires your explicit instruction. Fill and typing accept a per-request
+acknowledgement from the agent; without it, the call returns guidance without pausing the session.
+That acknowledgement cannot override policy or your Pause/Stop controls. Repeated policy refusals
+also leave later permitted work available. Browser messages and animations remain passive, with
+no buttons or interference with your input; interactive runtime control belongs in the workbench.
 
 The audit record holds identifiers, decisions, and content-minimized measurements: which tool ran,
 whether authority allowed it, how long it took, and what it did -- 3 fields, 1,240 words, 1280x720.

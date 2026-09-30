@@ -911,8 +911,8 @@ pub enum Refusal {
     AttentionRequired,
     /// The browser-local physical safety setting refused the action.
     LocalInterlock,
-    /// A credential-class field requires visible user handoff.
-    CredentialHandoff,
+    /// Credential input requires the caller to acknowledge the user's explicit instruction.
+    CredentialAuthorization,
     /// The browser returned a receipt outside the negotiated contract.
     IncompatibleReceipt,
     /// The browser adapter predates the physical command meaning the service requires.
@@ -975,8 +975,8 @@ impl Refusal {
             Self::AuthorityBlocked { reason, host } => return blocked(*reason, host),
             Self::AttentionRequired => "The browser job requires user attention.",
             Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
-            Self::CredentialHandoff => {
-                "A credential-class field requires user handoff in the visible browser."
+            Self::CredentialAuthorization => {
+                "This field appears to contain credentials. Explicit user authorization is required for this input; the session remains available."
             }
             Self::IncompatibleReceipt => {
                 "The browser answered in a form Ghostlight does not recognize."
@@ -1063,8 +1063,8 @@ impl Refusal {
                 "The user can change the relevant Ghostlight extension setting or perform the action directly."
                     .into(),
             ],
-            Self::CredentialHandoff => vec![
-                "Complete the credential field in the visible browser, then inspect the page again."
+            Self::CredentialAuthorization => vec![
+                "If the user has explicitly authorized credential entry, repeat this request with user_authorized_credentials set to true. Otherwise ask for that instruction or let the user enter it directly."
                     .into(),
             ],
             Self::IncompatibleReceipt => vec![
@@ -2141,8 +2141,8 @@ mod tests {
                 "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
             ),
             (
-                Refusal::CredentialHandoff,
-                "A credential-class field requires user handoff in the visible browser.",
+                Refusal::CredentialAuthorization,
+                "This field appears to contain credentials. Explicit user authorization is required for this input; the session remains available.",
             ),
             (
                 Refusal::IncompatibleReceipt,

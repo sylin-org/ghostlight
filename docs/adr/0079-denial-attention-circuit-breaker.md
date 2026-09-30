@@ -2,6 +2,11 @@
 
 Date: 2026-07-14
 Status: Accepted
+
+2026-09-28 amendment: [ADR-0185](0185-explicit-user-control-and-passive-browser-feedback.md)
+supersedes the denial circuit and interactive page overlay. Final dispatch checks and passive
+feedback remain. The original decision below is retained as history.
+
 Builds on: ADR-0018 (human pause and kill controls), ADR-0030 (multiplexed local sessions),
 ADR-0057 (honest governance presentation), and ADR-0072 (agent narration). Preserves
 ADR-0005's policy-free extension and ADR-0028's no-phone-home Continuity Promise.

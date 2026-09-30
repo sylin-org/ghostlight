@@ -1,9 +1,9 @@
-# Ghostlight in Browser: planned 1.0 store listing
+# Ghostlight in Browser: candidate store listing
 
-Last updated: 2026-08-22
+Last updated: 2026-09-30
 
 This is repository-local candidate copy. Do not change the public listing or submit a package until
-the owner approves the provenance-verified 1.0 artifacts and compatibility evidence. Recheck the
+the owner approves the provenance-verified release artifacts and compatibility evidence. Recheck the
 store's current fields, asset sizes, and policy wording at submission time.
 
 The public item id is `lejccfmoeogmhemakeknjjdhkfkgncdl`. The pinned source-development key and
@@ -39,6 +39,12 @@ use, with your existing signed-in sessions and local human control.
 Browser work stays together in a clearly named blue tab group. You can watch page reading,
 navigation, clicks, typing, form work, file upload, screenshots, dialogs, and other requested
 actions; pause or end the session at any time; and preserve controlled tabs as visible evidence.
+Page messages and animations are passive, with no buttons or interference with your input.
+Use the local workbench and extension popup for human controls.
+
+Credential input requires your explicit instruction, acknowledged by the agent for each request.
+Without that acknowledgement, the call returns guidance without pausing the session. Configured
+policy and your Pause/Stop controls still apply.
 
 The extension is a thin adapter for the separately installed Ghostlight application. Policy,
 terminal results, history, and model-facing tools stay in the local native orchestrator. The
@@ -48,7 +54,7 @@ feedback.
 Ghostlight is local-first. There is no developer-operated runtime service, account, telemetry,
 advertising, tracking, activation, or data sale.
 
-Requires the matching Ghostlight 1.0 desktop application:
+Requires a compatible Ghostlight desktop application:
 https://sylin.org/ghostlight/
 
 Source and documentation:
@@ -93,8 +99,10 @@ Policy, including the Limited Use requirements.
 
 At submission, disclose on-device handling of website content and user activity as required by the
 dashboard's then-current definitions. Do not claim that local processing means no disclosure is
-required. Ghostlight does not request Chrome history, cookies, credentials, payment, geolocation,
-or sync-storage access and does not maintain a browsing-history database.
+required. Disclose the handling of passwords, authentication codes, and payment values supplied
+for explicitly authorized credential input; local processing does not make those values absent.
+Ghostlight does not request Chrome history, cookies, geolocation, or sync-storage permissions and
+does not maintain a browsing-history database. It does not read the browser's saved-password store.
 
 ## Assets
 
@@ -117,9 +125,10 @@ Before owner submission:
 1. Produce the store zip from the approved release commit without the pinned development key or
    repository-only test material.
 2. Compare the zip's manifest, icons, popup, options, permissions, and scripts with the approved
-   source and exact 1.0 adapter version.
+   source and exact candidate adapter version.
 3. Complete the extension product and visible-browser gates in `docs/1.0/ACCEPTANCE.md`.
-4. Verify the privacy policy public URL already carries the matching 1.0 text.
+4. Verify the privacy policy public URL already discloses the candidate's authorized credential
+   handling and passive page feedback. A source-file edit alone does not update that public URL.
 5. Review the existing assets and listing fields, change only what the submitted extension makes
    inaccurate, review every disclosure in the live dashboard, then submit with the owner's
    explicit approval.

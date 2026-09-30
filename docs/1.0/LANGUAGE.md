@@ -264,14 +264,15 @@ Facts: `tab`, optional `target`, optional `view`, and `hovered`.
 
 ### `browser_fill_form`
 
-Fill one or more ordinary controls. It does not submit unless `submit_target` is present. Use
+Fill one or more form controls. It does not submit unless `submit_target` is present. Use
 `browser_type_text` when per-character input events matter. Shortest call:
 `{"fields":[{"target":"target_...","value":"Ada"}]}`.
 
 Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
 exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
 for checkboxes and radios, or a finite number for numeric inputs; optional `tab`; optional
-`submit_target`; optional `timeout_ms`; optional `expect` postcondition.
+`submit_target`; optional `timeout_ms`; optional `expect` postcondition; optional
+`user_authorized_credentials`, default `false`.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Ordinary textual inputs, textareas, and rich-text controls use the browser's editing transaction
@@ -288,22 +289,31 @@ Semantic selectors and target handles can address the same ordinary controls, in
 outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.
 An explicit `submit_target` is still checked against the first resolved field's containing form.
 
-Credential-class targets stop before any value dispatch and request visible user handoff. Facts:
+Credential-class targets return guidance before any grouped value dispatch unless
+`user_authorized_credentials` is `true`. Set it only when the user explicitly authorized credential
+entry; an existing instruction in the conversation is sufficient, including on the first call.
+This per-request caller acknowledgement is not independently verified proof of user intent and
+does not override configured policy or human controls. Missing acknowledgement creates no session
+hold or resume requirement. Values never enter audit, diagnostics, or presentation. Facts:
 `tab`, `filled_count`, `submitted`, and any governed committed landing.
 
 ### `browser_type_text`
 
-Type ordinary text through browser input events. Shortest call:
+Type text through browser input events. Shortest call:
 `{"target":"target_...","text":"Ada"}`.
 
 Inputs use one location: `target` with bounded `text`; or `selector` with `text`; or
 `focused:true` to type into the currently focused editable control. Optional `clear_first`, default
-`false`; optional `tab`; optional `timeout_ms`. Empty text is valid only as an
+`false`; optional `tab`; optional `timeout_ms`; optional `user_authorized_credentials`, default
+`false`. Empty text is valid only as an
 explicit clear together with `clear_first:true`. Optional `expect` adds a postcondition.
 Capabilities: `action`, plus `read` when `selector` or `expect` is supplied. Targeted and focused
 typing without a postcondition require `action`.
 
-Credential-class targets stop before text dispatch. Facts: `tab`, `target`, `typed`,
+Credential-class targets return guidance before text dispatch unless
+`user_authorized_credentials` is `true`, with the same per-request acknowledgement semantics as
+`browser_fill_form`. This applies to both targeted and focused typing and creates no session hold.
+Facts: `tab`, `target`, `typed`,
 `character_count`, and any governed committed landing.
 
 ### `browser_press_key`
@@ -379,7 +389,8 @@ As with form fill, a semantic selector can address an ordinary file input outsid
 
 Ghostlight rejects directories, missing files, any file larger than 5,000,000 bytes, and a combined
 payload larger than 5,000,000 bytes before browser dispatch, and refuses an upload above the
-capture-reuse ceiling. Inline bytes decode only after authorization and credential preflight. File
+capture-reuse ceiling. Inline bytes decode only after authorization and file-target preflight.
+Credential-like metadata on a file control does not turn an explicit upload into credential entry. File
 paths, names, and contents never enter audit or presentation. Facts: `tab`, `target`,
 `uploaded_count`, and `uploaded_bytes`.
 
@@ -473,7 +484,7 @@ Actions are:
   the browser attaches it to that file input and Ghostlight requires `read + write`; with
   `"download": true`, the browser saves it as a file and Ghostlight requires `read`; with neither,
   the GIF is returned to the client and Ghostlight requires `read`. `target` and `download`
-  together are refused.
+  together are refused. Credential-like metadata on a file input does not block an explicit save.
 - `discard`: optional `recording`; erase captured bytes; no new capability.
 
 Save checks its complete capability requirement before stopping active capture. Read still
@@ -539,7 +550,7 @@ or what is allowed before acting.
 
 Inputs: none. Capability: empty requirement set (always available).
 Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
-It remains available during session attention, global Pause or Stop, and a required audit outage.
+It remains available during explicit global attention, Pause or Stop, and a required audit outage.
 It does not clear attention or change controls. Cancellation, deadlines, bounded admission, and
 the ordinary completion/audit path still apply.
 
@@ -547,13 +558,14 @@ The result carries the orchestrator's compiled projection -- the same compilatio
 Policy destination renders -- with layer document texts and filesystem paths withheld from model
 results. The summary names its measurement: capability areas explained over layers in force.
 
-## Session attention and human control (ADR-0157)
+## Explicit human control and request guidance (ADR-0185)
 
-Configured observe-mode policy reports would-deny decisions without refusing ordinary work. A denial that reaches its session's
-attention threshold retains the actual policy explanation and returns `attention_required`.
-Further browser work in that session requires explicit human review/resume in the workbench; global Resume
-leaves it intact. Model tools cannot resume attention. The triggering composition stops even under
-Continue; recovery permits new requests and never replays prior steps.
+Configured observe-mode policy reports would-deny decisions without refusing ordinary work.
+Enforced denials retain their actual policy explanation regardless of how often they occur; they
+never open a session hold or require review/resume. Credential input without the user's explicit
+authorization returns guidance for that request and leaves later permitted work available.
+Flow error handling follows the requested stop/continue choice for these ordinary refusals.
+Explicit global runtime attention remains a human control, not a denial or credential threshold.
 
 Pause and Stop keep their fixed directives at the final dispatch check. A late refusal preserves
 already acknowledged effects, including when it prevents a separate postcondition observation.

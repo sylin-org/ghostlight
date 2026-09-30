@@ -308,8 +308,8 @@ projection carries that account into the parent audit record. Child payloads rem
 and per-step status/effect metadata survives flow-result omission. Direct operations and child
 terminals enter `work/receipt.rs`; each child gets its own completion gate without reacquiring the
 parent lease or snapshot. The same safe audit sink records children incrementally, identified by
-parent invocation and position. Only the parent settles the lifecycle. Actual child denials count
-once; aggregate wrappers do not repeat them.
+parent invocation and position. Only the parent settles the lifecycle. Actual child denials have
+one receipt; aggregate wrappers do not repeat them or create a denial counter.
 
 `governance/evidence.rs` captures bounded permission checks from the admission evaluator, including
 positive grant identities for each evaluated layer. Legacy receipts retain old request restriction
@@ -375,6 +375,13 @@ Semantic setters remain for select, toggle, and file controls. Submission starts
 terminal verification and remains an explicit action. A failed native edit refuses without
 fabricating input/change events or replacing the existing draft.
 
+Fill and typing decode `user_authorized_credentials`, false by default, in the orchestrator's
+language. It acknowledges an explicit user instruction for that request, not independently
+verified intent or a policy grant. The executor carries it through a closed physical command field
+to browser preflight and the immediate input check. Without it, credential detection returns
+guidance before input and creates no workspace state. Grouped fill checks every field before
+editing any. Values remain absent from audit, diagnostics, and presentation (ADR-0185).
+
 Pointer geometry follows the same composed surface. Frame-box discovery reaches embeds inside open
 roots. Point hit testing descends through open roots, then the service worker follows the embed at
 the point through Chromium's parent-frame tree. CDP effects keep top-viewport coordinates while
@@ -392,6 +399,8 @@ File upload is a cross-boundary capability with explicit owners. The language ac
 absolute paths. The orchestrator validates and reads only those files after governance admission,
 then sends bounded names, media types, and bytes through the physical bridge. The extension creates
 browser `File` objects for the already selected file input. The relay never reads paths or files.
+Credential-like metadata on that file control does not block explicitly requested file upload or
+recording save; the physical file-target checks and configured authority remain in force.
 
 Recording follows one-owner semantics, and the owner is the browser. The extension's plural
 registry owns Chrome screencast start, frame acknowledgement, identity, compressed frames, fixed
@@ -596,13 +605,17 @@ Chromium loads `extension/` directly with id `cjcmhepmagomefjggkcohdbfemacojoa`,
 `org.sylin.ghostlight`, and reloads explicitly after changes. Repo-built shores remain under
 `target/release`. No prior implementation code was reused.
 
-## Session attention and final dispatch (ADR-0157)
+## Explicit human control and final dispatch (ADR-0185)
 
-Workspace lifetime owns automatic attention, its closed cause, opaque incident id, and triggering
-invocation. Governance owns the denial thresholds and composes that fact with independent global
-human controls. WorkbenchFacade owns reviewed incident recovery; the allowlisted Tauri action is
-unavailable through model tools. Recovery changes no grants and replays no invocation. The WebView
-renders the session notice and opens its current history group, even after a disposable Clear view.
+Governance owns configured authority and explicit human runtime controls. Policy denials and
+credential-input guidance create no automatic attention state, rolling counters, incident ids,
+or session recovery journey. Any later permitted request remains available under the same policy
+and controls. Explicit global runtime attention remains supported independently of request results.
+
+The page renderer creates only passive messages and animations, never buttons, focusable controls,
+or a pointer-intercepting layer. That property holds when CSS fails. Legacy attention signals may
+render a bounded passive notice; runtime-state changes alone do not create a page dialog.
+Interactive runtime control belongs in the Tauri workbench.
 
 Observe-mode policy allowance remains useful. Obsolete request fields fail during decoding;
 they cannot turn observation into enforcement. Permission receipts retain the final decision and actual evaluated layers. The executor supplies a live
@@ -642,7 +655,7 @@ Governance owns the monotonic `audit.availability` setting and attributes its st
 the immutable policy layer. The executor reads current storage health before browser preparation
 and at the final dispatch callback after writer queuing. Already-admitted effects remain truthful.
 Human controls, diagnostics, and policy explanation remain reachable. Storage health does not
-mutate human runtime control or session attention. The extension and both connectors remain free
+mutate human runtime control. The extension and both connectors remain free
 of audit policy and health semantics.
 
 Startup tolerates unreadable history or a failed destination, with explicit human health.

@@ -12,7 +12,7 @@
   root.GhostlightPresentationCss = Object.freeze({
     build(tokens, reducedFadeSelector) {
       return `
-      :host{all:initial;${tokens}}*{box-sizing:border-box}
+      :host{all:initial;${tokens}}:host,*{pointer-events:none!important}*{box-sizing:border-box}
       .surface{position:fixed;inset:0;pointer-events:none;color:var(--gl-ink);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
       .scope{position:fixed;inset:0;opacity:0;transition:opacity .3s ease-in-out;box-shadow:inset 0 0 14px rgba(var(--gl-argb),.7),inset 0 0 26px rgba(var(--gl-argb),.35)}
       .scope.on{animation:ghostlight-control-breathe 4s ease-in-out infinite}
@@ -51,7 +51,6 @@
       .signature.completing .glint,.signature.confirming .glint{animation:ghostlight-signature-glint 520ms var(--gl-spring) 1}
       .signature.completing .workwheel,.signature.completing .keyboard,.signature.completing .lens{animation-play-state:paused}
       .denials{z-index:5;display:grid;place-items:center}.denial-ribbon{--gl-rgb:239,68,68;display:flex;align-items:center;justify-content:center;gap:12px;width:min(88vw,620px);padding:14px 20px;border-radius:16px;color:var(--gl-ink);background:var(--gl-ground);box-shadow:0 14px 44px -16px rgba(var(--gl-rgb),.75),inset 0 1px 0 rgba(255,255,255,.12);transform-origin:center;animation:ghostlight-notif-grow 320ms var(--gl-spring) forwards}.denial-badge{flex:0 0 auto;width:52px;height:52px;display:grid;place-items:center;border-radius:50%;color:rgb(var(--gl-rgb));background:rgb(var(--gl-rgb));box-shadow:0 4px 16px rgba(0,0,0,.35)}.denial-badge svg{width:72%;height:auto}.denial-title{font:600 16px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.denial-description{margin-top:2px;color:var(--gl-ink);opacity:0;font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;animation:ghostlight-notif-desc 320ms ease-out 220ms forwards}
-      .attention{position:fixed;inset:0;z-index:6;display:none;place-items:center;padding:24px;pointer-events:auto;background:rgba(5,10,18,.55);backdrop-filter:blur(5px) saturate(.7)}.attention.on{display:grid}.attention-card{width:min(92vw,560px);padding:24px;border:1px solid rgba(239,68,68,.7);border-radius:22px;color:var(--gl-ink);background:rgba(10,16,26,.97);box-shadow:0 24px 80px -24px rgba(239,68,68,.75);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.attention-icon{display:grid;place-items:center;width:58px;height:58px;margin:0 auto 14px;border-radius:50%;color:#fff;background:#ef4444;box-shadow:0 0 28px rgba(239,68,68,.55);font:800 30px/1 system-ui}.attention-card h2{margin:0;text-align:center;font-size:22px}.attention-card p{margin:8px 0 20px;color:#cbd5e1;text-align:center;font-size:14px;line-height:1.45}.attention-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.attention-actions button{min-height:42px;padding:9px 12px;border:1px solid rgba(148,163,184,.38);border-radius:10px;color:var(--gl-ink);background:#172033;font:600 12px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}.attention-actions button:hover,.attention-actions button:focus-visible{border-color:var(--gl-sky);background:#1d2b42;outline:none}.attention-actions .danger{border-color:rgba(239,68,68,.6);color:#fecaca}
       @keyframes ghostlight-control-breathe{0%,100%{opacity:.58}50%{opacity:.82}}
       @keyframes ghostlight-ripple{0%{opacity:.85;transform:translate(-50%,-50%) scale(.3)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.8)}}
       @keyframes ghostlight-trail{0%{opacity:.9;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(.55)}}
@@ -73,7 +72,6 @@
       @keyframes ghostlight-find-lens{0%,100%{transform:translate(-1px,-1px) rotate(-7deg)}50%{transform:translate(2px,2px) rotate(5deg)}}
       @keyframes ghostlight-notif-grow{0%{opacity:0;transform:translateY(10px) scale(.96)}100%{opacity:1;transform:none}}
       @keyframes ghostlight-notif-desc{0%{opacity:0}100%{opacity:.85}}
-      @media(max-width:520px){.attention-actions{grid-template-columns:1fr}}
       @media(prefers-reduced-motion:reduce){.scope.on{animation:none;opacity:.7}.cursor{transition:none}.ripple{animation-name:ghostlight-fade}${reducedFadeSelector}{animation-name:ghostlight-fade!important;animation-duration:180ms!important}.signature{transition:opacity 180ms ease-out}.denial-ribbon{animation:none!important}.denial-description{animation:none!important;opacity:.85}}
       @keyframes ghostlight-fade{0%{opacity:0}50%{opacity:.8}100%{opacity:0}}
     `;

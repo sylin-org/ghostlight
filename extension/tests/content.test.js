@@ -654,7 +654,7 @@ test("rich editor fills and clears use one native edit scoped to the chosen edit
 });
 
 test("rich editor refusal prevents native editing and preserves the existing draft", async () => {
-  for (const [attribute, value, reason] of [["aria-readonly", "true", /read-only/], ["aria-disabled", "true", /disabled/], ["autocomplete", "current-password", /handoff/]]) {
+  for (const [attribute, value, reason] of [["aria-readonly", "true", /read-only/], ["aria-disabled", "true", /disabled/], ["autocomplete", "current-password", /authorization/]]) {
     const harness = contentHarness();
     const editor = harness.element("div");
     editor.isContentEditable = true;
@@ -733,7 +733,7 @@ test("typing rechecks the exact target after page focus or selection handlers ru
     const result = await harness.send({ kind: "type_text", locator: inspected.result.targets[0].locator,
       text: "Replacement", clear_first: true });
     assert.equal(result.ok, false);
-    assert.match(result.error, /handoff/);
+    assert.match(result.error, /authorization/);
     assert.equal(element.value, "Retained draft");
     assert.equal(harness.edits.length, 0);
   }
@@ -901,7 +901,7 @@ test("invisibility refusals name the exact predicate", async () => {
   assert.match(ariaHidden.error, /target is not visible for activate \(aria-hidden\)/);
 });
 
-test("credential handoff names the exact control", async () => {
+test("credential authorization guidance names the exact control", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
   harness.input.type = "password";
@@ -912,7 +912,69 @@ test("credential handoff names the exact control", async () => {
   const refused = await harness.send({ kind: "fill", fields: [{ locator, value: "hunter2" }] });
 
   assert.equal(refused.ok, false);
-  assert.match(refused.error, /requires user handoff: the textbox "Master password"/);
+  assert.match(refused.error, /requires user authorization: the textbox "Master password"/);
+});
+
+test("password typing requires an exact per-request allowance without retaining it", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false; harness.input.type = "password"; harness.input.value = "existing";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets[0].locator;
+  for (const allow_credentials of [undefined, false, "true", 1]) {
+    const refused = await harness.send({ kind: "type_text", locator, text: "replacement", clear_first: true, allow_credentials });
+    assert.equal(refused.ok, false);
+    assert.equal(harness.input.value, "existing");
+  }
+  const typed = await harness.send({ kind: "type_text", locator, text: "replacement", clear_first: true, allow_credentials: true });
+  assert.equal(typed.ok, true);
+  assert.equal(harness.input.value, "replacement");
+  assert.equal(JSON.stringify(typed).includes("replacement"), false);
+  const later = await harness.send({ kind: "type_text", locator, text: "unacknowledged", clear_first: true });
+  assert.equal(later.ok, false);
+  assert.equal(harness.input.value, "replacement");
+});
+
+test("credential allowance survives every staged fill check and does not weaken actionability", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false; harness.input.type = "password"; harness.input.value = "existing";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const field = { locator: inspected.result.targets[0].locator, value: "replacement" };
+  for (const message of [
+    { kind: "prepare_fill", fields: [field] },
+    { kind: "prepare_text_fill", field },
+    { kind: "verify_text_fill_focus", field }
+  ]) {
+    assert.equal((await harness.send(message)).ok, false, message.kind);
+    assert.equal((await harness.send({ ...message, allow_credentials: true })).ok, true, message.kind);
+    assert.equal(harness.input.value, "existing");
+  }
+  const filled = await harness.send({ kind: "fill", fields: [field], allow_credentials: true });
+  assert.equal(filled.ok, true);
+  assert.equal(harness.input.value, "replacement");
+  const retained = await harness.send({ kind: "verify_fill_values", fields: [field], allow_credentials: true });
+  assert.equal(retained.ok, true);
+  assert.equal(retained.result.retained, true);
+  assert.equal(JSON.stringify([filled, retained]).includes("replacement"), false);
+  harness.input.readOnly = true;
+  const readonly = await harness.send({ kind: "prepare_text_fill", field, allow_credentials: true });
+  assert.equal(readonly.ok, false);
+  assert.match(readonly.error, /read-only/);
+});
+
+test("focused password verification and clear honor only the current allowance", async () => {
+  const harness = contentHarness();
+  harness.document.hasFocus = () => true;
+  harness.input.hidden = false; harness.input.type = "password"; harness.input.value = "existing";
+  harness.input.focus();
+  for (const kind of ["verify_focused_text", "clear_focused"]) {
+    assert.equal((await harness.send({ kind })).ok, false);
+    assert.equal(harness.input.value, "existing");
+    const allowed = await harness.send({ kind, allow_credentials: true });
+    assert.equal(allowed.ok, true, kind);
+  }
+  assert.equal(harness.input.value, "");
+  harness.document.hasFocus = () => false;
+  assert.equal((await harness.send({ kind: "verify_focused_text", allow_credentials: true })).ok, false);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {
@@ -1069,6 +1131,7 @@ function shadowFixture(name) {
     getBoundingClientRect() { return { left: 4, top: 4, width: 40, height: 20 }; },
     dispatchEvent(event) { this.events.push(event.type); return true; },
     focus() {},
+    scrollIntoView() {},
     getRootNode() { return {}; }
   };
 }

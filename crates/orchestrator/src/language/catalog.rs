@@ -127,14 +127,14 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill one to thirty ordinary form fields in one call. Requires read and write, including unsent drafts; submit_target also requires action. Nothing submits unless submit_target names the control, and credential fields stop so the user can enter their secret.",
+            "Fill one to thirty form fields in one call. Requires read and write, including unsent drafts; submit_target also requires action. Nothing submits unless submit_target names the control. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
             with_expect(fill_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_type_text",
             "Type text",
-            "Type text through real per-character keyboard input. Requires action; selector lookup or an expect check also requires read. Use browser_fill_form instead when plain values are enough.",
+            "Type text through real per-character keyboard input. Requires action; selector lookup or an expect check also requires read. Use browser_fill_form instead when plain values are enough. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
             with_expect(type_schema()),
             Hints::browser_action(true),
         ),
@@ -849,6 +849,13 @@ fn hover_schema() -> Value {
     )
 }
 
+fn credential_authorization() -> (&'static str, Value) {
+    (
+        "user_authorized_credentials",
+        boolean(false, "Set true only when the user explicitly authorized credential entry for this request. Existing user authorization is sufficient. This does not override configured policy or human Pause/Stop."),
+    )
+}
+
 fn fill_schema() -> Value {
     examples(
         object(
@@ -856,6 +863,7 @@ fn fill_schema() -> Value {
                 ("fields", json!({"type":"array","minItems":1,"maxItems":30,"description":"Ordinary form values to set. Each field provides exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_","Current form-control target."),"selector":semantic_selector(),"value":{"description":"Literal value, including an empty value to clear. Checkboxes and radios accept booleans; numeric inputs accept finite numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}})),
                 ("tab", tab()),
                 ("submit_target", handle("target_", "Optional current submit control. Supplying it may produce an external effect.")),
+                credential_authorization(),
                 ("timeout_ms", timeout_with_default(DEFAULT_FILL_TIMEOUT_MS)),
             ],
             vec!["fields"],
@@ -866,6 +874,7 @@ fn fill_schema() -> Value {
 
 fn type_schema() -> Value {
     let common = vec![
+        credential_authorization(),
         ("target", handle("target_", "Current editable target.")),
         ("tab", tab()),
         ("timeout_ms", timeout()),
@@ -910,6 +919,7 @@ fn type_schema() -> Value {
                             "Type into the currently focused editable control instead of `target`.",
                         ),
                     ),
+                    credential_authorization(),
                     (
                         "text",
                         text(0, 8_000, "Literal text to type; empty text only clears."),
@@ -925,7 +935,11 @@ fn type_schema() -> Value {
             ),
             object(
                 with_many(
-                    vec![("tab", tab()), ("timeout_ms", timeout())],
+                    vec![
+                        ("tab", tab()),
+                        ("timeout_ms", timeout()),
+                        credential_authorization(),
+                    ],
                     vec![
                         ("selector", semantic_selector()),
                         ("text", text(1, 8_000, "Literal text to type.")),

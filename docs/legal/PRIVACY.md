@@ -1,12 +1,16 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-08-22
+Last updated: 2026-09-30
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
 This policy covers the `Ghostlight in Browser` Manifest V3 extension published by Sylin. It
 explains what the extension can access, why it needs that access, and where data does and does not
 go.
+
+The credential-input and passive-page-feedback changes described for version 1.3.12 apply when
+the matching native application and browser adapter are installed. Earlier public versions refuse
+credential-class fill and typing requests.
 
 ## What the extension is
 
@@ -42,8 +46,10 @@ For controlled Ghostlight tabs, the extension may handle:
   does not use diagnostics to build browsing history.
 - **Synthetic input and navigation.** Pointer, keyboard, scroll, drag, zoom, navigation, dialog,
   and tab-management actions perform the browser work requested by the connected MCP client.
-- **Ordinary form values.** Values supplied by the connected MCP client may be placed into
-  non-credential fields.
+- **Form values.** Values supplied by the connected MCP client may be placed into form fields.
+  From version 1.3.12, passwords, one-time codes, and payment secrets may be entered when the client
+  acknowledges the user's explicit instruction for that request, subject to configured policy and
+  human controls. Earlier public versions accept only non-credential fields for fill and typing.
 - **User-requested page JavaScript.** When the MCP client explicitly requests `browser_execute`,
   bounded script text is evaluated through the Chrome Debugger API in the attached page. Its
   bounded serializable result may return through the local chain. The text is not installed,
@@ -52,8 +58,14 @@ For controlled Ghostlight tabs, the extension may handle:
   named page file input.
 
 The extension does not browse the filesystem. File paths are validated and bytes are read by the
-native application only for the requested upload. Ghostlight refuses credential-class fields and
-does not type passwords, one-time codes, or payment secrets.
+native application only for the requested upload.
+
+In version 1.3.12, fill and typing default to refusing credential-class input with guidance to the
+client. They accept the per-request `user_authorized_credentials` acknowledgement when the user
+explicitly instructed credential entry; an existing instruction is sufficient. The acknowledgement is supplied
+by the client, not independently verified by Ghostlight, and cannot override configured policy or
+human Pause/Stop. Without it, the current request returns guidance without pausing the session.
+Ghostlight does not add submitted form values to audit, diagnostic logs, or visual feedback.
 
 ## Where data goes
 
@@ -86,8 +98,11 @@ Policy, including the Limited Use requirements.
 
 The user controls whether the native application and extension are installed, which MCP harness is
 registered, whether a session is active or paused, whether controlled tabs may be closed by the
-model, and whether Ghostlight remains running. Visual browser receipts, the extension popup, and
-the tray workbench expose those controls without reading page content.
+model, and whether Ghostlight remains running. The extension popup and tray workbench expose
+controls without reading page content. In version 1.3.12, page receipts are passive messages and
+animations: they contain no buttons or focusable controls and never intercept pointer or keyboard
+input. Repeated policy refusals and credential-input guidance no longer automatically pause a
+session in that version.
 
 Removing the extension or stopping the native application ends its browser access. Closing only
 the workbench window destroys that local surface and does not imply the orchestrator stopped.

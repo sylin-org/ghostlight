@@ -137,8 +137,10 @@ impl ApplicationExecutor {
                 if targets.len() != locators.len() {
                     return self.protocol_failure(context, decision, Some(tab_id));
                 }
-                if targets.iter().any(|target| target.credential_class) {
-                    return self.credential_handoff(context, decision, &selected);
+                if !value.user_authorized_credentials
+                    && targets.iter().any(|target| target.credential_class)
+                {
+                    return self.credential_guidance(context, decision, &selected);
                 }
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -158,6 +160,7 @@ impl ApplicationExecutor {
             BrowserCommand::Fill {
                 tab_id: selected.physical_id,
                 fields,
+                allow_credentials: value.user_authorized_credentials,
                 submit_locator: submit.map(|target| target.locator),
                 timeout_ms: adapter_budget_ms(
                     value.timeout_ms,
@@ -220,8 +223,8 @@ impl ApplicationExecutor {
             Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
                 if tab_id == selected.physical_id && targets.len() == 1 =>
             {
-                if targets[0].credential_class {
-                    return self.credential_handoff(context, decision, &selected);
+                if targets[0].credential_class && !value.user_authorized_credentials {
+                    return self.credential_guidance(context, decision, &selected);
                 }
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -243,6 +246,7 @@ impl ApplicationExecutor {
                 locator: target.locator,
                 text: value.text.clone(),
                 clear_first: value.clear_first,
+                allow_credentials: value.user_authorized_credentials,
             },
         ) {
             Ok(BrowserOutcome::Typed {
@@ -349,12 +353,7 @@ impl ApplicationExecutor {
                 },
             ) {
                 Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                    if tab_id == selected.physical_id && targets.len() == 1 =>
-                {
-                    if targets[0].credential_class {
-                        return self.credential_handoff(context, decision, &selected);
-                    }
-                }
+                    if tab_id == selected.physical_id && targets.len() == 1 => {}
                 Ok(_) => {
                     return self.protocol_failure(context, decision, Some(selected.physical_id))
                 }
@@ -1014,8 +1013,8 @@ impl ApplicationExecutor {
                     Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
                         if tab_id == selected.physical_id && targets.len() == 1 =>
                     {
-                        if targets[0].credential_class {
-                            return self.credential_handoff(context, decision, selected);
+                        if targets[0].credential_class && !value.user_authorized_credentials {
+                            return self.credential_guidance(context, decision, selected);
                         }
                         Some(PhysicalActionSubject {
                             role: targets[0].role.clone(),
@@ -1040,6 +1039,7 @@ impl ApplicationExecutor {
                         tab_id: selected.physical_id,
                         text: value.text.clone(),
                         clear_first: value.clear_first,
+                        allow_credentials: value.user_authorized_credentials,
                     },
                 ) {
                     Ok(BrowserOutcome::Typed {

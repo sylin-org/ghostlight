@@ -2,8 +2,8 @@
 
 Ghostlight needs no policy for personal use. With no policy configured, ordinary HTTP(S) browser
 work is open, including localhost, loopback, and link-local destinations. Runtime controls,
-credential handoff, stale-handle checks, browser-local interlocks, and the HTTP(S)-only boundary
-still apply. Host restrictions belong to policy.
+explicit credential-input acknowledgement, stale-handle checks, browser-local interlocks, and the
+HTTP(S)-only boundary still apply. Host restrictions belong to policy.
 
 A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
 intersect. No lower layer can restore authority removed above it.
@@ -218,12 +218,19 @@ class, last verification, rationale, and contact channels. The local managed-sta
 the same content-minimized operational facts without policy rules, source addresses, or
 credentials.
 
-## Denials and attention
+## Denials and explicit user control
 
 An enforced denial carries a deterministic `D-` id, the deciding tier, grant, rule, complete RAWX
-set, effective authority identity, mode, and managed sequence in audit. Three matching denials in
-60 seconds, or five enforced denials in 120 seconds, pause that workspace for attention. Resume,
-resume quietly, keep paused, and end session use the existing browser and workbench controls.
+set, effective authority identity, mode, and managed sequence in audit. Repeated refusals do not
+pause the workspace or create a review/resume requirement. Each subsequent request follows the
+same configured authority and explicit human controls.
+
+Fill and typing accept `user_authorized_credentials`, false by default. Set it only when the user
+explicitly instructed credential entry; existing conversation authorization is sufficient. It is
+a per-request caller acknowledgement, not independently verified proof or a policy grant. Without
+it, credential detection returns guidance for that request and creates no session hold. With it,
+configured policy and human Pause/Stop still apply. Browser feedback contains no buttons or
+input-intercepting overlays; interactive runtime control belongs in the workbench.
 
 ## Audit collection
 

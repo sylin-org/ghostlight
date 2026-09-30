@@ -99,7 +99,8 @@ Two habits keep scripts out of rework:
 ## What governance sees
 
 A scripted call is governed exactly like an agent's call. The same capability classes apply, the
-same host rules, the same runtime pause, the same credential handoff, the same tab-close interlock.
+same host rules, the same human runtime controls, the same per-request acknowledgement of explicit
+user-authorized credential input, and the same tab-close interlock.
 There is no scripting bypass, because the command line is an edge and the orchestrator is the only
 thing that executes.
 

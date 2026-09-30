@@ -14,6 +14,62 @@ impl PresentationPort for PageSignals {
 }
 
 #[test]
+fn credential_guidance_finishes_visuals_without_a_denial_or_attention_notice() {
+    for composed in [false, true] {
+        let (mut executor, browser, _, workspace, _) = fixture();
+        let signals = Arc::new(PageSignals::default());
+        executor.presentation = PresentationReactor::new(signals.clone());
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        signals.0.lock().unwrap().clear();
+        browser.push(Ok(BrowserOutcome::TargetsDescribed {
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "password".into(),
+                role: "textbox".into(),
+                name: "Password".into(),
+                state: vec![],
+                credential_class: true,
+            }],
+        }));
+        let input = json!({"tab":opened.facts["tab"],"focused":true,"text":"PRIVATE_SECRET"});
+        let (tool, input) = if composed {
+            (
+                "browser_flow",
+                json!({"steps":[{"tool":"browser_type_text","arguments":input}]}),
+            )
+        } else {
+            ("browser_type_text", input)
+        };
+        let result = executor.execute(&workspace, tool, input, None, &CancellationToken::default());
+        assert_eq!(result.status, Status::Blocked);
+        assert_eq!(result.effect, Effect::None);
+        let signals = signals.0.lock().unwrap();
+        assert!(signals.iter().all(|signal| !matches!(
+            signal.signal,
+            PresentationKind::Denial | PresentationKind::Attention
+        )));
+        assert!(signals
+            .iter()
+            .any(|signal| signal.signal == PresentationKind::Completion));
+        assert!(!serde_json::to_string(&*signals)
+            .unwrap()
+            .contains("PRIVATE_SECRET"));
+    }
+}
+
+#[test]
 fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
     let (mut executor, browser, _, workspace, audit) = fixture();
     let signals = Arc::new(PageSignals::default());

@@ -13,7 +13,7 @@ courteous guest who narrates what they touch -- visible enough to trust, quiet e
 
 - **One accent.** Everything the agent DOES renders in the brand's luminous sky blue
   (`#38bdf8` / rgb `56,189,248`). One color means one meaning: "the agent did this." Governance
-  interventions (the denial sticker and attention overlay) are the deliberate exception -- they carry a severity
+  interventions (denial stickers and explicit attention notices) are the deliberate exception -- they carry a severity
   color (red/amber/sky/slate) on a neutral near-black chrome (`#0c0f14`, ink `#eaf6ff`), so a
   guardrail reads as a different AUTHORITY, not just another effect.
 - **Soft, omnidirectional light.** Glow comes from layered `rgba()` box-shadows and radial
@@ -56,8 +56,8 @@ domain modules.
 | Action signature medallion | non-spatial activity without presentational content | "the agent is doing THIS kind of work" | one signal-aware corner shell: JavaScript workwheel, glowing typing keyboard, three waiting lights, or post-capture camera |
 | Caption track | any action (opt-in) | subtitle naming the action | bottom-center pill; off by default, gorgeous for demos |
 | Narration caption | `narrate` | "the agent wants the watcher to understand this workflow phase" | compact timed sky-accent caption with an Agent label and one three-dot activity cue; auto, top, or bottom |
-| Denial sticker | one enforced denial via `Browser::notify()` | "a guardrail held; here is why" | compact centered sticker, replaced or removed after three seconds |
-| Attention overlay | ADR-0079 denial burst | "this MCP session is paused until a person decides" | page-softening modal with service-provided controls and popup fallback |
+| Denial sticker | one enforced denial | "a guardrail held; here is why" | passive centered sticker, replaced or removed after five seconds |
+| Explicit attention notice | legacy explicit attention signal | "see the workbench for details" | passive five-second notice; no modal, page dimming, focusable controls, or denial-burst trigger (ADR-0185) |
 | Recording badge | active screencast lifecycle | "Ghostlight is recording" | truthful red REC extension badge and popup state, never a simulated live preview |
 
 ## How a click describes itself
@@ -100,14 +100,15 @@ than merely pretty.
    `hiddenForTool`) so the model's own screenshots stay clean, and every effect element's id is
    `ghostlight-`-prefixed so `read_page`/`find` skip it. The agent must never see -- or act on --
    its own reflection.
-2. **Untouchable by default.** Transient effects and stickers use `pointer-events:none`. The
-   attention overlay's service-provided controls are real, keyboard-focusable `<button>` elements.
+2. **Always passive on the page.** Every effect and notice uses `pointer-events:none`. No page
+   treatment contains buttons or focusable controls, intercepts keyboard input, or disables the
+   page, even when CSS fails. Interactive runtime control belongs in the Tauri workbench (ADR-0185).
 3. **Ephemeral by default.** Spatial action effects are fire-and-fade confirmations (`addEphemeral`:
    removed on `animationend` with a timeout fallback). An active signature begins before its action,
    finishes through that action's `finally` path, and has a stale fallback. A confirmation signature
-   appears only after its action. An isolated denial lasts three seconds. Narration is bounded
-   state: one caption per tab until its timer expires or a new narration replaces it. The attention
-   overlay persists because its service-owned pause persists. The controlled-tab border persists
+   appears only after its action. Denial and explicit attention notices last five seconds.
+   Narration is bounded state: one caption per tab until its timer expires or a new narration
+   replaces it. No attention overlay persists. The controlled-tab border persists
    because the tab remains agent-reachable.
 4. **Reduced motion respected.** Animated effects use a plain-fade `-rm` variant or disable their
    internal motion under `prefers-reduced-motion`.
@@ -115,8 +116,8 @@ than merely pretty.
    (`ghostlight_effects`) silences decorative action effects and narration. The controlled-tab
    border is exempt because agent reachability must remain visible. Denial and attention
    presentation is exempt because a guardrail explanation is substantive.
-6. **Denials replace; they do not stack.** A new isolated denial replaces the active sticker. An
-   open attention overlay supersedes stickers and remains until the service reports a disposition.
+6. **Notices replace; they do not stack.** A denial or legacy explicit attention signal replaces
+   the active notice and expires after five seconds. Repeated denials never create a session hold.
 7. **Wire text is text.** Any string that can carry page- or policy-influenced content (captions,
    narration, denial title/description, attention labels) is inserted via `textContent`, never `innerHTML` -- this runs as a
    content script on `<all_urls>`.
@@ -129,7 +130,7 @@ than merely pretty.
   The binary/service worker knows which tool ran and publishes the matching `AGENT_*` intent,
   usually with viewport coordinates. The broker binds it to the current Chrome document,
   activates the packaged renderer on demand, and requires an exact channel/revision/document
-  acknowledgement. Controlled scope, narration, notifications, and attention replay while their
+  acknowledgement. Controlled scope, narration, and notifications replay while their
   state remains true. Transient action effects and signature lifecycle events never cross a
   document change.
 - **The `GhostlightFx` same-world export** (bottom of `agent-visual-indicator.js`): for sibling
@@ -151,8 +152,8 @@ the original deadline, then replays the remaining duration into the current ackn
 document. It is commentary, never governance: sky accent, inset compact caption, optional under
 the effects switch, and always below the guardrail layer. Auto placement chooses top or bottom
 once from recent touched-control, pointer, and scroll signals, then stays put. Narration, stickers,
-and overlays use bounded viewport-responsive sizing. The attention overlay is central, visually
-stronger, and never truncates its security text or controls.
+and explicit attention notices use bounded viewport-responsive sizing. No message becomes a modal
+or prevents the person from interacting with the page.
 
 Action signatures use fixed, content-free start, finish, and confirm messages from
 `extension/lib/action-signature.js`. The renderer owns one medallion and its bounded timers; broker

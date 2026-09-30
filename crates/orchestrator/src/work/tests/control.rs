@@ -34,15 +34,13 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
 use crate::governance::{CapabilitySet, ReasonCode};
 use crate::workbench::{
-    NotificationKind, WorkbenchFacade, WorkbenchNotification, WorkbenchPresentationError,
-    WorkbenchPresentationPort,
+    NotificationKind, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
 };
-use crate::workspace::AttentionReason;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 #[test]
-fn policy_explain_remains_available_without_releasing_attention_or_human_controls() {
+fn policy_explain_remains_available_without_releasing_human_controls() {
     let policy = temporary_policy("explain-no-browser-authority");
     fs::write(
         &policy,
@@ -54,54 +52,43 @@ fn policy_explain_remains_available_without_releasing_attention_or_human_control
         RuntimeControlIntent::Hold,
         RuntimeControlIntent::EndSession,
     ] {
-        for attention in [false, true] {
-            let (executor, browser, workspaces, workspace, audit) =
-                fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
-            if attention {
-                executor.require_session_attention(
-                    &workspace,
-                    "original_denial",
-                    AttentionReason::RepeatedDenials,
-                );
-            }
-            let incident = workspaces.attention(&workspace);
-            let control = executor.governance.apply_runtime_intent(intent);
-            let lease = workspaces.acquire(&workspace).unwrap();
-            let result = executor.execute(
-                &workspace,
-                "policy_explain",
-                json!({}),
-                None,
-                &CancellationToken::default(),
-            );
-            assert_eq!(result.status, Status::Succeeded, "{result:?}");
-            assert_eq!(result.effect, Effect::None);
-            assert!(result.repeat_safe);
-            assert_eq!(result.facts["layers"].as_array().unwrap().len(), 1);
-            assert!(browser.calls().is_empty());
-            assert_eq!(workspaces.attention(&workspace), incident);
-            assert_eq!(executor.governance.runtime_state(), control);
-            let records = audit.0.lock().unwrap();
-            assert_eq!(records.len(), 1);
-            assert_eq!(records[0].requirements(), CapabilitySet::EMPTY);
-            assert_eq!(records[0].permissions.checks.len(), 1);
-            let evidence = &records[0].permissions.checks[0];
-            assert!(evidence.allowed);
-            assert_eq!(evidence.requirements, CapabilitySet::EMPTY);
-            assert!(evidence.layers.is_empty());
-            assert!(!evidence.request_evaluated);
-            drop(records);
-            drop(lease);
-            let blocked = executor.execute(
-                &workspace,
-                "browser_tabs",
-                json!({"action":"list"}),
-                None,
-                &CancellationToken::default(),
-            );
-            assert_ne!(blocked.status, Status::Succeeded);
-            assert!(browser.calls().is_empty());
-        }
+        let (executor, browser, workspaces, workspace, audit) =
+            fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        let control = executor.governance.apply_runtime_intent(intent);
+        let lease = workspaces.acquire(&workspace).unwrap();
+        let result = executor.execute(
+            &workspace,
+            "policy_explain",
+            json!({}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{result:?}");
+        assert_eq!(result.effect, Effect::None);
+        assert!(result.repeat_safe);
+        assert_eq!(result.facts["layers"].as_array().unwrap().len(), 1);
+        assert!(browser.calls().is_empty());
+        assert_eq!(executor.governance.runtime_state(), control);
+        let records = audit.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].requirements(), CapabilitySet::EMPTY);
+        assert_eq!(records[0].permissions.checks.len(), 1);
+        let evidence = &records[0].permissions.checks[0];
+        assert!(evidence.allowed);
+        assert_eq!(evidence.requirements, CapabilitySet::EMPTY);
+        assert!(evidence.layers.is_empty());
+        assert!(!evidence.request_evaluated);
+        drop(records);
+        drop(lease);
+        let blocked = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_ne!(blocked.status, Status::Succeeded);
+        assert!(browser.calls().is_empty());
     }
     fs::remove_file(policy).unwrap();
 }
@@ -137,143 +124,95 @@ impl WorkbenchPresentationPort for Notices {
     }
 }
 
-fn facade(executor: &ApplicationExecutor) -> WorkbenchFacade {
-    WorkbenchFacade::new(
-        executor.workbench.clone(),
-        executor.workspaces.clone(),
-        executor.governance.clone(),
-        Arc::new(crate::browser::RelayBrowserPort::new("test".into())),
-        crate::diagnostics::DiagnosticsHub::for_tests(),
-    )
-}
-
 #[test]
-fn automatic_attention_is_local_reviewed_and_never_replays_work() {
+fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() {
     let policy = TestPolicy::new();
-    policy.set(json!(["action"]));
+    fs::write(
+        &policy.0,
+        serde_json::to_vec(&json!({
+            "schema":3,"name":"test authority","version":"1",
+            "grants":[{"id":"permitted-site","hosts":{"allow":["example.com"]},"allowed":["read"]}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let (executor, browser, workspaces, one, audit) = fixture_with_governance(policy.facade());
     let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp, None);
     let notices = Arc::new(Notices::default());
     executor.workbench.attach_presentation(notices.clone());
     let refused = json!({"on_error":"continue","steps":[
-        {"id":"one","tool":"browser_tabs","arguments":{"action":"list"}},
-        {"id":"two","tool":"browser_tabs","arguments":{"action":"list"}},
-        {"id":"three","tool":"browser_tabs","arguments":{"action":"list"}},
-        {"id":"four","tool":"browser_tabs","arguments":{"action":"list"}}
+        {"id":"one","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
+        {"id":"two","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
+        {"id":"three","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
+        {"id":"four","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
+        {"id":"five","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
+        {"id":"six","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}}
     ]});
-    let first = executor.execute(
-        &one,
-        "browser_flow",
-        refused.clone(),
-        None,
-        &CancellationToken::default(),
-    );
-    assert!(browser.calls().is_empty());
-    let incident = workspaces.attention(&one).unwrap();
-    assert_eq!(incident.invocation, first.invocation);
-    assert_eq!(incident.reason, AttentionReason::RepeatedDenials);
-    assert!(workspaces.attention(&two).is_none());
-    assert_eq!(
-        executor.governance.runtime_state(),
-        RuntimeControlState::Active
-    );
-    for _ in 0..3 {
-        let blocked = executor.execute(
-            &one,
-            "browser_tabs",
-            json!({"action":"list"}),
-            None,
-            &CancellationToken::default(),
-        );
-        assert_eq!(blocked.status, Status::AttentionRequired);
-        assert_eq!(workspaces.attention(&one), Some(incident.clone()));
-    }
-    policy.set(json!(["read", "action"]));
-    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
-    assert_eq!(
-        executor
-            .execute(
-                &two,
-                "browser_tabs",
-                json!({"action":"list"}),
-                None,
-                &CancellationToken::default()
-            )
-            .status,
-        Status::Succeeded
-    );
-    assert_eq!(browser.calls().len(), 1);
-    assert_eq!(
-        notices
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|notice| notice.kind == NotificationKind::Attention)
-            .count(),
-        1
-    );
-    assert!(notices
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|notice| notice.title.contains("test")));
-    executor
-        .governance
-        .apply_runtime_intent(RuntimeControlIntent::Resume);
-    assert_eq!(workspaces.attention(&one), Some(incident.clone()));
-    let recovery = facade(&executor);
-    for (intent, word) in [
-        (RuntimeControlIntent::Hold, "paused"),
-        (RuntimeControlIntent::EndSession, "stopped"),
-    ] {
-        executor.governance.apply_runtime_intent(intent);
-        let resumed = recovery.resume_session(one.as_str(), &incident.id);
-        assert!(resumed.accepted);
-        assert!(resumed.message.contains(word));
-        assert_eq!(browser.calls().len(), 1, "recovery must not replay");
-        assert!(!recovery.resume_session(one.as_str(), &incident.id).accepted);
-        workspaces.require_attention(&one, incident.clone());
-    }
-    executor
-        .governance
-        .apply_runtime_intent(RuntimeControlIntent::StartSession);
-    assert!(recovery.resume_session(one.as_str(), &incident.id).accepted);
-    policy.set(json!(["action"]));
-    let newer = executor.execute(
+    let result = executor.execute(
         &one,
         "browser_flow",
         refused,
         None,
         &CancellationToken::default(),
     );
-    assert_ne!(newer.invocation, first.invocation);
-    assert!(!recovery.resume_session(one.as_str(), &incident.id).accepted);
+    assert_eq!(result.status, Status::Blocked);
+    assert!(result.facts["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|step| step["status"] == "blocked"));
+    assert!(browser.calls().is_empty());
+    for _ in 0..6 {
+        let blocked = executor.execute(
+            &one,
+            "browser_navigate",
+            json!({"url":"https://denied.example/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(blocked.status, Status::Blocked);
+        assert_eq!(blocked.effect, Effect::None);
+    }
     assert_eq!(
-        workspaces.attention(&one).unwrap().invocation,
-        newer.invocation
+        executor.governance.runtime_state(),
+        RuntimeControlState::Active
     );
-    assert!(audit
+    assert!(notices
         .0
         .lock()
         .unwrap()
         .iter()
-        .any(|record| record.invocation == first.invocation && record.step.is_some()));
-    let latest = workspaces.attention(&one).unwrap();
-    assert!(recovery.resume_session(one.as_str(), &latest.id).accepted);
-    let mut same_invocation = latest.clone();
-    same_invocation.id = "new_incident_same_invocation".into();
-    assert!(workspaces.require_attention(&one, same_invocation.clone()));
-    assert!(!recovery.resume_session(one.as_str(), &latest.id).accepted);
-    assert_eq!(workspaces.attention(&one), Some(same_invocation));
-    workspaces.release(&one);
-    assert!(
-        !recovery
-            .resume_session(one.as_str(), &newer.invocation)
-            .accepted
+        .all(|notice| notice.kind != NotificationKind::Attention));
+    // The existing policy permits navigation. No policy change or resume is needed after refusals.
+    for workspace in [&one, &two] {
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(
+                if workspace == &one { 7 } else { 8 },
+                "https://example.com/",
+            ),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let allowed = executor.execute(
+            workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(allowed.status, Status::Succeeded, "{allowed:?}");
+    }
+    assert_eq!(browser.calls().len(), 2);
+    assert_eq!(
+        audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|record| record.step.is_some())
+            .count(),
+        6
     );
-    assert!(workspaces.attention(&one).is_none());
 }
 
 #[test]
@@ -350,9 +289,9 @@ fn obsolete_arguments_are_rejected_even_in_observe_mode() {
             Status::Succeeded
         );
     }
-    assert!(
-        executor.workspaces.attention(&workspace).is_none(),
-        "observations never count as enforced denials"
+    assert_eq!(
+        executor.governance.runtime_state(),
+        RuntimeControlState::Active
     );
     fs::remove_file(path).unwrap();
 }

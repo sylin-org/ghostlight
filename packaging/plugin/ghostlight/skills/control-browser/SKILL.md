@@ -43,8 +43,12 @@ fresh screenshot.
   whatever is focused and `clear_first` to replace. Use it when keystroke events matter.
 - `browser_click` takes a target or a view point; `click_count` covers double and triple.
   `browser_press_key` takes one key or a stroke sequence with repeat and modifiers.
-- Credential-class fields (passwords, card numbers) stop before dispatch and ask for visible
-  user handoff. That refusal is a feature; do not route around it.
+- For credential-class fields (passwords, card numbers), fill and typing accept
+  `user_authorized_credentials: true` only when the user explicitly instructed credential entry.
+  An existing instruction is sufficient; do not ask again, and set it on the first call when
+  already authorized. It defaults to false and applies only to that request. Without it, the call
+  returns guidance before input and creates no session hold. This caller acknowledgement cannot
+  override configured policy or human Pause/Stop and is not independently verified proof.
 - `browser_upload` attaches local paths, inline base64 files (1 to 5, each and combined under
   5,000,000 bytes), or a captured image, to a file input or dropped at a view point.
 - `browser_execute` runs page JavaScript and can mutate or navigate anything. Use a semantic
@@ -79,6 +83,8 @@ fresh screenshot.
 - Refusals name the deciding reason and the remedy. When a refusal surprises you, ask
   `policy_explain` first: it compiles the authority in force, one line per capability, and is
   always available.
+- Repeated policy refusals do not pause the session. Later permitted requests remain available;
+  do not ask the user to review or resume a session because a request was refused.
 
 ## Recording evidence
 

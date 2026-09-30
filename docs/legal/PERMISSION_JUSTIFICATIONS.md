@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-08-22
+Last updated: 2026-09-30
 
 These blocks correspond exactly to `extension/manifest.json`. Recheck store field names and length
 limits at submission time.
@@ -14,7 +14,7 @@ The alarms permission schedules local reconnection and lifecycle checks for the 
 ## debugger
 
 ```text
-The debugger permission attaches Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, handles page navigation state, and evaluates an explicitly requested bounded page script. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
+The debugger permission attaches Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, handles page navigation state, and evaluates an explicitly requested bounded page script. Credential input requires the local application to acknowledge the user's explicit instruction for that request. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
 ```
 
 ## downloads
@@ -38,7 +38,7 @@ The offscreen permission creates a local extension document only while encoding 
 ## scripting
 
 ```text
-The scripting permission dispatches local function executions to document contexts in controlled tabs to deliver visual presentation feedback and verify interaction targets without evaluating dynamic external code strings. It operates only in Ghostlight-controlled tabs during active operations.
+The scripting permission dispatches local function executions to document contexts in controlled tabs to deliver passive visual feedback and verify interaction targets without evaluating dynamic external code strings. Page feedback contains no controls and does not intercept user input. It operates only in Ghostlight-controlled tabs during active operations.
 ```
 
 ## storage

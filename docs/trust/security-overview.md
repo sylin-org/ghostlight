@@ -26,12 +26,18 @@ schemes and configured sacred domains remain hard ceilings.
 Observe mode records ordinary would-deny decisions without blocking them; enforce mode blocks.
 Explicit request restrictions still enforce under observe policy.
 Every enforced policy denial receives deterministic attribution to authority, tier, grant, and
-rule. Repeated enforced denials require review in the affected session. Explicit session resume
-permits new work without replay or permission changes. Global Pause/Stop remain independent;
-global Resume does not clear session attention. Controls are rechecked at browser transmission,
-while already dispatched work retains its actual effect evidence. ADR-0157 and the
-[H5 evidence](../tasks/security-hardening/h5-runtime-controls.md) describe the locally verified
-implementation and the installed-browser/platform lanes that remain untested.
+rule. Repeated refusals do not pause a session; later permitted work remains available. Human
+Pause/Stop and explicit global attention remain authoritative. Controls are rechecked at browser
+transmission, while already dispatched work retains its actual effect evidence.
+
+Fill and typing require the caller to acknowledge explicit user authorization for credential
+entry through `user_authorized_credentials`, false by default. Existing conversation authorization
+is sufficient. This per-request acknowledgement is not independently verified proof of intent
+and cannot override policy or human controls. Without it, the request returns guidance without
+creating a session hold. Credential-like metadata on a file control does not block explicitly
+requested file uploads or recording saves. In-page feedback is passive and cannot intercept user
+input. [ADR-0185](../adr/0185-explicit-user-control-and-passive-browser-feedback.md) records this
+source behavior; [STATUS](../STATUS.md) distinguishes verification and deployment evidence.
 
 Audit is a local append-only JSONL flight recorder. It carries the complete RAWX requirement set,
 decision attribution, managed sequence, governed host, and bounded outcome measurements. It does

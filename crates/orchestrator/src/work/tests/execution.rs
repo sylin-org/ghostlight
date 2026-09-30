@@ -568,8 +568,8 @@ fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() 
 }
 
 #[test]
-fn retired_tools_and_inputs_never_dispatch_or_trigger_policy_attention() {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
+fn retired_tools_and_inputs_never_dispatch_or_change_human_controls() {
+    let (executor, browser, _, workspace, audit) = fixture();
     let mut cases = vec![
         (
             "browser_sequence".to_string(),
@@ -620,7 +620,10 @@ fn retired_tools_and_inputs_never_dispatch_or_trigger_policy_attention() {
         );
     }
     assert!(browser.calls().is_empty());
-    assert!(workspaces.attention(&workspace).is_none());
+    assert_eq!(
+        executor.governance.runtime_state(),
+        RuntimeControlState::Active
+    );
     assert!(audit
         .0
         .lock()
@@ -1376,7 +1379,7 @@ fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
 }
 
 #[test]
-fn child_receipts_share_authority_and_count_denials_once() {
+fn child_receipts_share_authority_without_holding_the_session() {
     let path = temporary_policy("h4-denials");
     fs::write(
         &path,
@@ -1400,7 +1403,7 @@ fn child_receipts_share_authority_and_count_denials_once() {
     assert_eq!(
         governance.runtime_state(),
         RuntimeControlState::Active,
-        "parent cannot count either child twice"
+        "denied children leave human controls unchanged"
     );
     {
         let records = audit.0.lock().unwrap();
@@ -1428,24 +1431,18 @@ fn child_receipts_share_authority_and_count_denials_once() {
     assert_eq!(
         governance.runtime_state(),
         RuntimeControlState::Active,
-        "the next direct denial is exactly the third"
+        "a later direct denial leaves human controls unchanged"
     );
-    assert!(executor.workspaces.attention(&workspace).is_some());
     fs::remove_file(path).unwrap();
 }
 
 #[test]
-fn repeated_policy_denials_pause_browser_work_until_the_user_resumes() {
-    let policy = temporary_policy("denial-attention");
-    fs::write(
-        &policy,
-        r#"{"schema":3,"name":"deny reads","version":"1","grants":[],"config":[]}"#,
-    )
-    .unwrap();
-    let governance = GovernanceFacade::new(Some(policy.clone()), None);
+fn repeated_policy_denials_remain_independent_requests() {
+    let policy = TestPolicy::new();
+    policy.set(json!([]));
+    let governance = policy.facade();
     let (executor, browser, _, workspace, _) = fixture_with_governance(governance.clone());
-
-    for index in 0..3 {
+    for _ in 0..6 {
         let denied = executor.execute(
             &workspace,
             "browser_tabs",
@@ -1453,53 +1450,22 @@ fn repeated_policy_denials_pause_browser_work_until_the_user_resumes() {
             None,
             &CancellationToken::default(),
         );
-        assert_eq!(
-            denied.status,
-            if index == 2 {
-                Status::AttentionRequired
-            } else {
-                Status::Blocked
-            }
-        );
+        assert_eq!(denied.status, Status::Blocked);
+        assert_eq!(denied.effect, Effect::None);
     }
+    assert!(browser.calls().is_empty());
     assert_eq!(governance.runtime_state(), RuntimeControlState::Active);
-    assert_eq!(
-        browser.control_states().last(),
-        Some(&RuntimeControlState::Active)
-    );
-
-    let paused = executor.execute(
+    policy.set(json!(["read"]));
+    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
+    let allowed = executor.execute(
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
         None,
         &CancellationToken::default(),
     );
-    assert_eq!(paused.status, Status::AttentionRequired);
-
-    assert_eq!(
-        governance.apply_runtime_intent(RuntimeControlIntent::Resume),
-        RuntimeControlState::Active
-    );
-    assert!(
-        executor.workspaces.attention(&workspace).is_some(),
-        "global resume cannot clear session review"
-    );
-    let incident = executor.workspaces.attention(&workspace).unwrap();
-    assert!(executor
-        .workspaces
-        .resume_attention(workspace.as_str(), &incident.id)
-        .unwrap());
-    let denied_again = executor.execute(
-        &workspace,
-        "browser_tabs",
-        json!({"action":"list"}),
-        None,
-        &CancellationToken::default(),
-    );
-    assert_eq!(denied_again.status, Status::Blocked);
-    assert_eq!(governance.runtime_state(), RuntimeControlState::Active);
-    let _ = fs::remove_file(policy);
+    assert_eq!(allowed.status, Status::Succeeded);
+    assert_eq!(browser.calls().len(), 1);
 }
 
 #[test]
@@ -2526,7 +2492,7 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
 }
 
 #[test]
-fn credential_target_requests_handoff_before_any_value_dispatch() {
+fn credential_target_returns_guidance_without_holding_the_session() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
@@ -2574,8 +2540,8 @@ fn credential_target_requests_handoff_before_any_value_dispatch() {
         None,
         &CancellationToken::default(),
     );
-    assert_eq!(result.status, Status::AttentionRequired);
-    assert!(executor.workspaces.attention(&workspace).is_some());
+    assert_eq!(result.status, Status::Blocked);
+    assert_eq!(result.facts["user_authorization_required"], true);
     assert_eq!(result.facts["values_sent"], false);
     assert_eq!(
         browser.control_states().last(),
@@ -2585,6 +2551,25 @@ fn credential_target_requests_handoff_before_any_value_dispatch() {
         .calls()
         .iter()
         .any(|call| matches!(call, BrowserCommand::Fill { .. })));
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "ordinary page".into(),
+        truncated: false,
+        title: "Example".into(),
+        url: "https://example.com/".into(),
+    }));
+    let next = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        next.status,
+        Status::Succeeded,
+        "credential guidance does not block later work: {next:?}"
+    );
 }
 
 #[test]

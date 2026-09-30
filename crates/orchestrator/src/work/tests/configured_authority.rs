@@ -18,7 +18,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 true,
                 false,
                 json!(["read", "write"]),
-                Status::AttentionRequired,
+                Status::Blocked,
             ),
             (
                 "missing read",
@@ -102,7 +102,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 tab_id: 7,
                 targets: vec![field.clone()],
             }));
-            if expected != Status::Blocked {
+            if expected != Status::Blocked || credential {
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
                     tab_id: 7,
                     targets: if submit {
@@ -141,7 +141,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
             assert_eq!(result.status, expected, "{label}: {result:?}");
             let commands = browser.calls();
             let requested = &commands[before..];
-            if expected == Status::Blocked {
+            if expected == Status::Blocked && !credential {
                 assert_eq!(result.effect, Effect::None, "{label}");
                 assert!(
                     requested.is_empty(),
@@ -166,7 +166,10 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                         2,
                         "credential handoff sends no value or submission"
                     );
-                    assert!(executor.workspaces.attention(&workspace).is_some());
+                    assert_eq!(
+                        executor.governance.runtime_state(),
+                        ghostlight_bridge::browser::RuntimeControlState::Active
+                    );
                 } else {
                     assert_eq!(
                         requested.len(),
@@ -199,7 +202,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
 }
 
 #[test]
-fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
+fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
     for composed in [false, true] {
         for credential in [false, true] {
             let policy = TestPolicy::new();
@@ -232,14 +235,12 @@ fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
                 tab_id: 7,
                 targets: vec![input],
             }));
-            if !credential {
-                browser.push(Ok(BrowserOutcome::FilesUploaded {
-                    tab_id: 7,
-                    uploaded_count: 1,
-                    uploaded_bytes: 1,
-                    subject: None,
-                }));
-            }
+            browser.push(Ok(BrowserOutcome::FilesUploaded {
+                tab_id: 7,
+                uploaded_count: 1,
+                uploaded_bytes: 1,
+                subject: None,
+            }));
             let before = browser.calls().len();
             let arguments = json!({
                 "tab":opened.facts["tab"],
@@ -265,11 +266,7 @@ fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
             );
             assert_eq!(
                 result.status,
-                if credential {
-                    Status::AttentionRequired
-                } else {
-                    Status::Succeeded
-                },
+                Status::Succeeded,
                 "composed={composed}, credential={credential}: {result:?}"
             );
             let commands = browser.calls();
@@ -283,11 +280,7 @@ fn selector_uploads_find_standalone_inputs_and_keep_credential_preflight() {
             assert!(
                 matches!(requested.get(1), Some(BrowserCommand::DescribeTargets { tab_id: 7, locators }) if locators == &["standalone-file"])
             );
-            if credential {
-                assert_eq!(result.effect, Effect::None);
-                assert_eq!(requested.len(), 2, "credential handoff sends no bytes");
-                assert!(executor.workspaces.attention(&workspace).is_some());
-            } else {
+            {
                 assert_eq!(requested.len(), 3);
                 assert!(
                     matches!(requested.last(), Some(BrowserCommand::UploadFiles { tab_id: 7, locator, files }) if locator == "standalone-file" && files.len() == 1 && files[0].name == "PRIVATE_FILE.txt" && files[0].data == "eA==" && files[0].size == 1)

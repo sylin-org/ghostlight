@@ -183,21 +183,6 @@
         return state.snapshot?.sessions.find((item) => item.id === workspace) ?? null;
       },
 
-      /** Restore an explicitly requested history group even after Clear view. */
-      revealHistory(invocation) {
-        const existing = state.feed.find((entry) => entry.invocation === invocation);
-        if (existing) return existing;
-        const record = state.snapshot?.history.find((item) => item.invocation === invocation);
-        if (!record) return null;
-        state.hidden.delete(invocation);
-        // Explicit review can reach beyond the visible feed limit. Keep the current hero and
-        // place this requested receipt directly beneath it so trimming cannot discard it.
-        state.feed.splice(Math.min(1, state.feed.length), 0, entryFromRecord(record, null));
-        trim();
-        emit(CHANGE.Feed, { feed: state.feed });
-        return state.feed.find((entry) => entry.invocation === invocation);
-      },
-
       // ---- the only ways it may move -----------------------------------------------
       setConnected(value) {
         if (state.connected === value) return;
@@ -242,15 +227,6 @@
           case "operation_changed": touch(); changed(change.operation); break;
           case "operation_settled": touch(); settled(change.record); break;
           case "composition_changed": touch(); settled(change.record); break;
-          case "session_attention_changed": {
-            const session = state.snapshot?.sessions.find((item) => item.id === change.workspace);
-            if (session) {
-              session.attention = change.attention;
-              session.attention_message = change.message;
-              emit(CHANGE.Collections, { snapshot: state.snapshot });
-            }
-            break;
-          }
           case "runtime_changed": state.runtime = change.runtime_state; break;
           default: return "ignored";
         }

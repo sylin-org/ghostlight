@@ -1,8 +1,5 @@
 //! The workspace aggregate, opaque handles, ownership, document generations, and leases.
 
-mod attention;
-pub use attention::{AttentionReason, SessionAttention};
-
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -27,8 +24,6 @@ pub struct WorkspaceSummary {
     pub client_label: String,
     /// Current connections, each with its own immutable observed and claimed evidence.
     pub connections: Vec<ConnectionDetails>,
-    /// Current session-local human review requirement.
-    pub attention: Option<SessionAttention>,
     /// Which intake admitted this workspace. Attribution only (ADR-0105).
     pub channel: IntakeChannel,
     /// Whether one invocation currently owns the workspace lease.
@@ -281,7 +276,6 @@ struct TabState {
 
 #[derive(Debug)]
 struct WorkspaceState {
-    attention: Option<SessionAttention>,
     client_label: String,
     channel: IntakeChannel,
     connections: HashMap<String, Arc<ConnectionEvidence>>,
@@ -336,7 +330,6 @@ impl WorkspaceStore {
                     details.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
                     details
                 },
-                attention: workspace.attention.clone(),
                 channel: workspace.channel,
                 leased: workspace.leased,
                 tab_count: workspace.tabs.len(),
@@ -377,7 +370,6 @@ impl WorkspaceStore {
         aggregate.workspaces.insert(
             id.clone(),
             WorkspaceState {
-                attention: None,
                 client_label: connection.reported_application().into(),
                 channel: connection.attribution().channel,
                 connections: HashMap::from([(connection_id, connection)]),

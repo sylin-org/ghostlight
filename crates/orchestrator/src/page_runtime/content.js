@@ -250,9 +250,9 @@
   }
 
   // The refusal names the exact control so a model can ask its human for one precise thing.
-  function credentialHandoffError(element) {
+  function credentialAuthorizationError(element) {
     const name = shared.bounded(accessibleName(element) || element.id || "", 80);
-    return new Error(`credential-class target requires user handoff: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
+    return new Error(`credential-class target requires user authorization: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
   }
 
   function observation(element) {
@@ -518,20 +518,14 @@
     }
   }
 
-  function clearText(element) {
-    requireActionable(element, "type");
-    if (credentialClass(element)) throw credentialHandoffError(element);
-    const subject = actionSubject(element);
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-      typeText(element, "", true);
-    } else if (element.isContentEditable) replaceEditableText(element, "");
-    else throw new Error("target is not text-editable");
-    return { cleared: true, subject };
+  function clearText(element, allowCredentials = false) {
+    const result = typeText(element, "", true, allowCredentials);
+    return { cleared: true, subject: result.subject };
   }
 
-  function validateTextEditElement(element) {
+  function validateTextEditElement(element, allowCredentials = false) {
     requireActionable(element, "type");
-    if (credentialClass(element)) throw credentialHandoffError(element);
+    if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
       throw new Error("target is not text-editable");
     }
@@ -540,27 +534,27 @@
     }
   }
 
-  function prepareBrowserText(element) {
-    validateTextEditElement(element);
+  function prepareBrowserText(element, allowCredentials = false) {
+    validateTextEditElement(element, allowCredentials);
     const subject = actionSubject(element);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
-    verifyBrowserTextFocus(element);
+    verifyBrowserTextFocus(element, allowCredentials);
     return { subject };
   }
 
-  function verifyBrowserTextFocus(element) {
-    validateTextEditElement(element);
+  function verifyBrowserTextFocus(element, allowCredentials = false) {
+    validateTextEditElement(element, allowCredentials);
     if (deepestActiveElement() !== element) throw new Error("target did not retain browser input focus");
     return { focused: true };
   }
 
-  function prepareTextEdit(element, clearFirst) {
-    validateTextEditElement(element);
+  function prepareTextEdit(element, clearFirst, allowCredentials = false) {
+    validateTextEditElement(element, allowCredentials);
     const subject = actionSubject(element);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
-    validateTextEditElement(element);
+    validateTextEditElement(element, allowCredentials);
     if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
     if (clearFirst) {
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.select();
@@ -573,13 +567,13 @@
         selection.addRange(range);
       }
     }
-    validateTextEditElement(element);
+    validateTextEditElement(element, allowCredentials);
     if (deepestActiveElement() !== element) throw new Error("target did not retain input focus");
     return { subject };
   }
 
-  function typeText(element, text, clearFirst) {
-    const prepared = prepareTextEdit(element, clearFirst);
+  function typeText(element, text, clearFirst, allowCredentials = false) {
+    const prepared = prepareTextEdit(element, clearFirst, allowCredentials);
     if (!text && !clearFirst) return { typed: true, subject: prepared.subject };
     if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject: prepared.subject };
     if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
@@ -588,9 +582,9 @@
     return { typed: true, subject: prepared.subject };
   }
 
-  function validateFillElement(element, value) {
+  function validateFillElement(element, value, allowCredentials = false) {
     requireActionable(element, "fill");
-    if (credentialClass(element)) throw credentialHandoffError(element);
+    if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (element instanceof HTMLSelectElement) {
       const option = Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
       if (!option) throw new Error("select option not found");
@@ -606,7 +600,7 @@
   // before an earlier field can be edited, including when the worker is preparing several frames.
   function prepareFill(message) {
     const elements = message.fields.map((field) => resolve(field.locator));
-    elements.forEach((element, index) => validateFillElement(element, message.fields[index].value));
+    elements.forEach((element, index) => validateFillElement(element, message.fields[index].value, message.allow_credentials));
     let submitElement = null;
     if (message.submit_locator) {
       submitElement = requireActionable(resolve(message.submit_locator), "activate");
@@ -641,10 +635,10 @@
   }
 
 
-  function fillValuesRetained(fields) {
+  function fillValuesRetained(fields, allowCredentials = false) {
     return fields.every((field) => {
       const element = resolve(field.locator);
-      validateFillElement(element, field.value);
+      validateFillElement(element, field.value, allowCredentials);
       return fillControlValue(element) === expectedFillValue(element, field.value);
     });
   }
@@ -676,8 +670,8 @@
     }
   }
 
-  function fillElement(element, value) {
-    const option = validateFillElement(element, value);
+  function fillElement(element, value, allowCredentials = false) {
+    const option = validateFillElement(element, value, allowCredentials);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
     if (element instanceof HTMLSelectElement) {
@@ -685,7 +679,7 @@
     } else if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       setNativeChecked(element, ["true", "1", "yes", "on"].includes(String(value).toLowerCase()));
     } else if (element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))) {
-      typeText(element, String(value), true);
+      typeText(element, String(value), true, allowCredentials);
       return;
     } else if (element instanceof HTMLInputElement) {
       setNativeValue(element, value);
@@ -699,12 +693,12 @@
     element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 
-  function fillLocalElement(element, value) {
+  function fillLocalElement(element, value, allowCredentials = false) {
     const textual = element instanceof HTMLTextAreaElement
       || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
       || element.isContentEditable;
     if (textual) throw new Error("text target requires browser input");
-    fillElement(element, value);
+    fillElement(element, value, allowCredentials);
   }
 
   function requireActionable(element, intent) {
@@ -858,7 +852,7 @@
     if (message.kind === "fill") {
       try {
         const { elements, submitElement } = prepareFill(message);
-        formDiagnostics.run("fill", () => elements.forEach((element, index) => fillElement(element, message.fields[index].value)));
+        formDiagnostics.run("fill", () => elements.forEach((element, index) => fillElement(element, message.fields[index].value, message.allow_credentials)));
         sendResponse({ ok: true, result: { filled_count: message.fields.length, submitted: Boolean(submitElement) } });
         if (submitElement) submitElement.click();
       } catch (error) {
@@ -894,23 +888,23 @@
       }
       if (message.kind === "prepare_text_fill") {
         const element = resolve(message.field.locator);
-        validateFillElement(element, message.field.value);
+        validateFillElement(element, message.field.value, message.allow_credentials);
         const textual = element instanceof HTMLTextAreaElement
           || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
           || element.isContentEditable;
         if (!textual) throw new Error("target does not use browser text input");
-        return formDiagnostics.run("fill", () => prepareBrowserText(element));
+        return formDiagnostics.run("fill", () => prepareBrowserText(element, message.allow_credentials));
       }
       if (message.kind === "verify_text_fill_focus") {
         const element = resolve(message.field.locator);
-        return verifyBrowserTextFocus(element);
+        return verifyBrowserTextFocus(element, message.allow_credentials);
       }
       if (message.kind === "verify_fill_values") {
-        return { retained: fillValuesRetained(message.fields) };
+        return { retained: fillValuesRetained(message.fields, message.allow_credentials) };
       }
       if (message.kind === "fill_local") {
         const element = resolve(message.field.locator);
-        formDiagnostics.run("fill", () => fillLocalElement(element, message.field.value));
+        formDiagnostics.run("fill", () => fillLocalElement(element, message.field.value, message.allow_credentials));
         return { filled: true };
       }
       if (message.kind === "document_route") {
@@ -965,8 +959,12 @@
           : extract();
       }
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }
-      if (message.kind === "clear_focused") return formDiagnostics.run("clear", () => clearText(deepestActiveElement()));
-      if (message.kind === "type_text") return formDiagnostics.run("type", () => typeText(resolve(message.locator), message.text, message.clear_first));
+      if (message.kind === "verify_focused_text") {
+        if (!document.hasFocus()) throw new Error("no editable control is focused");
+        return verifyBrowserTextFocus(deepestActiveElement(), message.allow_credentials);
+      }
+      if (message.kind === "clear_focused") return formDiagnostics.run("clear", () => clearText(deepestActiveElement(), message.allow_credentials));
+      if (message.kind === "type_text") return formDiagnostics.run("type", () => typeText(resolve(message.locator), message.text, message.clear_first, message.allow_credentials));
       if (message.kind === "drop_files") {
         const dropTarget = deepestElementFromPoint(document, message.x, message.y);
         if (!dropTarget) throw new Error("no element is at the drop point");

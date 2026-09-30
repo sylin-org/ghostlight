@@ -5,6 +5,11 @@
 })(globalThis, function createGhostlightPresentation() {
   "use strict";
 
+  const ROOT_ID = "ghostlight-presentation-root";
+  // A replacement runtime cannot reach a predecessor's closed shadow root. Retire its
+  // owned host immediately so old controls cannot survive until the next page signal.
+  for (const previous of document.querySelectorAll(`#${ROOT_ID}`)) previous.remove();
+
   const SKY = "#38bdf8";
   const SKY_RGB = "56,189,248";
   const INK = "#eaf6ff";
@@ -99,7 +104,6 @@
   let caption = null;
   let signatureLayer = null;
   let denialLayer = null;
-  let attention = null;
   let signature = null;
   let signatureKind = null;
   let signatureInvocation = null;
@@ -121,7 +125,7 @@
   function mount() {
     if (host?.isConnected) return;
     host = document.createElement("div");
-    host.id = "ghostlight-presentation-root";
+    host.id = ROOT_ID;
     Object.assign(host.style, {
       all: "initial",
       position: "fixed",
@@ -135,6 +139,8 @@
 
     surface = document.createElement("div");
     surface.className = "surface";
+    // Page feedback never owns human input, even when the stylesheet is unavailable.
+    surface.style.pointerEvents = "none";
     scope = document.createElement("div");
     scope.className = "scope";
     fxLayer = document.createElement("div");
@@ -151,45 +157,10 @@
     signatureLayer.className = "signatures";
     denialLayer = document.createElement("div");
     denialLayer.className = "denials";
-    attention = buildAttention();
-    surface.append(scope, fxLayer, cursor, caption, signatureLayer, denialLayer, attention);
+    surface.append(scope, fxLayer, cursor, caption, signatureLayer, denialLayer);
     shadow.append(style, surface);
     (document.documentElement || document).appendChild(host);
     syncVisibility();
-  }
-
-  function buildAttention() {
-    const overlay = document.createElement("div");
-    overlay.className = "attention";
-    const card = document.createElement("section");
-    card.className = "attention-card";
-    const icon = document.createElement("div");
-    icon.className = "attention-icon";
-    icon.textContent = "!";
-    const title = document.createElement("h2");
-    title.textContent = "Ghostlight needs your attention";
-    const description = document.createElement("p");
-    description.textContent = "Agent browsing is paused until you decide what happens next.";
-    const actions = document.createElement("div");
-    actions.className = "attention-actions";
-    for (const [disposition, label, dangerous] of [
-      ["keep_paused", "Keep paused", false],
-      ["resume", "Resume", false],
-      ["resume_quiet", "Resume + quiet", false],
-      ["end_session", "End session", true]
-    ]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = label;
-      if (dangerous) button.className = "danger";
-      button.addEventListener("click", () => {
-        chrome.runtime.sendMessage({ kind: "attention_action", disposition }).catch(() => {});
-      });
-      actions.appendChild(button);
-    }
-    card.append(icon, title, description, actions);
-    overlay.appendChild(card);
-    return overlay;
   }
 
   function syncVisibility() {
@@ -462,7 +433,11 @@
     const activity = signal.activity || "quiet";
     if (kind === "attention") {
       clearTransient();
-      attention.classList.add("on");
+      // Older service signals may still arrive, but all controls belong to the workbench.
+      showDenial({
+        phase: signal.phase || "Ghostlight needs your attention",
+        detail: signal.detail || "Open the Ghostlight workbench for details."
+      });
       return true;
     }
     if (kind === "denial") {
@@ -534,7 +509,6 @@
     mount();
     if (value !== "active") clearTransient();
     runtimeReachable = !["ended", "disconnected"].includes(value);
-    attention.classList.toggle("on", value === "attention");
     syncVisibility();
   }
 

@@ -134,11 +134,11 @@ const COMMAND_HANDLERS = Object.freeze({
   hover_point: { capability: "pointer_input", revision: 3 },
   drag: { capability: "pointer_input", revision: 3 },
   drag_points: { capability: "pointer_input", revision: 3 },
-  fill: { capability: "keyboard_input", revision: 1 },
-  type_text: { capability: "keyboard_input", revision: 1 },
+  fill: { capability: "keyboard_input", revision: 3 },
+  type_text: { capability: "keyboard_input", revision: 3 },
   press_key: { capability: "keyboard_input", revision: 1 },
   describe_focused: { capability: "keyboard_input", revision: 2 },
-  type_focused: { capability: "keyboard_input", revision: 2 },
+  type_focused: { capability: "keyboard_input", revision: 3 },
   upload_files: { capability: "files", revision: 1 },
   drop_image_at: { capability: "files", revision: 3 },
   evaluate_script: { capability: "script", revision: 2 },
@@ -1678,13 +1678,13 @@ async function replaceFocusedText(tabId, frameId, value, deadline = Number.POSIT
   await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...tab }, frameId);
 }
 
-async function retainedFillNow(tabId, groups) {
+async function retainedFillNow(tabId, groups, allowCredentials) {
   const results = await Promise.all(groups.map(({ frameId, fields }) =>
-    contentIn(tabId, frameId, { kind: "verify_fill_values", fields })));
+    contentIn(tabId, frameId, { kind: "verify_fill_values", fields, allow_credentials: allowCredentials })));
   return results.every((result) => result?.retained === true);
 }
 
-async function verifyRetainedFill(tabId, groups, deadline) {
+async function verifyRetainedFill(tabId, groups, deadline, allowCredentials) {
   const started = Date.now();
   const retentionDeadline = Math.min(deadline, started + FILL_RETAINED_LIMIT_MS);
   let stableSince = null;
@@ -1692,7 +1692,7 @@ async function verifyRetainedFill(tabId, groups, deadline) {
     if (Date.now() >= retentionDeadline) {
       throw new Error("target did not retain filled value within the physical execution budget");
     }
-    if (await retainedFillNow(tabId, groups)) {
+    if (await retainedFillNow(tabId, groups, allowCredentials)) {
       const now = Date.now();
       if (stableSince === null) stableSince = now;
       if (now - stableSince >= FILL_RETAINED_STABLE_MS) return;
@@ -1742,6 +1742,7 @@ async function fill(correlation, command) {
       const prepared = await contentIn(command.tab_id, frameId, {
         kind: "prepare_fill",
         fields,
+        allow_credentials: command.allow_credentials,
         submit_locator: submitFrame === frameId ? frames.localOf(command.submit_locator) : undefined
       });
       if (!Array.isArray(prepared.field_kinds) || prepared.field_kinds.length !== fields.length
@@ -1760,11 +1761,11 @@ async function fill(correlation, command) {
           const field = fields[index];
           dispatched = true;
           if (fieldKinds[index] === "browser_text") {
-            await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field });
-            await contentIn(command.tab_id, frameId, { kind: "verify_text_fill_focus", field });
+            await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field, allow_credentials: command.allow_credentials });
+            await contentIn(command.tab_id, frameId, { kind: "verify_text_fill_focus", field, allow_credentials: command.allow_credentials });
             await replaceFocusedText(command.tab_id, frameId, field.value, deadline);
           } else {
-            await contentIn(command.tab_id, frameId, { kind: "fill_local", field });
+            await contentIn(command.tab_id, frameId, { kind: "fill_local", field, allow_credentials: command.allow_credentials });
           }
           filledCount += 1;
         }
@@ -1775,7 +1776,7 @@ async function fill(correlation, command) {
     // Native input consequences can settle as the debugger detaches. A later field can also
     // trigger page code that rolls back or disables an earlier edit. Confirm the complete visible
     // batch at the same boundary the user receives before reporting success.
-    await verifyRetainedFill(command.tab_id, preparedGroups, deadline);
+    await verifyRetainedFill(command.tab_id, preparedGroups, deadline, command.allow_credentials);
     if (command.submit_locator) {
       requireFillBudget(deadline);
       dispatched = true;
@@ -1783,6 +1784,7 @@ async function fill(correlation, command) {
       const result = await contentIn(command.tab_id, submitFrame, {
         kind: "submit_fill",
         fields,
+        allow_credentials: command.allow_credentials,
         submit_locator: frames.localOf(command.submit_locator)
       });
       submitted = Boolean(result.submitted);
@@ -1806,7 +1808,7 @@ async function typeText(correlation, command) {
     await documents.verify(command.tab_id);
     dispatched = true;
     const target = await content(command.tab_id, { kind: "type_text", locator: command.locator,
-      text: command.text, clear_first: command.clear_first });
+      text: command.text, clear_first: command.clear_first, allow_credentials: command.allow_credentials });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: target.subject, committed_urls: commits };
@@ -2344,8 +2346,13 @@ async function typeFocused(correlation, command) {
   try {
     await ensureDebugger(command.tab_id);
     await documents.verifyInput(command.tab_id, "Input.insertText", { text: command.text });
+    await firstFrameAnswer(command.tab_id, { kind: "verify_focused_text", allow_credentials: command.allow_credentials });
+    if (command.clear_first) {
+      dispatched = true;
+      await firstFrameAnswer(command.tab_id, { kind: "clear_focused", allow_credentials: command.allow_credentials });
+      await firstFrameAnswer(command.tab_id, { kind: "verify_focused_text", allow_credentials: command.allow_credentials });
+    }
     dispatched = true;
-    if (command.clear_first) await firstFrameAnswer(command.tab_id, { kind: "clear_focused" });
     await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -2477,17 +2484,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // Chrome's own infobar or closing every tab. This is that way.
       await debuggerLifecycle.detachAll();
       return { released: true };
-    }
-    if (message?.kind === "attention_action") {
-      if (message.disposition === "keep_paused") return { queued: false };
-      let intent = message.disposition;
-      if (intent === "resume_quiet") {
-        preferences = stateApi.preferences({ ...preferences, effects: false, captions: false });
-        await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
-        intent = "resume";
-      }
-      requestRuntimeControl(intent);
-      return { queued: true };
     }
     if (message?.kind === "get_preferences") return preferences;
     if (message?.kind === "set_preferences") {

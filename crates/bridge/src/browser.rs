@@ -47,6 +47,8 @@ pub mod adapter_capability {
     pub const POINTER_INPUT_REVISION_COMPOSED_GEOMETRY: u16 = 3;
     /// Keyboard revision adding focused-control description and typing.
     pub const KEYBOARD_INPUT_REVISION_FOCUSED: u16 = 2;
+    /// Keyboard revision accepting the service's per-request credential-input allowance.
+    pub const KEYBOARD_INPUT_REVISION_CREDENTIALS: u16 = 3;
     /// Semantic-document revision adding typed semantic-selector queries.
     pub const SEMANTIC_DOCUMENT_REVISION_SELECTOR: u16 = 2;
     /// Semantic-document revision adding article reading and document trees.
@@ -170,7 +172,7 @@ pub struct PhysicalActionSubject {
 pub struct PhysicalField {
     /// Browser-local locator.
     pub locator: String,
-    /// Non-credential value.
+    /// Input value, never retained in receipts or diagnostics.
     pub value: String,
 }
 
@@ -836,7 +838,7 @@ pub enum BrowserCommand {
         point: PhysicalPoint,
         expected_viewport: ViewportGeometry,
     },
-    /// Fill non-credential fields and optionally submit.
+    /// Fill fields after service preflight and optionally submit.
     Fill {
         tab_id: u64,
         fields: Vec<PhysicalField>,
@@ -844,6 +846,9 @@ pub enum BrowserCommand {
         submit_locator: Option<String>,
         /// Adapter-side budget for the complete physical fill and its terminal verification.
         timeout_ms: u64,
+        /// Whether service preflight allows credential-class fields in this request.
+        #[serde(default)]
+        allow_credentials: bool,
     },
     /// Type text through browser input events after credential preflight.
     TypeText {
@@ -851,6 +856,9 @@ pub enum BrowserCommand {
         locator: String,
         text: String,
         clear_first: bool,
+        /// Whether service preflight allows credential-class input in this request.
+        #[serde(default)]
+        allow_credentials: bool,
     },
     /// Describe the currently focused editable control before typing.
     DescribeFocused { tab_id: u64 },
@@ -859,6 +867,9 @@ pub enum BrowserCommand {
         tab_id: u64,
         text: String,
         clear_first: bool,
+        /// Whether service preflight allows credential-class input in this request.
+        #[serde(default)]
+        allow_credentials: bool,
     },
     /// Send one physical keyboard action.
     PressKey {
@@ -1024,6 +1035,18 @@ impl BrowserCommand {
     #[must_use]
     pub fn required_revision(&self) -> u16 {
         match self {
+            Self::Fill {
+                allow_credentials: true,
+                ..
+            }
+            | Self::TypeText {
+                allow_credentials: true,
+                ..
+            }
+            | Self::TypeFocused {
+                allow_credentials: true,
+                ..
+            } => adapter_capability::KEYBOARD_INPUT_REVISION_CREDENTIALS,
             Self::EvaluateScript { .. } => adapter_capability::SCRIPT_REVISION_REPL,
             Self::DropImageAt { .. } => adapter_capability::FILES_REVISION_COMPOSED_DROP,
             Self::NavigateDiscardingBeforeUnload { .. } => {
@@ -1811,6 +1834,7 @@ mod tests {
                         }],
                         submit_locator: None,
                         timeout_ms: 29_250,
+                        allow_credentials: false,
                     },
                 },
             },
@@ -2029,6 +2053,37 @@ mod tests {
             .required_revision(),
             1
         );
+    }
+
+    #[test]
+    fn credential_allowance_is_per_command_and_revision_negotiated() {
+        for wire in [
+            serde_json::json!({"command":"fill","tab_id":7,"fields":[],"timeout_ms":1000}),
+            serde_json::json!({"command":"type_text","tab_id":7,"locator":"locator-1","text":"private","clear_first":false}),
+            serde_json::json!({"command":"type_focused","tab_id":7,"text":"private","clear_first":false}),
+        ] {
+            let ordinary: BrowserCommand = serde_json::from_value(wire.clone()).unwrap();
+            assert!(
+                ordinary.required_revision()
+                    < adapter_capability::KEYBOARD_INPUT_REVISION_CREDENTIALS
+            );
+            let mut acknowledged = wire.clone();
+            acknowledged["allow_credentials"] = serde_json::json!(true);
+            let command: BrowserCommand = serde_json::from_value(acknowledged).unwrap();
+            assert_eq!(
+                command.required_capability(),
+                adapter_capability::KEYBOARD_INPUT
+            );
+            assert_eq!(
+                command.required_revision(),
+                adapter_capability::KEYBOARD_INPUT_REVISION_CREDENTIALS
+            );
+            let encoded = serde_json::to_value(command).unwrap();
+            assert_eq!(encoded["allow_credentials"], true);
+            let mut malformed = wire;
+            malformed["allow_credentials"] = serde_json::json!("true");
+            assert!(serde_json::from_value::<BrowserCommand>(malformed).is_err());
+        }
     }
 
     #[test]

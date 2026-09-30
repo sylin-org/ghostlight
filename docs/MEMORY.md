@@ -176,11 +176,19 @@ the owner wants, and what this project learned the hard way.
   already live in `crates/orchestrator/src/language/outcome.rs`; the reference-experience S5
   records their implementation. Preserve those decisions when testing effect-boundary timing
   and scope. Do not rebuild missing language from an older memory entry.
-- **Automatic attention belongs to its session.** Global human controls stay independent.
-  Explicit session recovery uses the exact incident, permits new requests without replay, and
-  changes no permission. A composition that triggered attention stops even if recovery races its
-  completion. Dispatch checks happen after writer wait; a refused follow-up observation cannot
-  erase an acknowledged action (ADR-0157).
+- **Ghostlight does not regulate agent behavior.** Repeated policy denials and credential-input
+  guidance never pause a session or create a review/resume ritual. Each request follows configured
+  policy and explicit human controls. Dispatch checks happen after writer wait; a refused
+  follow-up observation cannot erase an acknowledged action (ADR-0185).
+- **Browser feedback is passive.** Messages and animations may appear on the page; buttons,
+  focusable controls, and input-intercepting overlays may not. Interactive runtime control belongs
+  in the Tauri workbench, including when page styling fails (ADR-0185).
+- **Explicit user instructions permit credential input.** Fill and typing accept the per-request
+  `user_authorized_credentials` acknowledgement. Prior explicit user authorization is sufficient;
+  do not ask again. Without it, return guidance for that request, not a session hold. The caller's
+  acknowledgement is not independently verified proof and cannot override configured policy or
+  human Pause/Stop. Credential-like file-control names do not block explicitly requested uploads
+  or recording saves (ADR-0185).
 - **Client provenance has a bounded purpose.** Ghostlight governs its invocation route and assumes
   host integrity; it does not contain independent desktop automation. Record claimed and observed
   identity separately. Optional signer/hash admission needs a concrete verifiable peer; proving

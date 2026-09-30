@@ -528,33 +528,23 @@ impl ApplicationExecutor {
         }
     }
 
-    fn credential_handoff(
+    fn credential_guidance(
         &self,
         context: &InvocationContext<'_>,
         decision: Decision,
         selected: &SelectedTab,
     ) -> Terminal {
-        self.require_session_attention(
-            context.workspace,
-            context.invocation,
-            crate::workspace::AttentionReason::CredentialHandoff,
-        );
-        self.emit(DomainEvent::AttentionRequired {
-            invocation: context.invocation.into(),
-            workspace: context.workspace.as_str().into(),
-            physical_id: Some(selected.physical_id),
-        });
-        let refusal = Refusal::CredentialHandoff;
+        let refusal = Refusal::CredentialAuthorization;
         let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
-                Status::AttentionRequired,
+                Status::Blocked,
                 Effect::None,
                 readiness(selected.readiness),
                 false,
                 &summary,
-                json!({"tab":selected.handle.as_str(),"credential_handoff":true,"values_sent":false}),
+                json!({"tab":selected.handle.as_str(),"user_authorization_required":true,"values_sent":false}),
                 refusal.next_steps(),
             ),
             decision,
@@ -1019,10 +1009,9 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Resolve independent global human control and this session's review requirement.
-    fn runtime_decision(&self, context: &InvocationContext<'_>) -> Decision {
-        self.governance
-            .session_decision(self.workspaces.attention(context.workspace).is_some())
+    /// Resolve explicit human control at this request's dispatch boundary.
+    fn runtime_decision(&self, _context: &InvocationContext<'_>) -> Decision {
+        self.governance.runtime_decision()
     }
 
     fn audit_decision(&self, context: &InvocationContext<'_>) -> Decision {
@@ -1074,30 +1063,6 @@ impl ApplicationExecutor {
                     .decision_evidence(CapabilitySet::EMPTY, None, decision),
             );
             Err(BrowserError::RuntimeControl(decision.reason))
-        }
-    }
-
-    fn require_session_attention(
-        &self,
-        workspace: &WorkspaceId,
-        invocation: &str,
-        reason: crate::workspace::AttentionReason,
-    ) {
-        let attention = crate::workspace::SessionAttention {
-            id: format!("attention_{}", Uuid::new_v4().simple()),
-            invocation: invocation.into(),
-            reason,
-        };
-        if self
-            .workspaces
-            .require_attention(workspace, attention.clone())
-        {
-            let label = self
-                .workspaces
-                .client_label(workspace)
-                .unwrap_or_else(|_| "Session".into());
-            self.workbench
-                .session_attention_changed(workspace.as_str(), &label, Some(attention));
         }
     }
 
@@ -2395,6 +2360,7 @@ mod tests {
     mod catalog_authority;
     mod configured_authority;
     mod control;
+    mod credentials;
     mod documents;
     mod execution;
     mod presentation;

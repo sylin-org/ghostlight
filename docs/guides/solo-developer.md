@@ -25,7 +25,10 @@ instead of changing your active personal window.
   or mistaken close request.
 - Open the tray workbench to watch the current action and scroll back through what already
   happened, check health, and see anything that was blocked.
-- Ghostlight never enters credentials. A credential-class target becomes a visible handoff to you.
+- Explicitly instruct the agent when you want credential entry. Fill and typing acknowledge that
+  instruction per request with `user_authorized_credentials: true`; prior authorization is enough.
+  Without it, the call returns guidance and leaves the session usable. Policy and your controls
+  still apply. Page messages and animations are passive; they never add buttons or intercept input.
 
 No policy is required for HTTP(S) browsing, including a development server on localhost. Local
 and remote destinations use the same policy rules. If you want narrower personal boundaries,
@@ -41,7 +44,8 @@ changes. This refusal is useful evidence, not a reason to reach around Ghostligh
 mechanism.
 
 File upload accepts only explicitly supplied absolute paths, at most five files, after governance
-and credential preflight. Script execution requires `execute` authority. Neither file content nor
+and file-target preflight. A credential-like name on a file control does not prevent an explicit
+upload or recording save. Script execution requires `execute` authority. Neither file content nor
 script source enters audit or desktop history.
 
 ## When something needs attention

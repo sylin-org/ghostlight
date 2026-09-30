@@ -358,14 +358,7 @@ impl ApplicationExecutor {
                 },
             ) {
                 Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                    if tab_id == selected.physical_id && targets.len() == 1 =>
-                {
-                    if targets[0].credential_class {
-                        return Err(Box::new(
-                            self.credential_handoff(context, decision, &selected),
-                        ));
-                    }
-                }
+                    if tab_id == selected.physical_id && targets.len() == 1 => {}
                 Ok(_) => {
                     return Err(Box::new(self.protocol_failure(
                         context,

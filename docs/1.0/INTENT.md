@@ -34,8 +34,8 @@ Ghostlight supports these distinct jobs:
 11. Scroll the page or reveal a semantic target.
 12. Set the visible tab zoom.
 13. Hover a semantic target or a point in a current captured view.
-14. Fill a group of ordinary form controls without entering credentials.
-15. Type ordinary text through browser input events without entering credentials.
+14. Fill a group of form controls, including credentials when explicitly authorized by the user.
+15. Type text through browser input events, including user-authorized credential input.
 16. Send an explicit keyboard action.
 17. Drag one semantic target to another.
 18. Upload explicitly named, bounded local files to an ordinary file control.
@@ -62,7 +62,8 @@ Internal browser commands are combined when a person experiences them as one job
 - Ghostlight-created tabs remain visibly grouped by workspace. A child tab opened by a controlled
   page joins the same workspace when ownership is unambiguous.
 - Visual feedback follows the active document without leaking page content or becoming required
-  for successful work.
+  for successful work. Page feedback contains no buttons or focusable controls and never intercepts
+  human pointer or keyboard input. Interactive runtime control belongs in the Tauri workbench.
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
   is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
@@ -150,7 +151,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - Its installation identity persists across service-worker suspension, browser restart, and
   extension reload. The pinned development key preserves the established unpacked extension id.
 - The toolbar popup preserves the established take-the-wheel control, separate panic control,
-  human-attention choices, connection indicator, local-only note, caption toggle, and wording.
+  connection indicator, local-only note, caption toggle, and wording. The page has no controls.
 - The options page preserves the established dark sky-blue presentation, effects-on and
   captions-off defaults, connection status, diagnostic toggle, governance explanation, and a
   default-on local choice to preserve controlled tabs. It owns only adapter-local presentation,
@@ -191,7 +192,11 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - Every committed landing is governed before its content or readiness is accepted.
 - Managed authority with no valid initial source or cache fails closed. Later source failure keeps
   verified last-known-good.
-- Credential-class fields require visible user handoff. Ghostlight never types secrets.
+- Fill and typing requests default to refusing credential input with guidance for that call.
+  `user_authorized_credentials: true` acknowledges the user's explicit instruction and permits
+  credential input under the same policy and human controls. Prior conversation authorization is
+  sufficient; no approval round trip or session hold is created. The acknowledgement is caller
+  supplied, not independently verified proof. Values never enter audit, diagnostics, or presentation.
 - Local file upload reads only paths explicitly supplied for that invocation, enforces count and
   byte bounds before browser dispatch, and never records paths, names, or contents in audit.
 - Script execution is explicit `execute` authority. Its source and result are bounded and never
@@ -210,7 +215,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
 ## Exclusions
 
 - No hidden or headless browser.
-- No credential entry, secret storage, content inspection, or DLP.
+- No secret storage, independent verification of user intent, content inspection, or DLP.
 - No vendor-, model-, or client-specific language.
 - No remote multi-tenant service.
 - No generic workflow engine, actor framework, event bus, CQRS split, or event store.
@@ -229,12 +234,10 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - **Landing:** the final committed document observed after navigation.
 - **Hold:** a state that prevents further effects until runtime authority permits them.
 
-## Session review and recovery (ADR-0157)
+## Explicit user control (ADR-0185)
 
-Repeated enforced denials and credential handoff require attention only in their owning session.
-Other sessions can continue. The existing three-matching-in-60-seconds or five-in-120-seconds
-thresholds remain; observe findings do not count. One session notice offers Review history and
-Resume this session. Review restores the current grouped receipt even after Clear view. Explicit
-resume permits new requests under the same policy, with no replay or permission expansion.
-Global Resume does not clear this attention, and session recovery does not clear global Pause/Stop.
-A stale review cannot clear a newer incident. The child that triggers attention ends its composition.
+Repeated denials do not pause a session. Credential-input guidance applies only to the current
+request and does not prevent later permitted work. Ghostlight enforces configured authority and
+explicit human controls without regulating how often an agent asks. Human Pause/Stop and explicit
+global runtime attention retain their final dispatch checks. Resuming human-paused work permits
+new requests and never replays prior actions.

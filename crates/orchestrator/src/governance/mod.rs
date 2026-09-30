@@ -12,7 +12,6 @@ pub mod managed;
 pub mod manifest;
 pub mod paths;
 
-use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::io;
@@ -36,11 +35,6 @@ const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
 const RUNTIME_ATTENTION: u8 = 2;
 const RUNTIME_END: u8 = 3;
-const DENIAL_ATTENTION_MATCHING_WINDOW_MS: u64 = 60_000;
-const DENIAL_ATTENTION_ALL_WINDOW_MS: u64 = 120_000;
-const DENIAL_ATTENTION_MATCHING_THRESHOLD: usize = 3;
-const DENIAL_ATTENTION_ALL_THRESHOLD: usize = 5;
-const DENIAL_ATTENTION_HISTORY_LIMIT: usize = 512;
 
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -883,72 +877,6 @@ pub struct GovernanceFacade {
     policies: Arc<Mutex<PolicySources>>,
     runtime_control: Option<PathBuf>,
     controls: Arc<RuntimeControls>,
-    denial_attention: Arc<Mutex<DenialAttention>>,
-}
-
-#[derive(Debug, Default)]
-struct DenialAttention {
-    attempts: VecDeque<DenialAttempt>,
-}
-
-#[derive(Debug)]
-struct DenialAttempt {
-    workspace: String,
-    key: String,
-    at_ms: u64,
-}
-
-impl DenialAttention {
-    fn record(&mut self, workspace: &str, decision: Decision, at_ms: u64) -> bool {
-        if decision.allowed || decision.observed || !attention_eligible(decision.reason) {
-            return false;
-        }
-        let oldest = at_ms.saturating_sub(DENIAL_ATTENTION_ALL_WINDOW_MS);
-        self.attempts.retain(|attempt| attempt.at_ms >= oldest);
-        let key = decision
-            .denial_id()
-            .unwrap_or_else(|| decision.reason.as_str().into());
-        self.attempts.push_back(DenialAttempt {
-            workspace: workspace.into(),
-            key: key.clone(),
-            at_ms,
-        });
-        while self.attempts.len() > DENIAL_ATTENTION_HISTORY_LIMIT {
-            self.attempts.pop_front();
-        }
-        let all = self
-            .attempts
-            .iter()
-            .filter(|attempt| attempt.workspace == workspace)
-            .count();
-        let matching = self
-            .attempts
-            .iter()
-            .filter(|attempt| {
-                attempt.workspace == workspace
-                    && attempt.key == key
-                    && attempt.at_ms >= at_ms.saturating_sub(DENIAL_ATTENTION_MATCHING_WINDOW_MS)
-            })
-            .count();
-        let attention = matching >= DENIAL_ATTENTION_MATCHING_THRESHOLD
-            || all >= DENIAL_ATTENTION_ALL_THRESHOLD;
-        if attention {
-            self.attempts
-                .retain(|attempt| attempt.workspace != workspace);
-        }
-        attention
-    }
-}
-
-const fn attention_eligible(reason: ReasonCode) -> bool {
-    matches!(
-        reason,
-        ReasonCode::CapabilityDenied
-            | ReasonCode::TabCloseDenied
-            | ReasonCode::HostDenied
-            | ReasonCode::ProtectedHost
-            | ReasonCode::InvalidAuthority
-    )
 }
 
 #[derive(Debug)]
@@ -1293,7 +1221,6 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::new(local_policy, managed_policy))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
-            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
     }
 
@@ -1304,7 +1231,6 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::owning(path, managed))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
-            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
     }
 
@@ -1314,7 +1240,6 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::with_managed_paths(paths))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
-            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
     }
 
@@ -1327,7 +1252,6 @@ impl GovernanceFacade {
             ))),
             runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
-            denial_attention: Arc::new(Mutex::new(DenialAttention::default())),
         }
         .with_runtime_control_file(
             env::var_os("GHOSTLIGHT_RUNTIME_CONTROL_FILE").map(PathBuf::from),
@@ -1356,15 +1280,6 @@ impl GovernanceFacade {
     #[must_use]
     pub fn runtime_state(&self) -> RuntimeControlState {
         self.controls.state()
-    }
-
-    /// Record one enforced workspace-local denial and report whether it crossed the attention
-    /// threshold. The circuit is bounded, memory-only, and clears that workspace after firing.
-    pub(crate) fn record_denial_attention(&self, workspace: &str, decision: Decision) -> bool {
-        self.denial_attention
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .record(workspace, decision, unix_ms())
     }
 
     /// Decide whether an intake channel may open a session at all.
@@ -1734,17 +1649,6 @@ fn assemble(
 }
 
 impl GovernanceFacade {
-    /// Combine independent global human control with the workspace's review requirement.
-    #[must_use]
-    pub fn session_decision(&self, needs_attention: bool) -> Decision {
-        let global = self.runtime_decision();
-        if global.allowed && needs_attention {
-            Decision::refused(ReasonCode::RuntimeAttention)
-        } else {
-            global
-        }
-    }
-
     /// Check live runtime control at an effect boundary.
     #[must_use]
     pub fn runtime_decision(&self) -> Decision {

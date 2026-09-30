@@ -4,6 +4,10 @@
 - Date: 2026-09-06
 - Amends: ADR-0102, ADR-0121, ADR-0126, ADR-0156
 
+2026-09-28 amendment: [ADR-0185](0185-explicit-user-control-and-passive-browser-feedback.md)
+supersedes automatic session attention and review/resume. Explicit human controls and final
+dispatch checks remain. The original decision and implementation evidence below are historical.
+
 ## Decision
 
 The owner approved H5's review-and-resume experience. Workspace lifetime owns automatic attention,

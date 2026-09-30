@@ -25,8 +25,9 @@ as audit.
 
 Test update failure too. A bad signature, rollback, malformed source, or unreachable source must
 retain the active verified bundle. A configured cold start without a valid source or cache must
-fail closed. Three matching denials in 60 seconds must enter the visible attention state until a
-person chooses what happens next.
+fail closed. Repeated denials must leave later permitted requests available without a session
+review or resume. Credential-input acknowledgement must not override configured policy or human
+Pause/Stop; without acknowledgement, the call returns guidance and creates no session hold.
 
 ## Collect evidence
 
@@ -42,8 +43,9 @@ collection pattern are in [`siem-integration.md`](siem-integration.md).
 ## Keep the human controls
 
 Managed policy does not replace visibility. Keep the toolbar, denial receipts, dedicated tab
-group, workbench history, pause, attention, resume quietly, and end-session paths available. The
-browser-local preserve-tabs setting remains a second gate beneath policy.
+group, workbench history, and explicit pause, resume, and end-session controls available. Page
+feedback remains passive, with interactive runtime control in the workbench. The browser-local
+preserve-tabs setting remains a second gate beneath policy.
 
 Before rollout, require the checksum-bound package, matching extension, provenance attestation,
 clean install/upgrade/uninstall evidence, visible-browser policy journey, and native notification

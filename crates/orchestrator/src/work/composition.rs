@@ -222,9 +222,8 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
         Some(A::AuthorityBlocked {
             cause: BlockedReason::SessionEnded,
         }) => StepCause::SessionEnded,
-        Some(A::AttentionRequired | A::CredentialHandoff | A::LocalInterlock) => {
-            StepCause::AttentionRequired
-        }
+        Some(A::CredentialHandoff | A::CredentialAuthorization) => StepCause::Failed,
+        Some(A::AttentionRequired | A::LocalInterlock) => StepCause::AttentionRequired,
         Some(A::DeadlineBeforeStart | A::DeadlineExpired { .. }) => StepCause::Deadline,
         Some(A::CancelledBeforeStart | A::CancelledAfterDispatch) => StepCause::Cancelled,
         Some(A::ConnectionLost | A::BrowserStopped { reconnect: true }) => {

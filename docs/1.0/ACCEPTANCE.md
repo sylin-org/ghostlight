@@ -101,7 +101,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    viewport, and zoom still match; stale views fail before pointer or region-capture dispatch. A
    bounded region returns a magnified image and fresh view, and a second region chains from it.
 9. File paths are validated and bounded before reading, and no file bytes cross the browser bridge
-   until governance and credential preflight succeed.
+   until governance and file-target preflight succeed.
 10. The extension alone owns recording identity, frame acceptance, deadlines, memory bounds, stop,
     retention, and erase. The orchestrator checks source authority before start and disclosure.
     Status, stop, and discard remain available without new browser authority.
@@ -140,8 +140,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 11. Audit carries the complete RAWX set, authority, mode, tier, grant, rule, deterministic denial
     id, and managed sequence without policy payloads.
 12. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
-13. Three matching enforced denials in 60 seconds or five in 120 seconds enter workspace-local
-    attention. Resume clears the fired window; another workspace is unaffected.
+13. Repeated enforced denials never create an automatic session hold. A later permitted request
+    succeeds without review/resume, in the same workspace and in other workspaces.
 14. Model-driven close dispatches only when the action capability and monotonic tab-close policy
     constraint both permit it. A denying local or managed layer cannot be expanded later.
 15. A refused explicit navigation records only the normalized attempted host. Its path, query,
@@ -175,8 +175,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 3. Capture a screenshot only through `browser_screenshot`, verify bounded dimensions and one
    MCP image content block, and verify base64 image data is absent from structured facts. Capture
    and magnify one bounded view region, then repeat against the returned view.
-4. Fill multiple ordinary fields, but stop before dispatch and request user handoff when any
-   described target is credential-class.
+4. Fill multiple fields. If any described target is credential-class and
+   `user_authorized_credentials` is absent or false, return guidance before any input dispatch
+   and leave subsequent permitted work available. With explicit user authorization acknowledged
+   as true, grouped fill and targeted/focused typing enter credentials under ordinary policy and
+   human controls. Verify actual retained password input without retaining its value in evidence.
    The physical fill carries the remaining invocation budget, uses one all-field preflight and one
    terminal batch verification, and leaves enough time for a decisive receipt. The 30-second
    default must support ordinary multi-field work without multiplying a fixed stability delay by
@@ -205,8 +208,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     make the old view stale.
 12. Scroll in four directions, reveal a target, and set zoom while returning observed viewport
     facts rather than assumed effects.
-13. Upload one and several bounded local files to an ordinary file input. Reject credential-class,
-    missing, directory, oversized, and changed-after-read inputs before any browser effect.
+13. Upload one and several bounded local files to a file input, including one with credential-like
+    metadata. Explicit recording save to that control works too. Reject missing, directory,
+    oversized, changed-after-read, and non-file targets before any browser effect.
 14. Run an explicitly authorized script, return a bounded serializable value, govern any committed
     landing, and never audit source or result.
     - A runtime exception containing `Illegal return statement` and a runtime-thrown `SyntaxError`
@@ -305,8 +309,10 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    does not grant ownership: child tabs and popups are not automatically adopted, grouped, or
    attached to a debugger. Manually moving tabs causes no regrouping; closing or moving tabs does
    not transfer ownership (ADR-0164).
-9. The established content-free visual language renders visibly, stays pointer-transparent except
-   for attention controls, remains hidden from screenshots, and remounts after navigation. Its
+9. The established content-free visual language renders visibly, stays pointer-transparent with
+   no focusable controls, remains hidden from screenshots, and remounts after navigation. A missing
+   stylesheet cannot expose buttons or create an input-intercepting layer. Legacy attention signals
+   show at most a bounded passive notice; runtime-state transitions create no page dialog. Its
    palette is sky `#38bdf8`, ink `#eaf6ff`, and governance ground `#0c0f14`; its spring curve is
    `cubic-bezier(.22,1,.36,1)`. The 150 ms cursor, four-second scope breath, 620 ms ripple, 700 ms
    field splash, 1450 ms read scan, 1600 ms navigation pill, 1500 ms capture frame, and 1150 ms
@@ -449,20 +455,25 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    and newer actions retain open panels and keyboard focus. Expanded content fits its row at both
    widths, with no horizontal overflow. Pause precedes At a glance visually and in keyboard order.
 
-## Session control evidence (ADR-0157)
+## Explicit control and credential-input evidence (ADR-0185)
 
 1. Obsolete request restrictions fail before dispatch under every policy mode. Configured enforcing
-   policy still denies direct and composed work; observe work cannot trip enforced-denial attention.
-2. Session A's third matching denial opens one review notice and stops its composition. Session B
-   can continue through the same browser. Global Resume leaves A's attention intact.
-3. Explicit recovery targets the current incident, changes no policy, and replays no work. Global
-   Pause/Stop remain effective after recovery; stale or ended-session recovery refuses.
+   policy still denies direct and composed work. Neither observe nor enforced denials create
+   automatic attention.
+2. After any number of matching or mixed denials, the same session can perform permitted work
+   without a human review or resume. Other sessions remain independent. Flow stop/continue applies
+   normally to ordinary refusals.
+3. Credential input without acknowledgement returns guidance and dispatches no input, including
+   an ordinary field before a credential field in grouped fill. Subsequent ordinary input works
+   immediately. A first-call or later `user_authorized_credentials: true` reaches password input
+   for grouped fill and targeted/focused typing. It cannot bypass configured policy or Pause/Stop.
 4. Control arriving after preparation or during writer queuing prevents the next command. Queued
    cancellation/deadline also sends no command and leaves no pending receipt. Applied and uncertain
    receipts keep their facts when controls change after dispatch; postcondition refusal preserves
    the previously acknowledged action.
-5. Review history restores the current receipt after Clear view, expands its first problem, and
-   preserves narrow-layout usability. Incremental updates retain expansion, scroll, and focus.
+5. Human Pause/Stop and explicit global attention still prevent the next browser effect. Resume
+   permits new requests without replay or permission changes. Page feedback contains no buttons,
+   focusable elements, or input-intercepting layers, even when its stylesheet is unavailable.
 6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with
    fake/synthetic browser adapters. The isolated Chromium history journey exercises bundled UI.
    These do not establish installed Tauri/MV3, physical input timing, or Linux runtime evidence.

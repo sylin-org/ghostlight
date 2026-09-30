@@ -1,4 +1,4 @@
-// Exercise the production keyboard replacement function against real Chromium editing.
+// Exercise production keyboard, credential-input, and passive-presentation mechanisms in Chromium.
 // This component test starts no Ghostlight service and touches no installed browser profile.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -47,7 +47,7 @@ try {
   const target = targetInfos.find(info => info.type === "page");
   const { sessionId } = await send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
   const evaluate = async expression => {
-    const response = await send("Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+    const response = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
     assert.equal(response.exceptionDetails, undefined);
     return response.result.value;
   };
@@ -84,6 +84,121 @@ try {
     assert.equal(observed.focused, "next");
   }
   console.log(`PASS: ${cases.length} Chromium text replacements preserve DOM/model values, trusted input, blur, and no submission.`);
+
+  // Load the same source the service bundles. Only Chrome transport is replaced by this
+  // disposable page's CDP connection; validators and worker input sequencing are production.
+  await evaluate(`document.body.innerHTML = '<form><label>Password<input id="credential" type="password"></label><input id="after"><button>Submit</button></form>';
+    window.submits = 0; window.inputs = []; window.diagnosticMessages = [];
+    document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); window.submits++; });
+    credential.addEventListener('input', e => window.inputs.push({trusted:e.isTrusted,type:e.inputType}));
+    globalThis.chrome = { runtime: { sendMessage: async message => {
+      if (message.kind === 'form_diagnostics') window.diagnosticMessages.push(message.row);
+      return {ok:true,value:{enabled:true}};
+    } } };`);
+  for (const relative of ["extension/lib/shared.js", "extension/lib/form-diagnostics.js",
+    "crates/orchestrator/src/page_runtime/sensor.js", "extension/lib/presentation-css.js",
+    "extension/lib/presentation.js", "crates/orchestrator/src/page_runtime/content.js"]) {
+    await evaluate(readFileSync(join(root, relative), "utf8"));
+  }
+  const runtime = async message => {
+    const response = await evaluate(`window.__ghostlight_dispatch__(${JSON.stringify(message)})
+      .then(result => ({ok:true,result})).catch(error => ({ok:false,error:String(error.message)}))`);
+    if (!response.ok) throw new Error(response.error);
+    return response.result;
+  };
+  const inspected = await runtime({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const credential = inspected.targets.find(target => target.name === "Password");
+  assert.ok(credential?.credential_class, "real password input is classified by production observation");
+  Object.assign(sandbox, {
+    navigationWatchers: new Map(), cancelled: new Set(), setTimeout,
+    frames: { frameOf: () => 0, localOf: locator => locator,
+      groupLocators: locators => new Map([[0, locators]]) },
+    contentIn: (_tab, _frame, message) => runtime(message),
+    content: (_tab, message) => runtime(message),
+    firstFrameAnswer: (_tab, message) => runtime(message),
+    documents: { verify: async () => {}, verifyInput: async () => {} },
+    ensureDebugger: async () => {}, detachDebugger: async () => {},
+    chrome: { tabs: { get: async id => ({ id, url: "about:blank", status: "complete" }) } },
+    physicalTab: tab => tab
+  });
+  const constants = worker.match(/^const FILL_RETAINED_(?:STABLE|LIMIT|POLL)_MS = [\d_]+;$/gm);
+  assert.equal(constants?.length, 3);
+  vm.runInContext(constants.join("\n"), sandbox);
+  const fillStart = worker.indexOf("async function fill(");
+  const fillEnd = worker.indexOf("async function dispatchDrag(", fillStart);
+  const focusedStart = worker.indexOf("async function typeFocused(");
+  const focusedEnd = worker.indexOf("async function inspectDialog(", focusedStart);
+  assert.ok(fillStart >= 0 && fillEnd > fillStart && focusedStart >= 0 && focusedEnd > focusedStart);
+  vm.runInContext(worker.slice(fillStart, fillEnd), sandbox);
+  vm.runInContext(worker.slice(focusedStart, focusedEnd), sandbox);
+  const secret = "FIXTURE_CREDENTIAL_DO_NOT_RETAIN";
+  const credentialCases = [
+    ["fill", allow_credentials => sandbox.fill("credential-fill", {
+      tab_id: 1, timeout_ms: 5_000, allow_credentials,
+      fields: [{ locator: credential.locator, value: secret }]
+    })],
+    ["targeted typing", allow_credentials => sandbox.typeText("credential-type", {
+      tab_id: 1, locator: credential.locator, text: secret, clear_first: true, allow_credentials
+    })],
+    ["focused typing", allow_credentials => sandbox.typeFocused("credential-focused", {
+      tab_id: 1, text: secret, clear_first: true, allow_credentials
+    })]
+  ];
+  const receipts = [];
+  const authorizationRefusal = error => {
+    assert.match(error.message, /requires user authorization/);
+    assert.equal(error.message.includes(secret), false, "credential refusal contains no input value");
+    return true;
+  };
+  for (const [name, invoke] of credentialCases) {
+    await evaluate("credential.value = 'existing'; credential.focus(); window.inputs = [];");
+    await assert.rejects(invoke(false), authorizationRefusal, `${name} refuses without the service allowance`);
+    assert.equal(await evaluate("credential.value === 'existing' && inputs.length === 0"), true,
+      `${name} refusal preserves the existing field without input`);
+    receipts.push(await invoke(true));
+    const observed = await evaluate(`({retained:credential.value === ${JSON.stringify(secret)}, inputs:window.inputs, submits:window.submits})`);
+    assert.equal(observed.retained, true, `${name} retains the explicitly authorized credential`);
+    assert.ok(observed.inputs.length > 0, name);
+    assert.ok(observed.inputs.every(event => event.trusted), `${name} uses browser editing input`);
+    assert.equal(observed.submits, 0, `${name} never implicitly submits`);
+    await evaluate("credential.focus(); window.inputs = [];");
+    await assert.rejects(invoke(false), authorizationRefusal, `${name} allowance does not survive the request`);
+    assert.equal(await evaluate(`credential.value === ${JSON.stringify(secret)} && inputs.length === 0`), true);
+  }
+  await new Promise(resolveDelay => setTimeout(resolveDelay, 350));
+  assert.equal(JSON.stringify(receipts).includes(secret), false, "effect receipts contain no credential value");
+  const diagnostics = await evaluate("window.diagnosticMessages");
+  assert.ok(diagnostics.some(row => row.event === "trace_started"), "diagnostics were enabled during real credential entry");
+  assert.ok(diagnostics.every(row => row.control_count === 1 && row.nonempty_count === 0),
+    "the credential control and its changing value stay outside diagnostic measurements");
+  assert.equal(JSON.stringify(diagnostics).includes(secret), false, "enabled diagnostics contain no credential value");
+
+  // Capture the real closed shadow root only for inspection. Simulate a missing stylesheet,
+  // then prove that legacy attention feedback has no controls and cannot take page input.
+  const passive = await evaluate(`(() => {
+    const attach = Element.prototype.attachShadow;
+    let shadow;
+    Element.prototype.attachShadow = function (options) { shadow = attach.call(this, options); return shadow; };
+    try { GhostlightPresentation.setManaged(true); }
+    finally { Element.prototype.attachShadow = attach; }
+    shadow.querySelector('style').remove();
+    credential.focus();
+    GhostlightPresentation.render({signal:'attention'}, {effects:true,captions:true});
+    const box = credential.getBoundingClientRect();
+    const host = document.getElementById('ghostlight-presentation-root');
+    return {
+      controls: shadow.querySelectorAll('button,a[href],input,textarea,select,[tabindex],[contenteditable="true"],[role="button"]').length,
+      styleMissing: shadow.querySelector('style') === null,
+      pointerPassive: [host, ...shadow.querySelectorAll('*')].every(node => getComputedStyle(node).pointerEvents === 'none'),
+      focusRetained: document.activeElement === credential,
+      pageReceivesPointer: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === credential,
+      guidanceVisible: shadow.textContent.includes('workbench')
+    };
+  })()`);
+  assert.deepEqual(passive, { controls: 0, styleMissing: true, pointerPassive: true,
+    focusRetained: true, pageReceivesPointer: true, guidanceVisible: true });
+  console.log(`PASS: ${credentialCases.length} production credential input paths honor per-request allowance, retain real password input, and exclude values from receipts/diagnostics.`);
+  console.log("PASS: production attention feedback has no controls and preserves page focus/pointer input with its stylesheet absent.");
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) await send("Browser.close").catch(() => {});
   socket?.close();

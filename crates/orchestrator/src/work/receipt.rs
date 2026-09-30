@@ -38,56 +38,34 @@ impl ApplicationExecutor {
             terminal.result.facts["coverage"] = json!(coverage);
         }
         let tool = language::audit::tool_name(tool);
-        let denial_attention = terminal.audit.composition().is_none()
-            && terminal.result.status == Status::Blocked
-            && self
-                .governance
-                .record_denial_attention(workspace.as_str(), terminal.decision);
-        if denial_attention {
-            self.require_session_attention(
-                workspace,
-                &terminal.result.invocation,
-                crate::workspace::AttentionReason::RepeatedDenials,
-            );
-            // End this invocation even if a person resumes the session before its next child.
-            // The policy explanation and permission evidence still identify the actual refusal.
-            terminal.result.status = Status::AttentionRequired;
-            terminal.result.repeat_safe = false;
-        }
-        let event = if self.workspaces.attention(workspace).is_some() {
-            DomainEvent::AttentionRequired {
+        let event = match terminal.result.status {
+            Status::Blocked
+                if !matches!(
+                    terminal.decision.reason,
+                    ReasonCode::AuditUnavailable
+                        | ReasonCode::RuntimeHold
+                        | ReasonCode::SessionEnded
+                ) && terminal.audit.refusal()
+                    != Some(&crate::language::audit::AuditRefusal::CredentialAuthorization)
+                    && (terminal.audit.composition().is_none() || !terminal.decision.allowed) =>
+            {
+                DomainEvent::WorkBlocked {
+                    invocation: terminal.result.invocation.clone(),
+                    workspace: workspace.as_str().into(),
+                    physical_id: terminal.physical_id,
+                    presentation: denial_presentation(tool, &terminal.result),
+                }
+            }
+            Status::AttentionRequired => DomainEvent::AttentionRequired {
                 invocation: terminal.result.invocation.clone(),
                 workspace: workspace.as_str().into(),
                 physical_id: terminal.physical_id,
-            }
-        } else {
-            match terminal.result.status {
-                Status::Blocked
-                    if !matches!(
-                        terminal.decision.reason,
-                        ReasonCode::AuditUnavailable
-                            | ReasonCode::RuntimeHold
-                            | ReasonCode::SessionEnded
-                    ) =>
-                {
-                    DomainEvent::WorkBlocked {
-                        invocation: terminal.result.invocation.clone(),
-                        workspace: workspace.as_str().into(),
-                        physical_id: terminal.physical_id,
-                        presentation: denial_presentation(tool, &terminal.result),
-                    }
-                }
-                Status::AttentionRequired => DomainEvent::AttentionRequired {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                },
-                _ => DomainEvent::WorkCompleted {
-                    invocation: terminal.result.invocation.clone(),
-                    workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                },
-            }
+            },
+            _ => DomainEvent::WorkCompleted {
+                invocation: terminal.result.invocation.clone(),
+                workspace: workspace.as_str().into(),
+                physical_id: terminal.physical_id,
+            },
         };
         if step.is_none() {
             self.emit(event);

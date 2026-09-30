@@ -1,6 +1,56 @@
 # STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-26 (adapter architecture implementation after 1.3.10 publication).
+Last updated: 2026-09-30 (1.3.12 source and Chrome submission preparation).
+
+## Ghostlight 1.3.12 Prepared for Chrome Review (2026-09-30, unpublished)
+
+The service, desktop, package-source manifests, and Chromium adapter now share version 1.3.12.
+The [release notes](release/notes-v1.3.12.md) and changelog describe ADR-0185's passive browser
+feedback, removal of automatic session holds, and explicitly authorized credential entry.
+The compatibility table pairs adapter 1.3.12 with service 1.3.12. Public versions remain service
+1.3.10 and Chrome adapter 1.3.8; protocol-3 adapter publication must remain staged until the
+matching service is publicly available.
+
+The Chrome API independently confirmed on September 30 that adapter 1.3.11 was approved and
+`STAGED`, while adapter 1.3.8 remained public at 100 percent. The new submission replaces that
+older candidate with the requested fix. Legal source copy now describes 1.3.12's credential
+handling and passive browser feedback, with earlier public behavior distinguished explicitly.
+
+The prepared deterministic extension archive has SHA-256
+`9d5521b3f34562051ea6b07d9d5d0e07267ff6d7bacf274bd38234d43659a25d`.
+Two packages built with PowerShell 7.6.5 reproduced those bytes. Formatting, strict workspace
+clippy, all 563 Rust tests, 294 extension tests, 10 npm launcher tests, four MCPB tests, JavaScript
+syntax, repository integrity, public-surface consistency, the workbench surface, and real
+Chromium credential/passive-feedback checks passed. A fresh workspace build and process journey
+using the exact `.target-adapter-181/debug` executables also passed. Local `cargo-audit` and
+`cargo-deny` are unavailable; their dependency gates remain in CI.
+The current installed service and browser extension have not been replaced by this preparation.
+
+## Explicit User Control and Passive Browser Feedback (2026-09-28, unpublished)
+
+Implemented [ADR-0185](adr/0185-explicit-user-control-and-passive-browser-feedback.md) from
+the owner's correction to the browser attention overlay:
+
+- Removed repeated-denial counters, automatic session holds, and their review/resume journey.
+  Refused requests return ordinary results; later permitted requests can proceed immediately.
+- Credential detection returns guidance for the current request without pausing the session.
+  Fill and typing accept `user_authorized_credentials: true` when the user explicitly authorized
+  entry, including in an earlier instruction. The acknowledgement is per request, can accompany
+  the first call, and does not override configured policy or explicit human Pause/Stop.
+- Browser feedback contains no interactive controls and cannot intercept page input, even without
+  its stylesheet. Runtime replacement also removes predecessor roots with the obsolete buttons.
+  Interactive runtime control belongs in the Tauri workbench.
+- Preserved historical audit decoding and explicit global runtime controls. Updated the active
+  contracts, guides, skill, and security claims; historical decisions retain supersession notes.
+- Verification passed: formatting, strict workspace clippy, 563 Rust tests, 294 extension tests,
+  changed JavaScript syntax, repository integrity, workbench surface/history, and the process
+  journey against the fresh `.target-adapter-181/debug` executables. The real Chromium component
+  journey covers authorized and unacknowledged fill/targeted/focused credential input, value
+  exclusion from receipts and diagnostics, and passive rendering without a stylesheet.
+- These changes have not been deployed or verified through the installed browser stack. The
+  browser tool rejects `chrome://extensions`; the unpacked adapter needs a manual reload before
+  installed acceptance can proceed. Component journeys used disposable browser profiles.
+  Source remains 1.3.11; no release, store submission, or public version change occurred.
 
 ## Chromium-Only Browser Offering (2026-09-26)
 
@@ -3443,4 +3493,3 @@ test tab for direct closure.
   [`adr/0116-windows-and-linux-platform-scope.md`](adr/0116-windows-and-linux-platform-scope.md).
 - Effective harness configuration resolution:
   [`adr/0117-effective-harness-config-resolution.md`](adr/0117-effective-harness-config-resolution.md).
-

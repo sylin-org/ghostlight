@@ -74,3 +74,31 @@ test("a lost reply after document-bound typing preserves effect uncertainty", as
   await assert.rejects(sandbox.typeText("typing", command), { effectUnknown: true });
   assert.equal(sandbox.navigationWatchers.size, 0);
 });
+
+test("targeted typing forwards the service credential allowance", async () => {
+  const { calls, sandbox } = fixture();
+  await sandbox.typeText("typing", { ...command, allow_credentials: true });
+  assert.equal(calls[1].message.allow_credentials, true);
+});
+
+test("focused typing rechecks the credential allowance before and after clearing", async () => {
+  for (const allow_credentials of [false, true]) {
+    const { calls, sandbox } = fixture();
+    sandbox.firstFrameAnswer = async (_tab, message) => { calls.push(message); };
+    const result = await sandbox.typeFocused("typing", { ...command, allow_credentials });
+    assert.equal(result.outcome, "typed");
+    assert.deepEqual(calls.map(call => typeof call === "string" ? call : call.kind),
+      ["attach", "input-admission", "verify_focused_text", "clear_focused", "verify_focused_text", "insert", "detach"]);
+    assert.ok(calls.filter(call => typeof call === "object").every(call => call.allow_credentials === allow_credentials));
+  }
+});
+
+test("focused credential refusal before clear dispatch has no effect", async () => {
+  const { calls, sandbox } = fixture();
+  sandbox.firstFrameAnswer = async (_tab, message) => {
+    calls.push(message.kind);
+    throw new Error("credential-class target requires user authorization");
+  };
+  await assert.rejects(sandbox.typeFocused("typing", command), { effectUnknown: false });
+  assert.deepEqual(calls, ["attach", "input-admission", "verify_focused_text", "detach"]);
+});

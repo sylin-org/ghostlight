@@ -1,3 +1,12 @@
+ghostlight (1.3.12) unstable; urgency=medium
+
+  * Keep browser messages and animations passive, with runtime controls in the workbench.
+  * Remove automatic session holds after repeated policy refusals or credential guidance.
+  * Permit explicitly user-authorized credential entry through fill and typing requests.
+  * Preserve configured policy, human Pause/Stop, and content-free diagnostic records.
+
+ -- Leonardo Botinelly <hello@sylin.org>  Wed, 30 Sep 2026 00:00:00 -0400
+
 ghostlight (1.3.11) unstable; urgency=medium
 
   * Negotiate truthful browser capabilities from executable adapter handlers.

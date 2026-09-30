@@ -91,6 +91,7 @@ pub enum AuditRefusal {
     AttentionRequired,
     LocalInterlock,
     CredentialHandoff,
+    CredentialAuthorization,
     IncompatibleReceipt,
     BrowserAdapterOutdated,
     DeadlineExpired { before_dispatch: bool },
@@ -146,7 +147,7 @@ impl Refusal {
             }
             Self::AttentionRequired => AuditRefusal::AttentionRequired,
             Self::LocalInterlock => AuditRefusal::LocalInterlock,
-            Self::CredentialHandoff => AuditRefusal::CredentialHandoff,
+            Self::CredentialAuthorization => AuditRefusal::CredentialAuthorization,
             Self::IncompatibleReceipt => AuditRefusal::IncompatibleReceipt,
             Self::BrowserAdapterOutdated => AuditRefusal::BrowserAdapterOutdated,
             Self::DeadlineExpired { before_dispatch } => AuditRefusal::DeadlineExpired {

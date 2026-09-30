@@ -19,7 +19,7 @@ function fixture() {
     },
     shared: require("../lib/shared.js"),
     contentIn: async (_tab, _frame, message) => {
-      calls.push({ kind: message.kind });
+      calls.push({ kind: message.kind, allow_credentials: message.allow_credentials });
       if (message.kind === "prepare_fill") return { field_kinds: ["browser_text"] };
       if (message.kind === "prepare_text_fill") return { subject: { role: "textbox", name: "Draft" } };
       if (message.kind === "verify_fill_values") return { retained: true };
@@ -98,6 +98,21 @@ test("final batch verification catches a page rollback after browser input", asy
   );
   assert.ok(calls.some(call => call.kind === "Input.dispatchKeyEvent"));
   assert.ok(calls.some(call => call.kind === "detach"));
+});
+
+test("credential allowance reaches every staged fill primitive including submission", async () => {
+  for (const allow_credentials of [false, true]) {
+    const { calls, sandbox } = fixture();
+    await sandbox.fill("fill", {
+      tab_id: 7, timeout_ms: 1_000, allow_credentials,
+      fields: [{ locator: "locator_1", value: "fixture-value" }], submit_locator: "locator_submit"
+    });
+    for (const kind of ["prepare_fill", "prepare_text_fill", "verify_text_fill_focus", "verify_fill_values", "submit_fill"]) {
+      const observed = calls.filter(call => call.kind === kind);
+      assert.ok(observed.length > 0, kind);
+      assert.ok(observed.every(call => call.allow_credentials === allow_credentials), kind);
+    }
+  }
 });
 
 test("multiline fill preserves Enter character payload only on key down", async () => {

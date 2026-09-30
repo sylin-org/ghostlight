@@ -129,7 +129,6 @@ function receiveChange(event) {
   const change = store.applyChange(event);
   if (change === "gap") resync({ rebuildFeed: true });
   else if (change === "refresh") resync();
-  else if (event.change.kind === "session_attention_changed") resync();
 }
 
 /* --------------------------------- policy ------------------------------- */
@@ -327,24 +326,6 @@ function wire() {
     // they may. An action inside an open rule is handled above and must not close it again.
     const toggle = event.target.closest("[data-rule-toggle]");
     if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
-    const reviewSession = event.target.closest("[data-review-session]");
-    if (reviewSession) {
-      const invocation = reviewSession.dataset.reviewInvocation;
-      withButton({ currentTarget: reviewSession }, async () => {
-        await resync();
-        view.reviewSession(store.revealHistory(invocation));
-      }).catch((error) => view.toast(String(error), true));
-      return;
-    }
-    const resumeSession = event.target.closest("[data-resume-session]");
-    if (resumeSession && !resumeSession.disabled) {
-      withButton({ currentTarget: resumeSession }, async () => {
-        const result = await transport.resumeSession(resumeSession.dataset.resumeSession, resumeSession.dataset.resumeIncident);
-        view.toast(result.message, !result.accepted);
-        await resync();
-      }).catch((error) => view.toast(String(error), true));
-      return;
-    }
     const intent = event.target.closest("[data-intent]");
     if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
