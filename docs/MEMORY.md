@@ -171,6 +171,8 @@ the owner wants, and what this project learned the hard way.
 - **Ghostlight owns mechanism, not the user's larger intent.** It understands canonical browser
   operations, authority, lifecycle, observable browser state, and effect truth. It does not infer
   that a generic click or write means booking, buying, sending, or another task-level consequence.
+  Client-supplied text is generic input. Product and privacy descriptions must follow the actual
+  operation and data use, not infer authentication or financial activity from possible text values.
 - **Human runtime control is authoritative.** ADR-0126 decides that pause refuses the next effect
   instead of suspending a caller, and stop is terminal with a pinned directive. Both directives
   already live in `crates/orchestrator/src/language/outcome.rs`; the reference-experience S5

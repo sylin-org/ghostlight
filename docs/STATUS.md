@@ -1,8 +1,8 @@
 # STATUS -- Ghostlight 1.3.10 published; Chrome adapter 1.3.8 published
 
-Last updated: 2026-09-30 (1.3.12 source and Chrome submission preparation).
+Last updated: 2026-09-30 (1.3.12 source pushed and Chrome package uploaded).
 
-## Ghostlight 1.3.12 Prepared for Chrome Review (2026-09-30, unpublished)
+## Ghostlight 1.3.12 Uploaded to Chrome (2026-09-30, unpublished)
 
 The service, desktop, package-source manifests, and Chromium adapter now share version 1.3.12.
 The [release notes](release/notes-v1.3.12.md) and changelog describe ADR-0185's passive browser
@@ -23,8 +23,17 @@ clippy, all 563 Rust tests, 294 extension tests, 10 npm launcher tests, four MCP
 syntax, repository integrity, public-surface consistency, the workbench surface, and real
 Chromium credential/passive-feedback checks passed. A fresh workspace build and process journey
 using the exact `.target-adapter-181/debug` executables also passed. Local `cargo-audit` and
-`cargo-deny` are unavailable; their dependency gates remain in CI.
+`cargo-deny` are unavailable; CI passed those dependency gates and all 11 jobs on the source commit,
+including Windows and Linux Rust, process, and real-browser journeys.
 The current installed service and browser extension have not been replaced by this preparation.
+
+Source commit `03a086004afb94a869b1c384df24f9eb24d60ce2` is pushed to `main`. The old 1.3.11
+staged submission prevented upload and was cancelled under the owner's request to replace it
+with the fix. Chrome then accepted the 1.3.12 ZIP with `SUCCEEDED`. The updated public privacy
+policy is live. Store disclosures continue to describe actual browser operations and data use;
+arbitrary client-supplied input does not by itself establish a separate data-collection category. The
+[submission record](testing/chrome-store-submission-2026-09-30.md) preserves package custody,
+verification, the store sequence, and the remaining step.
 
 ## Explicit User Control and Passive Browser Feedback (2026-09-28, unpublished)
 

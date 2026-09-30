@@ -47,9 +47,10 @@ For controlled Ghostlight tabs, the extension may handle:
 - **Synthetic input and navigation.** Pointer, keyboard, scroll, drag, zoom, navigation, dialog,
   and tab-management actions perform the browser work requested by the connected MCP client.
 - **Form values.** Values supplied by the connected MCP client may be placed into form fields.
-  From version 1.3.12, passwords, one-time codes, and payment secrets may be entered when the client
-  acknowledges the user's explicit instruction for that request, subject to configured policy and
-  human controls. Earlier public versions accept only non-credential fields for fill and typing.
+  Ghostlight processes the supplied text to perform the requested edit. From version 1.3.12,
+  credential-class fields accept input when the client acknowledges the user's explicit instruction
+  for that request, subject to configured policy and human controls. Earlier public versions accept
+  only non-credential fields for fill and typing.
 - **User-requested page JavaScript.** When the MCP client explicitly requests `browser_execute`,
   bounded script text is evaluated through the Chrome Debugger API in the attached page. Its
   bounded serializable result may return through the local chain. The text is not installed,
@@ -62,9 +63,9 @@ native application only for the requested upload.
 
 In version 1.3.12, fill and typing default to refusing credential-class input with guidance to the
 client. They accept the per-request `user_authorized_credentials` acknowledgement when the user
-explicitly instructed credential entry; an existing instruction is sufficient. The acknowledgement is supplied
-by the client, not independently verified by Ghostlight, and cannot override configured policy or
-human Pause/Stop. Without it, the current request returns guidance without pausing the session.
+explicitly instructed credential entry; an existing instruction is sufficient. The acknowledgement
+is supplied by the client, not independently verified by Ghostlight, and cannot override configured
+policy or human Pause/Stop. Without it, the current request returns guidance without pausing the session.
 Ghostlight does not add submitted form values to audit, diagnostic logs, or visual feedback.
 
 ## Where data goes

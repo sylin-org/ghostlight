@@ -99,8 +99,9 @@ Policy, including the Limited Use requirements.
 
 At submission, disclose on-device handling of website content and user activity as required by the
 dashboard's then-current definitions. Do not claim that local processing means no disclosure is
-required. Disclose the handling of passwords, authentication codes, and payment values supplied
-for explicitly authorized credential input; local processing does not make those values absent.
+required. Describe client-supplied form values as input for the requested edit. Select data
+categories from the actual collection and use; do not infer additional categories solely from
+what an arbitrary input string could contain.
 Ghostlight does not request Chrome history, cookies, geolocation, or sync-storage permissions and
 does not maintain a browsing-history database. It does not read the browser's saved-password store.
 
