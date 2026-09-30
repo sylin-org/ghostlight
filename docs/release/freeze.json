@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": "6078e5425442aa0f0235baad52468b0bab57cf85",
-  "frozen_at_utc": "2026-09-25T14:44:55Z",
+  "revision": "d67048bbe0914485771a2640ea0eef3e4b02ccaa",
+  "frozen_at_utc": "2026-09-30T13:35:58Z",
   "frozen_by": "Leo",
-  "note": "Ghostlight 1.3.10 release candidate"
+  "note": "Ghostlight 1.3.12 service release candidate matching published Chrome adapter 1.3.12"
 }
