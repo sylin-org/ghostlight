@@ -44,6 +44,19 @@ physical dispatch, Stop semantics, and connector/adapter contracts remain intact
 no hold, inferred task intent, acknowledgment queue, notification engine, or destination.
 Exact-record targeting from global history search is deferred to a separate bounded change.
 
+## Review amendment: confirmations state only authority effects (2026-10-01)
+
+Independent review found that Decision 4's separate browser sample and publication success
+cannot establish browser delivery. The last adapter can disconnect between those steps, and
+broadcasting to the empty writer collection still succeeds. Publication has no receipt.
+
+Human confirmations now state only the applied authority state, its global scope, and its
+continuity across browser reconnection. They do not use `browser_notified`. The existing
+best-effort metadata field remains compatible, with its limits explicit: it is a sampled browser
+plus successful publication, never evidence of receipt or application. No acknowledgement
+mechanism is added. A deterministic port fixture disconnects the final adapter inside publication
+after the topology sample and proves identical truthful wording with or without that disconnect.
+
 ## Evidence
 
 The [source handoff](../testing/in-service-ux-2026-10-01.md) records gates and limits.

@@ -18,7 +18,7 @@ use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::browser::{BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
+use crate::browser::{BrowserDispatch, BrowserError, BrowserPort};
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{
@@ -436,7 +436,7 @@ pub struct WorkbenchFacade {
     projection: WorkbenchProjection,
     workspaces: WorkspaceStore,
     governance: GovernanceFacade,
-    browser: Arc<RelayBrowserPort>,
+    browser: Arc<dyn BrowserPort>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
     started_at_ms: u64,
@@ -449,7 +449,7 @@ impl WorkbenchFacade {
         projection: WorkbenchProjection,
         workspaces: WorkspaceStore,
         governance: GovernanceFacade,
-        browser: Arc<RelayBrowserPort>,
+        browser: Arc<dyn BrowserPort>,
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         Self {
@@ -796,7 +796,7 @@ impl WorkbenchFacade {
             accepted: true,
             runtime_state: state,
             browser_notified,
-            message: crate::language::control::confirmation(state, browser_notified),
+            message: crate::language::control::confirmation(state),
         }
     }
 
@@ -1685,7 +1685,8 @@ pub struct WorkbenchIntentResult {
     pub accepted: bool,
     /// Resulting authoritative runtime state.
     pub runtime_state: RuntimeControlState,
-    /// Whether a currently connected browser received the new state immediately.
+    /// Best-effort indication: a compatible browser was sampled and publication reported no error.
+    /// Not receipt or delivery evidence; that browser may disconnect between these steps.
     pub browser_notified: bool,
     /// Fixed user-facing outcome.
     pub message: String,

@@ -27,24 +27,17 @@ pub fn detail(
     }
 }
 
-/// Confirm an accepted human intent without presenting it as a browser failure.
+/// Confirm only the authoritative state, independently of unacknowledged browser publication.
 #[must_use]
-pub fn confirmation(
-    state: ghostlight_bridge::browser::RuntimeControlState,
-    browser_notified: bool,
-) -> String {
+pub fn confirmation(state: ghostlight_bridge::browser::RuntimeControlState) -> String {
     use ghostlight_bridge::browser::RuntimeControlState;
     let message = match state {
-        RuntimeControlState::Held => "Ghostlight is paused across all sessions.",
-        RuntimeControlState::Ended => "Ghostlight is stopped across all sessions.",
+        RuntimeControlState::Held => "Ghostlight is paused across all sessions. The pause remains in effect after reconnection.",
+        RuntimeControlState::Ended => "Ghostlight is stopped across all sessions. The stop remains in effect after reconnection.",
         RuntimeControlState::Active => {
             "Ghostlight can accept new requests. Earlier actions will not be repeated."
         }
-        RuntimeControlState::Attention => "Ghostlight is waiting for you across all sessions.",
+        RuntimeControlState::Attention => "Ghostlight is waiting for you across all sessions. The hold remains in effect after reconnection.",
     };
-    if browser_notified {
-        message.into()
-    } else {
-        format!("{message} The browser will receive this state after reconnecting.")
-    }
+    message.into()
 }

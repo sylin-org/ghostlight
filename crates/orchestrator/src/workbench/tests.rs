@@ -131,7 +131,11 @@ fn disconnected_runtime_control_is_authoritative_and_never_replays() {
         assert_eq!(result.runtime_state, state);
         assert!(!result.browser_notified);
         assert!(result.message.contains(word));
-        assert!(result.message.contains("after reconnecting"));
+        assert_eq!(
+            result.message,
+            crate::language::control::confirmation(state)
+        );
+        assert!(!result.message.contains("receive"));
         let snapshot = facade.snapshot();
         assert_eq!(snapshot.service.runtime_state, state);
         assert!(snapshot
@@ -152,6 +156,93 @@ fn disconnected_runtime_control_is_authoritative_and_never_replays() {
     );
     assert!(reconnect.invites_control);
     assert!(reconnect.control_detail.contains("without repeating"));
+}
+
+#[test]
+fn disconnect_between_browser_sample_and_control_publication_cannot_change_confirmation() {
+    use crate::browser::{BrowserError, BrowserPort, BrowserSummary};
+    use ghostlight_bridge::browser::{
+        BrowserCommand, BrowserOutcome, BrowserPlatform, RuntimeControlState,
+    };
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Instant;
+
+    // Deterministically lose the last adapter after the facade's topology sample, immediately
+    // before an otherwise successful empty publication. No scheduling or sleeps are involved.
+    struct PublicationRace {
+        connected: AtomicBool,
+        disconnect_on_publish: bool,
+        published: Mutex<Option<RuntimeControlState>>,
+    }
+    impl BrowserPort for PublicationRace {
+        fn call(
+            &self,
+            _: &str,
+            _: &str,
+            _: BrowserCommand,
+            _: Instant,
+            _: &AtomicBool,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            panic!("human control must not replay browser work");
+        }
+        fn browsers(&self) -> Vec<BrowserSummary> {
+            if !self.connected.load(Ordering::SeqCst) {
+                return vec![];
+            }
+            vec![BrowserSummary {
+                id: "last-adapter".into(),
+                name: Some("Chrome".into()),
+                adapter_version: "1.3.12".into(),
+                platform: BrowserPlatform::Chromium,
+                attended: true,
+                attention_incompatible: false,
+            }]
+        }
+        fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
+            if self.disconnect_on_publish {
+                self.connected.store(false, Ordering::SeqCst);
+            }
+            *self.published.lock().unwrap() = Some(state);
+            // Like a real broadcast, success over an empty writer collection proves no receipt.
+            Ok(())
+        }
+    }
+    let expected =
+        "Ghostlight is paused across all sessions. The pause remains in effect after reconnection.";
+    for disconnect_on_publish in [false, true] {
+        let browser = Arc::new(PublicationRace {
+            connected: AtomicBool::new(true),
+            disconnect_on_publish,
+            published: Mutex::new(None),
+        });
+        let facade = WorkbenchFacade::new(
+            WorkbenchProjection::default(),
+            crate::workspace::WorkspaceStore::default(),
+            GovernanceFacade::new(None, None),
+            browser.clone(),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
+        );
+        let result = facade.apply_runtime_intent(super::WorkbenchRuntimeIntent::Hold);
+        assert!(result.accepted);
+        assert_eq!(result.runtime_state, RuntimeControlState::Held);
+        assert_eq!(
+            *browser.published.lock().unwrap(),
+            Some(RuntimeControlState::Held)
+        );
+        assert_eq!(
+            browser.connected.load(Ordering::SeqCst),
+            !disconnect_on_publish
+        );
+        // The legacy best-effort flag is identical in both cases. The human confirmation must
+        // never use it as evidence that any adapter received or applied the control state.
+        assert!(result.browser_notified);
+        assert_eq!(result.message, expected);
+        assert_eq!(
+            facade.snapshot().service.runtime_state,
+            RuntimeControlState::Held
+        );
+        assert!(!result.message.contains("receive"));
+    }
 }
 
 #[derive(Default)]

@@ -11,6 +11,9 @@ browser reconnection, and clarifies Show tab versus takeover. The full guardian 
 all five destinations remain intact. Source validation and the pending runtime handoff are in
 the [UX evidence record](testing/in-service-ux-2026-10-01.md). Tangent owns desktop/browser testing
 until the parent releases that lane. No serving installation or registration has changed.
+Independent source review of `8d1e16ff` found a topology/publication race in control confirmation.
+The focused correction makes confirmations depend only on the applied authority state and adds
+a deterministic last-adapter disconnect regression. Browser publication is not acknowledgement.
 
 The owner authorized a bounded local engineering trial. The starting repository was clean at
 `de1a686761af5430afc50763d1a282efaa80f615`; no pending-change checkpoint commit was needed.
