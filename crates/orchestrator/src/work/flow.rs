@@ -10,7 +10,9 @@ use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::RunFlow;
 use crate::workspace::WorkspaceLease;
 
-use super::{result::Readiness, ApplicationExecutor, Effect, InvocationContext, Status, Terminal};
+use super::{
+    result::Readiness, ApplicationExecutor, Effect, InvocationContext, Status, WorkEvidence,
+};
 
 use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
 
@@ -22,7 +24,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &RunFlow,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let decision = self.authorize(context, CapabilitySet::EMPTY, None);
         if !decision.allowed {
             return self.blocked(
@@ -95,7 +97,7 @@ impl ApplicationExecutor {
             let cause = progress.record(position, &terminal);
             let mut row = terminal_row(position, &terminal, cause);
             row["id"] = json!(step.id);
-            let envelope = serde_json::to_value(&terminal.result).unwrap_or(Value::Null);
+            let envelope = serde_json::to_value(&terminal.caller).unwrap_or(Value::Null);
             budget_used = budget_used
                 .saturating_add(serde_json::to_string(&envelope).unwrap_or_default().len());
             if budget_used > FLOW_RESULT_BUDGET_BYTES {
@@ -106,7 +108,7 @@ impl ApplicationExecutor {
             rows.push(row);
             envelopes.insert(step.id.clone(), envelope);
             if cause.is_some_and(StepCause::stops_execution)
-                || (terminal.result.status != Status::Succeeded && value.on_error == "stop")
+                || (terminal.resolution.status() != Status::Succeeded && value.on_error == "stop")
             {
                 progress.progress.stopped = true;
                 break;
@@ -120,9 +122,7 @@ impl ApplicationExecutor {
         let facts = json!({"completed":progress.progress.counts.succeeded,"total":total,
             "stopped":progress.progress.stopped,"steps":rows});
         let mut terminal = progress.finish(context, facts);
-        terminal.audit = terminal
-            .audit
-            .with_tools(value.steps.iter().map(|step| &step.tool));
+        terminal.tools = value.steps.iter().map(|step| step.tool.clone()).collect();
         terminal
     }
 }

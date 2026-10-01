@@ -17,6 +17,29 @@ use super::super::{
     adapter_error, choose_browser, testing, AdapterLifecycleObserver, AdapterRegistry,
     BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort,
 };
+
+#[test]
+fn fresh_journal_capacity_is_known_unsent_and_restored_uncertainty_stays_uncertain() {
+    assert_eq!(
+        adapter_error("operation_ledger_full", "bounded".into(), false),
+        BrowserError::OperationLedgerFull
+    );
+    assert!(!adapter_error("operation_ledger_full", "bounded".into(), false).effect_unknown());
+    assert_eq!(
+        adapter_error(
+            "operation_result_unavailable",
+            "missing receipt".into(),
+            true
+        ),
+        BrowserError::EffectUnknown("missing receipt".into())
+    );
+    assert!(adapter_error(
+        "operation_ledger_full",
+        "contradictory adapter".into(),
+        true
+    )
+    .effect_unknown());
+}
 use super::{announce_adapter, announce_browser, capability, short_heartbeat, TEST_BROWSER};
 
 struct AttachedFlag(Arc<AtomicBool>);
@@ -39,6 +62,94 @@ fn adapter_local_interlock_is_a_decisive_typed_refusal() {
         adapter_error("local_interlock", "unknown".into(), true),
         BrowserError::EffectUnknown("unknown".into())
     );
+}
+
+#[test]
+fn an_acknowledged_script_exception_is_not_a_successful_effect_receipt() {
+    for uncertain in [false, true] {
+        let error = adapter_error("script_exception", "bounded exception".into(), uncertain);
+        assert_eq!(
+            error,
+            BrowserError::ScriptException("bounded exception".into())
+        );
+        assert!(
+            error.effect_unknown(),
+            "an exception cannot establish no earlier effects"
+        );
+    }
+    assert_eq!(
+        adapter_error("primitive_failed", "script_exception".into(), true),
+        BrowserError::EffectUnknown("script_exception".into())
+    );
+    assert_eq!(
+        adapter_error("primitive_failed", "decisive".into(), false),
+        BrowserError::Primitive("decisive".into())
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (release, hold) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        announce_adapter(
+            &mut stream,
+            vec![AdapterCapability {
+                name: adapter_capability::SCRIPT.into(),
+                revision: 2,
+            }],
+        );
+        let Some(BrowserFrame::Request { request }) =
+            read_native::<BrowserFrame>(&mut stream).unwrap()
+        else {
+            panic!("exactly one script request");
+        };
+        assert!(matches!(
+            request.command,
+            BrowserCommand::EvaluateScript { .. }
+        ));
+        let correlation = request.correlation;
+        write_native(
+            &mut stream,
+            &BrowserFrame::Error {
+                correlation: Some(correlation.clone()),
+                code: "script_exception".into(),
+                message: "bounded exception".into(),
+                effect_unknown: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read_native::<BrowserFrame>(&mut stream).unwrap(),
+            Some(BrowserFrame::Acknowledge { correlation })
+        );
+        hold.recv().unwrap();
+    });
+    let (stream, _) = listener.accept().unwrap();
+    let port = RelayBrowserPort::new("service_test".into());
+    port.attach(stream).unwrap();
+    let error = port
+        .call(
+            TEST_BROWSER,
+            "workspace_test",
+            BrowserCommand::EvaluateScript {
+                tab_id: 7,
+                script: "effects += 1; throw new Error('synthetic')".into(),
+                max_result_chars: 1000,
+            },
+            Instant::now() + Duration::from_secs(2),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        BrowserError::ScriptException("bounded exception".into())
+    );
+    assert!(error.effect_unknown());
+    release.send(()).unwrap();
+    client.join().unwrap();
 }
 
 #[test]

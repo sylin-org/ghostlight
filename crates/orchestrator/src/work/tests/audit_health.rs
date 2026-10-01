@@ -158,6 +158,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
     ));
     let snapshot = executor.governance.snapshot();
     let cancellation = CancellationToken::default();
+    let execution = std::sync::Mutex::new(super::super::ExecutionEvidence::default());
     let context = InvocationContext {
         provenance: None,
         invocation: "queued",
@@ -169,6 +170,8 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         requirements: CapabilitySet::READ,
         deadline: Instant::now() + Duration::from_secs(1),
         cancellation: &cancellation,
+        execution: &execution,
+        phase: super::super::Phase::RequestedEffect,
     };
     assert!(executor.admit_dispatch(&context).is_ok());
     executor.audit.record(&AuditRecord::now(

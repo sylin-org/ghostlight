@@ -11,7 +11,8 @@ pub const RETIRED_BROWSER_LANDING: &str = "browser_landing";
 pub const COMPOSITION_STEP_LIMIT: usize = 20;
 
 /// One language-owned human rendering of terminal facts; machine status remains unchanged.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutcomePresentation {
     /// Human-readable outcome label, independent of protocol status.
     pub label: String,
@@ -26,7 +27,7 @@ pub struct OutcomePresentation {
 }
 
 /// Presentation distinctions shared by the hero, historical rows, and child receipts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutcomeTone {
     Complete,
@@ -64,9 +65,21 @@ impl OutcomePresentation {
         }
     }
 
-    /// Describe recorded facts without inferring intent, rollback, or permission to replay.
+    /// Render the stored canonical presentation, with a bounded fallback for older receipts.
     #[must_use]
     pub fn from_record(record: &crate::governance::AuditRecord) -> Self {
+        if let Some(resolution) = &record.resolution {
+            return resolution.presentation.clone();
+        }
+        Self::from_legacy_record(record)
+    }
+
+    /// Interpret only the older receipt vocabulary when canonical presentation is unavailable.
+    /// Unknown optional resolution metadata never supplies a new cause or a safe-repeat claim.
+    #[must_use]
+    fn from_legacy_record(record: &crate::governance::AuditRecord) -> Self {
+        use super::audit::AuditRefusal;
+        use super::outcome::Refusal;
         // A configured restriction can refuse work after its capability check permitted it.
         let policy_refused = !record.allowed
             || matches!(
@@ -95,11 +108,31 @@ impl OutcomePresentation {
             "You paused Ghostlight. This request did not run.".into()
         } else if record.effect == "none" && record.reason == ReasonCode::SessionEnded {
             "You stopped Ghostlight. This request did not run.".into()
+        } else if record.effect == "unknown"
+            && record.composition.is_none()
+            && matches!(
+                record.refusal_facts,
+                None | Some(AuditRefusal::EffectUnknown)
+            )
+        {
+            Refusal::EffectUnknown.summary()
         } else {
-            record.summary.clone()
+            record.summary.chars().take(500).collect()
         };
-        let repeat_detail = if matches!(record.effect.as_str(), "unknown" | "partial") {
+        let repeat_detail = if matches!(record.effect.as_str(), "unknown" | "partial")
+            && record.composition.is_some()
+        {
+            "Check the per-step results before preparing unfinished work. Do not repeat the whole operation."
+        } else if record.effect == "unknown"
+            && record.refusal_facts == Some(AuditRefusal::ScriptException)
+        {
+            "Check the intended changes before running this script again. Ghostlight has no expected result to verify."
+        } else if matches!(record.effect.as_str(), "unknown" | "partial") {
             "Do not repeat this action. Observe the page before preparing unfinished work."
+        } else if record.effect == "applied"
+            && record.refusal_facts == Some(AuditRefusal::ExpectedConditionNotMet)
+        {
+            "The change was applied. Check the intended result before deciding what work remains."
         } else if record.effect == "applied" && record.status != "succeeded" {
             "The change was applied. Inspect the page before preparing unfinished work."
         } else {

@@ -17,8 +17,8 @@ use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
     action_subject, adapter_budget_ms, bounded, load_physical_files, named_key, observed_host,
-    readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
-    Status, Terminal,
+    readiness, ApplicationExecutor, Conclusion, Effect, InvocationContext, ResolvedLocation,
+    Status, WorkEvidence,
 };
 use ghostlight_bridge::browser::PhysicalFile;
 
@@ -28,7 +28,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &FillForm,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let mut resolved = Vec::with_capacity(value.fields.len());
         let mut selected: Option<SelectedTab> = None;
         if value.fields.iter().any(|field| field.selector.is_some()) {
@@ -186,7 +186,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &TypeText,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if value.focused {
             return self.type_focused(context, lease, value);
         }
@@ -286,7 +286,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &UploadFiles,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let dropping = value.view.is_some();
         let (selected, target_locator, target_role, drop) = if dropping {
             let location = match self.resolve_location(
@@ -475,7 +475,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &RunScript,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -526,7 +526,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &PressKey,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_optional_target(
             context,
             lease,
@@ -541,41 +541,55 @@ impl ApplicationExecutor {
                 };
                 let repetitions = usize::from(value.repeat.max(1));
                 let total = strokes.len().saturating_mul(repetitions);
-                let mut completed = 0usize;
+                context
+                    .execution
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .expect(total);
+                let mut current = selected.clone();
                 let mut last = None;
                 for _ in 0..repetitions {
                     for stroke in &strokes {
                         if context.cancellation.is_cancelled() {
-                            let error = if completed == 0 {
-                                crate::browser::BrowserError::CancelledBeforeDispatch
-                            } else {
-                                crate::browser::BrowserError::CancelledAfterDispatch
-                            };
                             return self.browser_failure(
                                 context,
                                 decision,
-                                error,
-                                Some(selected.physical_id),
+                                crate::browser::BrowserError::CancelledBeforeDispatch,
+                                Some(current.physical_id),
                             );
                         }
-                        match self.dispatch(
+                        // A prior Enter may have navigated. Use its governed landing and refuse
+                        // a locator from an earlier generation before sending another stroke.
+                        if locator.is_some() && current.generation != selected.generation {
+                            return self.workspace_failure(context, WorkspaceError::StaleTarget);
+                        }
+                        let decision =
+                            self.authorize(context, context.requirements, Some(&current.url));
+                        if !decision.allowed {
+                            return self.blocked(
+                                context,
+                                decision,
+                                Some(current.physical_id),
+                                Effect::None,
+                                false,
+                                json!({"reason":decision.reason.as_str()}),
+                            );
+                        }
+                        let receipt = match self.dispatch(
                             context,
                             BrowserCommand::PressKey {
-                                tab_id: selected.physical_id,
+                                tab_id: current.physical_id,
                                 locator: locator.clone(),
                                 key: stroke.clone(),
                                 modifiers: value.modifiers.clone(),
                             },
                         ) {
-                            Ok(receipt @ BrowserOutcome::KeyPressed { .. }) => {
-                                last = Some(receipt);
-                                completed += 1;
-                            }
+                            Ok(receipt @ BrowserOutcome::KeyPressed { .. }) => receipt,
                             Ok(_) => {
                                 return self.protocol_failure(
                                     context,
                                     decision,
-                                    Some(selected.physical_id),
+                                    Some(current.physical_id),
                                 )
                             }
                             Err(error) => {
@@ -583,41 +597,50 @@ impl ApplicationExecutor {
                                     context,
                                     decision,
                                     error,
-                                    Some(selected.physical_id),
+                                    Some(current.physical_id),
                                 )
                             }
+                        };
+                        let BrowserOutcome::KeyPressed {
+                            tab,
+                            key,
+                            subject,
+                            committed_urls,
+                        } = receipt
+                        else {
+                            unreachable!("the validated stroke receipt is a key receipt");
+                        };
+                        let outcome = Outcome::KeyboardSent {
+                            host: observed_host(&tab.url),
+                            key: named_key(&key),
+                            subject: action_subject(context, subject, focused_role),
+                        };
+                        let facts = json!({"tab":current.handle.as_str(),"key":key,"pressed":true});
+                        let applied = self.action_success(
+                            context,
+                            lease,
+                            decision,
+                            Capability::Action,
+                            &current,
+                            &tab,
+                            &committed_urls,
+                            outcome,
+                            facts,
+                        );
+                        if !applied.completed() {
+                            return applied;
                         }
+                        current = match lease.select_tab(Some(current.handle.as_str())) {
+                            Ok(tab) => tab,
+                            Err(error) => return self.workspace_failure(context, error),
+                        };
+                        last = Some(applied);
                     }
                 }
-                let BrowserOutcome::KeyPressed {
-                    tab,
-                    key,
-                    subject,
-                    committed_urls,
-                } = last.expect("at least one stroke is dispatched")
-                else {
-                    unreachable!("the stroke loop produced a key receipt");
-                };
-                let outcome = Outcome::KeyboardSent {
-                    host: observed_host(&tab.url),
-                    key: named_key(&key),
-                    subject: action_subject(context, subject, focused_role),
-                };
-                let mut facts = json!({"tab":selected.handle.as_str(),"key":key,"pressed":true});
-                if total > 1 {
-                    facts["strokes_completed"] = json!(completed);
-                    facts["total_expected"] = json!(total);
-                }
-                self.finish_with_expectation(
+                self.verify_action(
                     context,
-                    lease,
-                    decision,
-                    Capability::Action,
-                    selected,
-                    &tab,
-                    &committed_urls,
-                    outcome,
-                    facts,
+                    &current,
+                    last.expect("at least one stroke was dispatched"),
                     value.expect.as_ref(),
                 )
             },
@@ -629,7 +652,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Wait,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_optional_target(
             context,
             lease,
@@ -724,22 +747,17 @@ impl ApplicationExecutor {
                         "readiness": readiness(selected.readiness),
                         "visual_settle": should_settle,
                     });
-                    return Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
-                            status,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            facts,
-                            outcome.next_steps(),
-                        ),
+                    return WorkEvidence::new(
+                        context.invocation,
+                        status,
+                        Effect::None,
+                        readiness(selected.readiness),
+                        true,
+                        Conclusion::Outcome(outcome),
+                        facts,
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    };
+                        Some(selected.physical_id),
+                    );
                 }
                 // Waiting on what the page calls a control: polled executor-side through the same
                 // semantic query every selector-based action uses, so no handle pre-resolution is
@@ -856,22 +874,17 @@ impl ApplicationExecutor {
                         "elapsed_ms": final_elapsed_ms,
                         "visual_settle": should_settle,
                     });
-                    return Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
-                            status,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            facts,
-                            outcome.next_steps(),
-                        ),
+                    return WorkEvidence::new(
+                        context.invocation,
+                        status,
+                        Effect::None,
+                        readiness(selected.readiness),
+                        true,
+                        Conclusion::Outcome(outcome),
+                        facts,
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    };
+                        Some(selected.physical_id),
+                    );
                 }
                 match self.dispatch(
                     context,
@@ -951,9 +964,7 @@ impl ApplicationExecutor {
                             satisfied: final_satisfied,
                             host: observed_host(&selected.url),
                         };
-                        let summary = outcome.summary();
-                        let next_steps = outcome.next_steps();
-                        let outcome_observed = outcome.observed();
+
                         let facts = json!({
                             "tab": selected.handle.as_str(),
                             "condition": value.condition,
@@ -962,22 +973,17 @@ impl ApplicationExecutor {
                             "readiness": readiness(browser_readiness),
                             "visual_settle": should_settle,
                         });
-                        Terminal {
-                            result: InvocationResult::new(
-                                context.invocation,
-                                status,
-                                Effect::None,
-                                readiness(browser_readiness),
-                                true,
-                                &summary,
-                                facts,
-                                next_steps,
-                            ),
+                        WorkEvidence::new(
+                            context.invocation,
+                            status,
+                            Effect::None,
+                            readiness(browser_readiness),
+                            true,
+                            Conclusion::Outcome(outcome),
+                            facts,
                             decision,
-                            physical_id: Some(tab_id),
-                            observed: outcome_observed,
-                            audit: outcome.audit(),
-                        }
+                            Some(tab_id),
+                        )
                     }
                     Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
                     Err(error) => {
@@ -993,7 +999,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &TypeText,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,

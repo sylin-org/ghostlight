@@ -257,7 +257,7 @@
         `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : ""));
     }
 
-    function heroMarkup(entry) {
+    function heroMarkup(entry, showRecovery = true) {
       // The sentence names the host itself now, so the hero carries no host chip: it would say the
       // same thing twice. Readiness is the one observed fact no sentence states.
       const observed = entry.settled ? entry.observed : null;
@@ -277,7 +277,7 @@
 
       return `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
-        + recoveryMarkup(entry)
+        + recoveryMarkup(entry, showRecovery)
         + revealMarkup(entry)
         + technicalMarkup(entry, `${entry.invocation}:technical`)
         + compositionMarkup(entry)
@@ -285,18 +285,27 @@
     }
 
     /** Safe suggestions are authored with the outcome, never inferred from a tool or reason. */
-    function recoveryMarkup(entry) {
+    function recoveryMarkup(entry, showGuidance = true) {
       const guidance = entry.presentation?.repeat_detail;
+      // Human guidance already combines the relevant explanation and safe next action.
+      // Keep the model's retained suggestions available without repeating them in this view.
+      if (guidance) return showGuidance ? `<p class="recovery-note">${escapeHtml(guidance)}</p>` : "";
       const steps = entry.nextSteps ?? entry.next_steps ?? [];
-      return (guidance ? `<p class="recovery-note">${escapeHtml(guidance)}</p>` : "")
-        + (steps.length ? `<ul class="recovery-steps">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>` : "");
+      return steps.length ? `<p class="recovery-note">${escapeHtml(steps.join(" "))}</p>` : "";
     }
 
     /** Keep exact machine facts available without making them the headline. */
     function technicalMarkup(entry, key) {
       const repeat = entry.repeatSafe ?? entry.repeat_safe;
+      const resolution = entry.resolution;
+      const progress = resolution?.progress;
       const fields = [["Tool", entry.tool], ["Capability", entry.capability],
         ["Status", entry.status], ["Effect", entry.effect], ["Reason", entry.reason],
+        ["Failure cause", entry.failureCause ?? resolution?.cause?.reason ?? entry.refusal_facts?.reason],
+        ["Failure phase", resolution?.phase], ["Verification", resolution?.verification],
+        ["Attempts", progress?.attempted], ["Acknowledged", progress?.acknowledged],
+        ["Confirmed changes", progress?.confirmed_effects], ["Expected changes", progress?.expected],
+        ["Step issue", resolution?.composition_issue ? `${resolution.composition_issue.step}: ${resolution.composition_issue.cause}` : null],
         ["Repeat safe", repeat == null ? "Not recorded" : String(repeat)],
         ["Workspace", entry.workspace], ["Invocation", entry.invocation]];
       const body = '<dl class="connection-facts">' + fields.filter(([, value]) => value != null).map(([label, value]) =>
@@ -409,7 +418,7 @@
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
         + (entry.presentation?.repeat_detail ? `<p class="row-recovery">${escapeHtml(entry.presentation.repeat_detail)}</p>` : "")
-        + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;
+        + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry, false)}</div>`;
     }
 
     function rowClass(entry) {

@@ -1,3 +1,5 @@
+// Browser-local attempt persistence and duplicate suppression. The journal stores only an epoch,
+// opaque operation ids and closed phases; receipts and errors remain in this worker's memory.
 (function installGhostlightOperationEngine(root, factory) {
   const api = factory();
   root.GhostlightOperationEngine = api;
@@ -5,12 +7,30 @@
 })(globalThis, function createGhostlightOperationEngineApi() {
   "use strict";
 
-  const RESTORABLE_PHASES = new Set(["accepted", "dispatched", "completed", "failed", "uncertain"]);
+  const PHASE = Object.freeze({
+    ACCEPTED: "accepted",
+    DISPATCHED: "dispatched",
+    COMPLETED: "completed",
+    FAILED: "failed",
+    UNCERTAIN: "uncertain"
+  });
+  const RESTORABLE_PHASES = new Set(Object.values(PHASE));
+  const JOURNAL_ERROR = Object.freeze({
+    RESULT_UNAVAILABLE: "operation_result_unavailable",
+    LEDGER_FULL: "operation_ledger_full"
+  });
 
-  function recoveryError(message) {
-    const error = new Error(message);
-    error.code = "operation_result_unavailable";
+  function recoveryError() {
+    const error = new Error("The browser operation may have completed, but its result is unavailable.");
+    error.code = JOURNAL_ERROR.RESULT_UNAVAILABLE;
     error.effectUnknown = true;
+    return error;
+  }
+
+  function capacityError() {
+    const error = new Error("The browser operation recovery ledger is full; this operation did not run.");
+    error.code = JOURNAL_ERROR.LEDGER_FULL;
+    error.effectUnknown = false;
     return error;
   }
 
@@ -31,6 +51,7 @@
 
     let epoch = null;
     const records = new Map();
+    let saving = Promise.resolve();
     const ready = restore();
 
     async function restore() {
@@ -52,8 +73,13 @@
       };
     }
 
-    async function persist() {
-      await save(snapshot());
+    function persist() {
+      // Capture this transition now; a later transition must neither remove it before its save
+      // nor finish an older save after a newer snapshot has reached storage.
+      const value = snapshot();
+      const pending = saving.then(() => save(value));
+      saving = pending.catch(() => {});
+      return pending;
     }
 
     async function activate(nextEpoch) {
@@ -67,13 +93,14 @@
     }
 
     function run(record, id, operation) {
+      record.phase = PHASE.DISPATCHED;
+      records.set(id, record);
       const promise = (async () => {
         try {
           try {
-            record.phase = "dispatched";
             await persist();
           } catch (error) {
-            records.delete(id);
+            if (records.get(id) === record) records.delete(id);
             throw error;
           }
 
@@ -81,12 +108,12 @@
           try {
             result = await operation();
           } catch (error) {
-            record.phase = error?.effectUnknown ? "uncertain" : "failed";
+            record.phase = error?.effectUnknown ? PHASE.UNCERTAIN : PHASE.FAILED;
             record.error = error;
             try { await persist(); } catch (_persistenceError) { /* disposition remains conservative */ }
             throw error;
           }
-          record.phase = "completed";
+          record.phase = PHASE.COMPLETED;
           record.result = result;
           try { await persist(); } catch (_error) { /* retain the decisive in-memory receipt */ }
           return result;
@@ -95,7 +122,6 @@
         }
       })();
       record.promise = promise;
-      records.set(id, record);
       return promise;
     }
 
@@ -107,19 +133,19 @@
 
       const existing = records.get(id);
       if (existing?.promise) return existing.promise;
-      if (existing?.phase === "completed" && existing.result !== undefined) return existing.result;
-      if (existing?.phase === "failed" && existing.error) throw existing.error;
-      if (existing?.phase === "accepted" || existing?.phase === "failed") {
+      if (existing?.phase === PHASE.COMPLETED && existing.result !== undefined) return existing.result;
+      if (existing?.phase === PHASE.FAILED && existing.error) throw existing.error;
+      if (existing?.phase === PHASE.ACCEPTED || existing?.phase === PHASE.FAILED) {
         return run(existing, id, operation);
       }
       if (existing) {
-        throw recoveryError("The browser operation may have completed, but its result is unavailable.");
+        throw recoveryError();
       }
       if (records.size >= maximumRecords) {
-        throw recoveryError("The browser operation recovery ledger is full.");
+        throw capacityError();
       }
 
-      return run({ phase: "dispatched", result: undefined, promise: null }, id, operation);
+      return run({ phase: PHASE.DISPATCHED, result: undefined, promise: null }, id, operation);
     }
 
     async function acknowledge(id) {

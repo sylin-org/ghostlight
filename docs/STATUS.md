@@ -2,6 +2,25 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
+## Work resolution cleanup (2026-10-01, local source only)
+
+Leo approved the bounded architecture cleanup after investigation. [ADR-0190](adr/0190-work-owned-resolution-and-real-attempt-journal.md)
+records Work-owned evidence and a single frozen resolution, one Language projection, direct child
+accounting and real serialized adapter journal boundaries. The source candidate remains on
+`codex/in-service-outcome-ux`; no installation, browser, registry, service startup or deployment
+change is authorized by this implementation. The preceding paused patch is preserved in the
+ignored investigation artifacts and reconciled into this cleanup rather than kept as a second path.
+
+The migration has removed old Terminal assembly, result-buffer completion, result overwrites after
+verification, final-effect audit repair, audit-based child-cause inference and duplicate recovery
+rendering. All source gates pass: 613 Rust tests, 372 extension tests, 109 executable Workbench
+assertions, formatting, strict Clippy and changed-JavaScript syntax. The
+[source evidence](testing/work-resolution-2026-10-01.md) records independent handler/effect counters,
+the exact retirements, privacy and optional-history coverage, corrected gate failures and limits.
+Parent structural/redteam review, real predecessor-reader execution and whole-journey human/agent
+acceptance remain pending. No runtime acceptance is claimed. The installed About card and source
+selection remain unchanged. History search targeting stays deferred.
+
 ## Activity-list comprehension correction (2026-10-01, installed locally)
 
 Leo rejected the repeating Completed/Effects uncertain labels in the white activity column.

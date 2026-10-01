@@ -13,11 +13,12 @@ use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, Wor
 pub struct AuditProjection {
     unconfirmed_history_steps: u32,
     coverage: Option<super::coverage::Coverage>,
-    summary: String,
-    next_steps: Vec<String>,
-    refusal: Option<AuditRefusal>,
-    composition: Option<CompositionProgress>,
+    pub(super) summary: String,
+    pub(super) next_steps: Vec<String>,
+    pub(super) refusal: Option<AuditRefusal>,
+    pub(super) composition: Option<CompositionProgress>,
     tools: Vec<String>,
+    pub(super) resolution: Option<super::resolution::RetainedResolution>,
 }
 
 impl AuditProjection {
@@ -27,20 +28,10 @@ impl AuditProjection {
         &self.next_steps
     }
 
-    /// Reconcile recovery with final effects without copying a client result or browser payload.
+    /// Read the canonical frozen account and its human presentation, when this is a new receipt.
     #[must_use]
-    pub fn with_final_effect(
-        mut self,
-        effect: crate::work::result::Effect,
-        succeeded: bool,
-    ) -> Self {
-        use crate::work::result::Effect;
-        if matches!(effect, Effect::Unknown | Effect::Partial) && self.composition.is_none() {
-            self.next_steps = Refusal::EffectUnknown.next_steps();
-        } else if effect == Effect::Applied && !succeeded && self.composition.is_none() {
-            self.next_steps = vec![super::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
-        }
-        self
+    pub fn resolution(&self) -> Option<&super::resolution::RetainedResolution> {
+        self.resolution.as_ref()
     }
     /// Retain child storage gaps without copying child payloads.
     pub fn with_unconfirmed_history(mut self, steps: u32) -> Self {
@@ -141,6 +132,8 @@ pub enum AuditRefusal {
     ConnectionLost,
     CancelledAfterDispatch,
     EffectUnknown,
+    ScriptException,
+    ExpectedConditionNotMet,
     LandingDeniedUnknown,
     WorkspaceUnusable {
         cause: WorkspaceReason,
@@ -163,6 +156,7 @@ impl Outcome {
             next_steps: self.next_steps(),
             refusal: None,
             tools: vec![],
+            resolution: None,
             composition: match self {
                 Self::CompositionRan(progress) => Some(*progress),
                 _ => None,
@@ -194,7 +188,7 @@ impl Refusal {
             Self::DeadlineExpired { before_dispatch } => AuditRefusal::DeadlineExpired {
                 before_dispatch: *before_dispatch,
             },
-            Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
+            Self::BrowserPrimitive => AuditRefusal::BrowserPrimitiveFailed,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
             Self::BrowserStopped { reconnect } => AuditRefusal::BrowserStopped {
                 reconnect: *reconnect,
@@ -209,6 +203,8 @@ impl Refusal {
             Self::ConnectionLost => AuditRefusal::ConnectionLost,
             Self::CancelledAfterDispatch => AuditRefusal::CancelledAfterDispatch,
             Self::EffectUnknown => AuditRefusal::EffectUnknown,
+            Self::ScriptException => AuditRefusal::ScriptException,
+            Self::ExpectedConditionNotMet => AuditRefusal::ExpectedConditionNotMet,
             Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {
                 cause: reason.clone(),
@@ -222,16 +218,12 @@ impl Refusal {
         AuditProjection {
             unconfirmed_history_steps: 0,
             coverage: None,
-            summary: match self {
-                Self::BrowserPrimitive { .. } => {
-                    "The browser could not complete this operation.".into()
-                }
-                _ => self.summary(),
-            },
+            summary: self.summary(),
             refusal: Some(refusal),
             next_steps: self.next_steps(),
             tools: vec![],
             composition: None,
+            resolution: None,
         }
     }
 }
@@ -283,41 +275,17 @@ mod tests {
     }
 
     #[test]
-    fn retained_refusal_has_no_browser_text_but_client_detail_survives() {
-        let refusal = Refusal::BrowserPrimitive {
-            detail: "PRIVATE_EXCEPTION".into(),
-        };
-        assert!(refusal.summary().contains("PRIVATE_EXCEPTION"));
-        assert!(!refusal.audit().summary().contains("PRIVATE_EXCEPTION"));
+    fn retained_refusal_cannot_hold_browser_error_text() {
+        let refusal = Refusal::BrowserPrimitive;
+        assert_eq!(
+            refusal.summary(),
+            "The browser could not complete this operation."
+        );
+        assert_eq!(refusal.audit().summary(), refusal.summary());
         assert_eq!(refusal.audit().next_steps(), refusal.next_steps());
         assert_eq!(
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
-        );
-    }
-
-    #[test]
-    fn final_effects_replace_stale_retry_guidance_without_copying_client_details() {
-        use crate::work::result::Effect;
-        let retry = Refusal::DeadlineExpired {
-            before_dispatch: true,
-        }
-        .audit();
-        assert!(retry.next_steps()[0].starts_with("Repeat"));
-        for effect in [Effect::Unknown, Effect::Partial] {
-            let unsafe_repeat = retry.clone().with_final_effect(effect, false);
-            assert_eq!(
-                unsafe_repeat.next_steps(),
-                Refusal::EffectUnknown.next_steps()
-            );
-            assert!(unsafe_repeat
-                .next_steps()
-                .iter()
-                .all(|step| !step.starts_with("Repeat")));
-        }
-        assert_eq!(
-            retry.with_final_effect(Effect::Applied, false).next_steps(),
-            &[super::super::control::APPLIED_BEFORE_CHECK_FAILURE.to_string()]
         );
     }
 

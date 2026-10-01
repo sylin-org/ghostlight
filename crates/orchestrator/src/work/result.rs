@@ -1,11 +1,8 @@
-//! One bounded terminal product envelope and its single-completion gate.
-
-use std::sync::{Mutex, MutexGuard};
+//! The bounded caller projection of frozen Work resolution and its closed wire vocabulary.
 
 use ghostlight_bridge::service::ServiceContent;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use thiserror::Error;
 
 /// Terminal product status.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -133,75 +130,5 @@ impl InvocationResult {
     #[must_use]
     pub const fn is_error(&self) -> bool {
         !matches!(self.status, Status::Succeeded)
-    }
-}
-
-/// Enforces exactly one terminal construction path for an invocation.
-#[derive(Debug, Default)]
-pub struct CompletionGate {
-    result: Mutex<Option<InvocationResult>>,
-}
-
-impl CompletionGate {
-    /// Commit the invocation's only terminal outcome.
-    pub fn complete(&self, result: InvocationResult) -> Result<(), CompletionError> {
-        let mut slot = lock(&self.result);
-        if slot.is_some() {
-            return Err(CompletionError::AlreadyCompleted);
-        }
-        *slot = Some(result);
-        Ok(())
-    }
-
-    /// Consume the terminal result after all synchronous reactions finish.
-    pub fn take(&self) -> Result<InvocationResult, CompletionError> {
-        lock(&self.result)
-            .take()
-            .ok_or(CompletionError::NotCompleted)
-    }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Completion invariant failure.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-pub enum CompletionError {
-    /// A second terminal outcome was attempted.
-    #[error("invocation already completed")]
-    AlreadyCompleted,
-    /// The executor exited without a terminal outcome.
-    #[error("invocation did not complete")]
-    NotCompleted,
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::{CompletionError, CompletionGate, Effect, InvocationResult, Readiness, Status};
-
-    #[test]
-    fn gate_accepts_exactly_one_terminal_outcome() {
-        let gate = CompletionGate::default();
-        let result = InvocationResult::new(
-            "invocation_x",
-            Status::Succeeded,
-            Effect::None,
-            Readiness::NotApplicable,
-            true,
-            "done",
-            json!({}),
-            vec![],
-        );
-        gate.complete(result.clone()).unwrap();
-        assert_eq!(
-            gate.complete(result),
-            Err(CompletionError::AlreadyCompleted)
-        );
-        assert_eq!(gate.take().unwrap().status, Status::Succeeded);
     }
 }

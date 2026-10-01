@@ -91,7 +91,7 @@ test("a selected bare-return form reports runtime failure as uncertain", async (
   const { send } = fakeSend([failure("ReferenceError: missing is not defined", "ReferenceError")]);
   await assert.rejects(
     scriptEvaluator.evaluate(send, "return missing;", 1000),
-    (error) => error.effectUnknown === true && error.code === "primitive_failed"
+    (error) => error.effectUnknown === true && error.code === "script_exception"
   );
 });
 
@@ -102,7 +102,7 @@ test("a runtime failure is bounded, useful, and uncertain", async () => {
     (error) => {
       assert.match(error.message, /ReferenceError: missing is not defined/);
       assert.equal(error.effectUnknown, true);
-      assert.equal(error.code, "primitive_failed");
+      assert.equal(error.code, "script_exception");
       return true;
     }
   );
@@ -147,7 +147,7 @@ for (const errorExpression of [
     assert.equal(context.effects, 1, "the requested effect happens only once");
     assert.equal(calls.length, 1, "an exception must not trigger another execution");
     assert.equal(reported?.effectUnknown, true, "runtime effects cannot be ruled out");
-    assert.equal(reported?.code, "primitive_failed");
+    assert.equal(reported?.code, "script_exception");
   });
 }
 
@@ -211,9 +211,17 @@ test("a lost evaluation reply is uncertain and is never retried", async () => {
   let attempts = 0;
   await assert.rejects(scriptEvaluator.evaluate(async () => {
     attempts += 1;
-    throw new Error("connection lost");
-  }, "effects += 1", 1000), (error) => error.effectUnknown === true);
+    throw new Error("script_exception: connection lost");
+  }, "effects += 1", 1000), (error) => error.effectUnknown === true && error.code !== "script_exception");
   assert.equal(attempts, 1);
+});
+
+test("a throw before an observed mutation still cannot prove absence of script effects", async () => {
+  const { context, calls, send } = executingSend();
+  await assert.rejects(scriptEvaluator.evaluate(send, "throw new Error('early'); effects += 1;", 1000),
+    (error) => error.code === "script_exception" && error.effectUnknown === true);
+  assert.equal(context.effects, 0, "this fixture's counter did not change");
+  assert.equal(calls.length, 1, "an observed counter is not permission to replay arbitrary script");
 });
 
 test("a runtime syntax exception stays non-replayable after operation-engine recovery", async () => {

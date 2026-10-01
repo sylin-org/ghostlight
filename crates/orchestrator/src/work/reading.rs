@@ -11,7 +11,7 @@ use crate::workspace::WorkspaceLease;
 
 use super::{
     bounded, observed_host, readiness, word_count, ApplicationExecutor, Effect, InvocationContext,
-    TakeScreenshot, Terminal,
+    TakeScreenshot, WorkEvidence,
 };
 
 impl ApplicationExecutor {
@@ -23,7 +23,7 @@ impl ApplicationExecutor {
         target: Option<&str>,
         mode: Option<ReadMode>,
         max_chars: usize,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_optional_target(
             context,
             lease,
@@ -99,7 +99,7 @@ impl ApplicationExecutor {
         root: Option<&str>,
         max_depth: Option<usize>,
         max_items: usize,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if kind == "document" {
             return self.inspect_document(
                 context,
@@ -134,7 +134,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         root: Option<&str>,
         max_depth: usize,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_optional_target(
             context,
             lease,
@@ -206,7 +206,7 @@ impl ApplicationExecutor {
         text: &str,
         kind: &str,
         max_results: usize,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.targets_operation(
             context,
             lease,
@@ -234,7 +234,7 @@ impl ApplicationExecutor {
         capability: Capability,
         command: BrowserCommand,
         noun: TargetNoun,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -306,7 +306,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &TakeScreenshot,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let (selected, command, scope) = if let Some(view_handle) = value.view.as_deref() {
             let resolved = if let Some(requested) = value.tab.as_deref() {
                 let selected = match lease.select_tab(Some(requested)) {
@@ -431,7 +431,7 @@ impl ApplicationExecutor {
                 if let Some(image) = &image_handle {
                     facts["image"] = json!(image.as_str());
                 }
-                let mut terminal = self.succeeded(
+                let terminal = self.succeeded(
                     context,
                     decision,
                     Some(tab_id),
@@ -441,10 +441,7 @@ impl ApplicationExecutor {
                     outcome,
                     facts,
                 );
-                terminal.result = terminal
-                    .result
-                    .with_content(ServiceContent::Image { mime_type, data });
-                terminal
+                terminal.with_content(ServiceContent::Image { mime_type, data })
             }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {

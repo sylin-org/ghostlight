@@ -7,7 +7,7 @@ use crate::language::outcome::Outcome;
 use crate::language::ManageWorkspace;
 use crate::workspace::{WorkspaceError, WorkspaceId};
 
-use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal};
+use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, WorkEvidence};
 
 impl ApplicationExecutor {
     /// List admitted browser workspaces or switch the active session workspace.
@@ -15,7 +15,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         value: &ManageWorkspace,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let decision = self.authorize(context, Capability::Read, None);
         if !decision.allowed {
             return self.blocked(

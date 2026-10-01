@@ -45,6 +45,7 @@ pub enum StepCause {
     Deadline,
     Cancelled,
     Unconfirmed,
+    ScriptException,
 }
 
 impl StepCause {
@@ -69,7 +70,7 @@ impl StepCause {
             Self::AuditUnavailable | Self::AttentionRequired | Self::Cancelled | Self::Deadline => {
                 3
             }
-            Self::ConnectionLost | Self::Unconfirmed => 2,
+            Self::ConnectionLost | Self::Unconfirmed | Self::ScriptException => 2,
             _ => 1,
         }
     }
@@ -127,6 +128,9 @@ impl CompositionProgress {
                     StepCause::Deadline => format!("Time limit reached at step {step}."),
                     StepCause::Cancelled => format!("Cancelled at step {step}."),
                     StepCause::Unconfirmed => format!("Step {step} did not confirm completion."),
+                    StepCause::ScriptException => {
+                        format!("The script in step {step} threw an exception.")
+                    }
                     StepCause::Paused | StepCause::SessionEnded => unreachable!(),
                 };
                 return format!("{progress} {problem}");

@@ -10,8 +10,8 @@ use crate::language::outcome::{Outcome, Refusal};
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    bounded, observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect,
-    InvocationContext, InvocationResult, Readiness, Status, Terminal,
+    bounded, observed_host, readiness, ApplicationExecutor, CloseCompensation, Conclusion, Effect,
+    InvocationContext, Readiness, Status, WorkEvidence,
 };
 
 /// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
@@ -30,7 +30,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let decision = self.authorize(context, Capability::Read, None);
         if !decision.allowed {
             return self.blocked(
@@ -104,7 +104,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: &str,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let selected = match lease.select_tab(Some(requested_tab)) {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
@@ -160,7 +160,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         url: &str,
         reuse: crate::language::ReusePolicy,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
             return self.blocked_at(
@@ -223,7 +223,7 @@ impl ApplicationExecutor {
         controlled: SelectedTab,
         commits: Vec<String>,
         kind: OpenedTabKind,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.emit(DomainEvent::TabCreated {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
@@ -292,7 +292,7 @@ impl ApplicationExecutor {
         url: &str,
         discard_beforeunload: bool,
         reuse: crate::language::ReusePolicy,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
             return self.blocked_at(
@@ -361,14 +361,12 @@ impl ApplicationExecutor {
                     commits,
                     OpenedTabKind::Recovered,
                 );
-                if terminal.result.status == Status::Succeeded {
-                    terminal.result.repeat_safe = false;
+                if terminal.completed() {
                     let outcome = Outcome::PageRecovered {
-                        host: terminal.observed.host.clone(),
+                        host: observed_host(url),
                     };
-                    terminal.result.summary = outcome.summary();
-                    terminal.audit = outcome.audit();
-                    if let Some(facts) = terminal.result.facts.as_object_mut() {
+                    terminal.replace_outcome(outcome);
+                    if let Some(facts) = terminal.payload.facts.as_object_mut() {
                         facts.insert("recovered".into(), json!("new_tab"));
                     }
                 }
@@ -428,7 +426,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         direction: &str,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -464,7 +462,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         bypass_cache: bool,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -501,7 +499,7 @@ impl ApplicationExecutor {
         outcome: Result<BrowserOutcome, BrowserError>,
         make_outcome: F,
         mut facts: Value,
-    ) -> Terminal
+    ) -> WorkEvidence
     where
         F: FnOnce(Option<String>) -> Outcome,
     {
@@ -569,7 +567,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested: &str,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         // Closing what is already gone is the desired state achieved, not an error.
         if matches!(
             lease.select_tab(Some(requested)),
@@ -586,22 +584,17 @@ impl ApplicationExecutor {
                     json!({"tab":requested,"reason":decision.reason.as_str()}),
                 );
             }
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Succeeded,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    Outcome::TabAlreadyClosed.summary().as_str(),
-                    json!({"tab":requested,"closed":false,"already_gone":true}),
-                    vec![],
-                ),
+            return WorkEvidence::new(
+                context.invocation,
+                Status::Succeeded,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Outcome(Outcome::TabAlreadyClosed),
+                json!({"tab":requested,"closed":false,"already_gone":true}),
                 decision,
-                physical_id: None,
-                observed: Default::default(),
-                audit: Outcome::TabAlreadyClosed.audit(),
-            };
+                None,
+            );
         }
         let selected = match lease.select_tab(Some(requested)) {
             Ok(tab) => tab,

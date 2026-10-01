@@ -86,7 +86,7 @@
 
   function failureError(details, maximum) {
     const error = new Error(failureDescription(details, maximum));
-    error.code = "primitive_failed";
+    error.code = "script_exception";
     error.effectUnknown = true;
     return error;
   }

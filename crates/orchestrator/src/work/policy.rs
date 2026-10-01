@@ -9,11 +9,11 @@ use serde_json::{json, Value};
 use crate::governance::{CapabilitySet, Decision};
 use crate::language::outcome::Outcome;
 
-use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal};
+use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, WorkEvidence};
 
 impl ApplicationExecutor {
     /// Explain current authority from the orchestrator-owned projection.
-    pub(super) fn explain_policy(&self, context: &InvocationContext<'_>) -> Terminal {
+    pub(super) fn explain_policy(&self, context: &InvocationContext<'_>) -> WorkEvidence {
         // Explaining authority requires no browser permission and remains available while that
         // authority stops browser work. Keep the ordinary completion/audit path, without clearing
         // attention, changing human controls, or inventing a grant evaluation (ADR-0136).

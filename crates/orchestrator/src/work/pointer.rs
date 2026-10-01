@@ -13,7 +13,7 @@ use crate::workspace::WorkspaceLease;
 
 use super::{
     action_subject, observed_host, readiness, ApplicationExecutor, Clicked, Effect,
-    InvocationContext, ResolvedLocation, Terminal,
+    InvocationContext, ResolvedLocation, WorkEvidence,
 };
 
 impl ApplicationExecutor {
@@ -22,7 +22,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Click,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let location = if let Some(selector) = &value.selector {
             match self.resolve_semantic(context, lease, value.tab.as_deref(), selector) {
                 Ok((tab, target)) => ResolvedLocation::Target { tab, target },
@@ -160,7 +160,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &ScrollPage,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if let Some(view_handle) = value.view.as_deref() {
             return self.perform_wheel(context, lease, value, view_handle);
         }
@@ -239,7 +239,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &ScrollPage,
         view_handle: &str,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let location = match self.resolve_location(
             context,
             lease,
@@ -320,7 +320,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         percent: u16,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -371,7 +371,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         width: u32,
         height: u32,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,
@@ -423,7 +423,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Hover,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let location = match self.resolve_location(
             context,
             lease,
@@ -506,7 +506,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Drag,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let mut dragged_from = None;
         let mut dragged_onto = None;
         let (selected, command, facts) = if let (Some(source), Some(destination)) = (

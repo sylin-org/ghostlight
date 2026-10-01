@@ -2,18 +2,16 @@
 
 use super::*;
 
-/// A primitive adapter error routes to an honest refusal that carries the browser's own
-/// detail, instead of falling through to the browser-stopped rendering.
+/// A primitive error keeps volatile detail in client facts, outside frozen safe language.
 #[test]
 fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
     let (refusal, facts) = routing_refusal(&BrowserError::Primitive(
         "target is not visible for focus".into(),
     ))
     .expect("primitive errors route to a refusal");
-    let crate::language::outcome::Refusal::BrowserPrimitive { detail } = refusal else {
+    let crate::language::outcome::Refusal::BrowserPrimitive = refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
     };
-    assert_eq!(detail, "target is not visible for focus");
     assert_eq!(facts["reason"], "browser_primitive_failed");
     assert_eq!(facts["detail"], "target is not visible for focus");
 }
@@ -34,6 +32,10 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("primitive", BrowserError::Primitive("x".into())),
         ("interlock", BrowserError::LocalInterlock("x".into())),
         ("effect_unknown", BrowserError::EffectUnknown("x".into())),
+        (
+            "script_exception",
+            BrowserError::ScriptException("x".into()),
+        ),
         ("protocol", BrowserError::Protocol("x".into())),
         ("authentication", BrowserError::Authentication),
         (
@@ -89,6 +91,7 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
                     | BrowserError::CancelledAfterDispatch
                     | BrowserError::DeadlineAfterDispatch
                     | BrowserError::EffectUnknown(_)
+                    | BrowserError::ScriptException(_)
             ),
             "{name} effect-unknown classification drifted"
         );
@@ -406,7 +409,7 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
         title: "PRIVATE_TITLE_SENTINEL".into(),
         url: "https://example.com/PRIVATE_PATH?PRIVATE_QUERY#PRIVATE_FRAGMENT".into(),
     }));
-    browser.push(Err(BrowserError::EffectUnknown(
+    browser.push(Err(BrowserError::ScriptException(
         "PRIVATE_EXCEPTION_SENTINEL".into(),
     )));
     let result = executor.execute(&workspace, "browser_flow", json!({"steps":[
@@ -421,6 +424,24 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
     let parent = records.last().unwrap();
     assert_eq!(parent.next_steps, result.next_steps);
     assert_eq!(parent.repeat_safe, Some(false));
+    assert_eq!(
+        parent
+            .resolution
+            .as_ref()
+            .unwrap()
+            .composition_issue
+            .unwrap()
+            .cause,
+        crate::language::composition::StepCause::ScriptException
+    );
+    assert_eq!(
+        parent.composition.unwrap().issue.unwrap().cause,
+        crate::language::composition::StepCause::Failed,
+        "strict predecessor vocabulary stays readable"
+    );
+    assert!(parent
+        .summary
+        .contains("script in step 2 threw an exception"));
     assert!(records
         .iter()
         .filter(|record| record.step.is_some())
@@ -430,6 +451,81 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
         !encoded.contains("PRIVATE_"),
         "audit copied a flow payload: {encoded}"
     );
+}
+
+#[test]
+fn script_exception_and_lost_reply_have_distinct_causes_without_replay_or_retained_payloads() {
+    use crate::language::audit::AuditRefusal;
+    use crate::language::outcome::Refusal;
+    for (error, refusal, retained) in [
+        (
+            BrowserError::ScriptException("PRIVATE_EXCEPTION_SENTINEL".into()),
+            Refusal::ScriptException,
+            AuditRefusal::ScriptException,
+        ),
+        (
+            BrowserError::DisconnectedAfterDispatch,
+            Refusal::ConnectionLost,
+            AuditRefusal::ConnectionLost,
+        ),
+        (
+            BrowserError::EffectUnknown("PRIVATE_EXCEPTION_SENTINEL".into()),
+            Refusal::EffectUnknown,
+            AuditRefusal::EffectUnknown,
+        ),
+    ] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec![],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        browser.push(Err(error));
+        let result = executor.execute(
+            &workspace,
+            "browser_execute",
+            json!({"script":"PRIVATE_SCRIPT_SENTINEL"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.summary, refusal.summary());
+        assert_eq!(result.status, Status::Unknown);
+        assert_eq!(result.effect, Effect::Unknown);
+        assert!(!result.repeat_safe);
+        assert_eq!(
+            browser
+                .calls()
+                .iter()
+                .filter(|call| matches!(call, BrowserCommand::EvaluateScript { .. }))
+                .count(),
+            1
+        );
+        assert!(!browser.calls().iter().any(|call| matches!(
+            call,
+            BrowserCommand::Observe { .. } | BrowserCommand::ReadText { .. }
+        )));
+        let records = audit.0.lock().unwrap();
+        let record = records.last().unwrap();
+        assert_eq!(record.refusal_facts, Some(retained));
+        if record.refusal_facts == Some(AuditRefusal::ScriptException) {
+            assert_eq!(record.next_steps, result.next_steps);
+            assert_eq!(result.facts["phase"], "adapter_reported");
+            assert_eq!(result.facts["reason"], "script_exception");
+        }
+        let human = crate::workbench::HistoryItem::from(record.clone());
+        assert_eq!(human.presentation.summary, result.summary);
+        assert!(!serde_json::to_string(&*records)
+            .unwrap()
+            .contains("PRIVATE_"));
+        assert!(!serde_json::to_string(&human).unwrap().contains("PRIVATE_"));
+    }
 }
 
 #[test]
@@ -2591,7 +2687,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
 }
 
 #[test]
-fn denied_redirect_is_compensated_without_replay_risk() {
+fn denied_redirect_cleanup_does_not_erase_the_confirmed_visit_or_allow_replay() {
     let policy = TestPolicy::new();
     let mut document: serde_json::Value =
         serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
@@ -2615,9 +2711,9 @@ fn denied_redirect_is_compensated_without_replay_risk() {
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
-    assert_eq!(result.effect, Effect::None);
+    assert_eq!(result.effect, Effect::Applied);
     assert_eq!(result.facts["compensated"], true);
-    assert!(result.repeat_safe);
+    assert!(!result.repeat_safe);
 }
 
 #[test]

@@ -11,6 +11,7 @@ mod policy;
 mod reading;
 mod receipt;
 mod recording;
+pub(crate) mod resolution;
 pub mod result;
 mod workspace_management;
 
@@ -45,7 +46,6 @@ use crate::governance::{
 };
 use crate::language::{
     self,
-    audit::AuditProjection,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
         TargetRole, WorkspaceReason,
@@ -59,7 +59,8 @@ use crate::workspace::{
     SelectedTab, SelectedTarget, SelectedView, WorkspaceError, WorkspaceId, WorkspaceLease,
     WorkspaceStore,
 };
-use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
+use resolution::{Conclusion, ExecutionEvidence, Phase, Resolution, Verification, WorkEvidence};
+use result::{Effect, InvocationResult, Readiness, Status};
 
 /// Cloneable cancellation state forwarded from the MCP edge to physical dispatch.
 #[derive(Clone, Debug, Default)]
@@ -247,7 +248,7 @@ impl ApplicationExecutor {
         let invocation = prepared.invocation.clone();
         let tool = prepared.tool.as_str();
         let started = prepared.started;
-        let gate = CompletionGate::default();
+        let execution = Mutex::new(ExecutionEvidence::default());
         let (operation, requirements) = match &prepared.decoded {
             Ok(operation) => {
                 let requirements = language::capability_map::requirements(operation);
@@ -257,26 +258,19 @@ impl ApplicationExecutor {
                 let snapshot = self.governance.snapshot();
                 let decision = Decision::refused(ReasonCode::InvalidRequest);
                 let refusal = Refusal::InvalidRequest;
-                let summary = refusal.summary();
-                let result = InvocationResult::new(
+                let mut terminal = WorkEvidence::new(
                     &invocation,
                     Status::Failed,
                     Effect::None,
                     Readiness::NotApplicable,
                     true,
-                    &summary,
+                    Conclusion::Refusal(refusal),
                     json!({"reason":"invalid_input","detail":error.to_string()}),
-                    vec![error.guidance()],
-                );
-                let terminal = Terminal {
-                    result,
                     decision,
-                    physical_id: None,
-                    observed: Observed::default(),
-                    audit: refusal.audit(),
-                };
+                    None,
+                );
+                terminal.payload.guidance.push(error.guidance());
                 return self.finish(
-                    &gate,
                     terminal,
                     Completion {
                         workspace,
@@ -285,6 +279,7 @@ impl ApplicationExecutor {
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
                         provenance: prepared.provenance.as_deref(),
+                        execution: &execution,
                     },
                 );
             }
@@ -307,6 +302,7 @@ impl ApplicationExecutor {
         let context = InvocationContext {
             requirements,
             provenance: prepared.provenance.as_deref(),
+            execution: &execution,
             invocation: &invocation,
             workspace,
             requested_browser: operation_browser(operation),
@@ -315,25 +311,21 @@ impl ApplicationExecutor {
             snapshot: &snapshot,
             deadline,
             cancellation,
+            phase: Phase::RequestedEffect,
         };
         let terminal = if capacity_refused {
             let refusal = Refusal::Capacity;
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &refusal.summary(),
-                    json!({"reason":"capacity"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            WorkEvidence::new(
+                &invocation,
+                Status::Failed,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Refusal(refusal),
+                json!({"reason":"capacity"}),
+                Decision::permitted(),
+                None,
+            )
         } else if (!requires_lease || lease.is_some())
             && !cancellation.is_cancelled()
             && Instant::now() < deadline
@@ -362,42 +354,30 @@ impl ApplicationExecutor {
             }
         } else if cancellation.is_cancelled() {
             let refusal = Refusal::CancelledBeforeStart;
-            let summary = refusal.summary();
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Cancelled,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"cancelled"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            WorkEvidence::new(
+                &invocation,
+                Status::Cancelled,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Refusal(refusal),
+                json!({"reason":"cancelled"}),
+                Decision::permitted(),
+                None,
+            )
         } else if Instant::now() >= deadline {
             let refusal = Refusal::DeadlineBeforeStart;
-            let summary = refusal.summary();
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"deadline"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            WorkEvidence::new(
+                &invocation,
+                Status::Failed,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Refusal(refusal),
+                json!({"reason":"deadline"}),
+                Decision::permitted(),
+                None,
+            )
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
         };
@@ -407,7 +387,6 @@ impl ApplicationExecutor {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .running_or_finished = true;
         self.finish(
-            &gate,
             terminal,
             Completion {
                 workspace,
@@ -416,6 +395,7 @@ impl ApplicationExecutor {
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
                 provenance: prepared.provenance.as_deref(),
+                execution: &execution,
             },
         )
     }
@@ -425,7 +405,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         operation: &Operation,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if !matches!(operation, Operation::ExplainPolicy(_)) {
             if let Some(terminal) = self.audit_preflight(context) {
                 return terminal;
@@ -509,7 +489,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         operation: &Operation,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if !matches!(
             operation,
             Operation::ExplainPolicy(_) | Operation::ManageWorkspace(_)
@@ -533,25 +513,19 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         selected: &SelectedTab,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let refusal = Refusal::CredentialAuthorization;
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Blocked,
-                Effect::None,
-                readiness(selected.readiness),
-                false,
-                &summary,
-                json!({"tab":selected.handle.as_str(),"user_authorization_required":true,"values_sent":false}),
-                refusal.next_steps(),
-            ),
+        WorkEvidence::new(
+            context.invocation,
+            Status::Blocked,
+            Effect::None,
+            readiness(selected.readiness),
+            false,
+            Conclusion::Refusal(refusal),
+            json!({"tab":selected.handle.as_str(),"user_authorization_required":true,"values_sent":false}),
             decision,
-            physical_id: Some(selected.physical_id),
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+            Some(selected.physical_id),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -566,7 +540,7 @@ impl ApplicationExecutor {
         commits: &[String],
         outcome: Outcome,
         mut facts: Value,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let landing = self.authorize_commits(context, landing_requirements, physical, commits);
         if !landing.allowed {
             let _ = lease.hold_tab(&selected.handle);
@@ -621,9 +595,9 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         capability: impl Into<CapabilitySet>,
         f: F,
-    ) -> Terminal
+    ) -> WorkEvidence
     where
-        F: FnOnce(&SelectedTab, Decision) -> Terminal,
+        F: FnOnce(&SelectedTab, Decision) -> WorkEvidence,
     {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
@@ -649,38 +623,6 @@ impl ApplicationExecutor {
         f(&selected, decision)
     }
 
-    /// Authorize and resolve one controlled tab and target, executing the closure only when allowed (ADR-0176).
-    #[allow(dead_code)]
-    fn with_authorized_target<F>(
-        &self,
-        context: &InvocationContext<'_>,
-        lease: &WorkspaceLease,
-        requested_tab: Option<&str>,
-        target: &str,
-        capability: impl Into<CapabilitySet>,
-        f: F,
-    ) -> Terminal
-    where
-        F: FnOnce(&SelectedTab, &SelectedTarget, Decision) -> Terminal,
-    {
-        let (selected, target) = match self.resolve_target(context, lease, requested_tab, target) {
-            Ok(pair) => pair,
-            Err(error) => return self.workspace_failure(context, error),
-        };
-        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
-        if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                Some(selected.physical_id),
-                Effect::None,
-                true,
-                json!({"reason": decision.reason.as_str()}),
-            );
-        }
-        f(&selected, &target, decision)
-    }
-
     /// Authorize and resolve one controlled tab and optional target, executing the closure only when allowed (ADR-0177).
     fn with_authorized_optional_target<F>(
         &self,
@@ -690,9 +632,9 @@ impl ApplicationExecutor {
         target: Option<&str>,
         capability: impl Into<CapabilitySet>,
         f: F,
-    ) -> Terminal
+    ) -> WorkEvidence
     where
-        F: FnOnce(&SelectedTab, Option<String>, Option<TargetRole>, Decision) -> Terminal,
+        F: FnOnce(&SelectedTab, Option<String>, Option<TargetRole>, Decision) -> WorkEvidence,
     {
         let (selected, locator, role) =
             match self.resolve_optional_target(context, lease, requested_tab, target) {
@@ -815,8 +757,7 @@ impl ApplicationExecutor {
         outcome: Outcome,
         facts: Value,
         expect: Option<&crate::language::Postcondition>,
-    ) -> Terminal {
-        // Govern and retain the landed action before attempting a separate observation.
+    ) -> WorkEvidence {
         let applied = self.action_success(
             context,
             lease,
@@ -828,16 +769,30 @@ impl ApplicationExecutor {
             outcome,
             facts,
         );
-        if applied.result.status != Status::Succeeded {
+        self.verify_action(context, selected, applied, expect)
+    }
+
+    /// A declared check observes already governed action evidence; it never repeats the action.
+    fn verify_action(
+        &self,
+        context: &InvocationContext<'_>,
+        selected: &SelectedTab,
+        mut applied: WorkEvidence,
+        expect: Option<&crate::language::Postcondition>,
+    ) -> WorkEvidence {
+        let decision = applied.decision;
+        if !applied.completed() {
             return applied;
         }
         if let Some(expectation) = expect {
             let remaining = context.deadline.saturating_duration_since(Instant::now());
-            let budget = remaining
-                .min(std::time::Duration::from_millis(2_000))
-                .as_millis() as u64;
+            let budget = remaining.min(Duration::from_millis(2_000)).as_millis() as u64;
+            let check = InvocationContext {
+                phase: Phase::Verification,
+                ..*context
+            };
             match self.dispatch(
-                context,
+                &check,
                 BrowserCommand::Observe {
                     tab_id: selected.physical_id,
                     condition: expectation.condition.clone(),
@@ -847,51 +802,22 @@ impl ApplicationExecutor {
                 },
             ) {
                 Ok(BrowserOutcome::Observed { satisfied, .. }) => {
+                    applied.verify(if satisfied {
+                        Verification::Met
+                    } else {
+                        Verification::NotMet
+                    });
                     if !satisfied {
-                        let mut steps = applied.result.next_steps.clone();
-                        steps.push(
-                            "The effect was applied, but the expected condition did not hold. Inspect the page before repeating.".into(),
-                        );
-                        return Terminal {
-                            result: InvocationResult::new(
-                                context.invocation,
-                                Status::Failed,
-                                Effect::Applied,
-                                readiness(selected.readiness),
-                                false,
-                                &applied.result.summary,
-                                applied.result.facts,
-                                steps,
-                            ),
-                            decision,
-                            physical_id: Some(selected.physical_id),
-                            observed: applied.observed,
-                            audit: applied.audit,
-                        };
+                        applied.payload.facts["reason"] = json!("expected_condition_not_met");
                     }
                 }
-                Ok(_) => {
-                    let mut failed =
-                        self.protocol_failure(context, decision, Some(selected.physical_id));
-                    failed.result.effect = Effect::Applied;
-                    failed.result.repeat_safe = false;
-                    failed.result.next_steps =
-                        vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
-                    return failed;
-                }
-                Err(error) => {
-                    let human_control = matches!(error, BrowserError::RuntimeControl(_));
-                    let mut failed =
-                        self.browser_failure(context, decision, error, Some(selected.physical_id));
-                    // Observation failure cannot erase the acknowledged action.
-                    failed.result.effect = Effect::Applied;
-                    failed.result.repeat_safe = false;
-                    if !human_control {
-                        failed.result.next_steps =
-                            vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
-                    }
-                    return failed;
-                }
+                Ok(_) => applied.verify(Verification::Unavailable(Refusal::IncompatibleReceipt)),
+                Err(error) => applied.verification_failed(self.browser_failure(
+                    &check,
+                    decision,
+                    error,
+                    Some(selected.physical_id),
+                )),
             }
         }
         applied
@@ -907,7 +833,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         selector: &crate::language::SemanticSelector,
-    ) -> Result<(SelectedTab, SelectedTarget), Box<Terminal>> {
+    ) -> Result<(SelectedTab, SelectedTarget), Box<WorkEvidence>> {
         let selected = match lease.select_tab(requested_tab) {
             Ok(tab) => tab,
             Err(error) => return Err(Box::new(self.workspace_failure(context, error))),
@@ -924,7 +850,10 @@ impl ApplicationExecutor {
             )));
         }
         match self.dispatch(
-            context,
+            &InvocationContext {
+                phase: Phase::Preparation,
+                ..*context
+            },
             BrowserCommand::QuerySemantic {
                 tab_id: selected.physical_id,
                 name: selector.name.clone(),
@@ -937,22 +866,17 @@ impl ApplicationExecutor {
                 if targets.len() != 1 {
                     let matched = targets.len();
                     let outcome = Outcome::SelectorUnresolved { matched };
-                    return Err(Box::new(Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
-                            Status::Failed,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
-                            outcome.next_steps(),
-                        ),
+                    return Err(Box::new(WorkEvidence::new(
+                        context.invocation,
+                        Status::Failed,
+                        Effect::None,
+                        readiness(selected.readiness),
+                        true,
+                        Conclusion::Outcome(outcome),
+                        json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    }));
+                        Some(selected.physical_id),
+                    )));
                 }
                 let observed = &targets[0];
                 let registered = lease
@@ -1029,7 +953,7 @@ impl ApplicationExecutor {
             .authorize_audit(!self.audit.health().unavailable())
     }
 
-    fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
+    fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<WorkEvidence> {
         // Existing human-control paths keep their precedence and language.
         if !self.runtime_decision(context).allowed {
             return None;
@@ -1194,16 +1118,28 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
-        let outcome = match self.dispatch_documents(context, command) {
-            Ok(BrowserOutcome::AttentionProtected { reason }) => {
-                Err(BrowserError::AttentionProtected(reason))
-            }
-            Ok(BrowserOutcome::EffectUnknown { reason }) => {
-                Err(BrowserError::EffectUnknown(reason))
-            }
-            outcome => outcome,
-        };
+        let outcome = self
+            .dispatch_documents(context, command.clone())
+            .and_then(|outcome| match reported_failure(&outcome) {
+                Some(error) => Err(error),
+                None => Ok(outcome),
+            });
         if let Ok(outcome) = &outcome {
+            if !resolution::valid_receipt(&command, outcome) {
+                context
+                    .execution
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .incompatible(context.phase);
+                return Err(BrowserError::Protocol(
+                    "incompatible browser receipt identity".into(),
+                ));
+            }
+            context
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .confirm(context.phase, &command, outcome);
             self.observe(context.invocation, observed_from(outcome));
         }
         outcome
@@ -1238,7 +1174,7 @@ impl ApplicationExecutor {
         let outcome = self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
-            command,
+            command.clone(),
             crate::browser::BrowserDispatch {
                 attention,
                 deadline: context.deadline,
@@ -1246,18 +1182,12 @@ impl ApplicationExecutor {
                 admit: &admit,
             },
         );
-        // An adapter that reports effect-unknown has answered honestly. Route it through the
-        // truthful unknown rendering instead of letting per-family receipt matching mistake it
-        // for an incompatible receipt.
-        match outcome {
-            Ok(BrowserOutcome::AttentionProtected { reason }) => {
-                Err(BrowserError::AttentionProtected(reason))
-            }
-            Ok(BrowserOutcome::EffectUnknown { reason }) => {
-                Err(BrowserError::EffectUnknown(reason))
-            }
-            outcome => outcome,
-        }
+        context
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(context.phase, &command, &outcome);
+        outcome
     }
 
     /// Decide which browser this invocation belongs to, and bind the workspace to it.
@@ -1366,20 +1296,27 @@ impl ApplicationExecutor {
             return CloseCompensation::Unknown;
         };
         let attention = self.governance.browser_attention();
-        match self.browser.call_guarded(
+        let command = BrowserCommand::CloseTab {
+            tab_id: tab.physical_id,
+            released: false,
+        };
+        let outcome = self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
-            BrowserCommand::CloseTab {
-                tab_id: tab.physical_id,
-                released: false,
-            },
+            command.clone(),
             crate::browser::BrowserDispatch {
                 attention,
                 deadline,
                 cancelled: &cancelled,
                 admit: &|| self.admit_attention_dispatch(context, attention),
             },
-        ) {
+        );
+        context
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(Phase::Compensation, &command, &outcome);
+        match outcome {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == tab.physical_id => {
                 if lease.confirm_tab_closed(&tab.handle).is_ok() {
                     CloseCompensation::Closed
@@ -1404,26 +1341,18 @@ impl ApplicationExecutor {
         repeat_safe: bool,
         outcome: Outcome,
         facts: Value,
-    ) -> Terminal {
-        let summary = outcome.summary();
-        let next_steps = outcome.next_steps();
-        let observed = outcome.observed();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Succeeded,
-                effect,
-                readiness,
-                repeat_safe,
-                &summary,
-                facts,
-                next_steps,
-            ),
+    ) -> WorkEvidence {
+        WorkEvidence::new(
+            context.invocation,
+            Status::Succeeded,
+            effect,
+            readiness,
+            repeat_safe,
+            Conclusion::Outcome(outcome),
+            facts,
             decision,
             physical_id,
-            observed,
-            audit: outcome.audit(),
-        }
+        )
     }
 
     /// Report a denial the caller can act on, naming the host when the work named one.
@@ -1437,7 +1366,7 @@ impl ApplicationExecutor {
         repeat_safe: bool,
         mut facts: Value,
         blocked_host: Option<String>,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if let Value::Object(object) = &mut facts {
             if let Some(denial_id) = decision.denial_id() {
                 object.insert("denial_id".into(), Value::String(denial_id));
@@ -1458,28 +1387,21 @@ impl ApplicationExecutor {
                 host: blocked_host,
             }
         };
-        let observed = refusal.observed();
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                if attention {
-                    Status::AttentionRequired
-                } else {
-                    Status::Blocked
-                },
-                effect,
-                Readiness::Unknown,
-                repeat_safe,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+        WorkEvidence::new(
+            context.invocation,
+            if attention {
+                Status::AttentionRequired
+            } else {
+                Status::Blocked
+            },
+            effect,
+            Readiness::Unknown,
+            repeat_safe,
+            Conclusion::Refusal(refusal),
+            facts,
             decision,
             physical_id,
-            observed,
-            audit: refusal.audit(),
-        }
+        )
     }
 
     /// Report a denial with no host in play.
@@ -1491,7 +1413,7 @@ impl ApplicationExecutor {
         effect: Effect,
         repeat_safe: bool,
         facts: Value,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.blocked_at(
             context,
             decision,
@@ -1510,24 +1432,18 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
         refusal: Refusal,
         facts: Value,
-    ) -> Terminal {
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Failed,
-                Effect::None,
-                Readiness::Unknown,
-                true,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+    ) -> WorkEvidence {
+        WorkEvidence::new(
+            context.invocation,
+            Status::Failed,
+            Effect::None,
+            Readiness::Unknown,
+            true,
+            Conclusion::Refusal(refusal),
+            facts,
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn unknown(
@@ -1537,24 +1453,18 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
         refusal: Refusal,
         facts: Value,
-    ) -> Terminal {
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Unknown,
-                Effect::Unknown,
-                Readiness::Unknown,
-                false,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+    ) -> WorkEvidence {
+        WorkEvidence::new(
+            context.invocation,
+            Status::Unknown,
+            Effect::Unknown,
+            Readiness::Unknown,
+            false,
+            Conclusion::Refusal(refusal),
+            facts,
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn protocol_failure(
@@ -1562,7 +1472,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         physical_id: Option<u64>,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.failed(
             context,
             decision,
@@ -1578,25 +1488,20 @@ impl ApplicationExecutor {
         decision: Decision,
         error: BrowserError,
         physical_id: Option<u64>,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         if let BrowserError::AttentionProtected(reason) = error {
             let refusal = Refusal::BrowserAttentionProtected { reason };
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Blocked,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    false,
-                    &refusal.summary(),
-                    json!({"reason":"browser_attention_background","attention_refusal":reason}),
-                    refusal.next_steps(),
-                ),
+            return WorkEvidence::new(
+                context.invocation,
+                Status::Blocked,
+                Effect::None,
+                Readiness::NotApplicable,
+                false,
+                Conclusion::Refusal(refusal),
+                json!({"reason":"browser_attention_background","attention_refusal":reason}),
                 decision,
                 physical_id,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            };
+            );
         }
         if let BrowserError::DocumentAccess(decision) = error {
             return self.blocked(
@@ -1617,6 +1522,15 @@ impl ApplicationExecutor {
                 json!({"reason":"document_unavailable"}),
             );
         }
+        if let BrowserError::Protocol(detail) = &error {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::IncompatibleReceipt,
+                json!({"reason":"incompatible_browser_receipt","detail":detail}),
+            );
+        }
         if let BrowserError::RuntimeControl(reason) = error {
             return self.blocked(
                 context,
@@ -1629,51 +1543,43 @@ impl ApplicationExecutor {
         }
         if matches!(&error, BrowserError::LocalInterlock(_)) {
             let refusal = Refusal::LocalInterlock;
-            let summary = refusal.summary();
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Blocked,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"browser_local_interlock"}),
-                    refusal.next_steps(),
-                ),
+            return WorkEvidence::new(
+                context.invocation,
+                Status::Blocked,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Refusal(refusal),
+                json!({"reason":"browser_local_interlock"}),
                 decision,
                 physical_id,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            };
+            );
         }
         // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
         // nothing could be dispatched anywhere in particular. They name the browsers the caller
         // can choose between rather than picking one on the caller's behalf.
         if let Some((refusal, facts)) = routing_refusal(&error) {
-            let summary = refusal.summary();
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    facts,
-                    refusal.next_steps(),
-                ),
+            return WorkEvidence::new(
+                context.invocation,
+                Status::Failed,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                Conclusion::Refusal(refusal),
+                facts,
                 decision,
                 physical_id,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            };
+            );
         }
         if error.effect_unknown() {
             // Every after-dispatch class is an honest unknown: name its phase so the caller
             // can tell a silent adapter from a spent deadline, and give deadlines their own
             // sentence instead of the disconnection costume they used to wear.
             let (refusal, facts) = match &error {
+                BrowserError::ScriptException(detail) => (
+                    Refusal::ScriptException,
+                    json!({"reason":"script_exception","detail":detail,"phase":"adapter_reported"}),
+                ),
                 BrowserError::EffectUnknown(detail) => (
                     Refusal::EffectUnknown,
                     json!({"reason":"browser_effect_unknown","detail":detail,"phase":"adapter_reported"}),
@@ -1732,30 +1638,24 @@ impl ApplicationExecutor {
         let refusal = Refusal::BrowserStopped {
             reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
         };
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                status,
-                Effect::None,
-                Readiness::Unknown,
-                true,
-                &summary,
-                json!({"reason":browser_reason(&error)}),
-                refusal.next_steps(),
-            ),
+        WorkEvidence::new(
+            context.invocation,
+            status,
+            Effect::None,
+            Readiness::Unknown,
+            true,
+            Conclusion::Refusal(refusal),
+            json!({"reason":browser_reason(&error)}),
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn workspace_failure(
         &self,
         context: &InvocationContext<'_>,
         error: WorkspaceError,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let owner = match error {
             WorkspaceError::NotOwnedTab => context
                 .requested_tab
@@ -1776,7 +1676,6 @@ impl ApplicationExecutor {
         let refusal = Refusal::WorkspaceUnusable {
             reason: reason.clone(),
         };
-        let summary = refusal.summary();
         let status = if error == WorkspaceError::Held {
             Status::Blocked
         } else {
@@ -1789,26 +1688,21 @@ impl ApplicationExecutor {
         if let Some(candidates) = self.take_stale_candidates(context.invocation) {
             facts["recovery_candidates"] = Value::Array(candidates);
         }
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                status,
-                Effect::None,
-                Readiness::Unknown,
-                status == Status::Failed,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
-            decision: if status == Status::Blocked {
+        WorkEvidence::new(
+            context.invocation,
+            status,
+            Effect::None,
+            Readiness::Unknown,
+            status == Status::Failed,
+            Conclusion::Refusal(refusal),
+            facts,
+            if status == Status::Blocked {
                 Decision::refused(ReasonCode::RuntimeHold)
             } else {
                 Decision::permitted()
             },
-            physical_id: None,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+            None,
+        )
     }
 
     /// One bounded window for a waking adapter to reattach, used by reads that must touch
@@ -1844,11 +1738,28 @@ impl ApplicationExecutor {
     }
 }
 
-fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentation {
+/// One conversion at the physical seam, including a document-bound mechanism report.
+fn reported_failure(outcome: &BrowserOutcome) -> Option<BrowserError> {
+    match outcome {
+        BrowserOutcome::InDocuments { result, .. } => reported_failure(result),
+        BrowserOutcome::AttentionProtected { reason } => {
+            Some(BrowserError::AttentionProtected(*reason))
+        }
+        BrowserOutcome::EffectUnknown { reason } => {
+            Some(BrowserError::EffectUnknown(reason.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn denial_presentation(tool: &str, resolution: &Resolution) -> DenialPresentation {
     if tool == "browser_tabs" {
-        return match result.facts.get("reason").and_then(Value::as_str) {
-            Some("tab_close_denied") => DenialPresentation::TabKeptOpenByPolicy,
-            Some("browser_local_interlock") => DenialPresentation::TabKeptOpenBySetting,
+        return match resolution.cause() {
+            Some(Refusal::AuthorityBlocked {
+                reason: BlockedReason::TabClose,
+                ..
+            }) => DenialPresentation::TabKeptOpenByPolicy,
+            Some(Refusal::LocalInterlock) => DenialPresentation::TabKeptOpenBySetting,
             _ => DenialPresentation::Guardrail,
         };
     }
@@ -1868,6 +1779,7 @@ struct Completion<'a> {
     duration_ms: u64,
     /// Immutable evidence from this operation's original connection.
     provenance: Option<&'a ConnectionEvidence>,
+    execution: &'a Mutex<ExecutionEvidence>,
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -1891,14 +1803,15 @@ struct InvocationContext<'a> {
     snapshot: &'a AuthoritySnapshot,
     deadline: Instant,
     cancellation: &'a CancellationToken,
+    execution: &'a Mutex<ExecutionEvidence>,
+    phase: Phase,
 }
 
-struct Terminal {
-    result: InvocationResult,
-    decision: Decision,
-    physical_id: Option<u64>,
-    observed: Observed,
-    audit: AuditProjection,
+/// Final action truth and its caller projection; storage is an independent receipt fact.
+struct CompletedWork {
+    resolution: Resolution,
+    caller: InvocationResult,
+    storage: language::audit_health::Storage,
 }
 
 enum ResolvedLocation {
@@ -2043,10 +1956,12 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
             Some((Refusal::BrowserPinned, json!({"reason":"browser_pinned"})))
         }
         BrowserError::Primitive(detail) => Some((
-            Refusal::BrowserPrimitive {
-                detail: detail.clone(),
-            },
+            Refusal::BrowserPrimitive,
             json!({"reason":"browser_primitive_failed","detail":detail}),
+        )),
+        BrowserError::OperationLedgerFull => Some((
+            Refusal::BrowserPrimitive,
+            json!({"reason":"operation_ledger_full"}),
         )),
         BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
@@ -2420,6 +2335,8 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::OperationLedgerFull => "operation_ledger_full",
+        BrowserError::ScriptException(_) => "script_exception",
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)
         | BrowserError::Authentication
@@ -2441,6 +2358,7 @@ mod tests {
     mod presentation;
     mod provenance;
     mod quiet;
+    mod resolution;
     use std::fs;
     use std::io;
     use std::path::PathBuf;

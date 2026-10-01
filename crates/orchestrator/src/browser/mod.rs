@@ -1494,8 +1494,12 @@ fn acknowledge(writer: &Arc<SocketWriter>, correlation: String) {
 }
 
 fn adapter_error(code: &str, message: String, effect_unknown: bool) -> BrowserError {
-    if effect_unknown {
+    if code == "script_exception" {
+        BrowserError::ScriptException(message)
+    } else if effect_unknown {
         BrowserError::EffectUnknown(message)
+    } else if code == "operation_ledger_full" {
+        BrowserError::OperationLedgerFull
     } else if code == "local_interlock" {
         BrowserError::LocalInterlock(message)
     } else if code == "document_scope_changed" {
@@ -1587,12 +1591,18 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// The adapter's bounded command journal refused a fresh operation before its handler ran.
+    #[error("browser operation journal is full; this operation did not run")]
+    OperationLedgerFull,
     /// A browser-local human safety choice refused the primitive without an effect.
     #[error("browser local interlock refused the primitive: {0}")]
     LocalInterlock(String),
     /// Adapter explicitly reported an uncertain effect.
     #[error("browser effect is unknown: {0}")]
     EffectUnknown(String),
+    /// Chrome returned a script exception; effects before the exception remain uncertain.
+    #[error("page script threw an exception: {0}")]
+    ScriptException(String),
     /// Browser bridge framing or message state failed.
     #[error("browser bridge protocol failed: {0}")]
     Protocol(String),
@@ -1649,6 +1659,7 @@ impl BrowserError {
                 | Self::CancelledAfterDispatch
                 | Self::DeadlineAfterDispatch
                 | Self::EffectUnknown(_)
+                | Self::ScriptException(_)
         )
     }
 }

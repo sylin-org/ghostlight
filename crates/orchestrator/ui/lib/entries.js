@@ -41,6 +41,8 @@
       phase: record.complete === false && existing && !existing.settled ? existing.phase : record.allowed ? "completed" : "blocked",
       allowed: record.allowed,
       reason: record.reason,
+      failureCause: record.resolution?.cause?.reason ?? record.refusal_facts?.reason ?? null,
+      resolution: record.resolution ?? null,
       // Kept so a refusal can name the rule that caused it rather than only that it happened.
       policyTier: record.policy_tier ?? null,
       grantId: record.grant_id ?? null,

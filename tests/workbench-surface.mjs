@@ -623,33 +623,71 @@ const historyChecks = [];
   const uncertain = {
     invocation: "ux-unknown", workspace: "exact-workspace", tool: "browser_execute",
     capability: "execute", status: "unknown", effect: "unknown", allowed: true,
-    summary: "Sent, but the browser never confirmed what happened.", complete: true,
+    summary: "The page script threw an exception. Earlier changes may still have taken effect.", complete: true,
+    refusal_facts: { reason: "script_exception" },
     repeat_safe: false, next_steps: ['Observe the page with browser_read. <script>untrusted</script>'],
     presentation: { label: "Effects uncertain", tone: "caution",
-      summary: "Sent, but the browser never confirmed what happened.",
-      repeat_detail: "Do not repeat this action. Observe the page before preparing unfinished work.",
+      summary: "The page script threw an exception. Earlier changes may still have taken effect.",
+      repeat_detail: "Check the intended changes before running this script again. Ghostlight has no expected result to verify.",
       reveal_detail: "Show tab lets you look. Pause before taking over." },
     tab: "exact-tab", timestamp_ms: 1
   };
+  uncertain.resolution = { phase: "requested_effect", cause: { reason: "script_exception" },
+    verification: "not_requested", progress: { attempted: 1, acknowledged: 0, confirmed_effects: 0 },
+    presentation: uncertain.presentation };
   const held = { ...uncertain, invocation: "ux-held", timestamp_ms: 2,
     status: "blocked", effect: "none", allowed: false, reason: "runtime_hold", next_steps: [],
     summary: "The user paused Ghostlight. Wait for further instructions.",
     presentation: { label: "Paused by you", tone: "controlled",
       summary: "You paused Ghostlight. This request did not run.", repeat_detail: "" }
   };
+  held.resolution = { phase: "admission", cause: { reason: "authority_blocked", cause: "hold" },
+    verification: "not_requested", progress: { attempted: 0, acknowledged: 0, confirmed_effects: 0 },
+    presentation: held.presentation };
   const entry = entries.entryFromRecord(uncertain);
   view.hero(entry, false);
   const uncertainMarkup = nodes.get("hero-body").innerHTML;
   historyChecks.push(["unknown effects lead with authored language and show safe recovery with exact technical facts",
     nodes.get("hero").className.includes("caution")
-      && uncertainMarkup.startsWith('<p class="hero-activity">Sent, but')
-      && uncertainMarkup.includes("Do not repeat this action")
-      && uncertainMarkup.includes("browser_read") && uncertainMarkup.includes("&lt;script&gt;")
+      && uncertainMarkup.startsWith('<p class="hero-activity">The page script threw an exception.')
+      && uncertainMarkup.includes("Ghostlight has no expected result to verify")
+      && !uncertainMarkup.includes("untrusted") && !uncertainMarkup.includes('class="recovery-steps"')
+      && uncertainMarkup.includes("<dt>Failure cause</dt><dd>script_exception</dd>")
       && uncertainMarkup.includes("<dt>Repeat safe</dt><dd>false</dd>")
       && uncertainMarkup.includes("<dt>Effect</dt><dd>unknown</dd>")
+      && uncertainMarkup.includes("<dt>Failure phase</dt><dd>requested_effect</dd>")
+      && uncertainMarkup.includes("<dt>Verification</dt><dd>not_requested</dd>")
+      && uncertainMarkup.includes("<dt>Attempts</dt><dd>1</dd>")
+      && uncertainMarkup.includes("<dt>Acknowledged</dt><dd>0</dd>")
       && uncertainMarkup.includes("exact-workspace") && uncertainMarkup.includes("exact-tab")
       && uncertainMarkup.includes("Pause before taking over")
       && !uncertainMarkup.includes('class="hero-tool"')]);
+  view.hero(entries.entryFromRecord({ ...uncertain, effect: "none", status: "succeeded", refusal_facts: null }), false);
+  historyChecks.push(["canonical human presentation is rendered directly without reconstructing it from machine fields",
+    nodes.get("hero").className.includes("caution")
+      && nodes.get("hero-body").innerHTML.startsWith('<p class="hero-activity">The page script threw an exception.')
+      && nodes.get("hero-body").innerHTML.includes("<dt>Status</dt><dd>succeeded</dd>")
+      && nodes.get("hero-body").innerHTML.includes("<dt>Failure cause</dt><dd>script_exception</dd>")]);
+  const checked = { ...uncertain, invocation: "ux-checked", effect: "applied", status: "failed",
+    summary: "Clicked a button on example.com. The expected condition did not hold.",
+    presentation: { label: "Could not complete", tone: "failed",
+      summary: "Clicked a button on example.com. The expected condition did not hold.",
+      repeat_detail: "The change was applied. Check the intended result before deciding what work remains." },
+    resolution: { phase: "verification", cause: { reason: "expected_condition_not_met" },
+      verification: "not_met", progress: { attempted: 1, acknowledged: 1, confirmed_effects: 1, expected: 1 } } };
+  view.hero(entries.entryFromRecord(checked), false);
+  const checkedMarkup = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["confirmed action and failed check remain visible with one recovery paragraph and technical progress",
+    checkedMarkup.startsWith('<p class="hero-activity">Clicked a button on example.com. The expected condition did not hold.')
+      && (checkedMarkup.match(/The change was applied\./g) ?? []).length === 1
+      && checkedMarkup.includes("<dt>Verification</dt><dd>not_met</dd>")
+      && checkedMarkup.includes("<dt>Confirmed changes</dt><dd>1</dd>")
+      && checkedMarkup.includes("<dt>Expected changes</dt><dd>1</dd>")]);
+  view.hero(entries.entryFromRecord({ ...uncertain, invocation: "escaped-suggestions", effect: "none",
+    presentation: { ...uncertain.presentation, repeat_detail: "" } }), false);
+  const escapedMarkup = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["retained suggestions remain escaped when no human recovery replaces them",
+    escapedMarkup.includes("&lt;script&gt;untrusted&lt;/script&gt;") && !escapedMarkup.includes("<script>untrusted")]);
   view.hero(entries.entryFromRecord(held), false);
   const heldMarkup = nodes.get("hero-body").innerHTML;
   historyChecks.push(["human Pause is calm while blocked status and the fixed machine directive remain inspectable",
@@ -681,7 +719,7 @@ const historyChecks = [];
   historyChecks.push(["a later refusal retains the earlier uncertainty and recovery facts in history",
     store.feed().length === 2 && earlier.repeatSafe === false
       && earlier.nextSteps[0].includes("browser_read")
-      && nodes.get("hero-body").innerHTML.includes("Do not repeat this action")]);
+      && nodes.get("hero-body").innerHTML.includes("Ghostlight has no expected result to verify")]);
   const legacy = entries.entryFromRecord({ invocation: "legacy-ux", workspace: "w", tool: "browser_read",
     allowed: true, status: "succeeded", effect: "none", summary: "Read 5 words." });
   view.hero(legacy, false);
@@ -719,9 +757,12 @@ const historyChecks = [];
         && row.innerHTML.includes(`aria-controls="action-details-${mixed[index].invocation}"`))]);
     historyChecks.push(["mixed-list outcomes stay secondary and exceptional recovery remains visible",
       renderedRows.every((row, index) => row.innerHTML.includes(`<div class="row-activity">${mixed[index].presentation?.summary ?? mixed[index].summary ?? mixed[index].activity}</div>`))
-        && renderedRows[4].innerHTML.includes('<p class="row-recovery">Do not repeat this action.')
-        && renderedRows[5].innerHTML.includes('<p class="row-recovery">Do not repeat this action.')
+        && renderedRows[4].innerHTML.includes('<p class="row-recovery">Check the intended changes')
+        && renderedRows[5].innerHTML.includes('<p class="row-recovery">Check the intended changes')
         && !renderedRows[1].innerHTML.includes('class="row-recovery"')]);
+    historyChecks.push(["expanding an uncertain row does not duplicate its recovery or add model-only suggestions",
+      (renderedRows[4].innerHTML.match(/Ghostlight has no expected result to verify/g) ?? []).length === 1
+        && !renderedRows[4].innerHTML.includes('class="recovery-steps"')]);
     const watched = entries.entryFromRecord({ ...uncertain, invocation: mixed[0].invocation,
       tool: mixed[0].tool, status: "succeeded", effect: "none", summary: "Found 2 matches.",
       presentation: { label: "Completed", tone: "complete", summary: "Found 2 matches.", repeat_detail: "" } }, mixed[0]);

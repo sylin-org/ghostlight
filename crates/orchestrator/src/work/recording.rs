@@ -17,7 +17,7 @@ use crate::workspace::WorkspaceLease;
 
 use super::{
     bounded, observed_host, permitted, readiness, recording_delivery_name, recording_facts,
-    recording_state_name, ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal,
+    recording_state_name, ApplicationExecutor, Effect, InvocationContext, Readiness, WorkEvidence,
     RECORDING_FILE_NAME,
 };
 
@@ -27,7 +27,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: Option<&WorkspaceLease>,
         value: &Record,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         match value.action.as_str() {
             "start" => self.start_recording(
                 context,
@@ -75,7 +75,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Record,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let selected = match lease.select_tab(value.tab.as_deref()) {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
@@ -128,7 +128,11 @@ impl ApplicationExecutor {
         }
     }
 
-    fn stop_recording(&self, context: &InvocationContext<'_>, requested: Option<&str>) -> Terminal {
+    fn stop_recording(
+        &self,
+        context: &InvocationContext<'_>,
+        requested: Option<&str>,
+    ) -> WorkEvidence {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause/attention gate -- this one used to dispatch straight through it, so a
         // paused session could still have its recording stopped from underneath it.
@@ -174,7 +178,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         requested: Option<&str>,
-    ) -> Result<PhysicalRecordingSummary, Box<Terminal>> {
+    ) -> Result<PhysicalRecordingSummary, Box<WorkEvidence>> {
         match self.dispatch(
             context,
             BrowserCommand::StopRecording {
@@ -202,7 +206,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: Option<&WorkspaceLease>,
         value: &Record,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         // Capture-source Read and optional destination Write are known before freezing.
         // Recheck their actual hosts below once the browser returns the source inventory.
         let decision = self.authorize(context, context.requirements, None);
@@ -272,7 +276,7 @@ impl ApplicationExecutor {
         lease: Option<&WorkspaceLease>,
         value: &Record,
         stopped: &PhysicalRecordingSummary,
-    ) -> Result<(RecordingDestination, Decision, Option<u64>, usize), Box<Terminal>> {
+    ) -> Result<(RecordingDestination, Decision, Option<u64>, usize), Box<WorkEvidence>> {
         if !stopped.source_urls_complete
             && !context
                 .snapshot
@@ -413,7 +417,7 @@ impl ApplicationExecutor {
         summary: &PhysicalRecordingSummary,
         encoded: EncodedRecording,
         delivery: RecordingDelivery,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let landing = match &delivery {
             RecordingDelivery::Attached { tab_id } => Some(*tab_id),
             _ => Some(summary.tab_id),
@@ -455,9 +459,7 @@ impl ApplicationExecutor {
             facts,
         );
         if let RecordingDelivery::Returned { mime_type, data } = delivery {
-            terminal.result = terminal
-                .result
-                .with_content(ServiceContent::Image { mime_type, data });
+            terminal = terminal.with_content(ServiceContent::Image { mime_type, data });
         }
         terminal
     }
@@ -466,7 +468,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         requested: Option<&str>,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause/attention gate -- this one used to dispatch straight through it.
         let decision = self.authorize(context, CapabilitySet::EMPTY, None);
@@ -513,7 +515,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         summary: &PhysicalRecordingSummary,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.succeeded(
             context,
             decision,
@@ -539,7 +541,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         outcome: BrowserOutcome,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let facts = match outcome {
             BrowserOutcome::RecordingAmbiguous { recording_ids } => {
                 json!({"reason":"ambiguous","recordings":recording_ids})
@@ -556,7 +558,11 @@ impl ApplicationExecutor {
         )
     }
 
-    fn recording_export_failure(&self, context: &InvocationContext<'_>, reason: &str) -> Terminal {
+    fn recording_export_failure(
+        &self,
+        context: &InvocationContext<'_>,
+        reason: &str,
+    ) -> WorkEvidence {
         self.failed(
             context,
             permitted(),

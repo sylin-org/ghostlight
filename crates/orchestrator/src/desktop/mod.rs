@@ -1053,6 +1053,8 @@ mod tests {
             },
             repeat_safe: None,
             next_steps: vec![],
+            refusal_facts: None,
+            resolution: None,
             tab: None,
             provenance: None,
             storage: crate::language::audit_health::Storage::Saved,

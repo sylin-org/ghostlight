@@ -12,7 +12,7 @@ use crate::language::{Diagnose, HandleDialog};
 use crate::workspace::WorkspaceLease;
 
 use super::result::Effect;
-use super::{observed_host, readiness, ApplicationExecutor, InvocationContext, Terminal};
+use super::{observed_host, readiness, ApplicationExecutor, InvocationContext, WorkEvidence};
 
 impl ApplicationExecutor {
     pub(super) fn handle_dialog(
@@ -20,7 +20,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &HandleDialog,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         let capability = if value.action == "status" {
             Capability::Read
         } else {
@@ -120,7 +120,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         value: &Diagnose,
-    ) -> Terminal {
+    ) -> WorkEvidence {
         self.with_authorized_tab(
             context,
             lease,

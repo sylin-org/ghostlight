@@ -84,6 +84,8 @@ pub(super) fn merge_stored(
             parent.complete = false;
             parent.repeat_safe = None;
             parent.next_steps.clear();
+            parent.resolution = None;
+            parent.refusal_facts = None;
             parent
         });
         ensure_steps(&mut item, step.total, live);

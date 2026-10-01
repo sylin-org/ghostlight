@@ -1136,6 +1136,84 @@ fn typed_audit_failures_round_trip_with_policy_and_measurements() {
     );
 }
 
+#[test]
+fn canonical_audit_metadata_is_safe_and_optional_fields_fail_independently() {
+    use crate::language::outcome::Refusal;
+    use crate::language::resolution::{project, ResolutionPhase, VerificationState};
+    use crate::work::resolution::{Conclusion, Phase, Progress, Resolution, Verification};
+    use crate::work::result::{Effect, Status};
+    let (resolution, payload) = Resolution::fixture(
+        Conclusion::Refusal(Refusal::BrowserPrimitive),
+        Status::Failed,
+        Effect::None,
+        Verification::NotRequested,
+        Phase::RequestedEffect,
+        Progress {
+            attempted: 1,
+            acknowledged: 1,
+            ..Progress::default()
+        },
+        serde_json::json!({"detail":"PRIVATE_EXCEPTION","value":"PRIVATE_VALUE","url":"https://example.com/PRIVATE_PATH"}),
+    );
+    let projection = project(&resolution, payload);
+    let record = AuditRecord::now(
+        resolution.invocation(),
+        "workspace",
+        "browser_execute",
+        Capability::Execute,
+        "authority",
+        resolution.decision(),
+        "failed",
+        "none",
+        &projection.retained,
+        12,
+    );
+    let encoded = serde_json::to_value(&record).unwrap();
+    assert!(!encoded.to_string().contains("PRIVATE_"));
+    assert_eq!(encoded["resolution"]["phase"], "requested_effect");
+    let roundtrip: AuditRecord = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(roundtrip, record);
+    let metadata = roundtrip.resolution.unwrap();
+    assert_eq!(metadata.phase, ResolutionPhase::RequestedEffect);
+    assert_eq!(metadata.verification, VerificationState::NotRequested);
+    assert_eq!(metadata.presentation.summary, projection.retained.summary());
+    for unsupported in [
+        serde_json::json!({"reason":"future_cause","detail":"PRIVATE_UNKNOWN_CAUSE"}),
+        serde_json::json!({"reason":"browser_primitive_failed","detail":"PRIVATE_UNKNOWN_FIELD"}),
+    ] {
+        let mut future = encoded.clone();
+        future["resolution"]["cause"] = unsupported;
+        let read: AuditRecord = serde_json::from_value(future).unwrap();
+        assert_eq!(read.invocation, record.invocation);
+        assert_eq!(read.summary, record.summary);
+        assert!(read.resolution.is_none());
+        assert!(!serde_json::to_string(&read).unwrap().contains("PRIVATE_"));
+    }
+    for unsupported in [
+        serde_json::json!({"tone":"future_tone","summary":"PRIVATE_UNKNOWN_PRESENTATION"}),
+        serde_json::json!({"label":"Completed","tone":"complete","summary":"ok","repeat_detail":"","reveal_detail":"","future":"PRIVATE_UNKNOWN_FIELD"}),
+    ] {
+        let mut future = encoded.clone();
+        future["resolution"]["presentation"] = unsupported;
+        let read: AuditRecord = serde_json::from_value(future).unwrap();
+        assert!(read.resolution.is_none());
+        assert_eq!(read.effect, "none");
+        assert!(!serde_json::to_string(&read).unwrap().contains("PRIVATE_"));
+    }
+    let mut future_issue = encoded.clone();
+    future_issue["resolution"]["composition_issue"] =
+        serde_json::json!({"step":2,"cause":"future_step_cause"});
+    let read: AuditRecord = serde_json::from_value(future_issue).unwrap();
+    assert!(read.resolution.is_none());
+    assert_eq!(read.summary, record.summary);
+    assert_eq!(read.refusal_facts, record.refusal_facts);
+    let mut predecessor = encoded;
+    predecessor.as_object_mut().unwrap().remove("resolution");
+    let old: AuditRecord = serde_json::from_value(predecessor).unwrap();
+    assert!(old.resolution.is_none());
+    assert_eq!(old.summary, record.summary);
+}
+
 /// The record has exactly one URL-shaped field and it is a host.
 ///
 /// What the executor puts in it is guarded where it is extracted, in `work`; this pins that

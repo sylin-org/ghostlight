@@ -926,8 +926,8 @@ pub enum Refusal {
         /// True when the deadline fired before any dispatch could happen.
         before_dispatch: bool,
     },
-    /// The browser answered the job with its own bounded refusal.
-    BrowserPrimitive { detail: String },
+    /// The browser could not complete the primitive; volatile detail stays in the client payload.
+    BrowserPrimitive,
     /// A required browser document could not be bound to current authority.
     DocumentUnavailable,
     /// The browser stopped before a physical effect.
@@ -949,6 +949,10 @@ pub enum Refusal {
     CancelledAfterDispatch,
     /// A dispatched effect cannot be determined.
     EffectUnknown,
+    /// The adapter received a JavaScript exception, without proof of all earlier effects.
+    ScriptException,
+    /// An acknowledged action's explicit follow-up condition was checked and did not hold.
+    ExpectedConditionNotMet,
     /// A denied new-tab landing has an unknown final state.
     LandingDeniedUnknown,
     /// The selected workspace resource is unusable.
@@ -1000,9 +1004,7 @@ impl Refusal {
                 ghostlight_bridge::browser::BrowserAttentionReason::PreferenceChanged =>
                     "The user selected background browser work before this request was sent. This request was not applied.",
             },
-            Self::BrowserPrimitive { detail } => {
-                return format!("The browser refused this job: {detail}.");
-            }
+            Self::BrowserPrimitive => "The browser could not complete this operation.",
             Self::DocumentUnavailable => "Document access could not be verified.",
             Self::DeadlineExpired { before_dispatch } => {
                 if *before_dispatch {
@@ -1050,7 +1052,10 @@ impl Refusal {
                 }
             },
             Self::ConnectionLost => "Connection lost before the browser confirmed completion.",
-            Self::EffectUnknown | Self::CancelledAfterDispatch => "Sent, but the browser never confirmed what happened.",
+            Self::EffectUnknown => "The action's effects are unknown. This receipt does not record a specific cause.",
+            Self::ScriptException => "The page script threw an exception. Earlier changes may still have taken effect.",
+            Self::ExpectedConditionNotMet => "The expected condition did not hold.",
+            Self::CancelledAfterDispatch => "Cancelled after dispatch; the action's effects were not confirmed.",
             Self::LandingDeniedUnknown => {
                 "Blocked the landing, but the new tab's final state is unknown."
             }
@@ -1109,7 +1114,7 @@ impl Refusal {
             Self::BrowserStopped { reconnect: true } => {
                 vec!["Reconnect the Ghostlight browser adapter.".into()]
             }
-            Self::BrowserPrimitive { .. } => vec![
+            Self::BrowserPrimitive => vec![
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
@@ -1174,6 +1179,12 @@ impl Refusal {
                     .into(),
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
                     .into(),
+            ],
+            Self::ScriptException => vec![
+                "Use browser_read or browser_inspect to check visible changes in the affected tab. These observations cannot prove every script effect; do not rerun the script to verify it.".into(),
+            ],
+            Self::ExpectedConditionNotMet => vec![
+                "The action was applied. Inspect the intended result before preparing unfinished work; do not repeat the action to check it.".into(),
             ],
             _ => vec![],
         }
@@ -2189,7 +2200,19 @@ mod tests {
             ),
             (
                 Refusal::EffectUnknown,
-                "Sent, but the browser never confirmed what happened.",
+                "The action's effects are unknown. This receipt does not record a specific cause.",
+            ),
+            (
+                Refusal::ScriptException,
+                "The page script threw an exception. Earlier changes may still have taken effect.",
+            ),
+            (
+                Refusal::ExpectedConditionNotMet,
+                "The expected condition did not hold.",
+            ),
+            (
+                Refusal::CancelledAfterDispatch,
+                "Cancelled after dispatch; the action's effects were not confirmed.",
             ),
             (
                 Refusal::LandingDeniedUnknown,
@@ -2297,15 +2320,12 @@ mod tests {
         assert!(Refusal::InvalidRequest.observed().host.is_none());
     }
 
-    /// A primitive adapter refusal speaks the browser's own reason and never masquerades as a
-    /// disconnection.
+    /// A primitive refusal is authored without browser error text or an invented disconnection.
     #[test]
     fn primitive_refusal_carries_the_browser_reason_without_claiming_a_disconnection() {
-        let refusal = Refusal::BrowserPrimitive {
-            detail: "target is not visible for focus".into(),
-        };
+        let refusal = Refusal::BrowserPrimitive;
         let summary = refusal.summary();
-        assert!(summary.contains("target is not visible for focus"));
+        assert_eq!(summary, "The browser could not complete this operation.");
         assert!(!summary.to_lowercase().contains("disconnected"));
         assert_eq!(
             refusal.next_steps(),

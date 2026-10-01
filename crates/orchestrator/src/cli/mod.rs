@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use ghostlight_bridge::client::{ClientError, ServiceClient};
+use ghostlight_bridge::client::{ClientError, Invocation, ServiceClient};
 use ghostlight_bridge::service::{IntakeChannel, ServiceContent};
 use serde_json::Value;
 
@@ -206,35 +206,43 @@ fn invoke_once(
     out: &mut impl Write,
 ) -> i32 {
     match client.invoke(tool, input, None) {
-        Ok(invocation) => {
-            for item in &invocation.content {
-                match rendering.output.as_deref() {
-                    Some(path) => {
-                        let path = numbered(path, captures.0);
-                        captures.0 += 1;
-                        if let Err(error) = write_content(item, &path) {
-                            eprintln!("could not write {}: {error}", path.display());
-                            return EXIT_USAGE;
-                        }
-                        eprintln!("wrote {}", path.display());
-                    }
-                    // The facts still carry the view handle that names the capture.
-                    None => eprintln!("content omitted; pass --output <file> to keep it"),
-                }
-            }
-            if rendering.json {
-                let _ = writeln!(
-                    out,
-                    "{}",
-                    serde_json::to_string(&invocation.result).unwrap_or_default()
-                );
-            } else {
-                let _ = writeln!(out, "{}", summary_of(&invocation.result));
-            }
-            exit_code(&invocation.result)
-        }
+        Ok(invocation) => render_invocation(&invocation, rendering, captures, out),
         Err(error) => report_transport(&error),
     }
+}
+
+/// Render the service-authored text or exact structured facts without reinterpreting outcomes.
+fn render_invocation(
+    invocation: &Invocation,
+    rendering: &Rendering,
+    captures: &mut Captures,
+    out: &mut impl Write,
+) -> i32 {
+    for item in &invocation.content {
+        match rendering.output.as_deref() {
+            Some(path) => {
+                let path = numbered(path, captures.0);
+                captures.0 += 1;
+                if let Err(error) = write_content(item, &path) {
+                    eprintln!("could not write {}: {error}", path.display());
+                    return EXIT_USAGE;
+                }
+                eprintln!("wrote {}", path.display());
+            }
+            // The facts still carry the view handle that names the capture.
+            None => eprintln!("content omitted; pass --output <file> to keep it"),
+        }
+    }
+    if rendering.json {
+        let _ = writeln!(
+            out,
+            "{}",
+            serde_json::to_string(&invocation.result).unwrap_or_default()
+        );
+    } else {
+        let _ = writeln!(out, "{}", invocation.text);
+    }
+    exit_code(&invocation.result)
 }
 
 /// Decode one bounded content item to disk.
@@ -260,14 +268,6 @@ fn numbered(path: &Path, index: usize) -> PathBuf {
         .map(|value| format!(".{}", value.to_string_lossy()))
         .unwrap_or_default();
     path.with_file_name(format!("{stem}-{}{extension}", index + 1))
-}
-
-fn summary_of(result: &Value) -> String {
-    result
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or("the service returned no summary")
-        .to_owned()
 }
 
 /// Map the terminal status onto a process exit code.
@@ -330,6 +330,63 @@ mod tests {
 
     fn arguments(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn plain_cli_preserves_the_same_authored_recovery_as_the_protocol_edge() {
+        use crate::language::outcome::Refusal;
+        use crate::work::resolution::{Conclusion, Phase, Progress, Resolution, Verification};
+        use crate::work::result::{Effect, Status};
+        let (resolution, payload) = Resolution::fixture(
+            Conclusion::Refusal(Refusal::ScriptException),
+            Status::Unknown,
+            Effect::Unknown,
+            Verification::NotRequested,
+            Phase::RequestedEffect,
+            Progress::default(),
+            json!({}),
+        );
+        let caller = crate::language::resolution::project(&resolution, payload).caller;
+        let invocation = ghostlight_bridge::client::Invocation {
+            text: caller.model_text(),
+            result: serde_json::to_value(&caller).unwrap(),
+            is_error: caller.is_error(),
+            content: caller.content.clone(),
+        };
+        let mut output = Vec::new();
+        assert_eq!(
+            super::render_invocation(
+                &invocation,
+                &Rendering::default(),
+                &mut super::Captures(0),
+                &mut output
+            ),
+            EXIT_UNKNOWN
+        );
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            format!("{}\n", invocation.text)
+        );
+        assert!(invocation.text.contains("Next:"));
+        assert!(invocation.text.contains("script"));
+        let mut output = Vec::new();
+        let rendering = Rendering {
+            json: true,
+            output: None,
+        };
+        assert_eq!(
+            super::render_invocation(
+                &invocation,
+                &rendering,
+                &mut super::Captures(0),
+                &mut output
+            ),
+            EXIT_UNKNOWN
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap(),
+            invocation.result
+        );
     }
 
     #[test]

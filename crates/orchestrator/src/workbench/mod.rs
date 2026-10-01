@@ -1339,12 +1339,18 @@ pub struct BrowserInstanceSummary {
 /// One content-minimized terminal history record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HistoryItem {
+    /// Frozen phase, cause, check and progress for technical depth, absent in legacy history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<crate::language::resolution::RetainedResolution>,
     /// Language-owned human account, distinct from the exact machine facts below.
     pub presentation: crate::language::history::OutcomePresentation,
     /// Final repeat safety, absent for older receipts that did not retain it.
     pub repeat_safe: Option<bool>,
     /// Existing safe guidance retained from the typed outcome owner.
     pub next_steps: Vec<String>,
+    /// Closed recorded failure metadata, never browser error text or script content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusal_facts: Option<crate::language::audit::AuditRefusal>,
     /// Exact controlled tab selected by this live call, when proven by browser execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tab: Option<String>,
@@ -1430,8 +1436,10 @@ impl From<AuditRecord> for HistoryItem {
             .collect();
         Self {
             presentation,
+            resolution: value.resolution,
             repeat_safe: value.repeat_safe,
             next_steps: value.next_steps,
+            refusal_facts: value.refusal_facts,
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: if value.unconfirmed_history_steps > 0 {
                 "Some step history could not be saved.".into()

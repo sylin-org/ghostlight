@@ -18,7 +18,6 @@ use super::{
 #[test]
 fn recovery_and_effect_truth_survive_later_refusals_and_legacy_history() {
     use crate::language::outcome::{BlockedReason, Refusal};
-    use crate::work::result::Effect;
     let projection = WorkbenchProjection::default();
     let mut uncertain = AuditRecord::now(
         "uncertain",
@@ -29,9 +28,7 @@ fn recovery_and_effect_truth_survive_later_refusals_and_legacy_history() {
         Decision::permitted(),
         "unknown",
         "unknown",
-        &Refusal::EffectUnknown
-            .audit()
-            .with_final_effect(Effect::Unknown, false),
+        &Refusal::EffectUnknown.audit(),
         10,
     );
     uncertain.repeat_safe = Some(false);
@@ -76,8 +73,11 @@ fn recovery_and_effect_truth_survive_later_refusals_and_legacy_history() {
         "You paused Ghostlight. This request did not run."
     );
     let mut legacy = serde_json::to_value(uncertain).unwrap();
+    legacy["summary"] = serde_json::json!("Sent, but the browser never confirmed what happened.");
     legacy.as_object_mut().unwrap().remove("repeat_safe");
     legacy.as_object_mut().unwrap().remove("next_steps");
+    legacy.as_object_mut().unwrap().remove("refusal_facts");
+    let original = serde_json::to_vec(&legacy).unwrap();
     let old: AuditRecord = serde_json::from_value(legacy).unwrap();
     let restored = HistoryItem::from(old);
     assert_eq!(restored.repeat_safe, None);
@@ -86,6 +86,132 @@ fn recovery_and_effect_truth_survive_later_refusals_and_legacy_history() {
         .presentation
         .repeat_detail
         .contains("Do not repeat"));
+    assert_eq!(restored.refusal_facts, None);
+    assert_eq!(
+        restored.presentation.summary,
+        Refusal::EffectUnknown.summary()
+    );
+    assert_eq!(
+        restored.summary,
+        "Sent, but the browser never confirmed what happened."
+    );
+    assert!(!restored.presentation.summary.contains("exception"));
+    assert!(String::from_utf8(original)
+        .unwrap()
+        .contains("Sent, but the browser never confirmed"));
+}
+
+#[test]
+fn restored_canonical_presentation_is_used_directly_and_unknown_metadata_keeps_neighbors() {
+    use crate::language::history::{OutcomePresentation, OutcomeTone};
+    use crate::language::outcome::Refusal;
+    use crate::language::resolution::project;
+    use crate::work::resolution::{Conclusion, Phase, Progress, Resolution, Verification};
+    use crate::work::result::{Effect, Status};
+    let (resolution, payload) = Resolution::fixture(
+        Conclusion::Refusal(Refusal::ScriptException),
+        Status::Unknown,
+        Effect::Unknown,
+        Verification::NotRequested,
+        Phase::RequestedEffect,
+        Progress {
+            attempted: 1,
+            ..Progress::default()
+        },
+        serde_json::json!({"detail":"PRIVATE_EXCEPTION"}),
+    );
+    let projection = project(&resolution, payload);
+    let record = AuditRecord::now(
+        "canonical",
+        "workspace",
+        "browser_execute",
+        Capability::Execute,
+        "authority",
+        resolution.decision(),
+        "unknown",
+        "unknown",
+        &projection.retained,
+        12,
+    );
+    let canonical = record.resolution.as_ref().unwrap().presentation.clone();
+    let mut remapped = record.clone();
+    remapped.status = "succeeded".into();
+    remapped.effect = "none".into();
+    remapped.refusal_facts = None;
+    assert_eq!(
+        OutcomePresentation::from_record(&remapped),
+        canonical,
+        "new history renders its saved presentation rather than deriving another account"
+    );
+    let item = HistoryItem::from(record.clone());
+    assert_eq!(item.presentation, canonical);
+    assert_eq!(item.resolution, record.resolution);
+
+    let encoded = serde_json::to_value(&record).unwrap();
+    let mut legacy = encoded.clone();
+    legacy["invocation"] = serde_json::json!("legacy");
+    legacy.as_object_mut().unwrap().remove("resolution");
+    let mut future_cause = encoded.clone();
+    future_cause["invocation"] = serde_json::json!("future-cause");
+    future_cause["resolution"]["cause"]["reason"] = serde_json::json!("future_cause");
+    let mut future_presentation = encoded.clone();
+    future_presentation["invocation"] = serde_json::json!("future-presentation");
+    future_presentation["resolution"]["presentation"]["tone"] = serde_json::json!("future_tone");
+    let mut neighbor = encoded.clone();
+    neighbor["invocation"] = serde_json::json!("neighbor");
+    let mut future_issue = encoded.clone();
+    future_issue["invocation"] = serde_json::json!("future-issue");
+    future_issue["resolution"]["composition_issue"] =
+        serde_json::json!({"step":2,"cause":"future_step_cause"});
+    let bytes = [
+        encoded,
+        legacy,
+        future_cause,
+        future_presentation,
+        future_issue,
+        neighbor,
+    ]
+    .iter()
+    .map(|value| format!("{value}\n"))
+    .collect::<String>();
+    let path = std::env::temp_dir().join(format!(
+        "ghostlight-resolution-history-{}.jsonl",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&path, &bytes).unwrap();
+    let restored = WorkbenchProjection::default();
+    restored.load_history(&path).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+    std::fs::remove_file(path).unwrap();
+    let items = restored.history();
+    assert_eq!(items.len(), 6);
+    for item in &items {
+        assert_eq!(item.presentation.tone, OutcomeTone::Caution);
+        assert!(item.presentation.summary.contains("threw an exception"));
+        assert!(!serde_json::to_string(item)
+            .unwrap()
+            .contains("PRIVATE_EXCEPTION"));
+        assert_eq!(
+            item.resolution.is_some(),
+            matches!(item.invocation.as_str(), "canonical" | "neighbor")
+        );
+    }
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.invocation == "canonical")
+            .unwrap()
+            .presentation,
+        canonical
+    );
+    assert_eq!(
+        items
+            .iter()
+            .find(|item| item.invocation == "neighbor")
+            .unwrap()
+            .presentation,
+        canonical
+    );
 }
 
 #[test]

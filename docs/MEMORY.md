@@ -635,6 +635,11 @@ Every one of these cost something to learn.
   calling into a native event loop that shutdown may already have destroyed; a console handler alone
   is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment).
 
+- **A reply is not yet validated effect evidence.** Match request identity and admitted document
+  scope before confirming effects. Preserve acknowledged keyboard landings before later strokes.
+  Journal a fresh command before the first awaited save and serialize snapshots across overlapping
+  commands and acknowledgments. Work freezes action truth; Language projects its readings (ADR-0190).
+
 ## Where to look
 
 - **A Chrome tab can contain several outermost pages.** Build document authority and routing

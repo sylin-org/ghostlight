@@ -1,28 +1,25 @@
-//! One receipt/completion seam for direct operations, composition children, and preparation facts.
+//! One consuming resolution/completion seam for direct work, composition children and preparation facts.
 
 use super::*;
 use crate::governance::evidence::{PermissionCheck, PermissionTrace};
 use crate::language::history::StepReceipt;
 
 impl ApplicationExecutor {
-    /// Complete a direct operation or the composition parent through the shared receipt seam.
+    /// Consume direct or parent evidence before any completion reactions or audit writes.
     pub(super) fn finish(
         &self,
-        gate: &CompletionGate,
-        terminal: Terminal,
+        evidence: WorkEvidence,
         completion: Completion<'_>,
     ) -> InvocationResult {
-        self.complete_terminal(gate, terminal, completion, None)
-            .result
+        self.complete_work(evidence, completion, None).caller
     }
 
-    fn complete_terminal(
+    fn complete_work(
         &self,
-        gate: &CompletionGate,
-        mut terminal: Terminal,
+        mut evidence: WorkEvidence,
         completion: Completion<'_>,
         step: Option<StepReceipt>,
-    ) -> Terminal {
+    ) -> CompletedWork {
         let Completion {
             workspace,
             tool,
@@ -30,159 +27,164 @@ impl ApplicationExecutor {
             snapshot,
             duration_ms,
             provenance,
+            execution,
         } = completion;
-        // Expose the current operator choice through both intake edges, without
-        // changing the tool catalog or asking the caller to author authority.
-        terminal.result.facts["browser_attention"] =
+        evidence.payload.facts["browser_attention"] =
             json!(self.governance.effective_authority().browser_attention);
-        if let Some(physical_id) = terminal.physical_id {
+        let coverage = self.take_coverage(evidence.invocation());
+        if let Some(coverage) = &coverage {
+            evidence.payload.facts["coverage"] = json!(coverage);
+        }
+        let observed = self.take_observation(evidence.invocation());
+        let execution = std::mem::take(
+            &mut *execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        // WorkEvidence and Resolution have no Clone. This ownership transfer is the completion
+        // boundary: action truth is frozen before presentation, diagnostics or retained receipts.
+        let (resolution, payload) = evidence.resolve(execution, coverage, observed);
+        let language::resolution::Projection {
+            mut caller,
+            retained,
+        } = language::resolution::project(&resolution, payload);
+        let tool = language::audit::tool_name(tool);
+        if let Some(physical_id) = resolution.physical_id() {
             self.workbench.browser_tab(
-                &terminal.result.invocation,
+                resolution.invocation(),
                 workspace.as_str(),
                 physical_id,
                 &self.workspaces,
             );
         }
-        if let Some(coverage) = self.take_coverage(&terminal.result.invocation) {
-            terminal.result.summary =
-                language::coverage::qualify(&terminal.result.summary, &coverage);
-            terminal.audit = terminal.audit.with_coverage(&coverage);
-            terminal.result.facts["coverage"] = json!(coverage);
-        }
-        let tool = language::audit::tool_name(tool);
-        terminal.audit = terminal.audit.with_final_effect(
-            terminal.result.effect,
-            terminal.result.status == Status::Succeeded,
-        );
-        let event = match terminal.result.status {
+        let event = match resolution.status() {
             Status::Blocked
                 if !matches!(
-                    terminal.decision.reason,
+                    resolution.decision().reason,
                     ReasonCode::AuditUnavailable
                         | ReasonCode::RuntimeHold
                         | ReasonCode::SessionEnded
                 ) && !matches!(
-                    terminal.audit.refusal(),
+                    resolution.cause(),
                     Some(
-                        crate::language::audit::AuditRefusal::CredentialAuthorization
-                            | crate::language::audit::AuditRefusal::BrowserAttentionProtected { .. }
+                        Refusal::CredentialAuthorization
+                            | Refusal::BrowserAttentionProtected { .. }
                     )
-                ) && (terminal.audit.composition().is_none() || !terminal.decision.allowed) =>
+                ) && (!matches!(
+                    resolution.conclusion(),
+                    Conclusion::Outcome(Outcome::CompositionRan(_))
+                ) || !resolution.decision().allowed) =>
             {
                 DomainEvent::WorkBlocked {
-                    invocation: terminal.result.invocation.clone(),
+                    invocation: resolution.invocation().into(),
                     workspace: workspace.as_str().into(),
-                    physical_id: terminal.physical_id,
-                    presentation: denial_presentation(tool, &terminal.result),
+                    physical_id: resolution.physical_id(),
+                    presentation: denial_presentation(tool, &resolution),
                 }
             }
             Status::AttentionRequired => DomainEvent::AttentionRequired {
-                invocation: terminal.result.invocation.clone(),
+                invocation: resolution.invocation().into(),
                 workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
+                physical_id: resolution.physical_id(),
             },
             _ => DomainEvent::WorkCompleted {
-                invocation: terminal.result.invocation.clone(),
+                invocation: resolution.invocation().into(),
                 workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
+                physical_id: resolution.physical_id(),
             },
         };
         if step.is_none() {
             self.emit(event);
         } else {
-            // A child finishes its own decoration without settling its parent's lifecycle
-            // or showing a guardrail notice for every unsuccessful child in a composition.
             self.presentation.react(&DomainEvent::WorkCompleted {
-                invocation: terminal.result.invocation.clone(),
+                invocation: resolution.invocation().into(),
                 workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
+                physical_id: resolution.physical_id(),
             });
         }
-        let status = serde_json::to_value(terminal.result.status)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
-        let effect = serde_json::to_value(terminal.result.effect)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
+        let status = serde_json::to_value(resolution.status())
+            .expect("closed status")
+            .as_str()
+            .expect("status string")
+            .to_owned();
+        let effect = serde_json::to_value(resolution.effect())
+            .expect("closed effect")
+            .as_str()
+            .expect("effect string")
+            .to_owned();
         self.diagnostics.sink().emit(
-            if terminal.result.status == Status::Failed {
+            if resolution.status() == Status::Failed {
                 ghostlight_bridge::diagnostics::event::OPERATION_FAILED
             } else {
                 ghostlight_bridge::diagnostics::event::OPERATION_COMPLETED
             },
-            if terminal.result.status == Status::Failed {
+            if resolution.status() == Status::Failed {
                 ghostlight_bridge::diagnostics::Level::Warn
             } else {
                 ghostlight_bridge::diagnostics::Level::Info
             },
-            Some(terminal.result.invocation.as_str()),
-            &format!("{tool} {status} {effect} {}ms", duration_ms),
+            Some(resolution.invocation()),
+            &format!("{tool} {status} {effect} {duration_ms}ms"),
         );
-        let observed = self
-            .take_observation(&terminal.result.invocation)
-            .merged(terminal.observed.clone());
-        // Unconsumed candidate sets belong only to stale-target failures; drop strays here so
-        // nothing leaks across invocations.
-        let browser_label = self
-            .workspaces
-            .browser_of(workspace.as_str())
-            .and_then(|id| {
-                self.browser
-                    .browsers()
-                    .into_iter()
-                    .find(|b| b.id == id)
-                    .map(|b| b.name.unwrap_or_else(|| "Chromium".into()))
-                    .or_else(|| Some("Chromium".into()))
-            });
+        let browser_label = self.workspaces.browser_of(workspace.as_str()).map(|id| {
+            self.browser
+                .browsers()
+                .into_iter()
+                .find(|browser| browser.id == id)
+                .and_then(|browser| browser.name)
+                .unwrap_or_else(|| "Chromium".into())
+        });
         let mut record = AuditRecord::now(
-            &terminal.result.invocation,
+            resolution.invocation(),
             workspace.as_str(),
             tool,
             requirements,
             snapshot.id(),
-            terminal.decision,
+            resolution.decision(),
             &status,
             &effect,
-            &terminal.audit,
+            &retained,
             duration_ms,
         )
         .with_provenance(provenance.map(ConnectionEvidence::attribution))
-        .with_policy(snapshot, terminal.decision)
-        .with_observation(observed)
+        .with_policy(snapshot, resolution.decision())
+        .with_observation(resolution.observed().clone())
         .with_browser(browser_label);
         record.step = step;
-        record.repeat_safe = Some(terminal.result.repeat_safe);
-        record.permissions = self.take_permissions(&terminal.result.invocation);
+        record.repeat_safe = Some(resolution.repeat_safe());
+        record.permissions = self.take_permissions(resolution.invocation());
         let storage = self.audit.record_with_provenance(&record, provenance);
-        terminal.result.summary = if storage == language::audit_health::Storage::Saved {
+        caller.summary = if storage == language::audit_health::Storage::Saved {
             language::audit_health::qualify_children(
-                &terminal.result.summary,
-                terminal.audit.unconfirmed_history_steps(),
+                &caller.summary,
+                resolution.unconfirmed_history_steps(),
             )
         } else {
-            storage.qualify(&terminal.result.summary)
+            storage.qualify(&caller.summary)
         };
-        terminal.result.history_storage = storage;
-        gate.complete(terminal.result)
-            .expect("single executor completion path");
-        terminal.result = gate.take().expect("completion committed");
-        terminal
+        caller.history_storage = storage;
+        CompletedWork {
+            resolution,
+            caller,
+            storage,
+        }
     }
 
-    /// Execute and complete an ordinary child without taking another lease or snapshot.
+    /// Execute one ordinary child under the parent lease and snapshot, with separate effect evidence.
     pub(super) fn run_child(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         operation: &Operation,
         step: StepReceipt,
-    ) -> Terminal {
+    ) -> CompletedWork {
         let _ = self.take_permissions(context.invocation);
         let started = Instant::now();
+        let execution = Mutex::new(ExecutionEvidence::default());
         let context = InvocationContext {
             requirements: language::capability_map::requirements(operation),
+            execution: &execution,
+            phase: Phase::RequestedEffect,
             ..*context
         };
         self.emit(DomainEvent::WorkPhaseStarted {
@@ -191,17 +193,17 @@ impl ApplicationExecutor {
             physical_id: None,
             activity: operation_activity(operation),
         });
-        let terminal = self.run(&context, lease, operation);
-        self.complete_terminal(
-            &CompletionGate::default(),
-            terminal,
+        let evidence = self.run(&context, lease, operation);
+        self.complete_work(
+            evidence,
             Completion {
                 workspace: context.workspace,
                 tool: operation.name(),
-                requirements: language::capability_map::requirements(operation),
+                requirements: context.requirements,
                 snapshot: context.snapshot,
                 duration_ms: elapsed_ms(started),
                 provenance: context.provenance,
+                execution: &execution,
             },
             Some(step),
         )

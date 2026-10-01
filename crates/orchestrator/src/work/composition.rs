@@ -6,12 +6,11 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::governance::Decision;
-use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
-use crate::language::outcome::{BlockedReason, Outcome, WorkspaceReason};
+use crate::language::outcome::{BlockedReason, Outcome, Refusal, WorkspaceReason};
 
 use super::result::Readiness;
-use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
+use super::{CompletedWork, Conclusion, Effect, InvocationContext, Status, WorkEvidence};
 
 /// A step without an invocation must not masquerade as a failed child operation.
 #[derive(Clone, Copy, Serialize)]
@@ -86,14 +85,14 @@ impl Composition {
     }
 
     /// Retain a child's status, effects, and closed recovery cause.
-    pub fn record(&mut self, step: usize, terminal: &Terminal) -> Option<StepCause> {
-        let result = &terminal.result;
-        if result.history_storage == crate::language::audit_health::Storage::Unconfirmed {
+    pub fn record(&mut self, step: usize, terminal: &CompletedWork) -> Option<StepCause> {
+        let result = &terminal.resolution;
+        if terminal.storage == crate::language::audit_health::Storage::Unconfirmed {
             self.unconfirmed_history_steps += 1;
         }
         let counts = &mut self.progress.counts;
         counts.not_run -= 1;
-        match result.status {
+        match result.status() {
             Status::Succeeded => counts.succeeded += 1,
             Status::Blocked => counts.blocked += 1,
             Status::Failed => counts.failed += 1,
@@ -101,18 +100,18 @@ impl Composition {
             Status::AttentionRequired => counts.attention_required += 1,
             Status::Unknown => counts.unknown += 1,
         }
-        match result.effect {
+        match result.effect() {
             Effect::None => self.progress.effects.none += 1,
             Effect::Applied => self.progress.effects.applied += 1,
             Effect::Partial => self.progress.effects.partial += 1,
             Effect::Unknown => self.progress.effects.unknown += 1,
         }
-        self.all_repeat_safe &= result.repeat_safe;
-        self.readiness = result.readiness;
-        self.physical_id = terminal.physical_id.or(self.physical_id);
+        self.all_repeat_safe &= result.repeat_safe();
+        self.readiness = result.readiness();
+        self.physical_id = terminal.resolution.physical_id().or(self.physical_id);
         // Retain a deciding denial even if Continue later admits an independent step.
         if self.decision.allowed {
-            self.decision = terminal.decision;
+            self.decision = terminal.resolution.decision();
         }
         let cause = child_cause(terminal);
         if let Some(cause) = cause {
@@ -167,37 +166,36 @@ impl Composition {
     }
 
     /// Complete the parent with language and audit projected from the same progress account.
-    pub fn finish(self, context: &InvocationContext<'_>, mut facts: Value) -> Terminal {
+    pub fn finish(self, context: &InvocationContext<'_>, mut facts: Value) -> WorkEvidence {
         let status = self.status();
         let effect = self.effect();
         facts["progress"] = json!(self.progress);
         facts["unconfirmed_history_steps"] = json!(self.unconfirmed_history_steps);
         let outcome = Outcome::CompositionRan(self.progress);
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                status,
-                effect,
-                self.readiness,
-                status == Status::Succeeded && effect == Effect::None && self.all_repeat_safe,
-                &outcome.summary(),
-                facts,
-                outcome.next_steps(),
-            ),
-            decision: self.decision,
-            physical_id: self.physical_id,
-            observed: outcome.observed(),
-            audit: outcome
-                .audit()
-                .with_unconfirmed_history(self.unconfirmed_history_steps),
-        }
+        let mut evidence = WorkEvidence::new(
+            context.invocation,
+            status,
+            effect,
+            self.readiness,
+            status == Status::Succeeded && effect == Effect::None && self.all_repeat_safe,
+            Conclusion::Outcome(outcome),
+            facts,
+            self.decision,
+            self.physical_id,
+        );
+        evidence.unconfirmed_history_steps = self.unconfirmed_history_steps;
+        evidence
     }
 }
 
 /// Keep recovery metadata outside the optional, budgeted child result payload.
-pub(super) fn terminal_row(step: usize, terminal: &Terminal, cause: Option<StepCause>) -> Value {
-    json!({"step":step,"status":terminal.result.status,"effect":terminal.result.effect,
-        "repeat_safe":terminal.result.repeat_safe,"cause":cause,"history_storage":terminal.result.history_storage})
+pub(super) fn terminal_row(
+    step: usize,
+    terminal: &CompletedWork,
+    cause: Option<StepCause>,
+) -> Value {
+    json!({"step":step,"status":terminal.resolution.status(),"effect":terminal.resolution.effect(),
+        "repeat_safe":terminal.resolution.repeat_safe(),"cause":cause,"history_storage":terminal.storage})
 }
 
 /// Identify an unexecuted step without assigning it an invocation or a terminal status.
@@ -205,31 +203,35 @@ pub(super) fn unexecuted_row(step: usize, status: UnexecutedStatus) -> Value {
     json!({"step":step,"status":status,"effect":Effect::None,"repeat_safe":false})
 }
 
-fn child_cause(terminal: &Terminal) -> Option<StepCause> {
-    use AuditRefusal as A;
-    Some(match terminal.audit.refusal() {
-        Some(A::AuthorityBlocked {
-            cause: BlockedReason::AuditUnavailable,
+fn child_cause(terminal: &CompletedWork) -> Option<StepCause> {
+    use Refusal as R;
+    Some(match terminal.resolution.cause() {
+        Some(R::AuthorityBlocked {
+            reason: BlockedReason::AuditUnavailable,
+            ..
         }) => StepCause::AuditUnavailable,
         Some(
-            A::AuthorityBlocked {
-                cause: BlockedReason::Hold,
+            R::AuthorityBlocked {
+                reason: BlockedReason::Hold,
+                ..
             }
-            | A::WorkspaceUnusable {
-                cause: WorkspaceReason::TabHeld,
+            | R::WorkspaceUnusable {
+                reason: WorkspaceReason::TabHeld,
             },
         ) => StepCause::Paused,
-        Some(A::AuthorityBlocked {
-            cause: BlockedReason::SessionEnded,
+        Some(R::AuthorityBlocked {
+            reason: BlockedReason::SessionEnded,
+            ..
         }) => StepCause::SessionEnded,
-        Some(A::CredentialHandoff | A::CredentialAuthorization) => StepCause::Failed,
-        Some(A::AttentionRequired | A::LocalInterlock) => StepCause::AttentionRequired,
-        Some(A::DeadlineBeforeStart | A::DeadlineExpired { .. }) => StepCause::Deadline,
-        Some(A::CancelledBeforeStart | A::CancelledAfterDispatch) => StepCause::Cancelled,
-        Some(A::ConnectionLost | A::BrowserStopped { reconnect: true }) => {
+        Some(R::CredentialAuthorization) => StepCause::Failed,
+        Some(R::AttentionRequired | R::LocalInterlock) => StepCause::AttentionRequired,
+        Some(R::DeadlineBeforeStart | R::DeadlineExpired { .. }) => StepCause::Deadline,
+        Some(R::CancelledBeforeStart | R::CancelledAfterDispatch) => StepCause::Cancelled,
+        Some(R::ConnectionLost | R::BrowserStopped { reconnect: true }) => {
             StepCause::ConnectionLost
         }
-        _ => match terminal.result.status {
+        Some(R::ScriptException) => StepCause::ScriptException,
+        _ => match terminal.resolution.status() {
             Status::Succeeded => return None,
             Status::Blocked => StepCause::PolicyBlocked,
             Status::Failed => StepCause::Failed,
@@ -249,23 +251,25 @@ mod tests {
     use crate::workspace::WorkspaceStore;
     use ghostlight_bridge::service::IntakeChannel;
 
-    fn child(status: Status, effect: Effect, refusal: Option<Refusal>) -> Terminal {
-        let audit = refusal.map_or_else(|| Outcome::TabsListed { count: 0 }.audit(), |r| r.audit());
-        Terminal {
-            result: InvocationResult::new(
-                "child",
-                status,
-                effect,
-                Readiness::Complete,
-                effect == Effect::None,
-                audit.summary(),
-                json!({}),
-                vec![],
-            ),
-            decision: Decision::permitted(),
-            physical_id: Some(7),
-            observed: Default::default(),
-            audit,
+    fn child(status: Status, effect: Effect, refusal: Option<Refusal>) -> CompletedWork {
+        let conclusion = refusal.map_or_else(
+            || Conclusion::Outcome(Outcome::TabsListed { count: 0 }),
+            Conclusion::Refusal,
+        );
+        let (resolution, payload) = super::super::resolution::Resolution::fixture(
+            conclusion,
+            status,
+            effect,
+            super::super::Verification::NotRequested,
+            super::super::Phase::RequestedEffect,
+            Default::default(),
+            json!({}),
+        );
+        let projection = crate::language::resolution::project(&resolution, payload);
+        CompletedWork {
+            resolution,
+            caller: projection.caller,
+            storage: crate::language::audit_health::Storage::Saved,
         }
     }
 
@@ -358,6 +362,11 @@ mod tests {
                 "Step 2 did not confirm completion.",
             ),
             (
+                Refusal::ScriptException,
+                StepCause::ScriptException,
+                "The script in step 2 threw an exception.",
+            ),
+            (
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::Hold,
                     host: None,
@@ -413,6 +422,7 @@ mod tests {
             if cancelled {
                 token.cancel();
             }
+            let execution = std::sync::Mutex::new(super::super::ExecutionEvidence::default());
             let context = InvocationContext {
                 provenance: None,
                 requirements: crate::governance::CapabilitySet::READ,
@@ -424,12 +434,19 @@ mod tests {
                 snapshot: &snapshot,
                 deadline: Instant::now(),
                 cancellation: &token,
+                execution: &execution,
+                phase: super::super::Phase::RequestedEffect,
             };
             let mut composition =
                 Composition::new(3, Decision::permitted(), Readiness::NotApplicable, None);
             composition.record(1, &child(Status::Succeeded, Effect::Applied, None));
             assert!(composition.stop_at_boundary(&context, 2));
-            let result = composition.finish(&context, json!({})).result;
+            let (resolution, payload) = composition.finish(&context, json!({})).resolve(
+                super::super::ExecutionEvidence::default(),
+                None,
+                Default::default(),
+            );
+            let result = crate::language::resolution::project(&resolution, payload).caller;
             assert_eq!(
                 result.status,
                 if cancelled {

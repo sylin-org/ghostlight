@@ -1744,6 +1744,13 @@ fn unix_ms() -> u64 {
 /// This is a persistence reader, never an authority or command input (ADR-0163).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuditRecord {
+    /// Additive canonical account; unsupported optional metadata leaves the receipt readable.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::language::resolution::read_retained"
+    )]
+    pub resolution: Option<crate::language::resolution::RetainedResolution>,
     /// Final repeat safety; absence means older history did not retain it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat_safe: Option<bool>,
@@ -1872,6 +1879,7 @@ impl AuditRecord {
     ) -> Self {
         Self {
             unconfirmed_history_steps: language.unconfirmed_history_steps(),
+            resolution: language.resolution().cloned(),
             repeat_safe: None,
             next_steps: language.next_steps().iter().take(2).cloned().collect(),
             timestamp_ms: unix_ms(),

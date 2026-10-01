@@ -11,6 +11,7 @@ pub mod history;
 pub mod outcome;
 pub mod provenance;
 pub mod readiness;
+pub mod resolution;
 #[path = "catalog.rs"]
 mod tool_catalog;
 
