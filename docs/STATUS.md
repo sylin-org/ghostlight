@@ -8,12 +8,22 @@ The follow-on in-service UX source slice is on `codex/in-service-outcome-ux`, ba
 `22d27bd175fded4b66a731fb6b77d9fc433b8d2c`. [ADR-0187](adr/0187-readable-workbench-outcomes-and-reconnection-controls.md)
 keeps safe outcome/recovery facts in the existing work view, separates global human control from
 browser reconnection, and clarifies Show tab versus takeover. The full guardian About card and
-all five destinations remain intact. Source validation and the pending runtime handoff are in
-the [UX evidence record](testing/in-service-ux-2026-10-01.md). Tangent owns desktop/browser testing
-until the parent releases that lane. No serving installation or registration has changed.
+all five destinations remain intact. Source validation is in the
+[UX evidence record](testing/in-service-ux-2026-10-01.md); the
+[selected native acceptance](testing/in-service-ux-acceptance-2026-10-01.md) records outcomes,
+legacy history, child recovery, controls, narrow/enlarged text, About fidelity, and limits.
+The parent handed off the foreground lane; bounded acceptance is complete and ownership released.
+No serving installation or registration has changed.
 Independent source review of `8d1e16ff` found a topology/publication race in control confirmation.
 The focused correction makes confirmations depend only on the applied authority state and adds
 a deterministic last-adapter disconnect regression. Browser publication is not acknowledgement.
+Native observation also caught a background-attention refusal whose independent capability check
+had passed. Typed refusal evidence now selects its refusal tone without changing machine facts;
+unknown/partial effects still take precedence. Final gates pass: 594 Rust tests, 349 extension
+tests, 101 executable Workbench assertions, formatting, and strict Clippy. Keyboard Tab/Shift-Tab
+is verified; Enter activation remains inconclusive. The guarded native attempt sent no key because
+Windows could not foreground the verified isolated candidate. Temporary profiles/registrations
+are removed; production registry state and existing live process IDs were verified unchanged.
 
 The owner authorized a bounded local engineering trial. The starting repository was clean at
 `de1a686761af5430afc50763d1a282efaa80f615`; no pending-change checkpoint commit was needed.

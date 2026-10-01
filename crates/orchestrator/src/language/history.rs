@@ -67,6 +67,15 @@ impl OutcomePresentation {
     /// Describe recorded facts without inferring intent, rollback, or permission to replay.
     #[must_use]
     pub fn from_record(record: &crate::governance::AuditRecord) -> Self {
+        // A configured restriction can refuse work after its capability check permitted it.
+        let policy_refused = !record.allowed
+            || matches!(
+                &record.refusal_facts,
+                Some(
+                    super::audit::AuditRefusal::BrowserAttentionProtected { .. }
+                        | super::audit::AuditRefusal::RequestRestricted { .. }
+                )
+            );
         let (label, tone) = if record.effect == "unknown" {
             ("Effects uncertain", OutcomeTone::Caution)
         } else if record.effect == "partial" {
@@ -77,7 +86,7 @@ impl OutcomePresentation {
             ("Stopped by you", OutcomeTone::Controlled)
         } else if record.status == "succeeded" {
             ("Completed", OutcomeTone::Complete)
-        } else if !record.allowed {
+        } else if policy_refused {
             ("Request refused", OutcomeTone::Refused)
         } else {
             ("Could not complete", OutcomeTone::Failed)
@@ -119,6 +128,44 @@ pub enum CompositionKind {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn configured_restriction_is_a_refusal_after_a_permitted_capability_check() {
+        use crate::governance::{AuditRecord, CapabilitySet, Decision};
+        use crate::language::outcome::Refusal;
+        use ghostlight_bridge::browser::BrowserAttentionReason;
+        for refusal in [
+            super::super::audit::AuditRefusal::BrowserAttentionProtected {
+                cause: BrowserAttentionReason::Focus,
+            },
+            super::super::audit::AuditRefusal::RequestRestricted {
+                cause: crate::language::outcome::BlockedReason::Capability,
+            },
+        ] {
+            let mut record = AuditRecord::now(
+                "call",
+                "workspace",
+                "browser_tabs",
+                CapabilitySet::ACTION,
+                "authority",
+                Decision::permitted(),
+                "blocked",
+                "none",
+                &Refusal::BrowserAttentionProtected {
+                    reason: BrowserAttentionReason::Focus,
+                }
+                .audit(),
+                0,
+            );
+            record.refusal_facts = Some(refusal);
+            assert!(record.allowed);
+            assert_eq!(record.reason, ReasonCode::Permitted);
+            let presentation = OutcomePresentation::from_record(&record);
+            assert_eq!(presentation.tone, OutcomeTone::Refused);
+            assert_eq!(presentation.label, "Request refused");
+            assert_eq!(presentation.summary, record.summary);
+        }
+    }
 
     #[test]
     fn outcome_tones_preserve_control_policy_and_effect_distinctions() {

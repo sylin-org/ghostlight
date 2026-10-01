@@ -1,4 +1,8 @@
-# In-service UX source handoff -- 2026-10-01
+# In-service UX source record -- 2026-10-01
+
+Final bounded native results and selected screenshots are in the
+[acceptance record](in-service-ux-acceptance-2026-10-01.md). The initial handoff and subsequent
+review correction below describe their own validation points; later evidence supersedes pending rows.
 
 Branch: `codex/in-service-outcome-ux`.
 Baseline: clean `22d27bd175fded4b66a731fb6b77d9fc433b8d2c` on `codex/quiet-coexistence-trial`.
@@ -36,7 +40,7 @@ Final composition guidance is preserved rather than replaced with a whole-operat
 
 ## Initial source validation
 
-All execution so far is source inspection, existing-image inspection, build, or noninteractive tests.
+At the initial handoff, execution was source inspection, existing-image inspection, build, or noninteractive tests.
 `CARGO_TARGET_DIR=.target-quiet-trial` reuses the existing isolated build output; no binary was started.
 
 | Gate | Status/evidence |
@@ -76,7 +80,7 @@ Inspected baseline images, all under `.tmp/`:
 - `quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-paused-show-tab.png`
 - `quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-about-card.png`
 
-No final-interface screenshot has been captured. After the parent hands off runtime access,
+At this source handoff, no final-interface screenshot had been captured. The owed runtime lane was:
 inspect the actual built Workbench: success, Pause, policy refusal, unknown/partial child effects,
 newer refusal with earlier uncertainty, disconnected/reconnected authority, and Show/Resume/Stop.
 Verify narrow width, large text, keyboard activation/focus retention, and full About parity.
@@ -115,5 +119,14 @@ SHA-256 `10e1b8012bcedbf26046c2078c1bbd6a142779a5de896d659a8e79bc75b4c514`.
 The first fixture compile revealed the concrete relay dependency; switching to the existing port
 resolved that compile error. The final aggregate passes include the actual application race test.
 
-Desktop/browser, final visual, and installed journeys remain pending the parent handoff.
+At the review-correction handoff, desktop/browser, final visual, and installed journeys were pending.
 About, layout, assets, other UX behavior, and optional search deferral are unchanged.
+
+## Native observation correction
+
+The actual background-attention refusal remained red because its capability decision was permitted.
+The human projection now also examines closed retained refusal facts for browser-attention protection
+and legacy request restrictions. A refusal is amber even when that separate permission check passed.
+Unknown and partial effects keep their higher-priority caution presentation. Machine allowed/reason,
+status, effect, and the authored sentence remain unchanged. A regression exercises both typed facts
+with a permitted capability decision. Final native/source evidence is in the linked acceptance record.

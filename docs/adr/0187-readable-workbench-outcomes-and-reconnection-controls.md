@@ -59,6 +59,13 @@ after the topology sample and proves identical truthful wording with or without 
 
 ## Evidence
 
-The [source handoff](../testing/in-service-ux-2026-10-01.md) records gates and limits.
-Final native visual, narrow/large-text/keyboard, and installed runtime evidence require the
-parent's desktop handoff; source evidence alone does not establish those acceptance rows.
+The [source record](../testing/in-service-ux-2026-10-01.md) records gates and review.
+The [selected acceptance](../testing/in-service-ux-acceptance-2026-10-01.md) records the granted
+native lane, actual screenshots, cleanup, and keyboard-activation limit.
+
+## Native observation amendment: independent restriction evidence (2026-10-01)
+
+A configured background-attention refusal can follow a permitted capability decision. The final
+human refusal tone therefore also uses its closed retained refusal facts, including historical
+request restrictions. The separate capability decision is not rewritten. Unknown/partial effect
+presentation still takes precedence over refusal and calm control styling.
