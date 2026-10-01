@@ -2,7 +2,26 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
-## Shared attachment ownership correction (2026-10-01, local source only)
+## Reviewed recovery pipeline (2026-10-01, installed locally)
+
+The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership
+review and independent source/native/predecessor acceptance, then authorized supported local
+deployment. The orchestrator-only update and explicit reload of the existing unpacked adapter
+are complete. Installed authority SHA256:
+`bade8ca680362fb0a5e16d523f3381d41c8319e07a815c53458d37f8f6750945`.
+Both connector images, installation selection, policy-file state, adapter grants and prior audit
+bytes are preserved. No native registration or public version changed.
+
+The final installed localhost read/fill/uncertain-deadline/read smoke passed. Correlated Cancel
+restored an ordinary read, retaining the draft and one observed effect without replay or global
+End/Start. The existing preserve-tabs interlock correctly refused automatic close; only the owned
+fixture and maintenance tab were then closed through exact native Chrome controls. The work view
+shows published tool names, deadline cause and safe recovery. The complete guardian About card is
+preserved, and the actual installed app is open at At a glance with Ready state. The
+[deployment record](testing/evaluation-cancel-local-deployment-2026-10-01.md) records hashes,
+rollback and limits. The accepted matrix was not repeated.
+
+## Shared attachment ownership correction (2026-10-01, reviewed locally)
 
 Architect review withheld `d936b708`: generation alone did not establish exclusive debugger
 attachment ownership, and old ordinary release callbacks could decrement a replacement generation.
@@ -16,8 +35,9 @@ All source gates pass: 615 Rust tests, 393 extension tests, 110 executable Workb
 formatting, strict Clippy, JavaScript syntax and isolated build. Seven discriminating cases cover
 shared owners, setup/retirement races, recording, beforeunload and old ordinary finally after
 reattachment. A counterproof reproduces the baseline ownership/count failures and corrected results.
-Architect/independent review and actual Chromium/native acceptance remain pending. Deployment is
-held; installation, running service, About identity, data and public versions are unchanged.
+Architect/independent review and actual Chromium/native acceptance accepted the exact follow-on.
+The supported local deployment is recorded above. About identity, existing data and public versions
+remain preserved. Physical Enter activation remains unproven.
 
 ## Correlated evaluation cleanup (2026-10-01, local source only)
 
