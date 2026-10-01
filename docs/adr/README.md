@@ -219,6 +219,8 @@ history live here.
 | [0187](0187-readable-workbench-outcomes-and-reconnection-controls.md) | Readable Workbench outcomes, retained safe recovery facts, and runtime control during browser reconnection | Accepted for unpublished local UX trial (amends [0103](0103-language-owned-outcome-voice.md)/[0126](0126-reference-experience-contract.md); preserves [0156](0156-grouped-composition-history.md)/[0159](0159-audit-health-and-recovery.md)/[0185](0185-explicit-user-control-and-passive-browser-feedback.md)/[0186](0186-quiet-browser-coexistence.md)) |
 | [0188](0188-page-world-independent-form-diagnostics.md) | Page-world-independent local form diagnostics: worker-pushed state, bounded isolated delivery, and exact document custody through worker suspension | Accepted for unpublished local trial (amends [0145](0145-shared-process-diagnostics-log.md); preserves [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md)) |
 
+| [0189](0189-current-document-trees-exclude-inactive-browser-pages.md) | Current document inventories and routing exclude inactive browser pages while retaining exact active-document authority | Accepted (source correction; installed acceptance pending) |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

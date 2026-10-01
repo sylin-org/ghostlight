@@ -633,6 +633,11 @@ Every one of these cost something to learn.
 
 ## Where to look
 
+- **A Chrome tab can contain several outermost pages.** Build document authority and routing
+  from the active tree, excluding prerender, cached and pending-deletion pages before root checks.
+  Keep exact active identities and fail closed on ambiguous lifecycle or malformed active graphs.
+  Generic verification refusals need per-operation evidence before assigning a cause (ADR-0189).
+
 | Need | Source |
 | --- | --- |
 | How to work here, and the boundaries | [`AGENTS.md`](../AGENTS.md) |

@@ -14,8 +14,8 @@ contains candidate hashes, opening instructions, rollback, and exact limits.
 
 The initial localhost read returned `document_unavailable` with no effect. A later installed
 open/read/fill smoke passed after Chrome restarted and the existing adapter was reloaded, but a
-subsequent UX fixture reproduced the read failure. Recovery remains in progress; the original
-cause is not established. Actual native captures now verify the readable fill outcome and complete
+subsequent UX fixture reproduced the read failure. Recovery remains in progress. Actual native
+captures verify the readable fill outcome and complete
 guardian About card. Public versions and publication state are unchanged.
 
 [ADR-0188](adr/0188-page-world-independent-form-diagnostics.md) records a separately reproduced
@@ -24,7 +24,21 @@ messaging; local opt-in tracing uses an isolated relay and exact document custod
 suspension. Source gates pass: 594 Rust tests, 357 extension tests, 101 Workbench assertions,
 formatting, strict Clippy, and changed-JavaScript syntax. Independent review approves the correction
 after replaying failed-stop retry, overlapping off/on, and unrelated-tab capacity regressions.
-Deployment/live acceptance of this correction is pending. No permissions or public availability changed.
+The supported orchestrator-only deployment of `7af79ed4` completed at 05:56 UTC. Installed
+synthetic execute/read still failed before dispatch. At 06:16 UTC Leo reported repeated live
+verification refusals; further smoke/deployment actions were paused and the audit preserved.
+
+[ADR-0189](adr/0189-current-document-trees-exclude-inactive-browser-pages.md) records the observed
+cause: an active root plus a prerender root makes the existing inventory reject the whole tab.
+Historical replay confirms the same failure at `22d27bd1`, `c491a264`, and `7af79ed4`; the verifier
+is unchanged. A source-only correction excludes inactive trees from inventory and routing while
+retaining exact active identity, scope, malformed-tree, stale-target and uncertainty guards.
+Independent Sol Max source review passes. Aggregate gates pass: 594 Rust tests, 365 extension
+tests, 101 Workbench assertions, formatting, strict Clippy and changed-JavaScript syntax.
+The patch is frozen for parent-coordinated independent acceptance before adapter reload.
+Six of nine preserved verification failures match exact synthetic receipts; three remain
+unclassified. Other owner failures are not individually attributed. No permission,
+public version, publication, or installation selection changed.
 
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
 

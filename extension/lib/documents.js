@@ -6,21 +6,56 @@
 })(globalThis, function createDocumentApi() {
   "use strict";
   const DOCUMENT_LIMIT = 256;
+  const ROOT_FRAME_ID = 0;
+  const DOCUMENT_LIFECYCLE = Object.freeze({
+    ACTIVE: "active", PRERENDER: "prerender", CACHED: "cached", PENDING_DELETION: "pending_deletion"
+  });
+  const DOCUMENT_LIFECYCLES = new Set(Object.values(DOCUMENT_LIFECYCLE));
   const METADATA_KINDS = new Set(["document_route", "frame_boxes", "capture_mask", "capture_mask_check", "capture_mask_clear", "presentation_visibility", "scroll_offset", "viewport_point"]);
   const changed = () => Object.assign(new Error("document scope changed before access"), { code: "document_scope_changed", effectUnknown: false });
 
-  function inventory(raw) {
+  function currentFrames(raw) {
     if (!Array.isArray(raw) || !raw.length || raw.length > DOCUMENT_LIMIT) throw changed();
-    const ordered = raw.slice().sort((a, b) => a.frameId - b.frameId);
+    // Chrome introduced documentLifecycle in 106. Legacy snapshots without any
+    // lifecycle fields retain their one-current-tree contract. A partially
+    // described modern snapshot cannot establish which documents are current.
+    const legacy = raw.every(frame => frame?.documentLifecycle === undefined);
+    return raw.filter(frame => {
+      if (!frame || typeof frame !== "object") throw changed();
+      const lifecycle = legacy ? DOCUMENT_LIFECYCLE.ACTIVE : frame.documentLifecycle;
+      if (!DOCUMENT_LIFECYCLES.has(lifecycle)) throw changed();
+      return lifecycle === DOCUMENT_LIFECYCLE.ACTIVE;
+    });
+  }
+
+  function inventory(raw) {
+    const ordered = currentFrames(raw).sort((a, b) => a.frameId - b.frameId);
+    const byFrame = new Map();
+    for (const frame of ordered) {
+      if (!Number.isSafeInteger(frame.frameId) || frame.frameId < 0
+        || !Number.isSafeInteger(frame.parentFrameId) || frame.parentFrameId < -1
+        || byFrame.has(frame.frameId)) throw changed();
+      byFrame.set(frame.frameId, frame);
+    }
     const documents = ordered.map((frame) => {
       if (typeof frame.documentId !== "string" || !frame.documentId || frame.documentId.length > 160) throw changed();
-      const parent = frame.parentFrameId === -1 ? null : ordered.find((item) => item.frameId === frame.parentFrameId)?.documentId;
+      const parent = frame.parentFrameId === -1 ? null : byFrame.get(frame.parentFrameId)?.documentId;
       if (parent === undefined) throw changed();
+      if (frame.parentDocumentId !== undefined && frame.parentDocumentId !== parent) throw changed();
+      const ancestry = new Set([frame.frameId]);
+      let ancestor = frame;
+      while (ancestor.parentFrameId !== -1) {
+        if (ancestry.has(ancestor.parentFrameId)) throw changed();
+        ancestry.add(ancestor.parentFrameId);
+        ancestor = byFrame.get(ancestor.parentFrameId);
+        if (!ancestor) throw changed();
+      }
       return { id: frame.documentId, url: String(frame.url ?? ""), parent,
-        supported: /^https?:/i.test(frame.url ?? "") && frame.documentLifecycle !== "prerender" && !frame.errorOccurred };
+        supported: /^https?:/i.test(frame.url ?? "") && !frame.errorOccurred };
     });
     if (new Set(documents.map((document) => document.id)).size !== documents.length
-      || documents.filter((document) => document.parent === null).length !== 1) throw changed();
+      || documents.filter((document) => document.parent === null).length !== 1
+      || byFrame.get(ROOT_FRAME_ID)?.parentFrameId !== -1) throw changed();
     return documents;
   }
 
@@ -32,7 +67,7 @@
     const active = new Map();
 
     async function current(tabId) {
-      const raw = await getFrames(tabId);
+      const raw = currentFrames(await getFrames(tabId));
       return { raw, documents: inventory(raw) };
     }
 
@@ -47,14 +82,14 @@
         else subjects.add(documentId);
       }
       for (const point of command.points) {
-        let frame = raw.find((item) => item.frameId === 0);
+        let frame = raw.find((item) => item.frameId === ROOT_FRAME_ID);
         let x = point.x;
         let y = point.y;
         const visited = new Set();
         try {
           while (frame && !visited.has(frame.documentId)) {
             visited.add(frame.documentId);
-            const answer = await sendDocument(command.tab_id, frame.documentId, { kind: "document_route", page_x: x, page_y: y, viewport: command.viewport || frame.frameId !== 0 });
+            const answer = await sendDocument(command.tab_id, frame.documentId, { kind: "document_route", page_x: x, page_y: y, viewport: command.viewport || frame.frameId !== ROOT_FRAME_ID });
             if (!answer.embed) { subjects.add(frame.documentId); break; }
             const child = frames.childFrameForEmbed(raw, frame.frameId, answer.embed.src);
             x = answer.x - answer.embed.left;
@@ -177,5 +212,5 @@
     function limit(tabId) { const context = active.get(tabId); if (context) context.limited = true; }
     return { describe, run, route, frameIds, locator, verify, verifyInput, input, targetedInput, limit, context: (tabId) => active.get(tabId), current };
   }
-  return { create, inventory, same, changed, DOCUMENT_LIMIT };
+  return { create, inventory, same, changed, DOCUMENT_LIMIT, DOCUMENT_LIFECYCLE };
 });

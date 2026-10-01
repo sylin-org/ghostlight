@@ -113,3 +113,152 @@ test("malformed and oversized document inventories refuse", () => {
     { frameId: 1, parentFrameId: 0, documentId: "same", url: "https://allowed.test/" }
   ]]) assert.throws(() => api.inventory(raw), { code: "document_scope_changed" });
 });
+
+test("explicit active snapshots preserve the legacy current-tree inventory", async () => {
+  const { state, documents } = fixture();
+  const expected = api.inventory(state.raw);
+  state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+  assert.deepEqual(api.inventory(state.raw), expected);
+  assert.deepEqual((await documents.current(7)).documents, expected);
+});
+
+test("prerendered, cached, and pending-deletion roots and descendants are outside current coverage", async () => {
+  for (const lifecycle of ["prerender", "cached", "pending_deletion"]) {
+    const { state, documents, scope } = fixture();
+    state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+    state.raw.push(
+      { frameId: 42, parentFrameId: -1, documentId: "inactive-root", url: "https://inactive.test/", documentLifecycle: lifecycle },
+      { frameId: 43, parentFrameId: 42, parentDocumentId: "inactive-root", documentId: "inactive-child", url: "https://inactive-child.test/", documentLifecycle: lifecycle }
+    );
+    const current = await documents.current(7);
+    assert.deepEqual(current.raw.map(frame => frame.frameId), [0, 2]);
+    assert.deepEqual(current.documents, scope.documents);
+    state.answer = id => ({ focused: id === "inactive-root" });
+    const focused = await documents.describe({ tab_id: 7, locators: [], points: [], focused: true });
+    assert.equal(focused.unresolved, true);
+    assert.deepEqual(focused.subjects, []);
+    assert.deepEqual(state.calls.map(call => call.id), ["top-1", "child-1"]);
+    state.calls.length = 0;
+    const receipt = await documents.run(7, scope, async () => {
+      await assert.rejects(documents.route(7, 42, { kind: "read_text" }), { code: "document_scope_changed" });
+      await documents.route(7, 0, { kind: "read_text" });
+      return { text: "current" };
+    });
+    assert.deepEqual(receipt.observation.visited, ["top-1"]);
+    assert.deepEqual(receipt.observation.unavailable, []);
+    assert.deepEqual(state.calls.map(call => call.id), ["top-1"]);
+  }
+});
+
+test("inactive trees may change without invalidating the exact current scope", async () => {
+  const { state, documents, scope } = fixture();
+  state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+  await documents.run(7, scope, async () => {
+    state.raw.push({ frameId: 42, parentFrameId: -1, documentId: "prerender-1", url: "https://other.test/", documentLifecycle: "prerender" });
+    await documents.verify(7);
+    state.raw[2].documentLifecycle = "cached";
+    state.raw[2].documentId = "cached-2";
+    await documents.verify(7);
+    state.raw.pop();
+    await documents.verify(7);
+    await documents.route(7, 0, { kind: "read_text" });
+    return {};
+  });
+  assert.deepEqual(state.calls.map(call => call.id), ["top-1"]);
+});
+
+test("observed active and prerender roots permit consecutive scoped reads and fills", async () => {
+  const { state, documents } = fixture();
+  state.raw = [
+    { frameId: 0, parentFrameId: -1, documentId: "live-top", url: "http://127.0.0.1/fixture", documentLifecycle: "active", errorOccurred: false },
+    { frameId: 42, parentFrameId: -1, documentId: "prerender-top", url: "https://inactive.test/", documentLifecycle: "prerender", errorOccurred: false }
+  ];
+  let value = "original";
+  state.answer = (id, message) => {
+    assert.equal(id, "live-top");
+    if (message.kind === "fill") value = message.value;
+    return { text: value };
+  };
+  for (const [kind, expected] of [["read_text", "original"], ["fill", "replacement"], ["read_text", "replacement"]]) {
+    const description = await documents.describe({ tab_id: 7, locators: [], points: [], focused: false });
+    assert.deepEqual(description.documents.map(item => item.id), ["live-top"]);
+    const scope = { documents: description.documents, allowed: ["live-top"], subjects: [], mask: null, watch_changes: true };
+    const receipt = await documents.run(7, scope, async () => {
+      await documents.verify(7);
+      return documents.route(7, 0, { kind, value: "replacement" });
+    });
+    assert.equal(receipt.result.text, expected);
+    assert.deepEqual(receipt.observation.visited, ["live-top"]);
+    assert.deepEqual(receipt.observation.unavailable, []);
+  }
+  assert.deepEqual(state.calls.map(call => call.message.kind), ["read_text", "fill", "read_text"]);
+});
+
+test("cached document locators never regain authority through a reused frame id", async () => {
+  const { state, documents } = fixture();
+  state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+  state.raw.unshift(
+    { frameId: 0, parentFrameId: -1, documentId: "old-top", url: "https://old.test/", documentLifecycle: "cached" },
+    { frameId: 2, parentFrameId: 0, documentId: "old-child", url: "https://excluded.test/", documentLifecycle: "cached" }
+  );
+  const stale = await documents.describe({ tab_id: 7,
+    locators: [frames.scopedLocator(0, "locator_1", "old-top"), frames.scopedLocator(2, "locator_2", "old-child")],
+    points: [], focused: false });
+  assert.equal(stale.unresolved, true);
+  assert.deepEqual(stale.subjects, []);
+  const current = await documents.describe({ tab_id: 7,
+    locators: [frames.scopedLocator(2, "locator_3", "child-1")], points: [], focused: false });
+  assert.equal(current.unresolved, false);
+  assert.deepEqual(current.subjects, ["child-1"]);
+  assert.deepEqual(state.calls, []);
+});
+
+test("point routing cannot match inactive frames that share an embed URL", async () => {
+  const { state, documents } = fixture();
+  state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+  state.raw.push({ frameId: 44, parentFrameId: 0, documentId: "cached-child", url: "https://excluded.test/", documentLifecycle: "cached" });
+  state.answer = id => id === "top-1"
+    ? { x: 10, y: 10, embed: { src: "https://excluded.test/", left: 0, top: 0 } }
+    : { x: 10, y: 10 };
+  const request = { tab_id: 7, locators: [], points: [{ x: 10, y: 10 }], focused: false };
+  const current = await documents.describe(request);
+  assert.equal(current.unresolved, false);
+  assert.deepEqual(current.subjects, ["child-1"]);
+  assert.deepEqual(state.calls.map(call => call.id), ["top-1", "child-1"]);
+  state.raw = state.raw.filter(frame => frame.documentId !== "child-1");
+  state.calls.length = 0;
+  const unavailable = await documents.describe(request);
+  assert.equal(unavailable.unresolved, true);
+  assert.deepEqual(unavailable.subjects, []);
+  assert.deepEqual(state.calls.map(call => call.id), ["top-1"]);
+});
+
+test("current HTTP and error support checks remain independent of inactive-tree exclusion", () => {
+  const { state } = fixture();
+  state.raw = state.raw.map(frame => ({ ...frame, documentLifecycle: "active" }));
+  state.raw[1].errorOccurred = true;
+  assert.equal(api.inventory(state.raw)[1].supported, false);
+  state.raw[1].errorOccurred = false;
+  state.raw[1].url = "about:blank";
+  assert.equal(api.inventory(state.raw)[1].supported, false);
+});
+
+test("ambiguous lifecycle and inconsistent current trees fail closed", () => {
+  const root = { frameId: 0, parentFrameId: -1, documentId: "top", url: "https://current.test/", documentLifecycle: "active" };
+  const child = { frameId: 2, parentFrameId: 0, documentId: "child", url: "https://child.test/", documentLifecycle: "active" };
+  const cases = [
+    [root, { ...child, documentLifecycle: undefined }],
+    [{ ...root, documentLifecycle: null }],
+    [root, { ...child, documentLifecycle: "unknown" }],
+    [{ ...root, documentLifecycle: "prerender" }, child],
+    [root, { ...root, frameId: 42, documentId: "other-root" }],
+    [{ ...root, frameId: 42 }],
+    [root, { ...child, parentFrameId: 99 }],
+    [root, { ...child, parentDocumentId: "old-top" }],
+    [root, child, { ...child, documentId: "duplicate-frame" }],
+    [root, { ...child, parentFrameId: 3 }, { ...child, frameId: 3, parentFrameId: 2, documentId: "cycle" }],
+    [{ ...root, documentLifecycle: "cached" }],
+    Array(api.DOCUMENT_LIMIT + 1).fill({ ...root, documentLifecycle: "prerender" })
+  ];
+  for (const raw of cases) assert.throws(() => api.inventory(raw), { code: "document_scope_changed" });
+});
