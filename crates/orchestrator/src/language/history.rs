@@ -10,6 +10,102 @@ pub const RETIRED_BROWSER_LANDING: &str = "browser_landing";
 /// Maximum child count supported by a composition, including restored history.
 pub const COMPOSITION_STEP_LIMIT: usize = 20;
 
+/// One language-owned human rendering of terminal facts; machine status remains unchanged.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct OutcomePresentation {
+    /// Human-readable outcome label, independent of protocol status.
+    pub label: String,
+    /// Closed visual tone chosen by the orchestrator.
+    pub tone: OutcomeTone,
+    /// The authored sentence that leads the human surface.
+    pub summary: String,
+    /// Repeat guidance; absent safety evidence never becomes a safe-repeat claim.
+    pub repeat_detail: String,
+    /// Local guidance beside the existing exact-tab reveal control.
+    pub reveal_detail: String,
+}
+
+/// Presentation distinctions shared by the hero, historical rows, and child receipts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeTone {
+    Complete,
+    Controlled,
+    Refused,
+    Failed,
+    Caution,
+}
+
+impl OutcomePresentation {
+    /// Keep a live composition distinct from a restored group without a terminal parent receipt.
+    #[must_use]
+    pub fn incomplete_composition(completed: usize, total: usize, live: bool) -> Self {
+        use super::outcome::Outcome;
+        Self {
+            label: if live {
+                "In progress"
+            } else {
+                "Completion unrecorded"
+            }
+            .into(),
+            tone: OutcomeTone::Caution,
+            summary: if live {
+                Outcome::CompositionProgress { completed, total }.summary()
+            } else {
+                Outcome::CompositionUnrecorded.summary()
+            },
+            repeat_detail: if live {
+                String::new()
+            } else {
+                "Completion was not recorded. Inspect the page before preparing unfinished work."
+                    .into()
+            },
+            reveal_detail: super::control::SHOW_TAB_GUIDANCE.into(),
+        }
+    }
+
+    /// Describe recorded facts without inferring intent, rollback, or permission to replay.
+    #[must_use]
+    pub fn from_record(record: &crate::governance::AuditRecord) -> Self {
+        let (label, tone) = if record.effect == "unknown" {
+            ("Effects uncertain", OutcomeTone::Caution)
+        } else if record.effect == "partial" {
+            ("Partly completed", OutcomeTone::Caution)
+        } else if record.reason == ReasonCode::RuntimeHold {
+            ("Paused by you", OutcomeTone::Controlled)
+        } else if record.reason == ReasonCode::SessionEnded {
+            ("Stopped by you", OutcomeTone::Controlled)
+        } else if record.status == "succeeded" {
+            ("Completed", OutcomeTone::Complete)
+        } else if !record.allowed {
+            ("Request refused", OutcomeTone::Refused)
+        } else {
+            ("Could not complete", OutcomeTone::Failed)
+        };
+        let summary = if record.effect == "none" && record.reason == ReasonCode::RuntimeHold {
+            "You paused Ghostlight. This request did not run.".into()
+        } else if record.effect == "none" && record.reason == ReasonCode::SessionEnded {
+            "You stopped Ghostlight. This request did not run.".into()
+        } else {
+            record.summary.clone()
+        };
+        let repeat_detail = if matches!(record.effect.as_str(), "unknown" | "partial") {
+            "Do not repeat this action. Observe the page before preparing unfinished work."
+        } else if record.effect == "applied" && record.status != "succeeded" {
+            "The change was applied. Inspect the page before preparing unfinished work."
+        } else {
+            ""
+        };
+        Self {
+            label: label.into(),
+            tone,
+            summary,
+            repeat_detail: repeat_detail.into(),
+            reveal_detail: super::control::SHOW_TAB_GUIDANCE.into(),
+        }
+    }
+}
+
 /// Current flow and historical sequence identities; caller labels never supply an identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +119,92 @@ pub enum CompositionKind {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn outcome_tones_preserve_control_policy_and_effect_distinctions() {
+        use crate::governance::{AuditRecord, CapabilitySet, Decision};
+        use crate::language::outcome::{BlockedReason, Refusal};
+        for (reason, status, effect, tone, label) in [
+            (
+                ReasonCode::Permitted,
+                "succeeded",
+                "none",
+                OutcomeTone::Complete,
+                "Completed",
+            ),
+            (
+                ReasonCode::RuntimeHold,
+                "blocked",
+                "none",
+                OutcomeTone::Controlled,
+                "Paused by you",
+            ),
+            (
+                ReasonCode::SessionEnded,
+                "blocked",
+                "none",
+                OutcomeTone::Controlled,
+                "Stopped by you",
+            ),
+            (
+                ReasonCode::HostDenied,
+                "blocked",
+                "none",
+                OutcomeTone::Refused,
+                "Request refused",
+            ),
+            (
+                ReasonCode::Permitted,
+                "failed",
+                "none",
+                OutcomeTone::Failed,
+                "Could not complete",
+            ),
+            (
+                ReasonCode::RuntimeHold,
+                "blocked",
+                "unknown",
+                OutcomeTone::Caution,
+                "Effects uncertain",
+            ),
+            (
+                ReasonCode::SessionEnded,
+                "blocked",
+                "partial",
+                OutcomeTone::Caution,
+                "Partly completed",
+            ),
+        ] {
+            let record = AuditRecord::now(
+                "call",
+                "workspace",
+                "browser_execute",
+                CapabilitySet::EXECUTE,
+                "authority",
+                if reason == ReasonCode::Permitted {
+                    Decision::permitted()
+                } else {
+                    Decision::refused(reason)
+                },
+                status,
+                effect,
+                &Refusal::AuthorityBlocked {
+                    reason: BlockedReason::Hold,
+                    host: None,
+                }
+                .audit(),
+                0,
+            );
+            let presentation = OutcomePresentation::from_record(&record);
+            assert_eq!(presentation.tone, tone);
+            assert_eq!(presentation.label, label);
+            assert_eq!(record.status, status);
+            assert_eq!(record.effect, effect);
+            if tone == OutcomeTone::Caution {
+                assert!(presentation.repeat_detail.contains("Do not repeat"));
+            }
+        }
+    }
 
     #[test]
     fn retired_request_and_sequence_receipts_keep_their_original_meaning() {

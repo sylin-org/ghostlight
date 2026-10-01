@@ -3,7 +3,7 @@
 use super::{push_bounded, AuditRecord, HistoryItem, VecDeque};
 use crate::governance::CapabilitySet;
 use crate::language::history::{CompositionKind, COMPOSITION_STEP_LIMIT};
-use crate::language::outcome::{Observed, Outcome};
+use crate::language::outcome::Observed;
 use serde::Serialize;
 
 /// What history can establish about one planned step.
@@ -82,6 +82,8 @@ pub(super) fn merge_stored(
             parent.permission_explanations.clear();
             parent.permissions = Default::default();
             parent.complete = false;
+            parent.repeat_safe = None;
+            parent.next_steps.clear();
             parent
         });
         ensure_steps(&mut item, step.total, live);
@@ -108,15 +110,13 @@ pub(super) fn merge_stored(
                         .is_some_and(|record| record.status == "succeeded")
                 })
                 .count();
-            item.summary = if live {
-                Outcome::CompositionProgress {
+            item.presentation =
+                crate::language::history::OutcomePresentation::incomplete_composition(
                     completed,
-                    total: item.steps.len(),
-                }
-                .summary()
-            } else {
-                Outcome::CompositionUnrecorded.summary()
-            };
+                    item.steps.len(),
+                    live,
+                );
+            item.summary = item.presentation.summary.clone();
         }
         item
     } else {
@@ -201,6 +201,7 @@ mod tests {
     use crate::governance::{AuditSink, Decision};
     use crate::language::composition::{CompositionProgress, StepCounts};
     use crate::language::history::{CompositionKind, StepReceipt};
+    use crate::language::outcome::Outcome;
 
     fn child(position: usize) -> AuditRecord {
         let mut record = AuditRecord::now(

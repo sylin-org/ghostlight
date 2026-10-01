@@ -783,7 +783,12 @@ impl WorkbenchFacade {
     /// Apply an explicit local-human runtime control through the authoritative owners.
     pub fn apply_runtime_intent(&self, intent: WorkbenchRuntimeIntent) -> WorkbenchIntentResult {
         let state = self.governance.apply_runtime_intent(intent.into());
-        let browser_notified = self.browser.publish_control_state(state).is_ok();
+        let browser_connected = self
+            .browser_summary()
+            .iter()
+            .any(|browser| browser.connected);
+        let published = self.browser.publish_control_state(state).is_ok();
+        let browser_notified = browser_connected && published;
         self.projection.publish(WorkbenchChange::RuntimeChanged {
             runtime_state: state,
         });
@@ -791,11 +796,7 @@ impl WorkbenchFacade {
             accepted: true,
             runtime_state: state,
             browser_notified,
-            message: if browser_notified {
-                "Runtime control updated.".into()
-            } else {
-                "Runtime control updated; the browser will receive it after reconnecting.".into()
-            },
+            message: crate::language::control::confirmation(state, browser_notified),
         }
     }
 
@@ -1165,6 +1166,9 @@ pub struct ServiceSummary {
 /// the one thing that must have exactly one.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadinessSummary {
+    /// Human runtime scope stays distinct from browser connection health.
+    #[serde(default)]
+    pub control_detail: String,
     /// The closed state.
     pub state: readiness::Readiness,
     /// The word to show.
@@ -1184,6 +1188,18 @@ impl ReadinessSummary {
         let state = readiness::resolve(facts);
         Self {
             state,
+            control_detail: crate::language::control::detail(
+                if facts.session_ended {
+                    RuntimeControlState::Ended
+                } else if facts.paused {
+                    RuntimeControlState::Held
+                } else if facts.needs_attention {
+                    RuntimeControlState::Attention
+                } else {
+                    RuntimeControlState::Active
+                },
+                facts.browser_connected,
+            ),
             word: state.word().to_owned(),
             detail: state.detail().to_owned(),
             tone: state.tone().to_owned(),
@@ -1323,6 +1339,12 @@ pub struct BrowserInstanceSummary {
 /// One content-minimized terminal history record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HistoryItem {
+    /// Language-owned human account, distinct from the exact machine facts below.
+    pub presentation: crate::language::history::OutcomePresentation,
+    /// Final repeat safety, absent for older receipts that did not retain it.
+    pub repeat_safe: Option<bool>,
+    /// Existing safe guidance retained from the typed outcome owner.
+    pub next_steps: Vec<String>,
     /// Exact controlled tab selected by this live call, when proven by browser execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tab: Option<String>,
@@ -1387,6 +1409,7 @@ pub struct HistoryItem {
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
+        let presentation = crate::language::history::OutcomePresentation::from_record(&value);
         let provenance = value
             .provenance
             .as_ref()
@@ -1406,6 +1429,9 @@ impl From<AuditRecord> for HistoryItem {
             .map(crate::language::history::permission)
             .collect();
         Self {
+            presentation,
+            repeat_safe: value.repeat_safe,
+            next_steps: value.next_steps,
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: if value.unconfirmed_history_steps > 0 {
                 "Some step history could not be saved.".into()

@@ -511,6 +511,18 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
     assert_eq!(result.facts["reason"], ReasonCode::RuntimeHold.as_str());
     assert_eq!(browser.calls().len(), 3);
     assert_eq!(audit.0.lock().unwrap().last().unwrap().effect, "applied");
+    let record = audit.0.lock().unwrap().last().unwrap().clone();
+    assert_eq!(record.repeat_safe, Some(false));
+    assert_eq!(
+        record.next_steps,
+        vec![crate::language::control::APPLIED_BEFORE_CHECK_FAILURE]
+    );
+    let human = crate::workbench::HistoryItem::from(record);
+    assert!(human
+        .presentation
+        .repeat_detail
+        .contains("change was applied"));
+    assert!(!human.presentation.summary.contains("did not run"));
 }
 
 #[test]

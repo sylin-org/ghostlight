@@ -15,6 +15,145 @@ use super::{
     WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort, WorkbenchProjection,
 };
 
+#[test]
+fn recovery_and_effect_truth_survive_later_refusals_and_legacy_history() {
+    use crate::language::outcome::{BlockedReason, Refusal};
+    use crate::work::result::Effect;
+    let projection = WorkbenchProjection::default();
+    let mut uncertain = AuditRecord::now(
+        "uncertain",
+        "workspace",
+        "browser_execute",
+        Capability::Execute,
+        "authority",
+        Decision::permitted(),
+        "unknown",
+        "unknown",
+        &Refusal::EffectUnknown
+            .audit()
+            .with_final_effect(Effect::Unknown, false),
+        10,
+    );
+    uncertain.repeat_safe = Some(false);
+    projection.record(&uncertain, crate::language::audit_health::Storage::Saved);
+    let paused = AuditRecord::now(
+        "paused",
+        "workspace",
+        "browser_read",
+        Capability::Read,
+        "authority",
+        Decision::refused(crate::governance::ReasonCode::RuntimeHold),
+        "blocked",
+        "none",
+        &Refusal::AuthorityBlocked {
+            reason: BlockedReason::Hold,
+            host: None,
+        }
+        .audit(),
+        10,
+    );
+    projection.record(&paused, crate::language::audit_health::Storage::Saved);
+    let history = projection.history();
+    let earlier = history
+        .iter()
+        .find(|record| record.invocation == "uncertain")
+        .unwrap();
+    assert_eq!(earlier.repeat_safe, Some(false));
+    assert_eq!(earlier.next_steps, Refusal::EffectUnknown.next_steps());
+    assert_eq!(
+        earlier.presentation.tone,
+        crate::language::history::OutcomeTone::Caution
+    );
+    let human_pause = HistoryItem::from(paused);
+    assert_eq!(human_pause.status, "blocked");
+    assert_eq!(human_pause.reason, "runtime_hold");
+    assert_eq!(
+        human_pause.presentation.tone,
+        crate::language::history::OutcomeTone::Controlled
+    );
+    assert_eq!(
+        human_pause.presentation.summary,
+        "You paused Ghostlight. This request did not run."
+    );
+    let mut legacy = serde_json::to_value(uncertain).unwrap();
+    legacy.as_object_mut().unwrap().remove("repeat_safe");
+    legacy.as_object_mut().unwrap().remove("next_steps");
+    let old: AuditRecord = serde_json::from_value(legacy).unwrap();
+    let restored = HistoryItem::from(old);
+    assert_eq!(restored.repeat_safe, None);
+    assert!(restored.next_steps.is_empty());
+    assert!(restored
+        .presentation
+        .repeat_detail
+        .contains("Do not repeat"));
+}
+
+#[test]
+fn disconnected_runtime_control_is_authoritative_and_never_replays() {
+    use ghostlight_bridge::browser::RuntimeControlState;
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        Arc::new(crate::browser::RelayBrowserPort::new("ux-epoch".into())),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let initial = facade.snapshot();
+    assert!(initial.readiness.invites_control);
+    assert_eq!(
+        initial.readiness.state,
+        crate::language::readiness::Readiness::NotConnected
+    );
+    for (intent, state, word) in [
+        (
+            super::WorkbenchRuntimeIntent::Hold,
+            RuntimeControlState::Held,
+            "paused",
+        ),
+        (
+            super::WorkbenchRuntimeIntent::Resume,
+            RuntimeControlState::Active,
+            "new requests",
+        ),
+        (
+            super::WorkbenchRuntimeIntent::EndSession,
+            RuntimeControlState::Ended,
+            "stopped",
+        ),
+        (
+            super::WorkbenchRuntimeIntent::StartSession,
+            RuntimeControlState::Active,
+            "new requests",
+        ),
+    ] {
+        let result = facade.apply_runtime_intent(intent);
+        assert!(result.accepted);
+        assert_eq!(result.runtime_state, state);
+        assert!(!result.browser_notified);
+        assert!(result.message.contains(word));
+        assert!(result.message.contains("after reconnecting"));
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.service.runtime_state, state);
+        assert!(snapshot
+            .readiness
+            .control_detail
+            .contains("all Ghostlight sessions"));
+        assert!(snapshot.history.is_empty());
+        assert!(snapshot.operations.is_empty());
+    }
+    let reconnect = super::ReadinessSummary::resolve(&crate::language::readiness::ReadinessFacts {
+        browser_connected: true,
+        paused: true,
+        ..Default::default()
+    });
+    assert_eq!(
+        reconnect.state,
+        crate::language::readiness::Readiness::Paused
+    );
+    assert!(reconnect.invites_control);
+    assert!(reconnect.control_detail.contains("without repeating"));
+}
+
 #[derive(Default)]
 struct Events(Mutex<Vec<WorkbenchEvent>>);
 

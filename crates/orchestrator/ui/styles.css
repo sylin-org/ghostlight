@@ -229,10 +229,15 @@ body.runtime-offline .state-word { color: var(--muted); }
 .cap-execute { --cap: var(--cap-execute); }
 
 .hero-body { position: relative; z-index: 1; min-width: 0; }
-.hero-tool { display: flex; align-items: baseline; gap: 10px; color: var(--ink); font-size: 17px; font-weight: 400; letter-spacing: -.015em; }
-.hero-tool .cap-label { color: var(--cap, var(--cap-read)); font: 500 9px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; transition: color .5s var(--calm); }
-.hero-activity { margin: 4px 0 0; overflow: hidden; color: var(--ink-3); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.hero-reason { margin: 8px 0 0; color: #fca5a5; font-size: 12px; }
+.hero-activity { margin: 0; color: var(--ink); font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.recovery-note { margin: 10px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.recovery-steps { margin: 8px 0 12px; padding-left: 20px; color: var(--ink-3); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.handoff-note { margin: 8px 0; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+.hero.caution::before, .hero.refused::before { background: var(--amber); }
+.hero.controlled::before { background: var(--ink-3); }
+.hero.caution .outcome, .hero.refused .outcome { color: var(--amber); }
+.hero.controlled .outcome { color: var(--ink-2); }
+.hero.caution .med svg, .hero.refused .med svg { stroke: var(--amber); }
 .hero-meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 10px; color: var(--muted); font: 400 11px/1 var(--mono); }
 .hero-meta span { display: inline-flex; align-items: center; gap: 6px; }
 .hero-meta i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; font-style: normal; opacity: .55; }
@@ -241,7 +246,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .elapsed { color: var(--faint); font: 300 25px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; transition: color .5s var(--calm); }
 .hero.live .elapsed { color: var(--a); }
 .hero.blocked .elapsed { color: var(--danger); }
-.outcome { margin-top: 7px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.outcome { margin-top: 7px; max-width: 130px; color: var(--ink-3); font: 500 11px/1.5 var(--sans); }
 .hero.blocked .outcome { color: var(--danger); }
 
 .swap-in { animation: swap-in var(--beat-settle) var(--spring) both; }
@@ -261,6 +266,9 @@ body.runtime-offline .state-word { color: var(--muted); }
 }
 .row:hover { background: rgba(255, 255, 255, .022); }
 .row.blocked { border-left-color: var(--danger); }
+.row.caution, .row.refused { border-left-color: var(--amber); }
+.row.controlled { border-left-color: var(--ink-3); }
+.row-recovery { grid-column: 2 / -1; margin: 0 0 12px; color: var(--amber); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .row-tool { overflow: hidden; padding: 0; color: var(--ink-2); font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .row-tool:hover, .row-tool[aria-expanded="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .action-details { padding: 16px; margin-block: 8px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .025); }
@@ -766,8 +774,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .history-step { padding: 10px 0; border-top: 1px solid rgba(234, 246, 255, .1); }
 .step-line { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: start; }
 .step-line > span { overflow-wrap: anywhere; }
-.step-number, .step-meta { opacity: .7; }
-.step-meta { margin-left: 32px; font-size: 12px; }
+.step-number { opacity: .7; }
 .step-status { font-size: 12px; }
 .permission-details ul { padding-left: 20px; }
 .permission-details li p { margin: 3px 0 8px; overflow-wrap: anywhere; }

@@ -14,12 +14,34 @@ pub struct AuditProjection {
     unconfirmed_history_steps: u32,
     coverage: Option<super::coverage::Coverage>,
     summary: String,
+    next_steps: Vec<String>,
     refusal: Option<AuditRefusal>,
     composition: Option<CompositionProgress>,
     tools: Vec<String>,
 }
 
 impl AuditProjection {
+    /// Read recovery language from the same typed outcome that authored the summary.
+    #[must_use]
+    pub fn next_steps(&self) -> &[String] {
+        &self.next_steps
+    }
+
+    /// Reconcile recovery with final effects without copying a client result or browser payload.
+    #[must_use]
+    pub fn with_final_effect(
+        mut self,
+        effect: crate::work::result::Effect,
+        succeeded: bool,
+    ) -> Self {
+        use crate::work::result::Effect;
+        if matches!(effect, Effect::Unknown | Effect::Partial) && self.composition.is_none() {
+            self.next_steps = Refusal::EffectUnknown.next_steps();
+        } else if effect == Effect::Applied && !succeeded && self.composition.is_none() {
+            self.next_steps = vec![super::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
+        }
+        self
+    }
     /// Retain child storage gaps without copying child payloads.
     pub fn with_unconfirmed_history(mut self, steps: u32) -> Self {
         self.unconfirmed_history_steps = steps;
@@ -138,6 +160,7 @@ impl Outcome {
             unconfirmed_history_steps: 0,
             coverage: None,
             summary: self.summary(),
+            next_steps: self.next_steps(),
             refusal: None,
             tools: vec![],
             composition: match self {
@@ -206,6 +229,7 @@ impl Refusal {
                 _ => self.summary(),
             },
             refusal: Some(refusal),
+            next_steps: self.next_steps(),
             tools: vec![],
             composition: None,
         }
@@ -265,9 +289,35 @@ mod tests {
         };
         assert!(refusal.summary().contains("PRIVATE_EXCEPTION"));
         assert!(!refusal.audit().summary().contains("PRIVATE_EXCEPTION"));
+        assert_eq!(refusal.audit().next_steps(), refusal.next_steps());
         assert_eq!(
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
+        );
+    }
+
+    #[test]
+    fn final_effects_replace_stale_retry_guidance_without_copying_client_details() {
+        use crate::work::result::Effect;
+        let retry = Refusal::DeadlineExpired {
+            before_dispatch: true,
+        }
+        .audit();
+        assert!(retry.next_steps()[0].starts_with("Repeat"));
+        for effect in [Effect::Unknown, Effect::Partial] {
+            let unsafe_repeat = retry.clone().with_final_effect(effect, false);
+            assert_eq!(
+                unsafe_repeat.next_steps(),
+                Refusal::EffectUnknown.next_steps()
+            );
+            assert!(unsafe_repeat
+                .next_steps()
+                .iter()
+                .all(|step| !step.starts_with("Repeat")));
+        }
+        assert_eq!(
+            retry.with_final_effect(Effect::Applied, false).next_steps(),
+            &[super::super::control::APPLIED_BEFORE_CHECK_FAILURE.to_string()]
         );
     }
 

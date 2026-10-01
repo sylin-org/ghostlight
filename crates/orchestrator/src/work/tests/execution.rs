@@ -347,7 +347,7 @@ fn closing_an_already_gone_tab_succeeds_without_touching_the_browser() {
 /// reason, never as an incompatible receipt.
 #[test]
 fn effect_unknown_receipts_render_as_unknown_with_the_browser_reason() {
-    let (executor, browser, _workspaces, workspace, _) = fixture();
+    let (executor, browser, _workspaces, workspace, audit) = fixture();
     browser.connect(vec![summary("browser_chrome", true)]);
     browser.push(Ok(BrowserOutcome::EffectUnknown {
         reason: "the page stopped responding after dispatch".into(),
@@ -362,6 +362,16 @@ fn effect_unknown_receipts_render_as_unknown_with_the_browser_reason() {
     );
 
     assert_eq!(terminal.status, Status::Unknown);
+    let records = audit.0.lock().unwrap();
+    let receipt = records.last().unwrap();
+    assert_eq!(receipt.repeat_safe, Some(terminal.repeat_safe));
+    assert_eq!(receipt.next_steps, terminal.next_steps);
+    let human = crate::workbench::HistoryItem::from(receipt.clone());
+    assert_eq!(human.presentation.label, "Effects uncertain");
+    assert!(human.presentation.repeat_detail.contains("Do not repeat"));
+    assert!(!serde_json::to_string(&human)
+        .unwrap()
+        .contains("the page stopped responding"));
     assert_eq!(terminal.facts["reason"], "browser_effect_unknown");
     assert_eq!(
         terminal.facts["detail"],
@@ -407,7 +417,15 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
     let client = serde_json::to_string(&result).unwrap();
     assert!(client.contains("PRIVATE_PAGE_SENTINEL"));
     assert!(client.contains("PRIVATE_EXCEPTION_SENTINEL"));
-    let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    let records = audit.0.lock().unwrap();
+    let parent = records.last().unwrap();
+    assert_eq!(parent.next_steps, result.next_steps);
+    assert_eq!(parent.repeat_safe, Some(false));
+    assert!(records
+        .iter()
+        .filter(|record| record.step.is_some())
+        .all(|record| record.repeat_safe.is_some()));
+    let encoded = serde_json::to_string(&*records).unwrap();
     assert!(
         !encoded.contains("PRIVATE_"),
         "audit copied a flow payload: {encoded}"

@@ -1744,6 +1744,12 @@ fn unix_ms() -> u64 {
 /// This is a persistence reader, never an authority or command input (ADR-0163).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuditRecord {
+    /// Final repeat safety; absence means older history did not retain it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_safe: Option<bool>,
+    /// At most two language-owned suggestions, never copied from arbitrary result facts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<String>,
     /// Child receipts whose storage could not be confirmed.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub unconfirmed_history_steps: u32,
@@ -1866,6 +1872,8 @@ impl AuditRecord {
     ) -> Self {
         Self {
             unconfirmed_history_steps: language.unconfirmed_history_steps(),
+            repeat_safe: None,
+            next_steps: language.next_steps().iter().take(2).cloned().collect(),
             timestamp_ms: unix_ms(),
             invocation: invocation.into(),
             workspace: workspace.into(),

@@ -87,10 +87,10 @@ impl Readiness {
         }
     }
 
-    /// Whether a person can act on this state from the front door.
+    /// Runtime control stays available whenever this authority can answer the front door.
     #[must_use]
     pub const fn invites_control(self) -> bool {
-        !matches!(self, Readiness::NotConnected)
+        true
     }
 }
 
@@ -205,13 +205,9 @@ mod tests {
     }
 
     #[test]
-    fn only_a_disconnected_stack_offers_no_control() {
+    fn the_reachable_authority_offers_control_even_without_a_browser() {
         for state in Readiness::ALL {
-            assert_eq!(
-                state.invites_control(),
-                *state != Readiness::NotConnected,
-                "{state:?}"
-            );
+            assert!(state.invites_control(), "{state:?}");
         }
     }
 }

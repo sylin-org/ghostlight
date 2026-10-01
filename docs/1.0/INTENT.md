@@ -105,6 +105,9 @@ the Applications entry as interaction routes.
   Plural MCP sessions and browser instances appear beside it.
 - Each queued action name toggles an inline panel with the same details as the current action.
   Mouse and keyboard activation work alike; incoming activity preserves open details and focus.
+- Completed work leads with its authored outcome. Safe recovery facts remain visible for uncertain
+  and partial effects even after newer work arrives. Human Pause/Stop is calm; policy refusal,
+  failure, and uncertainty remain distinct. Exact machine facts stay in expandable details.
 - The record beneath the current action is bounded, local, newest first, and content-minimized.
   By default an action keeps the bounded visible name of the element it actually used, such as
   `Clicked the "Save" button`; governance can remove target names without making the action vague.
@@ -131,6 +134,9 @@ the Applications entry as interaction routes.
   Explicit rule edits and removals are never undone by that convenience.
 - Pause, resume, and start-session apply from the persistent header before At a glance
   and match the tray, so taking the wheel has one affordance rather than several.
+- These controls apply across Ghostlight sessions whenever the authority is reachable, including
+  while browsers reconnect. Browser connection health does not remove human authority. Show tab
+  is for looking; Pause is the takeover control. Neither control changes configured permissions.
 - A pause prevents the next browser effect by refusing it at the existing final boundary. It does
   not suspend an invocation or hold a client's request open, because a human-scale pause outlives
   MCP request timeouts and would compete with the ADR-0113 deadline. The refusal is non-terminal and

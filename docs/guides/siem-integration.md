@@ -60,6 +60,8 @@ its bounded History view from the same file.
 | `denial_id` | Deterministic `D-` correlation id for an authored denial. |
 | `status`, `effect` | Terminal result and physical-effect class. |
 | `summary` | Bounded Ghostlight-authored sentence. |
+| `repeat_safe` | Optional recorded repeat safety. Absence means older history did not retain it. |
+| `next_steps` | At most two language-owned safe suggestions. Never client/browser payloads. |
 | `refusal_facts` | Optional closed refusal category and typed context; never a copy of client result facts. |
 | `duration_ms` | Direct decode-to-terminal or child dispatch-to-terminal elapsed time. |
 | `observed` | Closed governed landing and measurement facts. |

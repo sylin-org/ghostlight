@@ -4,6 +4,14 @@ Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public vers
 
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
 
+The follow-on in-service UX source slice is on `codex/in-service-outcome-ux`, based on clean
+`22d27bd175fded4b66a731fb6b77d9fc433b8d2c`. [ADR-0187](adr/0187-readable-workbench-outcomes-and-reconnection-controls.md)
+keeps safe outcome/recovery facts in the existing work view, separates global human control from
+browser reconnection, and clarifies Show tab versus takeover. The full guardian About card and
+all five destinations remain intact. Source validation and the pending runtime handoff are in
+the [UX evidence record](testing/in-service-ux-2026-10-01.md). Tangent owns desktop/browser testing
+until the parent releases that lane. No serving installation or registration has changed.
+
 The owner authorized a bounded local engineering trial. The starting repository was clean at
 `de1a686761af5430afc50763d1a282efaa80f615`; no pending-change checkpoint commit was needed.
 Work proceeds on `codex/quiet-coexistence-trial` in the ordinary repository. This source trial

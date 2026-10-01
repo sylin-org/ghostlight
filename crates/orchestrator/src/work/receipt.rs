@@ -50,6 +50,10 @@ impl ApplicationExecutor {
             terminal.result.facts["coverage"] = json!(coverage);
         }
         let tool = language::audit::tool_name(tool);
+        terminal.audit = terminal.audit.with_final_effect(
+            terminal.result.effect,
+            terminal.result.status == Status::Succeeded,
+        );
         let event = match terminal.result.status {
             Status::Blocked
                 if !matches!(
@@ -149,6 +153,7 @@ impl ApplicationExecutor {
         .with_observation(observed)
         .with_browser(browser_label);
         record.step = step;
+        record.repeat_safe = Some(terminal.result.repeat_safe);
         record.permissions = self.take_permissions(&terminal.result.invocation);
         let storage = self.audit.record_with_provenance(&record, provenance);
         terminal.result.summary = if storage == language::audit_health::Storage::Saved {

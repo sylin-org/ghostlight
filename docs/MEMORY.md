@@ -120,6 +120,10 @@ the owner wants, and what this project learned the hard way.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
   the visual language, the motion character, and user expectations are identity. Model-facing tools
   and descriptions are mechanisms the orchestrator owns and may redesign.
+  Ghostlight's About must keep its complete TCG-like guardian card: lantern pixel art, softly lit
+  dark frame, cyan divider/diamond, circular version medallion, name/title, ability icons, and
+  flavor line, with the adjacent real local facts and help links. Normal-screen refinement must
+  not flatten or replace that identity.
 - **Prefer the root fix.** No wrapper, alternate id, guarded installer, or parallel protocol added
   to route around the abstraction that should own the change.
 - **Understand the architecture before fixing.** Several failures in one capability means stop

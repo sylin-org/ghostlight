@@ -619,6 +619,95 @@ view.collections({
 
 const historyChecks = [];
 {
+  const entries = sandbox.globalThis.GhostlightEntries;
+  const uncertain = {
+    invocation: "ux-unknown", workspace: "exact-workspace", tool: "browser_execute",
+    capability: "execute", status: "unknown", effect: "unknown", allowed: true,
+    summary: "Sent, but the browser never confirmed what happened.", complete: true,
+    repeat_safe: false, next_steps: ['Observe the page with browser_read. <script>untrusted</script>'],
+    presentation: { label: "Effects uncertain", tone: "caution",
+      summary: "Sent, but the browser never confirmed what happened.",
+      repeat_detail: "Do not repeat this action. Observe the page before preparing unfinished work.",
+      reveal_detail: "Show tab lets you look. Pause before taking over." },
+    tab: "exact-tab", timestamp_ms: 1
+  };
+  const held = { ...uncertain, invocation: "ux-held", timestamp_ms: 2,
+    status: "blocked", effect: "none", allowed: false, reason: "runtime_hold", next_steps: [],
+    summary: "The user paused Ghostlight. Wait for further instructions.",
+    presentation: { label: "Paused by you", tone: "controlled",
+      summary: "You paused Ghostlight. This request did not run.", repeat_detail: "" }
+  };
+  const entry = entries.entryFromRecord(uncertain);
+  view.hero(entry, false);
+  const uncertainMarkup = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["unknown effects lead with authored language and show safe recovery with exact technical facts",
+    nodes.get("hero").className.includes("caution")
+      && uncertainMarkup.startsWith('<p class="hero-activity">Sent, but')
+      && uncertainMarkup.includes("Do not repeat this action")
+      && uncertainMarkup.includes("browser_read") && uncertainMarkup.includes("&lt;script&gt;")
+      && uncertainMarkup.includes("<dt>Repeat safe</dt><dd>false</dd>")
+      && uncertainMarkup.includes("<dt>Effect</dt><dd>unknown</dd>")
+      && uncertainMarkup.includes("exact-workspace") && uncertainMarkup.includes("exact-tab")
+      && uncertainMarkup.includes("Pause before taking over")
+      && !uncertainMarkup.includes('class="hero-tool"')]);
+  view.hero(entries.entryFromRecord(held), false);
+  const heldMarkup = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["human Pause is calm while blocked status and the fixed machine directive remain inspectable",
+    nodes.get("hero").className.includes("controlled") && !nodes.get("hero").className.includes("blocked")
+      && nodes.get("hero-right").innerHTML.includes("Paused by you")
+      && heldMarkup.startsWith('<p class="hero-activity">You paused Ghostlight.')
+      && heldMarkup.includes("<dt>Status</dt><dd>blocked</dd>")
+      && heldMarkup.includes("The user paused Ghostlight. Wait for further instructions.")
+      && !heldMarkup.includes('data-history-details="ux-held:technical" open')]);
+  for (const [tone, label, effect, status, allowed] of [
+    ["complete", "Completed", "applied", "succeeded", true],
+    ["controlled", "Stopped by you", "none", "blocked", false],
+    ["refused", "Request refused", "none", "blocked", false],
+    ["failed", "Could not complete", "none", "failed", true],
+    ["caution", "Partly completed", "partial", "failed", true]
+  ]) {
+    view.hero(entries.entryFromRecord({ ...uncertain, effect, status, allowed,
+      presentation: { ...uncertain.presentation, tone, label } }), false);
+    historyChecks.push([`${label} uses the authored outcome label while retaining ${status}/${effect}`,
+      nodes.get("hero-right").innerHTML.includes(label)
+        && nodes.get("hero-body").innerHTML.includes(`<dt>Status</dt><dd>${status}</dd>`)
+        && nodes.get("hero-body").innerHTML.includes(`<dt>Effect</dt><dd>${effect}</dd>`)]);
+  }
+  const store = sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
+  store.applySnapshot({ seq: 0, service: { runtime_state: "active" }, operations: [], history: [uncertain], sessions: [] }, true);
+  store.applyChange({ seq: 1, change: { kind: "operation_settled", record: held } });
+  const earlier = store.feed().find(record => record.invocation === uncertain.invocation);
+  view.hero(earlier, false);
+  historyChecks.push(["a later refusal retains the earlier uncertainty and recovery facts in history",
+    store.feed().length === 2 && earlier.repeatSafe === false
+      && earlier.nextSteps[0].includes("browser_read")
+      && nodes.get("hero-body").innerHTML.includes("Do not repeat this action")]);
+  const legacy = entries.entryFromRecord({ invocation: "legacy-ux", workspace: "w", tool: "browser_read",
+    allowed: true, status: "succeeded", effect: "none", summary: "Read 5 words." });
+  view.hero(legacy, false);
+  historyChecks.push(["legacy history omits unavailable guidance and never invents repeat safety",
+    legacy.repeatSafe === null && legacy.nextSteps.length === 0
+      && nodes.get("hero-body").innerHTML.includes("<dt>Repeat safe</dt><dd>Not recorded</dd>")]);
+  const disconnected = snapshot();
+  disconnected.readiness = { ...disconnected.readiness, state: "not_connected", word: "Not connected",
+    tone: "offline", invites_control: true,
+    control_detail: "Controls apply across all sessions and remain in effect when a browser reconnects." };
+  view.band({ snapshot: disconnected, runtime: "active", running: 0, connected: true });
+  historyChecks.push(["a reachable authority offers Pause while browser connection is absent and explains global scope",
+    !nodes.get("wheel").disabled && nodes.get("wheel").dataset.intent === "hold"
+      && nodes.get("browser-attention").textContent.includes("across all sessions")]);
+  view.band({ snapshot: disconnected, runtime: "held", running: 0, connected: true });
+  historyChecks.push(["a disconnected paused authority offers Resume",
+    !nodes.get("wheel").disabled && nodes.get("wheel").dataset.intent === "resume"]);
+  view.band({ snapshot: disconnected, runtime: "ended", running: 0, connected: true });
+  historyChecks.push(["a disconnected stopped authority offers Start session",
+    !nodes.get("wheel").disabled && nodes.get("wheel").dataset.intent === "start_session"]);
+  view.band({ snapshot: disconnected, runtime: "active", running: 0, connected: false });
+  historyChecks.push(["losing the authority disables control even when an old snapshot was reachable", nodes.get("wheel").disabled]);
+  view.band({ snapshot: snapshot(), runtime: "active", running: 0, connected: true });
+  historyChecks.push(["authority reconnection restores control without replay", !nodes.get("wheel").disabled]);
+}
+{
   const store = sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
   const active = { invocation: "active-h8", workspace: "w", tool: "browser_read", activity: "Reading", phase: "running" };
   const waiting = { ...active, invocation: "waiting-h8", phase: "waiting", activity: "Waiting for earlier browser work" };

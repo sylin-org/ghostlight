@@ -217,6 +217,7 @@ mod tests {
 
         for state in Readiness::ALL {
             let readiness = ReadinessSummary {
+                control_detail: String::new(),
                 state: *state,
                 word: state.word().into(),
                 detail: state.detail().into(),

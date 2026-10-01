@@ -73,6 +73,7 @@
      * the host the action landed on.
      */
     function sentence(entry) {
+      if (entry.presentation?.summary) return entry.presentation.summary;
       if (entry.summary) return entry.summary;
       if (!entry.settled) return entry.activity;
       if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
@@ -234,14 +235,14 @@
         const receipt = step.record;
         const state = receipt?.status ?? step.state;
         const labels = { succeeded: "Completed", not_started: "Could not start", not_run: "Not run", pending: "Pending", unconfirmed: "Receipt unavailable" };
-        const label = labels[state] ?? words(state);
+        const label = receipt?.presentation?.label ?? labels[state] ?? words(state);
         const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
-        const title = receipt?.summary ?? step.tool ?? `Step ${step.position}`;
-        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`)
+        const title = receipt?.presentation?.summary ?? receipt?.summary ?? step.tool ?? `Step ${step.position}`;
+        const detail = receipt ? recoveryMarkup(receipt) + technicalMarkup(receipt, `${entry.invocation}:step:${step.position}:technical`)
+          + storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`)
           + connectionMarkup(receipt, `${entry.invocation}:step:${step.position}:connection`) : "";
         return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
           + `<span class="step-number">${step.position}</span><span>${escapeHtml(title)}</span><span class="step-status">${escapeHtml(label)}</span></div>`
-          + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
           + detail + "</li>";
       }).join("");
       return storageMarkup(entry) + historyDetails(`${entry.invocation}:steps`, `View ${entry.steps.length} steps`, `<ol class="history-steps">${rows}</ol>`, "composition-details") + connection + coverageMarkup(entry);
@@ -267,28 +268,56 @@
       if (browser) meta.push(`<span><i></i>${escapeHtml(browser)}</span>`);
       // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
       if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
-      if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
-      if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
       if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
 
-      const reason = isBlocked(entry) && entry.reason
-        ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
+      const reason = isBlocked(entry)
+        ? refusalMarkup(entry)
         : "";
 
-      return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
-        + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
+      return `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
+        + recoveryMarkup(entry)
         + revealMarkup(entry)
+        + technicalMarkup(entry, `${entry.invocation}:technical`)
         + compositionMarkup(entry)
         + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
+    }
+
+    /** Safe suggestions are authored with the outcome, never inferred from a tool or reason. */
+    function recoveryMarkup(entry) {
+      const guidance = entry.presentation?.repeat_detail;
+      const steps = entry.nextSteps ?? entry.next_steps ?? [];
+      return (guidance ? `<p class="recovery-note">${escapeHtml(guidance)}</p>` : "")
+        + (steps.length ? `<ul class="recovery-steps">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>` : "");
+    }
+
+    /** Keep exact machine facts available without making them the headline. */
+    function technicalMarkup(entry, key) {
+      const repeat = entry.repeatSafe ?? entry.repeat_safe;
+      const fields = [["Tool", entry.tool], ["Capability", entry.capability],
+        ["Status", entry.status], ["Effect", entry.effect], ["Reason", entry.reason],
+        ["Repeat safe", repeat == null ? "Not recorded" : String(repeat)],
+        ["Workspace", entry.workspace], ["Invocation", entry.invocation]];
+      const body = '<dl class="connection-facts">' + fields.filter(([, value]) => value != null).map(([label, value]) =>
+        `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("") + '</dl>'
+        + (entry.summary && entry.summary !== sentence(entry) ? `<p>${escapeHtml(entry.summary)}</p>` : "");
+      return historyDetails(key, "Technical details", body, "connection-details technical-details");
+    }
+
+    /** The orchestrator selects terminal tone; legacy receipts retain their prior treatment. */
+    function outcomeClass(entry) {
+      if (!entry.settled) return isBlocked(entry) ? " blocked" : "";
+      const tones = { controlled: " controlled", refused: " refused", failed: " blocked", caution: " caution", complete: "" };
+      return tones[entry.presentation?.tone] ?? (isBlocked(entry) ? " blocked" : "");
     }
 
     /** A handle is evidence of a reveal destination; a browser name or host is not. */
     function revealMarkup(entry) {
       if (!entry.workspace || !entry.tab) return "";
       return `<button class="ghost-button" type="button" data-reveal-workspace="${escapeHtml(entry.workspace)}"`
-        + ` data-reveal-tab="${escapeHtml(entry.tab)}" title="Show this controlled tab without permitting work or resuming it">Show tab</button>`;
+        + ` data-reveal-tab="${escapeHtml(entry.tab)}" title="Show this controlled tab without permitting work or resuming it">Show tab</button>`
+        + (entry.presentation?.reveal_detail ? `<p class="handoff-note">${escapeHtml(entry.presentation.reveal_detail)}</p>` : "");
     }
 
     /**
@@ -331,6 +360,8 @@
         : duration(settledMs(entry));
       const outcome = running
         ? words(entry.phase)
+        : entry.presentation?.label
+          ? entry.presentation.label
         : isBlocked(entry)
           ? "blocked"
           : words(entry.status ?? "completed");
@@ -342,14 +373,12 @@
       if (!entry) {
         el.hero.className = "hero";
         el["hero-med"].innerHTML = GLYPHS.scan;
-        el["hero-body"].innerHTML = '<div class="hero-tool">Nothing yet</div>'
-          + '<p class="hero-activity">The first browser action an agent takes will appear here.</p>';
+        el["hero-body"].innerHTML = '<p class="hero-activity">The first browser action an agent takes will appear here.</p>';
         el["hero-right"].innerHTML = "";
         return;
       }
-      el.hero.className = `hero ${capabilityClass(entry)}`;
+      el.hero.className = `hero ${capabilityClass(entry)}${outcomeClass(entry)}`;
       if (isRunning(entry)) el.hero.classList.add("live");
-      if (isBlocked(entry)) el.hero.classList.add("blocked");
       el["hero-med"].innerHTML = glyphFor(entry);
       replaceHistoryMarkup(el["hero-body"], heroMarkup(entry));
       el["hero-right"].innerHTML = heroRightMarkup(entry);
@@ -371,7 +400,7 @@
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
       return `<div class="med-mini">${glyphFor(entry)}</div>`
-        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.tool)}</button>`
+        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-label="${escapeHtml(describe(entry))} Show details" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.presentation?.label ?? entry.activity ?? entry.tool)}</button>`
         + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
@@ -379,13 +408,14 @@
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
+        + (entry.presentation?.repeat_detail ? `<p class="row-recovery">${escapeHtml(entry.presentation.repeat_detail)}</p>` : "")
         + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;
     }
 
     function rowClass(entry) {
       let name = `row ${capabilityClass(entry)}`;
       if (isRunning(entry)) name += " running";
-      if (isBlocked(entry)) name += " blocked";
+      name += outcomeClass(entry);
       return name;
     }
 
@@ -483,11 +513,13 @@
 
       const paused = facts.runtime !== "active";
       const attention = facts.snapshot?.configuration?.browser_attention;
-      el["browser-attention"].hidden = !attention;
-      el["browser-attention"].textContent = !attention ? "" : attention.value === "background"
+      const attentionDetail = !attention ? "" : attention.value === "background"
         ? "Browser work stays in the background. Use Show tab to look."
         : BROWSER_ATTENTION_FOREGROUND;
-      el.wheel.disabled = !(facts.snapshot?.readiness?.invites_control ?? false);
+      el["browser-attention"].hidden = !attentionDetail && !readiness?.control_detail;
+      el["browser-attention"].textContent = [attentionDetail, readiness?.control_detail].filter(Boolean).join(" ");
+      el.wheel.disabled = facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
+      el.wheel.title = readiness?.control_detail ?? "";
       el.wheel.dataset.intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
       el["wheel-icon"].innerHTML = paused

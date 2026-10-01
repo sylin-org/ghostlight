@@ -1044,6 +1044,15 @@ mod tests {
             phase: OperationPhase::Running,
         };
         let record = HistoryItem {
+            presentation: crate::language::history::OutcomePresentation {
+                label: "Completed".into(),
+                tone: crate::language::history::OutcomeTone::Complete,
+                summary: "Read 1,240 words from example.com.".into(),
+                repeat_detail: String::new(),
+                reveal_detail: crate::language::control::SHOW_TAB_GUIDANCE.into(),
+            },
+            repeat_safe: None,
+            next_steps: vec![],
             tab: None,
             provenance: None,
             storage: crate::language::audit_health::Storage::Saved,
