@@ -35,9 +35,18 @@ is unchanged. A source-only correction excludes inactive trees from inventory an
 retaining exact active identity, scope, malformed-tree, stale-target and uncertainty guards.
 Independent Sol Max source review passes. Aggregate gates pass: 594 Rust tests, 365 extension
 tests, 101 Workbench assertions, formatting, strict Clippy and changed-JavaScript syntax.
-The patch is frozen for parent-coordinated independent acceptance before adapter reload.
+The parent independently accepted the exact frozen hashes. Source correction `1485b8a4` was
+committed and the existing adapter reloaded. Two installed read/fill/read rounds passed while
+Chrome reported an active HTTP root plus two prerender roots; only the active document entered
+scope. Installed uncertainty, Pause, Show while held, Resume without replay, Stop and Start
+passed. Ready is restored and the full About card verified. Native source remains `7af79ed4`;
+no further native image swap occurred. The foreground lane is released for final independent
+live review. [Recovery evidence](testing/document-lifecycle-recovery-2026-10-01.md) preserves
+the first failures, exact source acceptance, actual lifecycle inventory and final screenshots.
 Six of nine preserved verification failures match exact synthetic receipts; three remain
-unclassified. Other owner failures are not individually attributed. No permission,
+unclassified. Other owner failures are not individually attributed. One post-reload harness
+attempt used a stale saved handle and correctly returned `tab_unavailable`; a fresh owned
+fixture resolved that test setup limitation. No permission,
 public version, publication, or installation selection changed.
 
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)

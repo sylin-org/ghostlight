@@ -1,8 +1,10 @@
 # Current document lifecycle recovery -- 2026-10-01
 
-Source-only correction on `codex/in-service-outcome-ux`, following deployed `7af79ed4`.
-No adapter reload or further installed action occurred after the owner's 06:16 UTC report.
-The foreground lane is released for parent-coordinated independent review of this frozen patch.
+Correction `1485b8a4033a754c7741a56fcebbcc941fcab075` on `codex/in-service-outcome-ux`, following
+deployed native source `7af79ed4`. Further live actions paused at the owner's 06:16 UTC report.
+The parent independently accepted the frozen patch before the existing adapter was reloaded.
+Bounded installed acceptance passed. The foreground lane is now released for final independent
+live review; no concurrent GUI, browser, service or adapter changes are planned.
 
 ## Evidence and attribution
 
@@ -39,13 +41,29 @@ inactive-tree addition and removal, stale cached locators, point/focus routing, 
 inactive lifecycles, malformed active trees, exclusion and post-dispatch uncertainty.
 Independent Sol Max source review also replayed historical and adversarial cases.
 
-## Installed acceptance still required
+## Installed acceptance
 
-This candidate has not been explicitly reloaded. Freeze source before the parent's independent
-review. Then reload only the existing Ghostlight adapter; native binaries need no rebuild.
-Verify consecutive reads and fills in the ordinary installed browser under the reproduced frame
-condition, followed by the bounded human Pause/Show/Resume/Stop journey. Retain failing receipts.
-Do not suppress verification refusals globally or relax access guards to get a green result.
+The parent independently replayed 17 repo tests and five separate probes. Frozen SHA-256 values
+matched: documents.js `99d9a457144b4747d5360d2e664044221e25b27a83e168c416e9b5d421f472bd`;
+documents.test.js `740d2c7395b186552f1b3357b74c23a2fcd4b447c1a6bb3487c0c75ad2f02972`.
+Only the existing adapter Reload control was invoked. A generic Chrome main-window helper first
+refused the wrong window; exact internal details-page identity resolved that harness limitation.
+
+The first post-reload attempt used a stale saved tool handle and returned `tab_unavailable`,
+effect none. It is retained in `.tmp/local-deploy-lifecycle-stale-handle-failure.json`.
+A fresh owned localhost fixture passed two consecutive read/fill/read rounds, with exact filled
+value observations. `.tmp/local-deploy-lifecycle-accept.json` contains every receipt.
+Chrome simultaneously reported active HTTP root 0, HTTPS prerender root 46 and HTTP prerender
+root 47. The new adapter projected only the active document. Sanitized actual inventory:
+`.tmp/local-deploy-lifecycle-final-inventory.json`. No private URL or page content is included.
+
+The installed human-control journey passed: thrown script retained unknown effect and recovery;
+Pause blocked fill with no effect; Show tab left Pause unchanged; Resume preserved one script
+effect and original input value, replaying neither request; End session blocked reads; Start
+session restored Ready. `.tmp/local-deploy-live-ux.json` and its timestamped copy retain receipts.
+Actual final native screenshots: `live-native-uncertain.png`, `live-native-paused.png`,
+`live-native-paused-after-show.png`, `live-native-ended.png`, `live-native-final-about.png`, and
+`live-native-final-ready.png`, all under `.tmp/`. The complete guardian card is unchanged.
 
 The installed native Workbench renders correctly in `.tmp/live-native-corrected-current.png`.
 Its visible-only At a glance test locator failed while another application occluded the window;
@@ -56,3 +74,10 @@ The actual local UI entry remains `target/release/ghostlight.exe open`; there is
 Rollback copies exist for the 04:43 and 05:56 native swaps. Reverting those binaries alone does
 not remove this historically reproduced adapter defect. Selection, policy, history, registrations
 and browser grants must remain intact throughout restoration. No remote publication occurred.
+
+Remaining limits: the parent owns final independent live acceptance. Disconnected Pause,
+legacy history, child recovery, narrow/enlarged text and Tab/Shift-Tab were validated in the prior
+isolated native acceptance; this final installed run did not repeat them. Enter activation
+remains inconclusive from the earlier guarded attempt. Form-diagnostics worker suspension and
+delivery races have executable source coverage; actual worker suspension was not forced in this
+run. Synthetic fixture tabs and the own worker inspector remain available for independent review.

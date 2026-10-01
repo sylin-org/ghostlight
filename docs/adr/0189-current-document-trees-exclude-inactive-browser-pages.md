@@ -1,6 +1,6 @@
 # ADR-0189: Current document trees exclude inactive browser pages
 
-Date: 2026-10-01. Status: Accepted (source correction; installed acceptance pending).
+Date: 2026-10-01. Status: Accepted (implemented; bounded installed acceptance passed).
 Builds on ADR-0138, ADR-0151, and ADR-0181.
 
 ## Context
@@ -41,5 +41,8 @@ An inactive page is outside the current page's document authority and routing gr
 Executable adapter tests replay active frame 0 plus inactive frame 42, consecutive scoped
 read/fill/read, inactive-tree addition/removal, inactive subtrees and focus, cached locators,
 point routing, malformed active graphs, exclusion, and effect uncertainty. Existing guards remain.
-Installed acceptance must separately prove consecutive reads and fills in the ordinary browser.
+Installed acceptance proved two consecutive read/fill/read rounds in the ordinary browser while
+Chrome reported active HTTP root 0 plus HTTPS prerender root 46 and HTTP prerender root 47.
+Only the active document entered scope. The installed human-control journey also passed.
+The parent coordinates a separate final independent live check.
 No owner-target page content or private host is needed to reproduce or report this failure.

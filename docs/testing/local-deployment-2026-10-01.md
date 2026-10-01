@@ -1,5 +1,28 @@
 # Authorized local deployment -- 2026-10-01
 
+## Current installed result (06:36 UTC follow-up)
+
+The installed native source is `7af79ed48d142a7f7deb151a55522f78256d5451`; its supported
+orchestrator-only swap completed at 05:56 UTC. The adapter now includes independently accepted
+`1485b8a4033a754c7741a56fcebbcc941fcab075`, applied through the existing extension Reload control.
+Two installed read/fill/read rounds passed with an active root plus two prerender roots.
+The native uncertainty, Pause/Show/Resume without replay, Stop/Start journey passed. Ready is
+restored. Full actual About/outcome captures and preserved initial failures are in the
+[recovery record](document-lifecycle-recovery-2026-10-01.md). Final independent live review remains
+with the parent; the foreground lane is released.
+
+Current orchestrator SHA-256: `917c2de645a017f3eaeb91392a14623fa2a8529823432741149b4a8f8d146527`.
+Browser connector and MCP hashes below are unchanged. Native source/build identity is separate
+from the adapter-only correction; no native rebuild or swap was needed for lifecycle filtering.
+Verification at 06:36 UTC confirms Ready, fresh build identity, unchanged selection, policy-file
+state, adapter grants, MCP bytes, and prior audit prefix. Current capture/rollback directory:
+`.tmp/local-deployment-2026-10-01T05-54-50Z/`. Its saved prior native image is the first reviewed
+UX build; `previous-reviewed-extension.zip` preserves the preceding adapter source as evidence.
+The initial 04:41 backup below remains available. Reverting native images alone does not fix the
+historically reproduced inactive-root adapter defect. No rollback was executed.
+
+## Initial deployment record
+
 Leo explicitly asked to deploy Ghostlight locally and test it live. Reviewed implementation:
 `c491a2643fbab7874606110452899e37b5c5d60f`, branch `codex/in-service-outcome-ux`.
 The checkout was clean before deployment. No implementation, permissions, registration, public
