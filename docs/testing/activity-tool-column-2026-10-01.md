@@ -61,6 +61,49 @@ workbench-surface.mjs `6d3ebeed1ebe7e044effeccc6e47fe1c4ddb7faf27d7b597cf3c3b832
 The disposable component profiles have been removed after their processes exited; snapshots and
 the reproducible fixture remain. The existing native/browser installation and user tabs remain.
 
-The parent independently evaluates comprehension and safety before installation. The original
+The parent independently evaluated comprehension and safety before installation. The original
 failure diagnostics and earlier local deployment evidence are preserved. Public versions and
 publication state are unchanged. No generated art, dashboard, data model or new destination.
+
+## Approved installed follow-up
+
+The parent approved exact `696275e66fb69c9412b1a1b56533066a948f82a4` and directed the authorized
+local correction. `scripts/dev-loop.ps1 -Action Deploy -Component @('orchestrator')` built in
+`.target-dev-loop`, stopped only the selected old authority, replaced only `ghostlight.exe`, and
+started the selected authority. Existing adapter and connector files were unchanged; no native-host
+registration, browser restart or extension reload occurred. Native PID 28872 remains running.
+
+Installed and fresh-build SHA-256 match:
+`8f4bc1ee0bd7bdecee90d2ed5c307dcdf5e0319ab3932f311a8dce6985402a7a`.
+Verification at 13:06 UTC confirms Ready; identical selection and policy-file state; prior audit
+bytes preserved; both connectors unchanged; and identical adapter source, permissions and grants.
+`.tmp/tool-column-installed-verified.json` records the facts. Version remains 1.3.12.
+
+Actual installed screenshots under `.tmp/`:
+
+- `tool-column-installed-mixed.png`: restored tool names in the original mixed history.
+- `tool-column-installed-owned.png`: a later successful read with earlier uncertainty retained.
+- `tool-column-installed-show.png`: exact owned Show tab control used without changing Ready.
+- `tool-column-installed-details.png`: uncertainty details expanded with repeat guidance and Show.
+- `tool-column-installed-about.png`: complete unchanged guardian card and adjacent local facts.
+- `tool-column-installed-final.png`: Ready, compact mixed list, tool names primary.
+
+One fresh localhost fixture opened, read, ran one intentionally throwing synthetic script, and
+read again. The uncertain result retained `repeat_safe: false` and was never repeated. No existing
+user tab was navigated or closed. The fixture tab remains available for inspection; its temporary
+server and connector exited. Exact receipts: `.tmp/tool-column-installed-ui.json`.
+
+Native UIA initially omitted the Show tab control until the exact window/provider was refreshed.
+The row disclosure correctly exposes ExpandCollapsePattern, not InvokePattern. Using that
+supported pattern expanded and collapsed it. These harness limits did not trigger another browser
+action or change the product. There is no claim about global keyboard activation.
+
+Fresh rollback capture: `.tmp/local-deployment-2026-10-01T12-51-36Z/`. Its guarded,
+syntax-checked `rollback-orchestrator.ps1` is bound to that directory and restores only the saved
+prior authority, leaving selection, policy, audit, connectors and adapter in place. It was not run.
+Open the actual native app with `target/release/ghostlight.exe open`; no HTTP UI address exists.
+
+The 700px component preview has inherited clipping from the unchanged 720px minimum width.
+It shows restored identities, not full fit at 700px. That layout issue is outside this targeted
+correction. Both uploaded Library screenshots remain uninspected due to the Windows metadata
+helper failure recorded above. Actual native captures supply independent evidence.
