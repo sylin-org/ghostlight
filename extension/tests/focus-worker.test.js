@@ -60,8 +60,7 @@ test("runtime pause, attention, stop, and disconnect restore focus without affec
   for (const boundary of ["held", "attention", "ended", "disconnected"]) {
     const { sandbox, lifecycle, attached, focus } = fixture();
     await sandbox.applyRuntimeState("active");
-    await sandbox.ensureDebugger(7);
-    await lifecycle.release(7);
+    await lifecycle.release(7, await sandbox.ensureDebugger(7));
     await sandbox.ensureDebugger(99);
     assert.equal(focus.get(7), true);
     assert.equal(focus.has(99), false);
@@ -88,8 +87,7 @@ test("a preserved tab from a released workspace loses both ownership and debugge
   const { sandbox, lifecycle, attached, focus, owners } = fixture();
   await sandbox.applyRuntimeState("active");
   for (const id of [7, 8]) {
-    await sandbox.ensureDebugger(id);
-    await lifecycle.release(id);
+    await lifecycle.release(id, await sandbox.ensureDebugger(id));
   }
   const close = released => sandbox.dispatch({ correlation: "close", command: { command: "close_tab", tab_id: 7, released } });
   await assert.rejects(close(false), { code: "local_interlock" });
@@ -106,14 +104,13 @@ test("a preserved tab from a released workspace loses both ownership and debugge
 test("only new explicit debugger work restores focus after a local release", async () => {
   const { sandbox, lifecycle, attached, focus } = fixture();
   await sandbox.applyRuntimeState("active");
-  await sandbox.ensureDebugger(7);
-  await lifecycle.release(7);
+  await lifecycle.release(7, await sandbox.ensureDebugger(7));
   await lifecycle.detachAll();
   await sandbox.applyRuntimeState("active");
   assert.equal(attached.size, 0);
-  await sandbox.ensureDebugger(7);
+  const lease = await sandbox.ensureDebugger(7);
   assert.equal(focus.get(7), true);
-  await lifecycle.release(7);
+  await lifecycle.release(7, lease);
   await lifecycle.detachAll();
 });
 
@@ -167,8 +164,7 @@ test("visual reveal never acquires debugger custody or changes runtime state", a
   for (const state of ["active", "held", "ended"]) {
     const { sandbox, lifecycle, attached, focus, owners } = fixture();
     await sandbox.applyRuntimeState("active");
-    await sandbox.ensureDebugger(7);
-    await lifecycle.release(7);
+    await lifecycle.release(7, await sandbox.ensureDebugger(7));
     await sandbox.applyRuntimeState(state);
     // Reveal after an explicit local release must stay presentation-only even while active.
     await lifecycle.detachAll();
@@ -211,7 +207,7 @@ test("new service epoch drops plural debugger custody and ownership before Activ
   assert.equal(owners.size,0);
   owners.set(7,"first-workspace");owners.set(8,"second-workspace");
   await sandbox.applyRuntimeState("active");
-  for(const id of [7,8]){await sandbox.ensureDebugger(id);await lifecycle.release(id);}
+  for(const id of [7,8]){await lifecycle.release(id, await sandbox.ensureDebugger(id));}
   await sandbox.negotiateServiceEpoch("epoch_first");
   assert.equal(owners.size,2);assert.equal(attached.size,2);assert.equal(focus.get(7),true);
   await sandbox.negotiateServiceEpoch("epoch_second");

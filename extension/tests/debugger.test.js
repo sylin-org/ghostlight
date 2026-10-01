@@ -23,16 +23,16 @@ test("concurrent debugger users share one attachment", async () => {
   const chromeDebugger = fakeDebugger();
   const lifecycle = debuggerApi.create(chromeDebugger);
 
-  await Promise.all([lifecycle.acquire(7), lifecycle.acquire(7)]);
+  const [first, second] = await Promise.all([lifecycle.acquire(7), lifecycle.acquire(7)]);
   assert.deepEqual(chromeDebugger.calls, [
     ["attach", 7, "1.3"],
     ["command", 7, "Page.enable"]
   ]);
   assert.equal(lifecycle.attachedCount(), 1);
 
-  await lifecycle.release(7);
+  await lifecycle.release(7, first);
   assert.equal(lifecycle.attachedCount(), 1);
-  await lifecycle.release(7);
+  await lifecycle.release(7, second);
   assert.equal(lifecycle.attachedCount(), 0);
   assert.deepEqual(chromeDebugger.calls.at(-1), ["detach", 7]);
 });
@@ -42,10 +42,8 @@ test("a retained controlled tab stays attached between sequential operations", a
   const lifecycle = debuggerApi.create(chromeDebugger);
 
   await lifecycle.retain(8);
-  await lifecycle.acquire(8);
-  await lifecycle.release(8);
-  await lifecycle.acquire(8);
-  await lifecycle.release(8);
+  await lifecycle.release(8, await lifecycle.acquire(8));
+  await lifecycle.release(8, await lifecycle.acquire(8));
 
   assert.equal(lifecycle.attachedCount(), 1);
   assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "attach"), [["attach", 8, "1.3"]]);
@@ -131,18 +129,18 @@ test("an open JavaScript dialog retains its debugger session until handled", asy
   const chromeDebugger = fakeDebugger();
   const lifecycle = debuggerApi.create(chromeDebugger);
 
-  await lifecycle.acquire(9);
+  const first = await lifecycle.acquire(9);
   lifecycle.openDialog(9, "prompt");
-  await lifecycle.release(9);
+  await lifecycle.release(9, first);
 
   assert.deepEqual(lifecycle.currentDialog(9), { type: "prompt" });
   assert.equal(lifecycle.attachedCount(), 1);
   assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 0);
 
-  await lifecycle.acquire(9);
+  const second = await lifecycle.acquire(9);
   await lifecycle.closeDialog(9);
   assert.equal(lifecycle.attachedCount(), 1);
-  await lifecycle.release(9);
+  await lifecycle.release(9, second);
 
   assert.equal(lifecycle.currentDialog(9), null);
   assert.equal(lifecycle.attachedCount(), 0);
@@ -154,19 +152,19 @@ test("an external detach preserves a known dialog for a later handling lease", a
   const chromeDebugger = fakeDebugger();
   const lifecycle = debuggerApi.create(chromeDebugger);
 
-  await lifecycle.acquire(11);
+  const old = await lifecycle.acquire(11);
   lifecycle.openDialog(11, "confirm");
   lifecycle.detached(11);
-  await lifecycle.release(11);
+  await lifecycle.release(11, old);
   assert.deepEqual(lifecycle.currentDialog(11), { type: "confirm" });
 
-  await lifecycle.acquire(11);
+  const current = await lifecycle.acquire(11);
   assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "attach"), [
     ["attach", 11, "1.3"],
     ["attach", 11, "1.3"]
   ]);
   await lifecycle.closeDialog(11);
-  await lifecycle.release(11);
+  await lifecycle.release(11, current);
 });
 
 test("a new lease waits for an in-flight detach and then reattaches", async () => {
@@ -183,18 +181,20 @@ test("a new lease waits for an in-flight detach and then reattaches", async () =
     async sendCommand(target, method) { calls.push(["command", target.tabId, method]); }
   });
 
-  await lifecycle.acquire(12);
-  const releasing = lifecycle.release(12);
+  const first = await lifecycle.acquire(12);
+  const releasing = lifecycle.release(12, first);
   await new Promise((resolve) => setImmediate(resolve));
   const acquiring = lifecycle.acquire(12);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls.filter(([kind]) => kind === "attach").length, 1);
 
   finishFirstDetach();
-  await Promise.all([releasing, acquiring]);
+  const [, second] = await Promise.all([releasing, acquiring]);
   assert.equal(calls.filter(([kind]) => kind === "attach").length, 2);
   assert.equal(lifecycle.attachedCount(), 1);
-  await lifecycle.release(12);
+  await lifecycle.release(12, second);
+  assert.equal(lifecycle.attachedCount(), 0);
+  assert.equal(detachCount, 2);
 });
 
 test("failed Page enablement leaves no attached lifecycle state", async () => {
@@ -242,8 +242,7 @@ test("only retained tabs emulate focus, and only after active runtime negotiatio
   await lifecycle.setFocusEmulationEnabled(true);
   assert.equal(chromeDebugger.focus.get(21), true);
   assert.equal(chromeDebugger.focus.has(22), false);
-  await lifecycle.acquire(21);
-  await lifecycle.release(21);
+  await lifecycle.release(21, await lifecycle.acquire(21));
   assert.equal(chromeDebugger.focus.get(21), true);
   await lifecycle.retain(23);
   assert.equal(chromeDebugger.focus.get(23), true);
@@ -269,11 +268,11 @@ test("releasing ownership restores focus immediately while a command still holds
   const lifecycle = debuggerApi.create(chromeDebugger);
   await lifecycle.setFocusEmulationEnabled(true);
   await lifecycle.retain(26);
-  await lifecycle.acquire(26);
+  const lease = await lifecycle.acquire(26);
   await lifecycle.unretain(26);
   assert.equal(chromeDebugger.focus.get(26), false);
   assert.equal(lifecycle.attachedCount(), 1);
-  await lifecycle.release(26);
+  await lifecycle.release(26, lease);
   assert.equal(lifecycle.attachedCount(), 0);
   assert.equal(chromeDebugger.focus.has(26), false);
 });
@@ -344,9 +343,9 @@ test("an external detach stays detached until an explicit operation reacquires t
   await lifecycle.setFocusEmulationEnabled(true);
   assert.equal(lifecycle.attachedCount(), 0);
   assert.equal(chromeDebugger.focus.size, 0);
-  await lifecycle.acquire(31);
+  const lease = await lifecycle.acquire(31);
   assert.equal(chromeDebugger.focus.get(31), true);
-  await lifecycle.release(31);
+  await lifecycle.release(31, lease);
   await lifecycle.detachAll();
 });
 
@@ -364,9 +363,9 @@ test("failed focus enablement releases its possibly applied override and permits
   assert.equal(lifecycle.attachedCount(), 0);
   assert.equal(chromeDebugger.focus.size, 0);
   fail = false;
-  await lifecycle.acquire(32);
+  const lease = await lifecycle.acquire(32);
   assert.equal(chromeDebugger.focus.get(32), true);
-  await lifecycle.release(32);
+  await lifecycle.release(32, lease);
   await lifecycle.detachAll();
 });
 
@@ -468,5 +467,79 @@ test("an old generation's retirement and finally cannot release a fresh debugger
   assert.equal(lifecycle.owns(current), true);
   assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, detaches);
   await lifecycle.release(40, current);
+  await lifecycle.detachAll();
+});
+
+test("evaluator retirement refuses a shared attachment without evicting its ordinary owner", async () => {
+  const chromeDebugger = fakeDebugger();
+  const lifecycle = debuggerApi.create(chromeDebugger);
+  const evaluator = await lifecycle.acquire(41);
+  const ordinary = await lifecycle.acquire(41);
+  await assert.rejects(lifecycle.retire(evaluator), /held by another operation/);
+  assert.equal(lifecycle.owns(evaluator), true);
+  assert.equal(lifecycle.owns(ordinary), true);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 0);
+  await assert.rejects(lifecycle.release(41), /requires its acquired tab lease/);
+  await lifecycle.release(41, ordinary);
+  await lifecycle.release(41, ordinary);
+  assert.equal(lifecycle.owns(evaluator), true);
+  await lifecycle.retire(evaluator);
+  assert.equal(lifecycle.attachedCount(), 0);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 1);
+  await lifecycle.release(41, evaluator);
+});
+
+test("acquisition during retirement refuses without entering the attachment being detached", async () => {
+  const chromeDebugger = fakeDebugger();
+  const detach = chromeDebugger.detach;
+  let finishDetach;
+  chromeDebugger.detach = async target => {
+    await new Promise(resolve => { finishDetach = resolve; });
+    await detach(target);
+  };
+  const lifecycle = debuggerApi.create(chromeDebugger);
+  const evaluator = await lifecycle.acquire(42);
+  const retiring = lifecycle.retire(evaluator);
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(lifecycle.acquire(42), /session was released/);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "attach").length, 1);
+  finishDetach(); await retiring;
+  const current = await lifecycle.acquire(42);
+  await lifecycle.release(42, evaluator);
+  assert.equal(lifecycle.owns(current), true);
+  const releasing = lifecycle.release(42, current);
+  await new Promise(resolve => setImmediate(resolve));
+  finishDetach(); await releasing;
+  assert.equal(lifecycle.attachedCount(), 0);
+});
+
+test("retirement rechecks exclusivity after an ordinary setup already in flight completes", async () => {
+  const chromeDebugger = fakeDebugger();
+  let onEvent, finishChild;
+  chromeDebugger.onEvent = { addListener(listener) { onEvent = listener; } };
+  const sendCommand = chromeDebugger.sendCommand;
+  chromeDebugger.sendCommand = async (target, method, params) => {
+    if (target.sessionId === "pending_child" && method === "Page.enable") {
+      await new Promise(resolve => { finishChild = resolve; });
+    }
+    return sendCommand(target, method, params);
+  };
+  const lifecycle = debuggerApi.create(chromeDebugger);
+  await lifecycle.installPageRuntime("globalThis.runtimeInstalled = true;");
+  await lifecycle.retain(43);
+  const evaluator = await lifecycle.acquire(43);
+  onEvent({ tabId: 43 }, "Target.attachedToTarget", {
+    sessionId: "pending_child", targetInfo: { type: "iframe" }, waitingForDebugger: true
+  });
+  const acquiring = lifecycle.acquire(43);
+  await new Promise(resolve => setImmediate(resolve));
+  const retired = assert.rejects(lifecycle.retire(evaluator), /held by another operation/);
+  finishChild();
+  const ordinary = await acquiring; await retired;
+  assert.equal(lifecycle.owns(ordinary), true);
+  assert.equal(lifecycle.owns(evaluator), true);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 0);
+  await lifecycle.release(43, ordinary);
+  await lifecycle.release(43, evaluator);
   await lifecycle.detachAll();
 });

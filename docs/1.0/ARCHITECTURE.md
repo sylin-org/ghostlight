@@ -522,6 +522,13 @@ service epoch, correlation, tab, document scope and debugger attachment generati
 owner coordinates retirement and finally. Targeted debugger detachment must be confirmed and the
 original scoped handler must settle before a fresh operation can enter; no active scope is simply
 cleared. The admission guard can wait for that bounded cleanup, then revalidates the current graph.
+Retirement requires the evaluator's lease to be the attachment's sole live lease, checked both
+before retirement and at its serialized detach boundary. Recording capture and beforeunload
+navigation can share the attachment outside the document guard; their live leases prevent targeted
+retirement and produce the same bounded cleanup prerequisite. Acquisition registers a token in the
+actual attachment generation after serialized setup. Every ordinary release consumes its original
+token, so an old finally cannot decrement a replacement generation's lease. New acquisition during
+retirement refuses before setup; setup already running is counted before exclusivity is rechecked.
 Late completion cannot remove a newer scope/watcher, release its lease or overwrite a newer epoch's
 journal attempt. Ordinary successful work adds no cancellation roundtrip.
 

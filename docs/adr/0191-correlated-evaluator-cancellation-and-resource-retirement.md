@@ -64,3 +64,29 @@ and native acceptance precede deployment. Synthetic debugger callbacks validate 
 they cannot establish Chrome's installed detach behavior, draft preservation or keyboard activation.
 No deployment, public version, publication, new dashboard, notification queue or automatic hold is
 authorized by this decision.
+
+## Amendment: shared attachment ownership (2026-10-01)
+
+Architect review withheld source candidate `d936b708`. Its generation check did not establish
+exclusive attachment ownership: recording frame capture and beforeunload navigation independently
+acquire the same generation outside the evaluator's document guard. Chrome detach would release
+their shared attachment too. Ordinary callbacks also released by tab id alone, so an old finally
+could decrement a new generation's lease. This was a source counterexample, not a native incident.
+
+Targeted retirement now requires exactly one live lease, checked before beginning retirement and
+again at the serialized detach boundary. Another live owner causes cleanup to fail conservatively
+and leaves all leases and attachment state untouched. The existing bounded typed prerequisite
+applies. No automatic drain, replay, control toggle or new synchronization framework is added.
+
+Acquire registers its token and count only after serialized setup, in the actual attachment
+generation. Acquisition begun during retirement refuses before setup. Setup already running can
+finish with its own counted lease; retirement must then refuse at its exclusive-owner recheck.
+Every ordinary release requires and consumes its original token, and a stale or duplicate token
+cannot change current ownership. The beforeunload watcher and acceptor also use exact owner identity
+in finally. Recording and screenshot cleanup release their tokens even if presentation cleanup
+fails. Ordinary global End session retains its explicit all-owner release semantics.
+
+Discriminating source tests cover shared evaluator/ordinary leases, setup versus retirement,
+recording capture and beforeunload navigation during Cancel, old ordinary finally after reattachment,
+presentation failures and the count of a lease admitted behind an in-flight detach. Frozen candidate
+review and actual Chromium/native acceptance remain prerequisites to deployment.

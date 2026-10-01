@@ -1110,9 +1110,9 @@ async function interruptAllRecordings(reason) {
 
 async function captureRecordingFrame(state, frameKind) {
   if (!await recordingScopeCurrent(state.tabId)) return false;
-  await ensureDebugger(state.tabId);
-  await contentAll(state.tabId, { kind: "presentation_visibility", hidden: true });
+  const debuggerLease = await ensureDebugger(state.tabId);
   try {
+    await contentAll(state.tabId, { kind: "presentation_visibility", hidden: true });
     const metrics = await sendDebugger({ tabId: state.tabId }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
     const clip = {
@@ -1135,8 +1135,8 @@ async function captureRecordingFrame(state, frameKind) {
     }
     return await recordingScopeCurrent(state.tabId) && recording.append(state.tabId, capture.data, frameKind, Date.now());
   } finally {
-    await contentAll(state.tabId, { kind: "presentation_visibility", hidden: false });
-    await detachDebugger(state.tabId);
+    try { await contentAll(state.tabId, { kind: "presentation_visibility", hidden: false }); }
+    finally { await detachDebugger(state.tabId, debuggerLease); }
   }
 }
 
@@ -1609,12 +1609,13 @@ async function navigate(correlation, command, { background = false } = {}) {
 }
 
 async function navigateDiscardingBeforeUnload(correlation, command, { background = false } = {}) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   const commits = [];
-  navigationWatchers.set(command.tab_id, { correlation, commits });
+  const watcher = { correlation, commits };
+  navigationWatchers.set(command.tab_id, watcher);
   try {
     await sendDebugger({ tabId: command.tab_id }, "Page.enable");
-    beforeUnloadAcceptors.set(command.tab_id, true);
+    beforeUnloadAcceptors.set(command.tab_id, watcher);
     await chrome.tabs.update(command.tab_id, { url: command.url, ...(background ? {} : { active: true }) });
     const tab = await waitForReady(command.tab_id, correlation);
     return { outcome: "navigated", tab: physicalTab(tab), committed_urls: commits };
@@ -1622,9 +1623,9 @@ async function navigateDiscardingBeforeUnload(correlation, command, { background
     if (!error.effectUnknown) error.effectUnknown = true;
     throw error;
   } finally {
-    beforeUnloadAcceptors.delete(command.tab_id);
-    navigationWatchers.delete(command.tab_id);
-    await detachDebugger(command.tab_id);
+    if (beforeUnloadAcceptors.get(command.tab_id) === watcher) beforeUnloadAcceptors.delete(command.tab_id);
+    if (navigationWatchers.get(command.tab_id) === watcher) navigationWatchers.delete(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
@@ -1729,7 +1730,7 @@ async function observeAcrossFrames(command) {
 }
 
 async function activate(correlation, command, nativeContext = null) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
@@ -1750,7 +1751,7 @@ async function activate(correlation, command, nativeContext = null) {
     throw error;
   } finally {
     navigationWatchers.delete(command.tab_id);
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
@@ -1864,7 +1865,7 @@ async function fill(correlation, command, { background = false, nativeContext = 
     }
     const needsBrowserInput = preparedGroups.some((group) => group.fieldKinds.includes("browser_text"));
     requireFillBudget(deadline);
-    if (needsBrowserInput) await ensureDebugger(command.tab_id);
+    const debuggerLease = needsBrowserInput ? await ensureDebugger(command.tab_id) : null;
     try {
       for (const { frameId, fields, fieldKinds } of preparedGroups) {
         for (let index = 0; index < fields.length; index += 1) {
@@ -1888,7 +1889,7 @@ async function fill(correlation, command, { background = false, nativeContext = 
         }
       }
     } finally {
-      if (needsBrowserInput) await detachDebugger(command.tab_id);
+      if (needsBrowserInput) await detachDebugger(command.tab_id, debuggerLease);
     }
     // Native input consequences can settle as the debugger detaches. A later field can also
     // trigger page code that rolls back or disables an earlier edit. Confirm the complete visible
@@ -2066,7 +2067,7 @@ async function dragLocators(correlation, command, nativeContext = null) {
     x: rectangle.left + rectangle.width / 2 + offset.x,
     y: rectangle.top + rectangle.height / 2 + offset.y
   });
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     return await dragWithPoints(
       correlation,
@@ -2078,19 +2079,19 @@ async function dragLocators(correlation, command, nativeContext = null) {
       nativeContext
     );
   } finally {
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
 async function dragPoints(correlation, command, nativeContext = null) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const start = await viewportPoint(command.tab_id, command.start);
     const end = await viewportPoint(command.tab_id, command.end);
     return await dragWithPoints(correlation, command.tab_id, start, end, start.subject, end.subject, nativeContext);
   } finally {
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
@@ -2213,8 +2214,8 @@ async function ensureDebugger(tabId) {
   return debuggerLifecycle.acquire(tabId);
 }
 
-async function detachDebugger(tabId) {
-  await debuggerLifecycle.release(tabId);
+async function detachDebugger(tabId, debuggerLease) {
+  await debuggerLifecycle.release(tabId, debuggerLease);
 }
 
 async function prepareCaptureMasks(tabId) {
@@ -2256,21 +2257,21 @@ async function prepareCaptureMasks(tabId) {
 }
 
 async function screenshot(command) {
-  await ensureDebugger(command.tab_id);
-  await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
-  if (command.visual_settle !== false) {
-    try {
-      await contentIn(command.tab_id, frames.TOP_FRAME_ID, {
-        kind: "observe",
-        condition: "visual_settle",
-        timeout_ms: 1000,
-      });
-    } catch (_) {
-      // Sane default visual settle: best-effort quiescence before capture.
-    }
-  }
+  const debuggerLease = await ensureDebugger(command.tab_id);
   let masks;
   try {
+    await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
+    if (command.visual_settle !== false) {
+      try {
+        await contentIn(command.tab_id, frames.TOP_FRAME_ID, {
+          kind: "observe",
+          condition: "visual_settle",
+          timeout_ms: 1000,
+        });
+      } catch (_) {
+        // Sane default visual settle: best-effort quiescence before capture.
+      }
+    }
     const metrics = await sendDebugger({ tabId: command.tab_id }, "Page.getLayoutMetrics");
     const visual = metrics.cssVisualViewport || metrics.visualViewport;
     let clip;
@@ -2327,9 +2328,11 @@ async function screenshot(command) {
       }
     };
   } finally {
-    await masks?.clear();
-    await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false });
-    await detachDebugger(command.tab_id);
+    try { await masks?.clear(); }
+    finally {
+      try { await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false }); }
+      finally { await detachDebugger(command.tab_id, debuggerLease); }
+    }
   }
 }
 
@@ -2443,7 +2446,7 @@ async function dispatchClick(tabId, point, button, clickCount, modifierFlags, na
 }
 
 async function activatePoint(correlation, command, nativeContext = null) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
@@ -2459,7 +2462,7 @@ async function activatePoint(correlation, command, nativeContext = null) {
     throw error;
   } finally {
     navigationWatchers.delete(command.tab_id);
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
@@ -2467,7 +2470,7 @@ async function hoverLocator(command, nativeContext = null) {
   if (nativeContext) await nativeContext.check();
   const geometry = await content(command.tab_id, { kind: "hover", locator: command.locator });
   const offset = await frameViewportOffset(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID);
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
@@ -2476,26 +2479,26 @@ async function hoverLocator(command, nativeContext = null) {
     });
     return { outcome: "hovered", tab_id: command.tab_id, subject: geometry.subject };
   } finally {
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
 async function hoverPoint(command, nativeContext = null) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
     await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     return { outcome: "hovered", tab_id: command.tab_id, subject: point.subject };
   } finally {
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
 async function pressKey(correlation, command, nativeContext = null) {
   if (nativeContext) await nativeContext.check();
   const target = command.locator ? await content(command.tab_id, { kind: "focus", locator: command.locator }) : null;
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
@@ -2513,11 +2516,11 @@ async function pressKey(correlation, command, nativeContext = null) {
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };
   } catch (error) { error.effectUnknown = true; throw error; }
-  finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
+  finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id, debuggerLease); }
 }
 
 async function dropImageAt(correlation, command) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
@@ -2531,10 +2534,11 @@ async function dropImageAt(correlation, command) {
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: point.subject };
   } catch (error) { error.effectUnknown = true; throw error; }
-  finally { await detachDebugger(command.tab_id); }
+  finally { await detachDebugger(command.tab_id, debuggerLease); }
 }
 
-async function wheelAt(correlation, command, nativeContext = null) {  await ensureDebugger(command.tab_id);
+async function wheelAt(correlation, command, nativeContext = null) {
+  const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
@@ -2547,16 +2551,17 @@ async function wheelAt(correlation, command, nativeContext = null) {  await ensu
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "scrolled", tab_id: command.tab_id, x: point.x, y: point.y, subject: point.subject };
   } finally {
-    await detachDebugger(command.tab_id);
+    await detachDebugger(command.tab_id, debuggerLease);
   }
 }
 
 async function typeFocused(correlation, command, nativeContext = null) {
   const commits = [];
   let dispatched = false;
+  let debuggerLease;
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    await ensureDebugger(command.tab_id);
+    debuggerLease = await ensureDebugger(command.tab_id);
     await documents.verifyInput(command.tab_id, "Input.insertText", { text: command.text });
     await firstFrameAnswer(command.tab_id, { kind: "verify_focused_text", allow_credentials: command.allow_credentials });
     if (command.clear_first) {
@@ -2571,24 +2576,24 @@ async function typeFocused(correlation, command, nativeContext = null) {
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: null, committed_urls: commits };
   } catch (error) { error.effectUnknown = dispatched || Boolean(error.effectUnknown); throw error; }
-  finally { navigationWatchers.delete(command.tab_id); await detachDebugger(command.tab_id); }
+  finally { navigationWatchers.delete(command.tab_id); if (debuggerLease) await detachDebugger(command.tab_id, debuggerLease); }
 }
 
 async function inspectDialog(tabId) {
   const known = debuggerLifecycle.currentDialog(tabId);
   if (known) return { outcome: "dialog", tab_id: tabId, present: true, dialog_type: known.type };
-  await ensureDebugger(tabId);
+  const debuggerLease = await ensureDebugger(tabId);
   try {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const dialog = debuggerLifecycle.currentDialog(tabId);
     return { outcome: "dialog", tab_id: tabId, present: Boolean(dialog), dialog_type: dialog?.type || "unknown" };
   } finally {
-    await detachDebugger(tabId);
+    await detachDebugger(tabId, debuggerLease);
   }
 }
 
 async function handleDialog(command) {
-  await ensureDebugger(command.tab_id);
+  const debuggerLease = await ensureDebugger(command.tab_id);
   const type = debuggerLifecycle.currentDialog(command.tab_id)?.type || "unknown";
   try {
     await sendDebugger({ tabId: command.tab_id }, "Page.handleJavaScriptDialog", { accept: command.accept, promptText: command.text });
@@ -2601,7 +2606,7 @@ async function handleDialog(command) {
     }
     error.effectUnknown = true;
     throw error;
-  } finally { await detachDebugger(command.tab_id); }
+  } finally { await detachDebugger(command.tab_id, debuggerLease); }
 }
 
 // A person's diagnostics toggle rides the same closed event envelope as runtime control. The

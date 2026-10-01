@@ -642,7 +642,9 @@ Every one of these cost something to learn.
 
 - **A timed-out wait is not resource cleanup.** Correlated Cancel must retire the exact evaluator,
   attachment generation and document scope before observations can enter. Confirm custody release
-  and handler settlement; fence old finally from new ownership. Page effects may continue after
+  and handler settlement; require exclusive attachment ownership before targeted detach. All
+  ordinary releases must carry their acquired generation token; register counts after serialized
+  setup and fence old finally from new ownership. Page effects may continue after
   release, so cleanup does not revise an unknown result or authorize replay (ADR-0191).
 
 ## Where to look

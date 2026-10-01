@@ -2,6 +2,23 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
+## Shared attachment ownership correction (2026-10-01, local source only)
+
+Architect review withheld `d936b708`: generation alone did not establish exclusive debugger
+attachment ownership, and old ordinary release callbacks could decrement a replacement generation.
+The `codex/evaluation-cancel-lease-fence` follow-on requires one live lease before and at targeted
+retirement, registers leases after serialized setup and passes the original token through every
+ordinary release. Shared recording/beforeunload owners remain intact; bounded cleanup refuses with
+the existing typed human prerequisite. The marked ADR-0191 amendment and
+[source evidence](testing/evaluation-cancel-lease-fence-2026-10-01.md) record the exact correction.
+
+All source gates pass: 615 Rust tests, 393 extension tests, 110 executable Workbench assertions,
+formatting, strict Clippy, JavaScript syntax and isolated build. Seven discriminating cases cover
+shared owners, setup/retirement races, recording, beforeunload and old ordinary finally after
+reattachment. A counterproof reproduces the baseline ownership/count failures and corrected results.
+Architect/independent review and actual Chromium/native acceptance remain pending. Deployment is
+held; installation, running service, About identity, data and public versions are unchanged.
+
 ## Correlated evaluation cleanup (2026-10-01, local source only)
 
 Independent review accepted `fcb4bce` core behavior and real predecessor compatibility, including
@@ -19,9 +36,9 @@ contract now records the actual lease/snapshot/completion and child ordering. So
 615 Rust tests, 386 extension tests, 110 executable Workbench assertions, formatting, strict Clippy,
 changed-JavaScript syntax and an isolated workspace build. The
 [source evidence](testing/evaluation-cancel-recovery-2026-10-01.md) records the exact mechanism,
-retirements and limits. Exact-candidate architect/independent review, actual Chromium/native
-recovery and real predecessor readers at this follow-on are pending. No installed state, runtime,
-public version or deployment changed.
+retirements and limits. Architect review then withheld `d936b708` for the shared ownership gap;
+the corrected follow-on is recorded above. No installed state, runtime, public version or
+deployment changed.
 
 ## Work resolution cleanup (2026-10-01, local source only)
 

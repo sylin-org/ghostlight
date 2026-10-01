@@ -4,6 +4,7 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis, function createGhostlightDebuggerLifecycleApi() {
   "use strict";
+  const SHARED_ATTACHMENT_MESSAGE = "The debugger attachment is still held by another operation.";
 
   function create(debuggerApi, protocolVersion = "1.3") {
     if (!debuggerApi?.attach || !debuggerApi?.detach || !debuggerApi?.sendCommand) {
@@ -197,17 +198,19 @@
 
     async function acquire(tabId) {
       const state = tabState(tabId);
-      state.leases += 1;
-      try {
-        await enqueue(tabId, state, () => ensureAttached(tabId, state));
-      } catch (error) {
-        state.leases = Math.max(0, state.leases - 1);
-        prune(tabId, state);
-        throw error;
-      }
-      const lease = Object.freeze({ tabId, generation: state.generation });
-      leaseOwners.set(lease, state);
-      return lease;
+      if (state.closing || state.retiring) throw new Error("The debugger session was released.");
+      return enqueue(tabId, state, async () => {
+        await ensureAttached(tabId, state);
+        if (tabs.get(tabId) !== state || !state.attached || state.closing) {
+          throw new Error("The debugger session was released during setup.");
+        }
+        // Register only after serialized setup, in the attachment generation actually acquired.
+        // A preceding detach must not erase the count of a lease that has not entered yet.
+        const lease = Object.freeze({ tabId, generation: state.generation });
+        state.leases += 1;
+        leaseOwners.set(lease, state);
+        return lease;
+      });
     }
 
     async function retain(tabId) {
@@ -234,12 +237,11 @@
       if (errors.length) throw new AggregateError(errors, "Could not update controlled-tab focus.");
     }
 
-    async function release(tabId, lease = null) {
-      const state = lease ? leaseOwners.get(lease) : tabs.get(tabId);
-      if (lease) {
-        leaseOwners.delete(lease);
-        if (lease.tabId !== tabId || tabs.get(tabId) !== state || state?.generation !== lease.generation) return;
-      }
+    async function release(tabId, lease) {
+      if (!lease || lease.tabId !== tabId) throw new TypeError("debugger release requires its acquired tab lease");
+      const state = leaseOwners.get(lease);
+      leaseOwners.delete(lease);
+      if (tabs.get(tabId) !== state || state?.generation !== lease.generation) return;
       if (!state || state.leases === 0) return;
       state.leases -= 1;
       await enqueue(tabId, state, () => settle(tabId, state));
@@ -256,10 +258,14 @@
     async function retire(lease) {
       const state = leaseOwners.get(lease);
       if (!state || tabs.get(lease.tabId) !== state || state.generation !== lease.generation) return;
+      if (state.leases !== 1) throw new Error(SHARED_ATTACHMENT_MESSAGE);
       state.retiring = true;
       await enqueue(lease.tabId, state, async () => {
         try {
           if (tabs.get(lease.tabId) !== state || state.generation !== lease.generation) return;
+          // A setup already running when retirement began may have acquired another lease.
+          // Chrome detaches the whole attachment, so shared custody must remain untouched.
+          if (state.leases !== 1) throw new Error(SHARED_ATTACHMENT_MESSAGE);
           // Do not put a possibly blocked Runtime command ahead of the release itself.
           // Chrome removes focus emulation with the confirmed debugger detachment.
           if (state.attached) {

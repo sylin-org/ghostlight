@@ -220,7 +220,7 @@ history live here.
 | [0188](0188-page-world-independent-form-diagnostics.md) | Page-world-independent local form diagnostics: worker-pushed state, bounded isolated delivery, and exact document custody through worker suspension | Accepted for unpublished local trial (amends [0145](0145-shared-process-diagnostics-log.md); preserves [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md)) |
 | [0189](0189-current-document-trees-exclude-inactive-browser-pages.md) | Current document inventories and routing exclude inactive browser pages while retaining exact active-document authority | Accepted (bounded installed acceptance passed) |
 | [0190](0190-work-owned-resolution-and-real-attempt-journal.md) | Work-owned phase-aware resolution, one Language projection, validated effect confirmation, governed keyboard prefixes and serialized attempt journaling | Core behavior and predecessor compatibility accepted; recovery amended by ADR-0191 |
-| [0191](0191-correlated-evaluator-cancellation-and-resource-retirement.md) | Bounded exact-resource evaluator Cancel, generation/scope/epoch fences and useful cleanup prerequisite | Authorized local implementation; review and native acceptance pending |
+| [0191](0191-correlated-evaluator-cancellation-and-resource-retirement.md) | Bounded exact-resource evaluator Cancel, exclusive shared-attachment ownership, generation/scope/epoch fences and useful cleanup prerequisite | d936b708 withheld for shared ownership; amended source candidate review and native acceptance pending |
 
 ## Conventions
 

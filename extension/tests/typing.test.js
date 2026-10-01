@@ -19,7 +19,7 @@ function fixture() {
     },
     content: async (tab, message) => { calls.push({ tab, message }); return { subject: { name: "Draft" } }; },
     firstFrameAnswer: async (_tab, message) => { calls.push(message.kind); },
-    ensureDebugger: async () => { calls.push("attach"); },
+    ensureDebugger: async () => { calls.push("attach"); return { tabId: 7, generation: 1 }; },
     detachDebugger: async () => { calls.push("detach"); },
     sendDebugger: async () => { calls.push("insert"); },
     chrome: { tabs: { get: async id => ({ id }) } },
