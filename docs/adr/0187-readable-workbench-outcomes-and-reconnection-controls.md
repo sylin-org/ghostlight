@@ -69,3 +69,16 @@ A configured background-attention refusal can follow a permitted capability deci
 human refusal tone therefore also uses its closed retained refusal facts, including historical
 request restrictions. The separate capability decision is not rewritten. Unknown/partial effect
 presentation still takes precedence over refusal and calm control styling.
+
+## Owner correction: tool identity remains primary in the activity list (2026-10-01)
+
+The owner rejected the repeating Completed/Effects uncertain labels in the white activity
+column. They replaced useful tool names with outcome noise and made a mixed list harder to scan.
+Restore the exact catalog tool name in that column for live and restored records. Keep the
+authored outcome sentence secondary and retain exceptional recovery below uncertain/partial rows.
+The detail button's accessible name starts with its visible tool identity.
+
+No additional task inference, caller text, script, page label or retained context is needed.
+Existing records already carry the tool. Evaluate the complete mixed activity list, including
+live work, ordinary successes, refusals, controls, uncertainty, partial work and older records.
+An isolated card or technical safety check does not establish human comprehension.

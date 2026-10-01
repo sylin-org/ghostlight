@@ -2,6 +2,19 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
+## Activity-list comprehension correction (2026-10-01, candidate)
+
+Leo rejected the repeating Completed/Effects uncertain labels in the white activity column.
+The candidate restores exact tool names, preserving secondary outcome sentences and exceptional
+recovery. It changes one renderer line plus mixed-list regression checks; no new retained data,
+task inference, policy, safety, Show tab, About or installation change. Fresh native inspection
+reproduces the regression. Paired component snapshots verify the whole mixed list at large and
+narrow widths. The [candidate evidence](testing/activity-tool-column-2026-10-01.md) records the
+Library screenshot limitation, source diff, exact examples and review/deployment boundary.
+All gates pass: 594 Rust tests, 365 extension tests, 105 executable Workbench assertions,
+formatting, strict Clippy and changed-JavaScript syntax. The frozen source is ready for the
+parent's independent review. The running native image remains unchanged.
+
 ## Authorized Local Deployment (2026-10-01)
 
 Leo explicitly requested local deployment and live testing. Reviewed implementation `c491a264`

@@ -688,6 +688,50 @@ const historyChecks = [];
   historyChecks.push(["legacy history omits unavailable guidance and never invents repeat safety",
     legacy.repeatSafe === null && legacy.nextSteps.length === 0
       && nodes.get("hero-body").innerHTML.includes("<dt>Repeat safe</dt><dd>Not recorded</dd>")]);
+  const mixed = [
+    entries.entryFromOperation({ invocation: "mixed-live", workspace: "w", tool: "browser_find",
+      activity: "Finding on page", capability: "read", phase: "running" }),
+    ...[
+      ["browser_read", "succeeded", "none", "Completed", "Read 5 words."],
+      ["browser_fill_form", "succeeded", "applied", "Completed", "Filled 1 field."],
+      ["browser_tabs", "blocked", "none", "Request refused", "This request did not bring the tab into view."],
+      ["browser_execute", "unknown", "unknown", "Effects uncertain", uncertain.summary],
+      ["browser_flow", "failed", "partial", "Partly completed", "Completed 1 of 2 steps."],
+      ["browser_type", "blocked", "none", "Paused by you", held.presentation.summary]
+    ].map(([tool, status, effect, label, summary], index) => entries.entryFromRecord({
+      ...uncertain, invocation: `mixed-${index}`, tool, status, effect, summary,
+      presentation: { ...uncertain.presentation, label, summary,
+        repeat_detail: ["unknown", "partial"].includes(effect) ? uncertain.presentation.repeat_detail : "" }
+    })),
+    legacy
+  ];
+  const renderedRows = [];
+  const originalCreateElement = sandbox.document.createElement;
+  sandbox.document.createElement = () => { const element = node("mixed-row"); renderedRows.push(element); return element; };
+  try {
+    view.rebuildFeed([entry, ...mixed]);
+    historyChecks.push(["a mixed activity list identifies each tool instead of repeating outcome labels",
+      renderedRows.length === mixed.length && renderedRows.every((row, index) =>
+        row.innerHTML.match(/<button class="row-tool"[^>]*>([^<]*)<\/button>/)?.[1] === mixed[index].tool)]);
+    historyChecks.push(["tool detail buttons keep the visible tool in their accessible names and exact expansion identity",
+      renderedRows.every((row, index) => row.innerHTML.includes(`aria-label="${mixed[index].tool}. `)
+        && row.innerHTML.includes(`data-action-details="${mixed[index].invocation}:action"`)
+        && row.innerHTML.includes(`aria-controls="action-details-${mixed[index].invocation}"`))]);
+    historyChecks.push(["mixed-list outcomes stay secondary and exceptional recovery remains visible",
+      renderedRows.every((row, index) => row.innerHTML.includes(`<div class="row-activity">${mixed[index].presentation?.summary ?? mixed[index].summary ?? mixed[index].activity}</div>`))
+        && renderedRows[4].innerHTML.includes('<p class="row-recovery">Do not repeat this action.')
+        && renderedRows[5].innerHTML.includes('<p class="row-recovery">Do not repeat this action.')
+        && !renderedRows[1].innerHTML.includes('class="row-recovery"')]);
+    const watched = entries.entryFromRecord({ ...uncertain, invocation: mixed[0].invocation,
+      tool: mixed[0].tool, status: "succeeded", effect: "none", summary: "Found 2 matches.",
+      presentation: { label: "Completed", tone: "complete", summary: "Found 2 matches.", repeat_detail: "" } }, mixed[0]);
+    view.row(watched);
+    historyChecks.push(["settling live work preserves the tool column while updating its outcome",
+      renderedRows[0].innerHTML.match(/<button class="row-tool"[^>]*>([^<]*)<\/button>/)?.[1] === mixed[0].tool
+        && renderedRows[0].innerHTML.includes('<div class="row-activity">Found 2 matches.</div>')]);
+  } finally {
+    sandbox.document.createElement = originalCreateElement;
+  }
   const disconnected = snapshot();
   disconnected.readiness = { ...disconnected.readiness, state: "not_connected", word: "Not connected",
     tone: "offline", invites_control: true,

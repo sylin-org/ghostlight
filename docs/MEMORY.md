@@ -160,6 +160,10 @@ the owner wants, and what this project learned the hard way.
   browser access and legible agent activity. Its integrations across MCP clients, models and
   harnesses, and its configurable policies should be understandable optional depth. This is
   product direction, not permission to make unverified privacy or compatibility claims.
+- **Activity lists lead with tool identity.** The owner rejected replacing the white tool column
+  with repeated Completed/Effects uncertain labels. Keep exact tool names primary, outcomes
+  secondary, and exceptional recovery visible. Evaluate the whole mixed list for scanability;
+  successful technical checks or one readable card do not prove user comprehension (ADR-0187).
 - **Absorb ordinary bursts.** The owner rejected a refusal-led local-resilience experience. Keep
   permitted work flowing within its original deadline, make sustained waiting legible, contain
   stalled connections, preserve other sessions and human controls, and recover without replay.

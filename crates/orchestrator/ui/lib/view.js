@@ -400,7 +400,7 @@
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
       return `<div class="med-mini">${glyphFor(entry)}</div>`
-        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-label="${escapeHtml(describe(entry))} Show details" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.presentation?.label ?? entry.activity ?? entry.tool)}</button>`
+        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-label="${escapeHtml(entry.tool)}. ${escapeHtml(describe(entry))} Show details" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.tool)}</button>`
         + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
