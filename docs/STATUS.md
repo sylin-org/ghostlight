@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
 
-Last updated: 2026-09-30 (unpublished local quiet coexistence trial; public versions unchanged).
+Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
 
@@ -39,23 +39,25 @@ remain outside scope.
   actual stdin continuation behavior, flow continuation limits, and uncertainty before repeats.
   Superseded automatic child-tab adoption claims are reconciled with ADR-0164.
 
-This candidate checkpoint awaits remaining validation; it is not a completion or release claim.
-The integrated run passed 24 gates and failed four browser checks. Those failures and subsequent
-diagnostics are retained in the [trial record](testing/quiet-coexistence-trial-2026-09-30.md).
-Corrected grouping placement and two-client native effects passed diagnostic browser checks.
-Historical custody retirement/reconnect passed. The complete current quiet and native-installed
-journeys, full-page capture, and final exact-source gate rerun remain outstanding.
+Checkpoint `8c8d856cdc3eca635f69c1a0a21c6b632687e1a7` preserves the trial before final validation.
+Implementation and first verification are complete; independent exact-commit execution and UX
+review remain the next step. This is not a release or production-installation claim.
+The [trial record](testing/quiet-coexistence-trial-2026-09-30.md) retains every failed run and
+the exact commands, hashes and artifact paths. Final workspace format, strict Clippy, 588 Rust
+tests and 349 extension tests passed. The final full suite passed 26 gates and failed two new
+fixture expectations: future requests after Stop are blocked with `session_ended`, not cancelled.
+Those assertions were corrected and strengthened; both complete affected journeys then passed.
+Real frame acceptance passed all 69 checks, including screenshots and later-field invalidation.
+Current quiet, legacy refusal/custody/reconnect, and isolated installed native messaging with
+actual Workbench Show tab, Pause, Resume and Stop all passed. Test-owned services, profiles and
+the unique native registration were cleaned up; existing registrations remained unchanged.
 
-Verification is pending the coordinator's complete checks and visible Chromium component
-journeys using synthetic local fixtures. No passes are claimed here before those runs finish.
-Native-window coordination and event-fencing refinements require a fresh final-source rerun;
-earlier checks are not completion evidence for that change.
-The integrated run also exposed Chromium's implicit current-window group creation, which moved
-a new work tab into the human window. Explicit group window selection, placement rechecks, and
-refreshed receipts correct that mechanism; its final-source verification is still pending.
-An isolated installed native-messaging journey is also being prepared. Its evidence must be
-distinguished from component fixtures, Tauri interaction, and the selected everyday installation.
-Linux runtime evidence is separate. The rule governs direct Ghostlight mechanisms, not OS
+A logged ordinary never-emulated control and pinned baseline adapter comparison distinguish
+native document focus reporting from debugger emulation. Cleanup requires an inactive never-native
+sentinel and actual owned-debugger detachment, with native-filled page observations retained.
+No observer uses Playwright. The isolated installed proof remains distinct from the selected
+everyday installation, store packaging, Linux runtime and physical input; those were not run.
+The rule governs direct Ghostlight mechanisms, not OS
 containment or browser-originated focus/popups from explicit page scripts and actions. A new
 unfocused work window can still appear, and preserved tabs can accumulate across released runs.
 

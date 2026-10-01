@@ -9,13 +9,10 @@ const documents = globalThis.GhostlightDocuments.create({
     const results = await chrome.scripting.executeScript({
       target: { tabId, documentIds: [documentId] },
       world: "MAIN",
-      func: async (msg) => {
-        if (typeof window.__ghostlight_dispatch__ !== "function") throw new Error("Ghostlight UI not injected");
-        return await window.__ghostlight_dispatch__(msg);
-      },
+      func: injectedContentPrimitive,
       args: [message]
     });
-    return results[0].result;
+    return contentInjectionResult(results);
   },
   frames
 });
@@ -1354,6 +1351,26 @@ async function readDocument(command) {
   };
 }
 
+async function injectedContentPrimitive(message) {
+  try {
+    if (typeof window.__ghostlight_dispatch__ !== "function") throw new Error("Ghostlight UI not injected");
+    return await window.__ghostlight_dispatch__(message);
+  } catch (error) {
+    // Chromium can omit the result of a rejected injected Promise. Return its failure.
+    return { error: String(error?.message ?? error) };
+  }
+}
+
+function contentInjectionResult(results) {
+  if (!Array.isArray(results) || results.length !== 1
+    || !Object.hasOwn(results[0] ?? {}, "result") || results[0].result === undefined || results[0].result === null) {
+    throw new Error("content primitive failed (no result)");
+  }
+  const result = results[0].result;
+  if (Object.hasOwn(result, "error")) throw new Error(String(result.error ?? "content primitive failed"));
+  return result;
+}
+
 async function contentIn(tabId, frameId, message, optional = false) {
   if (!tabId) {
     if (optional) return { presented: false };
@@ -1364,14 +1381,10 @@ async function contentIn(tabId, frameId, message, optional = false) {
       const results = await chrome.scripting.executeScript({
         target: { tabId, frameIds: [frameId] },
         world: "MAIN",
-        func: async (msg) => {
-          if (typeof window.__ghostlight_dispatch__ !== "function") throw new Error("Ghostlight UI not injected");
-          return await window.__ghostlight_dispatch__(msg);
-        },
+        func: injectedContentPrimitive,
         args: [message]
       });
-      if (!results || results.length === 0) throw new Error("content primitive failed (no result)");
-      return results[0].result;
+      return contentInjectionResult(results);
     });
   } catch (error) {
     if (optional) return { presented: false };

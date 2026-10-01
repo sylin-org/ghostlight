@@ -32,7 +32,8 @@ const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const report = { started_at: new Date().toISOString(), passed: false, failure: "run_incomplete",
   transport: "Chrome connectNative -> registered copied browser connector -> ordinary service discovery -> MCP and CLI",
   workbench: "Production Tauri WebView2 and production Show tab click handler",
-  limitations: ["Disposable local installation; not the existing user install or store packaging", "Typing and operator clicks use CDP, not physical input"],
+  limitations: ["Disposable local installation; not the existing user install or store packaging", "Typing and operator clicks use CDP, not physical input",
+    "Chrome retains document.hasFocus after native input even without emulation; cleanup uses an inactive never-native sentinel plus native-page visibility and debugger detachment"],
   browser_fixture_arguments: fixtureRenderingArguments(),
   revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, windowsHide: true, encoding: "utf8" }).trim(),
   host, scratch, runtime, runtime_override: false, binaries: {}, checks: [], receipts: [], observations: [], artifacts: [] };
@@ -252,44 +253,73 @@ try {
   for (const edge of ["mcp", "cli"]) { const focused = edge === "mcp" ? await call("browser_tabs", { action: "focus", tab }) : (await cli("browser_tabs", { action: "focus", tab: cliTab })).result;
     assert.equal(focused.status, "blocked", JSON.stringify(focused)); assert.equal(focused.effect, "none"); assert.equal(focused.facts.reason, "browser_attention_background"); }
   assert.deepEqual(await state(), baseline); check("both real intake edges obey operator attention rule through native transport");
+  const custodyOpened = await call("browser_navigate", { url: `${origin}/custody-sentinel`, new_tab: true });
+  assert.equal(custodyOpened.status, "succeeded", JSON.stringify(custodyOpened));
+  const custodyPhysical = await worker(`(await chrome.tabs.query({})).find(item=>item.url===${JSON.stringify(`${origin}/custody-sentinel`)}).id`);
+  const custodyPage = () => worker(`chrome.scripting.executeScript({target:{tabId:${custodyPhysical}},world:'MAIN',func:()=>({focus:document.hasFocus(),visibility:document.visibilityState})}).then(items=>items[0].result)`);
   const webviewTarget = await until(async () => { try { const items = await (await fetch(`http://127.0.0.1:${webviewPort}/json/list`)).json(); return items.find(item=>item.type === "page" && item.webSocketDebuggerUrl); } catch { return false; } }, "production WebView2 debug endpoint");
   const webview = await connect(webviewTarget.webSocketDebuggerUrl);
   const ui = expression => evaluate(webview, expression);
+  const captureWorkbench = async name => {
+    const screenshot = await webview.send("Page.captureScreenshot", { format: "png" });
+    const bytes = Buffer.from(screenshot.data, "base64"), path = evidence.replace(/\.json$/, `-${name}.png`);
+    writeFileSync(path, bytes); report.artifacts.push({ path, sha256: hash(bytes), content: `Synthetic installed Workbench ${name}` }); save();
+  };
   await until(() => ui("Boolean(window.__TAURI__?.core?.invoke && document.querySelector('[data-intent]'))"), "production workbench loaded");
   report.webview = { target_url: webviewTarget.url, debugger_port: webviewPort, product: (await webview.send("Browser.getVersion")).product }; save();
   // Click actual production buttons. No test double or direct adapter reveal is used.
   const click = async selector => { await until(() => ui(`Boolean(document.querySelector(${JSON.stringify(selector)}) && !document.querySelector(${JSON.stringify(selector)}).disabled)`), `Workbench button ${selector}`);
     return ui(`(()=>{document.querySelector(${JSON.stringify(selector)}).click();return true})()`); };
-  // An inactive target is a positive control for emulation cleanup. An active page's ordinary
-  // focus after an operator reveal must not be mistaken for retained debugger emulation.
+  // Chrome's native Input.insertText can leave hasFocus true even after false+detach.
+  // A separate inactive target with no native input proves actual emulation cleanup.
   assert.equal((await worker(`chrome.tabs.get(${cliPhysical})`)).windowId, (await worker(`chrome.tabs.get(${physical})`)).windowId);
   await worker(`chrome.tabs.update(${cliPhysical},{active:true})`);
   assert.equal((await worker(`chrome.tabs.get(${physical})`)).active, false);
-  await until(async () => (await agentPage()).focus === true, "inactive controlled page retains active focus emulation");
-  report.observations.push({ name: "inactive_agent_before_pause", ...(await agentPage()) }); save();
+  assert.equal((await worker(`chrome.tabs.get(${custodyPhysical})`)).active, false);
+  await until(async () => (await custodyPage()).focus === true, "inactive never-native controlled page retains active focus emulation");
+  report.observations.push({ name: "inactive_agent_before_pause", ...(await agentPage()), sentinel: await custodyPage() }); save();
+  await captureWorkbench("active-effective-attention");
   await click('[data-intent="hold"]'); await until(() => worker("liveState.control_state==='held'"), "native Workbench pause reaches adapter");
-  await until(async () => (await agentPage()).focus === false, "pause removes controlled-page focus emulation");
+  try {
+    await until(async () => (await custodyPage()).focus === false, "pause removes inactive never-native controlled-page focus emulation");
+    assert.equal((await agentPage()).visibility, "hidden");
+  } finally {
+    report.observations.push({ name: "inactive_agent_after_pause", ...(await agentPage()),
+      sentinel: await custodyPage(),
+      tab: await worker(`chrome.tabs.get(${physical})`),
+      sibling: await worker(`chrome.tabs.get(${cliPhysical})`),
+      control_state: await worker("liveState.control_state"),
+      debugger_targets: await worker("chrome.debugger.getTargets()") }); save();
+  }
+  await captureWorkbench("paused");
   const paused = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "MUST_NOT_TYPE" }); assert.equal(paused.effect, "none");
   const revealSelector = `[data-reveal-tab="${tab}"]`;
   await click(revealSelector); await until(async () => (await worker(`chrome.tabs.get(${physical})`)).active, "native Workbench Show tab selects exact owned tab");
   assert.equal((await worker(`chrome.windows.get((await chrome.tabs.get(${physical})).windowId)`)).focused, true);
   assert.equal(await worker("liveState.control_state"), "held"); assert.equal((await agentPage()).value, "Native retained");
+  await captureWorkbench("paused-show-tab");
   const revealedPaused = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "REVEAL_IS_NOT_PERMISSION" }); assert.equal(revealedPaused.effect, "none");
   await worker(`chrome.tabs.update(${human.id},{active:true})`); await worker(`chrome.windows.update(${human.windowId},{focused:true})`);
   await worker(`chrome.tabs.update(${cliPhysical},{active:true})`);
-  assert.equal((await agentPage()).focus, false, "reveal while paused must leave normal inactive page focus after return to human");
+  assert.equal((await custodyPage()).focus, false, "reveal while paused must not restore controlled emulation");
+  assert.equal((await agentPage()).visibility, "hidden");
   check("actual Workbench Show tab reveals while paused without permitting effects or restoring emulation");
   await click('[data-intent="resume"]'); await until(() => worker("liveState.control_state==='active'"), "native Workbench resume reaches adapter");
-  await until(async () => (await agentPage()).focus === true, "resume restores inactive controlled focus without replay");
+  await until(async () => (await custodyPage()).focus === true, "resume restores inactive never-native controlled focus without replay");
   assert.equal((await agentPage()).value, "Native retained"); assert.equal((await call("browser_read", { tab })).status, "succeeded");
   await click('[data-intent="end_session"]'); await until(() => worker("liveState.control_state==='ended'"), "native Workbench Stop reaches adapter");
-  await until(async () => (await agentPage()).focus === false, "stop removes focus emulation");
-  const stopped = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "MUST_NOT_REPLAY" }); assert.equal(stopped.status, "cancelled"); assert.equal(stopped.effect, "none");
+  await until(async () => (await custodyPage()).focus === false, "stop removes inactive never-native focus emulation");
+  const targetsAfterStop = await worker("chrome.debugger.getTargets()");
+  for (const ownedPhysical of [physical, cliPhysical, custodyPhysical]) assert.equal(Boolean(targetsAfterStop.find(target=>target.tabId===ownedPhysical)?.attached), false);
+  report.observations.push({ name: "stopped_native_page_and_sentinel", ...(await agentPage()), sentinel: await custodyPage(), owned_debuggers_detached: true }); save();
+  const stopped = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "MUST_NOT_REPLAY" }); assert.equal(stopped.status, "blocked"); assert.equal(stopped.effect, "none");
+  assert.equal(stopped.facts.reason, "session_ended");
   await click(revealSelector); await until(async () => (await worker(`chrome.tabs.get(${physical})`)).active, "Show tab works after stop");
   assert.equal(await worker("liveState.control_state"), "ended");
   await worker(`chrome.tabs.update(${human.id},{active:true})`); await worker(`chrome.windows.update(${human.windowId},{focused:true})`);
   await worker(`chrome.tabs.update(${cliPhysical},{active:true})`);
-  assert.equal((await agentPage()).focus, false); assert.equal((await agentPage()).value, "Native retained"); assert.deepEqual(await state(), baseline);
+  assert.equal((await custodyPage()).focus, false); assert.equal((await agentPage()).visibility, "hidden");
+  assert.equal((await agentPage()).value, "Native retained"); assert.deepEqual(await state(), baseline);
   assert.equal(await humanPage("human.value"), fragments.join("")); check("native pause, resume, stop and post-stop reveal preserve work without replay or custody restoration");
   for (const [name, connection, sessionId] of [["human", cdp, humanSession], ["workbench", webview, undefined]]) {
     const screenshot = await connection.send("Page.captureScreenshot", { format: "png" }, sessionId);

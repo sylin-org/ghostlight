@@ -36,7 +36,8 @@ const desktopForeground = () => process.platform === "win32" ? JSON.parse(execFi
   { windowsHide: true, encoding: "utf8" })) : null;
 const report = { started_at: new Date().toISOString(), passed: false, legacy_adapter: legacy || legacyCustody,
   transport: "isolated MV3 native-port shim -> browser connector -> service -> MCP and CLI",
-  limitations: ["Not installed-stack acceptance", "Typing uses trusted Chromium input, not a physical keyboard"],
+  limitations: ["Not installed-stack acceptance", "Typing uses trusted Chromium input, not a physical keyboard",
+    "Chrome retains document.hasFocus after native input even without emulation; cleanup uses an inactive never-native sentinel and requires every controlled debugger to detach on Stop"],
   browser_fixture_arguments: fixtureRenderingArguments(),
   revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, windowsHide: true, encoding: "utf8" }).trim(),
   binaries: {}, checks: [], receipts: [], observations: [], dispatched_commands: [], native_trace: [], native_attention_receipts: [], failure: "run_incomplete" };
@@ -523,7 +524,7 @@ try {
     const agentGroup = await rawWorker(`chrome.tabGroups.get(${agentBefore.groupId})`);
     const duplicateWindow = await rawWorker(`chrome.windows.create({url:${JSON.stringify(`${origin}/duplicate-human`)},focused:false})`);
     const duplicateTab = duplicateWindow.tabs[0];
-    const duplicateGroup = await rawWorker(`chrome.tabs.group({tabIds:[${duplicateTab.id}]})`);
+    const duplicateGroup = await rawWorker(`chrome.tabs.group({tabIds:[${duplicateTab.id}],createProperties:{windowId:${duplicateWindow.id}}})`);
     await rawWorker(`chrome.tabGroups.update(${duplicateGroup},{title:${JSON.stringify(agentGroup.title)},color:'red',collapsed:false})`);
     await rawWorker(`chrome.tabGroups.update(${agentGroup.id},{collapsed:true})`);
     const duplicateState = () => rawWorker(`Promise.all([chrome.tabs.get(${duplicateTab.id}),chrome.tabGroups.get(${duplicateGroup})])
@@ -542,10 +543,25 @@ try {
     const retainedValue = "Control cleanup retained";
     assert.equal((await call("browser_fill_form", { tab, fields: [{ selector: { name: "Agent draft", role: "textbox" }, value: retainedValue }] })).status, "succeeded");
     assert.equal(await agentPage("agent.value"), retainedValue);
-    assert.equal(await agentPage("document.hasFocus()"), true, "controlled inactive tab keeps focus emulation");
+    // Native input leaves Chromium's ordinary hasFocus flag sticky even after false+detach
+    // (also reproduced on the pinned baseline and a never-emulated tab). Use a separate
+    // retained, inactive target with no native input as the cleanup positive control.
+    const custodyOpened = await call("browser_navigate", { url: `${origin}/custody-sentinel`, new_tab: true });
+    assert.equal(custodyOpened.status, "succeeded", JSON.stringify(custodyOpened));
+    const custodyPhysical = await rawWorker(`(await chrome.tabs.query({})).find(item=>item.url===${JSON.stringify(`${origin}/custody-sentinel`)}).id`);
+    const custodyTab = await rawWorker(`chrome.tabs.get(${custodyPhysical})`);
+    const custodySibling = await rawWorker(`(await chrome.tabs.query({windowId:${custodyTab.windowId}})).find(item=>item.id!==${custodyPhysical})`);
+    if (custodySibling) await rawWorker(`chrome.tabs.update(${custodySibling.id},{active:true})`);
+    else await rawWorker(`chrome.tabs.create({url:${JSON.stringify(`${origin}/custody-human-sibling`)},windowId:${custodyTab.windowId},active:true})`);
+    const custodyPage = () => rawWorker(`chrome.scripting.executeScript({target:{tabId:${custodyPhysical}},world:'MAIN',
+      func:()=>({focus:document.hasFocus(),visibility:document.visibilityState})}).then(items=>items[0].result)`);
+    assert.equal((await rawWorker(`chrome.tabs.get(${custodyPhysical})`)).active, false);
+    await until(async () => (await custodyPage()).focus === true, "inactive never-native controlled sentinel keeps focus emulation");
+    report.observations.push({ name: "cleanup_before_pause", native_focus: await agentPage("document.hasFocus()"), sentinel: await custodyPage() }); save();
     nativeSend({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
     await until(() => controls.at(-1) === "held", "pause reaches adapter");
-    await until(async () => await agentPage("document.hasFocus()") === false, "pause removes focus emulation");
+    await until(async () => (await custodyPage()).focus === false, "pause removes inactive never-native focus emulation");
+    report.observations.push({ name: "cleanup_after_pause", native_focus: await agentPage("document.hasFocus()"), sentinel: await custodyPage() }); save();
     const paused = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "MUST_NOT_TYPE" });
     assert.equal(paused.status, "blocked"); assert.equal(paused.effect, "none"); assert.equal(await agentPage("agent.value"), retainedValue);
     const revealed = await rawWorker(`dispatch({correlation:'quiet-human-reveal',workspace:topology.workspaceFor(${physical}),
@@ -559,7 +575,7 @@ try {
     check("foreground reveal mechanism shows the tab while Pause still blocks agent input");
     nativeSend({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
     await until(() => controls.at(-1) === "active", "resume reaches adapter");
-    await until(() => agentPage("document.hasFocus()"), "resume restores focus emulation");
+    await until(async () => (await custodyPage()).focus === true, "resume restores inactive never-native focus emulation");
     assert.equal(await agentPage("agent.value"), retainedValue, "resume must not replay paused input");
     assert.equal((await call("browser_read", { tab })).status, "succeeded");
     check("pause removes controlled focus, blocks future effects, and resume reobserves without replay");
@@ -583,13 +599,19 @@ try {
     // install boundary. Every model browser operation must carry the effective background rule.
     assert.ok(requests.filter(request => !["install_page_runtime", "present"].includes(request.command.command))
       .every(request => request.attention === "background"));
+    const controlledPhysicals = await rawWorker("(await chrome.tabs.query({})).filter(tab=>topology.workspaceFor(tab.id)).map(tab=>tab.id)");
     nativeSend({ kind: "event", event: { event: "runtime_control_requested", intent: "end_session" } });
     await until(() => controls.at(-1) === "ended", "stop reaches adapter");
     const cleanupState = () => rawWorker(`chrome.scripting.executeScript({target:{tabId:${physical}},world:'MAIN',
       func:()=>({focus:document.hasFocus(),value:agent.value})}).then(items=>items[0].result)`);
-    await until(async () => (await cleanupState()).focus === false, "stop restores normal page focus");
+    await until(async () => (await custodyPage()).focus === false, "stop restores inactive never-native page focus");
+    const targetsAfterStop = await rawWorker("chrome.debugger.getTargets()");
+    for (const ownedPhysical of controlledPhysicals) assert.equal(Boolean(targetsAfterStop.find(target=>target.tabId===ownedPhysical)?.attached), false);
+    report.observations.push({ name: "cleanup_after_stop", native_focus: (await cleanupState()).focus,
+      sentinel: await custodyPage(), owned_debuggers_detached: controlledPhysicals.length }); save();
     const stopped = await call("browser_type_text", { tab, selector: { name: "Agent draft", role: "textbox" }, text: "MUST_NOT_REPLAY" });
-    assert.equal(stopped.status, "cancelled", JSON.stringify(stopped)); assert.equal(stopped.effect, "none");
+    assert.equal(stopped.status, "blocked", JSON.stringify(stopped)); assert.equal(stopped.effect, "none");
+    assert.equal(stopped.facts.reason, "session_ended");
     assert.equal((await cleanupState()).value, retainedValue); assert.deepEqual(await state(), baseline);
     check("stop restores normal focus, preserves the unsent effect and leaves human work untouched");
   }
