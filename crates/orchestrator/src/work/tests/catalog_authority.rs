@@ -735,6 +735,7 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
                 &policy,
                 serde_json::to_vec(&json!({
                     "schema":3,"name":"Exact ordinary permission","version":"1",
+                    "config":[{"key":"browser.attention","value":"foreground","level":"mandatory"}],
                     "grants":grants
                 }))
                 .unwrap(),

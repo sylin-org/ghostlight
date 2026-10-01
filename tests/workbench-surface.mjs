@@ -61,6 +61,11 @@ let heartbeat = false;
 let snapshots = 0;
 let bulkSetups = 0;
 const managedHarnesses = [];
+const revealedTabs = [];
+const runtimeIntents = [];
+const appliedPolicies = [];
+let revealFailure = null;
+let policyResponse = null;
 
 const snapshot = () => ({
   seq: ++snapshots,
@@ -125,6 +130,20 @@ const sandbox = {
     __TAURI__: {
       core: { invoke: async (cmd, args) => {
         if (cmd === "workbench_snapshot") return snapshot();
+        if (cmd === "reveal_browser_tab") {
+          revealedTabs.push(args);
+          if (revealFailure) throw new Error(revealFailure);
+          return;
+        }
+        if (cmd === "apply_runtime_intent") {
+          runtimeIntents.push(args);
+          return { message: "Runtime intent applied." };
+        }
+        if (cmd === "workbench_policy") return policyResponse;
+        if (cmd === "apply_user_policy") {
+          appliedPolicies.push(JSON.parse(args.document));
+          return { message: "Policy applied." };
+        }
         if (cmd === "setup_detected_harnesses") {
           bulkSetups += 1;
           return { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." };
@@ -245,12 +264,156 @@ const compiled = (editable) => ({
     blocked_reason: editable ? null : "Example Org does not allow rules to be set on this machine."
   },
   browser_startup: { value: "on_demand", decided_by: "organization", organization_ceiling: "on_demand" },
+  browser_attention: { value: "background", decided_by: "default", organization_ceiling: null },
   passport: { configured: false, contacts: [] }
 });
 
 // A second view over the same stub document. The booted surface holds its own instance; this one
 // exists so the destination can be drawn on demand without a real click.
 const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error) => reported.push(`${what}: ${error?.message ?? error}`) });
+
+// Quiet coexistence is an actual editor/transport path, not a source-string promise. Exercise
+// delegated user controls against the running composition root, including the complete policy
+// passed to its native boundary. The backend owns validation and real browser effects.
+const quietChecks = [];
+const unavailableAdapter = snapshot();
+const adapterUpgradeDetail = "Update Ghostlight in Browser to continue. This adapter cannot enforce background work; its connection was retired without closing tabs.";
+unavailableAdapter.browsers = [{ id: "legacy-adapter", family: "Chrome", adapter_version: "1.0.0", connected: false, detail: adapterUpgradeDetail }];
+view.collections(unavailableAdapter, new Set());
+view.band({ snapshot: unavailableAdapter, runtime: "active", running: 0 });
+quietChecks.push(["a retired incompatible browser visibly requires an update without pausing the operator",
+  nodes.get("connections").innerHTML.includes('class="chip unavailable" data-browser="legacy-adapter"')
+    && nodes.get("connections").innerHTML.includes("Unavailable - adapter 1.0.0")
+    && nodes.get("connections").innerHTML.includes(adapterUpgradeDetail)
+    && nodes.get("wheel").dataset.intent === "hold"
+    && nodes.get("state-facts").innerHTML.includes("<b>0</b> browsers")]);
+unavailableAdapter.browsers.push({ id: "current-adapter", family: "Edge", adapter_version: "1.3.12", connected: true });
+view.collections(unavailableAdapter, new Set());
+view.band({ snapshot: unavailableAdapter, runtime: "active", running: 0 });
+quietChecks.push(["an unavailable browser does not hide a separate usable adapter",
+  nodes.get("connections").innerHTML.includes('class="chip on" data-browser="current-adapter"')
+    && nodes.get("connections").innerHTML.includes(adapterUpgradeDetail)
+    && nodes.get("state-facts").innerHTML.includes("<b>1</b> browsers")]);
+unavailableAdapter.browsers[0].detail = '<script>never executable</script>';
+view.collections(unavailableAdapter, new Set());
+quietChecks.push(["browser recovery detail is rendered as text without guessing or executing markup",
+  nodes.get("connections").innerHTML.includes("&lt;script&gt;never executable&lt;/script&gt;")
+    && !nodes.get("connections").innerHTML.includes("<script>never executable</script>")]);
+const firstPreference = compiled(true);
+firstPreference.layers = [];
+firstPreference.organization = null;
+view.policy(firstPreference);
+view.setChoice("browser.attention", "foreground");
+const firstPreferenceDocument = JSON.parse(view.draftDocument());
+quietChecks.push(["first preference preserves browser permissions through one visible ordinary rule",
+  firstPreferenceDocument.grants.length === 1
+    && firstPreferenceDocument.grants[0].hosts.allow.join(",") === "*"
+    && firstPreferenceDocument.grants[0].allowed.join(",") === "read,action,write,execute"
+    && firstPreferenceDocument.config.some(setting => setting.key === "browser.attention" && setting.value === "foreground")
+    && !nodes.get("apply-policy").disabled && !nodes.get("policy-permissions-note").hidden
+    && nodes.get("rule-list").innerHTML.includes("look at pages, click and type, fill in forms, run page code")]);
+view.ruleAction(0, "remove");
+view.setChoice("browser.attention", "background");
+quietChecks.push(["removing the starter rule is deliberate and a later preference does not recreate it",
+  JSON.parse(view.draftDocument()).grants.length === 0 && nodes.get("apply-policy").disabled
+    && nodes.get("policy-permissions-note").hidden]);
+view.policy(firstPreference);
+view.addRule("example.test");
+view.ruleAction(0, "remove");
+view.setChoice("browser.startup", "on_demand");
+quietChecks.push(["an explicitly authored then removed rule prevents preference seeding",
+  JSON.parse(view.draftDocument()).grants.length === 0 && nodes.get("apply-policy").disabled]);
+view.policy(firstPreference);
+view.setPermission("browser.tabs.allow_close", false);
+quietChecks.push(["first boolean preference also keeps the original browser permission envelope",
+  JSON.parse(view.draftDocument()).grants[0].allowed.length === 4]);
+policyResponse = compiled(true);
+await sandbox.loadPolicy();
+let attentionMarkup = nodes.get("setting-groups").innerHTML;
+quietChecks.push(["background browser work is the effective default in the existing policy editor",
+  /id="setting-browser-attention"[\s\S]*?<option value="background" selected>On<\/option>/.test(attentionMarkup)
+    && attentionMarkup.includes("without activating or moving your tabs")]);
+const attentionChoice = {
+  dataset: { settingChoice: "browser.attention" }, value: "foreground",
+  closest: (selector) => selector === "[data-setting-choice]" ? attentionChoice : null
+};
+elementHandlers.get("setting-groups:change")({ target: attentionChoice });
+quietChecks.push(["foreground preference explains human-tab reuse, navigation, and group movement",
+  nodes.get("setting-groups").innerHTML.includes("take control of and navigate tabs Ghostlight does not yet control on the same host")
+    && nodes.get("setting-groups").innerHTML.includes("repair or move matching Ghostlight tab groups")]);
+await elementHandlers.get("apply-policy:click")();
+await new Promise((r) => setTimeout(r, 0));
+quietChecks.push(["operator choice reaches the normal apply-policy boundary as a closed value",
+  appliedPolicies.at(-1)?.config.some((setting) => setting.key === "browser.attention" && setting.value === "foreground")]);
+
+const pinnedAttention = compiled(true);
+pinnedAttention.browser_attention = { value: "background", decided_by: "organization", organization_ceiling: "background" };
+view.policy(pinnedAttention);
+attentionMarkup = nodes.get("setting-groups").innerHTML;
+view.setChoice("browser.attention", "foreground");
+quietChecks.push(["organization background ceiling is named and cannot be relaxed by an editor event",
+  /id="setting-browser-attention"[^>]*disabled/.test(attentionMarkup)
+    && attentionMarkup.includes("Example Org requires background browser work")
+    && !JSON.parse(view.draftDocument()).config.some((setting) => setting.key === "browser.attention" && setting.value === "foreground")]);
+const readOnlyAttention = compiled(false);
+readOnlyAttention.browser_attention.decided_by = "user";
+view.policy(readOnlyAttention);
+quietChecks.push(["effective attention remains visible when the policy editor is read-only",
+  nodes.get("policy-editor").hidden && nodes.get("policy-settings").innerHTML.includes("Agents cannot request foreground focus")
+    && nodes.get("policy-settings").innerHTML.includes("Your rules")]);
+readOnlyAttention.browser_attention.value = "foreground";
+view.policy(readOnlyAttention);
+quietChecks.push(["read-only foreground feedback explains the same tab reuse and movement authority",
+  nodes.get("policy-settings").innerHTML.includes("navigate tabs Ghostlight does not yet control")
+    && nodes.get("policy-settings").innerHTML.includes("repair or move matching Ghostlight tab groups")]);
+view.policy(compiled(true));
+view.setChoice("browser.startup", "on_demand");
+quietChecks.push(["auto-open On explains the overriding background rule and human browser handoff",
+  nodes.get("setting-groups").innerHTML.includes("Background mode overrides this: automatic launch stays off")
+    && nodes.get("setting-groups").innerHTML.includes("agent asks you to open an eligible browser")]);
+
+const tabOperation = { invocation: "show-work", workspace: 'workspace"exact', tab: 'tab"exact',
+  tool: "browser_read", phase: "running", activity: "Reading" };
+const liveTabEntry = sandbox.GhostlightEntries.entryFromOperation(tabOperation);
+view.hero(liveTabEntry, false);
+const revealMarkup = nodes.get("hero-body").innerHTML;
+quietChecks.push(["live operation Show tab carries only the exact escaped workspace and tab handles",
+  revealMarkup.includes('data-reveal-workspace="workspace&quot;exact"')
+    && revealMarkup.includes('data-reveal-tab="tab&quot;exact"')
+    && revealMarkup.includes("without permitting work or resuming it")]);
+const retained = sandbox.GhostlightEntries.entryFromRecord({ ...tabOperation, complete: true, allowed: true }, liveTabEntry);
+view.hero(retained, false);
+quietChecks.push(["settled live history retains its exact tab destination",
+  nodes.get("hero-body").innerHTML.includes('data-reveal-tab="tab&quot;exact"')]);
+view.hero(sandbox.GhostlightEntries.entryFromRecord({ ...tabOperation, tab: null, complete: true }, retained), false);
+quietChecks.push(["an omitted backend destination clears a formerly revealable tab",
+  !nodes.get("hero-body").innerHTML.includes("data-reveal-tab")]);
+view.hero(sandbox.GhostlightEntries.entryFromRecord({ invocation: "old", workspace: "w", tool: "browser_read", complete: true }), false);
+quietChecks.push(["history without actual tab evidence does not invent a Show tab destination",
+  !nodes.get("hero-body").innerHTML.includes("data-reveal-tab")]);
+const revealButton = {
+  disabled: false, dataset: { revealWorkspace: tabOperation.workspace, revealTab: tabOperation.tab },
+  closest: (selector) => selector === "[data-reveal-tab]" ? revealButton : null
+};
+const beforeIntents = runtimeIntents.length;
+dispatchDocument("click", { target: revealButton });
+dispatchDocument("click", { target: revealButton });
+const revealPending = revealButton.disabled;
+await new Promise((r) => setTimeout(r, 0));
+quietChecks.push(["operator Show tab invokes one native reveal without applying a runtime intent",
+  revealPending && !revealButton.disabled && revealedTabs.length === 1
+    && revealedTabs[0].workspace === tabOperation.workspace && revealedTabs[0].tab === tabOperation.tab
+    && runtimeIntents.length === beforeIntents]);
+revealFailure = "This tab is no longer controlled by this workspace.";
+dispatchDocument("click", { target: revealButton });
+await new Promise((r) => setTimeout(r, 0));
+quietChecks.push(["a stale reveal is visible and re-enables the operator control without claiming success",
+  nodes.get("toast").textContent.includes(revealFailure) && !revealButton.disabled]);
+revealFailure = null;
+view.band({ snapshot: { ...snapshot(), configuration: { browser_attention: { value: "background" } } }, runtime: "paused", running: 0 });
+quietChecks.push(["At a glance shows background work while keeping the explicit Resume control",
+  !nodes.get("browser-attention").hidden && nodes.get("browser-attention").textContent.includes("background")
+    && nodes.get("wheel").dataset.intent === "resume"]);
 
 view.collections({
   sessions: [], browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
@@ -572,6 +735,7 @@ auditPinned.audit = { mode: "require_audit", source: "organization", organizatio
 view.policy(auditPinned);
 const auditPinnedMarkup = nodes.get("setting-groups").innerHTML;
 const checks = [
+  ...quietChecks,
   ["audit health stays visible through recovery gaps and quiet when healthy", auditNoticeVisible && recoveredGapVisible && healthyAuditQuiet],
   ["audit policy authors a closed choice and organization requirement disables relaxation", authoredAudit.some((item) => item.key === "audit.availability" && item.value === "require_audit") && /value="keep_working"[^>]*disabled/.test(auditPinnedMarkup)],
   ["coverage handling and notices author separate closed choices",

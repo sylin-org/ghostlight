@@ -12,6 +12,10 @@ const args = process.argv.slice(2);
 assert.ok(args.length <= 1 && (!args.length || /^--lane=(all|process|browser)$/.test(args[0])),
   "Usage: node tests/hardening-suite.mjs [--lane=all|process|browser]");
 const lane = args[0]?.split("=")[1] || "all";
+// These explicitly authorized fixture lanes are opt-in. Shallow CI need not carry the old
+// adapter Git object, and ordinary component testing does not create native host registrations.
+const quietCompatibility = process.env.GHOSTLIGHT_TEST_QUIET_COMPATIBILITY === "1";
+const nativeInstallation = process.env.GHOSTLIGHT_TEST_NATIVE_INSTALLATION === "1";
 const target = resolve(process.env.CARGO_TARGET_DIR || join(root, ".target-ghostlight-1.0"));
 const browser = process.env.GHOSTLIGHT_TEST_BROWSER || join(root, ".tmp/chrome-testing/chrome-win64/chrome.exe");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -68,6 +72,7 @@ if (lane === "all") {
   await run("portable-package", "pwsh", ["-NoProfile", "-File", "tests/portable-package.ps1"]);
   if (process.platform === "linux") await node("shell-installer", "tests/installer-shell.mjs");
   await node("policy-grammar", "tests/policy-grammar.mjs");
+  await node("scripted-recipes", "tests/scripted-journey-recipes.mjs");
 }
 const artifacts = new Map();
 const executables = ["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"];
@@ -90,6 +95,7 @@ if (built) {
 if (lane !== "browser") {
   for (const [name, file] of [
     ["connector-parent", "connector-parent-lifecycle.mjs"],
+    ["browser-relay-reconnect", "browser-relay-reconnect.mjs"],
     ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
     ["history-compatibility", "history-compatibility.mjs"],
     ["provenance", "provenance-journey.mjs"], ["cli", "cli-journey.mjs"],
@@ -106,11 +112,29 @@ if (lane !== "process") {
   await run("browser-harness", process.execPath, ["--test", "tests/chromium-harness.test.mjs", "tests/linux/installed-reporting.test.mjs"]);
   for (const [name, file] of [
     ["script-browser", "script-browser-journey.mjs"], ["frame-browser", "frame-browser-journey.mjs"],
-    ["history-browser", "workbench-history-browser.mjs"]
+    ["history-browser", "workbench-history-browser.mjs"],
+    ["quiet-browser", "quiet-browser-journey.mjs"], ["quiet-browser-legacy", "quiet-browser-journey.mjs"]
   ]) {
     if (!built) blocked(name, "Current-source build failed.");
     else if (!existsSync(browser)) blocked(name, "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing with unpacked-extension support.");
-    else await node(name, `tests/${file}`);
+    else await run(name, process.execPath, [`tests/${file}`, ...(name === "quiet-browser-legacy" ? ["--legacy"] : [])]);
+  }
+  if (quietCompatibility) {
+    const name = "quiet-browser-legacy-custody";
+    let historicalAdapter = false;
+    try { execFileSync("git", ["cat-file", "-e", "de1a686761af5430afc50763d1a282efaa80f615:extension/service-worker.js"],
+      { cwd: root, windowsHide: true, stdio: "ignore" }); historicalAdapter = true; } catch {}
+    if (!built) blocked(name, "Current-source build failed.");
+    else if (!existsSync(browser)) blocked(name, "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing with unpacked-extension support.");
+    else if (!historicalAdapter) blocked(name, "Requested compatibility fixture requires pinned Git object de1a686761af5430afc50763d1a282efaa80f615.");
+    else await run(name, process.execPath, ["tests/quiet-browser-journey.mjs", "--legacy-custody"]);
+  }
+  if (nativeInstallation) {
+    const name = "quiet-native-installed";
+    if (process.platform !== "win32") blocked(name, "Requested disposable native installation fixture requires Windows.");
+    else if (!built) blocked(name, "Current-source build failed.");
+    else if (!existsSync(browser)) blocked(name, "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing with unpacked-extension support.");
+    else await node(name, "tests/quiet-native-installed-journey.mjs");
   }
 }
 report.finished_at = new Date().toISOString();

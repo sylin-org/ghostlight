@@ -2,6 +2,10 @@
 
 Date: 2026-08-25. Status: Accepted (implemented in this revision).
 
+Amended by ADR-0186: same-host unbound adoption and duplicate-group movement apply only under
+operator-selected foreground attention. Background preserves unowned tabs and existing placement.
+The original decision remains below as its historical rationale.
+
 ## Context
 
 Running the sample scripts repeatedly produced ever-accumulating tabs, and the browser showed

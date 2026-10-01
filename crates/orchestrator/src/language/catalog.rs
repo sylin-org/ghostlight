@@ -50,7 +50,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_tabs",
             "Browser tabs",
-            "List, focus, or close this workspace's tabs. List reads the connected browser live and refuses when no browser is connected; use list to recover fresh tab handles for later calls.",
+            "List, focus, or close this workspace's tabs. Browser work defaults to the background; explicit focus is refused under that setting. Native keys and pointer input need an unfocused window containing only controlled tabs. The user can choose Show tab in the Ghostlight workbench without granting permission or resuming paused work. List reads the connected browser live; use it to recover fresh tab handles for later calls. Results report effective browser_attention; policy_explain names its deciding layer.",
             tabs_schema(),
             Hints::browser_action(true),
         ),
@@ -134,7 +134,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_type_text",
             "Type text",
-            "Type text through real per-character keyboard input. Requires action; selector lookup or an expect check also requires read. Use browser_fill_form instead when plain values are enough. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
+            "Enter text through browser editing. Requires action; selector lookup or an expect check also requires read. Use browser_press_key for keys and shortcuts, or browser_fill_form for plain field values. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
             with_expect(type_schema()),
             Hints::browser_action(true),
         ),
@@ -386,7 +386,7 @@ fn navigate_schema() -> Value {
                         enumeration(
                             &["domain", "never"],
                             Some("domain"),
-                            "domain adopts an existing unbound same-host tab (exact URL preferred) instead of creating another one; never always creates. Ignored when new_tab is true.",
+                            "When opening without a controlled tab, domain may adopt an unbound same-host tab only with operator foreground attention (exact URL preferred). Background opens create instead of adopting human tabs. never prevents adoption; use new_tab:true to create fresh even when this workspace already controls a tab.",
                         ),
                     ),
                     ("timeout_ms", timeout()),

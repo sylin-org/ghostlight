@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
+use ghostlight_bridge::browser::{BrowserAttention, RuntimeControlIntent, RuntimeControlState};
 use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1418,6 +1418,22 @@ impl GovernanceFacade {
             passport: policies.managed_passport(),
         };
         effective::browser_startup(&inputs).value
+    }
+
+    /// Resolve the live operator-owned attention preference before browser dispatch.
+    #[must_use]
+    pub fn browser_attention(&self) -> BrowserAttention {
+        self.refresh_policies();
+        let policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        effective::browser_attention(
+            policies.managed_manifest(),
+            policies.user.active.as_ref(),
+            policies.managed_valid() && policies.user.has_authority(),
+        )
+        .value
     }
 
     /// Build one immutable snapshot from configured policy authority.

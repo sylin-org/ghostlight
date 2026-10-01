@@ -196,7 +196,7 @@ try {
     capabilities: [
       "document_scope", "adapter_liveness", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
-      "operation_recovery", "presentation"
+      "operation_recovery", "presentation", "browser_attention"
     ].map((name) => ({ name, revision: { script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
   });
   // Wait for the relay's own handshake rather than guessing: until the connector answers

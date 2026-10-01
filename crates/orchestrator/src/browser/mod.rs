@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use ghostlight_bridge::browser::{
-    adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-    BrowserOutcome, BrowserPlatform, BrowserRequest, DiagnosticsState, RuntimeControlState,
-    ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
-    COMMAND_TRANSFER_MAX_CHUNKS,
+    adapter_capability, AdapterCapability, BrowserAttention, BrowserAttentionReason,
+    BrowserCommand, BrowserEvent, BrowserFrame, BrowserOutcome, BrowserPlatform, BrowserRequest,
+    DiagnosticsState, RuntimeControlState, ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES,
+    COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
 };
 use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
 use ghostlight_bridge::transport::{
@@ -38,6 +38,8 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 const BROWSER_NAME_MAX_CHARS: usize = 40;
 const MAX_BROWSER_CONNECTIONS: usize = 16;
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
+const ATTENTION_UPGRADE_CODE: &str = "browser_attention_upgrade_required";
+pub(crate) const ATTENTION_UPGRADE_DETAIL: &str = "Update Ghostlight in Browser to continue. This adapter cannot enforce background work; its connection was retired without closing tabs.";
 
 #[derive(Clone, Copy, Debug)]
 struct HeartbeatSettings {
@@ -56,6 +58,8 @@ impl Default for HeartbeatSettings {
 
 /// A live application-owned admission check used at the actual transmission boundary.
 pub struct BrowserDispatch<'a> {
+    /// Operator-selected attention enforced by the negotiated adapter.
+    pub attention: BrowserAttention,
     /// Invocation deadline, checked again after waiting for the writer.
     pub deadline: Instant,
     /// Live cancellation state for this invocation.
@@ -102,6 +106,14 @@ pub trait BrowserPort: Send + Sync {
     /// Every connected browser, most recently attended first.
     fn browsers(&self) -> Vec<BrowserSummary>;
 
+    /// Retire an incompatible adapter's retained custody without closing browser tabs.
+    ///
+    /// The legacy Ended mechanism is delivered without a correlated acknowledgement. The
+    /// connection stays excluded until an adapter supporting background attention reconnects.
+    fn retire_attention_incompatible(&self, _browser: &str) -> Result<bool, BrowserError> {
+        Ok(false)
+    }
+
     /// Publish authoritative content-free runtime state to every browser without awaiting a
     /// receipt.
     fn publish_control_state(&self, _state: RuntimeControlState) -> Result<(), BrowserError> {
@@ -141,17 +153,36 @@ pub fn choose_browser(
         if pinned.is_some_and(|pinned| pinned != requested) {
             return Err(BrowserError::BrowserPinned);
         }
-        if !connected.iter().any(|browser| browser.id == requested) {
+        let Some(browser) = connected.iter().find(|browser| browser.id == requested) else {
             return Err(BrowserError::UnknownBrowser(requested.into()));
+        };
+        if browser.attention_incompatible {
+            return Err(attention_capability_error());
         }
         return Ok(requested.into());
     }
     if let Some(pinned) = pinned {
-        if connected.iter().any(|browser| browser.id == pinned) {
+        if let Some(browser) = connected.iter().find(|browser| browser.id == pinned) {
+            if browser.attention_incompatible {
+                return Err(attention_capability_error());
+            }
             return Ok(pinned.into());
         }
         return Err(BrowserError::DisconnectedBeforeDispatch);
     }
+    let eligible: Vec<_> = connected
+        .iter()
+        .filter(|browser| !browser.attention_incompatible)
+        .cloned()
+        .collect();
+    if eligible.is_empty()
+        && connected
+            .iter()
+            .any(|browser| browser.attention_incompatible)
+    {
+        return Err(attention_capability_error());
+    }
+    let connected = eligible.as_slice();
     if let Some(attended) = connected.iter().find(|browser| browser.attended) {
         return Ok(attended.id.clone());
     }
@@ -206,6 +237,8 @@ pub struct BrowserSummary {
     pub platform: BrowserPlatform,
     /// Whether this is the most recently attended connected browser.
     pub attended: bool,
+    /// This adapter was retired because it cannot enforce the operator's background rule.
+    pub attention_incompatible: bool,
 }
 
 /// Every connected browser, and the reported order in which they were last attended.
@@ -220,6 +253,8 @@ struct AdapterRegistry {
     /// transport for one adapter, never a second browser: the adapter mints its identity once
     /// and keeps it across reconnects and service-worker restarts (ADR-0061).
     connections: HashMap<String, Connection>,
+    /// Bounded content-free legacy identities; reconnect cannot restore their stale custody.
+    attention_quarantine: HashMap<String, BrowserSummary>,
     /// Move-to-front browser attention order, most recent first.
     ///
     /// Attention is reported by adapters and outlives any single connection, so a browser that
@@ -263,8 +298,10 @@ impl AdapterRegistry {
                 adapter_version: connection.adapter_version.clone(),
                 platform: connection.platform,
                 attended: attended.as_deref() == Some(connection.browser_id.as_str()),
+                attention_incompatible: false,
             })
             .collect();
+        summaries.extend(self.attention_quarantine.values().cloned());
         summaries.sort_by(|left, right| {
             right
                 .attended
@@ -329,9 +366,12 @@ pub trait AdapterLifecycleObserver: Send + Sync + 'static {
     fn adapter_detached(&self, browser_id: &str);
 }
 
+type AttentionSource = dyn Fn() -> BrowserAttention + Send + Sync;
+
 /// Authenticated loopback implementation of the physical browser port.
 pub struct RelayBrowserPort {
     service_epoch: String,
+    attention_source: Mutex<Option<Arc<AttentionSource>>>,
     adapters: Arc<Mutex<AdapterRegistry>>,
     event_sink: Mutex<Option<Arc<dyn BrowserEventSink>>>,
     control_state: Mutex<RuntimeControlState>,
@@ -355,6 +395,7 @@ impl RelayBrowserPort {
     pub fn new(service_epoch: String) -> Self {
         Self {
             service_epoch,
+            attention_source: Mutex::new(None),
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
@@ -369,6 +410,7 @@ impl RelayBrowserPort {
         debug_assert!(heartbeat.interval < heartbeat.timeout);
         Self {
             service_epoch,
+            attention_source: Mutex::new(None),
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
@@ -376,6 +418,17 @@ impl RelayBrowserPort {
             lifecycle: Mutex::new(None),
             heartbeat,
         }
+    }
+
+    /// Use live operator authority before accepting a browser that could restore old custody.
+    pub fn set_attention_source(&self, source: Arc<AttentionSource>) {
+        *lock(&self.attention_source) = Some(source);
+    }
+
+    fn effective_attention(&self) -> BrowserAttention {
+        lock(&self.attention_source)
+            .clone()
+            .map_or(BrowserAttention::Foreground, |source| source())
     }
 
     /// Install the direct typed event reaction target.
@@ -391,7 +444,9 @@ impl RelayBrowserPort {
     /// Whether at least one compatible adapter is currently connected.
     #[must_use]
     pub fn is_connected(&self) -> bool {
-        !self.connected_browsers().is_empty()
+        self.connected_browsers()
+            .iter()
+            .any(|browser| !browser.attention_incompatible)
     }
 
     /// Every connected browser, most recently attended first.
@@ -487,6 +542,62 @@ impl RelayBrowserPort {
         let capabilities = validated_capabilities(capabilities)?;
         let browser_name = validated_browser_name(browser_name)?;
         let platform = platform.unwrap_or_default();
+        let supports_background = capabilities
+            .get(adapter_capability::BROWSER_ATTENTION)
+            .copied()
+            .unwrap_or_default()
+            >= 1;
+        let quarantine = !supports_background
+            && (self.effective_attention() == BrowserAttention::Background
+                || lock(&self.adapters)
+                    .attention_quarantine
+                    .contains_key(&browser_id));
+        if quarantine {
+            self.retire_attention_incompatible(&browser_id)?;
+            let writer = SocketWriter::new(stream)
+                .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+            let summary = BrowserSummary {
+                id: browser_id.clone(),
+                name: browser_name,
+                adapter_version,
+                platform,
+                attended: false,
+                attention_incompatible: true,
+            };
+            {
+                let mut adapters = lock(&self.adapters);
+                let healthy_replacement =
+                    adapters
+                        .connections
+                        .get(&browser_id)
+                        .is_some_and(|connection| {
+                            connection
+                                .capabilities
+                                .get(adapter_capability::BROWSER_ATTENTION)
+                                .copied()
+                                .unwrap_or_default()
+                                >= 1
+                        });
+                if !healthy_replacement {
+                    if !adapters.attention_quarantine.contains_key(&browser_id)
+                        && adapters.connections.len() + adapters.attention_quarantine.len()
+                            >= MAX_BROWSER_CONNECTIONS
+                    {
+                        writer.close();
+                        return Err(BrowserError::Protocol(
+                            "browser connection capacity reached".into(),
+                        ));
+                    }
+                    adapters
+                        .attention_quarantine
+                        .insert(browser_id.clone(), summary);
+                }
+            }
+            let result = retire_legacy_writer(&writer);
+            writer.close();
+            result?;
+            return Err(attention_capability_error());
+        }
         let reports_attention = capabilities
             .get(adapter_capability::ADAPTER_ATTENTION)
             .copied()
@@ -518,8 +629,12 @@ impl RelayBrowserPort {
         };
         let replaced = {
             let mut adapters = lock(&self.adapters);
+            if supports_background {
+                adapters.attention_quarantine.remove(&browser_id);
+            }
             if !adapters.connections.contains_key(&browser_id)
-                && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
+                && adapters.connections.len() + adapters.attention_quarantine.len()
+                    >= MAX_BROWSER_CONNECTIONS
             {
                 writer.close();
                 return Err(BrowserError::Protocol(
@@ -535,6 +650,11 @@ impl RelayBrowserPort {
             }
             previous.is_some()
         };
+        // Recheck after registration, before a legacy hello can restore stale focus custody.
+        if !supports_background && self.effective_attention() == BrowserAttention::Background {
+            self.retire_attention_incompatible(&browser_id)?;
+            return Err(attention_capability_error());
+        }
         if let Err(error) = writer.native(&BrowserFrame::HelloAccepted {
             major: ADAPTER_PROTOCOL_MAJOR,
             service_version: env!("CARGO_PKG_VERSION").into(),
@@ -712,6 +832,7 @@ impl RelayBrowserPort {
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         let BrowserDispatch {
+            attention,
             deadline,
             cancelled,
             admit,
@@ -722,10 +843,18 @@ impl RelayBrowserPort {
         if Instant::now() >= deadline {
             return Err(BrowserError::DeadlineBeforeDispatch);
         }
+        if lock(&self.adapters)
+            .attention_quarantine
+            .contains_key(browser)
+        {
+            return Err(attention_capability_error());
+        }
+        let needs_attention_contract = attention == BrowserAttention::Background
+            || matches!(&command, BrowserCommand::FocusTab { .. });
         let correlation = format!("physical_{}", Uuid::new_v4().simple());
         let (sender, receiver) = mpsc::channel();
         let required_capability = command.required_capability();
-        let (writer, pending, chunked_commands, liveness) = {
+        let (writer, pending, chunked_commands, liveness, selected_connection_id) = {
             let adapters = lock(&self.adapters);
             let Some(connection) = adapters.connections.get(browser) else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
@@ -737,6 +866,27 @@ impl RelayBrowserPort {
                 !lock(liveness).is_available(Instant::now(), self.heartbeat.timeout)
             }) {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
+            }
+            if needs_attention_contract {
+                let advertised = connection
+                    .capabilities
+                    .get(adapter_capability::BROWSER_ATTENTION)
+                    .copied()
+                    .unwrap_or_default();
+                if advertised < 1 {
+                    let selected_id = connection.id.clone();
+                    drop(adapters);
+                    if attention == BrowserAttention::Background
+                        || self.effective_attention() == BrowserAttention::Background
+                    {
+                        self.retire_attention_incompatible_if_current(browser, &selected_id)?;
+                    }
+                    return Err(BrowserError::CapabilityVersion {
+                        capability: adapter_capability::BROWSER_ATTENTION.into(),
+                        required: 1,
+                        advertised,
+                    });
+                }
             }
             let advertised = connection
                 .capabilities
@@ -783,12 +933,14 @@ impl RelayBrowserPort {
                     .unwrap_or_default()
                     >= 1,
                 connection.liveness.clone(),
+                connection.id.clone(),
             )
         };
         let frame = BrowserFrame::Request {
             request: BrowserRequest {
                 correlation: correlation.clone(),
                 workspace: workspace.into(),
+                attention,
                 command,
             },
         };
@@ -822,6 +974,30 @@ impl RelayBrowserPort {
         }
         if Instant::now() >= deadline {
             return Err(BrowserError::DeadlineBeforeDispatch);
+        }
+        // Writer contention cannot transfer admission to a replacement connection. Capabilities
+        // are immutable for one connection, and this writer must still be that exact connection.
+        {
+            let adapters = lock(&self.adapters);
+            if adapters.attention_quarantine.contains_key(browser) {
+                return Err(attention_capability_error());
+            }
+            let Some(current) = adapters.connections.get(browser) else {
+                return Err(BrowserError::DisconnectedBeforeDispatch);
+            };
+            if current.id != selected_connection_id {
+                return Err(BrowserError::DisconnectedBeforeDispatch);
+            }
+            if needs_attention_contract
+                && current
+                    .capabilities
+                    .get(adapter_capability::BROWSER_ATTENTION)
+                    .copied()
+                    .unwrap_or_default()
+                    < 1
+            {
+                return Err(attention_capability_error());
+            }
         }
         admit()?;
         lock(&pending).insert(correlation.clone(), sender);
@@ -867,6 +1043,7 @@ impl BrowserPort for RelayBrowserPort {
             workspace,
             command,
             BrowserDispatch {
+                attention: BrowserAttention::Foreground,
                 deadline,
                 cancelled,
                 admit: &|| Ok(()),
@@ -888,6 +1065,25 @@ impl BrowserPort for RelayBrowserPort {
         self.connected_browsers()
     }
 
+    fn retire_attention_incompatible(&self, browser: &str) -> Result<bool, BrowserError> {
+        let selected_id = {
+            let adapters = lock(&self.adapters);
+            if adapters.attention_quarantine.contains_key(browser) {
+                return Ok(true);
+            }
+            adapters
+                .connections
+                .get(browser)
+                .map(|connection| connection.id.clone())
+        };
+        match selected_id {
+            Some(connection_id) => {
+                self.retire_attention_incompatible_if_current(browser, &connection_id)
+            }
+            None => Ok(false),
+        }
+    }
+
     /// Runtime control is a property of Ghostlight, not of one browser, so every connected
     /// adapter learns the new state. One unreachable browser does not hide the state from the
     /// rest.
@@ -903,6 +1099,56 @@ impl RelayBrowserPort {
     pub fn publish_diagnostics(&self, diagnostics: DiagnosticsState) -> Result<(), BrowserError> {
         *lock(&self.diagnostics) = Some(diagnostics);
         self.broadcast_control(*lock(&self.control_state))
+    }
+
+    fn retire_attention_incompatible_if_current(
+        &self,
+        browser: &str,
+        connection_id: &str,
+    ) -> Result<bool, BrowserError> {
+        let connection = {
+            let mut adapters = lock(&self.adapters);
+            if adapters.attention_quarantine.contains_key(browser) {
+                return Ok(true);
+            }
+            let Some(connection) = adapters.connections.get(browser) else {
+                return Ok(false);
+            };
+            if connection.id != connection_id {
+                return Ok(false);
+            }
+            if connection
+                .capabilities
+                .get(adapter_capability::BROWSER_ATTENTION)
+                .copied()
+                .unwrap_or_default()
+                >= 1
+            {
+                return Ok(false);
+            }
+            let connection = adapters
+                .connections
+                .remove(browser)
+                .expect("connection checked");
+            adapters.attention_quarantine.insert(
+                browser.into(),
+                BrowserSummary {
+                    id: connection.browser_id.clone(),
+                    name: connection.browser_name.clone(),
+                    adapter_version: connection.adapter_version.clone(),
+                    platform: connection.platform,
+                    attended: false,
+                    attention_incompatible: true,
+                },
+            );
+            connection
+        };
+        let result = retire_legacy_writer(&connection.writer);
+        retire(&connection);
+        if let Some(observer) = lock(&self.lifecycle).clone() {
+            observer.adapter_detached(browser);
+        }
+        result.map(|()| true)
     }
 
     fn broadcast_control(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
@@ -924,6 +1170,49 @@ impl RelayBrowserPort {
         }
         published
     }
+}
+
+fn attention_capability_error() -> BrowserError {
+    BrowserError::CapabilityVersion {
+        capability: adapter_capability::BROWSER_ATTENTION.into(),
+        required: 1,
+        advertised: 0,
+    }
+}
+
+/// Legacy Ended detaches every retained debugger without closing tabs. This is a bounded delivery,
+/// not a fabricated receipt; reconnect remains excluded until the adapter is updated.
+fn retire_legacy_writer(writer: &SocketWriter) -> Result<(), BrowserError> {
+    let deadline = Instant::now() + CONTROL_DELIVERY_TIMEOUT;
+    let result = (|| {
+        // Keep the Ended frame and shutdown under one writer lease. A previously collected
+        // Active broadcast must not overtake retirement and restore stale focus emulation.
+        let mut channel = writer
+            .until(deadline)
+            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        write_native(
+            &mut channel,
+            &BrowserFrame::ControlState {
+                state: RuntimeControlState::Ended,
+                diagnostics: None,
+            },
+        )
+        .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        write_native(
+            &mut channel,
+            &BrowserFrame::Error {
+                correlation: None,
+                code: ATTENTION_UPGRADE_CODE.into(),
+                message: ATTENTION_UPGRADE_DETAIL.into(),
+                effect_unknown: false,
+            },
+        )
+        .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+        writer.close();
+        Ok(())
+    })();
+    writer.close();
+    result
 }
 
 fn write_request_payload(
@@ -1011,6 +1300,7 @@ fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
         request: BrowserRequest {
             correlation: format!("cancel_{}", Uuid::new_v4().simple()),
             workspace: "system".into(),
+            attention: BrowserAttention::Foreground,
             command: BrowserCommand::Cancel {
                 correlation: correlation.into(),
             },
@@ -1264,6 +1554,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Truth-preserving physical-browser failure classes.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum BrowserError {
+    /// Operator background mode refuses a foreground request before transmission.
+    #[error("browser work is configured to remain in the background")]
+    AttentionProtected(BrowserAttentionReason),
     /// The authority refused the actual embedded-document subject before access.
     #[error("document access denied: {0:?}")]
     DocumentAccess(crate::governance::Decision),
@@ -1481,6 +1774,7 @@ pub(crate) mod testing {
             adapter_version: "1.0.0".into(),
             platform: BrowserPlatform::Chromium,
             attended,
+            attention_incompatible: false,
         }
     }
 

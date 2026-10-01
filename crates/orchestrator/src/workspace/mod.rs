@@ -641,6 +641,49 @@ impl WorkspaceStore {
         None
     }
 
+    /// Resolve an exact owned tab for a local-human reveal without acquiring a writer lease.
+    ///
+    /// Holds prevent agent effects, not the person seeing their controlled tab. This read never
+    /// adopts, recreates, unholds, or selects an ambiguous tab.
+    pub fn reveal_tab(
+        &self,
+        workspace: &str,
+        requested: &str,
+    ) -> Result<(String, SelectedTab), WorkspaceError> {
+        let state = self.lock();
+        let owned = state
+            .workspaces
+            .get(workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let handle = TabHandle(requested.into());
+        let tab = owned.tabs.get(&handle).ok_or_else(|| {
+            if state
+                .workspaces
+                .iter()
+                .any(|(id, other)| id.as_str() != workspace && other.tabs.contains_key(&handle))
+            {
+                WorkspaceError::NotOwnedTab
+            } else {
+                WorkspaceError::StaleTab
+            }
+        })?;
+        let browser = owned.browser.clone().ok_or(WorkspaceError::NoTab)?;
+        Ok((browser, selected(&handle, tab)))
+    }
+
+    /// Project an actual physical browser selection into an exact current opaque tab handle.
+    #[must_use]
+    pub fn handle_of_physical(&self, workspace: &str, physical_id: u64) -> Option<String> {
+        self.lock()
+            .workspaces
+            .get(workspace)?
+            .tabs
+            .iter()
+            .find_map(|(handle, tab)| {
+                (tab.physical_id == physical_id).then(|| handle.as_str().to_owned())
+            })
+    }
+
     /// Apply an asynchronous committed landing through the aggregate before later content use.
     /// Which browser this workspace works in, if its first work already chose one.
     #[must_use]

@@ -85,6 +85,15 @@ fn run(diagnostics: &Sink) -> Result<()> {
 
     loop {
         if service.is_none() {
+            // A service can accept the opaque adapter exchange and then close immediately.
+            // Space every established-session loss, not only failed connection attempts, so
+            // a persistent rejection cannot create an unbounded reconnect loop.
+            if generation != 0 {
+                thread::sleep(RETRY_INTERVAL);
+                if !chrome_alive.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+            }
             let connection = match connect_once(&adapter_hello) {
                 Ok(connection) => Some(connection),
                 Err(error) => {

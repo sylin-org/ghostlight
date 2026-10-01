@@ -258,7 +258,7 @@ impl PresentationReactor {
     /// Admission has no page destination yet. Recording a workspace-wide start must never
     /// animate whichever unrelated tab happens to be active while the real target resolves.
     pub(crate) fn bind_command(&self, workspace: &str, invocation: &str, command: &BrowserCommand) {
-        let Some(tab) = command_tab(command) else {
+        let Some(tab) = command.tab_id() else {
             return;
         };
         let activity = {
@@ -288,63 +288,6 @@ impl PresentationReactor {
                 click: None,
             },
         );
-    }
-}
-
-fn command_tab(command: &BrowserCommand) -> Option<u64> {
-    match command {
-        BrowserCommand::InDocuments { primitive, .. } => command_tab(primitive),
-        BrowserCommand::DescribeDocuments { tab_id, .. }
-        | BrowserCommand::FocusTab { tab_id }
-        | BrowserCommand::Navigate { tab_id, .. }
-        | BrowserCommand::TraverseHistory { tab_id, .. }
-        | BrowserCommand::Reload { tab_id, .. }
-        | BrowserCommand::CloseTab { tab_id, .. }
-        | BrowserCommand::NavigateDiscardingBeforeUnload { tab_id, .. }
-        | BrowserCommand::ReadText { tab_id, .. }
-        | BrowserCommand::ReadDocument { tab_id, .. }
-        | BrowserCommand::Inspect { tab_id, .. }
-        | BrowserCommand::InspectTree { tab_id, .. }
-        | BrowserCommand::Find { tab_id, .. }
-        | BrowserCommand::Screenshot { tab_id, .. }
-        | BrowserCommand::ScreenshotRegion { tab_id, .. }
-        | BrowserCommand::DescribeTargets { tab_id, .. }
-        | BrowserCommand::QuerySemantic { tab_id, .. }
-        | BrowserCommand::Activate { tab_id, .. }
-        | BrowserCommand::ActivatePoint { tab_id, .. }
-        | BrowserCommand::ActivateModified { tab_id, .. }
-        | BrowserCommand::ActivatePointModified { tab_id, .. }
-        | BrowserCommand::WheelAt { tab_id, .. }
-        | BrowserCommand::Scroll { tab_id, .. }
-        | BrowserCommand::SetZoom { tab_id, .. }
-        | BrowserCommand::ResizeWindow { tab_id, .. }
-        | BrowserCommand::Hover { tab_id, .. }
-        | BrowserCommand::HoverPoint { tab_id, .. }
-        | BrowserCommand::Fill { tab_id, .. }
-        | BrowserCommand::TypeText { tab_id, .. }
-        | BrowserCommand::DescribeFocused { tab_id }
-        | BrowserCommand::TypeFocused { tab_id, .. }
-        | BrowserCommand::PressKey { tab_id, .. }
-        | BrowserCommand::Drag { tab_id, .. }
-        | BrowserCommand::DragPoints { tab_id, .. }
-        | BrowserCommand::UploadFiles { tab_id, .. }
-        | BrowserCommand::DropImageAt { tab_id, .. }
-        | BrowserCommand::EvaluateScript { tab_id, .. }
-        | BrowserCommand::Observe { tab_id, .. }
-        | BrowserCommand::InspectDialog { tab_id }
-        | BrowserCommand::HandleDialog { tab_id, .. }
-        | BrowserCommand::ReadDiagnostics { tab_id, .. }
-        | BrowserCommand::StartRecording { tab_id } => Some(*tab_id),
-        BrowserCommand::ListTabs
-        | BrowserCommand::OpenTab { .. }
-        | BrowserCommand::ClearDiagnostics { .. }
-        | BrowserCommand::StatusRecording { .. }
-        | BrowserCommand::StopRecording { .. }
-        | BrowserCommand::ExportRecording { .. }
-        | BrowserCommand::DiscardRecording { .. }
-        | BrowserCommand::Cancel { .. }
-        | BrowserCommand::Present { .. }
-        | BrowserCommand::InstallPageRuntime { .. } => None,
     }
 }
 

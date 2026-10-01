@@ -1,6 +1,63 @@
 # STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
 
-Last updated: 2026-09-30 (matching service published after the owner published Chrome 1.3.12).
+Last updated: 2026-09-30 (unpublished local quiet coexistence trial; public versions unchanged).
+
+## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
+
+The owner authorized a bounded local engineering trial. The starting repository was clean at
+`de1a686761af5430afc50763d1a282efaa80f615`; no pending-change checkpoint commit was needed.
+Work proceeds on `codex/quiet-coexistence-trial` in the ordinary repository. This source trial
+does not bump versions, push, release, or change public availability. Disposable isolated local
+installation and browser-profile tests are authorized; production, public, and remote rollout
+remain outside scope.
+
+[ADR-0186](adr/0186-quiet-browser-coexistence.md) records the chosen design:
+
+- One persisted operator `browser.attention` preference defaults to background. Foreground is
+  an operator opt-out; mandatory organization background cannot be weakened. Recommended
+  values are defaults. Existing Pause/Stop/Attention states remain compatible and distinct.
+- The shared executor applies attention to CLI, MCP, flows, and compensation. Negotiated
+  `browser_attention` revision 1 prevents old adapters from silently claiming enforcement.
+  Background blocks model focus, unowned same-host adoption, human-window tab switching, duplicate-group
+  movement, focused/shared-window resize, and active close in a focused window, with an unowned
+  neighbor, or in a last-tab window. Missing-browser recovery requests human startup under background.
+  Opening prefers unfocused all-owned work windows. Trusted keyboard/pointer preparation can
+  select a controlled tab there. Native mechanical coordination is per window with target,
+  ownership, placement, selection, and focus checks before input packets. Focused/shared targets
+  refuse before input even when active; a human event after possible input preserves uncertainty
+  or partial effects rather than replaying or reselecting. No global hold is added.
+  Background textual fill uses one native replacement and validated blur commit, preserving
+  preflight and complete-batch retention. Foreground and explicit key semantics stay unchanged.
+  An incompatible legacy adapter receives bounded Ended retirement without physical tab close
+  or global Stop; reconnect remains excluded until an updated capable adapter connects.
+  A different modern service epoch clears stale ownership and detaches retained custody before
+  Active, while same-epoch reconnect preserves continuity. Legacy retirement proves neither.
+- The existing Workbench gains a bounded exact-owned-tab Show tab control. Reveal grants no
+  permission, changes no runtime state, and replays no action. Page feedback remains passive;
+  controlled-tab focus-emulation custody and cleanup remain unchanged.
+- Active contracts and scripting guidance now describe background work, fresh-tab recipes,
+  actual stdin continuation behavior, flow continuation limits, and uncertainty before repeats.
+  Superseded automatic child-tab adoption claims are reconciled with ADR-0164.
+
+This candidate checkpoint awaits remaining validation; it is not a completion or release claim.
+The integrated run passed 24 gates and failed four browser checks. Those failures and subsequent
+diagnostics are retained in the [trial record](testing/quiet-coexistence-trial-2026-09-30.md).
+Corrected grouping placement and two-client native effects passed diagnostic browser checks.
+Historical custody retirement/reconnect passed. The complete current quiet and native-installed
+journeys, full-page capture, and final exact-source gate rerun remain outstanding.
+
+Verification is pending the coordinator's complete checks and visible Chromium component
+journeys using synthetic local fixtures. No passes are claimed here before those runs finish.
+Native-window coordination and event-fencing refinements require a fresh final-source rerun;
+earlier checks are not completion evidence for that change.
+The integrated run also exposed Chromium's implicit current-window group creation, which moved
+a new work tab into the human window. Explicit group window selection, placement rechecks, and
+refreshed receipts correct that mechanism; its final-source verification is still pending.
+An isolated installed native-messaging journey is also being prepared. Its evidence must be
+distinguished from component fixtures, Tauri interaction, and the selected everyday installation.
+Linux runtime evidence is separate. The rule governs direct Ghostlight mechanisms, not OS
+containment or browser-originated focus/popups from explicit page scripts and actions. A new
+unfocused work window can still appear, and preserved tabs can accumulate across released runs.
 
 ## Ghostlight 1.3.12 Service Published (2026-09-30)
 

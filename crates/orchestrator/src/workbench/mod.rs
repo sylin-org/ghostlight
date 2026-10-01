@@ -7,16 +7,18 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use ghostlight_bridge::browser::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
+use ghostlight_bridge::browser::{
+    BrowserCommand, BrowserOutcome, PresentationActivity, RuntimeControlIntent, RuntimeControlState,
+};
 use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::browser::{BrowserPort, RelayBrowserPort};
+use crate::browser::{BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{
@@ -33,6 +35,7 @@ use crate::workspace::WorkspaceStore;
 const HISTORY_LIMIT: usize = 500;
 const SEARCH_LIMIT: usize = 100;
 const PREVIEW_DETAIL_LIMIT: usize = 8;
+const REVEAL_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// What a candidate policy would have done to work this machine already did.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -95,6 +98,7 @@ struct OperationState {
     capabilities: CapabilitySet,
     started_at_ms: u64,
     phase: OperationPhase,
+    tab: Option<String>,
     provenance: Option<crate::provenance::ConnectionDetails>,
 }
 
@@ -241,6 +245,11 @@ impl WorkbenchProjection {
                         tool: tool.clone(),
                         activity: *activity,
                         capabilities: *capabilities,
+                        tab: state
+                            .operations
+                            .get(invocation)
+                            .filter(|operation| operation.workspace == *workspace)
+                            .and_then(|operation| operation.tab.clone()),
                         provenance: provenance.clone(),
                         started_at_ms: unix_ms(),
                         phase: if matches!(event, DomainEvent::WorkWaiting { .. }) {
@@ -262,6 +271,7 @@ impl WorkbenchProjection {
                 } => {
                     let change = state.operations.get_mut(invocation).map(|operation| {
                         operation.activity = *activity;
+                        operation.tab = None;
                         WorkbenchChange::OperationChanged {
                             operation: OperationSummary::from(&*operation),
                         }
@@ -305,6 +315,34 @@ impl WorkbenchProjection {
         }
     }
 
+    /// Bind the live operation to its actually selected controlled tab, without retaining page data.
+    ///
+    /// Completion may repeat this read before settling history. Restored audit has no such proof
+    /// and therefore never fabricates a reveal handle.
+    pub fn browser_tab(
+        &self,
+        invocation: &str,
+        workspace: &str,
+        physical_id: u64,
+        workspaces: &WorkspaceStore,
+    ) {
+        let tab = workspaces.handle_of_physical(workspace, physical_id);
+        let change = {
+            let mut state = self.lock();
+            let Some(operation) = state.operations.get_mut(invocation) else {
+                return;
+            };
+            if operation.workspace != workspace || operation.tab == tab {
+                return;
+            }
+            operation.tab = tab;
+            WorkbenchChange::OperationChanged {
+                operation: OperationSummary::from(&*operation),
+            }
+        };
+        self.publish(change);
+    }
+
     #[cfg(test)]
     pub(crate) fn record(
         &self,
@@ -323,14 +361,43 @@ impl WorkbenchProjection {
         let child = record.step.is_some();
         let item = {
             let mut state = self.lock();
-            let live = state.operations.contains_key(&record.invocation);
+            if record.step.is_some_and(|step| step.preparation_failed) {
+                if let Some(operation) = state.operations.get_mut(&record.invocation) {
+                    operation.tab = None;
+                }
+            }
+            let operation = state.operations.get(&record.invocation);
+            let live = operation.is_some();
+            let tab = operation
+                .filter(|operation| operation.workspace == record.workspace)
+                .and_then(|operation| operation.tab.clone());
             if !child {
                 state.operations.remove(&record.invocation);
                 state
                     .notified
                     .retain(|(invocation, _)| invocation != &record.invocation);
             }
-            history::merge_stored(&mut state.history, record, live, storage, provenance)
+            let mut item =
+                history::merge_stored(&mut state.history, record, live, storage, provenance);
+            if child {
+                if let Some(row) = record
+                    .step
+                    .and_then(|step| step.position.checked_sub(1))
+                    .and_then(|position| item.steps.get_mut(position))
+                    .and_then(|step| step.record.as_mut())
+                {
+                    row.tab = tab.clone();
+                }
+            }
+            item.tab = tab;
+            if let Some(stored) = state
+                .history
+                .iter_mut()
+                .find(|item| item.invocation == record.invocation)
+            {
+                *stored = item.clone();
+            }
+            item
         };
         self.publish(if child {
             WorkbenchChange::CompositionChanged {
@@ -396,6 +463,11 @@ impl WorkbenchFacade {
         }
     }
 
+    /// Show an exact controlled tab at the person's request without permitting or resuming work.
+    pub fn reveal_browser_tab(&self, workspace: &str, tab: &str) -> Result<(), String> {
+        reveal_browser_tab(self.browser.as_ref(), &self.workspaces, workspace, tab)
+    }
+
     /// The current process-diagnostics state for surfaces.
     #[must_use]
     pub fn diagnostics_report(&self) -> crate::diagnostics::DiagnosticsReport {
@@ -452,13 +524,16 @@ impl WorkbenchFacade {
             })
             .collect::<Vec<_>>();
         let browsers = self.browser_summary();
+        let connected_browsers = browsers.iter().filter(|browser| browser.connected).count();
         let governance = self.governance.diagnostics();
         let mut diagnostics = vec![DiagnosticItem::passing(
             "service",
             "Orchestrator",
             "Ghostlight is accepting local connections.",
         )];
-        diagnostics.push(if browsers.is_empty() {
+        diagnostics.push(if browsers.iter().any(|browser| browser.detail.is_some()) {
+            DiagnosticItem::warning("browser", "Browser adapter update needed", "An adapter cannot enforce background work and was retired without closing tabs. Update Ghostlight in Browser to continue.")
+        } else if connected_browsers == 0 {
             DiagnosticItem::warning(
                 "browser",
                 "Browser adapter",
@@ -495,7 +570,7 @@ impl WorkbenchFacade {
         let required = self.governance.snapshot().requires_audit();
         let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
             audit_required_unavailable: required && audit_health.unavailable(),
-            browser_connected: !browsers.is_empty(),
+            browser_connected: connected_browsers > 0,
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
             needs_attention: runtime_state == RuntimeControlState::Attention,
@@ -531,7 +606,7 @@ impl WorkbenchFacade {
             overview: OverviewSummary {
                 active_sessions: sessions.len(),
                 active_operations: operations.len(),
-                connected_browsers: browsers.len(),
+                connected_browsers,
                 blocked_in_history: history.iter().filter(|item| !item.allowed).count(),
             },
             sessions,
@@ -552,6 +627,7 @@ impl WorkbenchFacade {
                 runtime_control_file_configured: governance.runtime_control_file_configured,
                 managed_policy: governance.managed_policy,
                 policy: self.governance.policy_chip(),
+                browser_attention: self.governance.effective_authority().browser_attention,
             },
         }
     }
@@ -906,7 +982,10 @@ impl WorkbenchFacade {
                     id: browser.id,
                     family,
                     adapter_version: Some(browser.adapter_version),
-                    connected: true,
+                    connected: !browser.attention_incompatible,
+                    detail: browser
+                        .attention_incompatible
+                        .then(|| crate::browser::ATTENTION_UPGRADE_DETAIL.into()),
                 }
             })
             .collect()
@@ -1157,6 +1236,9 @@ pub struct OperationSummary {
     pub invocation: String,
     /// Owning workspace identity.
     pub workspace: String,
+    /// Exact controlled tab selected by this live call, when proven by browser execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab: Option<String>,
     /// Catalog tool name.
     pub tool: String,
     /// Fixed presentation activity name.
@@ -1176,6 +1258,7 @@ impl From<&OperationState> for OperationSummary {
         Self {
             invocation: value.invocation.clone(),
             workspace: value.workspace.clone(),
+            tab: value.tab.clone(),
             tool: value.tool.clone(),
             activity: if value.phase == OperationPhase::Waiting {
                 crate::language::outcome::WAITING_FOR_WORK.into()
@@ -1232,11 +1315,18 @@ pub struct BrowserInstanceSummary {
     pub adapter_version: Option<String>,
     /// Current connection state.
     pub connected: bool,
+    /// Fixed explanation when an incompatible adapter is retained for visible recovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// One content-minimized terminal history record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HistoryItem {
+    /// Exact controlled tab selected by this live call, when proven by browser execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab: Option<String>,
+
     /// Storage confirmation is separate from execution and receipt presence.
     pub storage: crate::language::audit_health::Storage,
     /// Authored human explanation for unconfirmed storage.
@@ -1331,6 +1421,7 @@ impl From<AuditRecord> for HistoryItem {
             timestamp_ms: value.timestamp_ms,
             invocation: value.invocation,
             workspace: value.workspace,
+            tab: None,
             tool: value.tool,
             capability,
             allowed: value.allowed,
@@ -1421,6 +1512,8 @@ pub struct ConfigurationSummary {
     pub managed_policy: ManagedPolicyPassport,
     /// The band chip, authored by the orchestrator so the surface renders rather than derives it.
     pub policy: PolicyChip,
+    /// Effective operator attention preference, including the authority that decided it.
+    pub browser_attention: crate::governance::effective::BrowserAttentionView,
 }
 
 /// Every place the workbench is willing to send someone.
@@ -1627,6 +1720,53 @@ pub enum SearchDestination {
     Configuration,
     /// Supported harness registrations.
     Install,
+}
+
+fn reveal_browser_tab(
+    browser: &dyn BrowserPort,
+    workspaces: &WorkspaceStore,
+    workspace: &str,
+    tab: &str,
+) -> Result<(), String> {
+    let (browser_id, selected) = workspaces
+        .reveal_tab(workspace, tab)
+        .map_err(|error| format!("Cannot show this controlled tab: {error}."))?;
+    let cancelled = AtomicBool::new(false);
+    let admit = || {
+        let (current_browser, current_tab) =
+            workspaces.reveal_tab(workspace, tab).map_err(|error| {
+                BrowserError::Primitive(format!("Cannot show this controlled tab: {error}."))
+            })?;
+        if current_browser != browser_id || current_tab.physical_id != selected.physical_id {
+            return Err(BrowserError::Primitive(
+                "The controlled tab changed before it could be shown.".into(),
+            ));
+        }
+        Ok(())
+    };
+    let outcome = browser
+        .call_guarded(
+            &browser_id,
+            workspace,
+            BrowserCommand::FocusTab {
+                tab_id: selected.physical_id,
+            },
+            BrowserDispatch {
+                attention: ghostlight_bridge::browser::BrowserAttention::Foreground,
+                deadline: Instant::now() + REVEAL_TIMEOUT,
+                cancelled: &cancelled,
+                admit: &admit,
+            },
+        )
+        .map_err(|error| format!("The browser did not confirm showing this tab: {error}."))?;
+    match outcome {
+        BrowserOutcome::TabFocused {
+            tab_id,
+            active: true,
+            window_focused: true,
+        } if tab_id == selected.physical_id => Ok(()),
+        _ => Err("The browser did not confirm showing this exact tab and its window.".into()),
+    }
 }
 
 fn push_hit(hits: &mut Vec<SearchHit>, query: &str, hit: SearchHit) {

@@ -397,3 +397,311 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
 
     assert!(facade.preview_user_policy("not a policy").is_err());
 }
+
+fn controlled_reveal_tab(
+    store: &crate::workspace::WorkspaceStore,
+    browser: &str,
+    physical_id: u64,
+) -> (
+    crate::workspace::WorkspaceId,
+    crate::workspace::WorkspaceLease,
+    String,
+) {
+    let workspace = store.admit(
+        "reveal test".into(),
+        ghostlight_bridge::service::IntakeChannel::Mcp,
+        None,
+    );
+    store.pin_browser(workspace.as_str(), browser).unwrap();
+    let lease = store.acquire(&workspace).unwrap();
+    let tab = lease
+        .add_tab(&ghostlight_bridge::browser::PhysicalTab {
+            tab_id: physical_id,
+            title: "Synthetic".into(),
+            url: "https://example.com/".into(),
+            active: false,
+            readiness: ghostlight_bridge::browser::BrowserReadiness::Complete,
+        })
+        .unwrap();
+    (workspace, lease, tab.handle.as_str().to_owned())
+}
+
+#[test]
+fn operator_reveal_bypasses_held_writer_but_never_changes_authority_or_tab_ownership() {
+    use crate::browser::testing::FakeBrowser;
+    use crate::workspace::WorkspaceStore;
+    use ghostlight_bridge::browser::{
+        BrowserCommand, BrowserOutcome, RuntimeControlIntent, RuntimeControlState,
+    };
+    let store = WorkspaceStore::default();
+    let (workspace, lease, tab) = controlled_reveal_tab(&store, "browser_owned", 41);
+    let selected = lease.select_tab(Some(&tab)).unwrap();
+    lease.hold_tab(&selected.handle).unwrap();
+    let browser = FakeBrowser::default();
+    let governance = GovernanceFacade::new(None, None);
+    for (intent, expected) in [
+        (RuntimeControlIntent::Hold, RuntimeControlState::Held),
+        (RuntimeControlIntent::EndSession, RuntimeControlState::Ended),
+    ] {
+        governance.apply_runtime_intent(intent);
+        browser.push(Ok(BrowserOutcome::TabFocused {
+            tab_id: 41,
+            active: true,
+            window_focused: true,
+        }));
+        super::reveal_browser_tab(&browser, &store, workspace.as_str(), &tab).unwrap();
+        assert_eq!(governance.runtime_state(), expected);
+        assert_eq!(
+            lease.select_tab(Some(&tab)).unwrap_err(),
+            crate::workspace::WorkspaceError::Held
+        );
+        assert_eq!(store.summaries()[0].tab_count, 1);
+        assert!(store.summaries()[0].leased);
+    }
+    assert!(browser
+        .calls()
+        .iter()
+        .all(|command| matches!(command, BrowserCommand::FocusTab { tab_id: 41 })));
+    assert_eq!(browser.routed(), vec!["browser_owned", "browser_owned"]);
+    assert!(browser.control_states().is_empty());
+}
+
+#[test]
+fn operator_reveal_refuses_foreign_stale_and_unknown_handles_without_dispatch() {
+    use crate::browser::testing::FakeBrowser;
+    let store = crate::workspace::WorkspaceStore::default();
+    let (workspace, lease, tab) = controlled_reveal_tab(&store, "first_browser", 41);
+    let (foreign, _other_lease, other_tab) = controlled_reveal_tab(&store, "second_browser", 42);
+    let browser = FakeBrowser::default();
+    for (id, handle) in [
+        (workspace.as_str(), other_tab.as_str()),
+        (workspace.as_str(), "tab_stale"),
+        ("workspace_stale", tab.as_str()),
+        (foreign.as_str(), tab.as_str()),
+    ] {
+        assert!(super::reveal_browser_tab(&browser, &store, id, handle).is_err());
+    }
+    store.apply_browser_close("first_browser", 41);
+    assert!(super::reveal_browser_tab(&browser, &store, workspace.as_str(), &tab).is_err());
+    drop(lease);
+    assert!(browser.calls().is_empty());
+}
+
+#[test]
+fn operator_reveal_requires_exact_active_and_window_receipt_and_does_not_replay_uncertainty() {
+    use crate::browser::{testing::FakeBrowser, BrowserError};
+    use ghostlight_bridge::browser::BrowserOutcome;
+    let store = crate::workspace::WorkspaceStore::default();
+    let (workspace, _lease, tab) = controlled_reveal_tab(&store, "browser_owned", 41);
+    let browser = FakeBrowser::default();
+    for outcome in [
+        Ok(BrowserOutcome::TabFocused {
+            tab_id: 99,
+            active: true,
+            window_focused: true,
+        }),
+        Ok(BrowserOutcome::TabFocused {
+            tab_id: 41,
+            active: false,
+            window_focused: true,
+        }),
+        Ok(BrowserOutcome::TabFocused {
+            tab_id: 41,
+            active: true,
+            window_focused: false,
+        }),
+        Err(BrowserError::DisconnectedAfterDispatch),
+    ] {
+        browser.push(outcome);
+        assert!(super::reveal_browser_tab(&browser, &store, workspace.as_str(), &tab).is_err());
+    }
+    assert_eq!(
+        browser.calls().len(),
+        4,
+        "uncertain reveal must not automatically replay"
+    );
+}
+
+#[test]
+fn show_tab_is_bound_to_actual_live_selection_and_never_reconstructed_from_audit() {
+    let store = crate::workspace::WorkspaceStore::default();
+    let (workspace, _lease, tab) = controlled_reveal_tab(&store, "browser_owned", 41);
+    let projection = WorkbenchProjection::default();
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: None,
+        invocation: "reveal_evidence".into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: CapabilitySet::READ,
+    });
+    projection.browser_tab("reveal_evidence", "foreign_workspace", 41, &store);
+    assert_eq!(projection.operations()[0].tab, None);
+    projection.browser_tab("reveal_evidence", workspace.as_str(), 41, &store);
+    assert_eq!(
+        projection.operations()[0].tab.as_deref(),
+        Some(tab.as_str())
+    );
+    let record = AuditRecord::now(
+        "reveal_evidence",
+        workspace.as_str(),
+        "browser_read",
+        CapabilitySet::READ,
+        "snapshot",
+        Decision::permitted(),
+        "succeeded",
+        "none",
+        &crate::language::outcome::Outcome::TextRead {
+            words: 5,
+            host: None,
+        }
+        .audit(),
+        10,
+    );
+    projection.record(&record, crate::language::audit_health::Storage::Saved);
+    assert_eq!(projection.history()[0].tab.as_deref(), Some(tab.as_str()));
+    assert!(!serde_json::to_string(&record).unwrap().contains(&tab));
+    let restored = WorkbenchProjection::default();
+    restored.record(&record, crate::language::audit_health::Storage::Saved);
+    assert_eq!(restored.history()[0].tab, None);
+}
+
+#[test]
+fn operator_reveal_rechecks_exact_ownership_after_writer_contention() {
+    use crate::browser::{BrowserDispatch, BrowserError, BrowserPort, BrowserSummary};
+    use ghostlight_bridge::browser::{BrowserAttention, BrowserCommand, BrowserOutcome};
+    use std::sync::atomic::AtomicBool;
+    use std::time::Instant;
+    struct ClosingWriter(crate::workspace::WorkspaceStore);
+    impl BrowserPort for ClosingWriter {
+        fn call(
+            &self,
+            _: &str,
+            _: &str,
+            _: BrowserCommand,
+            _: Instant,
+            _: &AtomicBool,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            panic!("stale reveal must never dispatch a physical focus");
+        }
+        fn call_guarded(
+            &self,
+            browser: &str,
+            workspace: &str,
+            command: BrowserCommand,
+            dispatch: BrowserDispatch<'_>,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            assert_eq!(dispatch.attention, BrowserAttention::Foreground);
+            (dispatch.admit)().expect("initial exact ownership is valid");
+            // Model the tab closing while this human command waits for the relay writer.
+            self.0.apply_browser_close(browser, 41);
+            (dispatch.admit)()?;
+            self.call(
+                browser,
+                workspace,
+                command,
+                dispatch.deadline,
+                dispatch.cancelled,
+            )
+        }
+        fn browsers(&self) -> Vec<BrowserSummary> {
+            vec![]
+        }
+    }
+    let store = crate::workspace::WorkspaceStore::default();
+    let (workspace, _lease, tab) = controlled_reveal_tab(&store, "browser_owned", 41);
+    let error = super::reveal_browser_tab(
+        &ClosingWriter(store.clone()),
+        &store,
+        workspace.as_str(),
+        &tab,
+    )
+    .unwrap_err();
+    assert!(error.contains("tab handle is stale"));
+}
+
+#[test]
+fn each_flow_child_must_supply_its_own_show_tab_evidence() {
+    use crate::language::history::{CompositionKind, StepReceipt};
+    let store = crate::workspace::WorkspaceStore::default();
+    let (workspace, _lease, tab) = controlled_reveal_tab(&store, "browser_owned", 41);
+    let projection = WorkbenchProjection::default();
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: None,
+        invocation: "flow_tab_evidence".into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_flow".into(),
+        activity: PresentationActivity::Quiet,
+        capabilities: CapabilitySet::READ,
+    });
+    let phase = DomainEvent::WorkPhaseStarted {
+        invocation: "flow_tab_evidence".into(),
+        workspace: workspace.as_str().into(),
+        physical_id: None,
+        activity: PresentationActivity::Read,
+    };
+    projection.react(&phase);
+    projection.browser_tab("flow_tab_evidence", workspace.as_str(), 41, &store);
+    let mut child = AuditRecord::now(
+        "flow_tab_evidence",
+        workspace.as_str(),
+        "browser_read",
+        CapabilitySet::READ,
+        "snapshot",
+        Decision::permitted(),
+        "succeeded",
+        "none",
+        &crate::language::outcome::Outcome::TextRead {
+            words: 5,
+            host: None,
+        }
+        .audit(),
+        10,
+    );
+    child.step = Some(StepReceipt {
+        parent: CompositionKind::Flow,
+        position: 1,
+        total: 3,
+        preparation_failed: false,
+    });
+    projection.record(&child, crate::language::audit_health::Storage::Saved);
+    assert_eq!(
+        projection.history()[0].steps[0]
+            .record
+            .as_ref()
+            .unwrap()
+            .tab
+            .as_deref(),
+        Some(tab.as_str())
+    );
+
+    // A new tab-independent child cannot inherit the previous child's exact tab.
+    projection.react(&phase);
+    assert_eq!(projection.operations()[0].tab, None);
+    child.tool = "browser_workspace".into();
+    child.step.as_mut().unwrap().position = 2;
+    projection.record(&child, crate::language::audit_health::Storage::Saved);
+    let history = projection.history();
+    assert_eq!(history[0].tab, None);
+    assert_eq!(history[0].steps[1].record.as_ref().unwrap().tab, None);
+    assert_eq!(
+        history[0].steps[0].record.as_ref().unwrap().tab.as_deref(),
+        Some(tab.as_str())
+    );
+
+    // Preparation failure may occur without entering a phase. It also has no selected-tab proof.
+    projection.browser_tab("flow_tab_evidence", workspace.as_str(), 41, &store);
+    child.step.as_mut().unwrap().position = 3;
+    child.step.as_mut().unwrap().preparation_failed = true;
+    child.status = "not_started".into();
+    projection.record(&child, crate::language::audit_health::Storage::Saved);
+    assert_eq!(projection.operations()[0].tab, None);
+    assert_eq!(
+        projection.history()[0].steps[2]
+            .record
+            .as_ref()
+            .unwrap()
+            .tab,
+        None
+    );
+}

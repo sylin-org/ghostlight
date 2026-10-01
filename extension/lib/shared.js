@@ -9,6 +9,21 @@
 
   const NATIVE_HOST_NAME = "org.sylin.ghostlight";
   const ADAPTER_PROTOCOL_MAJOR = 3;
+  const BROWSER_ATTENTION = Object.freeze({ BACKGROUND: "background", FOREGROUND: "foreground" });
+  const ATTENTION_PROTECTION_REASON = Object.freeze({
+    FOCUS: "focus", SHARED_WINDOW_RESIZE: "shared_window_resize", ACTIVE_TAB_CLOSE: "active_tab_close", NATIVE_INPUT: "native_input"
+  });
+
+  function attentionProtected(reason) {
+    return { outcome: "attention_protected", reason };
+  }
+
+  // This is a service-authored mechanical request rule, never a browser-local preference.
+  function browserAttention(value) {
+    if (value === undefined) return BROWSER_ATTENTION.FOREGROUND;
+    if (Object.values(BROWSER_ATTENTION).includes(value)) return value;
+    throw new Error("unsupported browser attention rule");
+  }
 
   function adapterCapabilities(commandHandlers, passiveHandlers = []) {
     const revisions = new Map();
@@ -228,6 +243,10 @@
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
+    BROWSER_ATTENTION,
+    ATTENTION_PROTECTION_REASON,
+    attentionProtected,
+    browserAttention,
     adapterCapabilities,
     bounded,
     readinessForStatus,

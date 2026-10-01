@@ -893,11 +893,21 @@
           || (element instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(element.type))
           || element.isContentEditable;
         if (!textual) throw new Error("target does not use browser text input");
-        return formDiagnostics.run("fill", () => prepareBrowserText(element, message.allow_credentials));
+        return formDiagnostics.run("fill", () => message.native_replace
+          ? prepareTextEdit(element, true, message.allow_credentials)
+          : prepareBrowserText(element, message.allow_credentials));
       }
       if (message.kind === "verify_text_fill_focus") {
         const element = resolve(message.field.locator);
         return verifyBrowserTextFocus(element, message.allow_credentials);
+      }
+      if (message.kind === "commit_text_fill") {
+        const element = resolve(message.field.locator);
+        verifyBrowserTextFocus(element, message.allow_credentials);
+        // Blurring the actual control lets Chromium commit its native editing transaction.
+        // No value setter, fabricated change event, or desktop focus movement is involved.
+        element.blur();
+        return { committed: true };
       }
       if (message.kind === "verify_fill_values") {
         return { retained: fillValuesRetained(message.fields, message.allow_credentials) };

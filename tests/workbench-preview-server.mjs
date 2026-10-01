@@ -246,6 +246,7 @@ const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
 (() => {
   const preview = window.__GHOSTLIGHT_PREVIEW__;
+  const policyView = ${JSON.stringify(policyView)};
   const listeners = [];
   let counter = 0;
   let step = 0;

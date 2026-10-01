@@ -2,7 +2,8 @@
 
 Ghostlight does not need an MCP client to do browser work. `ghostlight call` invokes the same tools,
 through the same governance, and writes the same audit record. It exists for the jobs that have no
-model in them: a deploy check, a smoke test, a scheduled report.
+model in them: a deploy check, a smoke test, or a report run by your own scheduler. Ghostlight
+adds no scheduler or workflow engine.
 
 ## One call
 
@@ -40,6 +41,44 @@ nobody. In a batch, later captures gain an index rather than overwriting the fir
 `--catalog` lists the tools this build offers. Their full contract is in
 [`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md).
 
+## Background work and repeat runs
+
+The operator's `browser.attention` preference applies equally to CLI calls, MCP, and flows.
+Background is the default: direct work leaves the person's active tab alone, never adopts an unowned
+same-host tab, and does not merge or move existing groups. A new work window may appear unfocused.
+Opening prefers an unfocused window containing only owned tabs. Native keyboard or pointer
+input can select the controlled tab in that window without foregrounding it. Any key/mouse
+surface in a focused or shared window refuses with `attention_refusal:native_input` before input. Work in
+one physical window is coordinated and checks target, placement, and focus before input packets.
+Human focus or tab movement can interrupt later input; after an effect may have landed, inspect
+partial or unknown receipts rather than retrying or reselecting. Show tab is for human review.
+Return focus elsewhere or use new background work and reobserve before continuing native input.
+When no browser is connected, Ghostlight asks the person to open one rather than risking a
+foreground launch. An older adapter without background enforcement refuses before dispatch.
+The Workbench shows the effective preference and offers `Show tab` for an exact owned tab.
+Reveal grants no permission and does not Resume, retry, or roll back work.
+Each result's `facts.browser_attention` contains `value`, `decided_by`, and
+`organization_ceiling`, matching the effective policy view. A blocked focus request has no
+effect but is not repeat-safe advice; use explicit operator reveal instead.
+Background form fill uses exact control selection, one native whole-value replacement, and
+validated blur commit with batch retention checks. It does not claim every key was emitted.
+Whole-value edits do not select the tab and may edit an inactive owned target in a shared or
+focused window. They refuse an active target in the focused window and retain the same event
+fences and input checks. Cleanup can release held input after takeover, without replaying edits.
+
+Keep that preference under operator control. For a recipe that must create a fresh tab even if
+the operator later chooses foreground, state the navigation intent explicitly:
+
+```sh
+ghostlight call browser_navigate '{"url":"https://example.com","new_tab":true,"reuse":"never"}' --json
+```
+
+Keep the returned tab handle for later calls in the same session. A new run in a released session
+can leave a new preserved tab; the preserve-tabs interlock remains independent. Foreground
+permits the earlier unbound same-host reuse when `reuse` remains `domain`.
+`new_tab:true` makes the fresh-tab request. `reuse:"never"` alone prevents unowned-tab adoption
+when an open is needed; it still navigates an existing unambiguous controlled tab in the session.
+
 ## Several calls, one session
 
 **The session is your terminal.** Every `ghostlight call` you type in one shell reaches the same
@@ -65,7 +104,7 @@ If your program shells out *through* a shell, the parent is a throwaway `cmd.exe
 every call, and you would get a new session each time. Set `GHOSTLIGHT_SESSION` to any string once,
 and every descendant lands in the same session no matter how many shells deep:
 
-```sh
+```powershell
 $env:GHOSTLIGHT_SESSION = "acme-deploy-$PID"
 ```
 
@@ -86,6 +125,16 @@ for a fixed batch; name steps when later arguments use `flow_ref` to read their 
 executes its steps and stops on the first failure by default. Policy remains configured by the
 person or organization; calls do not accept host or capability restriction fields.
 
+`--stdin` keeps processing later lines after a nonzero result and returns the last nonzero exit
+code. It is not fail-fast. Use separate calls and check each exit code before dependent work, or
+use a flow's default `on_error:stop`. Explicit `on_error:continue` can run later steps after an
+unknown effect or connection loss; it does not prove those steps are independent or safe.
+
+Read `status`, `effect`, `repeat_safe`, and the per-step receipts before repeating a script.
+After an unknown or partially applied write, reobserve the actual page state and determine
+what remains. Do not replay the whole batch or assume a lost reply means no effect. Human Pause
+blocks future dispatch and Resume allows new requests without replay. Stop remains terminal.
+
 Two habits keep scripts out of rework:
 
 - Prefer typed semantic selectors over stashed target handles. A selector (`name`, optional
@@ -100,7 +149,9 @@ Two habits keep scripts out of rework:
 
 A scripted call is governed exactly like an agent's call. The same capability classes apply, the
 same host rules, the same human runtime controls, the same per-request acknowledgement of explicit
-user-authorized credential input, and the same tab-close interlock.
+user-authorized credential input, the same browser-attention preference, and the same tab-close
+interlock. Background protects direct Ghostlight mechanisms; explicit scripts or page actions
+can still cause browser-originated popups or focus. It is not OS containment.
 There is no scripting bypass, because the command line is an edge and the orchestrator is the only
 thing that executes.
 
@@ -147,9 +198,12 @@ tab. Every step is a plain `ghostlight call` in its own process, and they share 
 they share a shell, which is how the last step closes exactly the tab the first one opened. The
 shell scripts require `jq` for typo-safe JSON construction and result decoding.
 
-It exits with Ghostlight's own code rather than inventing one, so a refusal stays distinguishable
-from a breakage. On a default install the close step is refused by the browser's preserve-tabs
-setting and the script exits 2, which is governance working rather than the journey failing.
+Both recipes request `new_tab:true` with `reuse:"never"` and stop at the first nonzero exit or
+non-success receipt.
+Later reads, capture, and close do not run after an earlier refusal or uncertain effect. They
+retain Ghostlight's actual exit code, including 6 for uncertainty, instead of replacing it with
+a later result. On a default install the final close is refused by the browser's preserve-tabs
+setting and the script exits 2. Enable close only when you intend that cleanup.
 
 The optional `demo-brief` scripts are a longer form journey with adjustable pacing:
 

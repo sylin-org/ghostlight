@@ -303,7 +303,8 @@ test("service epochs and browser loss share one volatile-state teardown seam", (
   const cleanup = worker.match(/async function settleServiceBoundaryState[\s\S]*?\n}\n/)[0];
   assert.match(cleanup, /commandChunks\.clear\(\)[\s\S]*?interruptAllRecordings\("service_disconnected"\)[\s\S]*?diagnostics\.clearAll\(\)/);
   assert.match(worker, /onDisconnect[\s\S]*?settleServiceBoundaryState\(\)/);
-  assert.match(worker, /operationEngine\.activate\(frame\.service_epoch\)[\s\S]*?if \(changed\) await settleServiceBoundaryState\(\)/);
+  assert.match(worker, /await negotiateServiceEpoch\(frame\.service_epoch\)/);
+  assert.match(worker, /async function negotiateServiceEpoch\([\s\S]*?operationEngine\.activate\(serviceEpoch\)[\s\S]*?settleServiceBoundaryState\(\)[\s\S]*?debuggerLifecycle\.detachAll\(\)[\s\S]*?topology\.forgetAll\(\)/);
   assert.match(worker, /frame\.kind === "command_chunk"[\s\S]*?await browserNegotiation[\s\S]*?commandChunks\.accept/);
   assert.match(worker, /onNativeMessage\(frame, port\)/);
 });
@@ -425,9 +426,8 @@ test("model-driven close obeys the local preserve-tabs interlock", () => {
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
   const options = readFileSync(join(root, "options.html"), "utf8");
   assert.match(worker, /async function tabPreservationEnabled\(\)[\s\S]*?chrome\.storage\.local\.get\(stateApi\.PRESERVE_TABS_KEY\)/);
-  assert.match(worker, /if \(await tabPreservationEnabled\(\)\)[\s\S]*?code: "local_interlock"[\s\S]*?chrome\.tabs\.remove/);
-  // A released close that the interlock refuses unbinds the tab, so the reuse ladder can adopt
-  // it later (ADR-0137).
+  assert.match(worker, /const preserve = await tabPreservationEnabled\(\);[\s\S]*?if \(preserve\) \{[\s\S]*?code: "local_interlock"[\s\S]*?chrome\.tabs\.remove/);
+  // A released close unbinds the tab even when preserve-tabs or background attention keeps it.
   assert.match(
     worker,
     /if \(command\.released\) \{[\s\S]*?topology\.forget\(command\.tab_id\)[\s\S]*?code: "local_interlock"/
@@ -621,7 +621,7 @@ test("opening creates the first URL directly in a dedicated Ghostlight window", 
     focused: true,
     type: "normal"
   });
-  assert.deepEqual(grouped, { tabIds: [8] });
+  assert.deepEqual(grouped, { tabIds: [8], createProperties: { windowId: 30 } });
 });
 
 test("an unobservable created window reports an unknown physical effect", async () => {
@@ -713,7 +713,7 @@ test("concurrent same-name opens create one canonical group and window", async (
   ]);
   assert.equal(windowCreates, 1);
   assert.deepEqual(grouped, [
-    { tabIds: [1] },
+    { tabIds: [1], createProperties: { windowId: 30 } },
     { groupId: 100, tabIds: [2] }
   ]);
 });

@@ -158,6 +158,9 @@
     unavailable: "no"
   };
 
+  /** Full operator-visible consequence of allowing foreground browser work. */
+  const BROWSER_ATTENTION_FOREGROUND = "Agents may focus work tabs, take control of and navigate tabs Ghostlight does not yet control on the same host, and repair or move matching Ghostlight tab groups.";
+
   /**
    * The settings a policy may author, grouped and worded the way a person actually thinks about
    * them -- not the way the schema stores them.
@@ -206,6 +209,20 @@
       title: "In the browser",
       items: [
         {
+          key: "browser.attention", kind: "choice",
+          name: "Keep browser work in the background",
+          choices: [
+            {
+              value: "background", label: "On",
+              detail: "Create controlled work tabs without activating or moving your tabs. Agents cannot request foreground focus. Show tab lets you look without permitting work or resuming it."
+            },
+            {
+              value: "foreground", label: "Off",
+              detail: `${BROWSER_ATTENTION_FOREGROUND} Show tab only reveals a tab; it does not permit work or resume it.`
+            }
+          ]
+        },
+        {
           key: "content.frames.handling", kind: "choice", field: "handling",
           name: "When embedded content is excluded", default: "permitted_content",
           choices: [
@@ -237,7 +254,7 @@
             {
               value: "on_demand",
               label: "On",
-              detail: "Ghostlight may make one bounded attempt to start the browser you normally use."
+              detail: "Ghostlight may make one bounded attempt to start your usual browser. Background mode overrides this: automatic launch stays off, and the agent asks you to open an eligible browser."
             },
             {
               value: "manual",
@@ -476,7 +493,7 @@
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     READINESS_ATTENTION, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
-    CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    CAPABILITY_BADGE, CAPABILITY_TONE, BROWSER_ATTENTION_FOREGROUND, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

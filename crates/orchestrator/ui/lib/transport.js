@@ -31,7 +31,8 @@
       /** Hold, resume, end or start the runtime session. */
       applyIntent: (intent) => call("apply_runtime_intent", { intent }),
 
-      /** Resume the exact session incident a person reviewed, without replay. */
+      /** Reveal one exact controlled tab without granting work or changing runtime control. */
+      revealBrowserTab: (workspace, tab) => call("reveal_browser_tab", { workspace, tab }),
 
       /** Flip the shared process-diagnostics marker; returns the resulting state. */
       toggleDiagnostics: () => call("toggle_diagnostics"),

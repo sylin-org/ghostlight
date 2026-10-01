@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
+import { fixtureRenderingArguments, readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const scratchRoot = join(repository, ".tmp");
@@ -47,6 +47,7 @@ try {
   await until(() => address.includes("http://"), "preview server");
   const profile = join(scratch, "profile");
   chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    ...fixtureRenderingArguments(),
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "about:blank"]);
@@ -83,6 +84,44 @@ try {
     const { data } = await page("Page.captureScreenshot", { format: "png" });
     writeFileSync(join(scratchRoot, `h4-${name}.png`), Buffer.from(data, "base64"));
   };
+  // Wrap the synthetic native fixture before transport captures invoke. This exercises real
+  // DOM clicks through app/transport while retaining exact arguments and mutable policy truth.
+  await page("Page.enable");
+  await page("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    window.__QUIET_CALLS__ = [];
+    let native;
+    Object.defineProperty(window, '__TAURI__', {
+      get: () => native,
+      set(value) {
+        const invoke = value.core.invoke;
+        value.core.invoke = async (command, args) => {
+          window.__QUIET_CALLS__.push({ command, args });
+          if (command === 'reveal_browser_tab') {
+            if (window.__QUIET_REVEAL_FAILURE__) throw new Error(window.__QUIET_REVEAL_FAILURE__);
+            return;
+          }
+          if (command === 'workbench_policy' && window.__QUIET_POLICY__) return window.__QUIET_POLICY__;
+          if (command === 'apply_user_policy' && window.__QUIET_POLICY__) {
+            const document = JSON.parse(args.document);
+            const setting = document.config.find(setting => setting.key === 'browser.attention');
+            window.__QUIET_POLICY__.browser_attention.value = setting?.value ?? 'background';
+            window.__QUIET_POLICY__.browser_attention.decided_by = 'user';
+            let layer = window.__QUIET_POLICY__.layers.find(layer => layer.kind === 'user');
+            if (!layer) {
+              layer = { kind: 'user', title: 'Your rules', policy_name: document.name, version: document.version,
+                mode: document.mode, path: window.__QUIET_POLICY__.user_layer.path, document: args.document, rules: [] };
+              window.__QUIET_POLICY__.layers.push(layer);
+            }
+            layer.rules = document.grants.map(grant => ({ id: grant.id, description: grant.description,
+              allow: grant.hosts.allow, deny: grant.hosts.deny ?? [], allowed: grant.allowed, mode: document.mode, note: null }));
+            layer.settings = document.config.map(setting => ({ ...setting, value: JSON.stringify(setting.value) }));
+          }
+          return invoke(command, args);
+        };
+        native = value;
+      }
+    });
+  })()` });
   await resize(1280, 900);
   await page("Page.navigate", { url: address.trim() });
   await until(() => evaluate("!!document.querySelector('.composition-details')"), "grouped history");
@@ -306,6 +345,182 @@ try {
     await capture(`action-details-${width}`);
   }
   console.log('PASS action name opens hero details; updates retain expansion and focus; mouse, Space, Enter, and Pause order work at both widths');
+
+  // Quiet coexistence in the bundled UI with synthetic native truth. This lane proves DOM
+  // behavior and transport fidelity; installed browser ownership/focus is verified separately.
+  await evaluate(`(async () => {
+    window.__QUIET_BASE_POLICY__ = structuredClone(await window.__TAURI__.core.invoke('workbench_policy'));
+    window.__QUIET_POLICY__ = structuredClone(window.__QUIET_BASE_POLICY__);
+    const policy = window.__QUIET_POLICY__;
+    policy.layers = []; policy.organization = null; policy.passport = { configured: false };
+    policy.headline = 'No configured restrictions. Agents may work on ordinary websites.';
+    policy.capabilities.forEach(line => { line.state = 'available'; line.decided_by = []; line.detail = 'Available on ordinary websites.'; });
+    policy.browser_attention = { value: 'background', decided_by: 'default', organization_ceiling: null };
+    document.querySelector('[data-view="policy"]').click();
+  })()`);
+  await until(() => evaluate("!!document.querySelector('#setting-browser-attention')"), 'first preference without user policy');
+  assert.equal(await evaluate("document.querySelector('#apply-policy').disabled"), true, 'untouched empty policy cannot be applied');
+  await evaluate(`(() => {
+    const select = document.querySelector('#setting-browser-attention');
+    select.value = 'foreground'; select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  assert.equal(await evaluate("document.querySelector('#apply-policy').disabled"), false, 'preference is usable without permission-rule boilerplate');
+  assert.equal(await evaluate("document.querySelector('#rule-list').textContent.includes('look at pages, click and type, fill in forms, run page code')"), true);
+  assert.equal(await evaluate("document.querySelector('#policy-permissions-note').hidden"), false);
+  assert.equal(await evaluate("document.querySelector('#setting-browser-attention').parentElement.textContent.includes('take control of and navigate tabs Ghostlight does not yet control on the same host')"), true);
+  assert.equal(await evaluate("document.querySelector('#setting-browser-attention').parentElement.textContent.includes('repair or move matching Ghostlight tab groups')"), true);
+  await evaluate(`(() => {
+    const select = document.querySelector('#setting-browser-startup');
+    select.value = 'on_demand'; select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  assert.equal(await evaluate("document.querySelector('#setting-browser-startup').parentElement.textContent.includes('Background mode overrides this: automatic launch stays off')"), true);
+  assert.equal(await evaluate("document.querySelector('#setting-browser-startup').parentElement.textContent.includes('agent asks you to open an eligible browser')"), true);
+  await evaluate("document.querySelector('#policy-permissions-note').scrollIntoView({ block: 'center' })");
+  await capture('quiet-first-preference');
+  await evaluate("document.querySelector('#apply-policy').click()");
+  await until(() => evaluate("window.__QUIET_POLICY__.layers.some(layer => layer.kind === 'user')"), 'first preference applied');
+  assert.deepEqual(await evaluate(`(() => {
+    const document = JSON.parse(window.__QUIET_CALLS__.filter(call => call.command === 'apply_user_policy').at(-1).args.document);
+    return { allow: document.grants[0].hosts.allow, allowed: document.grants[0].allowed,
+      grants: document.grants.length, setting: document.config.find(setting => setting.key === 'browser.attention').value };
+  })()`), { allow: ['*'], allowed: ['read', 'action', 'write', 'execute'], grants: 1, setting: 'foreground' });
+  await until(() => evaluate("document.querySelector('#setting-browser-attention').value === 'foreground'"), 'first preference applied readback');
+  console.log('PASS first preference without user policy preserves a visible wildcard RAWX rule and serializes foreground through normal Apply');
+  await evaluate(`(async () => {
+    window.__QUIET_POLICY__ = structuredClone(window.__QUIET_BASE_POLICY__);
+    window.__QUIET_POLICY__.browser_attention = { value: 'background', decided_by: 'default', organization_ceiling: null };
+    window.__GHOSTLIGHT_PREVIEW__.configuration.browser_attention = window.__QUIET_POLICY__.browser_attention;
+    await resync();
+    document.querySelector('[data-view="policy"]').click();
+  })()`);
+  const attentionSelect = '#setting-browser-attention';
+  await until(() => evaluate(`!!document.querySelector('${attentionSelect}')`), 'background policy choice');
+  assert.equal(await evaluate(`document.querySelector('${attentionSelect}').value`), 'background');
+  assert.equal(await evaluate("document.querySelector('#policy-settings').textContent.includes('Ghostlight default')"), true,
+    JSON.stringify(await evaluate("({ settings: document.querySelector('#policy-settings').innerHTML, calls: window.__QUIET_CALLS__?.slice(-4), attention: window.__QUIET_POLICY__?.browser_attention })")));
+  assert.equal(await evaluate(`document.querySelector('${attentionSelect}').parentElement.textContent.includes('without activating or moving your tabs')`), true);
+  await capture('quiet-policy-default');
+  await evaluate(`(() => {
+    const select = document.querySelector('${attentionSelect}');
+    select.value = 'foreground'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('#apply-policy').click();
+  })()`);
+  await until(() => evaluate("window.__QUIET_POLICY__.browser_attention.value === 'foreground'"), 'attention policy applied');
+  await until(() => evaluate(`document.querySelector('${attentionSelect}').value === 'foreground'`), 'applied attention readback');
+  assert.equal(await evaluate(`(() => {
+    const call = window.__QUIET_CALLS__.filter(call => call.command === 'apply_user_policy').at(-1);
+    return JSON.parse(call.args.document).config.some(setting => setting.key === 'browser.attention' && setting.value === 'foreground');
+  })()`), true);
+  await evaluate(`(() => {
+    const select = document.querySelector('${attentionSelect}');
+    select.value = 'background'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('#apply-policy').click();
+  })()`);
+  await until(() => evaluate("window.__QUIET_POLICY__.browser_attention.value === 'background'"), 'background policy applied');
+  await until(() => evaluate(`document.querySelector('${attentionSelect}').value === 'background'`), 'background applied readback');
+  assert.equal(await evaluate(`(() => {
+    const call = window.__QUIET_CALLS__.filter(call => call.command === 'apply_user_policy').at(-1);
+    return JSON.parse(call.args.document).config.some(setting => setting.key === 'browser.attention' && setting.value === 'background');
+  })()`), true);
+  await evaluate(`(() => {
+    window.__QUIET_POLICY__.browser_attention = { value: 'background', decided_by: 'organization', organization_ceiling: 'background' };
+    document.querySelector('#refresh-policy').click();
+  })()`);
+  await until(() => evaluate(`document.querySelector('${attentionSelect}').disabled`), 'organization background ceiling');
+  assert.equal(await evaluate(`document.querySelector('${attentionSelect}').value`), 'background');
+  assert.equal(await evaluate(`document.querySelector('${attentionSelect}').parentElement.textContent.includes('requires background browser work')`), true);
+  await resize(720, 900);
+  assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+  await evaluate(`document.querySelector('${attentionSelect}').scrollIntoView({ block: 'center' })`);
+  await capture('quiet-policy-ceiling-720');
+  await evaluate(`(() => {
+    window.__QUIET_POLICY__.user_layer.editable = false;
+    document.querySelector('#refresh-policy').click();
+  })()`);
+  await until(() => evaluate("document.querySelector('#policy-editor').hidden"), 'read-only policy');
+  assert.equal(await evaluate("document.querySelector('#policy-settings').textContent.includes('Agents cannot request foreground focus')"), true);
+
+  await evaluate(`(async () => {
+    window.__GHOSTLIGHT_PREVIEW__.configuration.browser_attention = window.__QUIET_POLICY__.browser_attention;
+    window.__GHOSTLIGHT_PREVIEW__.readiness = {
+      state: 'ready', word: 'Ready', tone: 'quiet', detail: 'Synthetic connected browser.', invites_control: true
+    };
+    await resync();
+    document.querySelector('[data-view="monitor"]').click();
+    document.querySelector('#wheel').click();
+    await resync();
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_started', operation: {
+      invocation: 'quiet-live', workspace: 'workspace_codex', tab: 'tab_opaque_exact',
+      tool: 'browser_read', activity: 'Reading', capability: 'read', phase: 'running', started_at_ms: Date.now()
+    } });
+  })()`);
+  const showTab = '#hero-body [data-reveal-tab="tab_opaque_exact"]';
+  await until(() => evaluate(`!!document.querySelector('${showTab}')`), 'live Show tab');
+  assert.equal(await evaluate("document.querySelector('#browser-attention').textContent.includes('background')"), true);
+  assert.equal(await evaluate("document.querySelector('#wheel').dataset.intent"), 'resume');
+  const intentCount = await evaluate("window.__QUIET_CALLS__.filter(call => call.command === 'apply_runtime_intent').length");
+  await evaluate(`document.querySelector('${showTab}').focus(); document.querySelector('${showTab}').click()`);
+  await until(() => evaluate("window.__QUIET_CALLS__.some(call => call.command === 'reveal_browser_tab')"), 'native tab reveal');
+  assert.deepEqual(await evaluate("window.__QUIET_CALLS__.filter(call => call.command === 'reveal_browser_tab').at(-1).args"),
+    { workspace: 'workspace_codex', tab: 'tab_opaque_exact' });
+  assert.equal(await evaluate("window.__QUIET_CALLS__.filter(call => call.command === 'apply_runtime_intent').length"), intentCount);
+  await evaluate(`window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
+    invocation: 'quiet-live', workspace: 'workspace_codex', tab: 'tab_opaque_exact', tool: 'browser_read',
+    capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 7 words.',
+    complete: true, timestamp_ms: Date.now()
+  } })`);
+  await until(() => evaluate("document.querySelector('#hero-body').textContent.includes('Read 7 words.')"), 'settled tab destination');
+  assert.equal(await evaluate(`document.activeElement.matches('${showTab}')`), true, 'Show tab focus survives receipt repaint');
+  await evaluate(`window.__QUIET_REVEAL_FAILURE__ = 'This tab is no longer controlled.'; document.querySelector('${showTab}').click()`);
+  await until(() => evaluate("document.querySelector('#toast').textContent.includes('no longer controlled')"), 'stale reveal error');
+  assert.equal(await evaluate(`document.querySelector('${showTab}').disabled`), false);
+  assert.equal(await evaluate("document.querySelector('#wheel').dataset.intent"), 'resume');
+  for (const width of [1280, 720]) {
+    await resize(width, 900);
+    await evaluate(`document.querySelector('${showTab}').scrollIntoView({ block: 'center' })`);
+    assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+    await capture(`quiet-show-tab-${width}`);
+  }
+  await evaluate(`(() => {
+    window.__QUIET_REVEAL_FAILURE__ = null;
+    window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
+      invocation: 'quiet-newer', workspace: 'workspace_codex', tool: 'browser_read', capability: 'read',
+      allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 8 words.', complete: true, timestamp_ms: Date.now()
+    } });
+    document.querySelector('[data-action-details="quiet-live:action"]').click();
+  })()`);
+  const historyShowTab = '#action-details-quiet-live [data-reveal-tab="tab_opaque_exact"]';
+  assert.equal(await evaluate("document.querySelector('#action-details-quiet-live').hidden"), false);
+  await evaluate(`document.querySelector('${historyShowTab}').focus(); document.querySelector('${historyShowTab}').click()`);
+  await until(() => evaluate("window.__QUIET_CALLS__.filter(call => call.command === 'reveal_browser_tab').length === 3"), 'history tab reveal');
+  assert.equal(await evaluate("window.__QUIET_CALLS__.filter(call => call.command === 'apply_runtime_intent').length"), intentCount);
+  assert.equal(await evaluate("document.querySelector('#hero-body [data-reveal-tab]') === null"), true);
+  await evaluate(`document.querySelector('${historyShowTab}').scrollIntoView({ block: 'center' })`);
+  assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+  await capture('quiet-history-show-tab-720');
+  console.log('PASS quiet Workbench: default/effective author, policy apply/readback, organization ceiling, read-only feedback, exact native reveal without resume, stale errors, focus retention, and 1280/720px layout');
+  await evaluate(`(async () => {
+    const snapshot = window.__GHOSTLIGHT_PREVIEW__;
+    snapshot.browsers = [{ id: 'legacy-adapter', family: 'Chrome', adapter_version: '1.0.0', connected: false,
+      detail: 'Update Ghostlight in Browser to continue. This adapter cannot enforce background work; its connection was retired without closing tabs.' }];
+    snapshot.service.runtime_state = 'active'; snapshot.configuration.runtime_state = 'active';
+    snapshot.diagnostics = [{ severity: 'warning', label: 'Browser adapter update needed',
+      detail: 'An adapter cannot enforce background work and was retired without closing tabs. Update Ghostlight in Browser to continue.' }];
+    await resync();
+  })()`);
+  assert.equal(await evaluate("document.querySelector('[data-browser=\"legacy-adapter\"]').classList.contains('on')"), false);
+  assert.equal(await evaluate("document.querySelector('[data-browser=\"legacy-adapter\"]').textContent.includes('Unavailable')"), true);
+  assert.equal(await evaluate("document.querySelector('[data-browser-detail=\"legacy-adapter\"]').textContent.includes('Update Ghostlight in Browser to continue')"), true);
+  assert.equal(await evaluate("document.querySelector('#wheel').dataset.intent"), 'hold', 'adapter retirement never pauses active operator control');
+  assert.equal(await evaluate("document.querySelector('#state-facts').textContent.includes('0 browsers')"), true);
+  assert.equal(await evaluate("window.__GHOSTLIGHT_PREVIEW__.service.runtime_state"), 'active');
+  await evaluate("document.querySelector('[data-browser-detail=\"legacy-adapter\"]').scrollIntoView({ block: 'center' })");
+  assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+  await capture('quiet-legacy-update-720');
+  await evaluate("document.querySelector('[data-view=\"status\"]').click()");
+  assert.equal(await evaluate("document.querySelector('#diagnostic-grid').textContent.includes('Browser adapter update needed')"), true);
+  await capture('quiet-legacy-status-720');
+  console.log('PASS incompatible adapter is visibly unavailable with update detail; browser count excludes it and operator runtime stays Active');
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }

@@ -629,6 +629,12 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
+        self.workbench.browser_tab(
+            context.invocation,
+            context.workspace.as_str(),
+            selected.physical_id,
+            &self.workspaces,
+        );
         let decision = self.authorize(context, capability, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -1066,6 +1072,24 @@ impl ApplicationExecutor {
         }
     }
 
+    /// Recheck runtime and attention after queued writer access, including compensation.
+    fn admit_attention_dispatch(
+        &self,
+        context: &InvocationContext<'_>,
+        attention: ghostlight_bridge::browser::BrowserAttention,
+    ) -> Result<(), BrowserError> {
+        self.admit_dispatch(context)?;
+        if attention == ghostlight_bridge::browser::BrowserAttention::Foreground
+            && self.governance.browser_attention()
+                == ghostlight_bridge::browser::BrowserAttention::Background
+        {
+            return Err(BrowserError::AttentionProtected(
+                ghostlight_bridge::browser::BrowserAttentionReason::PreferenceChanged,
+            ));
+        }
+        Ok(())
+    }
+
     /// Authorize one operation against its real destination whenever it names one.
     /// `url: None` means this operation has no tab in play at all -- `list_tabs` is the only
     /// caller, since listing needs no destination to check. Every operation that names a tab
@@ -1171,6 +1195,9 @@ impl ApplicationExecutor {
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         let outcome = match self.dispatch_documents(context, command) {
+            Ok(BrowserOutcome::AttentionProtected { reason }) => {
+                Err(BrowserError::AttentionProtected(reason))
+            }
             Ok(BrowserOutcome::EffectUnknown { reason }) => {
                 Err(BrowserError::EffectUnknown(reason))
             }
@@ -1188,15 +1215,32 @@ impl ApplicationExecutor {
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         self.admit_dispatch(context)?;
+        let attention = self.governance.browser_attention();
+        if attention == ghostlight_bridge::browser::BrowserAttention::Background
+            && matches!(&command, BrowserCommand::FocusTab { .. })
+        {
+            return Err(BrowserError::AttentionProtected(
+                ghostlight_bridge::browser::BrowserAttentionReason::Focus,
+            ));
+        }
         let browser = self.target_browser(context)?;
         self.presentation
             .bind_command(context.workspace.as_str(), context.invocation, &command);
-        let admit = || self.admit_dispatch(context);
+        if let Some(physical_id) = command.tab_id() {
+            self.workbench.browser_tab(
+                context.invocation,
+                context.workspace.as_str(),
+                physical_id,
+                &self.workspaces,
+            );
+        }
+        let admit = || self.admit_attention_dispatch(context, attention);
         let outcome = self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
             command,
             crate::browser::BrowserDispatch {
+                attention,
                 deadline: context.deadline,
                 cancelled: context.cancellation.flag(),
                 admit: &admit,
@@ -1206,6 +1250,9 @@ impl ApplicationExecutor {
         // truthful unknown rendering instead of letting per-family receipt matching mistake it
         // for an incompatible receipt.
         match outcome {
+            Ok(BrowserOutcome::AttentionProtected { reason }) => {
+                Err(BrowserError::AttentionProtected(reason))
+            }
             Ok(BrowserOutcome::EffectUnknown { reason }) => {
                 Err(BrowserError::EffectUnknown(reason))
             }
@@ -1318,6 +1365,7 @@ impl ApplicationExecutor {
         let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) else {
             return CloseCompensation::Unknown;
         };
+        let attention = self.governance.browser_attention();
         match self.browser.call_guarded(
             &browser,
             context.workspace.as_str(),
@@ -1326,9 +1374,10 @@ impl ApplicationExecutor {
                 released: false,
             },
             crate::browser::BrowserDispatch {
+                attention,
                 deadline,
                 cancelled: &cancelled,
-                admit: &|| self.admit_dispatch(context),
+                admit: &|| self.admit_attention_dispatch(context, attention),
             },
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == tab.physical_id => {
@@ -1338,6 +1387,7 @@ impl ApplicationExecutor {
                     CloseCompensation::Unknown
                 }
             }
+            Ok(BrowserOutcome::AttentionProtected { .. }) => CloseCompensation::Retained,
             Err(error) if !error.effect_unknown() => CloseCompensation::Retained,
             _ => CloseCompensation::Unknown,
         }
@@ -1529,6 +1579,25 @@ impl ApplicationExecutor {
         error: BrowserError,
         physical_id: Option<u64>,
     ) -> Terminal {
+        if let BrowserError::AttentionProtected(reason) = error {
+            let refusal = Refusal::BrowserAttentionProtected { reason };
+            return Terminal {
+                result: InvocationResult::new(
+                    context.invocation,
+                    Status::Blocked,
+                    Effect::None,
+                    Readiness::NotApplicable,
+                    false,
+                    &refusal.summary(),
+                    json!({"reason":"browser_attention_background","attention_refusal":reason}),
+                    refusal.next_steps(),
+                ),
+                decision,
+                physical_id,
+                observed: Observed::default(),
+                audit: refusal.audit(),
+            };
+        }
         if let BrowserError::DocumentAccess(decision) = error {
             return self.blocked(
                 context,
@@ -1641,13 +1710,18 @@ impl ApplicationExecutor {
                 json!({"reason":"deadline","phase":"before_dispatch"}),
             );
         }
-        if matches!(error, BrowserError::CapabilityVersion { .. }) {
+        if let BrowserError::CapabilityVersion {
+            ref capability,
+            required,
+            advertised,
+        } = error
+        {
             return self.failed(
                 context,
                 decision,
                 physical_id,
                 Refusal::BrowserAdapterOutdated,
-                json!({"reason":browser_reason(&error)}),
+                json!({"reason":browser_reason(&error),"capability":capability,"required_revision":required,"advertised_revision":advertised}),
             );
         }
         let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
@@ -2280,6 +2354,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         },
         // Receipts without landing metadata leave what the invocation already observed standing.
         BrowserOutcome::Tabs { .. }
+        | BrowserOutcome::AttentionProtected { .. }
         | BrowserOutcome::Targets { .. }
         | BrowserOutcome::Screenshot { .. }
         | BrowserOutcome::FilesUploaded { .. }
@@ -2365,6 +2440,7 @@ mod tests {
     mod execution;
     mod presentation;
     mod provenance;
+    mod quiet;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -2519,6 +2595,7 @@ mod tests {
                 &self.0,
                 serde_json::to_vec(&json!({
                     "schema":3,"name":"test authority","version":"1",
+                    "config":[{"key":"browser.attention","value":"foreground","level":"mandatory"}],
                     "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
                 }))
                 .unwrap(),

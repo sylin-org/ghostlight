@@ -5,10 +5,17 @@ import { basename, dirname, join, resolve } from "node:path";
 
 const READ_RETRY_CODES = new Set(["ENOENT", "EBUSY", "EACCES", "EPERM"]);
 const REMOVE_RETRY_CODES = new Set([...READ_RETRY_CODES, "ENOTEMPTY"]);
-const PROFILE_PREFIXES = new Set(["frame-browser-", "script-browser-", "history-browser-"]);
+const PROFILE_PREFIXES = new Set(["frame-browser-", "script-browser-", "history-browser-", "quiet-browser-"]);
 const POLL_MS = 50;
 const delay = (ms) => new Promise(done => setTimeout(done, ms));
 const exited = child => !child || child.startError || child.exitCode !== null || child.signalCode !== null;
+
+// The unattended Windows desktop can occlude even the focused test window and stop screenshot
+// composition. This one fixture argument keeps capture rendering without selecting a tab/window.
+// It is never used by production browser startup; installed evidence must disclose the argument.
+export function fixtureRenderingArguments(platform = process.platform) {
+  return platform === "win32" ? ["--disable-backgrounding-occluded-windows"] : [];
+}
 
 // Chrome can publish this file before its final bytes or Windows sharing handle are available.
 // Unexpected filesystem errors and a dead launcher fail immediately; incomplete data is bounded.

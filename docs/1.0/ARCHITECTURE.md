@@ -116,7 +116,11 @@ unknown disposition.
 Compatibility uses separate axes for the external MCP revision, the service edge bridge, the
 browser relay, and the adapter protocol. Adapter behavior is selected by explicitly advertised
 physical capabilities, never by parsing an implementation version. A new service may continue to
-use an older adapter for every capability that adapter advertises.
+use an older adapter for advertised capabilities only when it can honor the effective attention
+preference. Background requires the independent attention mechanism. An incompatible connection
+receives legacy Ended cleanup and is retired; repeated legacy reconnects never receive Active.
+This affects only that adapter, closes no physical tabs, and changes no global runtime state.
+Cleanup has no correlated acknowledgement and does not prove its old topology cache was cleared.
 
 Each adapter has one closed executable handler table. Its hello capability revisions are derived
 from that table and its passive frame handlers, never maintained as a second declaration. Platform
@@ -219,7 +223,7 @@ unit-of-work state, uncertainty, and the single completion path.
 ### Workspace
 
 Owns MCP sessions, controlled tabs, opaque tab and target handles, document generations,
-view handles and viewport transforms, selection, ownership, leases, child-tab adoption, stale
+view handles and viewport transforms, selection, explicit ownership, leases, stale
 detection, and release on disconnect.
 
 ### Recording
@@ -371,6 +375,10 @@ shadow roots stay closed, and child-frame origins do not become result or audit 
 Ordinary textual form fills and rich-editor replacements use one budgeted physical transaction.
 The orchestrator passes the adapter's remaining execution budget; the adapter preflights every
 field, performs native editing, releases its debugger lease, and verifies the complete batch once.
+Background textual fill prepares and verifies the exact DOM selection, uses one native
+`Input.insertText` replacement, including empty/multiline text, and commits by blurring that
+validated control. Foreground retains its keyboard editing transaction. Neither mode claims
+every key packet for whole-value insertion. Explicit keyboard tools retain their own semantics.
 Semantic setters remain for select, toggle, and file controls. Submission starts only after that
 terminal verification and remains an explicit action. A failed native edit refuses without
 fabricating input/change events or replacing the existing draft.
@@ -516,17 +524,66 @@ The extension has four small responsibilities with explicit boundaries:
 
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
 workspace already present on every browser request, and the presentation-only exact title
-`Ghostlight - <client label>`. The adapter resolves placement before opening: it reuses one
-browser-wide exact-title group wherever that group currently resides, otherwise reuses a window
+`Ghostlight - <client label>`. For foreground work, the adapter resolves placement before opening:
+it reuses one browser-wide exact-title group wherever that group currently resides, otherwise reuses a window
 containing another Ghostlight group, otherwise creates a dedicated normal window containing the
-requested URL. Destination resolution is serialized so concurrent opens cannot create duplicate
-groups. The first tab for a workspace brings the Ghostlight window into view; later tabs do not
-repeatedly steal window focus. The adapter colors the group blue, records the opaque workspace
+requested URL. Destination resolution is serialized. Background requests reuse only unfocused
+windows whose tabs are all owned, or create an
+unfocused dedicated window. They ignore same-title groups/windows containing human tabs and
+skip duplicate-group merging and existing-tab movement. They never adopt unowned same-host tabs.
+Separate same-title groups can remain across windows when a group is ineligible for quiet work;
+background never merges them at the cost of the person's focus or placement.
+New group creation explicitly supplies `createProperties.windowId` from the physical tab, rather
+than allowing Chromium's current-window default to move it. Background grouping rechecks
+placement/eligibility, observes focus/movement across the effect, and refreshes the tab for its
+receipt. Changed placement before grouping may skip that decoration; uncertainty after grouping
+is not retried or reported as the earlier physical location.
+Foreground requests retain first-workspace window reveal and earlier reuse behavior. The
+adapter colors the group blue, records the opaque workspace
 association, and opens without an externally visible blank-tab step. Group ids are restart-local
 hints and exact-title discovery repairs stale hints. The label never routes or grants authority. A
 newly opened tab is not adopted through its opener: that relationship cannot distinguish an
 agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
 group or tab between windows does not change ownership or trigger automatic regrouping.
+
+ADR-0186 adds one persisted operator setting, `browser.attention`, through the existing policy
+facade. Its default is background; mandatory organization background is a ceiling, recommended
+values are defaults, and user background can tighten foreground. The shared executor places the
+resolved closed value on every physical request. Session-release cleanup also passes the same
+preference through guarded browser dispatch, so disconnect does not bypass quiet behavior.
+The browser port requires `browser_attention`
+revision 1 before sending background work and rejects an older adapter before effect. Final
+writer admission refuses queued foreground work if the operator tightened the preference.
+Model focus is blocked under background attention rather than acknowledged as a no-op.
+Trusted native key/mouse effects require a presented Chromium tab surface. Mechanical input
+preparation may select an owned tab in an unfocused all-owned window, without foregrounding it.
+Native coordination is per physical window, including packet-time placement, ownership,
+selection, and focus validation. Human focus, tab addition, or movement fences the scope. Any
+focused or shared keyboard/pointer surface returns typed `native_input` protection before input, including
+an already selected target. After possibly applied input, later interference remains partial or
+unknown; there is no packet replay or automatic reselection. Work in other windows remains
+independent. Show tab permits human review, not background native input while that window is
+focused; return focus elsewhere or open new background work and reobserve.
+Transport acknowledgement alone does not prove an inactive surface received native input.
+Whole-value text edits use the same coordinator without tab selection and may edit an inactive
+owned target in a shared or focused window; an active target in the focused window refuses.
+Packet checks and event fences still apply. Cleanup key-up, mouse-release, and drag-cancel
+packets may release already held input after takeover, without admitting new input or replay.
+Background also refuses resizing a focused window or one shared with unowned tabs. Active close
+refuses a focused window, an unowned neighbor, or a last-tab window. Changed target placement
+refuses before either effect; release cleanup drops custody first. Those physical
+interlocks return the typed attention-protection receipt rather than generic close failure.
+Browser recovery leaves launch to the person under background attention, even when the
+configured startup value is on-demand; starting an absent browser cannot promise quiet focus.
+Ordinary admitted navigation in a controlled tab remains available. Attention protects direct
+shell/input mechanics; it is not a content freeze. Human Pause remains the takeover boundary.
+
+The Workbench facade accepts a bounded `Show tab` intent, resolves a currently owned live tab,
+and issues an explicit human foreground reveal through the browser port. Its native adapter
+cannot supply browser primitives. Reveal grants no policy authority, changes no runtime state,
+and replays no browser action. Direct mechanism enforcement is not containment of explicit page
+scripts or browser-originated popups. A new unfocused work window remains visible.
+Chrome's separate state queries and effect APIs are not an atomic OS focus lock.
 
 Document-commit events silently update cached destinations and invalidate agent references. They
 never authorize browsing, hold tabs, write action history, or produce presentation. Even a
@@ -558,6 +615,13 @@ availability fact and ordinary local traffic that keeps the idle adapter shore o
 native relay owns ordinary backend reconnection; the alarm-backed extension loop is the fallback
 when the native host itself ends. Both paths repeat the same adapter identity and capability
 declaration.
+
+A different service epoch settles volatile boundary state, detaches retained debugger custody,
+and clears cached opaque tab ownership before modern adapter Active admission. Physical tabs
+and group hints remain; same-epoch reconnect retains ordinary ownership continuity. A legacy
+attention-incompatible adapter receives only bounded Ended retirement on its own connection,
+never global Stop or physical tab close. Its cleanup is not a correlated acknowledgement and
+cannot establish modern epoch reconciliation.
 
 Model-driven close is dual gated. The orchestrator first admits the action capability and the
 monotonic tab-close policy constraint. The extension then checks its default-on preserve-tabs

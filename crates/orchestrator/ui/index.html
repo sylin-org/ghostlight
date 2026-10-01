@@ -40,6 +40,7 @@
     <main id="main-content" tabindex="-1">
       <section class="view active" id="view-monitor" data-page="monitor" aria-label="At a glance">
         <div class="connections" id="connections"></div>
+        <p id="browser-attention" class="coverage-note" hidden></p>
         <p id="audit-health" class="coverage-note" role="status" hidden></p>
 
         <article class="hero" id="hero" aria-live="polite">
@@ -135,6 +136,7 @@
             you can do here; nothing lets you turn back on something an organization already
             turned off.</p>
           <div class="setting-groups" id="setting-groups"></div>
+          <p class="editor-hint" id="policy-permissions-note" hidden>The new rule above preserves your existing browser permissions while applying these preferences. Organization restrictions still apply.</p>
           <div class="sacred">
             <label class="sacred-label" for="sacred-hosts">Sites agents must never touch</label>
             <input id="sacred-hosts" type="text" spellcheck="false"

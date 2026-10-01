@@ -917,6 +917,10 @@ pub enum Refusal {
     IncompatibleReceipt,
     /// The browser adapter predates the physical command meaning the service requires.
     BrowserAdapterOutdated,
+    /// The operator keeps browser work in the background.
+    BrowserAttentionProtected {
+        reason: ghostlight_bridge::browser::BrowserAttentionReason,
+    },
     /// The job ran out of time.
     DeadlineExpired {
         /// True when the deadline fired before any dispatch could happen.
@@ -984,6 +988,18 @@ impl Refusal {
             Self::BrowserAdapterOutdated => {
                 "The Ghostlight extension is older than this browser command."
             }
+            Self::BrowserAttentionProtected { reason } => match reason {
+                ghostlight_bridge::browser::BrowserAttentionReason::Focus =>
+                    "Browser work is kept in the background. This request did not bring the tab into view.",
+                ghostlight_bridge::browser::BrowserAttentionReason::SharedWindowResize =>
+                    "Kept the window size unchanged: background work cannot resize a focused window or a window containing human tabs.",
+                ghostlight_bridge::browser::BrowserAttentionReason::ActiveTabClose =>
+                    "Kept the active tab open: closing it could change the foreground page, select a human tab, or bring another window into view.",
+                ghostlight_bridge::browser::BrowserAttentionReason::NativeInput =>
+                    "Native input was not sent: the work surface changed or does not meet the operator's background protection.",
+                ghostlight_bridge::browser::BrowserAttentionReason::PreferenceChanged =>
+                    "The user selected background browser work before this request was sent. This request was not applied.",
+            },
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
             }
@@ -1074,6 +1090,21 @@ impl Refusal {
             Self::BrowserAdapterOutdated => vec![
                 "Reload or update the Ghostlight extension in that browser, then repeat the call."
                     .into(),
+            ],
+            Self::BrowserAttentionProtected { reason: ghostlight_bridge::browser::BrowserAttentionReason::Focus } => vec![
+                "Continue working in the controlled tab without focusing it. The user can choose Show tab in the Ghostlight workbench; revealing it does not resume paused work or grant permission.".into(),
+            ],
+            Self::BrowserAttentionProtected { reason: ghostlight_bridge::browser::BrowserAttentionReason::SharedWindowResize } => vec![
+                "Keep the current window size, or let the user resize that window directly.".into(),
+            ],
+            Self::BrowserAttentionProtected { reason: ghostlight_bridge::browser::BrowserAttentionReason::ActiveTabClose } => vec![
+                "Leave the tab open; the user can close it directly.".into(),
+            ],
+            Self::BrowserAttentionProtected { reason: ghostlight_bridge::browser::BrowserAttentionReason::NativeInput } => vec![
+                "Create a fresh background work tab with browser_navigate using new_tab true and reuse never, or let the user attend another window before requesting new work. Show tab grants no permission, resumes no work, and does not relax background input protection.".into(),
+            ],
+            Self::BrowserAttentionProtected { reason: ghostlight_bridge::browser::BrowserAttentionReason::PreferenceChanged } => vec![
+                "Observe current browser state, then submit new work under the background setting if still needed. This call was not replayed.".into(),
             ],
             Self::BrowserStopped { reconnect: true } => {
                 vec!["Reconnect the Ghostlight browser adapter.".into()]

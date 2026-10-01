@@ -76,7 +76,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-worst=0
+# Stop at the first unsuccessful call, keeping its exit code. Never retry an uncertain effect,
+# run dependent work after it, or replace its result with a later cleanup refusal.
 run_step() {
   label=$1
   tool=$2
@@ -89,15 +90,16 @@ run_step() {
   fi
   status=$(jq -er '.status' "$result") || {
     echo "browser-journey: $label returned no result status" >&2
-    exit 70
+    if [ "$call_status" -ne 0 ]; then exit "$call_status"; else exit 1; fi
   }
   summary=$(jq -er '.summary' "$result") || {
     echo "browser-journey: $label returned no summary" >&2
-    exit 70
+    if [ "$call_status" -ne 0 ]; then exit "$call_status"; else exit 1; fi
   }
   printf '%-12s %-10s %s\n' "$label" "$status" "$summary"
-  if [ "$call_status" -ne 0 ]; then
-    worst=$call_status
+  if [ "$call_status" -ne 0 ] || [ "$status" != "succeeded" ]; then
+    echo "browser-journey: stopped at $label; inspect the result before any new call. No retry or cleanup was attempted." >&2
+    if [ "$call_status" -ne 0 ]; then exit "$call_status"; else exit 1; fi
   fi
 }
 
@@ -105,11 +107,7 @@ printf 'Ghostlight: %s\n\n' "$ghostlight"
 printf '%-12s %-10s %s\n' STEP STATUS 'WHAT HAPPENED'
 printf '%-12s %-10s %s\n' ---- ------ '-------------'
 
-run_step open browser_navigate "$(jq -nc --arg url "$url" '{url:$url}')"
-if [ "$(jq -r '.status' "$result")" != "succeeded" ]; then
-  echo "browser-journey: could not open $url" >&2
-  if [ "$worst" -ne 0 ]; then exit "$worst"; else exit 70; fi
-fi
+run_step open browser_navigate "$(jq -nc --arg url "$url" '{url:$url,new_tab:true,reuse:"never"}')"
 tab=$(jq -er '.facts.tab' "$result")
 run_step list browser_tabs '{"action":"list"}'
 run_step read browser_read "$(jq -nc --arg tab "$tab" '{tab:$tab}')"
@@ -122,9 +120,5 @@ if [ -f "$output_path" ]; then
   printf 'Screenshot: %s (%s bytes)\n' "$output_path" "$bytes"
 fi
 
-case "$worst" in
-  0) echo 'Journey complete. Every step ran through ghostlight call, governed and audited as cli.' ;;
-  2) echo 'Journey finished with a governed refusal. That is Ghostlight working, not failing.' ;;
-  *) echo "Journey did not complete cleanly (exit $worst)." ;;
-esac
-exit "$worst"
+echo 'Journey complete. Every step ran through ghostlight call, governed and audited as cli.'
+exit 0

@@ -86,28 +86,43 @@ pub enum AuditRefusal {
     CancelledBeforeStart,
     DeadlineBeforeStart,
     Capacity,
-    AuthorityBlocked { cause: BlockedReason },
-    RequestRestricted { cause: BlockedReason },
+    AuthorityBlocked {
+        cause: BlockedReason,
+    },
+    RequestRestricted {
+        cause: BlockedReason,
+    },
     AttentionRequired,
     LocalInterlock,
     CredentialHandoff,
     CredentialAuthorization,
     IncompatibleReceipt,
     BrowserAdapterOutdated,
-    DeadlineExpired { before_dispatch: bool },
+    BrowserAttentionProtected {
+        cause: ghostlight_bridge::browser::BrowserAttentionReason,
+    },
+    DeadlineExpired {
+        before_dispatch: bool,
+    },
     BrowserPrimitiveFailed,
     DocumentUnavailable,
-    BrowserStopped { reconnect: bool },
+    BrowserStopped {
+        reconnect: bool,
+    },
     BrowserAmbiguous,
     BrowserUnknown,
     BrowserPinned,
     BrowserStartupManual,
-    BrowserRecoveryFailed { cause: BrowserRecoveryReason },
+    BrowserRecoveryFailed {
+        cause: BrowserRecoveryReason,
+    },
     ConnectionLost,
     CancelledAfterDispatch,
     EffectUnknown,
     LandingDeniedUnknown,
-    WorkspaceUnusable { cause: WorkspaceReason },
+    WorkspaceUnusable {
+        cause: WorkspaceReason,
+    },
     FilesUnreadable,
     CaptureTooLarge,
     NoDialogVisible,
@@ -150,6 +165,9 @@ impl Refusal {
             Self::CredentialAuthorization => AuditRefusal::CredentialAuthorization,
             Self::IncompatibleReceipt => AuditRefusal::IncompatibleReceipt,
             Self::BrowserAdapterOutdated => AuditRefusal::BrowserAdapterOutdated,
+            Self::BrowserAttentionProtected { reason } => {
+                AuditRefusal::BrowserAttentionProtected { cause: *reason }
+            }
             Self::DeadlineExpired { before_dispatch } => AuditRefusal::DeadlineExpired {
                 before_dispatch: *before_dispatch,
             },

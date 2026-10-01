@@ -31,6 +31,18 @@ impl ApplicationExecutor {
             duration_ms,
             provenance,
         } = completion;
+        // Expose the current operator choice through both intake edges, without
+        // changing the tool catalog or asking the caller to author authority.
+        terminal.result.facts["browser_attention"] =
+            json!(self.governance.effective_authority().browser_attention);
+        if let Some(physical_id) = terminal.physical_id {
+            self.workbench.browser_tab(
+                &terminal.result.invocation,
+                workspace.as_str(),
+                physical_id,
+                &self.workspaces,
+            );
+        }
         if let Some(coverage) = self.take_coverage(&terminal.result.invocation) {
             terminal.result.summary =
                 language::coverage::qualify(&terminal.result.summary, &coverage);
@@ -45,9 +57,13 @@ impl ApplicationExecutor {
                     ReasonCode::AuditUnavailable
                         | ReasonCode::RuntimeHold
                         | ReasonCode::SessionEnded
-                ) && terminal.audit.refusal()
-                    != Some(&crate::language::audit::AuditRefusal::CredentialAuthorization)
-                    && (terminal.audit.composition().is_none() || !terminal.decision.allowed) =>
+                ) && !matches!(
+                    terminal.audit.refusal(),
+                    Some(
+                        crate::language::audit::AuditRefusal::CredentialAuthorization
+                            | crate::language::audit::AuditRefusal::BrowserAttentionProtected { .. }
+                    )
+                ) && (terminal.audit.composition().is_none() || !terminal.decision.allowed) =>
             {
                 DomainEvent::WorkBlocked {
                     invocation: terminal.result.invocation.clone(),

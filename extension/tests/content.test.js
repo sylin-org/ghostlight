@@ -104,6 +104,7 @@ function contentHarness() {
     closest(selector) { return this.matches(selector) ? this : null; }
     querySelectorAll(selector) { return descendantsOf(this, selector); }
     focus() { document.activeElement = this; }
+    blur() { if (document.activeElement === this) document.activeElement = document.body; }
     scrollIntoView() {}
     dispatchEvent(event) { this.events.push(event.type); return true; }
   }
@@ -138,6 +139,7 @@ function contentHarness() {
     dispatchEvent(event) { this.events.push(event.type); return true; }
     click() { this.events.push("click"); }
     focus() { document.activeElement = this; }
+    blur() { if (document.activeElement === this) document.activeElement = document.body; }
     select() { selectedRange = { selected: this }; }
     scrollIntoView() {}
   }
@@ -1176,4 +1178,26 @@ test("point subjects cross the shadow boundary to the nearest actionable host", 
   harness.document.elementFromPoint = () => orphan;
   const plain = await harness.send({ kind: "scroll_point", x: 30, y: 30 });
   assert.equal(plain.result.subject.role, "span");
+});
+
+
+test("native form replacement selects only the validated control and commits without synthetic events", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "text";
+  harness.input.value = "Existing draft";
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const field = { locator: inspected.result.targets[0].locator, value: "Replacement" };
+  const prepared = await harness.send({ kind: "prepare_text_fill", field, native_replace: true });
+  assert.equal(prepared.ok, true);
+  assert.equal(harness.input.value, "Existing draft");
+  assert.equal(harness.document.activeElement, harness.input);
+  assert.deepEqual(harness.edits, []);
+  const committed = await harness.send({ kind: "commit_text_fill", field });
+  assert.equal(committed.ok, true);
+  assert.equal(harness.document.activeElement, harness.document.body);
+  assert.deepEqual(harness.input.events, []);
+  const stale = await harness.send({ kind: "commit_text_fill", field });
+  assert.equal(stale.ok, false);
+  assert.match(stale.error, /did not retain browser input focus/);
 });

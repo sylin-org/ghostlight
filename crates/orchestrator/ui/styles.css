@@ -196,6 +196,8 @@ body.runtime-offline .state-word { color: var(--muted); }
 }
 .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
 .chip.on .dot { background: var(--ok); }
+.chip.unavailable .dot { background: var(--amber); }
+.browser-connection-detail { flex-basis: 100%; margin: 0; color: var(--ink-3); font-size: 12px; }
 .chip.busy .dot { background: var(--a); box-shadow: 0 0 8px rgba(var(--argb), .8); }
 .chip small { color: var(--muted); font: 400 10.5px/1 var(--mono); }
 /* How many connections one client is holding. Reads as a badge on the name, not as a tab count. */

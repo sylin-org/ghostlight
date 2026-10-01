@@ -7,6 +7,36 @@ pub mod documents;
 /// Adapter protocol major negotiated end to end by the extension and orchestrator.
 pub const ADAPTER_PROTOCOL_MAJOR: u16 = 3;
 
+/// Service-selected desktop attention for one physical request.
+///
+/// Missing legacy wire values retain the earlier foreground behavior. The service
+/// negotiates background enforcement before sending a background request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserAttention {
+    /// Work without activating windows or acquiring unowned human tabs.
+    Background,
+    /// Permit the existing physical activation and explicit adoption mechanisms.
+    #[default]
+    Foreground,
+}
+
+/// The physical attention boundary that refused an unsent effect.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserAttentionReason {
+    /// A model requested desktop focus while background work is selected.
+    Focus,
+    /// Geometry changes would affect a window containing unowned human tabs.
+    SharedWindowResize,
+    /// Closing an active tab could select a human tab or foreground another window.
+    ActiveTabClose,
+    /// Native input needs a selected tab but cannot safely select it in this window.
+    NativeInput,
+    /// The operator tightened the rule while a foreground request waited to send.
+    PreferenceChanged,
+}
+
 /// Maximum decoded bytes carried by one host-to-extension command chunk.
 pub const COMMAND_CHUNK_PAYLOAD_BYTES: usize = 512 * 1024;
 /// Maximum serialized request bytes accepted by one chunked command transfer.
@@ -16,6 +46,8 @@ pub const COMMAND_TRANSFER_MAX_CHUNKS: u16 = 64;
 
 /// Stable names for independently negotiable physical browser capabilities.
 pub mod adapter_capability {
+    /// Request-scoped background topology and desktop-attention enforcement.
+    pub const BROWSER_ATTENTION: &str = "browser_attention";
     /// Installation of the service-owned page runtime.
     pub const PAGE_RUNTIME: &str = "page_runtime";
     /// Document inventory and execution bound to exact browser document identities.
@@ -965,6 +997,65 @@ pub enum BrowserCommand {
 }
 
 impl BrowserCommand {
+    /// The physical tab explicitly named by this command, including document constraints.
+    #[must_use]
+    pub fn tab_id(&self) -> Option<u64> {
+        match self {
+            BrowserCommand::InDocuments { primitive, .. } => primitive.tab_id(),
+            BrowserCommand::DescribeDocuments { tab_id, .. }
+            | BrowserCommand::FocusTab { tab_id }
+            | BrowserCommand::Navigate { tab_id, .. }
+            | BrowserCommand::TraverseHistory { tab_id, .. }
+            | BrowserCommand::Reload { tab_id, .. }
+            | BrowserCommand::CloseTab { tab_id, .. }
+            | BrowserCommand::NavigateDiscardingBeforeUnload { tab_id, .. }
+            | BrowserCommand::ReadText { tab_id, .. }
+            | BrowserCommand::ReadDocument { tab_id, .. }
+            | BrowserCommand::Inspect { tab_id, .. }
+            | BrowserCommand::InspectTree { tab_id, .. }
+            | BrowserCommand::Find { tab_id, .. }
+            | BrowserCommand::Screenshot { tab_id, .. }
+            | BrowserCommand::ScreenshotRegion { tab_id, .. }
+            | BrowserCommand::DescribeTargets { tab_id, .. }
+            | BrowserCommand::QuerySemantic { tab_id, .. }
+            | BrowserCommand::Activate { tab_id, .. }
+            | BrowserCommand::ActivatePoint { tab_id, .. }
+            | BrowserCommand::ActivateModified { tab_id, .. }
+            | BrowserCommand::ActivatePointModified { tab_id, .. }
+            | BrowserCommand::WheelAt { tab_id, .. }
+            | BrowserCommand::Scroll { tab_id, .. }
+            | BrowserCommand::SetZoom { tab_id, .. }
+            | BrowserCommand::ResizeWindow { tab_id, .. }
+            | BrowserCommand::Hover { tab_id, .. }
+            | BrowserCommand::HoverPoint { tab_id, .. }
+            | BrowserCommand::Fill { tab_id, .. }
+            | BrowserCommand::TypeText { tab_id, .. }
+            | BrowserCommand::DescribeFocused { tab_id }
+            | BrowserCommand::TypeFocused { tab_id, .. }
+            | BrowserCommand::PressKey { tab_id, .. }
+            | BrowserCommand::Drag { tab_id, .. }
+            | BrowserCommand::DragPoints { tab_id, .. }
+            | BrowserCommand::UploadFiles { tab_id, .. }
+            | BrowserCommand::DropImageAt { tab_id, .. }
+            | BrowserCommand::EvaluateScript { tab_id, .. }
+            | BrowserCommand::Observe { tab_id, .. }
+            | BrowserCommand::InspectDialog { tab_id }
+            | BrowserCommand::HandleDialog { tab_id, .. }
+            | BrowserCommand::ReadDiagnostics { tab_id, .. }
+            | BrowserCommand::StartRecording { tab_id } => Some(*tab_id),
+            BrowserCommand::ListTabs
+            | BrowserCommand::OpenTab { .. }
+            | BrowserCommand::ClearDiagnostics { .. }
+            | BrowserCommand::StatusRecording { .. }
+            | BrowserCommand::StopRecording { .. }
+            | BrowserCommand::ExportRecording { .. }
+            | BrowserCommand::DiscardRecording { .. }
+            | BrowserCommand::Cancel { .. }
+            | BrowserCommand::Present { .. }
+            | BrowserCommand::InstallPageRuntime { .. } => None,
+        }
+    }
+
     /// Read the physical primitive carried by a single document execution constraint.
     #[must_use]
     pub fn primitive(&self) -> &Self {
@@ -1095,6 +1186,9 @@ pub struct BrowserRequest {
     pub correlation: String,
     /// Opaque owning workspace handle.
     pub workspace: String,
+    /// Service-selected physical attention rule, never a model-authored override.
+    #[serde(default)]
+    pub attention: BrowserAttention,
     /// Physical primitive.
     pub command: BrowserCommand,
 }
@@ -1103,6 +1197,8 @@ pub struct BrowserRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum BrowserOutcome {
+    /// The adapter refused a physical attention effect before applying it.
+    AttentionProtected { reason: BrowserAttentionReason },
     /// Content-free current document and subject evidence.
     Documents {
         tab_id: u64,
@@ -1478,21 +1574,22 @@ pub enum BrowserFrame {
 #[cfg(test)]
 mod tests {
     use super::{
-        adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-        BrowserOutcome, BrowserPlatform, BrowserReceipt, BrowserRequest, CaptureScope,
-        DiagnosticDetail, DiagnosticEntry, DiagnosticSource, DiagnosticsLayer, DiagnosticsState,
-        EncodedRecording, PhysicalActionSubject, PhysicalField, PhysicalRecordingSummary,
-        PhysicalRectangle, PhysicalTab, PresentationActivity, PresentationKind, PresentationSignal,
-        RecordingDelivery, RecordingDestination, RecordingState, RecordingStopReason,
-        RuntimeControlState, SettlePolicy, ViewportGeometry, ADAPTER_PROTOCOL_MAJOR,
-        COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
-        RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
+        adapter_capability, AdapterCapability, BrowserAttention, BrowserCommand, BrowserEvent,
+        BrowserFrame, BrowserOutcome, BrowserPlatform, BrowserReceipt, BrowserRequest,
+        CaptureScope, DiagnosticDetail, DiagnosticEntry, DiagnosticSource, DiagnosticsLayer,
+        DiagnosticsState, EncodedRecording, PhysicalActionSubject, PhysicalField,
+        PhysicalRecordingSummary, PhysicalRectangle, PhysicalTab, PresentationActivity,
+        PresentationKind, PresentationSignal, RecordingDelivery, RecordingDestination,
+        RecordingState, RecordingStopReason, RuntimeControlState, SettlePolicy, ViewportGeometry,
+        ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
+        COMMAND_TRANSFER_MAX_CHUNKS, RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES,
     };
 
     #[test]
     fn browser_messages_round_trip() {
         let frame = BrowserFrame::Request {
             request: BrowserRequest {
+                attention: BrowserAttention::Foreground,
                 correlation: "physical-1".into(),
                 workspace: "workspace-1".into(),
                 command: BrowserCommand::OpenTab {
@@ -1511,6 +1608,7 @@ mod tests {
     fn presentation_detail_round_trips_as_an_optional_compatible_field() {
         let frame = BrowserFrame::Request {
             request: BrowserRequest {
+                attention: BrowserAttention::Foreground,
                 correlation: "physical-2".into(),
                 workspace: "workspace-1".into(),
                 command: BrowserCommand::Present {
@@ -1720,6 +1818,7 @@ mod tests {
         let frames = [
             BrowserFrame::Request {
                 request: BrowserRequest {
+                    attention: BrowserAttention::Foreground,
                     correlation: "physical-diagnostics".into(),
                     workspace: "workspace-1".into(),
                     command: BrowserCommand::ReadDiagnostics {
@@ -1765,6 +1864,7 @@ mod tests {
             },
             BrowserFrame::Request {
                 request: BrowserRequest {
+                    attention: BrowserAttention::Foreground,
                     correlation: "physical-diagnostics-clear".into(),
                     workspace: "workspace-1".into(),
                     command: BrowserCommand::ClearDiagnostics {
@@ -1809,6 +1909,7 @@ mod tests {
             },
             BrowserFrame::Request {
                 request: BrowserRequest {
+                    attention: BrowserAttention::Foreground,
                     correlation: "physical-recording-export".into(),
                     workspace: "workspace-1".into(),
                     command: BrowserCommand::ExportRecording {
@@ -1824,6 +1925,7 @@ mod tests {
             },
             BrowserFrame::Request {
                 request: BrowserRequest {
+                    attention: BrowserAttention::Foreground,
                     correlation: "physical-fill".into(),
                     workspace: "workspace-1".into(),
                     command: BrowserCommand::Fill {
@@ -1923,6 +2025,7 @@ mod tests {
         let frames = [
             BrowserFrame::Request {
                 request: BrowserRequest {
+                    attention: BrowserAttention::Foreground,
                     correlation: "runtime-1".into(),
                     workspace: "system".into(),
                     command: BrowserCommand::InstallPageRuntime {

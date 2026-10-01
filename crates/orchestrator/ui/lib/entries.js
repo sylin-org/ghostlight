@@ -12,6 +12,7 @@
     return {
       invocation: operation.invocation,
       workspace: operation.workspace,
+      tab: operation.tab ?? null,
       tool: operation.tool,
       activity: operation.activity,
       capability: operation.capability,
@@ -29,6 +30,7 @@
       ...(existing ?? {}),
       invocation: record.invocation,
       workspace: record.workspace,
+      tab: record.tab ?? null,
       tool: record.tool,
       // No activity when the record was restored rather than watched: the medallion then comes
       // from the tool. Defaulting to the quiet label is what made every row identical.

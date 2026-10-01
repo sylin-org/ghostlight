@@ -75,8 +75,8 @@
       });
     }
 
-    // One exact-title group per client label is the shipped invariant, and history can leave
-    // duplicates behind (service-worker restarts between creation and titling, pre-repair
+    // Foreground grouping repairs one exact-title group per client label. Quiet requests
+    // leave duplicates and human placement untouched. History can leave duplicates behind (service-worker restarts between creation and titling, pre-repair
     // releases). Chromium removes a group the moment its last tab leaves, so merging is: move
     // every stray tab of every same-title group into the canonical one and the duplicates
     // cease to exist. Best-effort per duplicate; the next assignment retries.
@@ -97,13 +97,20 @@
       }
     }
 
-    async function canonicalGroup(title) {
+    async function ownedWindow(windowId) {
+      const [tabs, window] = await Promise.all([
+        chromeApi.tabs.query({ windowId }), chromeApi.windows.get(windowId)
+      ]);
+      return !window.focused && tabs.length > 0 && tabs.every(tab => tabWorkspaces.has(tab.id));
+    }
+
+    async function canonicalGroup(title, { background = false } = {}) {
       const storedId = groups.get(title);
       if (storedId !== undefined) {
         try {
           const stored = await chromeApi.tabGroups.get(storedId);
-          if (stored.title === title) {
-            await mergeDuplicates(title, stored);
+          if (stored.title === title && (!background || await ownedWindow(stored.windowId))) {
+            if (!background) await mergeDuplicates(title, stored);
             return stored;
           }
         } catch (_error) {
@@ -111,41 +118,81 @@
         }
         groups.delete(title);
       }
-      const exact = (await chromeApi.tabGroups.query({}))
-        .filter((group) => group.title === title)
-        .sort((left, right) => left.id - right.id)[0];
-      if (exact) {
+      const candidates = (await chromeApi.tabGroups.query({}))
+        .filter(group => group.title === title)
+        .sort((left, right) => left.id - right.id);
+      for (const exact of candidates) {
+        if (background && !await ownedWindow(exact.windowId)) continue;
         groups.set(title, exact.id);
-        await mergeDuplicates(title, exact);
+        if (!background) await mergeDuplicates(title, exact);
         return exact;
       }
       return undefined;
     }
 
-    async function ghostlightWindow() {
-      return (await chromeApi.tabGroups.query({}))
-        .filter((group) => validTitle(group.title))
-        .sort((left, right) => left.id - right.id)[0]?.windowId;
+    async function ghostlightWindow({ background = false } = {}) {
+      const candidates = (await chromeApi.tabGroups.query({}))
+        .filter(group => validTitle(group.title))
+        .sort((left, right) => left.id - right.id);
+      for (const group of candidates) {
+        if (!background || await ownedWindow(group.windowId)) return group.windowId;
+      }
+      return undefined;
     }
 
-    async function groupTab(tabId, workspace, title, group) {
-      tabWorkspaces.set(tabId, workspace);
+    async function groupTab(tabId, workspace, title, group, { background = false } = {}) {
       let tab = await chromeApi.tabs.get(tabId);
+      // Quiet grouping never moves a tab to satisfy a historical presentation hint.
+      if (background && group && tab.windowId !== group.windowId) group = null;
+      tabWorkspaces.set(tabId, workspace);
       if (group && tab.windowId !== group.windowId) {
         await chromeApi.tabs.move(tabId, { windowId: group.windowId, index: -1 });
         tab = await chromeApi.tabs.get(tabId);
       }
-      const groupId = await chromeApi.tabs.group(
-        group ? { groupId: group.id, tabIds: [tabId] } : { tabIds: [tabId] }
-      );
-      groups.set(title, groupId);
-      await chromeApi.tabGroups.update(groupId, {
-        title,
-        color: GROUP_COLOR,
-        collapsed: false
-      });
-      await persist();
-      return tab;
+      let revision = 0;
+      const moved = id => { if (id === tabId) revision++; };
+      const focused = id => { if (id === tab.windowId) revision++; };
+      if (background) {
+        chromeApi.tabs.onDetached?.addListener(moved);
+        chromeApi.tabs.onAttached?.addListener(moved);
+        chromeApi.windows.onFocusChanged?.addListener(focused);
+      }
+      try {
+        if (background) {
+          const observedRevision = revision;
+          const eligible = await ownedWindow(tab.windowId);
+          const current = await chromeApi.tabs.get(tabId);
+          if (!eligible || revision !== observedRevision || current.windowId !== tab.windowId) {
+            // The person changed placement or took this window. Keep custody, skip grouping.
+            await persist();
+            return current;
+          }
+          tab = current;
+        }
+        const observedRevision = revision;
+        const groupId = await chromeApi.tabs.group(group
+          ? { groupId: group.id, tabIds: [tabId] }
+          // Chromium otherwise creates the group in the CURRENT window, moving this tab.
+          : { tabIds: [tabId], createProperties: { windowId: tab.windowId } });
+        const current = await chromeApi.tabs.get(tabId);
+        if (background && (revision !== observedRevision || current.windowId !== tab.windowId)) {
+          throw Object.assign(new Error("The tab moved while Chromium was grouping it."), { effectUnknown: true });
+        }
+        groups.set(title, groupId);
+        await chromeApi.tabGroups.update(groupId, {
+          title,
+          color: GROUP_COLOR,
+          ...(background ? {} : { collapsed: false })
+        });
+        await persist();
+        return await chromeApi.tabs.get(tabId);
+      } finally {
+        if (background) {
+          chromeApi.tabs.onDetached?.removeListener(moved);
+          chromeApi.tabs.onAttached?.removeListener(moved);
+          chromeApi.windows.onFocusChanged?.removeListener(focused);
+        }
+      }
     }
 
     async function assignInternal(tabId, workspace, requestedTitle) {
@@ -169,35 +216,35 @@
       });
     }
 
-    async function open(url, workspace, requestedTitle, onCreated) {
+    async function open(url, workspace, requestedTitle, onCreated, { background = false } = {}) {
       return serialized(async () => {
         const title = resolvedTitle(workspace, requestedTitle);
         const firstWorkspaceTab = !Array.from(tabWorkspaces.values()).includes(workspace);
-        const group = await canonicalGroup(title);
+        const group = await canonicalGroup(title, { background });
         let tab;
 
         if (group) {
           tab = requireCreatedTab(
-            await chromeApi.tabs.create({ url, active: true, windowId: group.windowId })
+            await chromeApi.tabs.create({ url, active: !background, windowId: group.windowId })
           );
           onCreated?.(tab);
-          await groupTab(tab.id, workspace, title, group);
-          if (firstWorkspaceTab) await chromeApi.windows.update(group.windowId, { focused: true });
+          tab = await groupTab(tab.id, workspace, title, group, { background });
+          if (!background && firstWorkspaceTab) await chromeApi.windows.update(group.windowId, { focused: true });
           return tab;
         }
 
-        const windowId = await ghostlightWindow();
+        const windowId = await ghostlightWindow({ background });
         if (windowId !== undefined) {
-          tab = requireCreatedTab(await chromeApi.tabs.create({ url, active: true, windowId }));
+          tab = requireCreatedTab(await chromeApi.tabs.create({ url, active: !background, windowId }));
           onCreated?.(tab);
-          await groupTab(tab.id, workspace, title, null);
-          if (firstWorkspaceTab) await chromeApi.windows.update(windowId, { focused: true });
+          tab = await groupTab(tab.id, workspace, title, null, { background });
+          if (!background && firstWorkspaceTab) await chromeApi.windows.update(windowId, { focused: true });
           return tab;
         }
 
         const createdWindow = await chromeApi.windows.create({
           url,
-          focused: firstWorkspaceTab,
+          focused: !background && firstWorkspaceTab,
           type: "normal"
         });
         const createdTabs = createdWindow?.tabs ?? (
@@ -205,7 +252,7 @@
         );
         tab = requireCreatedTab(createdTabs.find((candidate) => candidate.id !== undefined));
         onCreated?.(tab);
-        await groupTab(tab.id, workspace, title, null);
+        tab = await groupTab(tab.id, workspace, title, null, { background });
         return tab;
       });
     }
@@ -213,6 +260,14 @@
     async function forget(tabId) {
       return serialized(async () => {
         tabWorkspaces.delete(tabId);
+        await persist();
+      });
+    }
+
+    // A new authority epoch invalidates opaque custody, not physical presentation hints.
+    async function forgetAll() {
+      return serialized(async () => {
+        tabWorkspaces.clear();
         await persist();
       });
     }
@@ -265,7 +320,7 @@
       );
     }
 
-    return Object.freeze({ restore, open, assign, remember, forget, findReusable, workspaceFor, titleFor, tabsFor });
+    return Object.freeze({ restore, open, assign, remember, forget, forgetAll, findReusable, workspaceFor, titleFor, tabsFor });
   }
 
   return Object.freeze({ GROUP_PREFIX, GROUP_COLOR, validTitle, create });

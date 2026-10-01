@@ -509,7 +509,13 @@ impl BrowserRecovery {
                 },
                 |candidates| {
                     phase_from_plan(decide(
-                        self.governance.browser_startup(),
+                        if self.governance.browser_attention()
+                            == ghostlight_bridge::browser::BrowserAttention::Background
+                        {
+                            BrowserStartup::Manual
+                        } else {
+                            self.governance.browser_startup()
+                        },
                         requested,
                         pinned,
                         &candidates,
@@ -557,6 +563,15 @@ impl BrowserRecovery {
                 }
             }
             FlightPhase::Launching { browser } => {
+                // Ordinary browser startup can draw desktop attention. Recheck
+                // the operator's choice after repair/wait, before the OS launch.
+                if self.governance.browser_attention()
+                    == ghostlight_bridge::browser::BrowserAttention::Background
+                {
+                    return Ok(FlightPhase::Complete(RecoveryDecision::Manual {
+                        browsers: vec![browser],
+                    }));
+                }
                 match self.mechanism.launch(&browser, deadline, cancelled) {
                     Ok(()) => Ok(FlightPhase::Launched { browser }),
                     Err(MechanismError::Wait(error)) => Err(error),
@@ -869,7 +884,7 @@ mod tests {
             std::fs::write(
                 &path,
                 format!(
-                    r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
+                    r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}},{{"key":"browser.attention","value":"foreground","level":"mandatory"}}]}}"#
                 ),
             )
             .unwrap();
@@ -957,6 +972,56 @@ mod tests {
         assert_eq!(first_thread.join().unwrap(), second_thread.join().unwrap());
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn background_recovery_and_a_tightened_launch_never_start_a_browser() {
+        let inventory = Arc::new(FakeInventory {
+            candidates: vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Current,
+            )],
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        let mechanism = mechanism(Ok(()), None);
+        recovery.mechanism = mechanism.clone();
+        // Leave browser.startup's platform default intact; background remains the
+        // person's attention ceiling even when the authored startup is on demand.
+        recovery.governance = GovernanceFacade::new(None, None);
+        let decision = recovery
+            .request(
+                None,
+                None,
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        assert!(matches!(decision, RecoveryDecision::Manual { browsers } if browsers.len() == 1));
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+        let next = recovery
+            .advance(
+                FlightPhase::Launching {
+                    browser: candidate(
+                        "Chromium",
+                        BrowserPackage::Native,
+                        NativeHostState::Current,
+                    ),
+                },
+                None,
+                None,
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        assert!(matches!(
+            next,
+            FlightPhase::Complete(RecoveryDecision::Manual { .. })
+        ));
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
     }
 
     #[test]

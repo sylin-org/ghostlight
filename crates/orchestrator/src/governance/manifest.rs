@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
+use ghostlight_bridge::browser::BrowserAttention;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -262,6 +263,21 @@ impl Manifest {
     pub fn browser_startup(&self) -> Option<BrowserStartup> {
         self.string_setting("browser.startup")
             .and_then(BrowserStartup::from_str)
+    }
+
+    /// Resolve the operator-authored browser attention setting, including its policy level.
+    #[must_use]
+    pub fn browser_attention(&self) -> Option<(BrowserAttention, SettingLevel)> {
+        let entry = self
+            .config
+            .iter()
+            .find(|entry| entry.key == "browser.attention")?;
+        let value = match entry.value.as_str()? {
+            "background" => BrowserAttention::Background,
+            "foreground" => BrowserAttention::Foreground,
+            _ => return None,
+        };
+        Some((value, entry.level))
     }
 
     /// Resolve one string-array setting if this manifest authors it.
@@ -605,6 +621,14 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
             }
             validate_patterns(&patterns, source, &path)?;
         }
+        "browser.attention" => {
+            let Some(value) = entry.value.as_str() else {
+                return field(source, &path, "must be a string");
+            };
+            if !matches!(value, "background" | "foreground") {
+                return field(source, &path, "must be background or foreground");
+            }
+        }
         "browser.startup" => {
             let Some(value) = entry.value.as_str() else {
                 return field(source, &path, "must be a string");
@@ -874,6 +898,48 @@ mod tests {
             BrowserStartup::default_for_platform(false),
             BrowserStartup::Manual
         );
+    }
+
+    #[test]
+    fn browser_attention_validates_values_types_and_levels() {
+        use ghostlight_bridge::browser::BrowserAttention;
+
+        for (value, expected) in [
+            ("background", BrowserAttention::Background),
+            ("foreground", BrowserAttention::Foreground),
+        ] {
+            for (level, expected_level) in [
+                ("mandatory", super::SettingLevel::Mandatory),
+                ("recommended", super::SettingLevel::Recommended),
+            ] {
+                let document = format!(
+                    r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.attention","value":"{value}","level":"{level}"}}]}}"#
+                );
+                let manifest = parse(&document, "attention").unwrap();
+                assert_eq!(
+                    manifest.browser_attention(),
+                    Some((expected, expected_level))
+                );
+            }
+        }
+
+        for value in [r#""quiet""#, "true", "null", "[]", "1"] {
+            let document = format!(
+                r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.attention","value":{value},"level":"mandatory"}}]}}"#
+            );
+            let error = parse(&document, "attention").unwrap_err();
+            assert!(error.to_string().contains("config[0].value"));
+        }
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.attention","value":"background","level":"optional"}]}"#,
+            "attention"
+        )
+        .is_err());
+        assert!(parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.attentions","value":"background","level":"mandatory"}]}"#,
+            "attention"
+        )
+        .is_err());
     }
 
     #[test]

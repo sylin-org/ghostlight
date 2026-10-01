@@ -5,8 +5,10 @@ work is open, including localhost, loopback, and link-local destinations. Runtim
 explicit credential-input acknowledgement, stale-handle checks, browser-local interlocks, and the
 HTTP(S)-only boundary still apply. Host restrictions belong to policy.
 
-A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
-intersect. No lower layer can restore authority removed above it.
+A policy can only narrow browser capability authority. Managed and local policy intersect; tool
+calls do not author another policy layer. No lower layer can restore authority removed above it.
+Browser attention is an operational preference: background by default, with an operator-selected
+foreground opt-out and a mandatory organization ceiling.
 
 ## Write a schema-3 policy
 
@@ -40,6 +42,7 @@ capability in its set; Execute does not imply the other three. The exact operati
     {"key": "privacy.preserve_target_names", "value": false, "level": "mandatory"},
     {"key": "channels.cli.enabled", "value": false, "level": "mandatory"},
     {"key": "browser.startup", "value": "manual", "level": "mandatory"},
+    {"key": "browser.attention", "value": "background", "level": "mandatory"},
     {"key": "content.security.sacred_domains", "value": ["vault.example.com"], "level": "mandatory"}
   ]
 }
@@ -67,6 +70,7 @@ Supported settings are:
 | `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
 | `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it; observe mode does not relax it. |
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
+| `browser.attention` | `background` or `foreground` | Background is the default and protects the person's active tab, unowned pages, and placement from direct agent mechanisms. Foreground restores direct activation and unbound same-host adoption. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 | `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
 
@@ -77,10 +81,43 @@ security control: a user layer could never widen anything. Use it when a fleet n
 predictable, and supply an `organization.statement` so the person reads a reason rather than a
 missing button.
 
-`browser.startup` is an operational control, not a security boundary. `on_demand` permits one
-bounded recovery attempt when admitted work finds no connected browser; `manual` returns a
+`browser.startup` is an operational control, not a security boundary. With foreground attention,
+`on_demand` permits one bounded recovery attempt when admitted work finds no connected browser;
+background attention overrides launch with human handoff. `manual` returns a
 diagnosis and leaves startup to the person. An organization-authored `manual` value is a ceiling a
 user layer cannot relax.
+
+`browser.attention` is authored by the person or organization, never by a model tool call.
+A mandatory organization background value pins the choice. A recommended value is a default
+that an explicit user value may override. User background can always tighten foreground.
+The effective view states the choice and its deciding layer; it is persisted in the same user
+policy file as other settings. No extension switch or separate attention service is added.
+
+Background work does not adopt an unowned same-host tab, foreground a window, select another
+tab in the person's focused or shared window, merge duplicate groups, or move existing tabs.
+It opens in an unfocused window containing only owned tabs, creating one if needed. For trusted
+native keyboard or pointer input, it may select an owned tab inside that unfocused work window.
+Any native key/mouse surface in a focused or shared window returns `native_input` protection
+before input, including an already active tab. Native work coordinates per window and rechecks current
+target, placement, ownership, and focus before packets. Human focus, tab addition, or movement
+interrupts that scope. If an effect may have landed, the result retains partial or unknown
+effects and never replays input. Show tab permits review; return focus elsewhere or use a new
+background tab and reobserve before further native work. Focused/shared-window resize and active
+close in a focused window, with an unowned neighbor, or in a last-tab window are refused.
+Ordinary admitted navigation in a controlled tab remains available. Attention is not a content
+freeze; use Pause when taking over. If no browser is connected,
+background recovery asks the person to open it even when `browser.startup` is `on_demand`.
+An older adapter lacking the negotiated mechanism returns a visible refusal before effect.
+That adapter receives local Ended cleanup and is disconnected until updated, without physical
+tab closure or Stop on another adapter. Cleanup delivery does not assert acknowledged detachment.
+Whole-value text edits do not select a tab. They can edit an inactive owned target in a shared
+or focused window, but refuse the active target in a focused window. The same event fences and
+input checks apply; cleanup may release already held input after takeover without replay.
+
+Use Workbench `Show tab` to reveal an exact currently owned tab. Showing it grants no permission,
+resumes no work, and repeats no action. Pause and Stop keep their existing meanings. This protects
+Ghostlight's direct mechanisms, not focus or popups caused by explicitly run page code or page
+actions. A new unfocused work window can still appear. See [ADR-0186](../adr/0186-quiet-browser-coexistence.md).
 
 ## Say who wrote the policy
 
@@ -142,10 +179,15 @@ decision engine against this machine's recorded audit and reports what would hav
 The same page authors the registered settings, grouped by what they are about -- where agents may
 connect, in the browser, privacy. Boolean permissions start on. Turning one off is the only thing
 its switch does: the permissive value is never written, because a user layer cannot hand authority
-back. Browser startup is a closed two-choice select instead of a free-form field. A control pinned
+back. Browser startup and attention are closed choices instead of free-form fields. A control pinned
 by an organization renders disabled and names who set it. `policy.user.enabled` stays
 organization-only and is refused if a user document tries to author it. Sacred destinations are
 edited as a list with the same plain-words readback host patterns get.
+
+With no existing user policy, changing the first preference in an untouched empty draft shows
+one all-sites grant preserving the current permissions under organization rules. You can save
+the choice without writing grant boilerplate. Adding, editing, or removing rules makes that
+draft explicit; the editor never puts a removed grant back for you.
 
 Applying validates before it replaces anything and writes atomically, so no action in the window
 can leave Ghostlight configured with a policy it cannot read. Removing the rules is one action and

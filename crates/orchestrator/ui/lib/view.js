@@ -14,7 +14,7 @@
   const {
     VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass,
-    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, BROWSER_ATTENTION_FOREGROUND, SETTING_GROUPS, SACRED_KEY, settingWords,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId
@@ -162,6 +162,8 @@
       const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
         ? active.closest("details")?.dataset.historyDetails : null;
       const actionFocus = node.contains(active) ? active?.dataset?.actionDetails : null;
+      const revealFocus = node.contains(active) && active?.dataset?.revealTab
+        ? [active.dataset.revealWorkspace, active.dataset.revealTab] : null;
       node.innerHTML = markup;
       for (const list of node.querySelectorAll(".history-steps")) {
         const key = list.closest("details")?.dataset.historyDetails;
@@ -173,6 +175,11 @@
       }
       if (actionFocus) {
         [...node.querySelectorAll("[data-action-details]")].find((button) => button.dataset.actionDetails === actionFocus)
+          ?.focus({ preventScroll: true });
+      }
+      if (revealFocus) {
+        [...node.querySelectorAll("[data-reveal-tab]")].find((button) =>
+          button.dataset.revealWorkspace === revealFocus[0] && button.dataset.revealTab === revealFocus[1])
           ?.focus({ preventScroll: true });
       }
     }
@@ -272,8 +279,16 @@
       return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
         + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
+        + revealMarkup(entry)
         + compositionMarkup(entry)
         + (meta.length ? `<div class="hero-meta">${meta.join("")}</div>` : "");
+    }
+
+    /** A handle is evidence of a reveal destination; a browser name or host is not. */
+    function revealMarkup(entry) {
+      if (!entry.workspace || !entry.tab) return "";
+      return `<button class="ghost-button" type="button" data-reveal-workspace="${escapeHtml(entry.workspace)}"`
+        + ` data-reveal-tab="${escapeHtml(entry.tab)}" title="Show this controlled tab without permitting work or resuming it">Show tab</button>`;
     }
 
     /**
@@ -451,7 +466,7 @@
         el["state-facts"].textContent = "";
       } else {
         el["state-facts"].innerHTML = `<b>${facts.snapshot.sessions.length}</b> sessions`
-          + ` &middot; <b>${facts.snapshot.browsers.length}</b> browsers`
+          + ` &middot; <b>${facts.snapshot.browsers.filter(browser => browser.connected).length}</b> browsers`
           + ` &middot; <b>${facts.running}</b> running`
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
@@ -467,6 +482,11 @@
       }
 
       const paused = facts.runtime !== "active";
+      const attention = facts.snapshot?.configuration?.browser_attention;
+      el["browser-attention"].hidden = !attention;
+      el["browser-attention"].textContent = !attention ? "" : attention.value === "background"
+        ? "Browser work stays in the background. Use Show tab to look."
+        : BROWSER_ATTENTION_FOREGROUND;
       el.wheel.disabled = !(facts.snapshot?.readiness?.invites_control ?? false);
       el.wheel.dataset.intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
@@ -507,8 +527,10 @@
           + `<small>${group.tabs} tabs</small></span>`;
       });
       chips.push(...snapshot.browsers.map((browser) =>
-        `<span class="chip on"><span class="dot"></span>${escapeHtml(browser.family)}`
-        + `<small>adapter ${escapeHtml(browser.adapter_version ?? "unknown")}</small></span>`));
+        `<span class="chip ${browser.connected ? "on" : "unavailable"}" data-browser="${escapeHtml(browser.id)}"><span class="dot"></span>${escapeHtml(browser.family)}`
+        + `<small>${browser.connected ? "" : "Unavailable - "}adapter ${escapeHtml(browser.adapter_version ?? "unknown")}</small></span>`
+        + (browser.detail ? `<p class="browser-connection-detail" data-browser-detail="${escapeHtml(browser.id)}">`
+          + `${escapeHtml(browser.family)}: ${escapeHtml(browser.detail)}</p>` : "")));
       if (!chips.length) {
         chips.push('<span class="chip"><span class="dot"></span>Waiting for a client or a browser</span>');
       }
@@ -536,7 +558,7 @@
       const facts = [
         ["Version", version || "unknown"],
         ["Sessions", `${snapshot.sessions.length} connected`],
-        ["Browsers", `${snapshot.browsers.length} attached`],
+        ["Browsers", `${snapshot.browsers.filter(browser => browser.connected).length} attached`],
         ["Recorded", `${snapshot.history.length} actions on this device`],
         ["License", "Apache-2.0 OR MIT"]
       ];
@@ -710,7 +732,7 @@
       el["policy-ceilings"].innerHTML = view.ceilings
         .map((line) => `<li>${escapeHtml(line)}</li>`).join("");
 
-      settingsAndDocuments(view.layers);
+      settingsAndDocuments(view.layers, view.browser_attention);
 
       const user = view.user_layer;
       el["policy-editor"].hidden = !user.editable;
@@ -766,7 +788,7 @@
      * possible setting teaches nothing. The documents stay reachable so this page never becomes the
      * only way to read the policy.
      */
-    function settingsAndDocuments(layers) {
+    function settingsAndDocuments(layers, attention) {
       const settings = layers.flatMap((layer) =>
         layer.settings.map((setting) => ({ ...setting, owner: layer.title, kind: layer.kind })));
       el["policy-settings"].innerHTML = settings.length
@@ -784,6 +806,16 @@
           + `</ul>`
         : "";
 
+      if (attention) {
+        const owner = attention.decided_by === "organization" ? applied?.organization?.name ?? "Your organization"
+          : attention.decided_by === "user" ? "Your rules" : "Ghostlight default";
+        const answer = attention.value === "background"
+          ? "Browser work stays in the background. Agents cannot request foreground focus."
+          : BROWSER_ATTENTION_FOREGROUND;
+        el["policy-settings"].innerHTML = `<p class="coverage-note">${escapeHtml(answer)} ${escapeHtml(owner)}.</p>`
+          + el["policy-settings"].innerHTML;
+      }
+
       el["policy-documents"].innerHTML = layers.map((layer) => {
         if (!layer.document) return "";
         const where = layer.path ? `<span class="doc-path">${escapeHtml(layer.path)}</span>` : "";
@@ -799,10 +831,12 @@
     /** Turn the applied user layer into an editable draft, or start an empty one. */
     function draftFrom(view) {
       const layer = view.layers.find((entry) => entry.kind === "user");
-      if (!layer) return { rules: [], settings: emptySettings(), observe: false, dirty: false };
+      if (!layer) return { rules: [], settings: emptySettings(), observe: false, dirty: false, rulesEdited: false, preservesPermissions: false };
       return {
         observe: layer.mode === "observe",
         dirty: false,
+        rulesEdited: false,
+        preservesPermissions: false,
         rules: layer.rules.map((rule) => ({
           id: rule.id,
           hosts: rule.allow.join(", "),
@@ -868,6 +902,7 @@
      */
     function renderSettings() {
       if (!draft) return;
+      el["policy-permissions-note"].hidden = !draft.preservesPermissions;
       el["setting-groups"].innerHTML = SETTING_GROUPS.map((group) =>
         `<div class="setting-group"><h3>${escapeHtml(group.title)}</h3>`
         + group.items.map(settingRow).join("")
@@ -901,6 +936,7 @@
 
     /** Render the first closed string setting without turning it into a free-form field. */
     function choiceRow(item) {
+      if (item.key === "browser.attention") return attentionChoiceRow(item);
       if (item.key !== "browser.startup") return documentChoiceRow(item);
       const ceiling = applied?.browser_startup?.organization_ceiling;
       const forcedBy = ceiling === "manual"
@@ -922,6 +958,24 @@
         + `<select class="setting-choice" id="setting-browser-startup" data-setting-choice="${escapeHtml(item.key)}"`
         + `${forcedBy ? " disabled" : ""}>${options}</select>`
         + `<span class="setting-detail">${detail}</span></div></div>`;
+    }
+
+    /** The operator's foreground rule comes from effective authority, never from a model call. */
+    function attentionChoiceRow(item) {
+      const authority = applied?.browser_attention;
+      const forcedBy = authority?.organization_ceiling === "background"
+        ? applied?.organization?.name ?? "Your organization" : null;
+      const selected = forcedBy ? "background"
+        : draft.settings.choices[item.key] ?? authority?.value ?? "background";
+      const choice = item.choices.find((entry) => entry.value === selected) ?? item.choices[0];
+      const options = item.choices.map((entry) =>
+        `<option value="${escapeHtml(entry.value)}"${entry === choice ? " selected" : ""}>${escapeHtml(entry.label)}</option>`).join("");
+      const detail = choice.detail + (forcedBy ? ` ${forcedBy} requires background browser work.` : "");
+      return `<div class="setting-row${forcedBy ? " setting-forced" : ""}"><div class="setting-body">`
+        + `<label class="setting-name" for="setting-browser-attention">${escapeHtml(item.name)}</label>`
+        + `<select class="setting-choice" id="setting-browser-attention" data-setting-choice="${escapeHtml(item.key)}"`
+        + `${forcedBy ? " disabled" : ""}>${options}</select>`
+        + `<span class="setting-detail">${escapeHtml(detail)}</span></div></div>`;
     }
 
     // Closed choices share the effective policy's authored source and organization floor.
@@ -968,7 +1022,7 @@
       if (allowed) draft.settings.restricted.delete(key);
       else draft.settings.restricted.add(key);
       draft.dirty = true;
-      renderSettings();
+      if (seedPreferenceRule()) renderRules(); else renderSettings();
       editorReady();
       el["discard-policy"].hidden = false;
     }
@@ -977,10 +1031,12 @@
     function setChoice(key, value) {
       const item = SETTING_GROUPS.flatMap((group) => group.items).find((item) => item.key === key && item.kind === "choice");
       if (!draft || !item?.choices.some((choice) => choice.value === value)) return;
+      if (key === "browser.attention" && value === "foreground"
+        && applied?.browser_attention?.organization_ceiling === "background") return;
       if (key === "browser.startup") draft.settings.startup = value;
       else draft.settings.choices[key] = value;
       draft.dirty = true;
-      renderSettings();
+      if (seedPreferenceRule()) renderRules(); else renderSettings();
       editorReady();
       el["discard-policy"].hidden = false;
     }
@@ -989,9 +1045,29 @@
       if (!draft) return;
       draft.settings.sacred = value;
       draft.dirty = true;
+      if (seedPreferenceRule()) renderRules();
       refreshSacred();
       editorReady();
       el["discard-policy"].hidden = false;
+    }
+
+    /** A first preference keeps permission unchanged through one visible ordinary policy rule. */
+    function seedPreferenceRule() {
+      if (!draft || hasUserLayer(applied) || draft.rulesEdited || draft.rules.length) return false;
+      draft.rules.push({
+        id: "preserve-browser-permissions", hosts: "*",
+        description: "Preserve existing browser permissions. Organization restrictions still apply.",
+        allowed: new Set(CAPABILITY_ORDER)
+      });
+      draft.preservesPermissions = true;
+      return true;
+    }
+
+    /** An explicit rule edit ends automatic preference seeding, including after the last removal. */
+    function markRulesEdited() {
+      draft.rulesEdited = true;
+      draft.preservesPermissions = false;
+      el["policy-permissions-note"].hidden = true;
     }
 
     /**
@@ -1215,6 +1291,7 @@
 
     function editRule(index, field, value) {
       if (!draft?.rules[index]) return;
+      markRulesEdited();
       draft.rules[index][field] = value;
       draft.dirty = true;
       el["discard-policy"].hidden = false;
@@ -1256,6 +1333,7 @@
 
     function toggleCapability(index, capability, on) {
       if (!draft?.rules[index]) return;
+      markRulesEdited();
       if (on) draft.rules[index].allowed.add(capability);
       else draft.rules[index].allowed.delete(capability);
       draft.dirty = true;
@@ -1264,6 +1342,7 @@
 
     function ruleAction(index, action) {
       if (!draft) return;
+      markRulesEdited();
       if (action === "remove") {
         draft.rules.splice(index, 1);
         opened.delete(`mine:${index}`);
@@ -1280,6 +1359,7 @@
 
     function addRule(seed) {
       if (!draft) return;
+      markRulesEdited();
       draft.rules.push({
         id: `rule-${draft.rules.length + 1}`,
         hosts: seed || "",
@@ -1298,6 +1378,7 @@
       if (!draft) return;
       draft.observe = on;
       draft.dirty = true;
+      if (seedPreferenceRule()) renderRules();
       el["discard-policy"].hidden = false;
       editorReady();
     }

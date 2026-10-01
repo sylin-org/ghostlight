@@ -20,7 +20,8 @@ continuous integration, and release evidence use only Windows and that declared 
 Ghostlight supports these distinct jobs:
 
 1. See the tabs Ghostlight controls.
-2. Bring an exact controlled tab and its window into view.
+2. Show an exact controlled tab from the Workbench, or through a model request when the operator
+   permits foreground browser work.
 3. Open a URL in a selected or newly controlled tab.
 4. Navigate an exact controlled tab to a URL, through history, or by reloading it.
 5. Close an exact controlled tab.
@@ -59,8 +60,10 @@ Internal browser commands are combined when a person experiences them as one job
   settlement, or process details.
 - The toolbar always explains whether Ghostlight is connected, active, paused, waiting for the
   user, or ended.
-- Ghostlight-created tabs remain visibly grouped by workspace. A child tab opened by a controlled
-  page joins the same workspace when ownership is unambiguous.
+- Ghostlight-created tabs remain visibly grouped by workspace. Child tabs and popups are never
+  adopted merely because their opener is controlled (ADR-0164).
+- Browser work defaults to background attention, preserving the person's active tab and unowned
+  pages. The operator can opt into foreground behavior through the existing policy preference.
 - Visual feedback follows the active document without leaking page content or becoming required
   for successful work. Page feedback contains no buttons or focusable controls and never intercepts
   human pointer or keyboard input. Interactive runtime control belongs in the Tauri workbench.
@@ -119,6 +122,13 @@ the Applications entry as interaction routes.
 - Policy names `browser.startup` as `Auto-open browser on request`. When it is off, Ghostlight
   does not launch a browser; a refused browser call tells the model to ask the person to open any
   eligible installed browser it names, with the Ghostlight extension installed.
+- Policy also owns `browser.attention`: background by default, with foreground as an operator
+  opt-out. Models cannot relax it. At a glance offers `Show tab` for an exact currently owned
+  tab. Showing it grants no permission, resumes no work, and repeats no action.
+  Background recovery asks the person to open a missing browser even when auto-open is configured.
+  A first preference in an untouched empty user-policy draft shows a visible all-sites grant
+  preserving current permissions under organization rules, without requiring grant boilerplate.
+  Explicit rule edits and removals are never undone by that convenience.
 - Pause, resume, and start-session apply from the persistent header before At a glance
   and match the tray, so taking the wheel has one affordance rather than several.
 - A pause prevents the next browser effect by refusing it at the existing final boundary. It does
@@ -157,11 +167,27 @@ The unpacked extension is a complete local product surface, not an invisible rel
   default-on local choice to preserve controlled tabs. It owns only adapter-local presentation,
   diagnostics, and physical safety preferences. Authority and policy never move into the
   extension.
-- Controlled tabs use one browser-wide blue exact-title group named
-  `Ghostlight - <client label>`. New work reuses that group wherever the user placed it. When no
+- Controlled tabs use blue exact-title groups named `Ghostlight - <client label>`.
+  Foreground work reuses and repairs one browser-wide canonical group. Background work reuses
+  only an eligible unfocused all-owned work window, preserving separate same-title groups when
+  the person's focus or placement makes existing groups ineligible. When no eligible
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of
-  inserting work into the user's active window. Moves between windows preserve ownership, and
-  unambiguous child tabs are adopted by the parent workspace.
+  inserting work into the user's active window. Background creation prefers an unfocused window
+  containing only owned tabs, creating one if needed. It avoids unowned same-host adoption and
+  duplicate-group movement. Native input can select an owned tab inside that unfocused work
+  window; it cannot select a different tab in a focused or shared window. Moves preserve
+  ownership; child tabs remain unowned. Model focus remains refused under background attention.
+  Native input coordinates per work window and rechecks its current surface before packets.
+  Focused or shared windows refuse native key/mouse surface input even for an active target. Human focus, tab
+  addition, or movement can interrupt the command without a global hold. Already applied or
+  uncertain effects stay truthful and are never repaired by replay or automatic reselection.
+  Show tab is human review; background native work can continue after focus returns elsewhere
+  and the agent reobserves the page.
+  Whole-value text edits do not select tabs: an inactive owned target may be edited quietly,
+  but its active focused surface is protected. Already held input may be released on takeover.
+  Background work also refuses focused/shared-window resize and an active close in a focused
+  window, with an unowned neighbor, or in a last-tab window. Ordinary controlled navigation
+  remains admitted; attention is not a content freeze. Pause gives the person takeover.
 - Presentation preserves Ghostlight's luminous sky-blue visual language: controlled-tab border,
   phantom cursor, target and field treatments, click ripple, drag trail, scroll cue, read scan,
   action signatures, screenshot frame, denial, attention, and optional captions. It survives
@@ -219,6 +245,9 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - No vendor-, model-, or client-specific language.
 - No remote multi-tenant service.
 - No generic workflow engine, actor framework, event bus, CQRS split, or event store.
+- No browser-attention scheduler or separate attention service. Background enforcement governs
+  direct Ghostlight mechanisms; explicitly run page code and actions can cause their own popups
+  or focus behavior. It is not OS containment or a promise that no new window appears.
 - No telemetry, activation service, update check, audit upload, or network call unrelated to the
   requested visible-browser work or administrator-configured managed-policy fetch.
 

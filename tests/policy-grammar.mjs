@@ -83,6 +83,16 @@ check("browser startup values read as choices rather than raw keys",
     "Auto-open browser on request: Off",
   words.settingWords("browser.startup", "manual"));
 
+const attention = words.SETTING_GROUPS.flatMap((group) => group.items)
+  .find((item) => item.key === "browser.attention");
+check("browser attention uses only the two closed authority values",
+  attention?.kind === "choice"
+    && attention.choices.map((choice) => choice.value).join(",") === "background,foreground",
+  JSON.stringify(attention));
+check("browser attention values use the operator's background choice",
+  words.settingWords("browser.attention", "background") === "Keep browser work in the background: On"
+    && words.settingWords("browser.attention", "foreground") === "Keep browser work in the background: Off");
+
 let failed = 0;
 for (const [what, ok, detail] of checks) {
   if (!ok) failed += 1;

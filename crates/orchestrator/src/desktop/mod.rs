@@ -138,6 +138,7 @@ pub fn run() -> Result<()> {
             apply_runtime_intent,
             toggle_diagnostics,
             reveal_diagnostics,
+            reveal_browser_tab,
             refresh_harnesses,
             setup_detected_harnesses,
             manage_harness,
@@ -617,6 +618,19 @@ fn workbench_search(
     Ok(state.workbench.search(&query))
 }
 
+/// Show one exact controlled browser tab at the local person's request.
+#[tauri::command]
+async fn reveal_browser_tab(
+    workspace: String,
+    tab: String,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    let workbench = state.workbench.clone();
+    tauri::async_runtime::spawn_blocking(move || workbench.reveal_browser_tab(&workspace, &tab))
+        .await
+        .map_err(|error| format!("Could not show the controlled tab: {error}"))?
+}
+
 /// The compiled policy for the Policy destination.
 #[tauri::command]
 fn workbench_policy(state: State<'_, DesktopState>) -> EffectiveAuthority {
@@ -1019,6 +1033,7 @@ mod tests {
 
         let app = &surface_source();
         let operation = OperationSummary {
+            tab: None,
             provenance: None,
             invocation: "invocation_1".into(),
             workspace: "workspace_1".into(),
@@ -1029,6 +1044,7 @@ mod tests {
             phase: OperationPhase::Running,
         };
         let record = HistoryItem {
+            tab: None,
             provenance: None,
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: String::new(),

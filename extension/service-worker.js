@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js", "lib/connection-log.js", "lib/form-diagnostics.js");
+importScripts("lib/shared.js", "lib/native-input.js", "lib/state.js", "lib/topology.js", "lib/engine.js", "lib/frames.js", "lib/documents.js", "lib/debugger.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/diagnostics.js", "lib/recording.js", "lib/chunks.js", "lib/presentation-queue.js", "lib/screenshot.js", "lib/connection-log.js", "lib/form-diagnostics.js");
 
 const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
@@ -26,16 +26,31 @@ const INPUT_DISPATCH_METHODS = new Set([
   "Input.dispatchDragEvent",
   "Input.insertText"
 ]);
+// Native key/mouse packets need a presented tab surface in Chromium. Quiet preparation
+// can select an owned tab only inside an unfocused window containing no human tabs.
+const NATIVE_SURFACE_COMMANDS = new Set([
+  "activate", "activate_modified", "activate_point", "activate_point_modified",
+  "wheel_at", "hover", "hover_point", "press_key", "drag", "drag_points"
+]);
+const BACKGROUND_EDIT_COMMANDS = new Set(["fill", "type_text", "type_focused"]);
 const FILL_RETAINED_STABLE_MS = 250;
 const FILL_RETAINED_LIMIT_MS = 2_000;
 const FILL_RETAINED_POLL_MS = 25;
 
 async function sendDebugger(target, method, params, targetedFrameId = null) {
-  if (INPUT_DISPATCH_METHODS.has(method) || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles") {
+  const { nativeContext, ...debugTarget } = target;
+  const nativePacket = INPUT_DISPATCH_METHODS.has(method) || method === "Input.cancelDragging";
+  const compensation = nativeContext && nativePacket && nativeContext.isCompensation(method, params);
+  if (nativeContext && nativePacket && !compensation) await nativeContext.check();
+  if (!compensation && (INPUT_DISPATCH_METHODS.has(method) || (method === "Runtime.evaluate" && params?.replMode) || method === "DOM.setFileInputFiles")) {
     if (INPUT_DISPATCH_METHODS.has(method) && targetedFrameId !== null) await documents.targetedInput(target.tabId, targetedFrameId);
     else await documents.input(target.tabId, method, params);
   }
-  return chrome.debugger.sendCommand(target, method, params);
+  // Document admission may await page-local reads. Check again at the actual Chrome boundary.
+  if (nativeContext && nativePacket) await nativeContext.beforePacket(method, params);
+  const result = await chrome.debugger.sendCommand(debugTarget, method, params);
+  if (nativeContext && nativePacket) nativeContext.afterPacket(method, params);
+  return result;
 }
 const screenshotApi = globalThis.GhostlightScreenshot;
 const scriptEvaluator = globalThis.GhostlightScriptEvaluator;
@@ -83,6 +98,8 @@ const QUERY_SEMANTIC_CAP = 8;
 const beforeUnloadAcceptors = new Map();
 const activity = new Map();
 const topology = globalThis.GhostlightTopology.create(chrome, stateApi.TOPOLOGY_KEY);
+const nativeInput = globalThis.GhostlightNativeInput.create(chrome, id => topology.workspaceFor(id),
+  () => shared.attentionProtected(shared.ATTENTION_PROTECTION_REASON.NATIVE_INPUT));
 const presentationQueue = globalThis.GhostlightPresentationQueue.create();
 let nativePort = null;
 let nativeConnectionAttempt = null;
@@ -161,7 +178,10 @@ const PASSIVE_HANDLERS = Object.freeze([
   { capability: "adapter_liveness", revision: 1 },
   { capability: "adapter_attention", revision: 1 }
 ]);
-const ADAPTER_CAPABILITIES = shared.adapterCapabilities(COMMAND_HANDLERS, PASSIVE_HANDLERS);
+const REQUEST_HANDLERS = Object.freeze([
+  { capability: "browser_attention", revision: 1 }
+]);
+const ADAPTER_CAPABILITIES = shared.adapterCapabilities(COMMAND_HANDLERS, [...PASSIVE_HANDLERS, ...REQUEST_HANDLERS]);
 
 const recording = globalThis.GhostlightRecording.create({
   onStop: (tabId) => {
@@ -545,6 +565,16 @@ async function disableDiagnosticCapture(tabIds) {
     .map((domain) => debuggerLifecycle.disableDomain(tabId, domain).catch(() => {}))));
 }
 
+async function negotiateServiceEpoch(serviceEpoch) {
+  if (!await operationEngine.activate(serviceEpoch)) return;
+  try {
+    await settleServiceBoundaryState();
+  } finally {
+    try { await debuggerLifecycle.detachAll(); }
+    finally { await topology.forgetAll(); }
+  }
+}
+
 async function settleServiceBoundaryState() {
   commandChunks.clear();
   try {
@@ -643,8 +673,7 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
   if (frame.kind === "hello_accepted") {
     connectionLog.record(connectionEvents.HELLO_ACCEPTED, { service_version: frame.service_version });
     browserNegotiation = (async () => {
-      const changed = await operationEngine.activate(frame.service_epoch);
-      if (changed) await settleServiceBoundaryState();
+      await negotiateServiceEpoch(frame.service_epoch);
     })();
     await browserNegotiation;
     if (sourcePort && nativePort !== sourcePort) return;
@@ -714,6 +743,11 @@ async function installPageRuntime(command) {
 
 async function dispatch(request) {
   const command = request.command;
+  const background = shared.browserAttention(request.attention) === shared.BROWSER_ATTENTION.BACKGROUND;
+  // Refuse before debugger custody, tab activation, or window focus can change.
+  if (background && command.command === "focus_tab") {
+    return shared.attentionProtected(shared.ATTENTION_PROTECTION_REASON.FOCUS);
+  }
   if (typeof COMMAND_HANDLERS !== "undefined" && !Object.hasOwn(COMMAND_HANDLERS, command.command)) {
     throw new Error("unknown browser primitive");
   }
@@ -734,10 +768,20 @@ async function dispatch(request) {
   if (cancelled.delete(request.correlation)) return { outcome: "cancelled" };
   // Extension reload clears storage.session, but not the orchestrator's workspace.
   // Relearn its authoritative association from explicit work, never from a page event.
-  // Inventory, document discovery, and released-tab cleanup do not acquire custody.
+  // Inventory, document discovery, visual reveal, and released-tab cleanup do not acquire custody.
   const controlledTabId = command.tab_id ?? command.destination?.tab_id;
-  if (Number.isSafeInteger(controlledTabId) && request.workspace && command.command !== "close_tab") {
+  if (Number.isSafeInteger(controlledTabId) && request.workspace
+    && command.command !== "close_tab" && command.command !== "focus_tab") {
     await topology.remember(controlledTabId, request.workspace);
+  }
+  if (background && !request.nativeContext
+    && (NATIVE_SURFACE_COMMANDS.has(command.command) || BACKGROUND_EDIT_COMMANDS.has(command.command))) {
+    return nativeInput.run(command.tab_id, { surface: NATIVE_SURFACE_COMMANDS.has(command.command) },
+      nativeContext => dispatch({ ...request, nativeContext }));
+  }
+  const nativeContext = request.nativeContext;
+  if (Number.isSafeInteger(controlledTabId) && request.workspace
+    && command.command !== "close_tab" && command.command !== "focus_tab") {
     await retainManagedDebugger(controlledTabId);
   }
   if (command.command === "list_tabs") return { outcome: "tabs", tabs: (await chrome.tabs.query({})).map(physicalTab) };
@@ -746,27 +790,43 @@ async function dispatch(request) {
     const window = await chrome.windows.update(tab.windowId, { focused: true });
     return { outcome: "tab_focused", tab_id: command.tab_id, active: Boolean(tab.active), window_focused: Boolean(window.focused) };
   }
-  if (command.command === "open_tab") return openTab(request.correlation, request.workspace, command);
-  if (command.command === "navigate") return navigate(request.correlation, command);
-  if (command.command === "navigate_discarding_before_unload") return navigateDiscardingBeforeUnload(request.correlation, command);
+  if (command.command === "open_tab") return openTab(request.correlation, request.workspace, command, { background });
+  if (command.command === "navigate") return navigate(request.correlation, command, { background });
+  if (command.command === "navigate_discarding_before_unload") return navigateDiscardingBeforeUnload(request.correlation, command, { background });
   if (command.command === "traverse_history") return traverseHistory(request.correlation, command);
   if (command.command === "reload") return reload(request.correlation, command);
   if (command.command === "close_tab") {
-    if (await tabPreservationEnabled()) {
-      // A released close comes from a dead workspace: the person's interlock keeps the tab, and
-      // the tab is no longer owned by anything, so it becomes adoptable again (ADR-0137).
-      if (command.released) {
-        try {
-          await debuggerLifecycle.unretain(command.tab_id);
-        } finally {
-          await topology.forget(command.tab_id);
-          await syncFormDiagnostics(command.tab_id);
-        }
+    const preserve = await tabPreservationEnabled();
+    // Release ends debugger custody even when either operator rule keeps the physical tab.
+    // The service has already released its workspace; attention is never ownership.
+    if (command.released) {
+      try {
+        await debuggerLifecycle.unretain(command.tab_id);
+      } finally {
+        await topology.forget(command.tab_id);
+        await syncFormDiagnostics(command.tab_id);
       }
+    }
+    if (preserve) {
       throw Object.assign(
         new Error("Ghostlight is preserving controlled tabs by local browser choice."),
         { code: "local_interlock" }
       );
+    }
+    if (background) {
+      const tab = await chrome.tabs.get(command.tab_id);
+      const [neighbors, window] = await Promise.all([
+        chrome.tabs.query({ windowId: tab.windowId }), chrome.windows.get(tab.windowId)
+      ]);
+      const current = await chrome.tabs.get(command.tab_id);
+      // Closing an active tab selects a successor. Protect foreground selection and
+      // unowned neighbors; the final tab would also close its containing window.
+      const unowned = neighbors.some(item => item.id !== command.tab_id
+        && (!Number.isSafeInteger(item.id) || !topology.workspaceFor(item.id)));
+      if (current.windowId !== tab.windowId
+        || current.active && (window.focused || neighbors.length <= 1 || unowned)) {
+        return shared.attentionProtected(shared.ATTENTION_PROTECTION_REASON.ACTIVE_TAB_CLOSE);
+      }
     }
     await chrome.tabs.remove(command.tab_id);
     return { outcome: "tab_closed", tab_id: command.tab_id };
@@ -823,11 +883,11 @@ async function dispatch(request) {
   }
   if (command.command === "screenshot") return screenshot(command);
   if (command.command === "screenshot_region") return screenshot(command);
-  if (command.command === "activate") return activate(request.correlation, command);
-  if (command.command === "activate_modified") return activate(request.correlation, command);
-  if (command.command === "activate_point") return activatePoint(request.correlation, command);
-  if (command.command === "activate_point_modified") return activatePoint(request.correlation, command);
-  if (command.command === "wheel_at") return wheelAt(request.correlation, command);
+  if (command.command === "activate") return activate(request.correlation, command, nativeContext);
+  if (command.command === "activate_modified") return activate(request.correlation, command, nativeContext);
+  if (command.command === "activate_point") return activatePoint(request.correlation, command, nativeContext);
+  if (command.command === "activate_point_modified") return activatePoint(request.correlation, command, nativeContext);
+  if (command.command === "wheel_at") return wheelAt(request.correlation, command, nativeContext);
   if (command.command === "scroll") {
     const result = await content(command.tab_id, { kind: "scroll", locator: command.locator, direction: command.direction, amount: command.amount });
     // A scroll-into-view inside an embedded frame reports where the TAB ended up, so the
@@ -843,19 +903,19 @@ async function dispatch(request) {
     await chrome.tabs.setZoom(command.tab_id, command.zoom);
     return { outcome: "zoomed", tab_id: command.tab_id, zoom: await chrome.tabs.getZoom(command.tab_id) };
   }
-  if (command.command === "resize_window") return resizeWindow(command);
-  if (command.command === "hover") return hoverLocator(command);
-  if (command.command === "hover_point") return hoverPoint(command);
-  if (command.command === "fill") return fill(request.correlation, command);
-  if (command.command === "type_text") return typeText(request.correlation, command);
-  if (command.command === "type_focused") return typeFocused(request.correlation, command);
+  if (command.command === "resize_window") return resizeWindow(command, { background });
+  if (command.command === "hover") return hoverLocator(command, nativeContext);
+  if (command.command === "hover_point") return hoverPoint(command, nativeContext);
+  if (command.command === "fill") return fill(request.correlation, command, { background, nativeContext });
+  if (command.command === "type_text") return typeText(request.correlation, command, nativeContext);
+  if (command.command === "type_focused") return typeFocused(request.correlation, command, nativeContext);
   if (command.command === "describe_focused") {
     const result = await firstFrameAnswer(command.tab_id, { kind: "describe_focused" });
     return { outcome: "targets_described", tab_id: command.tab_id, targets: result.targets };
   }
-  if (command.command === "press_key") return pressKey(request.correlation, command);
-  if (command.command === "drag") return dragLocators(request.correlation, command);
-  if (command.command === "drag_points") return dragPoints(request.correlation, command);
+  if (command.command === "press_key") return pressKey(request.correlation, command, nativeContext);
+  if (command.command === "drag") return dragLocators(request.correlation, command, nativeContext);
+  if (command.command === "drag_points") return dragPoints(request.correlation, command, nativeContext);
   if (command.command === "upload_files") {
     const result = await content(command.tab_id, { kind: "upload_files", locator: command.locator, files: command.files });
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: result.subject };
@@ -983,7 +1043,7 @@ function physicalTab(tab) {
   };
 }
 
-async function resizeWindow(command) {
+async function resizeWindow(command, { background = false } = {}) {
   if (!Number.isSafeInteger(command.width) || command.width < 320 || command.width > 7680) {
     throw new RangeError("window width must be from 320 through 7680");
   }
@@ -991,6 +1051,16 @@ async function resizeWindow(command) {
     throw new RangeError("window height must be from 240 through 4320");
   }
   const tab = await chrome.tabs.get(command.tab_id);
+  if (background) {
+    const [neighbors, window] = await Promise.all([
+      chrome.tabs.query({ windowId: tab.windowId }), chrome.windows.get(tab.windowId)
+    ]);
+    const current = await chrome.tabs.get(command.tab_id);
+    if (current.windowId !== tab.windowId || window.focused
+      || neighbors.some(item => !Number.isSafeInteger(item.id) || !topology.workspaceFor(item.id))) {
+      return shared.attentionProtected(shared.ATTENTION_PROTECTION_REASON.SHARED_WINDOW_RESIZE);
+    }
+  }
   let resized;
   try {
     resized = await chrome.windows.update(tab.windowId, { width: command.width, height: command.height });
@@ -1450,13 +1520,13 @@ async function waitForReady(tabId, correlation, timeoutMs = 8000) {
   return chrome.tabs.get(tabId);
 }
 
-async function openTab(correlation, workspace, command) {
+async function openTab(correlation, workspace, command, { background = false } = {}) {
   const commits = [];
   let openedTab = null;
   try {
-    // Domain reuse (ADR-0137): a plain open adopts the nearest unbound same-host tab instead
-    // of creating another one. new_tab and stale-handle recovery send reuse "never".
-    if (command.reuse === "domain") {
+    // Foreground domain reuse retains ADR-0137 compatibility. Background work cannot
+    // distinguish a released Ghostlight tab from a human draft, so it never adopts one.
+    if (!background && command.reuse === "domain") {
       const candidate = await topology.findReusable(command.url);
       if (candidate) {
         openedTab = candidate;
@@ -1476,7 +1546,7 @@ async function openTab(correlation, workspace, command) {
     openedTab = await topology.open(command.url, workspace, command.group_title, (tab) => {
       openedTab = tab;
       navigationWatchers.set(tab.id, { correlation, commits });
-    });
+    }, { background });
     await retainManagedDebugger(openedTab.id);
     syncFormDiagnostics(openedTab.id).catch(() => {});
     const landed = await waitForReady(openedTab.id, correlation);
@@ -1489,11 +1559,11 @@ async function openTab(correlation, workspace, command) {
   }
 }
 
-async function navigate(correlation, command) {
+async function navigate(correlation, command, { background = false } = {}) {
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
-    await chrome.tabs.update(command.tab_id, { url: command.url, active: true });
+    await chrome.tabs.update(command.tab_id, { url: command.url, ...(background ? {} : { active: true }) });
     const tab = await waitForReady(command.tab_id, correlation);
     return { outcome: "navigated", tab: physicalTab(tab), committed_urls: commits };
   } catch (error) {
@@ -1504,14 +1574,14 @@ async function navigate(correlation, command) {
   }
 }
 
-async function navigateDiscardingBeforeUnload(correlation, command) {
+async function navigateDiscardingBeforeUnload(correlation, command, { background = false } = {}) {
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
     await sendDebugger({ tabId: command.tab_id }, "Page.enable");
     beforeUnloadAcceptors.set(command.tab_id, true);
-    await chrome.tabs.update(command.tab_id, { url: command.url, active: true });
+    await chrome.tabs.update(command.tab_id, { url: command.url, ...(background ? {} : { active: true }) });
     const tab = await waitForReady(command.tab_id, correlation);
     return { outcome: "navigated", tab: physicalTab(tab), committed_urls: commits };
   } catch (error) {
@@ -1624,18 +1694,19 @@ async function observeAcrossFrames(command) {
   return { satisfied, elapsed_ms: Math.max(0, ...settled.map((entry) => entry.elapsed_ms ?? 0)), readiness };
 }
 
-async function activate(correlation, command) {
+async function activate(correlation, command, nativeContext = null) {
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
+    if (nativeContext) await nativeContext.check();
     const result = await content(command.tab_id, { kind: "activate", locator: command.locator, button: command.button, click_count: command.click_count, modifiers: command.modifiers ?? [] });
     const frameId = frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID;
     const offset = await frameViewportOffset(command.tab_id, frameId);
     await dispatchClick(command.tab_id, {
       x: result.rectangle.left + result.rectangle.width / 2 + offset.x,
       y: result.rectangle.top + result.rectangle.height / 2 + offset.y
-    }, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []));
+    }, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []), nativeContext);
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -1653,14 +1724,20 @@ function requireFillBudget(deadline) {
   if (Date.now() >= deadline) throw new Error("form fill exhausted its physical execution budget");
 }
 
-async function replaceFocusedText(tabId, frameId, value, deadline = Number.POSITIVE_INFINITY) {
+async function replaceFocusedText(tabId, frameId, value, deadline = Number.POSITIVE_INFINITY, { background = false, nativeContext = null } = {}) {
   requireFillBudget(deadline);
+  if (background) {
+    // Native insertion replaces the prepared selection even in an unfocused window.
+    // Keyboard packets may be acknowledged there without reaching the control.
+    await sendDebugger({ tabId, nativeContext }, "Input.insertText", { text: String(value).replace(/\r\n?/g, "\n") }, frameId);
+    return;
+  }
   const control = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
   const selectAll = { key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 };
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...control, modifiers: 2 }, frameId);
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...selectAll, modifiers: 2 }, frameId);
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...selectAll, modifiers: 2 }, frameId);
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...control }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyDown", ...control, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyDown", ...selectAll, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyUp", ...selectAll, modifiers: 2 }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyUp", ...control }, frameId);
 
   const text = String(value).replace(/\r\n?/g, "\n");
   const characters = Array.from(text);
@@ -1668,14 +1745,14 @@ async function replaceFocusedText(tabId, frameId, value, deadline = Number.POSIT
   for (const character of characters) {
     requireFillBudget(deadline);
     const descriptor = shared.keyDescriptor(character === "\n" ? "Enter" : character);
-    await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor }, frameId);
+    await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyDown", ...descriptor }, frameId);
     const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
-    await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp }, frameId);
+    await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp }, frameId);
   }
   requireFillBudget(deadline);
   const tab = shared.keyDescriptor("Tab");
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyDown", ...tab }, frameId);
-  await sendDebugger({ tabId }, "Input.dispatchKeyEvent", { type: "keyUp", ...tab }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyDown", ...tab }, frameId);
+  await sendDebugger({ tabId, nativeContext }, "Input.dispatchKeyEvent", { type: "keyUp", ...tab }, frameId);
 }
 
 async function retainedFillNow(tabId, groups, allowCredentials) {
@@ -1708,7 +1785,7 @@ async function verifyRetainedFill(tabId, groups, deadline, allowCredentials) {
   }
 }
 
-async function fill(correlation, command) {
+async function fill(correlation, command, { background = false, nativeContext = null } = {}) {
   if (!Number.isSafeInteger(command.timeout_ms) || command.timeout_ms < 0) {
     throw new Error("form fill requires a physical execution budget");
   }
@@ -1759,12 +1836,18 @@ async function fill(correlation, command) {
         for (let index = 0; index < fields.length; index += 1) {
           requireFillBudget(deadline);
           const field = fields[index];
+          if (nativeContext) await nativeContext.check();
           dispatched = true;
           if (fieldKinds[index] === "browser_text") {
-            await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field, allow_credentials: command.allow_credentials });
+            await contentIn(command.tab_id, frameId, { kind: "prepare_text_fill", field, native_replace: background, allow_credentials: command.allow_credentials });
             await contentIn(command.tab_id, frameId, { kind: "verify_text_fill_focus", field, allow_credentials: command.allow_credentials });
-            await replaceFocusedText(command.tab_id, frameId, field.value, deadline);
+            await replaceFocusedText(command.tab_id, frameId, field.value, deadline, { background, nativeContext });
+            if (background) {
+              if (nativeContext) await nativeContext.check();
+              await contentIn(command.tab_id, frameId, { kind: "commit_text_fill", field, allow_credentials: command.allow_credentials });
+            }
           } else {
+            if (nativeContext) nativeContext.markEffect();
             await contentIn(command.tab_id, frameId, { kind: "fill_local", field, allow_credentials: command.allow_credentials });
           }
           filledCount += 1;
@@ -1779,6 +1862,7 @@ async function fill(correlation, command) {
     await verifyRetainedFill(command.tab_id, preparedGroups, deadline, command.allow_credentials);
     if (command.submit_locator) {
       requireFillBudget(deadline);
+      if (nativeContext) { await nativeContext.check(); nativeContext.markEffect(); }
       dispatched = true;
       const fields = groups.get(submitFrame);
       const result = await contentIn(command.tab_id, submitFrame, {
@@ -1800,12 +1884,13 @@ async function fill(correlation, command) {
   } finally { navigationWatchers.delete(command.tab_id); }
 }
 
-async function typeText(correlation, command) {
+async function typeText(correlation, command, nativeContext = null) {
   const commits = [];
   let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
     await documents.verify(command.tab_id);
+    if (nativeContext) { await nativeContext.check(); nativeContext.markEffect(); }
     dispatched = true;
     const target = await content(command.tab_id, { kind: "type_text", locator: command.locator,
       text: command.text, clear_first: command.clear_first, allow_credentials: command.allow_credentials });
@@ -1820,7 +1905,7 @@ async function typeText(correlation, command) {
   }
 }
 
-async function dispatchDrag(tabId, start, end) {
+async function dispatchDrag(tabId, start, end, nativeContext = null) {
   const packets = shared.dragPackets(start, end);
   const finalPacket = packets.at(-1);
   let interceptEnabled = false;
@@ -1831,36 +1916,36 @@ async function dispatchDrag(tabId, start, end) {
   await contentAll(tabId, { kind: "drag_observation_arm" });
   try {
     try {
-      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: true });
+      await sendDebugger({ tabId, nativeContext }, "Input.setInterceptDrags", { enabled: true });
       interceptEnabled = true;
     } catch (_unsupported) {
       cancelDragInterception(tabId);
     }
 
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[0]);
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[1]);
+    await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", packets[0]);
+    await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", packets[1]);
     pressed = true;
 
     if (interceptEnabled) {
       for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
-        await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+        await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
         const observed = await dragObservationStatus(tabId);
         if (!observed.started) continue;
         nextHeldPacket += 1;
-        await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false });
+        await sendDebugger({ tabId, nativeContext }, "Input.setInterceptDrags", { enabled: false });
         interceptEnabled = false;
         if (!observed.cancelled) {
           const dragData = await waitForDragInterception(interception);
           if (dragData) {
             for (const type of ["dragEnter", "dragOver", "drop"]) {
-              await sendDebugger({ tabId }, "Input.dispatchDragEvent", {
+              await sendDebugger({ tabId, nativeContext }, "Input.dispatchDragEvent", {
                 type,
                 x: end.x,
                 y: end.y,
                 data: dragData
               });
             }
-            await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+            await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", finalPacket);
             released = true;
             return;
           }
@@ -1870,23 +1955,23 @@ async function dispatchDrag(tabId, start, end) {
     }
 
     if (interceptEnabled) {
-      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false });
+      await sendDebugger({ tabId, nativeContext }, "Input.setInterceptDrags", { enabled: false });
       interceptEnabled = false;
     }
     for (; nextHeldPacket < packets.length - 1; nextHeldPacket += 1) {
-      await sendDebugger({ tabId }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
+      await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", packets[nextHeldPacket]);
     }
-    await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket);
+    await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", finalPacket);
     released = true;
   } finally {
     cancelDragInterception(tabId);
     await contentAll(tabId, { kind: "drag_observation_finish" });
     if (interceptEnabled) {
-      await sendDebugger({ tabId }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
+      await sendDebugger({ tabId, nativeContext }, "Input.setInterceptDrags", { enabled: false }).catch(() => {});
     }
     if (pressed && !released) {
-      await sendDebugger({ tabId }, "Input.dispatchMouseEvent", finalPacket).catch(() => {});
-      await sendDebugger({ tabId }, "Input.cancelDragging").catch(() => {});
+      await sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", finalPacket).catch(() => {});
+      await sendDebugger({ tabId, nativeContext }, "Input.cancelDragging").catch(() => {});
     }
   }
 }
@@ -1914,11 +1999,11 @@ async function waitForDragInterception(interception) {
   ]);
 }
 
-async function dragWithPoints(correlation, tabId, start, end, sourceSubject = null, destinationSubject = null) {
+async function dragWithPoints(correlation, tabId, start, end, sourceSubject = null, destinationSubject = null, nativeContext = null) {
   const commits = [];
   navigationWatchers.set(tabId, { correlation, commits });
   try {
-    await dispatchDrag(tabId, start, end);
+    await dispatchDrag(tabId, start, end, nativeContext);
     const tab = await chrome.tabs.get(tabId);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "dragged", tab: physicalTab(tab), source_subject: sourceSubject, destination_subject: destinationSubject, committed_urls: commits };
@@ -1934,8 +2019,10 @@ async function dragWithPoints(correlation, tabId, start, end, sourceSubject = nu
 // its own frame first, then both boxes are read through the scroll-free "box" primitive
 // AFTER all scrolling, so neither rectangle is stale. Each composes into tab space with
 // its own frame offset.
-async function dragLocators(correlation, command) {
+async function dragLocators(correlation, command, nativeContext = null) {
+  if (nativeContext) await nativeContext.check();
   await content(command.tab_id, { kind: "hover", locator: command.destination_locator });
+  if (nativeContext) await nativeContext.check();
   await content(command.tab_id, { kind: "hover", locator: command.source_locator });
   const source = await content(command.tab_id, { kind: "box", locator: command.source_locator });
   const destination = await content(command.tab_id, { kind: "box", locator: command.destination_locator });
@@ -1953,20 +2040,21 @@ async function dragLocators(correlation, command) {
       pointOf(source.rectangle, sourceOffset),
       pointOf(destination.rectangle, destinationOffset),
       source.subject,
-      destination.subject
+      destination.subject,
+      nativeContext
     );
   } finally {
     await detachDebugger(command.tab_id);
   }
 }
 
-async function dragPoints(correlation, command) {
+async function dragPoints(correlation, command, nativeContext = null) {
   await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const start = await viewportPoint(command.tab_id, command.start);
     const end = await viewportPoint(command.tab_id, command.end);
-    return await dragWithPoints(correlation, command.tab_id, start, end, start.subject, end.subject);
+    return await dragWithPoints(correlation, command.tab_id, start, end, start.subject, end.subject, nativeContext);
   } finally {
     await detachDebugger(command.tab_id);
   }
@@ -2209,7 +2297,7 @@ function announceDialog(tabId, type) {
   for (const announce of waiting) announce(type || "unknown");
 }
 
-async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
+async function dispatchClick(tabId, point, button, clickCount, modifierFlags, nativeContext = null) {
   const name = button === "middle" ? "middle" : button === "secondary" ? "right" : "left";
   const modifiers = modifierFlags ?? 0;
   const dialog = watchForDialog(tabId);
@@ -2222,7 +2310,7 @@ async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
         // command never returns. The dialog is the proof the input landed, so stop
         // waiting on it. Remaining events in the sequence are not dispatched: the
         // renderer cannot receive them while it is blocked.
-        const sent = sendDebugger({ tabId }, "Input.dispatchMouseEvent", params).then(() => null);
+        const sent = sendDebugger({ tabId, nativeContext }, "Input.dispatchMouseEvent", params).then(() => null);
         sent.catch(() => {});
         if (await Promise.race([sent, dialog.opened])) return;
       }
@@ -2232,14 +2320,14 @@ async function dispatchClick(tabId, point, button, clickCount, modifierFlags) {
   }
 }
 
-async function activatePoint(correlation, command) {
+async function activatePoint(correlation, command, nativeContext = null) {
   await ensureDebugger(command.tab_id);
   const commits = [];
   navigationWatchers.set(command.tab_id, { correlation, commits });
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
-    await dispatchClick(command.tab_id, point, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []));
+    await dispatchClick(command.tab_id, point, command.button, command.click_count, shared.modifierMask(command.modifiers ?? []), nativeContext);
     await new Promise((resolve) => setTimeout(resolve, 250));
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -2253,12 +2341,13 @@ async function activatePoint(correlation, command) {
   }
 }
 
-async function hoverLocator(command) {
+async function hoverLocator(command, nativeContext = null) {
+  if (nativeContext) await nativeContext.check();
   const geometry = await content(command.tab_id, { kind: "hover", locator: command.locator });
   const offset = await frameViewportOffset(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID);
   await ensureDebugger(command.tab_id);
   try {
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", {
+    await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x: geometry.rectangle.left + geometry.rectangle.width / 2 + offset.x,
       y: geometry.rectangle.top + geometry.rectangle.height / 2 + offset.y
@@ -2269,19 +2358,20 @@ async function hoverLocator(command) {
   }
 }
 
-async function hoverPoint(command) {
+async function hoverPoint(command, nativeContext = null) {
   await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     return { outcome: "hovered", tab_id: command.tab_id, subject: point.subject };
   } finally {
     await detachDebugger(command.tab_id);
   }
 }
 
-async function pressKey(correlation, command) {
+async function pressKey(correlation, command, nativeContext = null) {
+  if (nativeContext) await nativeContext.check();
   const target = command.locator ? await content(command.tab_id, { kind: "focus", locator: command.locator }) : null;
   await ensureDebugger(command.tab_id);
   const commits = [];
@@ -2294,9 +2384,9 @@ async function pressKey(correlation, command) {
     const { text: _descriptorText, unmodifiedText: _descriptorUnmodifiedText, ...physicalDescriptor } = descriptor;
     const combinedModifiers = modifiers | (descriptor.modifiers ?? 0);
     const keyDown = modifiers & 7 ? physicalDescriptor : descriptor;
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyDown", ...keyDown, modifiers: combinedModifiers });
+    await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchKeyEvent", { type: "keyDown", ...keyDown, modifiers: combinedModifiers });
     const { text: _text, unmodifiedText: _unmodifiedText, ...keyUp } = descriptor;
-    await sendDebugger({ tabId: command.tab_id }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers: combinedModifiers });
+    await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchKeyEvent", { type: "keyUp", ...keyUp, modifiers: combinedModifiers });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "key_pressed", tab: physicalTab(tab), key: command.key, subject: target?.subject, committed_urls: commits };
@@ -2322,14 +2412,14 @@ async function dropImageAt(correlation, command) {
   finally { await detachDebugger(command.tab_id); }
 }
 
-async function wheelAt(correlation, command) {  await ensureDebugger(command.tab_id);
+async function wheelAt(correlation, command, nativeContext = null) {  await ensureDebugger(command.tab_id);
   try {
     await validateView(command.tab_id, command.expected_viewport);
     const point = await pointInViewport(command.tab_id, command.point);
     const deltaY = command.direction === "up" ? -120 : 120;
     for (let tick = 0; tick < command.ticks; tick += 1) {
       if (cancelled.has(correlation)) throw Object.assign(new Error("cancelled during wheel"), { effectUnknown: true });
-      await sendDebugger({ tabId: command.tab_id }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY });
+      await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY });
     }
     await new Promise((resolve) => setTimeout(resolve, 120));
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
@@ -2339,7 +2429,7 @@ async function wheelAt(correlation, command) {  await ensureDebugger(command.tab
   }
 }
 
-async function typeFocused(correlation, command) {
+async function typeFocused(correlation, command, nativeContext = null) {
   const commits = [];
   let dispatched = false;
   navigationWatchers.set(command.tab_id, { correlation, commits });
@@ -2348,12 +2438,13 @@ async function typeFocused(correlation, command) {
     await documents.verifyInput(command.tab_id, "Input.insertText", { text: command.text });
     await firstFrameAnswer(command.tab_id, { kind: "verify_focused_text", allow_credentials: command.allow_credentials });
     if (command.clear_first) {
+      if (nativeContext) { await nativeContext.check(); nativeContext.markEffect(); }
       dispatched = true;
       await firstFrameAnswer(command.tab_id, { kind: "clear_focused", allow_credentials: command.allow_credentials });
       await firstFrameAnswer(command.tab_id, { kind: "verify_focused_text", allow_credentials: command.allow_credentials });
     }
     dispatched = true;
-    await sendDebugger({ tabId: command.tab_id }, "Input.insertText", { text: command.text });
+    await sendDebugger({ tabId: command.tab_id, nativeContext }, "Input.insertText", { text: command.text });
     const tab = await chrome.tabs.get(command.tab_id);
     if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
     return { outcome: "typed", tab: physicalTab(tab), character_count: Array.from(command.text).length, subject: null, committed_urls: commits };

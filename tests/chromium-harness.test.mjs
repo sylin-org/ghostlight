@@ -3,10 +3,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join, resolve } from "node:path";
-import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
+import { fixtureRenderingArguments, readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const running = () => ({ exitCode: null, signalCode: null });
 const busy = code => Object.assign(new Error(code), { code });
+
+test("disposable Windows rendering fixture has no foreground, profile or sandbox arguments", () => {
+  const windows = fixtureRenderingArguments("win32");
+  assert.deepEqual(windows, ["--disable-backgrounding-occluded-windows"]);
+  assert.ok(!windows.some(value => /focus|active|sandbox|user-data|extension|debugging/.test(value)));
+  assert.deepEqual(fixtureRenderingArguments("linux"), []);
+  assert.deepEqual(fixtureRenderingArguments("darwin"), []);
+});
 
 test("DevTools publication tolerates known sharing errors and a partially written file", async () => {
   const answers = [busy("ENOENT"), busy("EBUSY"), busy("EACCES"), busy("EPERM"), "", "12345\n", "12345\n/devtools/browser/test-id\n"];

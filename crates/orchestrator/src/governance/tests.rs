@@ -24,6 +24,131 @@ fn all_open_grant() -> &'static str {
     r#"[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]"#
 }
 
+#[test]
+fn browser_attention_is_persisted_and_live_in_the_operator_policy() {
+    use ghostlight_bridge::browser::BrowserAttention;
+
+    let path = temporary("attention-owned");
+    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    assert_eq!(facade.browser_attention(), BrowserAttention::Background);
+    for (value, expected) in [
+        ("foreground", BrowserAttention::Foreground),
+        ("background", BrowserAttention::Background),
+    ] {
+        let config =
+            format!(r#"[{{"key":"browser.attention","value":"{value}","level":"mandatory"}}]"#);
+        facade
+            .apply_user_policy(&policy("mine", all_open_grant(), &config))
+            .unwrap();
+        assert_eq!(facade.browser_attention(), expected);
+        assert_eq!(
+            facade.effective_authority().browser_attention.value,
+            expected
+        );
+        let reopened = GovernanceFacade::new(Some(path.clone()), None);
+        assert_eq!(reopened.browser_attention(), expected);
+    }
+    assert!(facade
+        .apply_user_policy(&policy(
+            "mine",
+            all_open_grant(),
+            r#"[{"key":"browser.attention","value":"quiet","level":"mandatory"}]"#,
+        ))
+        .is_err());
+    assert_eq!(facade.browser_attention(), BrowserAttention::Background);
+    facade.remove_user_policy().unwrap();
+    assert_eq!(facade.browser_attention(), BrowserAttention::Background);
+    assert!(!path.exists());
+}
+
+#[test]
+fn browser_attention_cannot_weaken_a_mandatory_organization_background_rule() {
+    use ghostlight_bridge::browser::BrowserAttention;
+
+    let user = temporary("attention-user");
+    let organization = temporary("attention-organization");
+    fs::write(
+        &user,
+        policy(
+            "mine",
+            all_open_grant(),
+            r#"[{"key":"browser.attention","value":"foreground","level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &organization,
+        policy(
+            "organization",
+            all_open_grant(),
+            r#"[{"key":"browser.attention","value":"background","level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let facade = GovernanceFacade::new(Some(user.clone()), Some(organization.clone()));
+    assert_eq!(facade.browser_attention(), BrowserAttention::Background);
+    assert_eq!(
+        facade
+            .effective_authority()
+            .browser_attention
+            .organization_ceiling,
+        Some(BrowserAttention::Background)
+    );
+    fs::write(
+        &organization,
+        policy(
+            "organization",
+            all_open_grant(),
+            r#"[{"key":"browser.attention","value":"background","level":"recommended"}]"#,
+        ),
+    )
+    .unwrap();
+    assert_eq!(facade.browser_attention(), BrowserAttention::Foreground);
+    assert_eq!(
+        facade
+            .effective_authority()
+            .browser_attention
+            .organization_ceiling,
+        None
+    );
+    fs::remove_file(user).unwrap();
+    fs::remove_file(organization).unwrap();
+}
+
+#[test]
+fn malformed_attention_policy_fails_closed_and_reload_retains_last_valid_preference() {
+    use ghostlight_bridge::browser::BrowserAttention;
+
+    let path = temporary("attention-invalid");
+    fs::write(&path, "{malformed").unwrap();
+    let cold = GovernanceFacade::new(Some(path.clone()), None);
+    assert_eq!(cold.browser_attention(), BrowserAttention::Background);
+    assert!(
+        !cold
+            .snapshot()
+            .authorize_capability(Capability::Action)
+            .allowed
+    );
+    fs::write(
+        &path,
+        policy(
+            "mine",
+            all_open_grant(),
+            r#"[{"key":"browser.attention","value":"foreground","level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    assert_eq!(cold.browser_attention(), BrowserAttention::Foreground);
+    fs::write(&path, "{malformed-replacement").unwrap();
+    assert_eq!(cold.browser_attention(), BrowserAttention::Foreground);
+    assert!(
+        cold.snapshot()
+            .authorize_capability(Capability::Action)
+            .allowed
+    );
+    fs::remove_file(path).unwrap();
+}
+
 /// The workspace forbids raw memory access everywhere except the one audited FFI crate
 /// (ADR-0105 amendment 2026-08-24). The forbid itself cannot see across crates, so this
 /// guard does.

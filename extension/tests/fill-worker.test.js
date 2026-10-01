@@ -19,7 +19,7 @@ function fixture() {
     },
     shared: require("../lib/shared.js"),
     contentIn: async (_tab, _frame, message) => {
-      calls.push({ kind: message.kind, allow_credentials: message.allow_credentials });
+      calls.push({ kind: message.kind, allow_credentials: message.allow_credentials, native_replace: message.native_replace });
       if (message.kind === "prepare_fill") return { field_kinds: ["browser_text"] };
       if (message.kind === "prepare_text_fill") return { subject: { role: "textbox", name: "Draft" } };
       if (message.kind === "verify_fill_values") return { retained: true };
@@ -145,4 +145,42 @@ test("an exhausted physical budget refuses before form observation or input", as
     /execution budget/
   );
   assert.deepEqual(calls, []);
+});
+
+
+test("background form replacement uses one native edit then commits before full-batch retention", async () => {
+  for (const value of ["Replacement draft", "", "A\r\n\rB\n"]) {
+    const { calls, sandbox } = fixture();
+    const result = await sandbox.fill("background-fill", { tab_id: 7, timeout_ms: 1_000,
+      allow_credentials: true, fields: [{ locator: "locator_1", value }] }, { background: true });
+    assert.equal(result.outcome, "filled");
+    assert.equal(calls.filter(call => call.kind === "Input.dispatchKeyEvent").length, 0);
+    const inserts = calls.filter(call => call.kind === "Input.insertText");
+    assert.equal(inserts.length, 1);
+    assert.equal(inserts[0].params.text, value.replace(/\r\n?/g, "\n"));
+    assert.equal(calls.find(call => call.kind === "prepare_text_fill").native_replace, true);
+    assert.equal(calls.find(call => call.kind === "commit_text_fill").allow_credentials, true);
+    assert.ok(calls.findIndex(call => call.kind === "commit_text_fill") > calls.findIndex(call => call.kind === "Input.insertText"));
+    assert.ok(calls.findIndex(call => call.kind === "verify_fill_values") > calls.findIndex(call => call.kind === "commit_text_fill"));
+  }
+});
+
+test("background edit failure remains uncertain without switching to keyboard replay", async () => {
+  const { calls, sandbox } = fixture();
+  sandbox.sendDebugger = async (_target, method) => { calls.push({ kind: method }); throw new Error("native edit lost reply"); };
+  await assert.rejects(sandbox.fill("background-fill", { tab_id: 7, timeout_ms: 1_000,
+    fields: [{ locator: "locator_1", value: "Replacement" }] }, { background: true }),
+  error => error.effectUnknown === true);
+  assert.equal(calls.filter(call => call.kind === "Input.insertText").length, 1);
+  assert.equal(calls.filter(call => call.kind === "Input.dispatchKeyEvent").length, 0);
+});
+
+
+test("takeover after native form insertion prevents commit blur and preserves uncertainty",async()=>{
+  const {calls,sandbox}=fixture();let checks=0;
+  const nativeContext={async check(){if(++checks===2)throw Object.assign(new Error("foreground takeover"),{nativeInputProtected:true});}};
+  await assert.rejects(sandbox.fill("takeover-fill",{tab_id:7,timeout_ms:1_000,
+    fields:[{locator:"locator_1",value:"draft"}]},{background:true,nativeContext}),error=>error.effectUnknown===true);
+  assert.equal(calls.filter(call=>call.kind==="Input.insertText").length,1);
+  assert.equal(calls.some(call=>call.kind==="commit_text_fill"),false);
 });

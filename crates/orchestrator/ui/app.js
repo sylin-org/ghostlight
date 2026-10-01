@@ -196,6 +196,22 @@ async function applyIntent(intent) {
   }
 }
 
+/** Show exactly the tab the person chose; this does not change authority or resume work. */
+async function revealBrowserTab(button) {
+  if (!transport.available || button.disabled) return;
+  const { revealWorkspace: workspace, revealTab: tab } = button.dataset;
+  if (!workspace || !tab) return;
+  button.disabled = true;
+  try {
+    await transport.revealBrowserTab(workspace, tab);
+    view.toast("Tab shown. Work permissions and Pause are unchanged.");
+  } catch (error) {
+    view.toast(String(error), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // The person's diagnostics controls: flip the shared marker, or open its folder through the
 // native shell. Both live behind closed commands, like every other act in this window.
 async function handleDiagnosticsAction(button) {
@@ -332,6 +348,8 @@ function wire() {
     if (harness) handleHarnessAction(harness);
     const diagnostics = event.target.closest("[data-diagnostics-operation]");
     if (diagnostics) handleDiagnosticsAction(diagnostics);
+    const reveal = event.target.closest("[data-reveal-tab]");
+    if (reveal) revealBrowserTab(reveal);
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");

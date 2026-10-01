@@ -6,6 +6,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
 const debuggerApi = require("../lib/debugger.js");
+const engineApi = require("../lib/engine.js");
 
 function fixture() {
   const source = readFileSync(join(__dirname, "../service-worker.js"), "utf8");
@@ -23,9 +24,10 @@ function fixture() {
     liveState: { connected: true, compatible: true },
     setConnection(patch) { Object.assign(sandbox.liveState, patch); },
     debuggerLifecycle: lifecycle,
+    operationEngine: engineApi.create({load:async()=>null,save:async()=>{}}),
     topology: { workspaceFor: id => owners.get(id), forget: async id => owners.delete(id),
-      remember: async (id, workspace) => owners.set(id, workspace) },
-    shared: { bounded: value => String(value) },
+      remember: async (id, workspace) => owners.set(id, workspace), forgetAll: async()=>owners.clear() },
+    shared: require("../lib/shared.js"),
     content: async () => ({ text: "fixture page" }),
     commandChunks: { clear() {} },
     diagnostics: { clearAll: () => [] },
@@ -37,10 +39,16 @@ function fixture() {
     syncFormDiagnostics: async () => {},
     broadcastRuntimeState: async () => {},
     tabPreservationEnabled: async () => true,
-    chrome: { tabs: { remove() { assert.fail("preserved tabs must remain open"); } } }
+    chrome: {
+      tabs: {
+        remove() { assert.fail("preserved tabs must remain open"); },
+        async update(id, options) { return { id, windowId: 10, ...options }; }
+      },
+      windows: { async update(id, options) { return { id, ...options }; } }
+    }
   };
   vm.createContext(sandbox);
-  for (const name of ["applyRuntimeState", "settleServiceBoundaryState", "ensureDebugger", "retainManagedDebugger", "dispatch"]) {
+  for (const name of ["negotiateServiceEpoch", "applyRuntimeState", "settleServiceBoundaryState", "ensureDebugger", "retainManagedDebugger", "dispatch"]) {
     const body = source.match(new RegExp(`async function ${name}\\([^]*?\\n}`));
     assert.ok(body, name);
     vm.runInContext(body[0], sandbox);
@@ -152,4 +160,62 @@ test("remembering service ownership only repairs opaque storage and never moves 
   assert.equal(restored.workspaceFor(8), "workspace-b");
   assert.equal(restored.titleFor("workspace-a"), null);
   assert.equal(saved.topology.groups.length, 0);
+});
+
+
+test("visual reveal never acquires debugger custody or changes runtime state", async () => {
+  for (const state of ["active", "held", "ended"]) {
+    const { sandbox, lifecycle, attached, focus, owners } = fixture();
+    await sandbox.applyRuntimeState("active");
+    await sandbox.ensureDebugger(7);
+    await lifecycle.release(7);
+    await sandbox.applyRuntimeState(state);
+    // Reveal after an explicit local release must stay presentation-only even while active.
+    await lifecycle.detachAll();
+    const beforeOwners = [...owners];
+    const result = await sandbox.dispatch({ correlation: `reveal-${state}`, workspace: "workspace",
+      attention: "foreground", command: { command: "focus_tab", tab_id: 7 } });
+    assert.equal(result.outcome, "tab_focused");
+    assert.equal(result.active, true);
+    assert.equal(result.window_focused, true);
+    assert.equal(sandbox.liveState.control_state, state);
+    assert.equal(attached.size, 0);
+    assert.equal(focus.size, 0);
+    assert.deepEqual([...owners], beforeOwners);
+    // Resuming later must not revive custody through the prior presentation request.
+    await sandbox.applyRuntimeState("active");
+    assert.equal(attached.size, 0);
+    assert.equal(focus.size, 0);
+    await lifecycle.detachAll();
+  }
+});
+
+test("visual reveal after reload does not reconstruct ownership or debugger retention", async () => {
+  const { sandbox, lifecycle, attached, focus, owners } = fixture();
+  owners.clear();
+  await sandbox.applyRuntimeState("ended");
+  const result = await sandbox.dispatch({ correlation: "reveal-after-reload", workspace: "workspace",
+    attention: "foreground", command: { command: "focus_tab", tab_id: 7 } });
+  assert.equal(result.outcome, "tab_focused");
+  assert.equal(owners.size, 0);
+  assert.equal(attached.size, 0);
+  assert.equal(focus.size, 0);
+  assert.equal(sandbox.liveState.control_state, "ended");
+  await lifecycle.detachAll();
+});
+
+
+test("new service epoch drops plural debugger custody and ownership before Active, same epoch keeps it", async () => {
+  const {sandbox,lifecycle,owners,attached,focus}=fixture();
+  await sandbox.negotiateServiceEpoch("epoch_first");
+  assert.equal(owners.size,0);
+  owners.set(7,"first-workspace");owners.set(8,"second-workspace");
+  await sandbox.applyRuntimeState("active");
+  for(const id of [7,8]){await sandbox.ensureDebugger(id);await lifecycle.release(id);}
+  await sandbox.negotiateServiceEpoch("epoch_first");
+  assert.equal(owners.size,2);assert.equal(attached.size,2);assert.equal(focus.get(7),true);
+  await sandbox.negotiateServiceEpoch("epoch_second");
+  assert.equal(owners.size,0);assert.equal(attached.size,0);assert.equal(focus.size,0);
+  await sandbox.applyRuntimeState("active");
+  assert.equal(attached.size,0);assert.equal(focus.size,0);
 });

@@ -51,6 +51,7 @@ impl ApplicationExecutor {
             })).collect::<Vec<Value>>(),
             "ceilings": authority.ceilings,
             "browser_startup": authority.browser_startup,
+            "browser_attention": authority.browser_attention,
             "audit": authority.audit,
             "audit_health": self.audit.health(),
             "documents": authority.documents,

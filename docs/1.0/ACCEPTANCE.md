@@ -302,13 +302,19 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    diagnostics-off, and preserve-tabs-on defaults under local keys. Preserve tabs is a final
    physical interlock: it can refuse model-driven close but cannot edit, import, expand, or
    override authority. Human browser closure remains available.
-8. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
-   browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
+8. Foreground attention repairs each exact `Ghostlight - <client label>` title into one canonical
+   blue group across normal browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active
-   window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. An opener
+   window and no blank tab is exposed. Placement is serialized. An opener
    does not grant ownership: child tabs and popups are not automatically adopted, grouped, or
    attached to a debugger. Manually moving tabs causes no regrouping; closing or moving tabs does
    not transfer ownership (ADR-0164).
+   Background attention never repairs duplicate groups by moving their tabs; foreground retains
+   that opt-in behavior. Background opens prefer unfocused all-owned windows, ignoring matching
+   groups/windows containing human tabs, and leave the person's active tab unchanged.
+   Separate same-title groups may remain without moving human work. Any new
+   dedicated window remains unfocused. Native preparation may select an owned tab within an
+   unfocused all-owned window without changing the person's foreground (ADR-0186).
 9. The established content-free visual language renders visibly, stays pointer-transparent with
    no focusable controls, remains hidden from screenshots, and remounts after navigation. A missing
    stylesheet cannot expose buttons or create an input-intercepting layer. Legacy attention signals
@@ -367,6 +373,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    per invocation. Notification failure cannot change governance, audit, or completion truth.
 7. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
+   Show tab resolves an exact currently owned live tab through the facade and foregrounds it as
+   human intent, without policy grants, Resume, action replay, or replacement of a released tab.
 8. MCP integrations explicitly check, connect, and disconnect Codex, Claude Code, Claude Desktop,
    Cursor, Visual Studio Code, historical Windsurf, current Devin, Zed, OpenCode, and Crush
    registrations. Mutations are
@@ -551,3 +559,71 @@ unsupported; source portability does not replace a live Linux runtime check.
    scripts, recordings, controls, history, and all-open browser work retain their existing coverage.
 5. Old sequence receipts and request denials remain readable; request denials do not claim to come
    from the person's rules. Cached clients receive catalog-refresh guidance without automatic replay.
+
+## Quiet browser coexistence (ADR-0186)
+
+1. With no authored preference, effective attention is background. Closed typed values persist
+   through operator policy; mandatory organization background cannot be widened, recommended
+   values are defaults, and user background can tighten organization foreground.
+2. CLI, MCP, and flow children receive the same final-dispatch enforcement. Model focus refuses
+   without effect under background; a model cannot change attention through tool arguments.
+3. An adapter missing `browser_attention` revision 1 refuses before any background physical work.
+   Legacy foreground compatibility never supplies evidence of enforced background behavior.
+   Its result retains `browser_contract_failed` and the actual capability/revision facts.
+   Retirement sends Ended only to the incompatible adapter, closes no physical tabs, and changes
+   no global runtime state. Repeated legacy reconnects receive no Active; a capable update can
+   recover. Bounded cleanup delivery is never represented as a correlated acknowledgement.
+4. In visible Chromium, retain a synthetic draft and keyboard focus on an unowned human tab while
+   opening and navigating controlled background work. Compare the actual active tab, focused
+   window, retained input, and receipts. Same-host unowned tabs retain URL, ownership, placement,
+   and draft; duplicate groups and moved tabs are not repaired by moving them.
+5. Explicit Workbench Show tab resolves only current ownership and reveals the exact tab. Released
+   or absent tabs refuse without replacement. Reveal changes no policy, control state, or action
+   outcome. A paused session remains paused and a stopped session remains stopped.
+6. Background refuses focused/shared-window resize and active close in a focused window, with
+   an unowned neighbor, or in a last-tab window. Changed placement refuses before either effect;
+   release drops custody first. Foreground preserves the operator's opt-out behavior. Ordinary
+   admitted controlled navigation stays available; Pause remains the takeover control.
+7. Missing-browser background recovery asks the person to launch rather than starting a browser
+   that could take desktop focus. Already connected browser work needs no reveal ritual.
+8. Pause stops future dispatch, Resume never replays, and Stop remains terminal. Acknowledged
+   effects stay acknowledged; uncertain effects stay unknown. Reobserve before dependent writes.
+   Controlled-tab focus-emulation retention and cleanup continue to satisfy ADR-0168 separately.
+9. First-time preference authoring shows a visible all-sites RAWX starter grant only for an
+   untouched empty draft with no existing user layer. Organization intersection preserves
+   current authority. Explicit rule edits/removals never reseed or lose deliberate restrictions.
+10. Repeating either fresh-tab scripting recipe in one live shell creates a new controlled tab
+    without navigating the prior controlled tab. Failed or uncertain prerequisites stop later
+    steps and preserve the actual exit code. Session-release cleanup retains attention guards.
+11. A never-visible inactive tab must not claim native keyboard/pointer success from transport
+    acknowledgement alone. An active tab in an unfocused all-owned window receives trusted
+    effects while the human window retains focus and its typed draft. Any target in a focused
+    or shared window returns `native_input` protection before key/mouse surface input, including
+    an active tab.
+    Same-window commands serialize their mechanical scopes. Before each input packet, verify
+    current target, placement, ownership, selection, and focus. Human focus, tab addition, and
+    movement fence the scope. A fence after possibly applied input retains partial/unknown
+    effects and never replays or reselects. Other work windows and global Active remain usable.
+    Show tab permits review but does not bypass the native input guard while the window is focused.
+12. Background textual fill verifies replacement, clear, multiline, blur commit, and subsequent
+    controlled-form retention from actual values. It emits no replacement key-packet fallback or
+    fabricated input/change event. Foreground form fill and explicit key semantics remain intact.
+    Inactive whole-value edits do not select the target and can use a shared/focused window;
+    an active-focused text-edit target refuses. Release/cancel cleanup may clear held input
+    after takeover without admitting new input or replaying edits.
+13. A different modern service epoch settles volatile state, detaches debugger custody, and
+    clears cached ownership before Active; same-epoch reconnect retains continuity. Legacy
+    Ended retirement applies only to its adapter and never proves correlated cleanup or modern
+    epoch reconciliation. Preserve physical tabs and their presentation hints.
+14. New group creation supplies the tab's exact `createProperties.windowId`. A visible Chrome
+    journey must compare post-group placement with the receipt while the human window is focused;
+    a source mock's same-window assumption cannot prove this. Check eligibility before grouping
+    and focus/movement after it. Skip grouping if interference precedes decoration, preserve
+    uncertainty afterward, and report refreshed physical facts without retrying the effect.
+
+These are acceptance requirements, not a verification claim. The unpublished trial authorizes
+disposable isolated local installations and browser profiles, including real native messaging.
+Production, public, and remote rollout remain outside scope. Visible Chromium component fixtures,
+isolated installed native messaging/Tauri journeys, the person's selected everyday installation,
+and Linux runtime evidence must be reported separately. Direct mechanism enforcement does not
+contain focus or popups initiated by explicit page scripts or page actions.

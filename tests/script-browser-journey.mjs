@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import evaluator from "../extension/lib/script-evaluator.js";
-import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
+import { fixtureRenderingArguments, readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const binDir = resolve(process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0/debug"));
@@ -90,6 +90,7 @@ try {
   const url = `http://127.0.0.1:${fixture.address().port}/`;
   const profile = join(scratch, "profile");
   chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    ...fixtureRenderingArguments(),
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update",
     "--disable-sync", "about:blank"]);
@@ -181,7 +182,7 @@ try {
     adapter_version: JSON.parse(readFileSync(join(repository, "extension/manifest.json"), "utf8")).version,
     browser_id: "browser_scriptjourney",
     adapter_epoch: "adapter_scriptjourney", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "script",
-      "operation_recovery", "presentation", "adapter_liveness"].map((name) => ({ name,
+      "operation_recovery", "presentation", "adapter_liveness", "browser_attention"].map((name) => ({ name,
       revision: name === "script" || name === "navigation" ? 2 : 1 })) });
   await until(() => ready, "browser relay negotiation");
   const connector = startGhostlight("ghostlight-mcp-connector");

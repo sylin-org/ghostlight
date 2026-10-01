@@ -8,7 +8,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
+import { fixtureRenderingArguments, readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const binDir = resolve(process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0/debug"));
@@ -153,6 +153,7 @@ try {
   writeFileSync(worker, shim + readFileSync(worker, "utf8"));
   const profile = join(scratch, "profile");
   chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
+    ...fixtureRenderingArguments(),
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
     ...(!liveSylin ? ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"] : []),
     `--load-extension=${extension}`, "--no-first-run", "--no-default-browser-check", "--disable-background-networking",

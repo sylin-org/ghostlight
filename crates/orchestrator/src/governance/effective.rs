@@ -11,6 +11,7 @@
 //! that decided it. The words are authored here, in the orchestrator, so the window renders
 //! sentences rather than inventing them from booleans.
 
+use ghostlight_bridge::browser::BrowserAttention;
 use serde::Serialize;
 
 use super::{manifest, Capability, CapabilitySet, ManagedPolicyPassport};
@@ -129,6 +130,17 @@ pub struct BrowserStartupView {
     pub organization_ceiling: Option<manifest::BrowserStartup>,
 }
 
+/// The effective browser attention preference and its mandatory organization ceiling.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserAttentionView {
+    /// Whether agent work must preserve the person's foreground and unowned tabs.
+    pub value: BrowserAttention,
+    /// The layer selecting the value, or none for the background default.
+    pub decided_by: Option<LayerKind>,
+    /// The organization's mandatory value, when one exists.
+    pub organization_ceiling: Option<BrowserAttention>,
+}
+
 /// One layer of the compiled policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LayerView {
@@ -226,6 +238,8 @@ pub struct EffectiveAuthority {
     pub user_layer: UserLayer,
     /// Whether missing-browser recovery may start a browser on this platform.
     pub browser_startup: BrowserStartupView,
+    /// Whether agent work preserves the person's foreground and unowned tabs.
+    pub browser_attention: BrowserAttentionView,
     /// Provenance for a signed organization layer.
     pub passport: ManagedPolicyPassport,
 }
@@ -382,6 +396,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         ceilings: ceilings(&inputs.sacred_hosts),
         user_layer: user_layer(inputs),
         browser_startup: browser_startup(inputs),
+        browser_attention: browser_attention(inputs.organization, inputs.user, inputs.valid),
         passport: inputs.passport.clone(),
     }
 }
@@ -407,6 +422,35 @@ pub(super) fn browser_startup(inputs: &Inputs<'_>) -> BrowserStartupView {
         value,
         decided_by,
         organization_ceiling: organization,
+    }
+}
+
+/// Resolve attention from operator policy, preserving mandatory organization restrictions.
+pub(super) fn browser_attention(
+    organization: Option<&manifest::Manifest>,
+    user: Option<&manifest::Manifest>,
+    valid: bool,
+) -> BrowserAttentionView {
+    let organization = organization.and_then(manifest::Manifest::browser_attention);
+    let user = user.and_then(manifest::Manifest::browser_attention);
+    let organization_ceiling = organization
+        .and_then(|(value, level)| (level == manifest::SettingLevel::Mandatory).then_some(value));
+    let (value, decided_by) = if !valid {
+        (BrowserAttention::Background, Some(LayerKind::Ghostlight))
+    } else {
+        match (organization, user) {
+            (Some((BrowserAttention::Background, manifest::SettingLevel::Mandatory)), _) => {
+                (BrowserAttention::Background, Some(LayerKind::Organization))
+            }
+            (_, Some((value, _))) => (value, Some(LayerKind::User)),
+            (Some((value, _)), None) => (value, Some(LayerKind::Organization)),
+            (None, None) => (BrowserAttention::Background, None),
+        }
+    };
+    BrowserAttentionView {
+        value,
+        decided_by,
+        organization_ceiling,
     }
 }
 
@@ -1004,6 +1048,88 @@ mod tests {
             .capabilities
             .iter()
             .all(|line| line.state == CapabilityState::Available));
+    }
+
+    #[test]
+    fn browser_attention_respects_defaults_user_choice_and_mandatory_ceiling() {
+        use ghostlight_bridge::browser::BrowserAttention;
+
+        fn attention(value: &str, level: &str) -> manifest::Manifest {
+            policy(&format!(
+                r#"{{"schema":3,"name":"attention","version":"1","grants":[],"config":[{{"key":"browser.attention","value":"{value}","level":"{level}"}}]}}"#
+            ))
+        }
+
+        let default = compile(&inputs(None, None)).browser_attention;
+        assert_eq!(default.value, BrowserAttention::Background);
+        assert_eq!(default.decided_by, None);
+        assert_eq!(default.organization_ceiling, None);
+
+        let foreground = attention("foreground", "mandatory");
+        let background = attention("background", "mandatory");
+        let recommended = attention("background", "recommended");
+        for (organization, user, value, decider, ceiling) in [
+            (
+                None,
+                Some(&foreground),
+                BrowserAttention::Foreground,
+                LayerKind::User,
+                None,
+            ),
+            (
+                None,
+                Some(&background),
+                BrowserAttention::Background,
+                LayerKind::User,
+                None,
+            ),
+            (
+                Some(&background),
+                Some(&foreground),
+                BrowserAttention::Background,
+                LayerKind::Organization,
+                Some(BrowserAttention::Background),
+            ),
+            (
+                Some(&foreground),
+                Some(&background),
+                BrowserAttention::Background,
+                LayerKind::User,
+                Some(BrowserAttention::Foreground),
+            ),
+            (
+                Some(&recommended),
+                Some(&foreground),
+                BrowserAttention::Foreground,
+                LayerKind::User,
+                None,
+            ),
+            (
+                Some(&recommended),
+                None,
+                BrowserAttention::Background,
+                LayerKind::Organization,
+                None,
+            ),
+            (
+                Some(&foreground),
+                None,
+                BrowserAttention::Foreground,
+                LayerKind::Organization,
+                Some(BrowserAttention::Foreground),
+            ),
+        ] {
+            let view = compile(&inputs(organization, user)).browser_attention;
+            assert_eq!(view.value, value);
+            assert_eq!(view.decided_by, Some(decider));
+            assert_eq!(view.organization_ceiling, ceiling);
+        }
+
+        let mut invalid = inputs(None, Some(&foreground));
+        invalid.valid = false;
+        let view = compile(&invalid).browser_attention;
+        assert_eq!(view.value, BrowserAttention::Background);
+        assert_eq!(view.decided_by, Some(LayerKind::Ghostlight));
     }
 
     #[test]

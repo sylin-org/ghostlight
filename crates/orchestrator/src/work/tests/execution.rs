@@ -2677,6 +2677,52 @@ fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensa
 }
 
 #[test]
+fn denied_redirect_remains_known_retained_when_background_close_is_acknowledged_refused() {
+    let policy = TestPolicy::new();
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&policy.0).unwrap()).unwrap();
+    document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
+    document["config"][0]["value"] = json!("background");
+    fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
+    let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "http://127.0.0.1/private"),
+        committed_urls: vec![
+            "https://example.com/".into(),
+            "http://127.0.0.1/private".into(),
+        ],
+    }));
+    browser.push(Ok(BrowserOutcome::AttentionProtected {
+        reason: ghostlight_bridge::browser::BrowserAttentionReason::ActiveTabClose,
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Blocked);
+    assert_eq!(result.effect, Effect::Applied);
+    assert!(!result.repeat_safe);
+    assert_eq!(result.facts["compensated"], false);
+    assert_eq!(result.facts["retained"], true);
+    assert_eq!(
+        browser.calls().len(),
+        2,
+        "a confirmed refusal must not be retried"
+    );
+    assert!(matches!(
+        browser.calls()[1],
+        BrowserCommand::CloseTab {
+            tab_id: 7,
+            released: false
+        }
+    ));
+}
+
+#[test]
 fn stale_target_fails_before_browser_dispatch() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {

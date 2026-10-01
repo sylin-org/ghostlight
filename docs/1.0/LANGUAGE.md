@@ -67,6 +67,10 @@ Every invocation returns one envelope:
 | `facts` | object | Tool-specific canonical facts. |
 | `next_steps` | string array | Zero to two Ghostlight-authored safe suggestions. |
 
+Every completion includes `facts.browser_attention`, the effective object with `value`,
+`decided_by`, and `organization_ceiling`. It has the same shape as the policy explanation and
+Workbench projection, so callers can distinguish the default, user choice, and mandatory ceiling.
+
 The MCP edge renders the complete envelope twice for client compatibility: `structuredContent`
 retains the machine-readable object, and the ordinary text block contains the authored summary and
 safe next steps followed by compact JSON for the same opaque envelope. A client that ignores
@@ -95,7 +99,8 @@ existing history does not authorize more capture. Additional retention profiles 
 diagnostic capture remain deferred (ADR-0103 H1 amendment).
 
 When no browser is connected and startup is left to the person -- because `browser.startup` is
-`manual`, or because more than one installed browser could serve and Ghostlight does not choose
+`manual`, because effective attention is `background`, or because more than one installed
+browser could serve and Ghostlight does not choose
 where to direct attention -- the refusal addresses the MCP model: ask the user to open one of the
 eligible installed browser windows it names, with the Ghostlight extension installed, then repeat
 the call. Facts carry the closed `browser_startup_manual` reason and a `browsers` array; one
@@ -119,12 +124,17 @@ List, focus, or close controlled tabs. Actions are:
 - `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. The list is read live
   from the connected browser on every call and names only this workspace's bound tabs, so it
   requires a connected browser and refuses without one.
-- `focus`: required `tab`; no RAWX capability.
+- `focus`: required `tab`; no RAWX capability. The operator's default background attention
+  refuses model focus with no effect and `repeat_safe:false`. Foreground permits the existing
+  exact-tab reveal. A refusal does not suggest repeating a focus request against the preference.
 - `close`: required exact `tab`; capability `action` and the tab-close policy constraint.
 
 Close also respects the browser's local preserve-tabs interlock. Facts for list contain `tabs`,
 each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Focus facts include
 `tab`, `active`, and `window_focused`. Close facts include `tab` and `closed`.
+Background close is also refused when the active target is in a focused window, has an unowned
+neighbor, or is the last tab in its window. Changed placement refuses before close. The
+attention-protection receipt identifies the physical refusal; released custody is dropped first.
 
 ### `browser_navigate`
 
@@ -132,14 +142,19 @@ Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
 Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional `reuse` of
 `domain` or `never`, default `domain`; optional `beforeunload` whose only value is `discard`,
-accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`. `tab` and `new_tab:true` cannot be combined, and `reuse` cannot be combined with
-`new_tab`. Without `beforeunload`, a blocking prompt stops the navigation and is reported, never
+accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`.
+`tab` and `new_tab:true` cannot be combined. `new_tab:true` accepts omitted `reuse` or `never`;
+explicit `reuse:"domain"` contradicts new-tab intent and is refused.
+Without `beforeunload`, a blocking prompt stops the navigation and is reported, never
 accepted.
 
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it
 navigates that exact tab. With neither, it uses the unambiguous controlled tab, and when none
-exists it opens one -- adopting an existing unbound same-host tab (exact URL preferred) unless
-`reuse:"never"` asks for a strictly fresh tab (ADR-0137). A reused open says so: the summary
+exists it opens one. Background attention never adopts an unowned tab. With operator-selected
+foreground attention, an existing unbound same-host tab can be adopted (exact URL preferred)
+unless `reuse:"never"` prevents that adoption on the fallback open path (ADR-0137, amended by
+ADR-0186). It does not prevent navigating an existing unambiguous controlled tab. A fresh run
+that must leave such a tab untouched uses `new_tab:true`. A reused open says so: the summary
 reads "Reused the example.com tab." rather than "Opened example.com." Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `document_generation`.
@@ -165,6 +180,8 @@ Set tab zoom or resize the containing browser window.
 Resize affects every tab in the window and may rerender the page. Either action invalidates a
 current view handle when its bound geometry no longer matches. Facts include the selected tab,
 action, requested dimensions or zoom, and observed geometry.
+Background resize refuses focused windows or windows shared with unowned tabs, and changed
+placement before effect, using the existing `shared_window_resize` attention reason.
 
 ### `browser_read`
 
@@ -279,6 +296,12 @@ Ordinary textual inputs, textareas, and rich-text controls use the browser's edi
 so controlled forms and editors retain the replacement across later renders. Selects, checkboxes,
 and radios keep their semantic control setters. Empty values clear only the named control. Filling
 never activates a submit control unless the caller supplied `submit_target`.
+
+Background textual fill verifies the exact control and DOM selection, performs one native
+whole-value insertion, including empty or multiline text, and commits by blurring that verified
+control. All-field preflight and complete-batch retention still apply. It does not claim every
+keyboard packet was delivered, fabricate input/change events, or replay a possibly applied edit.
+Foreground fill and the explicit keyboard tools retain their existing semantics (ADR-0186).
 
 Active controlled tabs emulate focus between calls to avoid focus-triggered refresh interrupting
 automation (ADR-0168). Pause, stop, disconnection, and release restore normal browser lifecycle.
@@ -439,6 +462,10 @@ them back. Explicit `continue` permits later independent steps to run and still 
 non-success when any child fails. Human pause/stop, attention, cancellation, and deadlines end
 execution even under Continue.
 
+Explicit Continue can proceed after a child's unknown effect or connection loss. It does not
+establish that a dependent write is safe. Observe the resulting state before deciding which
+remaining actions are needed; never retry an uncertain write blindly.
+
 Captured per-step envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
 terminal aggregate. Facts: `completed`, `total`, `stopped`, `progress`, and bounded per-step rows
 with each step's envelope where the budget allowed. `completed` counts successes. References still
@@ -544,7 +571,7 @@ and mutates no workspace state, although it changes which existing workspace the
 
 Read the authority in force as one compiled answer: situation sentence, one line per capability
 stating its polarity and deciding layer, the rules behind those lines, authored settings,
-permanent ceilings, browser startup posture, organization identity, and passport provenance.
+permanent ceilings, browser startup and attention posture, organization identity, and passport provenance.
 Available under every authority including all-open; use it to learn why another call was refused
 or what is allowed before acting.
 
@@ -557,6 +584,48 @@ the ordinary completion/audit path still apply.
 The result carries the orchestrator's compiled projection -- the same compilation the workbench
 Policy destination renders -- with layer document texts and filesystem paths withheld from model
 results. The summary names its measurement: capability areas explained over layers in force.
+
+## Operator-owned browser attention (ADR-0186)
+
+The persisted `browser.attention` setting is background by default, with a foreground operator
+opt-out. Tool calls cannot author it. Mandatory organization background cannot be weakened;
+recommended values are defaults. The effective policy projection reports the value, deciding
+layer, and mandatory organization ceiling.
+
+Background requires negotiated `browser_attention` revision 1 before physical dispatch. An old
+adapter refuses visibly before effect with `facts.reason:browser_contract_failed`, `capability`,
+`required_revision`, and `advertised_revision`. Opening prefers an unfocused window containing
+only owned tabs, creating one if needed. It never adopts unowned same-host pages, moves existing
+tabs, or merges duplicate groups. Native key/mouse preparation can select an owned tab within
+that unfocused work window. Key/mouse surface commands coordinate per window and validate the target,
+placement, ownership, selection, and focus before packets. Any focused or shared target window
+instead returns `attention_refusal:native_input` before key/mouse surface input. Human focus, tab addition, or
+movement fences the command. A fence after possibly applied input preserves partial or unknown
+effects, with no automatic reselection or packet replay. Show tab is human review; background
+native input still requires returning focus elsewhere or a fresh eligible work tab and reobservation.
+Direct model focus remains refused. Focused/shared-window
+resize and an active close in a focused window, with an unowned neighbor, or in a last-tab window
+are refused with attention protection. Missing-browser recovery requests human startup even
+when auto-open is configured. Background does not imply Pause; admitted work can continue.
+Ordinary controlled navigation stays admitted. Attention is not a content freeze; use Pause
+when the person takes over.
+
+Whole-value native text edits use the same coordination without selecting a tab. An inactive
+owned target can be edited in a shared or focused window, while an active target in the focused
+window refuses. Window checks and event fences still apply. Release/cancel cleanup can clear
+held input after takeover; it cannot admit new input or replay a possibly applied edit.
+
+Workbench Show tab is exact human reveal, without a policy grant, Resume, replacement, replay,
+or rollback. Explicit page scripts and actions can cause their own focus or popups; the rule
+governs direct Ghostlight tab and window mechanisms and is not OS containment.
+
+An incompatible legacy adapter receives Ended cleanup and its connection is retired without
+closing physical tabs or changing the global runtime. Repeated legacy reconnects stay excluded
+from Active until an updated capable adapter connects. The delivery has no correlated cleanup
+receipt and does not prove its retained debugger or topology state was cleared.
+An updated modern adapter clears stale ownership and detaches retained custody on a different
+service epoch before Active; same-epoch reconnect preserves continuity. The browser's separate
+focus queries and physical effects are not an atomic OS lock.
 
 ## Explicit human control and request guidance (ADR-0185)
 

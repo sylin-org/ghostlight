@@ -49,16 +49,53 @@ function Resolve-Ghostlight {
 }
 
 $exe = Resolve-Ghostlight
-$worst = 0
 
 # One call, reported as a row. The exit code comes from Ghostlight rather than being invented here,
 # so a governed refusal (2) stays distinguishable from a failure (4) and an uncertain effect (6).
+# Stop at the first unsuccessful call. A later cleanup refusal must not replace uncertain work,
+# and neither dependent work nor retries are safe after an outcome the script cannot establish.
 function Step {
     param([string] $Name, [string] $Tool, [hashtable] $Body = @{}, [string[]] $Extra = @())
 
-    $result = & $exe call $Tool ($Body | ConvertTo-Json -Compress) --json @Extra | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { $script:worst = $LASTEXITCODE }
+    # Ghostlight is a Windows GUI-subsystem executable. Explicit redirection and waiting capture
+    # its output and exit reliably; the ordinary & pipeline and $LASTEXITCODE do not.
+    $start = [System.Diagnostics.ProcessStartInfo]::new($exe)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in @('call', $Tool, ($Body | ConvertTo-Json -Compress), '--json') + $Extra) {
+        $start.ArgumentList.Add($argument)
+    }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        $null = $process.Start()
+        # Drain both streams concurrently so a long diagnostic cannot block the child.
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $text = $stdout.GetAwaiter().GetResult()
+        $diagnostic = $stderr.GetAwaiter().GetResult()
+        $code = $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
+    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+    try {
+        $result = $text | ConvertFrom-Json
+        if (!$result -or !$result.status -or !$result.summary) { throw 'Missing terminal result.' }
+    } catch {
+        [Console]::Error.WriteLine("browser-journey: $Name did not return a JSON result (exit $code).")
+        if ($code -ne 0) { exit $code }
+        exit 1
+    }
     Write-Host ('{0,-12} {1,-10} {2}' -f $Name, $result.status, $result.summary)
+    if ($code -ne 0 -or $result.status -ne 'succeeded') {
+        [Console]::Error.WriteLine("browser-journey: stopped at $Name; inspect the result before any new call. No retry or cleanup was attempted.")
+        if ($code -ne 0) { exit $code }
+        exit 1
+    }
     return $result
 }
 
@@ -67,8 +104,7 @@ Write-Host ''
 Write-Host ('{0,-12} {1,-10} {2}' -f 'STEP', 'STATUS', 'WHAT HAPPENED')
 Write-Host ('{0,-12} {1,-10} {2}' -f '----', '------', '-------------')
 
-$opened = Step 'open' 'browser_navigate' @{ url = $Url }
-if ($opened.status -ne 'succeeded') { throw "Could not open $Url : $($opened.summary)" }
+$opened = Step 'open' 'browser_navigate' @{ url = $Url; new_tab = $true; reuse = 'never' }
 $tab = $opened.facts.tab
 
 # Every step from here names the tab this journey opened, so it never touches anything else of
@@ -83,9 +119,5 @@ if (Test-Path -LiteralPath $OutputPath) {
     Write-Host "Screenshot: $OutputPath ($((Get-Item -LiteralPath $OutputPath -Force).Length) bytes)"
 }
 
-switch ($worst) {
-    0 { Write-Host 'Journey complete. Every step ran through ghostlight call, governed and audited as cli.' }
-    2 { Write-Host 'Journey finished with a governed refusal. That is Ghostlight working, not failing.' }
-    default { Write-Host "Journey did not complete cleanly (exit $worst)." }
-}
-exit $worst
+Write-Host 'Journey complete. Every step ran through ghostlight call, governed and audited as cli.'
+exit 0

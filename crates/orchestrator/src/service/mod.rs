@@ -12,7 +12,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use ghostlight_bridge::browser::{BrowserCommand, BrowserEvent};
+use ghostlight_bridge::browser::{
+    BrowserAttention, BrowserAttentionReason, BrowserCommand, BrowserEvent, BrowserOutcome,
+};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
@@ -27,7 +29,10 @@ use uuid::Uuid;
 use serde_json::Value;
 
 use crate::audit::AuditRecorder;
-use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
+use crate::browser::{
+    AdapterLifecycleObserver, BrowserDispatch, BrowserError, BrowserEventSink, BrowserPort,
+    RelayBrowserPort,
+};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
@@ -110,6 +115,8 @@ impl ServiceHost {
         let governance = GovernanceFacade::from_environment();
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
         let browser = Arc::new(RelayBrowserPort::new(service_epoch));
+        let attention_authority = governance.clone();
+        browser.set_attention_source(Arc::new(move || attention_authority.browser_attention()));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         browser
             .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
@@ -585,7 +592,7 @@ fn serve_session(
     }
     // Before opening anything, release workspaces whose owner is gone and close the tabs they
     // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
-    reap_finished_sessions(&workspaces, browser.as_ref());
+    reap_finished_sessions(&workspaces, browser.as_ref(), &governance, &diagnostics);
     // Evidence belongs to this connection. Workspace continuity never replaces it.
     let connection = Arc::new(crate::provenance::ConnectionEvidence::observe(
         &client_label,
@@ -814,14 +821,26 @@ fn serve_session(
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
     if !workspaces.is_owned(&workspace) && !workspaces.has_connections(&workspace) {
         let released = workspaces.release(&workspace);
-        cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
+        cleanup_released_tabs(
+            workspace.as_str(),
+            &released,
+            browser.as_ref(),
+            &governance,
+            &diagnostics,
+        );
     }
     if final_workspace != workspace
         && !workspaces.is_owned(&final_workspace)
         && !workspaces.has_connections(&final_workspace)
     {
         let released = workspaces.release(&final_workspace);
-        cleanup_released_tabs(final_workspace.as_str(), &released, browser.as_ref());
+        cleanup_released_tabs(
+            final_workspace.as_str(),
+            &released,
+            browser.as_ref(),
+            &governance,
+            &diagnostics,
+        );
     }
     diagnostics.sink().emit(
         ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
@@ -833,9 +852,14 @@ fn serve_session(
 }
 
 /// Close the tabs of every session whose owning process is gone.
-fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
+fn reap_finished_sessions(
+    workspaces: &WorkspaceStore,
+    browser: &dyn BrowserPort,
+    governance: &GovernanceFacade,
+    diagnostics: &DiagnosticsHub,
+) {
     for released in workspaces.reap(&owner_alive) {
-        cleanup_released_tabs("reaped", &released, browser);
+        cleanup_released_tabs("reaped", &released, browser, governance, diagnostics);
     }
 }
 
@@ -843,32 +867,94 @@ fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort
 ///
 /// Cleanup goes to the browser that holds the tabs and nowhere else. A workspace that never opened
 /// a browser has nothing to clean up.
-fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn BrowserPort) {
+fn cleanup_released_tabs(
+    workspace: &str,
+    released: &ReleasedTabs,
+    browser: &dyn BrowserPort,
+    governance: &GovernanceFacade,
+    diagnostics: &DiagnosticsHub,
+) {
     let Some(target) = released.browser.as_deref() else {
         return;
     };
-    let cancelled = AtomicBool::new(false);
     for tab_ids in released.physical_ids.chunks(DIAGNOSTIC_CLEAR_BATCH_SIZE) {
-        let _ = browser.call(
+        dispatch_release_cleanup(
             target,
             workspace,
             BrowserCommand::ClearDiagnostics {
                 tab_ids: tab_ids.to_vec(),
             },
-            Instant::now() + Duration::from_secs(2),
-            &cancelled,
+            browser,
+            governance,
+            diagnostics,
         );
     }
     for &tab_id in &released.physical_ids {
-        let _ = browser.call(
+        dispatch_release_cleanup(
             target,
             workspace,
             BrowserCommand::CloseTab {
                 tab_id,
                 released: true,
             },
-            Instant::now() + Duration::from_secs(2),
-            &cancelled,
+            browser,
+            governance,
+            diagnostics,
+        );
+    }
+}
+
+/// Release cleanup respects attention while remaining independent of Pause/Stop.
+fn dispatch_release_cleanup(
+    target: &str,
+    workspace: &str,
+    command: BrowserCommand,
+    browser: &dyn BrowserPort,
+    governance: &GovernanceFacade,
+    diagnostics: &DiagnosticsHub,
+) {
+    let attention = governance.browser_attention();
+    let cancelled = AtomicBool::new(false);
+    let admit = || {
+        if attention == BrowserAttention::Foreground
+            && governance.browser_attention() == BrowserAttention::Background
+        {
+            return Err(BrowserError::AttentionProtected(
+                BrowserAttentionReason::PreferenceChanged,
+            ));
+        }
+        Ok(())
+    };
+    let expected_tab = match &command {
+        BrowserCommand::CloseTab { tab_id, .. } => Some(*tab_id),
+        _ => None,
+    };
+    let result = browser.call_guarded(
+        target,
+        workspace,
+        command,
+        BrowserDispatch {
+            attention,
+            deadline: Instant::now() + Duration::from_secs(2),
+            cancelled: &cancelled,
+            admit: &admit,
+        },
+    );
+    let failure = match result {
+        Err(error) => Some(error.to_string()),
+        Ok(BrowserOutcome::AttentionProtected { reason }) => {
+            Some(format!("attention rule refused cleanup: {reason:?}"))
+        }
+        Ok(BrowserOutcome::TabClosed { tab_id }) if expected_tab == Some(tab_id) => None,
+        Ok(BrowserOutcome::DiagnosticsCleared { .. }) if expected_tab.is_none() => None,
+        Ok(_) => Some("browser did not confirm the requested cleanup".into()),
+    };
+    if let Some(failure) = failure {
+        diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::OPERATION_FAILED,
+            ghostlight_bridge::diagnostics::Level::Warn,
+            None,
+            &format!("workspace release cleanup workspace={workspace}: {failure}"),
         );
     }
 }
@@ -975,8 +1061,8 @@ impl BrowserEventSink for ServiceBrowserEvents {
 mod tests {
     use std::io::BufReader;
     use std::net::TcpStream;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -1363,7 +1449,13 @@ mod tests {
             physical_ids: (1..=257).collect(),
         };
 
-        cleanup_released_tabs("workspace-1", &released, &browser);
+        cleanup_released_tabs(
+            "workspace-1",
+            &released,
+            &browser,
+            &crate::governance::GovernanceFacade::new(None, None),
+            &crate::diagnostics::DiagnosticsHub::for_tests(),
+        );
 
         let calls = browser.calls();
         assert_eq!(
@@ -1390,5 +1482,194 @@ mod tests {
                 released: true
             })
         );
+    }
+
+    struct CleanupBrowser {
+        calls: Mutex<Vec<(ghostlight_bridge::browser::BrowserAttention, BrowserCommand)>>,
+        attempts: Mutex<Vec<ghostlight_bridge::browser::BrowserAttention>>,
+        tighten: Mutex<Option<std::path::PathBuf>>,
+        incompatible: bool,
+    }
+
+    impl CleanupBrowser {
+        fn new(tighten: Option<std::path::PathBuf>, incompatible: bool) -> Self {
+            Self {
+                calls: Mutex::default(),
+                attempts: Mutex::default(),
+                tighten: Mutex::new(tighten),
+                incompatible,
+            }
+        }
+    }
+
+    impl crate::browser::BrowserPort for CleanupBrowser {
+        fn call(
+            &self,
+            _: &str,
+            _: &str,
+            _: BrowserCommand,
+            _: Instant,
+            _: &AtomicBool,
+        ) -> Result<ghostlight_bridge::browser::BrowserOutcome, crate::browser::BrowserError>
+        {
+            panic!("cleanup must never fall back to the legacy foreground lane");
+        }
+
+        fn call_guarded(
+            &self,
+            _: &str,
+            _: &str,
+            command: BrowserCommand,
+            dispatch: crate::browser::BrowserDispatch<'_>,
+        ) -> Result<ghostlight_bridge::browser::BrowserOutcome, crate::browser::BrowserError>
+        {
+            use ghostlight_bridge::browser::{adapter_capability, BrowserOutcome};
+            self.attempts.lock().unwrap().push(dispatch.attention);
+            if let Some(path) = self.tighten.lock().unwrap().take() {
+                std::fs::write(path, cleanup_attention_policy("background")).unwrap();
+            }
+            (dispatch.admit)()?;
+            if self.incompatible {
+                return Err(crate::browser::BrowserError::CapabilityVersion {
+                    capability: adapter_capability::BROWSER_ATTENTION.into(),
+                    required: 1,
+                    advertised: 0,
+                });
+            }
+            let outcome = match &command {
+                BrowserCommand::ClearDiagnostics { tab_ids } => {
+                    BrowserOutcome::DiagnosticsCleared {
+                        cleared_count: tab_ids.len(),
+                    }
+                }
+                BrowserCommand::CloseTab {
+                    tab_id,
+                    released: true,
+                } => BrowserOutcome::TabClosed { tab_id: *tab_id },
+                _ => panic!("unexpected release cleanup primitive"),
+            };
+            self.calls
+                .lock()
+                .unwrap()
+                .push((dispatch.attention, command));
+            Ok(outcome)
+        }
+
+        fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+            vec![]
+        }
+    }
+
+    fn cleanup_attention_policy(value: &str) -> String {
+        format!(
+            r#"{{"schema":3,"name":"cleanup fixture","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read","action","write","execute"]}}],"config":[{{"key":"browser.attention","value":"{value}","level":"mandatory"}}]}}"#
+        )
+    }
+
+    #[test]
+    fn released_cleanup_uses_effective_background_attention_even_while_paused_or_ended() {
+        use ghostlight_bridge::browser::{
+            BrowserAttention, RuntimeControlIntent, RuntimeControlState,
+        };
+        let governance = crate::governance::GovernanceFacade::new(None, None);
+        let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
+        let browser = CleanupBrowser::new(None, false);
+        let released = ReleasedTabs {
+            browser: Some(FAKE_BROWSER.into()),
+            physical_ids: vec![41],
+        };
+        for (intent, expected) in [
+            (RuntimeControlIntent::Hold, RuntimeControlState::Held),
+            (RuntimeControlIntent::EndSession, RuntimeControlState::Ended),
+        ] {
+            governance.apply_runtime_intent(intent);
+            cleanup_released_tabs(
+                "workspace-1",
+                &released,
+                &browser,
+                &governance,
+                &diagnostics,
+            );
+            assert_eq!(governance.runtime_state(), expected);
+        }
+        let calls = browser.calls.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        assert!(calls
+            .iter()
+            .all(|(attention, _)| *attention == BrowserAttention::Background));
+        assert!(matches!(
+            calls[1].1,
+            BrowserCommand::CloseTab {
+                tab_id: 41,
+                released: true
+            }
+        ));
+        assert!(matches!(
+            calls[3].1,
+            BrowserCommand::CloseTab {
+                tab_id: 41,
+                released: true
+            }
+        ));
+    }
+
+    #[test]
+    fn released_cleanup_refuses_unsent_foreground_after_attention_tightens_without_replay() {
+        use ghostlight_bridge::browser::BrowserAttention;
+        let (directory, path) = runtime_path("cleanup-attention");
+        std::fs::write(&path, cleanup_attention_policy("foreground")).unwrap();
+        let governance = crate::governance::GovernanceFacade::new(Some(path.clone()), None);
+        assert_eq!(governance.browser_attention(), BrowserAttention::Foreground);
+        let browser = CleanupBrowser::new(Some(path), false);
+        let released = ReleasedTabs {
+            browser: Some(FAKE_BROWSER.into()),
+            physical_ids: vec![41],
+        };
+        cleanup_released_tabs(
+            "workspace-1",
+            &released,
+            &browser,
+            &governance,
+            &crate::diagnostics::DiagnosticsHub::for_tests(),
+        );
+        assert_eq!(
+            *browser.attempts.lock().unwrap(),
+            vec![BrowserAttention::Foreground, BrowserAttention::Background]
+        );
+        let calls = browser.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "unsent clear must not be replayed");
+        assert_eq!(
+            calls[0],
+            (
+                BrowserAttention::Background,
+                BrowserCommand::CloseTab {
+                    tab_id: 41,
+                    released: true
+                }
+            )
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn released_cleanup_never_falls_back_to_foreground_for_an_older_adapter() {
+        use ghostlight_bridge::browser::BrowserAttention;
+        let browser = CleanupBrowser::new(None, true);
+        let released = ReleasedTabs {
+            browser: Some(FAKE_BROWSER.into()),
+            physical_ids: vec![41],
+        };
+        cleanup_released_tabs(
+            "workspace-1",
+            &released,
+            &browser,
+            &crate::governance::GovernanceFacade::new(None, None),
+            &crate::diagnostics::DiagnosticsHub::for_tests(),
+        );
+        assert_eq!(
+            *browser.attempts.lock().unwrap(),
+            vec![BrowserAttention::Background, BrowserAttention::Background]
+        );
+        assert!(browser.calls.lock().unwrap().is_empty());
     }
 }
