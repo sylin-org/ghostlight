@@ -2,6 +2,22 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
+## Authorized Local Deployment (2026-10-01)
+
+Leo explicitly requested local deployment and live testing. Reviewed implementation `c491a264`
+was built and deployed through the supported exact-path workflow; only the orchestrator and
+browser connector were replaced. The existing unpacked adapter was reloaded. The application is
+left running; installed service/browser readiness is Ready, and the unchanged MCP connector
+negotiates the 24-tool catalog. Selection, policy-file state, browser grants, and prior audit bytes
+were verified preserved. The [local deployment record](testing/local-deployment-2026-10-01.md)
+contains candidate hashes, opening instructions, rollback, and exact limits.
+
+The live localhost smoke opens successfully under background attention, but read returns
+`document_unavailable` with no effect, including one bounded bootstrap retry. Fill was not reached;
+the full smoke is not green. No permission relaxation or unreviewed code change was made. Physical
+UI inspection was occluded; the opened responsive native window is tied to the verified candidate.
+Public versions and publication state are unchanged.
+
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
 
 The follow-on in-service UX source slice is on `codex/in-service-outcome-ux`, based on clean
@@ -13,7 +29,7 @@ all five destinations remain intact. Source validation is in the
 [selected native acceptance](testing/in-service-ux-acceptance-2026-10-01.md) records outcomes,
 legacy history, child recovery, controls, narrow/enlarged text, About fidelity, and limits.
 The parent handed off the foreground lane; bounded acceptance is complete and ownership released.
-No serving installation or registration has changed.
+At that source/native-isolated acceptance point, no serving installation or registration had changed.
 Independent source review of `8d1e16ff` found a topology/publication race in control confirmation.
 The focused correction makes confirmations depend only on the applied authority state and adds
 a deterministic last-adapter disconnect regression. Browser publication is not acknowledgement.
