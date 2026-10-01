@@ -2458,7 +2458,7 @@ fn uncertain_effect_guides_recovery_without_replay() {
     assert_eq!(
             result.next_steps,
             vec![
-                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.".to_string(),
+                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.".to_string(),
                 "Then observe the page with browser_read or browser_inspect to learn what happened.".to_string(),
             ]
         );

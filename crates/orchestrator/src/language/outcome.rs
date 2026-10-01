@@ -930,6 +930,8 @@ pub enum Refusal {
     BrowserPrimitive,
     /// A required browser document could not be bound to current authority.
     DocumentUnavailable,
+    /// An earlier operation's exact adapter resources could not yet be released.
+    OperationCleanupRequired,
     /// The browser stopped before a physical effect.
     BrowserStopped { reconnect: bool },
     /// Several browsers are connected and the call did not say which one it meant.
@@ -1006,6 +1008,7 @@ impl Refusal {
             },
             Self::BrowserPrimitive => "The browser could not complete this operation.",
             Self::DocumentUnavailable => "Document access could not be verified.",
+            Self::OperationCleanupRequired => "An earlier browser operation still holds this tab. This request did not run.",
             Self::DeadlineExpired { before_dispatch } => {
                 if *before_dispatch {
                     "The job ran out of time before reaching the browser."
@@ -1118,7 +1121,12 @@ impl Refusal {
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
-            Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
+            Self::DocumentUnavailable => vec![
+                "Use Show tab in the Ghostlight workbench for manual inspection when available. Resolve page loading or access requirements before requesting a fresh observation; do not rerun an uncertain action to check it.".into(),
+            ],
+            Self::OperationCleanupRequired => vec![
+                "Let the earlier operation finish. If it remains pending, ask the user to open Ghostlight's Status and choose End session, then Start session. End session blocks new Ghostlight requests across all sessions and releases browser control; Start permits new requests without replaying earlier work. Then observe the affected tab. These controls do not undo earlier effects or prove that page activity stopped; do not rerun an uncertain action to verify it.".into(),
+            ],
             Self::DeadlineExpired { .. } => vec![
                 "Repeat with a longer timeout_ms when the page genuinely needs more time."
                     .into(),
@@ -1175,7 +1183,7 @@ impl Refusal {
                     .into(),
             ],
             Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch => vec![
-                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly."
+                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance."
                     .into(),
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
                     .into(),
@@ -2302,7 +2310,7 @@ mod tests {
         assert_eq!(
             Refusal::EffectUnknown.next_steps(),
             vec![
-                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
+                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.",
                 "Then observe the page with browser_read or browser_inspect to learn what happened.",
             ]
         );

@@ -13,6 +13,7 @@
   const DOCUMENT_LIFECYCLES = new Set(Object.values(DOCUMENT_LIFECYCLE));
   const METADATA_KINDS = new Set(["document_route", "frame_boxes", "capture_mask", "capture_mask_check", "capture_mask_clear", "presentation_visibility", "scroll_offset", "viewport_point"]);
   const changed = () => Object.assign(new Error("document scope changed before access"), { code: "document_scope_changed", effectUnknown: false });
+  const cleanupRequired = () => Object.assign(new Error("an earlier operation still holds this tab's document scope"), { code: "operation_cleanup_required", effectUnknown: false });
 
   function currentFrames(raw) {
     if (!Array.isArray(raw) || !raw.length || raw.length > DOCUMENT_LIMIT) throw changed();
@@ -113,14 +114,20 @@
     }
 
     async function run(tabId, scope, operation) {
-      if (active.has(tabId)) throw changed();
+      const previous = active.get(tabId);
+      if (previous?.cleanup) await previous.cleanup;
+      if (active.has(tabId)) throw cleanupRequired();
       const snapshot = await current(tabId);
       if (!same(snapshot.documents, scope.documents) || scope.allowed.length > DOCUMENT_LIMIT
         || scope.allowed.some((id) => !snapshot.documents.some((document) => document.id === id && document.supported))) throw changed();
-      const context = { ...snapshot, scope, visited: new Set(), unavailable: new Set(), masked: 0, dispatched: false, limited: false };
+      // Inventory discovery awaited. A concurrent owner may have entered while it ran.
+      if (active.has(tabId)) throw cleanupRequired();
+      let settled;
+      const context = { ...snapshot, tabId, scope, visited: new Set(), unavailable: new Set(), masked: 0, dispatched: false, limited: false,
+        settled: new Promise(resolve => { settled = resolve; }), cleanup: null };
       active.set(tabId, context);
       try {
-        const result = await operation();
+        const result = await operation(context);
         return { outcome: "in_documents", result, observation: {
           visited: Array.from(context.visited), unavailable: Array.from(context.unavailable),
           limited_by_size: Boolean(result.truncated || context.limited), masked_regions: context.masked
@@ -128,7 +135,16 @@
       } catch (error) {
         if (error.code === "document_scope_changed") error.effectUnknown = context.dispatched;
         throw error;
-      } finally { active.delete(tabId); }
+      } finally {
+        if (active.get(tabId) === context) active.delete(tabId);
+        settled();
+      }
+    }
+
+    // Cleanup belongs to the exact still-active scope. Its bounded wait never clears that scope;
+    // only the original operation's finally can release it after its resources settle.
+    function cleaning(context, completion) {
+      if (active.get(context?.tabId) === context && !context.cleanup) context.cleanup = completion;
     }
 
     async function route(tabId, frameId, message, fallback) {
@@ -210,7 +226,7 @@
     }
 
     function limit(tabId) { const context = active.get(tabId); if (context) context.limited = true; }
-    return { describe, run, route, frameIds, locator, verify, verifyInput, input, targetedInput, limit, context: (tabId) => active.get(tabId), current };
+    return { describe, run, route, frameIds, locator, verify, verifyInput, input, targetedInput, limit, cleaning, context: (tabId) => active.get(tabId), current };
   }
-  return { create, inventory, same, changed, DOCUMENT_LIMIT, DOCUMENT_LIFECYCLE };
+  return { create, inventory, same, changed, cleanupRequired, DOCUMENT_LIMIT, DOCUMENT_LIFECYCLE };
 });

@@ -410,3 +410,41 @@ test("terminal persistence failure never turns a completed effect into failure",
     records: [{ id: "physical_one", phase: "completed" }]
   });
 });
+
+test("an old pre-handler save cannot enter its handler after a service epoch change", async () => {
+  const store = delayedPersistence();
+  const engine = engineApi.create(store);
+  await engine.activate("service_one");
+  store.delay();
+  let handlers = 0;
+  const old = assert.rejects(engine.execute("reused_id", async () => { handlers++; return { outcome: "cancelled" }; }),
+    { code: "operation_result_unavailable" });
+  await nextTurn();
+  const next = engine.activate("service_two");
+  await nextTurn();
+  store.pending[0].resolve(); await nextTurn();
+  store.pending[1].resolve();
+  await Promise.all([old, next]);
+  assert.equal(handlers, 0);
+  assert.equal(engine.snapshot().epoch, "service_two");
+  assert.equal(engine.snapshot().records.length, 0);
+});
+
+test("late old completion cannot replace a newer epoch's same-id attempt", async () => {
+  const store = persistence();
+  const engine = engineApi.create(store);
+  await engine.activate("service_one");
+  const oldResult = deferred();
+  const old = engine.execute("reused_id", () => oldResult.promise);
+  await nextTurn();
+  await engine.activate("service_two");
+  const currentResult = deferred();
+  const current = engine.execute("reused_id", () => currentResult.promise);
+  await nextTurn();
+  const before = store.writes.length;
+  oldResult.resolve({ outcome: "cancelled" }); await old;
+  assert.equal(store.writes.length, before);
+  assert.equal(engine.snapshot().records[0].phase, "dispatched");
+  currentResult.resolve({ outcome: "tab_closed", tab_id: 8 }); await current;
+  assert.deepEqual(await engine.execute("reused_id", () => assert.fail("new epoch replay")), { outcome: "tab_closed", tab_id: 8 });
+});

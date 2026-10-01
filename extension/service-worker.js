@@ -35,7 +35,8 @@ const FILL_RETAINED_LIMIT_MS = 2_000;
 const FILL_RETAINED_POLL_MS = 25;
 
 async function sendDebugger(target, method, params, targetedFrameId = null) {
-  const { nativeContext, ...debugTarget } = target;
+  const { nativeContext, evaluationContext, ...debugTarget } = target;
+  if (evaluationContext) assertScriptEvaluation(evaluationContext);
   const nativePacket = INPUT_DISPATCH_METHODS.has(method) || method === "Input.cancelDragging";
   const compensation = nativeContext && nativePacket && nativeContext.isCompensation(method, params);
   if (nativeContext && nativePacket && !compensation) await nativeContext.check();
@@ -45,6 +46,10 @@ async function sendDebugger(target, method, params, targetedFrameId = null) {
   }
   // Document admission may await page-local reads. Check again at the actual Chrome boundary.
   if (nativeContext && nativePacket) await nativeContext.beforePacket(method, params);
+  if (evaluationContext) {
+    assertScriptEvaluation(evaluationContext);
+    evaluationContext.dispatched = true;
+  }
   const result = await chrome.debugger.sendCommand(debugTarget, method, params);
   if (nativeContext && nativePacket) nativeContext.afterPacket(method, params);
   return result;
@@ -89,6 +94,9 @@ const diagnosticDocuments = new Map();
 const dragInterceptions = new Map();
 const dialogWaiters = new Map();
 const cancelled = new Set();
+const CANCEL_MARKER_LIMIT = 256;
+let browserServiceEpoch = null;
+const scriptEvaluations = new Map();
 // The per-frame semantic match cap lives in the content script; this is the same ceiling
 // applied to the merged cross-frame result so embedded frames cannot outbid the top one.
 const QUERY_SEMANTIC_CAP = 8;
@@ -669,6 +677,8 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
     return;
   }
   if (frame.kind === "hello_accepted") {
+    if (browserServiceEpoch !== frame.service_epoch) cancelled.clear();
+    browserServiceEpoch = frame.service_epoch;
     connectionLog.record(connectionEvents.HELLO_ACCEPTED, { service_version: frame.service_version });
     browserNegotiation = (async () => {
       await negotiateServiceEpoch(frame.service_epoch);
@@ -701,13 +711,23 @@ async function onNativeMessage(frame, sourcePort = nativePort) {
     return;
   }
   if (frame.kind !== "request") return;
-  const request = frame.request;
+  const request = { ...frame.request, serviceEpoch: browserServiceEpoch };
   try {
     await browserNegotiation;
     if (sourcePort && nativePort !== sourcePort) return;
-    const result = await operationEngine.execute(request.correlation, () => dispatch(request));
+    if (request.serviceEpoch !== browserServiceEpoch) return;
+    // Cancel disposes of an existing attempt. It must remain reachable when the journal
+    // cannot admit a fresh page operation, and never consumes another journal slot.
+    const result = request.command.command === "cancel"
+      ? await dispatch(request)
+      : await operationEngine.execute(request.correlation, () => {
+        if (request.serviceEpoch !== browserServiceEpoch) throw scriptCancellation(false);
+        return dispatch(request);
+      });
+    if (request.serviceEpoch !== browserServiceEpoch || (sourcePort && nativePort !== sourcePort)) return;
     send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   } catch (error) {
+    if (request.serviceEpoch !== browserServiceEpoch || (sourcePort && nativePort !== sourcePort)) return;
     const code = typeof error?.code === "string" ? error.code : "primitive_failed";
     send({ kind: "error", correlation: request.correlation, code, message: shared.bounded(error?.message ?? error, 500), effect_unknown: Boolean(error?.effectUnknown) });
   }
@@ -757,13 +777,14 @@ async function dispatch(request) {
     const primitive = command.primitive;
     if (primitive.command === "in_documents" || primitive.command === "describe_documents") throw globalThis.GhostlightDocuments.changed();
     const tabId = primitive.tab_id ?? primitive.destination?.tab_id;
-    return documents.run(tabId, command.scope, () => dispatch({ ...request, command: primitive }));
+    return documents.run(tabId, command.scope, documentScope => dispatch({ ...request, documentScope, command: primitive }));
   }
   if (command.command === "cancel") {
-    cancelled.add(command.correlation);
+    await cancelBrowserOperation(request.serviceEpoch, command.correlation);
     return { outcome: "cancelled" };
   }
   if (cancelled.delete(request.correlation)) return { outcome: "cancelled" };
+  if (command.command === "evaluate_script") return evaluateScript(request, command);
   // Extension reload clears storage.session, but not the orchestrator's workspace.
   // Relearn its authoritative association from explicit work, never from a page event.
   // Inventory, document discovery, visual reveal, and released-tab cleanup do not acquire custody.
@@ -919,7 +940,6 @@ async function dispatch(request) {
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: result.subject };
   }
   if (command.command === "drop_image_at") return dropImageAt(request.correlation, command);
-  if (command.command === "evaluate_script") return evaluateScript(request.correlation, command);
   if (command.command === "observe") {
     const result = await observeAcrossFrames(command);
     return { outcome: "observed", tab_id: command.tab_id, ...result };
@@ -2075,26 +2095,114 @@ async function dragPoints(correlation, command, nativeContext = null) {
 }
 
 const SCRIPT_SETTLE_MS = 100;
+const SCRIPT_CLEANUP_TIMEOUT_MS = 1000;
 
-async function evaluateScript(correlation, command) {
-  await ensureDebugger(command.tab_id);
+function scriptCancellation(dispatched) {
+  return Object.assign(new Error("The browser operation was cancelled; earlier page effects are not reversed."),
+    { code: "operation_cancelled", effectUnknown: Boolean(dispatched) });
+}
+
+function assertScriptEvaluation(record) {
+  if (record.cancelled || record.epoch !== browserServiceEpoch
+    || scriptEvaluations.get(record.correlation) !== record
+    || (record.lease && !debuggerLifecycle.owns(record.lease))
+    || (record.scope && documents.context(record.tabId) !== record.scope)) {
+    throw scriptCancellation(record.dispatched);
+  }
+}
+
+// One resource owner handles both cancellation retirement and the original handler's finally.
+// A cancellation waits for this handler and its exact document scope to settle; it never just
+// clears a scope while Runtime.evaluate is unresolved. Failed retirement stays visibly pending.
+function teardownScriptEvaluation(record, cancelling = false) {
+  if (cancelling) {
+    record.cancelled = true;
+    if (!record.retirement) {
+      record.retirement = (async () => {
+        const lease = await record.acquisition;
+        if (record.evaluationPending) await debuggerLifecycle.retire(lease);
+      })();
+      record.retirement.catch(() => {});
+    }
+    return record.retirement;
+  }
+  if (!record.teardown) {
+    record.teardown = (async () => {
+      if (record.retirement) await record.retirement.catch(() => {});
+      let lease;
+      try { lease = await record.acquisition; } catch (_error) { /* setup never supplied a lease */ }
+      if (lease) await debuggerLifecycle.release(record.tabId, lease);
+    })().finally(() => {
+      if (navigationWatchers.get(record.tabId) === record.watcher) navigationWatchers.delete(record.tabId);
+      if (scriptEvaluations.get(record.correlation) === record) scriptEvaluations.delete(record.correlation);
+      record.finished();
+    });
+  }
+  return record.teardown;
+}
+
+async function cancelBrowserOperation(epoch, correlation) {
+  if (!epoch || epoch !== browserServiceEpoch || typeof correlation !== "string"
+    || correlation.length === 0 || correlation.length > 96 || !/^[A-Za-z0-9_-]+$/.test(correlation)) return;
+  const record = scriptEvaluations.get(correlation);
+  if (!record || record.epoch !== epoch) {
+    cancelled.add(correlation);
+    while (cancelled.size > CANCEL_MARKER_LIMIT) cancelled.delete(cancelled.values().next().value);
+    return;
+  }
+  if (!record.cleanup) {
+    const retired = teardownScriptEvaluation(record, true);
+    record.cleanup = new Promise(resolve => {
+      const timer = setTimeout(() => resolve(false), SCRIPT_CLEANUP_TIMEOUT_MS);
+      Promise.all([retired, record.done, record.scope?.settled])
+        .then(() => { clearTimeout(timer); resolve(true); }, () => { clearTimeout(timer); resolve(false); });
+    });
+    if (record.scope) documents.cleaning(record.scope, record.cleanup);
+  }
+  if (!await record.cleanup) throw globalThis.GhostlightDocuments.cleanupRequired();
+}
+
+async function evaluateScript(request, command) {
+  const correlation = request.correlation;
   const commits = [];
-  navigationWatchers.set(command.tab_id, { correlation, commits });
-  const send = (method, params) => sendDebugger({ tabId: command.tab_id }, method, params);
+  let finished;
+  const record = { correlation, epoch: request.serviceEpoch, tabId: command.tab_id,
+    scope: request.documentScope, watcher: { correlation, commits }, cancelled: cancelled.delete(correlation), dispatched: false,
+    evaluationPending: false, acquisition: null, retirement: null, teardown: null, cleanup: null,
+    done: new Promise(resolve => { finished = resolve; }), finished: () => finished() };
+  scriptEvaluations.set(correlation, record);
+  record.acquisition = (async () => {
+    assertScriptEvaluation(record);
+    if (request.workspace) {
+      await topology.remember(command.tab_id, request.workspace);
+      assertScriptEvaluation(record);
+      await retainManagedDebugger(command.tab_id);
+    }
+    assertScriptEvaluation(record);
+    return ensureDebugger(command.tab_id);
+  })();
+  const send = (method, params) => sendDebugger({ tabId: command.tab_id, evaluationContext: record }, method, params);
   try {
-    const value = await scriptEvaluator.evaluate(send, command.script, command.max_result_chars);
+    record.lease = await record.acquisition;
+    assertScriptEvaluation(record);
+    navigationWatchers.set(command.tab_id, record.watcher);
+    record.evaluationPending = true;
+    let value;
+    try { value = await scriptEvaluator.evaluate(send, command.script, command.max_result_chars); }
+    finally { record.evaluationPending = false; }
+    assertScriptEvaluation(record);
     const serialized = JSON.stringify(value ?? null);
     const bounded = serialized.slice(0, command.max_result_chars);
     await new Promise((resolve) => setTimeout(resolve, SCRIPT_SETTLE_MS));
     const tab = await chrome.tabs.get(command.tab_id);
-    if (cancelled.delete(correlation)) throw Object.assign(new Error("cancelled after dispatch"), { effectUnknown: true });
+    assertScriptEvaluation(record);
+    if (cancelled.delete(correlation)) throw scriptCancellation(record.dispatched);
     return { outcome: "script_evaluated", tab: physicalTab(tab), value: bounded, truncated: serialized.length > bounded.length, committed_urls: commits };
   } catch (error) {
     if (error.effectUnknown === undefined) error.effectUnknown = true;
     throw error;
   } finally {
-    navigationWatchers.delete(command.tab_id);
-    await detachDebugger(command.tab_id);
+    await teardownScriptEvaluation(record);
   }
 }
 
@@ -2102,7 +2210,7 @@ async function ensureDebugger(tabId) {
   // A new explicit operation may reacquire a tab after the person released the
   // local debugger sessions. Passive browsing never restores an attachment.
   if (topology.workspaceFor(tabId)) await debuggerLifecycle.retain(tabId);
-  await debuggerLifecycle.acquire(tabId);
+  return debuggerLifecycle.acquire(tabId);
 }
 
 async function detachDebugger(tabId) {

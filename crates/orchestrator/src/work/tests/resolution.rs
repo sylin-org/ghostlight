@@ -14,6 +14,7 @@ use std::time::Instant;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Case {
     PreparationTimeout,
+    CleanupRequired,
     PrefixHold,
     PrefixLanding,
     WrongTab,
@@ -62,6 +63,9 @@ impl BrowserPort for Mechanism {
             return Err(BrowserError::DeadlineAfterDispatch);
         }
         if let BrowserCommand::InDocuments { scope, primitive } = command {
+            if self.case == Case::CleanupRequired {
+                return Err(BrowserError::OperationCleanupRequired);
+            }
             return self
                 .call(browser, workspace, *primitive, deadline, cancelled)
                 .map(|result| BrowserOutcome::InDocuments {
@@ -276,6 +280,58 @@ fn preparation_timeout_never_claims_a_requested_mutation_attempt() {
     assert_eq!(
         records.last().unwrap().resolution.as_ref().unwrap().phase,
         crate::language::resolution::ResolutionPhase::Preparation
+    );
+}
+
+#[test]
+fn cleanup_required_refuses_observation_without_an_effect_or_a_circular_retry() {
+    let (mut executor, browser, workspaces, workspace, audit) = fixture();
+    let handle = open_fixture(&executor, &browser, &workspace);
+    let probe = install_probe(
+        &mut executor,
+        browser,
+        &workspaces,
+        &workspace,
+        Case::CleanupRequired,
+    );
+    let result = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(probe.handlers.load(Ordering::SeqCst), 0);
+    assert_eq!(probe.effects.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        (result.status, result.effect),
+        (Status::Failed, Effect::None)
+    );
+    assert_eq!(result.facts["reason"], "operation_cleanup_required");
+    let guidance = result.next_steps.join(" ");
+    assert!(guidance.contains("Status"));
+    assert!(guidance.contains("End session, then Start session"));
+    assert!(guidance.contains("across all sessions"));
+    assert!(guidance.contains("do not rerun an uncertain action"));
+    assert!(!guidance.contains("Inspect the current page before trying again"));
+    let records = audit.0.lock().unwrap();
+    let record = records.last().unwrap();
+    assert_eq!(record.effect, "none");
+    assert_eq!(
+        record.refusal_facts,
+        Some(crate::language::audit::AuditRefusal::OperationCleanupRequired)
+    );
+    let metadata = record.resolution.as_ref().unwrap();
+    assert_eq!(metadata.progress.confirmed_effects, 0);
+    assert_eq!(metadata.presentation.repeat_detail, guidance);
+    assert!(metadata.presentation.repeat_detail.len() <= 500);
+    assert_eq!(
+        serde_json::from_str::<crate::governance::AuditRecord>(
+            &serde_json::to_string(record).unwrap()
+        )
+        .unwrap()
+        .resolution,
+        record.resolution
     );
 }
 

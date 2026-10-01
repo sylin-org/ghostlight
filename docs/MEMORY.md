@@ -640,6 +640,11 @@ Every one of these cost something to learn.
   Journal a fresh command before the first awaited save and serialize snapshots across overlapping
   commands and acknowledgments. Work freezes action truth; Language projects its readings (ADR-0190).
 
+- **A timed-out wait is not resource cleanup.** Correlated Cancel must retire the exact evaluator,
+  attachment generation and document scope before observations can enter. Confirm custody release
+  and handler settlement; fence old finally from new ownership. Page effects may continue after
+  release, so cleanup does not revise an unknown result or authorize replay (ADR-0191).
+
 ## Where to look
 
 - **A Chrome tab can contain several outermost pages.** Build document authority and routing

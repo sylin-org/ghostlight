@@ -11,6 +11,7 @@
     }
 
     const tabs = new Map();
+    const leaseOwners = new WeakMap();
     let pageRuntimeScript = null;
     const iframeAutoAttach = Object.freeze({
       autoAttach: true,
@@ -32,6 +33,7 @@
           pending: Promise.resolve(),
           pendingCount: 0,
           closing: false,
+          retiring: false,
           generation: 0,
           focusEmulated: false,
           focusAttempted: false,
@@ -66,6 +68,7 @@
 
     function clearAttachment(state) {
       state.attached = false;
+      state.leases = 0;
       state.focusEmulated = false;
       state.focusAttempted = false;
       state.generation += 1;
@@ -171,7 +174,7 @@
     }
 
     async function ensureAttached(tabId, state) {
-      if (state.closing) throw new Error("The debugger session was released.");
+      if (state.closing || state.retiring) throw new Error("The debugger session was released.");
       try {
         if (!state.attached) {
           await debuggerApi.attach({ tabId }, protocolVersion);
@@ -202,6 +205,9 @@
         prune(tabId, state);
         throw error;
       }
+      const lease = Object.freeze({ tabId, generation: state.generation });
+      leaseOwners.set(lease, state);
+      return lease;
     }
 
     async function retain(tabId) {
@@ -228,11 +234,41 @@
       if (errors.length) throw new AggregateError(errors, "Could not update controlled-tab focus.");
     }
 
-    async function release(tabId) {
-      const state = tabs.get(tabId);
+    async function release(tabId, lease = null) {
+      const state = lease ? leaseOwners.get(lease) : tabs.get(tabId);
+      if (lease) {
+        leaseOwners.delete(lease);
+        if (lease.tabId !== tabId || tabs.get(tabId) !== state || state?.generation !== lease.generation) return;
+      }
       if (!state || state.leases === 0) return;
       state.leases -= 1;
       await enqueue(tabId, state, () => settle(tabId, state));
+    }
+
+    function owns(lease) {
+      const state = lease && leaseOwners.get(lease);
+      return Boolean(state && tabs.get(lease.tabId) === state && state.generation === lease.generation
+        && state.attached && !state.closing && !state.retiring);
+    }
+
+    // Retire only the attachment that supplied this lease. Detachment releases CDP custody,
+    // not page effects. A late release of the old lease cannot touch a new attachment.
+    async function retire(lease) {
+      const state = leaseOwners.get(lease);
+      if (!state || tabs.get(lease.tabId) !== state || state.generation !== lease.generation) return;
+      state.retiring = true;
+      await enqueue(lease.tabId, state, async () => {
+        try {
+          if (tabs.get(lease.tabId) !== state || state.generation !== lease.generation) return;
+          // Do not put a possibly blocked Runtime command ahead of the release itself.
+          // Chrome removes focus emulation with the confirmed debugger detachment.
+          if (state.attached) {
+            try { await debuggerApi.detach({ tabId: lease.tabId }); }
+            catch (error) { if (state.attached && state.generation === lease.generation) throw error; }
+          }
+          if (tabs.get(lease.tabId) === state && state.generation === lease.generation) clearAttachment(state);
+        } finally { state.retiring = false; }
+      });
     }
 
     function openDialog(tabId, type) {
@@ -328,6 +364,8 @@
       unretain,
       setFocusEmulationEnabled,
       release,
+      retire,
+      owns,
       openDialog,
       closeDialog,
       currentDialog,

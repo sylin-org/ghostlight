@@ -93,6 +93,7 @@
     }
 
     function run(record, id, operation) {
+      const attemptEpoch = epoch;
       record.phase = PHASE.DISPATCHED;
       records.set(id, record);
       const promise = (async () => {
@@ -104,18 +105,26 @@
             throw error;
           }
 
+          // A pre-handler save may finish after a new service has retired this attempt.
+          // Do not enter that old handler or persist its completion over a new owner.
+          if (epoch !== attemptEpoch || records.get(id) !== record) throw recoveryError();
+
           let result;
           try {
             result = await operation();
           } catch (error) {
             record.phase = error?.effectUnknown ? PHASE.UNCERTAIN : PHASE.FAILED;
             record.error = error;
-            try { await persist(); } catch (_persistenceError) { /* disposition remains conservative */ }
+            if (epoch === attemptEpoch && records.get(id) === record) {
+              try { await persist(); } catch (_persistenceError) { /* disposition remains conservative */ }
+            }
             throw error;
           }
           record.phase = PHASE.COMPLETED;
           record.result = result;
-          try { await persist(); } catch (_error) { /* retain the decisive in-memory receipt */ }
+          if (epoch === attemptEpoch && records.get(id) === record) {
+            try { await persist(); } catch (_error) { /* retain the decisive in-memory receipt */ }
+          }
           return result;
         } finally {
           record.promise = null;

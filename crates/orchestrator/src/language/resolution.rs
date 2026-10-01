@@ -272,6 +272,14 @@ fn recovery(resolution: &Resolution) -> (Vec<String>, String) {
         let step = "Inspect the intended result before preparing unfinished work; do not repeat the action to check it.";
         return (vec![step.into()], step.into());
     }
+    if matches!(
+        resolution.cause(),
+        Some(Refusal::OperationCleanupRequired | Refusal::DocumentUnavailable)
+    ) {
+        let steps = resolution.cause().expect("matched cause").next_steps();
+        let detail = steps.join(" ");
+        return (steps, detail);
+    }
     let steps = match resolution.conclusion() {
         Conclusion::Outcome(outcome) => outcome.next_steps(),
         Conclusion::Refusal(refusal) => refusal.next_steps(),

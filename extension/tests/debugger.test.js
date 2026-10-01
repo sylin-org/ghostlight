@@ -452,3 +452,21 @@ test("a late focus acknowledgement cannot resurrect an externally detached sessi
   assert.equal(chromeDebugger.focus.size, 0);
   await lifecycle.detachAll();
 });
+
+test("an old generation's retirement and finally cannot release a fresh debugger lease", async () => {
+  const chromeDebugger = fakeDebugger();
+  const lifecycle = debuggerApi.create(chromeDebugger);
+  await lifecycle.retain(40);
+  const old = await lifecycle.acquire(40);
+  await lifecycle.retire(old);
+  assert.equal(lifecycle.owns(old), false);
+  const current = await lifecycle.acquire(40);
+  assert.equal(lifecycle.owns(current), true);
+  const detaches = chromeDebugger.calls.filter(([kind]) => kind === "detach").length;
+  await lifecycle.retire(old);
+  await lifecycle.release(40, old);
+  assert.equal(lifecycle.owns(current), true);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, detaches);
+  await lifecycle.release(40, current);
+  await lifecycle.detachAll();
+});

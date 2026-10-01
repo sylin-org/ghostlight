@@ -1522,6 +1522,15 @@ impl ApplicationExecutor {
                 json!({"reason":"document_unavailable"}),
             );
         }
+        if error == BrowserError::OperationCleanupRequired {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::OperationCleanupRequired,
+                json!({"reason":"operation_cleanup_required"}),
+            );
+        }
         if let BrowserError::Protocol(detail) = &error {
             return self.failed(
                 context,
@@ -2330,6 +2339,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
     match error {
         BrowserError::DocumentAccess(_) => "document_access_denied",
         BrowserError::DocumentUnavailable => "document_unavailable",
+        BrowserError::OperationCleanupRequired => "operation_cleanup_required",
         BrowserError::RuntimeControl(reason) => reason.as_str(),
         BrowserError::DisconnectedBeforeDispatch => "browser_disconnected",
         BrowserError::CancelledBeforeDispatch => "cancelled",

@@ -683,6 +683,23 @@ const historyChecks = [];
       && checkedMarkup.includes("<dt>Verification</dt><dd>not_met</dd>")
       && checkedMarkup.includes("<dt>Confirmed changes</dt><dd>1</dd>")
       && checkedMarkup.includes("<dt>Expected changes</dt><dd>1</dd>")]);
+  const cleanup = { ...checked, invocation: "ux-cleanup", tool: "browser_read", effect: "none",
+    summary: "An earlier browser operation still holds this tab. This request did not run.",
+    presentation: { label: "Could not complete", tone: "failed",
+      summary: "An earlier browser operation still holds this tab. This request did not run.",
+      repeat_detail: "Ask the user to open Status and choose End session, then Start session. This affects all Ghostlight sessions; do not rerun the uncertain action." },
+    resolution: { phase: "requested_effect", cause: { reason: "operation_cleanup_required" },
+      verification: "not_requested", progress: { attempted: 0, acknowledged: 0, confirmed_effects: 0 } } };
+  view.hero(entries.entryFromRecord(cleanup), false);
+  const cleanupMarkup = nodes.get("hero-body").innerHTML;
+  historyChecks.push(["failed cleanup shows the authored global prerequisite once without toggling runtime or claiming an effect",
+    cleanupMarkup.includes("This request did not run.")
+      && cleanupMarkup.includes("all Ghostlight sessions")
+      && (cleanupMarkup.match(/End session/g) ?? []).length === 1
+      && cleanupMarkup.includes("do not rerun the uncertain action")
+      && cleanupMarkup.includes("<dt>Effect</dt><dd>none</dd>")
+      && cleanupMarkup.includes("<dt>Failure cause</dt><dd>operation_cleanup_required</dd>")
+      && !cleanupMarkup.includes('data-intent="start_session"')]);
   view.hero(entries.entryFromRecord({ ...uncertain, invocation: "escaped-suggestions", effect: "none",
     presentation: { ...uncertain.presentation, repeat_detail: "" } }), false);
   const escapedMarkup = nodes.get("hero-body").innerHTML;

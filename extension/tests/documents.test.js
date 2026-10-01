@@ -15,6 +15,37 @@ function fixture() {
   return { state, documents, scope };
 }
 
+test("concurrent scope admission never overlaps unresolved handlers after inventory awaits", async () => {
+  const { documents, scope } = fixture();
+  let finish;
+  let handlers = 0;
+  const first = documents.run(7, scope, async () => {
+    handlers++;
+    await new Promise(resolve => { finish = resolve; });
+    return {};
+  });
+  const second = assert.rejects(documents.run(7, scope, async () => { handlers++; return {}; }),
+    { code: "operation_cleanup_required", effectUnknown: false });
+  await second;
+  assert.equal(handlers, 1);
+  finish(); await first;
+  assert.equal(documents.context(7), undefined);
+});
+
+test("a stale cleanup promise cannot replace the current scope's bounded wait", async () => {
+  const { documents, scope } = fixture();
+  let finish;
+  const work = documents.run(7, scope, async context => {
+    const stale = { tabId: 7 };
+    documents.cleaning(stale, new Promise(() => {}));
+    assert.equal(context.cleanup, null);
+    await new Promise(resolve => { finish = resolve; }); return {};
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(documents.run(7, scope, async () => ({})), { code: "operation_cleanup_required" });
+  finish(); await work;
+});
+
 test("excluded documents receive no extraction, and locators bind to document identity", async () => {
   const { state, documents, scope } = fixture();
   const receipt = await documents.run(7, scope, async () => {

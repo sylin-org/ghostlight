@@ -974,7 +974,7 @@ try {
   // An effect whose fate is unknown names the open-dialog hypothesis and the observation
   // route (d5a8c5de); it never suggests replaying the interrupted call.
   assert.deepEqual(cancelled.next_steps, [
-    "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
+    "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.",
     "Then observe the page with browser_read or browser_inspect to learn what happened.",
   ]);
 

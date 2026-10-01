@@ -2,6 +2,27 @@
 
 Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
 
+## Correlated evaluation cleanup (2026-10-01, local source only)
+
+Independent review accepted `fcb4bce` core behavior and real predecessor compatibility, including
+11 native checks and seven predecessor-reader phases. It withheld complete agent recovery UX
+acceptance: a pending evaluation kept the document scope occupied, and ordinary observation guidance
+looped. The architect recommended repairing the existing Cancel lifecycle. [ADR-0191](adr/0191-correlated-evaluator-cancellation-and-resource-retirement.md)
+records targeted bounded retirement, exact generation/scope/epoch ownership and a typed fallback.
+
+The follow-on candidate is on `codex/evaluation-cancel-recovery`. Synthetic worker checks verify
+fresh read recovery without End/Start, full-journal cleanup, failed cleanup without observation
+effects, unrelated workspaces, setup/epoch/generation fences and delayed page continuation without
+replay or a stopped-effects claim. Work and human recovery share canonical Language; generic
+unverified document access points to existing Show tab for manual inspection. The active architecture
+contract now records the actual lease/snapshot/completion and child ordering. Source gates pass:
+615 Rust tests, 386 extension tests, 110 executable Workbench assertions, formatting, strict Clippy,
+changed-JavaScript syntax and an isolated workspace build. The
+[source evidence](testing/evaluation-cancel-recovery-2026-10-01.md) records the exact mechanism,
+retirements and limits. Exact-candidate architect/independent review, actual Chromium/native
+recovery and real predecessor readers at this follow-on are pending. No installed state, runtime,
+public version or deployment changed.
+
 ## Work resolution cleanup (2026-10-01, local source only)
 
 Leo approved the bounded architecture cleanup after investigation. [ADR-0190](adr/0190-work-owned-resolution-and-real-attempt-journal.md)
@@ -17,9 +38,11 @@ rendering. All source gates pass: 613 Rust tests, 372 extension tests, 109 execu
 assertions, formatting, strict Clippy and changed-JavaScript syntax. The
 [source evidence](testing/work-resolution-2026-10-01.md) records independent handler/effect counters,
 the exact retirements, privacy and optional-history coverage, corrected gate failures and limits.
-Parent structural/redteam review, real predecessor-reader execution and whole-journey human/agent
-acceptance remain pending. No runtime acceptance is claimed. The installed About card and source
-selection remain unchanged. History search targeting stays deferred.
+Parent review now accepts the demonstrated core behavior and real predecessor-reader compatibility
+at `fcb4bce`. Isolated native checks verify the unchanged About card and restored activity history,
+but complete human/agent acceptance remains qualified by the recovery gap above and unverified
+physical Enter activation. The installed About card and source selection remain unchanged.
+History search targeting stays deferred.
 
 ## Activity-list comprehension correction (2026-10-01, installed locally)
 

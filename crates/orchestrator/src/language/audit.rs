@@ -119,6 +119,7 @@ pub enum AuditRefusal {
     },
     BrowserPrimitiveFailed,
     DocumentUnavailable,
+    OperationCleanupRequired,
     BrowserStopped {
         reconnect: bool,
     },
@@ -190,6 +191,7 @@ impl Refusal {
             },
             Self::BrowserPrimitive => AuditRefusal::BrowserPrimitiveFailed,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
+            Self::OperationCleanupRequired => AuditRefusal::OperationCleanupRequired,
             Self::BrowserStopped { reconnect } => AuditRefusal::BrowserStopped {
                 reconnect: *reconnect,
             },

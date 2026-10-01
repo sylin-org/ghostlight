@@ -65,6 +65,22 @@ fn adapter_local_interlock_is_a_decisive_typed_refusal() {
 }
 
 #[test]
+fn cleanup_required_is_known_unsent_without_guessing_a_document_failure() {
+    assert_eq!(
+        adapter_error("operation_cleanup_required", "PRIVATE_DETAIL".into(), false),
+        BrowserError::OperationCleanupRequired
+    );
+    assert!(!BrowserError::OperationCleanupRequired.effect_unknown());
+    assert!(
+        adapter_error("operation_cleanup_required", "contradictory".into(), true).effect_unknown()
+    );
+    assert_eq!(
+        adapter_error("document_scope_changed", "ordinary graph".into(), false),
+        BrowserError::DocumentUnavailable
+    );
+}
+
+#[test]
 fn an_acknowledged_script_exception_is_not_a_successful_effect_receipt() {
     for uncertain in [false, true] {
         let error = adapter_error("script_exception", "bounded exception".into(), uncertain);

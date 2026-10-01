@@ -293,25 +293,36 @@ unit of work until exactly one completion is committed.
 The synchronous path is:
 
 1. Decode and validate through language.
-2. Snapshot configured local and managed authority.
-3. Start work and emit `WorkStarted`.
-4. Resolve ownership and acquire a workspace lease.
-5. Ask the governance facade at the final boundary for each required capability or landing.
-6. Dispatch physical effects only through the browser port.
-7. Apply observed receipts to the workspace aggregate.
-8. Complete through `CompletionGate`, which accepts one terminal outcome only.
-9. Release the lease and synchronously deliver audit and presentation reactions.
+2. Resolve the workspace and acquire its lease when the operation requires one, using the original
+   deadline and cancellation. Queued leased work captures no earlier authority snapshot.
+3. Snapshot configured local and managed authority after lease admission. Refusals before running
+   still capture the snapshot needed for their own receipt.
+4. Start admitted work and emit `WorkStarted`.
+5. Resolve exact owned resources and document scope; ask the governance facade at every final
+   capability, live control and landing boundary. Preparation is separate from requested effects.
+6. Dispatch physical work only through the browser port. Record attempts, but confirm effects only
+   after exact request identity and admitted document scope validate. Apply each governed keyboard
+   landing and generation before sending another stroke.
+7. Apply receipts to the workspace aggregate and retain a declared check as separate Met, NotMet or
+   Unavailable evidence. A failed check cannot erase an acknowledged change or confirmed prefix.
+8. Consume non-Clone `WorkEvidence` into one immutable `Resolution` in `work/receipt.rs` before
+   completion reactions. Language projects caller, safe retained metadata and human presentation
+   once from that account; transient client payload cannot author retained truth.
+9. Synchronously deliver audit and presentation reactions under the same lease. History storage is
+   independent of action truth. Release the lease when this invocation returns to caller delivery.
 
 An operation handler cannot mutate another context directly, call a transport, bypass
-governance, or construct a client result around `CompletionGate`.
+governance, construct its own client/audit rendering, or reopen a consumed resolution.
 
 Flows retain the parent's lease and immutable authority snapshot. Their ordinary
 child executors feed one accumulator in `work/composition.rs`; language owns its closed progress,
 summary, and recovery in `language/composition.rs`, through `Outcome::CompositionRan`. One safe
 projection carries that account into the parent audit record. Child payloads remain separate,
 and per-step status/effect metadata survives flow-result omission. Direct operations and child
-terminals enter `work/receipt.rs`; each child gets its own completion gate without reacquiring the
-parent lease or snapshot. The same safe audit sink records children incrementally, identified by
+evidence enters `work/receipt.rs`; each child owns fresh execution evidence and uses the same
+consuming resolution seam without reacquiring the parent lease or snapshot. The accumulator reads
+child frozen status, effect, cause and repeat safety directly, with storage tracked separately.
+The same safe audit sink records children incrementally, identified by
 parent invocation and position. Only the parent settles the lifecycle. Actual child denials have
 one receipt; aggregate wrappers do not repeat them or create a denial counter.
 
@@ -504,6 +515,23 @@ receipt yields `unknown`, never failure or success. Cancellation follows the sam
 Stale tabs and targets fail before dispatch. Sequence failure reports completed step count and
 never replays completed steps. Recovery suggestions come from typed reason codes and effect class,
 not page content.
+
+An evaluation deadline freezes the original uncertain result before adapter cleanup. The existing
+correlated Cancel bypasses journal capacity and asks the adapter to retire only that evaluator's
+service epoch, correlation, tab, document scope and debugger attachment generation. One resource
+owner coordinates retirement and finally. Targeted debugger detachment must be confirmed and the
+original scoped handler must settle before a fresh operation can enter; no active scope is simply
+cleared. The admission guard can wait for that bounded cleanup, then revalidates the current graph.
+Late completion cannot remove a newer scope/watcher, release its lease or overwrite a newer epoch's
+journal attempt. Ordinary successful work adds no cancellation roundtrip.
+
+Cleanup confirms custody release, not rollback or termination of every page side effect. The
+original resolution remains unknown and unsafe to repeat. When cleanup cannot be confirmed within
+the bound, a mechanically established OperationCleanupRequired refusal supplies no new requested
+effect and names the existing human Status End session / Start session prerequisite, including its
+global scope. The agent does not toggle those controls. Generic unverified document access points
+to manual inspection through existing Show tab when available, rather than asking Inspect to retry
+the same inaccessible scope. These refinements are recorded in ADR-0191.
 
 An unanswered post-dispatch liveness probe does not revise that invocation's unknown effect. It
 changes only the availability fact used by later invocations, which then stop before dispatch until

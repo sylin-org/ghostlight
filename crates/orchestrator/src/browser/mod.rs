@@ -1504,6 +1504,8 @@ fn adapter_error(code: &str, message: String, effect_unknown: bool) -> BrowserEr
         BrowserError::LocalInterlock(message)
     } else if code == "document_scope_changed" {
         BrowserError::DocumentUnavailable
+    } else if code == "operation_cleanup_required" {
+        BrowserError::OperationCleanupRequired
     } else {
         BrowserError::Primitive(message)
     }
@@ -1594,6 +1596,9 @@ pub enum BrowserError {
     /// The adapter's bounded command journal refused a fresh operation before its handler ran.
     #[error("browser operation journal is full; this operation did not run")]
     OperationLedgerFull,
+    /// An earlier adapter operation still owns this tab after its cleanup could not be confirmed.
+    #[error("an earlier browser operation still holds this tab; cleanup is required")]
+    OperationCleanupRequired,
     /// A browser-local human safety choice refused the primitive without an effect.
     #[error("browser local interlock refused the primitive: {0}")]
     LocalInterlock(String),
