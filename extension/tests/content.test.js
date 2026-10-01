@@ -6,8 +6,9 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
 const sharedModule = require("../lib/shared.js");
+const { createHash } = require("node:crypto");
 
-function contentHarness() {
+function contentHarness({ chrome = {}, fullRuntime = false } = {}) {
   let clock = 0;
   const delays = [];
   const windowListeners = new Map();
@@ -211,7 +212,7 @@ function contentHarness() {
   }
 
   const context = {
-    chrome: { runtime: { sendMessage: async () => ({ ok: true, value: { enabled: false } }) } },
+    chrome,
     document,
     location: { href: "https://example.test/" },
     window: {
@@ -273,8 +274,22 @@ function contentHarness() {
     }
   };
   context.globalThis = context;
+  if (chrome === null) delete context.chrome;
+  context.window.self = context.window;
+  context.window.top = context.window;
+  const contentSource = readFileSync(join(__dirname, "../../crates/orchestrator/src/page_runtime", "content.js"), "utf8");
+  const bodySource = fullRuntime ? [
+    "../lib/shared.js", "../lib/form-diagnostics.js",
+    "../../crates/orchestrator/src/page_runtime/sensor.js",
+    "../lib/presentation-css.js", "../lib/presentation.js",
+    "../../crates/orchestrator/src/page_runtime/content.js"
+  ].map(path => readFileSync(join(__dirname, path), "utf8")).join("\n") : contentSource;
+  const fingerprint = createHash("sha256").update(bodySource).digest("hex");
+  const runtimeSource = fullRuntime
+    ? `(() => { if (globalThis.__ghostlight_page_runtime__ === "${fingerprint}") return;\n${bodySource}\nglobalThis.__ghostlight_page_runtime__ = "${fingerprint}"; })();`
+    : bodySource;
   vm.runInNewContext(
-    readFileSync(join(__dirname, "../../crates/orchestrator/src/page_runtime", "content.js"), "utf8"),
+    runtimeSource,
     context,
     { filename: "content.js" }
   );
@@ -290,6 +305,7 @@ function contentHarness() {
   }
 
   return {
+    context,
     input,
     edits,
     delays,
@@ -307,6 +323,26 @@ function contentHarness() {
     hasWindowListener(type) { return windowListeners.has(type); }
   };
 }
+
+test("the complete MAIN-world runtime starts without extension messaging and reads a page", async () => {
+  let calls = 0;
+  for (const chrome of [null, {}, { runtime: { sendMessage() {
+    calls++;
+    throw new Error("webpage messaging requires an Extension ID");
+  } } }]) {
+    const harness = contentHarness({ chrome, fullRuntime: true });
+    const body = harness.element("body");
+    body.append(harness.text("Ordinary webpage text"));
+    harness.setBody(body);
+    assert.equal(typeof harness.context.window.__ghostlight_dispatch__, "function");
+    assert.match(harness.context.__ghostlight_page_runtime__, /^[a-f0-9]{64}$/);
+    const result = await harness.send({ kind: "read_text", max_chars: 1000 });
+    assert.equal(result.ok, true);
+    assert.equal(result.result.text, "Ordinary webpage text");
+    assert.equal(harness.hasWindowListener("focus"), false, "diagnostic observation starts disabled");
+  }
+  assert.equal(calls, 0, "page-world extension APIs are never invoked");
+});
 
 test("visible reads follow the composed tree without exposing hidden or editable text", async () => {
   const harness = contentHarness();

@@ -29,21 +29,19 @@
   // The worker supplies the human flag and existing tab ownership; only the top
   // document observes. No page setters or event behavior are changed.
   const formDiagnosticsApi = globalThis.GhostlightFormDiagnostics;
-  let diagnosticsStateVersion = 0;
   const formDiagnostics = formDiagnosticsApi.createObserver({
     document, window,
     queryControls: () => queryAll("input,textarea,select,[contenteditable='true']"),
     credentialClass,
-    emit: (row) => chrome?.runtime?.sendMessage?.({ kind: formDiagnosticsApi.MESSAGE_KIND, row }).catch(() => {})
+    emit: (row) => {
+      // The page world has no extension messaging authority. Its isolated relay
+      // accepts only projected structural rows and supplies Chromium identity.
+      const projected = formDiagnosticsApi.project(row);
+      if (IS_TOP && projected) window.dispatchEvent(new CustomEvent(formDiagnosticsApi.ROW_EVENT_KIND, {
+        detail: JSON.stringify(projected)
+      }));
+    }
   });
-  if (IS_TOP) {
-    const requestedVersion = diagnosticsStateVersion;
-    chrome?.runtime?.sendMessage?.({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND })
-      ?.then((response) => {
-        if (requestedVersion === diagnosticsStateVersion) formDiagnostics.setEnabled(response?.ok && response.value?.enabled === true);
-      })
-      .catch(() => {});
-  }
 
   function clearCaptureMask() {
     const state = captureMask;
@@ -827,7 +825,6 @@
 
   window.__ghostlight_dispatch__ = function(message) { return new Promise((resolvePromise, rejectPromise) => { const sendResponse = (resp) => { if (resp.ok) resolvePromise(resp.result); else rejectPromise(new Error(resp.error)); };
     if (message?.kind === formDiagnosticsApi.STATE_MESSAGE_KIND) {
-      diagnosticsStateVersion++;
       formDiagnostics.setEnabled(IS_TOP && message.enabled === true);
       sendResponse({ ok: true, result: { enabled: IS_TOP && message.enabled === true } });
       return false;

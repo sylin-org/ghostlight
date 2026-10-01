@@ -156,6 +156,10 @@ the owner wants, and what this project learned the hard way.
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **Solve the immediate need, then reveal useful depth.** Lead Ghostlight with private, controlled
+  browser access and legible agent activity. Its integrations across MCP clients, models and
+  harnesses, and its configurable policies should be understandable optional depth. This is
+  product direction, not permission to make unverified privacy or compatibility claims.
 - **Absorb ordinary bursts.** The owner rejected a refusal-led local-resilience experience. Keep
   permitted work flowing within its original deadline, make sustained waiting legible, contain
   stalled connections, preserve other sessions and human controls, and recover without replay.
@@ -319,6 +323,12 @@ the owner wants, and what this project learned the hard way.
   whole documents remain manual (ADR-0154).
 
 ## Durable lessons
+
+- **Execution world is part of browser correctness.** A service-owned MAIN-world runtime cannot
+  use extension-context messaging. Another installed extension can expose a webpage messaging API
+  with different calling requirements, so an isolated test profile can conceal a startup failure.
+  Keep optional diagnostics outside automation initialization, project local rows at each physical
+  boundary, and retain exact document custody through worker suspension (ADR-0188).
 
 - **Warm MCP success does not prove cold desktop demand-start.** A client can
   filter DISPLAY, Wayland, XDG runtime and session-bus variables from its stdio

@@ -12,11 +12,19 @@ negotiates the 24-tool catalog. Selection, policy-file state, browser grants, an
 were verified preserved. The [local deployment record](testing/local-deployment-2026-10-01.md)
 contains candidate hashes, opening instructions, rollback, and exact limits.
 
-The live localhost smoke opens successfully under background attention, but read returns
-`document_unavailable` with no effect, including one bounded bootstrap retry. Fill was not reached;
-the full smoke is not green. No permission relaxation or unreviewed code change was made. Physical
-UI inspection was occluded; the opened responsive native window is tied to the verified candidate.
-Public versions and publication state are unchanged.
+The initial localhost read returned `document_unavailable` with no effect. A later installed
+open/read/fill smoke passed after Chrome restarted and the existing adapter was reloaded, but a
+subsequent UX fixture reproduced the read failure. Recovery remains in progress; the original
+cause is not established. Actual native captures now verify the readable fill outcome and complete
+guardian About card. Public versions and publication state are unchanged.
+
+[ADR-0188](adr/0188-page-world-independent-form-diagnostics.md) records a separately reproduced
+source defect and its bounded correction: MAIN-world automation no longer depends on extension
+messaging; local opt-in tracing uses an isolated relay and exact document custody through worker
+suspension. Source gates pass: 594 Rust tests, 357 extension tests, 101 Workbench assertions,
+formatting, strict Clippy, and changed-JavaScript syntax. Independent review approves the correction
+after replaying failed-stop retry, overlapping off/on, and unrelated-tab capacity regressions.
+Deployment/live acceptance of this correction is pending. No permissions or public availability changed.
 
 ## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
 

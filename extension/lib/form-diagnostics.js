@@ -9,6 +9,10 @@
   const KEY = "ghostlight.form_diagnostics";
   const MESSAGE_KIND = "form_diagnostics";
   const STATE_MESSAGE_KIND = "form_diagnostics_state";
+  const ROW_EVENT_KIND = "ghostlight:form-diagnostics";
+  const ROW_MAX_CHARS = 2048;
+  const DOCUMENTS_KEY = "ghostlight.form_diagnostic_documents";
+  const DOCUMENT_LIMIT = 256;
   const LIMIT = 400;
   const CONTROL_LIMIT = 100;
   const INTERVAL_MS = 250;
@@ -220,5 +224,5 @@
     return Object.freeze({ record, setEnabled, snapshot });
   }
 
-  return Object.freeze({ KEY, MESSAGE_KIND, STATE_MESSAGE_KIND, LIMIT, CONTROL_LIMIT, INTERVAL_MS, DURATION_MS, EVENTS, TRIGGERS, validIdentity, createObserver, createLog });
+  return Object.freeze({ KEY, MESSAGE_KIND, STATE_MESSAGE_KIND, ROW_EVENT_KIND, ROW_MAX_CHARS, DOCUMENTS_KEY, DOCUMENT_LIMIT, LIMIT, CONTROL_LIMIT, INTERVAL_MS, DURATION_MS, EVENTS, TRIGGERS, project, validIdentity, createObserver, createLog });
 });

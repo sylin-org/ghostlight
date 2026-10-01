@@ -453,6 +453,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 // The next explicit operation resolves its existing ownership without undoing that move.
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  forgetFormDiagnosticDocument(tabId).catch(() => {});
   const activeRecording = recording.interruptTab(tabId, "browser_detached");
   diagnostics.forget(tabId);
   diagnosticDocuments.delete(tabId);
@@ -2525,6 +2526,42 @@ chrome.commands.onCommand.addListener((command) => {
 
 // Developer tracing is an adapter-local observation, not a browser action. It
 // neither discovers/adopts tabs nor sends a native event or page payload.
+const formDiagnosticDocuments = new Map();
+const formDiagnosticSynchronizations = new Map();
+let formDiagnosticDocumentsLoad = null;
+let formDiagnosticDocumentsWrite = Promise.resolve(true);
+
+async function restoreFormDiagnosticDocuments() {
+  if (!formDiagnosticDocumentsLoad) {
+    formDiagnosticDocumentsLoad = Promise.resolve().then(() => chrome.storage.session.get(formDiagnosticsApi.DOCUMENTS_KEY))
+      .then(saved => {
+        const entries = saved?.[formDiagnosticsApi.DOCUMENTS_KEY];
+        if (Array.isArray(entries)) {
+          for (const identity of entries.slice(0, formDiagnosticsApi.DOCUMENT_LIMIT)) {
+            if (formDiagnosticsApi.validIdentity(identity)) formDiagnosticDocuments.set(identity.tab_id, identity.document_id);
+          }
+        }
+        return true;
+      }).catch(() => { formDiagnosticDocumentsLoad = null; return false; });
+  }
+  return formDiagnosticDocumentsLoad;
+}
+
+async function persistFormDiagnosticDocuments() {
+  formDiagnosticDocumentsWrite = formDiagnosticDocumentsWrite.then(async () => {
+    const entries = Array.from(formDiagnosticDocuments, ([tab_id, document_id]) => ({ tab_id, document_id }));
+    await chrome.storage.session.set({ [formDiagnosticsApi.DOCUMENTS_KEY]: entries });
+    return true;
+  }).catch(() => false);
+  return formDiagnosticDocumentsWrite;
+}
+
+async function forgetFormDiagnosticDocument(tabId) {
+  if (!await restoreFormDiagnosticDocuments()) return;
+  formDiagnosticDocuments.delete(tabId);
+  await persistFormDiagnosticDocuments();
+}
+
 function formDiagnosticsEnabled(tabId) {
   return preferences.diagnostics && liveState.control_state !== "ended" && Boolean(topology.workspaceFor(tabId));
 }
@@ -2535,11 +2572,77 @@ function formDiagnosticsSender(sender) {
 }
 
 async function syncFormDiagnostics(tabId) {
+  if (!await restoreFormDiagnosticDocuments()) return;
+  const knownDocument = formDiagnosticDocuments.has(tabId);
+  if (!formDiagnosticsEnabled(tabId) && !knownDocument) return;
+  if (!formDiagnosticSynchronizations.has(tabId)
+    && !knownDocument) {
+    // Retained observers reserve their cleanup slots. New opt-in work cannot
+    // consume those slots while its page/runtime installation is in flight.
+    const pendingNew = Array.from(formDiagnosticSynchronizations.keys())
+      .filter(id => !formDiagnosticDocuments.has(id)).length;
+    if (formDiagnosticDocuments.size + pendingNew >= formDiagnosticsApi.DOCUMENT_LIMIT) return;
+  }
+  const previous = formDiagnosticSynchronizations.get(tabId) ?? Promise.resolve();
+  const synchronization = previous.catch(() => {}).then(() => synchronizeFormDiagnostics(tabId));
+  formDiagnosticSynchronizations.set(tabId, synchronization);
+  try { await synchronization; }
+  catch { /* Optional diagnostics cannot fail the caller's browser work. */ }
+  finally {
+    if (formDiagnosticSynchronizations.get(tabId) === synchronization) formDiagnosticSynchronizations.delete(tabId);
+  }
+}
+
+async function synchronizeFormDiagnostics(tabId) {
+  let enabled = formDiagnosticsEnabled(tabId);
+  let documentId = formDiagnosticDocuments.get(tabId);
+  let stopped = false;
   try {
-    await chrome.tabs.sendMessage(tabId, {
-      kind: formDiagnosticsApi.STATE_MESSAGE_KIND, enabled: formDiagnosticsEnabled(tabId)
-    }, { frameId: frames.TOP_FRAME_ID });
-  } catch { /* Old or unloaded documents have no receiver; never reload a draft. */ }
+    if (enabled) {
+      if (!formDiagnosticDocuments.has(tabId) && formDiagnosticDocuments.size >= formDiagnosticsApi.DOCUMENT_LIMIT) return;
+      const installed = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frames.TOP_FRAME_ID] }, world: "ISOLATED",
+        files: ["lib/form-diagnostics.js", "lib/form-diagnostics-relay.js"]
+      });
+      documentId = installed?.find(result => result.frameId === frames.TOP_FRAME_ID)?.documentId;
+      if (!formDiagnosticsApi.validIdentity({ tab_id: tabId, document_id: documentId })) return;
+      if (!formDiagnosticDocuments.has(tabId) && formDiagnosticDocuments.size >= formDiagnosticsApi.DOCUMENT_LIMIT) return;
+      formDiagnosticDocuments.set(tabId, documentId);
+      // An observer may outlive this worker. Never enable it until its exact
+      // disabling identity survives worker suspension in browser-local storage.
+      if (!await persistFormDiagnosticDocuments()) return;
+    }
+    enabled &&= formDiagnosticsEnabled(tabId);
+    // Unowned pages are never injected. Disable only a relay installed for this
+    // exact previously controlled document, without acquiring debugger custody.
+    if (!documentId) return;
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, documentIds: [documentId] }, world: "MAIN",
+      func: injectedContentPrimitive,
+      args: [{ kind: formDiagnosticsApi.STATE_MESSAGE_KIND, enabled }]
+    });
+    if (results?.length !== 1 || results[0].frameId !== frames.TOP_FRAME_ID
+      || results[0].documentId !== documentId) return;
+    const acknowledged = contentInjectionResult(results);
+    if (acknowledged.enabled !== enabled) return;
+    stopped = !enabled;
+    await chrome.scripting.executeScript({
+      target: { tabId, documentIds: [documentId] }, world: "ISOLATED",
+      func: flushFormDiagnosticsRelay
+    });
+  } catch { /* Optional diagnostics never reload a draft or fail browser work. */ }
+  finally {
+    // A failed or malformed stop must retain the exact identity for retry,
+    // including after this worker suspends. Script dispatch is not a stop receipt.
+    if (stopped) {
+      formDiagnosticDocuments.delete(tabId);
+      await persistFormDiagnosticDocuments();
+    }
+  }
+}
+
+async function flushFormDiagnosticsRelay() {
+  await globalThis.GhostlightFormDiagnosticsRelay?.flush();
 }
 
 async function refreshFormDiagnostics() {
@@ -2559,9 +2662,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return { enabled: formDiagnosticsSender(_sender) && formDiagnosticsEnabled(_sender.tab.id) };
     }
     if (message?.kind === formDiagnosticsApi.MESSAGE_KIND) {
-      if (formDiagnosticsSender(_sender) && formDiagnosticsEnabled(_sender.tab.id)) {
+      const projected = formDiagnosticsApi.project(message.row);
+      const stopping = projected?.event === "trace_stopped"
+        && formDiagnosticDocuments.get(_sender.tab?.id) === _sender.documentId;
+      if (projected && formDiagnosticsSender(_sender) && (formDiagnosticsEnabled(_sender.tab.id) || stopping)) {
         // Sender tab/document identity is supplied by Chromium, never by the page row.
-        await formLog.record(message.row, { tab_id: _sender.tab.id, document_id: _sender.documentId });
+        await formLog.record(projected, { tab_id: _sender.tab.id, document_id: _sender.documentId });
       }
       return null;
     }
@@ -2594,8 +2700,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       preferences = stateApi.preferences(message.preferences);
       await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
       await connectionLog.setEnabled(preferences.diagnostics);
-      await formLog.setEnabled(preferences.diagnostics);
-      refreshFormDiagnostics().catch(() => {});
+      if (preferences.diagnostics) await formLog.setEnabled(true);
+      await refreshFormDiagnostics();
+      if (!preferences.diagnostics) await formLog.setEnabled(false);
       connectionLog.record(connectionEvents.PREFERENCES_CHANGED);
       return preferences;
     }
