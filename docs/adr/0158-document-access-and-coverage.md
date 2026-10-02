@@ -89,6 +89,14 @@ window. The actual scale is reported in view geometry. Target and full-page scal
 rules retain their existing output budgets. Platform acceptance remains required;
 this is a physical capture correction, not an exception to exclusion verification.
 
+### Raster experiment rejected (2026-10-02)
+
+CI run 37065889684 disproves the preceding raster-scale remedy on Windows: capture
+still returns after mask expiry. This supersedes only the viewport scale change
+described above; it is removed from the source. The opacity mask retains positive
+Linux capture evidence. Windows capture remains an unpublished release blocker.
+Neither expiry nor exclusion verification is weakened to make the journey pass.
+
 The September 7 full-session browser suite also exposed incomplete physical batch preparation.
 Per-field validation discovered an invalid later field only after an earlier edit. The adapter
 now validates every document group, field, option, and submit containment before the first edit,

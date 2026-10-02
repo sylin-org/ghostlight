@@ -141,3 +141,10 @@ force inactive surface refresh. Actual output scale remains in the governed view
 geometry; target/full-page capture and image bounds are unchanged. This requires
 real CI confirmation. No expiry, exclusion or focus guard is relaxed.
 Local Rust source gates, all 409 extension tests and the 69-check frame journey pass.
+
+Run 37065889684 rejects the raster-scale experiment: Windows still returns the
+viewport capture after mask expiry. The unproven scale change and its helper/test
+are removed; the opacity correction retains its positive Linux capture evidence.
+The preceding experiments remain recorded as evidence, not accepted remedies.
+Publication is still blocked by Linux native-pointer focus and Windows masked
+viewport capture. Public 1.3.13 artifacts have not been published on any channel.

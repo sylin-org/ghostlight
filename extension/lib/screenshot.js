@@ -12,7 +12,6 @@
   const JPEG_QUALITY = 55;
   const FALLBACK_JPEG_QUALITY = 30;
   const MAX_BASE64_CHARS = 6_000_000;
-  const VIEWPORT_CAPTURE_SCALE = 0.99;
 
   function requireExtent(value, name) {
     if (!Number.isFinite(value) || value <= 0) throw new TypeError(`${name} must be positive`);
@@ -54,15 +53,6 @@
     return { x, y, width, height, scale: outputScale(width, height, true) };
   }
 
-  function viewportClip(x, y, width, height) {
-    const clip = ordinaryClip(x, y, width, height);
-    // Chromium preserves the CSS viewport while sizing the capture surface.
-    // A different surface size makes inactive viewport capture refresh instead
-    // of waiting for a later page mutation. Returned geometry keeps this scale.
-    clip.scale = Math.min(clip.scale, VIEWPORT_CAPTURE_SCALE);
-    return clip;
-  }
-
   return Object.freeze({
     MAX_SIDE,
     MAX_PIXELS,
@@ -72,7 +62,6 @@
     MAX_BASE64_CHARS,
     outputScale,
     ordinaryClip,
-    viewportClip,
     regionClip
   });
 });

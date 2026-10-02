@@ -4,6 +4,13 @@ Last updated: 2026-10-02 (1.3.13 release preparation; public versions unchanged)
 
 ## 1.3.13 release preparation (2026-10-02)
 
+Scope correction: the owner rejected further unrelated browser investigation.
+The release will carry only the fixed-path deployment repair on the published
+1.3.12 baseline. The unpublished browser trial and its failed capture experiments
+remain preserved on main, outside this deployment release. The compatible public
+injector remains usable without a store update. The older combined-candidate
+publication blockers below describe that trial, not the narrowed release.
+
 The owner authorized bump, changelog, commit, push and publication across configured
 channels. Source versions are 1.3.13. The release combines the committed browser and
 workbench corrections with fixed-path package updates under ADR-0193. Separate
@@ -54,6 +61,12 @@ masked viewport/magnified capture passes after the compositor correction; Window
 still expires its mask. The next capture candidate changes only viewport raster
 scale to force surface refresh while retaining CSS view geometry. Linux background
 native pointer focus remains independently unresolved. Public versions stay 1.3.12.
+
+Run 37065889684 rejects the viewport raster-scale attempt: Windows still reaches
+mask expiry. That unproven resampling change is removed. The source retains the
+opacity correction with positive Linux capture evidence. Linux native background
+pointer focus and Windows masked viewport capture remain release blockers. Source
+and process gates pass; no public 1.3.13 publication or release tag is claimed.
 
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 
