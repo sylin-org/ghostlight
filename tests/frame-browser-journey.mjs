@@ -172,7 +172,10 @@ try {
   };
   await until(() => nativeReady, "real connector negotiation");
   await rawWorker(`(()=>{globalThis.fixtureDispatchErrors=[];const original=dispatch;dispatch=async request=>{try{return await original(request)}catch(error){fixtureDispatchErrors.push({command:request.command.command,error:String(error),stack:String(error.stack||'').slice(0,1000)});throw error}};return true})()`);
-  diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,state:liveState})`);
+  await rawWorker(`(()=>{globalThis.fixtureCaptureTrace=[];const record=value=>{fixtureCaptureTrace.push({at:performance.now(),...value});if(fixtureCaptureTrace.length>64)fixtureCaptureTrace.shift()};
+    const route=documents.route;documents.route=async(...args)=>{const result=await route(...args);const [tabId,frameId,message]=args;if(message.kind.startsWith('capture_mask')){record({kind:message.kind,result});if(message.kind==='capture_mask_check'&&!result.valid){try{const state=await chrome.scripting.executeScript({target:{tabId,frameIds:[frameId]},world:'MAIN',func:()=>Array.from(document.querySelectorAll('iframe')).map(frame=>({visibility:getComputedStyle(frame).visibility,opacity:getComputedStyle(frame).opacity}))});record({kind:'invalid_mask_styles',state:state.map(item=>item.result)})}catch(error){record({kind:'invalid_mask_styles',error:String(error)})}}}return result};
+    const send=chrome.debugger.sendCommand.bind(chrome.debugger);chrome.debugger.sendCommand=async(target,method,params)=>{if(method==='Page.captureScreenshot')record({method,phase:'before'});const result=await send(target,method,params);if(method==='Page.captureScreenshot')record({method,phase:'after'});return result};return true})()`);
+  diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,capture:fixtureCaptureTrace,state:liveState})`);
   await until(() => nativeReady, "real connector negotiation");
   const connector = start(executable("ghostlight-mcp-connector"));
   let mcp = channel((message) => connector.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"));

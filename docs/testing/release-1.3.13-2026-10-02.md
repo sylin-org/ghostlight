@@ -99,3 +99,22 @@ when the diagnostic worker was evaluated before native readiness; evaluation now
 waits for the fixture handshake. These diagnostics are test-only.
 The corrected local frame journey passes all 69 checks with pinned Chrome 152;
 the other browser component lanes passed in that same local source run.
+
+CI run 37061973736 passes both process lanes, Rust, extension, dependency and release
+truth gates. Linux native startup now reaches the frame journey. Both browser lanes
+still fail. The Linux failure-only probe observes native mouseMoved retaining human
+focus, a mouse-source synthetic tap taking work-window focus and one trusted click,
+and owned tab selection retaining human focus. The production trace observes mouse
+press/release followed by work-window focus; trusted key and text input precede it
+without a focus change. No pointer mechanism substitution is accepted by this probe.
+Windows dispatch diagnostics locate the screenshot failure in post-capture mask
+verification. Added fixture tracing measures capture duration and inspects excluded
+iframe mask styles before cleanup when verification fails. It records no page text.
+
+Native startup also rechecks the port after the attendance await. Concurrent connect
+attempts then share the first port instead of opening two. The regression test now
+exercises both simultaneous attempts. Source gates and all 407 extension tests pass;
+the local frame journey still passes all 69 checks with capture diagnostics enabled.
+Publication remains held. A blanket Linux background-pointer refusal was discussed
+as a safe fallback, but is not implemented; the coordinator recommended resolving
+background pointer support to preserve useful work in the default attention mode.

@@ -139,6 +139,17 @@ not establish that this modern epoch cleanup occurred.
 
 ## Limits
 
+### Platform evidence correction (2026-10-02)
+
+The Windows trusted-input trial does not establish Linux quiet pointer support.
+Pinned Chrome 152.0.7977.82 under Xvfb/Openbox takes work-window focus during a native
+mouse press/release. A mouse-source synthetic tap does too; tab selection, native
+key input and native text insertion retain human focus in that fixture. Existing
+packet fences report the subsequent change conservatively, but observing it after
+dispatch does not satisfy the quiet promise. This remains an unpublished release
+blocker until a focus-preserving pointer mechanism is proven. No alternate pointer
+semantics or platform refusal is accepted by this evidence correction.
+
 This is enforcement of Ghostlight's direct browser mechanisms, not OS or page-code containment.
 Explicit scripts and page actions can cause browser-originated popups, dialogs, or focus behavior.
 Background work may create a visible unfocused window. It does not promise no windows, silence

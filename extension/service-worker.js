@@ -299,6 +299,7 @@ async function establishNativeConnection() {
     if (!browserId) await initializeLocalState();
     if (nativePort) return;
     const attended = await holdsFocusedWindow();
+    if (nativePort) return;
     stage = "connect_native";
     const port = chrome.runtime.connectNative(HOST_NAME);
     connectionLog.record(connectionEvents.NATIVE_PORT_OPENED, { attempt });

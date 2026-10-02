@@ -36,6 +36,12 @@ now preserves hello-first ordering through the attendance query, with a focused
 regression test. Failure-only fixture diagnostics collect the remaining causes;
 no public 1.3.13 channel has been advanced.
 
+CI run 37061973736 confirms the remaining Linux focus issue occurs with native mouse
+presses and synthetic mouse taps, while owned tab selection retains human focus.
+Windows failure diagnostics locate post-capture mask verification. Source/process
+gates pass, and local Windows frame/quiet fixtures pass. Full background pointer
+support remains the release target; no blanket Linux refusal is implemented.
+
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 
 The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership
