@@ -65,3 +65,17 @@ Corrected Windows source passes fmt, strict workspace Clippy, all workspace test
 the complete browser lane. The local deterministic adapter ZIP SHA256 is
 `a7821d3fed44da845a1022e80b1c3682b9c0a70a9971bf79ee6fc88bff9527b3`.
 Linux acceptance remains pending the corrected workflow.
+
+Run 37058240300 passes the Linux source gate, fixed replacement and native Linux
+package build. CI run 37058202430 passes both Rust/extension lanes, dependency
+policy and Linux process journeys. It confirms legacy Ended/error delivery on Linux.
+The remaining browser failures occur at native mouse focus on Xvfb without a window
+manager and inactive Windows screenshot access. A Windows reconnect fixture also
+issued its first effect before browser runtime readiness.
+
+The follow-up fixture uses Openbox in the disposable Linux display, keeps inactive
+Chrome timers/rendering available and probes browser readiness read-only before
+the first post-restart mutation. It preserves foreground, trusted-effect and
+no-replay assertions. These fixture arguments are distinct from installed browser
+evidence. Local source gates, process and full Windows browser lanes pass with the
+fixture changes. Corrected CI acceptance is still required.

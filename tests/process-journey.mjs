@@ -676,8 +676,19 @@ try {
   const relisted = await waitForMcpReady(mcp);
   assert.equal(relisted.result.tools.length, EXPECTED_TOOLS.length);
 
+  // MCP catalog readiness precedes browser runtime installation. Establish browser
+  // readiness with a read-only probe before requesting the first post-restart effect.
+  const browserReadyDeadline = Date.now() + 10000;
+  let browserReady;
+  do {
+    browserReady = structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } }));
+    if (browserReady.status === "succeeded") break;
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 25));
+  } while (Date.now() < browserReadyDeadline);
+  assert.equal(browserReady.status, "succeeded", JSON.stringify(browserReady));
+
   const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
-  assert.equal(reopened.status, "succeeded");
+  assert.equal(reopened.status, "succeeded", JSON.stringify(reopened));
   const restartedHandle = reopened.facts.tab;
 
   const read = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: restartedHandle } }));

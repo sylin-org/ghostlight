@@ -10,11 +10,12 @@ const POLL_MS = 50;
 const delay = (ms) => new Promise(done => setTimeout(done, ms));
 const exited = child => !child || child.startError || child.exitCode !== null || child.signalCode !== null;
 
-// The unattended Windows desktop can occlude even the focused test window and stop screenshot
-// composition. This one fixture argument keeps capture rendering without selecting a tab/window.
-// It is never used by production browser startup; installed evidence must disclose the argument.
+// Unattended desktops can throttle inactive timers or rendering and stall screenshot composition.
+// These fixture arguments keep rendering without selecting a tab/window. Production startup
+// never uses them; installed evidence must disclose any fixture arguments separately.
 export function fixtureRenderingArguments(platform = process.platform) {
-  return platform === "win32" ? ["--disable-backgrounding-occluded-windows"] : [];
+  return ["--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+    ...(platform === "win32" ? ["--disable-backgrounding-occluded-windows"] : [])];
 }
 
 // Chrome can publish this file before its final bytes or Windows sharing handle are available.

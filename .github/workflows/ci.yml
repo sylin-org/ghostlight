@@ -181,7 +181,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb openbox
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: "1.95.0"
@@ -208,7 +208,7 @@ jobs:
           "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/hardening-suite.mjs --lane=browser
+        run: dbus-run-session -- xvfb-run -a bash -c 'openbox --sm-disable > /tmp/ghostlight-openbox.log 2>&1 & node tests/hardening-suite.mjs --lane=browser'
       - name: Run real Chromium regressions on fresh binaries
         if: runner.os == 'Windows'
         run: node tests/hardening-suite.mjs --lane=browser

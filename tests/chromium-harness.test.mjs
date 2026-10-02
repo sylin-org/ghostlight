@@ -10,10 +10,11 @@ const busy = code => Object.assign(new Error(code), { code });
 
 test("disposable Windows rendering fixture has no foreground, profile or sandbox arguments", () => {
   const windows = fixtureRenderingArguments("win32");
-  assert.deepEqual(windows, ["--disable-backgrounding-occluded-windows"]);
+  const rendering = ["--disable-background-timer-throttling", "--disable-renderer-backgrounding"];
+  assert.deepEqual(windows, [...rendering,"--disable-backgrounding-occluded-windows"]);
   assert.ok(!windows.some(value => /focus|active|sandbox|user-data|extension|debugging/.test(value)));
-  assert.deepEqual(fixtureRenderingArguments("linux"), []);
-  assert.deepEqual(fixtureRenderingArguments("darwin"), []);
+  assert.deepEqual(fixtureRenderingArguments("linux"), rendering);
+  assert.deepEqual(fixtureRenderingArguments("darwin"), rendering);
 });
 
 test("DevTools publication tolerates known sharing errors and a partially written file", async () => {

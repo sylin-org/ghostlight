@@ -111,7 +111,7 @@ const server = createServer(async (request, response) => {
       agent.addEventListener('input',event=>{textModel=agent.value;nativeTextInputs.push({trusted:event.isTrusted,value:agent.value})});
       race.addEventListener('click',event=>nativeClicks.push({trusted:event.isTrusted}));</script>`);
 });
-let socket, cdp, chromium, journeyPassed = false, createdDeployLock = false;
+let socket, cdp, chromium, observeFailure, journeyPassed = false, createdDeployLock = false;
 const deployLock = join(binDir, "deploy.lock"), deployMarker = `quiet custody fixture ${randomUUID()}`;
 const check = name => { report.checks.push(name); save(); console.log(`PASS quiet: ${name}`); };
 function receipt(edge, tool, result) {
@@ -213,6 +213,7 @@ try {
       awaitPromise: true, replMode: true }, workerSession);
     assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result.value;
   };
+  observeFailure = () => rawWorker(`Promise.all([chrome.windows.getAll(),chrome.tabs.query({})]).then(([windows,tabs])=>({windows:windows.map(({id,focused,state})=>({id,focused,state})),tabs:tabs.map(({id,windowId,active})=>({id,windowId,active})),activations:globalThis.quietActivations||[],focuses:globalThis.quietWindowFocuses||[]}))`);
   if (legacy) {
     await until(() => controls.includes("ended") && nativeErrors.some(frame => frame.code === "browser_attention_upgrade_required"), "old adapter receives Ended and explicit upgrade error");
     await until(() => rawWorker("liveState.control_state==='ended' && Boolean(liveState.last_error?.includes('Update Ghostlight'))"), "legacy worker applies retirement state and displays upgrade detail");
@@ -617,6 +618,7 @@ try {
   }
   journeyPassed = true;
 } catch (error) {
+  if (observeFailure) { try { report.browser_at_failure = await observeFailure(); } catch (diagnosticError) { report.browser_diagnostic_failure = String(diagnosticError); } }
   try { report.desktop_foreground_at_failure = desktopForeground(); } catch (diagnosticError) { report.desktop_foreground_failure = String(diagnosticError); }
   report.failure = String(error.stack || error); report.finished_at = new Date().toISOString(); save(); throw error;
 } finally {
