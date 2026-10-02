@@ -100,6 +100,7 @@ struct OperationState {
     phase: OperationPhase,
     tab: Option<String>,
     provenance: Option<crate::provenance::ConnectionDetails>,
+    progress: Option<crate::language::progress::WaitProgress>,
 }
 
 impl WorkbenchProjection {
@@ -251,6 +252,7 @@ impl WorkbenchProjection {
                             .filter(|operation| operation.workspace == *workspace)
                             .and_then(|operation| operation.tab.clone()),
                         provenance: provenance.clone(),
+                        progress: None,
                         started_at_ms: unix_ms(),
                         phase: if matches!(event, DomainEvent::WorkWaiting { .. }) {
                             OperationPhase::Waiting
@@ -272,6 +274,7 @@ impl WorkbenchProjection {
                     let change = state.operations.get_mut(invocation).map(|operation| {
                         operation.activity = *activity;
                         operation.tab = None;
+                        operation.progress = None;
                         WorkbenchChange::OperationChanged {
                             operation: OperationSummary::from(&*operation),
                         }
@@ -285,16 +288,26 @@ impl WorkbenchProjection {
                     let change = state.set_phase(invocation, OperationPhase::Attention);
                     (None, change)
                 }
-                DomainEvent::WorkBlocked { invocation, .. } => {
+                DomainEvent::WorkBlocked {
+                    invocation,
+                    presentation,
+                    ..
+                } => {
                     let change = state.set_phase(invocation, OperationPhase::Blocked);
-                    let notification = state
-                        .notified
-                        .insert((invocation.clone(), NotificationKind::Blocked))
-                        .then(|| WorkbenchNotification {
-                            kind: NotificationKind::Blocked,
-                            title: "Ghostlight blocked an action".into(),
-                            body: "A configured guardrail prevented browser work.".into(),
-                        });
+                    let protective = matches!(
+                        presentation,
+                        crate::events::DenialPresentation::TabKeptOpenByPolicy
+                            | crate::events::DenialPresentation::TabKeptOpenBySetting
+                    );
+                    let notification = (!protective
+                        && state
+                            .notified
+                            .insert((invocation.clone(), NotificationKind::Blocked)))
+                    .then(|| WorkbenchNotification {
+                        kind: NotificationKind::Blocked,
+                        title: "Ghostlight blocked an action".into(),
+                        body: "A configured guardrail prevented browser work.".into(),
+                    });
                     (notification, change)
                 }
                 DomainEvent::WorkCompleted { invocation, .. } => {
@@ -343,6 +356,29 @@ impl WorkbenchProjection {
         self.publish(change);
     }
 
+    /// Project a wait's bounded purpose through the existing operation update, without audit.
+    pub(crate) fn wait_progress(
+        &self,
+        invocation: &str,
+        workspace: &str,
+        progress: crate::language::progress::WaitProgress,
+    ) {
+        let change = {
+            let mut state = self.lock();
+            let Some(operation) = state.operations.get_mut(invocation) else {
+                return;
+            };
+            if operation.workspace != workspace || operation.progress == Some(progress) {
+                return;
+            }
+            operation.progress = Some(progress);
+            WorkbenchChange::OperationChanged {
+                operation: OperationSummary::from(&*operation),
+            }
+        };
+        self.publish(change);
+    }
+
     #[cfg(test)]
     pub(crate) fn record(
         &self,
@@ -359,8 +395,23 @@ impl WorkbenchProjection {
         provenance: Option<crate::provenance::ConnectionDetails>,
     ) {
         let child = record.step.is_some();
-        let item = {
+        let (item, progress_change) = {
             let mut state = self.lock();
+            let progress_change = if child {
+                state
+                    .operations
+                    .get_mut(&record.invocation)
+                    .and_then(|operation| {
+                        operation
+                            .progress
+                            .take()
+                            .map(|_| WorkbenchChange::OperationChanged {
+                                operation: OperationSummary::from(&*operation),
+                            })
+                    })
+            } else {
+                None
+            };
             if record.step.is_some_and(|step| step.preparation_failed) {
                 if let Some(operation) = state.operations.get_mut(&record.invocation) {
                     operation.tab = None;
@@ -397,8 +448,11 @@ impl WorkbenchProjection {
             {
                 *stored = item.clone();
             }
-            item
+            (item, progress_change)
         };
+        if let Some(change) = progress_change {
+            self.publish(change);
+        }
         self.publish(if child {
             WorkbenchChange::CompositionChanged {
                 record: Box::new(item),
@@ -604,7 +658,10 @@ impl WorkbenchFacade {
             },
             readiness,
             overview: OverviewSummary {
-                active_sessions: sessions.len(),
+                active_sessions: sessions
+                    .iter()
+                    .filter(|session| !session.connections.is_empty())
+                    .count(),
                 active_operations: operations.len(),
                 connected_browsers,
                 blocked_in_history: history.iter().filter(|item| !item.allowed).count(),
@@ -1211,7 +1268,7 @@ impl ReadinessSummary {
 /// At-a-glance counts.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct OverviewSummary {
-    /// Admitted sessions.
+    /// Workspaces with at least one current intake connection; retained custody is separate.
     pub active_sessions: usize,
     /// Current operations.
     pub active_operations: usize,
@@ -1221,7 +1278,7 @@ pub struct OverviewSummary {
     pub blocked_in_history: usize,
 }
 
-/// One admitted MCP session.
+/// One admitted workspace, including caller continuity without a current intake connection.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SessionSummary {
     /// Opaque workspace identity.
@@ -1276,7 +1333,9 @@ impl From<&OperationState> for OperationSummary {
             workspace: value.workspace.clone(),
             tab: value.tab.clone(),
             tool: value.tool.clone(),
-            activity: if value.phase == OperationPhase::Waiting {
+            activity: if let Some(progress) = value.progress {
+                progress.summary()
+            } else if value.phase == OperationPhase::Waiting {
                 crate::language::outcome::WAITING_FOR_WORK.into()
             } else {
                 activity_label(value.activity).into()

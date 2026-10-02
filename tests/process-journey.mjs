@@ -968,14 +968,14 @@ try {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
   mcp.notify("notifications/cancelled", { requestId: delayed.id, reason: "acceptance cancellation" });
   const cancelled = structured(await delayed.promise);
-  assert.equal(cancelled.status, "unknown");
-  assert.equal(cancelled.effect, "unknown");
-  assert.equal(cancelled.repeat_safe, false);
-  // An effect whose fate is unknown names the open-dialog hypothesis and the observation
-  // route (d5a8c5de); it never suggests replaying the interrupted call.
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.effect, "none");
+  assert.equal(cancelled.repeat_safe, true);
+  assert.ok(cancelled.summary.includes("observation was cancelled"));
+  // The exact command was an observation. A lost receipt does not invent mutation evidence
+  // or claim that the condition was confirmed.
   assert.deepEqual(cancelled.next_steps, [
-    "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.",
-    "Then observe the page with browser_read or browser_inspect to learn what happened.",
+    "Observe the current page when document access is available. This unavailable observation does not confirm the requested condition.",
   ]);
 
   const closed = structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: restartedHandle } }));

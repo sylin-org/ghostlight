@@ -5,15 +5,7 @@ const stateApi = globalThis.GhostlightState;
 const frames = globalThis.GhostlightFrames;
 const documents = globalThis.GhostlightDocuments.create({
   getFrames: (tabId) => chrome.webNavigation.getAllFrames({ tabId }),
-  sendDocument: async (tabId, documentId, message) => {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId, documentIds: [documentId] },
-      world: "MAIN",
-      func: injectedContentPrimitive,
-      args: [message]
-    });
-    return contentInjectionResult(results);
-  },
+  sendDocument: sendDocumentPrimitive,
   frames
 });
 
@@ -96,7 +88,7 @@ const dialogWaiters = new Map();
 const cancelled = new Set();
 const CANCEL_MARKER_LIMIT = 256;
 let browserServiceEpoch = null;
-const scriptEvaluations = new Map();
+const cancellableOperations = new Map();
 // The per-frame semantic match cap lives in the content script; this is the same ceiling
 // applied to the merged cross-frame result so embedded frames cannot outbid the top one.
 const QUERY_SEMANTIC_CAP = 8;
@@ -785,6 +777,7 @@ async function dispatch(request) {
   }
   if (cancelled.delete(request.correlation)) return { outcome: "cancelled" };
   if (command.command === "evaluate_script") return evaluateScript(request, command);
+  if (command.command === "observe") return observeOperation(request, command);
   // Extension reload clears storage.session, but not the orchestrator's workspace.
   // Relearn its authoritative association from explicit work, never from a page event.
   // Inventory, document discovery, visual reveal, and released-tab cleanup do not acquire custody.
@@ -940,10 +933,6 @@ async function dispatch(request) {
     return { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: result.uploaded_count, uploaded_bytes: result.uploaded_bytes, subject: result.subject };
   }
   if (command.command === "drop_image_at") return dropImageAt(request.correlation, command);
-  if (command.command === "observe") {
-    const result = await observeAcrossFrames(command);
-    return { outcome: "observed", tab_id: command.tab_id, ...result };
-  }
   if (command.command === "inspect_dialog") return inspectDialog(command.tab_id);
   if (command.command === "handle_dialog") return handleDialog(command);
   if (command.command === "read_diagnostics") return readDiagnostics(command);
@@ -1378,8 +1367,16 @@ async function injectedContentPrimitive(message) {
     return await window.__ghostlight_dispatch__(message);
   } catch (error) {
     // Chromium can omit the result of a rejected injected Promise. Return its failure.
-    return { error: String(error?.message ?? error) };
+    return { error: String(error?.message ?? error), code: error?.code };
   }
+}
+
+async function sendDocumentPrimitive(tabId, documentId, message) {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, documentIds: [documentId] }, world: "MAIN",
+    func: injectedContentPrimitive, args: [message]
+  });
+  return contentInjectionResult(results);
 }
 
 function contentInjectionResult(results) {
@@ -1388,7 +1385,7 @@ function contentInjectionResult(results) {
     throw new Error("content primitive failed (no result)");
   }
   const result = results[0].result;
-  if (Object.hasOwn(result, "error")) throw new Error(String(result.error ?? "content primitive failed"));
+  if (Object.hasOwn(result, "error")) throw Object.assign(new Error(String(result.error ?? "content primitive failed")), { code: result.code });
   return result;
 }
 
@@ -1686,10 +1683,79 @@ async function firstFrameAnswer(tabId, message) {
   throw lastError ?? new Error("no editable control is focused");
 }
 
-async function observeAcrossFrames(command) {
+// The existing correlated owner covers this exact scope before setup or page injection awaits.
+function beginCancellableOperation(request, tabId) {
+  let finished;
+  const record = { correlation: request.correlation, epoch: request.serviceEpoch, tabId,
+    scope: request.documentScope, cancelled: cancelled.delete(request.correlation), cleanup: null,
+    done: new Promise(resolve => { finished = resolve; }), finished: () => finished() };
+  cancellableOperations.set(record.correlation, record);
+  return record;
+}
+
+function finishCancellableOperation(record) {
+  if (cancellableOperations.get(record.correlation) === record) cancellableOperations.delete(record.correlation);
+  record.finished();
+}
+
+function assertObservation(record, cancelling = false) {
+  if (!record.scope || !record.runtime || (!cancelling && record.cancelled) || record.epoch !== browserServiceEpoch
+    || cancellableOperations.get(record.correlation) !== record
+    || documents.context(record.tabId) !== record.scope
+    || globalThis.ghostlightPageRuntime !== record.runtime) throw scriptCancellation(false);
+}
+
+async function observationContent(record, frameId, message) {
+  assertObservation(record);
+  const frame = record.scope?.raw.find(item => item.frameId === frameId);
+  if (!frame || !record.scope.scope.allowed.includes(frame.documentId)) throw globalThis.GhostlightDocuments.changed();
+  const observation = { documentId: frame.documentId, token: crypto.randomUUID() };
+  record.observations.set(observation.token, observation);
+  try {
+    const result = await contentIn(record.tabId, frameId, { ...message,
+      observation_token: observation.token, runtime_id: record.runtime.sha256 });
+    assertObservation(record);
+    return result;
+  } finally {
+    if (record.observations.get(observation.token) === observation) record.observations.delete(observation.token);
+  }
+}
+
+async function cancelObservationFrames(record) {
+  assertObservation(record, true);
+  await Promise.all([...record.observations.values()].map(observation =>
+    sendDocumentPrimitive(record.tabId, observation.documentId, {
+      kind: shared.OBSERVATION_CONTROL.CANCEL_KIND,
+      observation_token: observation.token, runtime_id: record.runtime.sha256
+    })));
+}
+
+async function observeOperation(request, command) {
+  const record = beginCancellableOperation(request, command.tab_id);
+  record.runtime = globalThis.ghostlightPageRuntime;
+  record.observations = new Map();
+  record.dispose = () => cancelObservationFrames(record);
+  try {
+    assertObservation(record);
+    if (request.workspace) {
+      await topology.remember(command.tab_id, request.workspace);
+      assertObservation(record);
+      await retainManagedDebugger(command.tab_id);
+      assertObservation(record);
+    }
+    const result = await observeAcrossFrames(command, record);
+    assertObservation(record);
+    return { outcome: "observed", tab_id: command.tab_id, ...result };
+  } finally {
+    finishCancellableOperation(record);
+  }
+}
+
+async function observeAcrossFrames(command, record) {
+  const observeIn = (frameId, message) => observationContent(record, frameId, message);
   if (command.condition === "visual_settle" || command.condition === "layout_stable") {
     const frameId = command.locator ? (frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID) : frames.TOP_FRAME_ID;
-    return contentIn(command.tab_id, frameId, {
+    return observeIn(frameId, {
       kind: "observe",
       condition: command.condition,
       value: command.value,
@@ -1699,10 +1765,10 @@ async function observeAcrossFrames(command) {
     });
   }
   if (command.condition === "load_ready" || command.condition === "url_contains") {
-    return contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms, visual_settle: command.visual_settle });
+    return observeIn(frames.TOP_FRAME_ID, { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms, visual_settle: command.visual_settle });
   }
   if (command.condition === "target_present" || command.condition === "target_absent") {
-    return contentIn(command.tab_id, frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID, {
+    return observeIn(frames.frameOf(command.locator) ?? frames.TOP_FRAME_ID, {
       kind: "observe",
       condition: command.condition,
       value: command.value,
@@ -1713,19 +1779,25 @@ async function observeAcrossFrames(command) {
   }
   const wantsPresence = command.condition === "text_present";
   const frameIds = await httpFrameIds(command.tab_id);
-  const settled = await Promise.all(frameIds.map((frameId) =>
-    contentIn(
-      command.tab_id,
+  const receipts = await Promise.allSettled(frameIds.map((frameId) =>
+    observeIn(
       frameId,
       { kind: "observe", condition: command.condition, value: command.value, timeout_ms: command.timeout_ms, visual_settle: command.visual_settle }
-    ).catch(() => ({ satisfied: !wantsPresence, elapsed_ms: 0 }))
+    )
   ));
+  const cancellation = receipts.find(entry => entry.status === "rejected" && entry.reason?.code === shared.OBSERVATION_CONTROL.CANCELLED_CODE);
+  if (cancellation) throw cancellation.reason;
+  assertObservation(record);
+  const settled = receipts.map(entry => entry.status === "fulfilled" ? entry.value : { satisfied: !wantsPresence, elapsed_ms: 0 });
   const satisfied = wantsPresence ? settled.some((entry) => entry.satisfied) : settled.every((entry) => entry.satisfied);
   let readiness = "loading";
   try {
-    const top = await contentIn(command.tab_id, frames.TOP_FRAME_ID, { kind: "observe", condition: "load_ready", timeout_ms: 0 });
+    const top = await observeIn(frames.TOP_FRAME_ID, { kind: "observe", condition: "load_ready", timeout_ms: 0 });
     readiness = top?.readiness ?? readiness;
-  } catch (_error) { /* an absent frame leaves readiness unknown-loading */ }
+  } catch (error) {
+    if (error?.code === shared.OBSERVATION_CONTROL.CANCELLED_CODE) throw error;
+    /* an absent frame leaves readiness unknown-loading */
+  }
   return { satisfied, elapsed_ms: Math.max(0, ...settled.map((entry) => entry.elapsed_ms ?? 0)), readiness };
 }
 
@@ -2096,7 +2168,7 @@ async function dragPoints(correlation, command, nativeContext = null) {
 }
 
 const SCRIPT_SETTLE_MS = 100;
-const SCRIPT_CLEANUP_TIMEOUT_MS = 1000;
+const OPERATION_CLEANUP_TIMEOUT_MS = 1000;
 
 function scriptCancellation(dispatched) {
   return Object.assign(new Error("The browser operation was cancelled; earlier page effects are not reversed."),
@@ -2105,7 +2177,7 @@ function scriptCancellation(dispatched) {
 
 function assertScriptEvaluation(record) {
   if (record.cancelled || record.epoch !== browserServiceEpoch
-    || scriptEvaluations.get(record.correlation) !== record
+    || cancellableOperations.get(record.correlation) !== record
     || (record.lease && !debuggerLifecycle.owns(record.lease))
     || (record.scope && documents.context(record.tabId) !== record.scope)) {
     throw scriptCancellation(record.dispatched);
@@ -2135,8 +2207,7 @@ function teardownScriptEvaluation(record, cancelling = false) {
       if (lease) await debuggerLifecycle.release(record.tabId, lease);
     })().finally(() => {
       if (navigationWatchers.get(record.tabId) === record.watcher) navigationWatchers.delete(record.tabId);
-      if (scriptEvaluations.get(record.correlation) === record) scriptEvaluations.delete(record.correlation);
-      record.finished();
+      finishCancellableOperation(record);
     });
   }
   return record.teardown;
@@ -2145,20 +2216,20 @@ function teardownScriptEvaluation(record, cancelling = false) {
 async function cancelBrowserOperation(epoch, correlation) {
   if (!epoch || epoch !== browserServiceEpoch || typeof correlation !== "string"
     || correlation.length === 0 || correlation.length > 96 || !/^[A-Za-z0-9_-]+$/.test(correlation)) return;
-  const record = scriptEvaluations.get(correlation);
+  const record = cancellableOperations.get(correlation);
   if (!record || record.epoch !== epoch) {
     cancelled.add(correlation);
     while (cancelled.size > CANCEL_MARKER_LIMIT) cancelled.delete(cancelled.values().next().value);
     return;
   }
   if (!record.cleanup) {
-    const retired = teardownScriptEvaluation(record, true);
-    record.cleanup = new Promise(resolve => {
-      const timer = setTimeout(() => resolve(false), SCRIPT_CLEANUP_TIMEOUT_MS);
-      Promise.all([retired, record.done, record.scope?.settled])
-        .then(() => { clearTimeout(timer); resolve(true); }, () => { clearTimeout(timer); resolve(false); });
-    });
+    record.cancelled = true;
+    let complete;
+    const timer = setTimeout(() => complete(false), OPERATION_CLEANUP_TIMEOUT_MS);
+    record.cleanup = new Promise(resolve => { complete = success => { clearTimeout(timer); resolve(success); }; });
     if (record.scope) documents.cleaning(record.scope, record.cleanup);
+    Promise.all([record.dispose(), record.done, record.scope?.settled])
+      .then(() => complete(true), () => complete(false));
   }
   if (!await record.cleanup) throw globalThis.GhostlightDocuments.cleanupRequired();
 }
@@ -2166,12 +2237,10 @@ async function cancelBrowserOperation(epoch, correlation) {
 async function evaluateScript(request, command) {
   const correlation = request.correlation;
   const commits = [];
-  let finished;
-  const record = { correlation, epoch: request.serviceEpoch, tabId: command.tab_id,
-    scope: request.documentScope, watcher: { correlation, commits }, cancelled: cancelled.delete(correlation), dispatched: false,
-    evaluationPending: false, acquisition: null, retirement: null, teardown: null, cleanup: null,
-    done: new Promise(resolve => { finished = resolve; }), finished: () => finished() };
-  scriptEvaluations.set(correlation, record);
+  const record = beginCancellableOperation(request, command.tab_id);
+  Object.assign(record, { watcher: { correlation, commits }, dispatched: false,
+    evaluationPending: false, acquisition: null, retirement: null, teardown: null });
+  record.dispose = () => teardownScriptEvaluation(record, true);
   record.acquisition = (async () => {
     assertScriptEvaluation(record);
     if (request.workspace) {

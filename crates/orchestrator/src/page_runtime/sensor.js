@@ -10,6 +10,28 @@
   const DEFAULT_QUIET_MS = 50;
   const DEFAULT_POLL_INTERVAL_MS = 50;
 
+  /** Wait without retaining a polling timer or listener after the exact observer is cancelled. */
+  function delay(milliseconds, signal, options = {}) {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    const setTimer = options.setTimeout ?? setTimeout;
+    const clearTimer = options.clearTimeout ?? clearTimeout;
+    return new Promise((resolve, reject) => {
+      let timer = null, finished = false;
+      const complete = (cancelled = false) => {
+        if (finished) return;
+        finished = true;
+        if (timer !== null) clearTimer(timer);
+        signal?.removeEventListener("abort", abort);
+        if (cancelled) reject(signal.reason); else resolve();
+      };
+      const abort = () => complete(true);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
+      timer = setTimer(() => complete(), milliseconds);
+      if (finished && timer !== null) clearTimer(timer);
+    });
+  }
+
   /**
    * Bounded settlement sensor for load-sensitive DOM operations.
    *
@@ -129,6 +151,8 @@
    * @returns {Promise<{ settled: boolean, elapsed_ms: number }>}
    */
   async function settleVisual(target, options = {}) {
+    const signal = options.signal;
+    if (signal?.aborted) throw signal.reason;
     const maxWaitMs = options.maxWaitMs ?? options.timeout_ms ?? DEFAULT_VISUAL_MAX_WAIT_MS;
     const quietMs = options.quietMs ?? DEFAULT_VISUAL_QUIET_MS;
     const doc = options.document ?? (typeof document !== "undefined" ? document : null);
@@ -178,7 +202,7 @@
       }
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let pendingTimer = null;
       let pendingRaf = null;
       let ceilingTimer = null;
@@ -192,7 +216,16 @@
         if (pendingRaf) cafFn(pendingRaf);
         if (pendingTimer) clearTimeoutFn(pendingTimer);
         if (ceilingTimer) clearTimeoutFn(ceilingTimer);
+        signal?.removeEventListener("abort", abort);
       }
+
+      function abort() {
+        cleanup();
+        reject(signal.reason);
+      }
+
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
 
       function scheduleNext() {
         if (finished) return;
@@ -260,6 +293,7 @@
   }
 
   return {
+    delay,
     settle,
     settleVisual,
     DEFAULT_MAX_WAIT_MS,

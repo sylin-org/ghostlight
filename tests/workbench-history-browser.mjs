@@ -521,6 +521,96 @@ try {
   assert.equal(await evaluate("document.querySelector('#diagnostic-grid').textContent.includes('Browser adapter update needed')"), true);
   await capture('quiet-legacy-status-720');
   console.log('PASS incompatible adapter is visibly unavailable with update detail; browser count excludes it and operator runtime stays Active');
+  // The delight slice uses the same bundled surface and snapshot/event paths. These are owned
+  // projection fixtures, not installed native UX or physical-keyboard acceptance.
+  await evaluate(`(async () => {
+    const preview = window.__GHOSTLIGHT_PREVIEW__;
+    preview.audit_notice = null;
+    preview.browsers = [{id:'delight-browser',family:'Chromium',connected:true,adapter_version:preview.service.version}];
+    preview.sessions = [
+      {id:'delight-live-workspace',client_label:'delight MCP',channel:'mcp',connections:[{channel:'mcp'}],tab_count:2,active_operations:2,leased:true},
+      {id:'delight-retained-workspace',client_label:'Draft CLI',channel:'cli',connections:[],tab_count:1,active_operations:0,leased:false},
+      {id:'delight-dormant-workspace',client_label:'Empty CLI',channel:'cli',connections:[],tab_count:0,active_operations:0,leased:false}
+    ];
+    preview.readiness = {state:'ready',word:'Ready',tone:'quiet',detail:'Synthetic connected browser.',invites_control:true};
+    preview.history = Array.from({length:500},(_,index)=>({
+      invocation:'delight-history-'+index,workspace:'delight-live-workspace',tool:index===0?'browser_tabs':'browser_read',
+      capability:index===0?'action':'read',allowed:true,status:index===0?'blocked':'succeeded',effect:'none',complete:true,
+      timestamp_ms:Date.now()-index-1000,summary:index===0?"Kept the tab open: Ghostlight's preserve-tabs setting is on.":'Read 5 words.',
+      presentation:{label:index===0?'Tab preserved':'Completed',tone:index===0?'controlled':'complete',
+        summary:index===0?"Kept the tab open: Ghostlight's preserve-tabs setting is on.":'Read 5 words.',repeat_detail:''}
+    }));
+    preview.operations = [
+      {invocation:'delight-reading',workspace:'delight-live-workspace',tab:'tab_owned_read',tool:'browser_read',activity:'Reading',phase:'running',started_at_ms:Date.now()},
+      {invocation:'delight-waiting',workspace:'delight-live-workspace',tab:'tab_owned_wait',tool:'browser_wait',
+        activity:'Waiting for the requested text to appear (up to 15000 ms remaining).',phase:'running',started_at_ms:Date.now()-1}
+    ];
+    await resync({rebuildFeed:true}); document.querySelector('[data-view="monitor"]').click();
+  })()`);
+  assert.equal(await evaluate("document.querySelector('#queue-count').textContent"), '200 shown / 500 retained groups');
+  assert.equal(await evaluate("document.querySelector('#connections').textContent.includes('Empty CLI')"), false);
+  assert.equal(await evaluate("document.querySelector('#connections').textContent.includes('1 tab retained')"), true);
+  assert.equal(await evaluate("document.querySelector('#state-facts').textContent.includes('1 connections')"), true);
+  for (const width of [1280,720]) {
+    await resize(width,900); await delay(80);
+    assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+    assert.equal(await evaluate("document.querySelector('[data-action-details=\"delight-waiting:action\"]').textContent"), 'browser_wait');
+    assert.equal(await evaluate("document.querySelector('[data-action-details=\"delight-waiting:action\"]').closest('.row').querySelector('.row-activity').textContent.includes('requested text to appear')"), true);
+    await capture('delight-wait-history-'+width);
+  }
+  await evaluate("document.querySelector('#clear-monitor').click()");
+  await evaluate("resync({rebuildFeed:true})");
+  assert.equal(await evaluate("document.querySelector('#queue-count').textContent"), '2 shown / 500 retained groups');
+  assert.equal(await evaluate("document.querySelector('#show-history').hidden"), false);
+  assert.equal(await evaluate("document.querySelector('#toast').textContent.includes('Cleared 500 completed groups')"), true);
+  await capture('delight-cleared-720');
+  await evaluate("document.querySelector('#show-history').click()");
+  assert.equal(await evaluate("document.querySelector('#queue-count').textContent"), '200 shown / 500 retained groups');
+  await evaluate(`(() => {
+    const operation = {invocation:'delight-composed-wait',workspace:'delight-live-workspace',tab:'tab_owned_wait',
+      tool:'browser_flow',activity:'Waiting for the requested text to appear (up to 20000 ms remaining).',
+      phase:'running',started_at_ms:Date.now()+1};
+    const record = {invocation:operation.invocation,workspace:operation.workspace,tab:operation.tab,tool:operation.tool,
+      capability:'read',allowed:true,status:'succeeded',effect:'partial',complete:false,timestamp_ms:Date.now(),
+      summary:'Completed 2 of 4 steps.',presentation:{summary:'Completed 2 of 4 steps.',label:'Working',tone:'running'},
+      steps:[{position:1,record:window.__GHOSTLIGHT_HISTORY_FIXTURE__.steps[0].record},
+        {position:2,record:window.__GHOSTLIGHT_HISTORY_FIXTURE__.steps[1].record}]};
+    window.__GHOSTLIGHT_PUBLISH__({kind:'operation_started',operation});
+    window.__GHOSTLIGHT_PUBLISH__({kind:'composition_changed',record});
+    window.__GHOSTLIGHT_PREVIEW__.operations.push(operation);
+    window.__GHOSTLIGHT_PREVIEW__.history.unshift(record);
+    window.__GHOSTLIGHT_PREVIEW__.history.length=500;
+  })()`);
+  for (const width of [1280,720]) {
+    await resize(width,900);
+    await until(() => evaluate("document.querySelector('#hero-body .hero-activity')?.textContent.includes('20000 ms remaining')"), 'composed current wait purpose');
+    assert.equal(await evaluate("document.querySelector('#hero-body .hero-progress').textContent"), 'Completed 2 of 4 steps.');
+    assert.equal(await evaluate("document.querySelector('#queue-count').textContent"), '200 shown / 500 retained groups');
+    assert.equal(await evaluate("document.querySelector('#hero-body').textContent.includes('browser_flow')"), true);
+    await capture('delight-composed-wait-live-'+width);
+    await evaluate("resync({rebuildFeed:true})");
+    assert.equal(await evaluate("document.querySelector('#hero-body .hero-activity').textContent.includes('20000 ms remaining')"), true);
+    assert.equal(await evaluate("document.querySelector('#hero-body .hero-progress').textContent"), 'Completed 2 of 4 steps.');
+    assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+    await capture('delight-composed-wait-rebuilt-'+width);
+  }
+  await evaluate(`(() => {
+    const operation=window.__GHOSTLIGHT_PREVIEW__.operations.find(item=>item.invocation==='delight-composed-wait');
+    operation.activity='Reading';
+    window.__GHOSTLIGHT_PUBLISH__({kind:'operation_changed',operation});
+  })()`);
+  await until(() => evaluate("document.querySelector('#hero-body .hero-activity')?.textContent==='Reading'"), 'next child clears wait purpose');
+  assert.equal(await evaluate("document.querySelector('#hero-body').textContent.includes('ms remaining')"), false);
+  await evaluate("resync({rebuildFeed:true})");
+  assert.equal(await evaluate("document.querySelector('#hero-body .hero-activity').textContent"), 'Reading');
+  await capture('delight-composed-next-child-720');
+  await evaluate("document.querySelector('[data-view=\"about\"]').click()");
+  await delay(4300);
+  await resize(1280,900); await delay(80); await capture('delight-guardian-1280');
+  await resize(720,900); await delay(80);
+  assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
+  await capture('delight-guardian-720');
+  console.log('PASS delight: exact wait tool/purpose/reveal, composed live/rebuilt purpose and secondary counts, next-child budget removal, 200 shown/500 retained, quiet dormant continuity, clear/restore, and guardian card at 1280/720');
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }

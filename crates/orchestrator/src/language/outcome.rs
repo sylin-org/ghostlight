@@ -390,7 +390,7 @@ impl Outcome {
             Self::CompositionUnrecorded => "Completion was not recorded.".into(),
             Self::StepNotStarted => "This step could not start.".into(),
 
-            Self::SelectorUnresolved { matched } => {
+            Self::SelectorUnresolved { matched, .. } => {
                 if *matched == 0 {
                     "No visible control matched the semantic selector in the inspected content."
                         .into()
@@ -708,8 +708,11 @@ impl Outcome {
             Self::DocumentInspected {
                 truncated: true, ..
             } => vec!["Narrow the subtree root or depth to capture the rest.".into()],
+            Self::SelectorUnresolved { matched: 0, .. } => vec![
+                "If the control is still loading, use browser_wait with condition selector_present and this selector. Otherwise use browser_inspect for current controls.".into(),
+            ],
             Self::SelectorUnresolved { .. } => vec![
-                "Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact.".into(),
+                "Use browser_inspect to identify the intended control, then use its current target handle.".into(),
             ],
             Self::CompositionRan(progress) => progress.next_steps(),
             Self::Waited {
@@ -768,7 +771,7 @@ impl Outcome {
                 count: measured(*completed),
                 ..Observed::default()
             },
-            Self::SelectorUnresolved { matched: count } => Observed {
+            Self::SelectorUnresolved { matched: count, .. } => Observed {
                 count: measured(*count),
                 ..Observed::default()
             },
@@ -896,6 +899,8 @@ pub enum Refusal {
     InvalidRequest,
     /// Cancellation won before workspace admission.
     CancelledBeforeStart,
+    /// Cancellation won before the next physical command was dispatched.
+    CancelledBeforeDispatch,
     /// The invocation deadline expired before workspace admission.
     DeadlineBeforeStart,
     /// Configured authority blocked the job.
@@ -979,6 +984,7 @@ impl Refusal {
             Self::Capacity => "The work queue is full. This request was not started.",
             Self::InvalidRequest => "The call does not match the Ghostlight catalog.",
             Self::CancelledBeforeStart => "The browser job was cancelled before it started.",
+            Self::CancelledBeforeDispatch => "Cancelled before sending the next browser command.",
             Self::DeadlineBeforeStart => {
                 "The browser job deadline expired while waiting for the workspace."
             }
@@ -1084,8 +1090,7 @@ impl Refusal {
                 "Repeat the call when the current Ghostlight action has finished.".into(),
             ],
             Self::LocalInterlock => vec![
-                "The user can change the relevant Ghostlight extension setting or perform the action directly."
-                    .into(),
+                "Leave this tab open. If cleanup is wanted, the user can choose Show tab in the Ghostlight workbench and close that exact tab directly.".into(),
             ],
             Self::CredentialAuthorization => vec![
                 "If the user has explicitly authorized credential entry, repeat this request with user_authorized_credentials set to true. Otherwise ask for that instruction or let the user enter it directly."
@@ -1183,9 +1188,8 @@ impl Refusal {
                     .into(),
             ],
             Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch => vec![
-                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance."
-                    .into(),
-                "Then observe the page with browser_read or browser_inspect to learn what happened."
+                "Observe the current page with browser_read before preparing unfinished work. If document access is unavailable, the user can use Show tab for manual inspection.".into(),
+                "Do not repeat this action. Page code may continue after cancellation or a timeout."
                     .into(),
             ],
             Self::ScriptException => vec![
@@ -2298,7 +2302,7 @@ mod tests {
         );
         assert_eq!(
             Refusal::LocalInterlock.next_steps(),
-            vec!["The user can change the relevant Ghostlight extension setting or perform the action directly."]
+            vec!["Leave this tab open. If cleanup is wanted, the user can choose Show tab in the Ghostlight workbench and close that exact tab directly."]
         );
         assert!(Refusal::BrowserStopped { reconnect: false }
             .next_steps()
@@ -2310,8 +2314,8 @@ mod tests {
         assert_eq!(
             Refusal::EffectUnknown.next_steps(),
             vec![
-                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.",
-                "Then observe the page with browser_read or browser_inspect to learn what happened.",
+                "Observe the current page with browser_read before preparing unfinished work. If document access is unavailable, the user can use Show tab for manual inspection.",
+                "Do not repeat this action. Page code may continue after cancellation or a timeout.",
             ]
         );
 
@@ -2448,7 +2452,7 @@ mod tests {
         );
         assert_eq!(
             Outcome::SelectorUnresolved { matched: 0 }.next_steps(),
-            vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
+            vec!["If the control is still loading, use browser_wait with condition selector_present and this selector. Otherwise use browser_inspect for current controls."]
         );
         assert_eq!(
             composition(2, 5)

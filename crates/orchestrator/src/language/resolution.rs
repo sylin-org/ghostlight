@@ -162,9 +162,9 @@ fn refusal_summary(resolution: &Resolution, refusal: &Refusal) -> String {
             Refusal::DeadlineExpired { .. } | Refusal::DeadlineBeforeStart => {
                 "The time limit expired during preparation.".into()
             }
-            Refusal::CancelledAfterDispatch | Refusal::CancelledBeforeStart => {
-                "Cancelled during preparation.".into()
-            }
+            Refusal::CancelledAfterDispatch
+            | Refusal::CancelledBeforeStart
+            | Refusal::CancelledBeforeDispatch => "Cancelled during preparation.".into(),
             _ => refusal.summary(),
         };
         return format!("{problem} The requested action was not sent.");
@@ -193,6 +193,24 @@ fn refusal_summary(resolution: &Resolution, refusal: &Refusal) -> String {
         };
         return format!("{prefix} {problem}");
     }
+    if resolution.effect() == Effect::None && progress.attempted > 0 {
+        let unavailable = match refusal {
+            Refusal::CancelledAfterDispatch => {
+                Some("The browser observation was cancelled before its result arrived.")
+            }
+            Refusal::DeadlineExpired {
+                before_dispatch: false,
+            } => Some("The browser observation ran out of time before its result arrived."),
+            Refusal::ConnectionLost => {
+                Some("The browser connection was lost before the observation's result arrived.")
+            }
+            Refusal::EffectUnknown => Some("The browser observation's result was unavailable."),
+            _ => None,
+        };
+        if let Some(unavailable) = unavailable {
+            return format!("{unavailable} No browser change was requested.");
+        }
+    }
     refusal.summary()
 }
 
@@ -215,9 +233,9 @@ fn verification_summary(cause: &Refusal) -> String {
         Refusal::DeadlineExpired { .. } | Refusal::DeadlineBeforeStart => {
             "The follow-up check ran out of time."
         }
-        Refusal::CancelledAfterDispatch | Refusal::CancelledBeforeStart => {
-            "The follow-up check was cancelled."
-        }
+        Refusal::CancelledAfterDispatch
+        | Refusal::CancelledBeforeStart
+        | Refusal::CancelledBeforeDispatch => "The follow-up check was cancelled.",
         Refusal::DocumentUnavailable => {
             "Document access could not be verified for the follow-up check."
         }
@@ -272,6 +290,21 @@ fn recovery(resolution: &Resolution) -> (Vec<String>, String) {
         let step = "Inspect the intended result before preparing unfinished work; do not repeat the action to check it.";
         return (vec![step.into()], step.into());
     }
+    if resolution.effect() == Effect::None
+        && matches!(
+            resolution.cause(),
+            Some(
+                Refusal::CancelledAfterDispatch
+                    | Refusal::ConnectionLost
+                    | Refusal::EffectUnknown
+                    | Refusal::DeadlineExpired {
+                        before_dispatch: false
+                    }
+            )
+        )
+    {
+        return (vec!["Observe the current page when document access is available. This unavailable observation does not confirm the requested condition.".into()], String::new());
+    }
     if matches!(
         resolution.cause(),
         Some(Refusal::OperationCleanupRequired | Refusal::DocumentUnavailable)
@@ -305,6 +338,21 @@ fn metadata(resolution: &Resolution, summary: &str, repeat_detail: String) -> Re
         Effect::Partial => ("Partly completed", OutcomeTone::Caution),
         _ if control == Some(false) => ("Paused by you", OutcomeTone::Controlled),
         _ if control == Some(true) => ("Stopped by you", OutcomeTone::Controlled),
+        _ if resolution.effect() == Effect::None
+            && matches!(
+                cause,
+                Some(
+                    Refusal::LocalInterlock
+                        | Refusal::AuthorityBlocked {
+                            reason: BlockedReason::TabClose,
+                            ..
+                        }
+                )
+            ) =>
+        {
+            ("Tab preserved", OutcomeTone::Controlled)
+        }
+        _ if resolution.status() == Status::Cancelled => ("Cancelled", OutcomeTone::Controlled),
         _ if resolution.status() == Status::Succeeded => ("Completed", OutcomeTone::Complete),
         _ if !resolution.decision().allowed
             || matches!(
@@ -408,6 +456,29 @@ mod tests {
             host: Some("example.com".into()),
             subject: ActionSubject::unnamed(TargetRole::Button),
         })
+    }
+
+    #[test]
+    fn preserving_a_tab_is_calm_only_when_no_effect_occurred() {
+        for (effect, label, tone) in [
+            (Effect::None, "Tab preserved", OutcomeTone::Controlled),
+            (Effect::Partial, "Partly completed", OutcomeTone::Caution),
+            (Effect::Unknown, "Effects uncertain", OutcomeTone::Caution),
+        ] {
+            let (resolution, payload) = Resolution::fixture(
+                Conclusion::Refusal(Refusal::LocalInterlock),
+                Status::Blocked,
+                effect,
+                Verification::NotRequested,
+                Phase::RequestedEffect,
+                Progress::default(),
+                json!({}),
+            );
+            let projection = project(&resolution, payload);
+            let presentation = &projection.retained.resolution().unwrap().presentation;
+            assert_eq!(presentation.label, label);
+            assert_eq!(presentation.tone, tone);
+        }
     }
 
     #[test]

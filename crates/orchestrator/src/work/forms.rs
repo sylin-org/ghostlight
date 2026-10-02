@@ -22,6 +22,22 @@ use super::{
 };
 use ghostlight_bridge::browser::PhysicalFile;
 
+struct WaitObservation {
+    satisfied: bool,
+    elapsed_ms: u64,
+    readiness: ghostlight_bridge::browser::BrowserReadiness,
+}
+
+fn wait_budget_ms(context: &InvocationContext<'_>) -> u64 {
+    u64::try_from(
+        context
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
+}
+
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
         &self,
@@ -660,338 +676,231 @@ impl ApplicationExecutor {
             value.target.as_deref(),
             Capability::Read,
             |selected, locator, _target_role, decision| {
-                if value.condition == "duration" {
-                    let milliseconds: u64 = value
-                        .value
-                        .as_deref()
-                        .and_then(|raw| raw.parse().ok())
-                        .unwrap_or(0);
-                    let started = Instant::now();
-                    loop {
-                        if context.cancellation.is_cancelled() {
+                let context = InvocationContext {
+                    deadline: context
+                        .deadline
+                        .min(Instant::now() + std::time::Duration::from_millis(value.timeout_ms)),
+                    ..*context
+                };
+                self.workbench.wait_progress(
+                    context.invocation,
+                    context.workspace.as_str(),
+                    crate::language::progress::WaitProgress::condition(
+                        value,
+                        wait_budget_ms(&context),
+                    ),
+                );
+                let mut observed =
+                    match self.wait_condition(&context, selected, locator.clone(), value) {
+                        Ok(observed) => observed,
+                        Err(error) => {
                             return self.browser_failure(
-                                context,
+                                &context,
                                 decision,
-                                crate::browser::BrowserError::CancelledBeforeDispatch,
+                                error,
                                 Some(selected.physical_id),
-                            );
+                            )
                         }
-                        if started.elapsed().as_millis() >= u128::from(milliseconds) {
-                            break;
-                        }
-                        if Instant::now() >= context.deadline {
-                            return self.browser_failure(
-                                context,
-                                decision,
-                                crate::browser::BrowserError::DeadlineAfterDispatch,
-                                Some(selected.physical_id),
-                            );
-                        }
-                        std::thread::sleep(std::cmp::min(
-                            std::time::Duration::from_millis(20),
-                            context.deadline.saturating_duration_since(Instant::now()),
-                        ));
-                    }
-                    let elapsed_ms =
-                        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.visual_settle != Some(false);
-                    let (final_satisfied, final_elapsed_ms) = if should_settle {
-                        let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
-                        let remaining_deadline =
-                            context.deadline.saturating_duration_since(Instant::now());
-                        let settle_timeout =
-                            adapter_budget_ms(remaining_budget, remaining_deadline);
-                        match self.dispatch(
-                            context,
-                            BrowserCommand::Observe {
-                                tab_id: selected.physical_id,
-                                condition: "visual_settle".into(),
-                                value: None,
-                                locator: locator.clone(),
-                                timeout_ms: settle_timeout,
-                            },
-                        ) {
-                            Ok(BrowserOutcome::Observed {
-                                tab_id: settle_tab_id,
-                                satisfied: settle_satisfied,
-                                elapsed_ms: settle_elapsed_ms,
-                                readiness: settle_readiness,
-                            }) if settle_tab_id == selected.physical_id => {
-                                let _ = lease.update_readiness(&selected.handle, settle_readiness);
-                                (
-                                    settle_satisfied,
-                                    elapsed_ms.saturating_add(settle_elapsed_ms),
-                                )
-                            }
-                            _ => (false, elapsed_ms),
-                        }
-                    } else {
-                        (true, elapsed_ms)
                     };
-                    let status = if final_satisfied {
+                let should_settle = match value.condition.as_str() {
+                    "duration" | "selector_present" | "load_ready" | "target_present" => {
+                        value.visual_settle != Some(false)
+                    }
+                    "visual_settle" | "layout_stable" => false,
+                    _ => value.visual_settle == Some(true),
+                };
+                if observed.satisfied && should_settle {
+                    self.workbench.wait_progress(
+                        context.invocation,
+                        context.workspace.as_str(),
+                        crate::language::progress::WaitProgress::Settlement {
+                            budget_ms: wait_budget_ms(&context),
+                        },
+                    );
+                    match self.observe_wait(&context, selected, locator, "visual_settle", None) {
+                        Ok(settled) => {
+                            observed.satisfied = settled.satisfied;
+                            observed.elapsed_ms =
+                                observed.elapsed_ms.saturating_add(settled.elapsed_ms);
+                            observed.readiness = settled.readiness;
+                        }
+                        Err(error) => {
+                            let mut failed = self.browser_failure(
+                                &context,
+                                decision,
+                                error,
+                                Some(selected.physical_id),
+                            );
+                            failed.payload.facts["condition_satisfied"] = json!(true);
+                            failed.payload.facts["wait_phase"] = json!("visual_settle");
+                            return failed;
+                        }
+                    }
+                }
+                if let Err(error) = lease.update_readiness(&selected.handle, observed.readiness) {
+                    return self.workspace_failure(&context, error);
+                }
+                WorkEvidence::new(
+                    context.invocation,
+                    if observed.satisfied {
                         Status::Succeeded
                     } else {
                         Status::Failed
-                    };
-                    let outcome = Outcome::Waited {
-                        condition: value.condition.clone(),
-                        elapsed_ms: final_elapsed_ms,
-                        satisfied: final_satisfied,
-                        host: observed_host(&selected.url),
-                    };
-                    let facts = json!({
-                        "tab": selected.handle.as_str(),
-                        "condition": "duration",
-                        "satisfied": final_satisfied,
-                        "elapsed_ms": final_elapsed_ms,
-                        "readiness": readiness(selected.readiness),
-                        "visual_settle": should_settle,
-                    });
-                    return WorkEvidence::new(
-                        context.invocation,
-                        status,
-                        Effect::None,
-                        readiness(selected.readiness),
-                        true,
-                        Conclusion::Outcome(outcome),
-                        facts,
-                        decision,
-                        Some(selected.physical_id),
-                    );
-                }
-                // Waiting on what the page calls a control: polled executor-side through the same
-                // semantic query every selector-based action uses, so no handle pre-resolution is
-                // needed and a stale handle can never be required to wait.
-                if value.condition == "selector_present" {
-                    let Some(selector) = value.selector.as_ref() else {
-                        return self.failed(
-                            context,
-                            decision,
-                            Some(selected.physical_id),
-                            Refusal::InvalidRequest,
-                            json!({"reason":"invalid_request"}),
-                        );
-                    };
-                    let started = Instant::now();
-                    let budget_end = started
-                        + std::cmp::min(
-                            std::time::Duration::from_millis(value.timeout_ms),
-                            context.deadline.saturating_duration_since(started),
-                        );
-                    let mut satisfied = false;
-                    loop {
-                        if context.cancellation.is_cancelled() {
-                            return self.browser_failure(
-                                context,
-                                decision,
-                                crate::browser::BrowserError::CancelledBeforeDispatch,
-                                Some(selected.physical_id),
-                            );
-                        }
-                        match self.dispatch(
-                            context,
-                            BrowserCommand::QuerySemantic {
-                                tab_id: selected.physical_id,
-                                name: selector.name.clone(),
-                                role: selector.role.clone(),
-                                exact: selector.exact,
-                                form_scope: false,
-                            },
-                        ) {
-                            Ok(BrowserOutcome::Targets { targets, .. }) if !targets.is_empty() => {
-                                satisfied = true;
-                                break;
-                            }
-                            Ok(_) => {}
-                            Err(error) => {
-                                return self.browser_failure(
-                                    context,
-                                    decision,
-                                    error,
-                                    Some(selected.physical_id),
-                                )
-                            }
-                        }
-                        if Instant::now() >= budget_end || Instant::now() >= context.deadline {
-                            break;
-                        }
-                        std::thread::sleep(std::cmp::min(
-                            std::time::Duration::from_millis(100),
-                            context.deadline.saturating_duration_since(Instant::now()),
-                        ));
-                    }
-                    let elapsed_ms =
-                        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.visual_settle != Some(false);
-                    let (final_satisfied, final_elapsed_ms) = if satisfied && should_settle {
-                        let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
-                        let remaining_deadline =
-                            context.deadline.saturating_duration_since(Instant::now());
-                        let settle_timeout =
-                            adapter_budget_ms(remaining_budget, remaining_deadline);
-                        match self.dispatch(
-                            context,
-                            BrowserCommand::Observe {
-                                tab_id: selected.physical_id,
-                                condition: "visual_settle".into(),
-                                value: None,
-                                locator: locator.clone(),
-                                timeout_ms: settle_timeout,
-                            },
-                        ) {
-                            Ok(BrowserOutcome::Observed {
-                                tab_id: settle_tab_id,
-                                satisfied: settle_satisfied,
-                                elapsed_ms: settle_elapsed_ms,
-                                readiness: settle_readiness,
-                            }) if settle_tab_id == selected.physical_id => {
-                                let _ = lease.update_readiness(&selected.handle, settle_readiness);
-                                (
-                                    settle_satisfied,
-                                    elapsed_ms.saturating_add(settle_elapsed_ms),
-                                )
-                            }
-                            _ => (false, elapsed_ms),
-                        }
-                    } else {
-                        (satisfied, elapsed_ms)
-                    };
-                    let status = if final_satisfied {
-                        Status::Succeeded
-                    } else {
-                        Status::Failed
-                    };
-                    let outcome = Outcome::Waited {
-                        condition: value.condition.clone(),
-                        elapsed_ms: final_elapsed_ms,
-                        satisfied: final_satisfied,
-                        host: observed_host(&selected.url),
-                    };
-                    let facts = json!({
-                        "tab": selected.handle.as_str(),
-                        "condition": "selector_present",
-                        "satisfied": final_satisfied,
-                        "elapsed_ms": final_elapsed_ms,
-                        "visual_settle": should_settle,
-                    });
-                    return WorkEvidence::new(
-                        context.invocation,
-                        status,
-                        Effect::None,
-                        readiness(selected.readiness),
-                        true,
-                        Conclusion::Outcome(outcome),
-                        facts,
-                        decision,
-                        Some(selected.physical_id),
-                    );
-                }
-                match self.dispatch(
-                    context,
-                    BrowserCommand::Observe {
-                        tab_id: selected.physical_id,
-                        condition: value.condition.clone(),
-                        value: value.value.clone(),
-                        locator: locator.clone(),
-                        timeout_ms: adapter_budget_ms(
-                            value.timeout_ms,
-                            context.deadline.saturating_duration_since(Instant::now()),
-                        ),
                     },
-                ) {
-                    Ok(BrowserOutcome::Observed {
-                        tab_id,
-                        satisfied,
-                        elapsed_ms,
-                        readiness: browser_readiness,
-                    }) if tab_id == selected.physical_id => {
-                        let _ = lease.update_readiness(&selected.handle, browser_readiness);
-                        let is_composite_default =
-                            value.condition == "load_ready" || value.condition == "target_present";
-                        let should_settle = if is_composite_default {
-                            value.visual_settle != Some(false)
-                        } else {
-                            value.visual_settle == Some(true)
-                        };
-                        let (final_satisfied, final_elapsed_ms) = if satisfied
-                            && should_settle
-                            && value.condition != "visual_settle"
-                            && value.condition != "layout_stable"
-                        {
-                            let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
-                            let remaining_deadline =
-                                context.deadline.saturating_duration_since(Instant::now());
-                            let settle_timeout =
-                                adapter_budget_ms(remaining_budget, remaining_deadline);
-                            match self.dispatch(
-                                context,
-                                BrowserCommand::Observe {
-                                    tab_id: selected.physical_id,
-                                    condition: "visual_settle".into(),
-                                    value: None,
-                                    locator: locator.clone(),
-                                    timeout_ms: settle_timeout,
-                                },
-                            ) {
-                                Ok(BrowserOutcome::Observed {
-                                    tab_id: settle_tab_id,
-                                    satisfied: settle_satisfied,
-                                    elapsed_ms: settle_elapsed_ms,
-                                    readiness: settle_readiness,
-                                }) if settle_tab_id == selected.physical_id => {
-                                    let _ =
-                                        lease.update_readiness(&selected.handle, settle_readiness);
-                                    (
-                                        settle_satisfied,
-                                        elapsed_ms.saturating_add(settle_elapsed_ms),
-                                    )
-                                }
-                                _ => (false, elapsed_ms),
-                            }
-                        } else {
-                            (satisfied, elapsed_ms)
-                        };
-                        let status = if final_satisfied {
-                            Status::Succeeded
-                        } else {
-                            Status::Failed
-                        };
-                        // The condition is a closed vocabulary and its value is not: only the name of the
-                        // condition joins the sentence that reaches audit.
-                        let outcome = Outcome::Waited {
-                            condition: value.condition.clone(),
-                            elapsed_ms: final_elapsed_ms,
-                            satisfied: final_satisfied,
-                            host: observed_host(&selected.url),
-                        };
-
-                        let facts = json!({
-                            "tab": selected.handle.as_str(),
-                            "condition": value.condition,
-                            "satisfied": final_satisfied,
-                            "elapsed_ms": final_elapsed_ms,
-                            "readiness": readiness(browser_readiness),
-                            "visual_settle": should_settle,
-                        });
-                        WorkEvidence::new(
-                            context.invocation,
-                            status,
-                            Effect::None,
-                            readiness(browser_readiness),
-                            true,
-                            Conclusion::Outcome(outcome),
-                            facts,
-                            decision,
-                            Some(tab_id),
-                        )
-                    }
-                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-                    Err(error) => {
-                        self.browser_failure(context, decision, error, Some(selected.physical_id))
-                    }
-                }
+                    Effect::None,
+                    readiness(observed.readiness),
+                    true,
+                    Conclusion::Outcome(Outcome::Waited {
+                        condition: value.condition.clone(),
+                        elapsed_ms: observed.elapsed_ms,
+                        satisfied: observed.satisfied,
+                        host: observed_host(&selected.url),
+                    }),
+                    json!({
+                        "tab":selected.handle.as_str(),
+                        "condition":value.condition,
+                        "satisfied":observed.satisfied,
+                        "elapsed_ms":observed.elapsed_ms,
+                        "readiness":readiness(observed.readiness),
+                        "visual_settle":should_settle,
+                    }),
+                    decision,
+                    Some(selected.physical_id),
+                )
             },
         )
+    }
+
+    /// Execute the requested condition within its original deadline, without an extra call.
+    fn wait_condition(
+        &self,
+        context: &InvocationContext<'_>,
+        selected: &SelectedTab,
+        locator: Option<String>,
+        value: &Wait,
+    ) -> Result<WaitObservation, crate::browser::BrowserError> {
+        use crate::browser::BrowserError;
+        let started = Instant::now();
+        if value.condition == "duration" {
+            let milliseconds: u64 = value
+                .value
+                .as_deref()
+                .and_then(|raw| raw.parse().ok())
+                .unwrap_or(0);
+            loop {
+                if context.cancellation.is_cancelled() {
+                    return Err(BrowserError::CancelledBeforeDispatch);
+                }
+                if Instant::now() >= context.deadline {
+                    return Err(BrowserError::DeadlineBeforeDispatch);
+                }
+                if started.elapsed().as_millis() >= u128::from(milliseconds) {
+                    return Ok(WaitObservation {
+                        satisfied: true,
+                        elapsed_ms: u64::try_from(started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
+                        readiness: selected.readiness,
+                    });
+                }
+                std::thread::sleep(
+                    std::time::Duration::from_millis(20)
+                        .min(context.deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+        if value.condition == "selector_present" {
+            let selector = value
+                .selector
+                .as_ref()
+                .expect("Language validated the selector");
+            loop {
+                match self.dispatch(
+                    context,
+                    BrowserCommand::QuerySemantic {
+                        tab_id: selected.physical_id,
+                        name: selector.name.clone(),
+                        role: selector.role.clone(),
+                        exact: selector.exact,
+                        form_scope: false,
+                    },
+                )? {
+                    BrowserOutcome::Targets { tab_id, targets }
+                        if tab_id == selected.physical_id =>
+                    {
+                        if !targets.is_empty() {
+                            return Ok(WaitObservation {
+                                satisfied: true,
+                                elapsed_ms: u64::try_from(started.elapsed().as_millis())
+                                    .unwrap_or(u64::MAX),
+                                readiness: selected.readiness,
+                            });
+                        }
+                    }
+                    _ => {
+                        return Err(BrowserError::Protocol(
+                            "Incompatible wait observation.".into(),
+                        ))
+                    }
+                }
+                if Instant::now() >= context.deadline {
+                    return Ok(WaitObservation {
+                        satisfied: false,
+                        elapsed_ms: u64::try_from(started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
+                        readiness: selected.readiness,
+                    });
+                }
+                std::thread::sleep(
+                    std::time::Duration::from_millis(100)
+                        .min(context.deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+        self.observe_wait(
+            context,
+            selected,
+            locator,
+            &value.condition,
+            value.value.clone(),
+        )
+    }
+
+    /// Read one exact observation receipt. Settlement uses the same validation and failure path.
+    fn observe_wait(
+        &self,
+        context: &InvocationContext<'_>,
+        selected: &SelectedTab,
+        locator: Option<String>,
+        condition: &str,
+        value: Option<String>,
+    ) -> Result<WaitObservation, crate::browser::BrowserError> {
+        match self.dispatch(
+            context,
+            BrowserCommand::Observe {
+                tab_id: selected.physical_id,
+                condition: condition.into(),
+                value,
+                locator,
+                timeout_ms: adapter_budget_ms(
+                    wait_budget_ms(context),
+                    context.deadline.saturating_duration_since(Instant::now()),
+                ),
+            },
+        )? {
+            BrowserOutcome::Observed {
+                tab_id,
+                satisfied,
+                elapsed_ms,
+                readiness,
+            } if tab_id == selected.physical_id => Ok(WaitObservation {
+                satisfied,
+                elapsed_ms,
+                readiness,
+            }),
+            _ => Err(crate::browser::BrowserError::Protocol(
+                "Incompatible wait observation.".into(),
+            )),
+        }
     }
 
     fn type_focused(

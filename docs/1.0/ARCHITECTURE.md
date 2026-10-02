@@ -510,8 +510,10 @@ historical file or claiming to sanitize its old summary text (ADR-0103 H1 amendm
 
 ## Failure and recovery
 
-Disconnect before a physical request has no effect. Disconnect after dispatch without a decisive
-receipt yields `unknown`, never failure or success. Cancellation follows the same boundary.
+Disconnect before a physical request has no effect. A lost receipt after dispatch leaves the
+observation unavailable. The exact command's effect evidence distinguishes a read-only request
+with no requested mutation from an uncertain mutating request. Cancellation follows the same
+boundary; it cannot erase an acknowledged prefix or make uncertain work safe to repeat.
 Stale tabs and targets fail before dispatch. Sequence failure reports completed step count and
 never replays completed steps. Recovery suggestions come from typed reason codes and effect class,
 not page content.
@@ -532,8 +534,17 @@ retirement refuses before setup; setup already running is counted before exclusi
 Late completion cannot remove a newer scope/watcher, release its lease or overwrite a newer epoch's
 journal attempt. Ordinary successful work adds no cancellation roundtrip.
 
+Observe shares that correlated owner and cleanup guard. It registers epoch, correlation and exact
+document scope before setup awaits, then captures the page runtime and exact original document
+IDs. Opaque per-frame tokens identify page-local cooperative disposal. Cleanup is registered
+before disposal awaits, wakes polling sleep and removes observation timers, RAF callbacks and
+abort listeners. It waits for every original frame callback, handler and scope finally within the
+same bound. Only the original scope finally releases custody. Failed disposal or an unsettled
+callback keeps the guard. Observe does not detach a debugger or stop page animation. Late
+cancellation cannot retarget a new runtime, document, epoch or same-correlation owner (ADR-0191).
+
 Cleanup confirms custody release, not rollback or termination of every page side effect. The
-original resolution remains unknown and unsafe to repeat. When cleanup cannot be confirmed within
+original uncertain mutation remains unknown and unsafe to repeat. When cleanup cannot be confirmed within
 the bound, a mechanically established OperationCleanupRequired refusal supplies no new requested
 effect and names the existing human Status End session / Start session prerequisite, including its
 global scope. The agent does not toggle those controls. Generic unverified document access points

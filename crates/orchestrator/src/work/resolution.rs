@@ -42,6 +42,7 @@ pub(super) struct ExecutionEvidence {
     progress: Progress,
     uncertain: bool,
     pending_effects: u32,
+    last_command_mutates: Option<bool>,
 }
 
 impl ExecutionEvidence {
@@ -62,6 +63,8 @@ impl ExecutionEvidence {
             Err(_) => None,
         };
         let result = reported.as_ref().unwrap_or(result);
+        let command_mutates = mutates(command);
+        self.last_command_mutates = Some(command_mutates);
         let phase = match command {
             BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::DescribeTargets { .. }
@@ -85,14 +88,14 @@ impl ExecutionEvidence {
                 self.phase = phase;
                 if phase == Phase::RequestedEffect {
                     self.progress.attempted = self.progress.attempted.saturating_add(1);
-                    self.uncertain = true;
+                    self.uncertain |= command_mutates;
                 }
             }
             Err(error) => {
                 self.phase = phase;
                 if phase == Phase::RequestedEffect && error.effect_unknown() {
                     self.progress.attempted = self.progress.attempted.saturating_add(1);
-                    self.uncertain = true;
+                    self.uncertain |= command_mutates;
                 }
             }
         }
@@ -112,11 +115,17 @@ impl ExecutionEvidence {
     }
 
     /// A received but incompatible requested receipt cannot establish the action's effects.
-    pub(super) fn incompatible(&mut self, phase: Phase) {
+    pub(super) fn incompatible(&mut self, phase: Phase, command: &BrowserCommand) {
         self.phase = phase;
         if phase == Phase::RequestedEffect {
-            self.uncertain = true;
+            self.uncertain |= mutates(command);
         }
+    }
+
+    /// The exact last physical command can establish a failed observation, never a mutation.
+    /// Missing dispatch evidence stays conservative; prior effects remain in the same account.
+    pub(super) fn last_command_is_read_only(&self) -> bool {
+        self.last_command_mutates == Some(false)
     }
 }
 
@@ -356,6 +365,7 @@ impl Resolution {
                 progress,
                 uncertain: effect == Effect::Unknown && phase == Phase::RequestedEffect,
                 pending_effects: 0,
+                last_command_mutates: None,
             },
             None,
             Observed::default(),

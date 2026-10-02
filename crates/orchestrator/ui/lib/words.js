@@ -10,8 +10,10 @@
   const CHANGE_EVENT = "ghostlight://change";
   /** Slow safety pull for collections that have no change event of their own. */
   const HEARTBEAT_MS = 10000;
-  /** Bound on the retained feed, matching the orchestrator's own bounded history. */
+  /** Display bound for recent activity, independent of retained history. */
   const FEED_LIMIT = 200;
+  /** Retained group bound, matching the orchestrator's existing history projection. */
+  const HISTORY_LIMIT = 500;
 
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
   const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
@@ -488,7 +490,7 @@
     ]]
   ];
 
-  return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+  return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, HISTORY_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     READINESS_ATTENTION, readinessNeedsAttention,

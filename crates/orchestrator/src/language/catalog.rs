@@ -155,7 +155,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_wait",
             "Wait",
-            "Wait for one explicit observable page condition. A false condition is a decisive failed result, not an unknown effect.",
+            "Wait for one explicit observable page condition. For a delayed save, use a fresh application confirmation in browser_flow after one click, then browser_read. A short action expect check or a pre-existing marker does not prove persistence. Use selector_present for controls that are still loading. A false condition is a decisive failed result, not an unknown effect.",
             wait_schema(),
             Hints::browser_read(),
         ),

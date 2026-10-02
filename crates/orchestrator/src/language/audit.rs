@@ -97,6 +97,7 @@ impl AuditProjection {
 pub enum AuditRefusal {
     InvalidRequest,
     CancelledBeforeStart,
+    CancelledBeforeDispatch,
     DeadlineBeforeStart,
     Capacity,
     AuthorityBlocked {
@@ -173,6 +174,7 @@ impl Refusal {
         let refusal = match self {
             Self::InvalidRequest => AuditRefusal::InvalidRequest,
             Self::CancelledBeforeStart => AuditRefusal::CancelledBeforeStart,
+            Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
             Self::DeadlineBeforeStart => AuditRefusal::DeadlineBeforeStart,
             Self::Capacity => AuditRefusal::Capacity,
             Self::AuthorityBlocked { reason, .. } => {

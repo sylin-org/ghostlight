@@ -28,6 +28,9 @@ enum Case {
     ScriptReplyLost,
     ExpectationNotMet,
     ExpectationLost,
+    ObservationCancelled,
+    ObservationDeadline,
+    ObservationDisconnected,
 }
 
 struct Mechanism {
@@ -156,14 +159,28 @@ impl BrowserPort for Mechanism {
                     committed_urls: vec![],
                 })
             }
-            BrowserCommand::Observe { .. } => {
+            BrowserCommand::Observe { condition, .. } => {
                 self.checks.fetch_add(1, Ordering::SeqCst);
                 if self.case == Case::ExpectationLost {
                     return Err(BrowserError::DisconnectedAfterDispatch);
                 }
+                let observation_failure = matches!(
+                    self.case,
+                    Case::ObservationCancelled
+                        | Case::ObservationDeadline
+                        | Case::ObservationDisconnected
+                        | Case::ScriptReplyLost
+                );
+                if observation_failure && condition == "visual_settle" {
+                    return Err(match self.case {
+                        Case::ObservationCancelled => BrowserError::CancelledAfterDispatch,
+                        Case::ObservationDeadline => BrowserError::DeadlineAfterDispatch,
+                        _ => BrowserError::DisconnectedAfterDispatch,
+                    });
+                }
                 Ok(BrowserOutcome::Observed {
                     tab_id: 7,
-                    satisfied: false,
+                    satisfied: observation_failure,
                     elapsed_ms: 1,
                     readiness: BrowserReadiness::Complete,
                 })
@@ -243,6 +260,121 @@ fn open_fixture(
     );
     assert_eq!(result.status, Status::Succeeded);
     result.facts["tab"].as_str().unwrap().into()
+}
+
+#[test]
+fn lost_observations_never_invent_mutation_or_erase_an_applied_prefix() {
+    for case in [
+        Case::ObservationCancelled,
+        Case::ObservationDeadline,
+        Case::ObservationDisconnected,
+    ] {
+        for primary in [false, true] {
+            for prefix in [false, true] {
+                let (mut executor, browser, workspaces, workspace, audit) = fixture();
+                let handle = open_fixture(&executor, &browser, &workspace);
+                let probe = install_probe(&mut executor, browser, &workspaces, &workspace, case);
+                let wait = json!({"tab":handle,"condition":if primary {"visual_settle"} else {"text_present"},
+                    "value":if primary {Value::Null} else {json!("PRIVATE_WAIT_CONDITION")},"visual_settle":true});
+                let mut wait = wait;
+                if primary {
+                    wait.as_object_mut().unwrap().remove("value");
+                }
+                let (tool, args) = if prefix {
+                    (
+                        "browser_flow",
+                        json!({"steps":[
+                            {"tool":"browser_press_key","arguments":{"tab":handle,"key":"x"}},
+                            {"tool":"browser_wait","arguments":wait},
+                            {"tool":"browser_press_key","arguments":{"tab":handle,"key":"y"}}
+                        ]}),
+                    )
+                } else {
+                    ("browser_wait", wait)
+                };
+                let result =
+                    executor.execute(&workspace, tool, args, None, &CancellationToken::default());
+                assert_eq!(probe.effects.load(Ordering::SeqCst), u32::from(prefix));
+                assert_eq!(
+                    probe.checks.load(Ordering::SeqCst),
+                    if primary { 1 } else { 2 }
+                );
+                assert_eq!(
+                    result.status,
+                    if case == Case::ObservationCancelled {
+                        Status::Cancelled
+                    } else {
+                        Status::Failed
+                    }
+                );
+                assert_eq!(
+                    result.effect,
+                    if prefix {
+                        Effect::Partial
+                    } else {
+                        Effect::None
+                    }
+                );
+                assert_eq!(result.repeat_safe, !prefix);
+                let observation = if prefix {
+                    &result.facts["steps"][1]["result"]
+                } else {
+                    &serde_json::to_value(&result).unwrap()
+                };
+                assert_eq!(observation["effect"], "none");
+                assert_eq!(observation["readiness"], "unknown");
+                assert!(observation["summary"]
+                    .as_str()
+                    .unwrap()
+                    .contains("observation"));
+                assert!(!observation["summary"]
+                    .as_str()
+                    .unwrap()
+                    .contains("effects were not confirmed"));
+                if !primary {
+                    assert_eq!(observation["facts"]["condition_satisfied"], true);
+                }
+                if prefix {
+                    assert_eq!(result.facts["steps"][2]["status"], "not_run");
+                }
+                let records = audit.0.lock().unwrap();
+                let read = records
+                    .iter()
+                    .find(|record| record.tool == "browser_wait")
+                    .unwrap();
+                assert_eq!(read.effect, "none");
+                let metadata = read.resolution.as_ref().unwrap();
+                assert_eq!(metadata.progress.confirmed_effects, 0);
+                assert_eq!(metadata.progress.attempted, if primary { 1 } else { 2 });
+                assert!(!serde_json::to_string(&*records)
+                    .unwrap()
+                    .contains("PRIVATE_WAIT_CONDITION"));
+            }
+        }
+    }
+}
+
+#[test]
+fn an_unknown_mutation_stays_unknown_after_an_unavailable_read_only_wait() {
+    let (mut executor, browser, workspaces, workspace, _) = fixture();
+    let handle = open_fixture(&executor, &browser, &workspace);
+    let probe = install_probe(
+        &mut executor,
+        browser,
+        &workspaces,
+        &workspace,
+        Case::ScriptReplyLost,
+    );
+    let result = executor.execute(&workspace, "browser_flow", json!({"on_error":"continue","steps":[
+        {"tool":"browser_execute","arguments":{"tab":handle,"script":"PRIVATE_MUTATION"}},
+        {"tool":"browser_wait","arguments":{"tab":handle,"condition":"text_present","value":"ready","visual_settle":true}}
+    ]}), None, &CancellationToken::default());
+    assert_eq!(probe.effects.load(Ordering::SeqCst), 1);
+    assert_eq!(result.status, Status::Unknown);
+    assert_eq!(result.effect, Effect::Unknown);
+    assert!(!result.repeat_safe);
+    assert_eq!(result.facts["steps"][0]["effect"], "unknown");
+    assert_eq!(result.facts["steps"][1]["effect"], "none");
 }
 
 #[test]

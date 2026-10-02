@@ -184,7 +184,7 @@ try {
   } else if (result.facts.reason === "native_host_unavailable") {
     assert.equal(
       listed.stdout.trim(),
-      "The browser cannot use Ghostlight's native messaging registration."
+      "The browser cannot use Ghostlight's native messaging registration. Next: Run ghostlight doctor, then repair the named browser registration."
     );
     assert.ok(result.facts.details.length >= 1, listed.stdout);
   } else if (result.facts.reason === "browser_absent") {
@@ -200,7 +200,7 @@ try {
   // A refusal must not look like success to a shell.
   const rejected = call(["browser_navigate", "{}"]);
   assert.notEqual(rejected.status, 0);
-  assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog.");
+  assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog. Next: missing field `url`");
 
   // One process, one session: even refusals from an earlier line share the workspace with
   // later ones.
@@ -239,7 +239,7 @@ try {
   const governedRuntime = `${runtimeFile}.governed.json`;
   const governedAudit = `${auditFile}.governed.jsonl`;
   const governedEnvironment = {
-    ...process.env,
+    ...environment,
     GHOSTLIGHT_RUNTIME_FILE: governedRuntime,
     GHOSTLIGHT_AUDIT_FILE: governedAudit,
     GHOSTLIGHT_POLICY_FILE: scriptingDisabledPolicyFile

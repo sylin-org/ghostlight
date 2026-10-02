@@ -125,6 +125,47 @@ impl WorkbenchPresentationPort for Notices {
 }
 
 #[test]
+fn protected_tab_closure_needs_no_repeated_native_interruption() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    let notices = Arc::new(Notices::default());
+    executor.workbench.attach_presentation(notices.clone());
+    for _ in 0..2 {
+        browser.push(Err(crate::browser::BrowserError::LocalInterlock(
+            "preserved".into(),
+        )));
+        let result = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"close","tab":opened.facts["tab"]}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked);
+        assert_eq!(result.effect, Effect::None);
+        let record = audit.0.lock().unwrap().last().unwrap().clone();
+        let presentation = crate::language::history::OutcomePresentation::from_record(&record);
+        assert_eq!(presentation.label, "Tab preserved");
+        assert_eq!(
+            presentation.tone,
+            crate::language::history::OutcomeTone::Controlled
+        );
+    }
+    assert!(notices.0.lock().unwrap().is_empty());
+}
+
+#[test]
 fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() {
     let policy = TestPolicy::new();
     fs::write(

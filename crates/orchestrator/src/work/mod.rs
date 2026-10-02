@@ -641,6 +641,12 @@ impl ApplicationExecutor {
                 Ok(tuple) => tuple,
                 Err(error) => return self.workspace_failure(context, error),
             };
+        self.workbench.browser_tab(
+            context.invocation,
+            context.workspace.as_str(),
+            selected.physical_id,
+            &self.workspaces,
+        );
         let decision = self.authorize(context, capability, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
@@ -1130,7 +1136,7 @@ impl ApplicationExecutor {
                     .execution
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .incompatible(context.phase);
+                    .incompatible(context.phase, &command);
                 return Err(BrowserError::Protocol(
                     "incompatible browser receipt identity".into(),
                 ));
@@ -1581,10 +1587,9 @@ impl ApplicationExecutor {
             );
         }
         if error.effect_unknown() {
-            // Every after-dispatch class is an honest unknown: name its phase so the caller
-            // can tell a silent adapter from a spent deadline, and give deadlines their own
-            // sentence instead of the disconnection costume they used to wear.
-            let (refusal, facts) = match &error {
+            // Dispatch alone does not establish mutation. The exact command evidence knows
+            // whether this was an observation; earlier effects remain in the same account.
+            let (refusal, mut facts) = match &error {
                 BrowserError::ScriptException(detail) => (
                     Refusal::ScriptException,
                     json!({"reason":"script_exception","detail":detail,"phase":"adapter_reported"}),
@@ -1612,6 +1617,34 @@ impl ApplicationExecutor {
                     json!({"reason":"browser_effect_unknown","phase":"unknown"}),
                 ),
             };
+            if context
+                .execution
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .last_command_is_read_only()
+            {
+                facts["reason"] = json!(match &error {
+                    BrowserError::CancelledAfterDispatch => "cancelled",
+                    BrowserError::DeadlineAfterDispatch => "deadline",
+                    BrowserError::DisconnectedAfterDispatch => "browser_disconnected",
+                    _ => "browser_observation_unavailable",
+                });
+                return WorkEvidence::new(
+                    context.invocation,
+                    if error == BrowserError::CancelledAfterDispatch {
+                        Status::Cancelled
+                    } else {
+                        Status::Failed
+                    },
+                    Effect::None,
+                    Readiness::Unknown,
+                    true,
+                    Conclusion::Refusal(refusal),
+                    facts,
+                    decision,
+                    physical_id,
+                );
+            }
             return self.unknown(context, decision, physical_id, refusal, facts);
         }
         if matches!(error, BrowserError::DeadlineBeforeDispatch) {
@@ -1639,13 +1672,15 @@ impl ApplicationExecutor {
                 json!({"reason":browser_reason(&error),"capability":capability,"required_revision":required,"advertised_revision":advertised}),
             );
         }
-        let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
-            Status::Cancelled
+        let (status, refusal) = if matches!(error, BrowserError::CancelledBeforeDispatch) {
+            (Status::Cancelled, Refusal::CancelledBeforeDispatch)
         } else {
-            Status::Failed
-        };
-        let refusal = Refusal::BrowserStopped {
-            reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
+            (
+                Status::Failed,
+                Refusal::BrowserStopped {
+                    reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
+                },
+            )
         };
         WorkEvidence::new(
             context.invocation,
@@ -2462,16 +2497,14 @@ mod tests {
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
         let audit = Arc::new(MemoryAudit::default());
+        let workbench = WorkbenchProjection::default();
         let mut executor = ApplicationExecutor::new(
             governance,
             workspaces.clone(),
             browser.clone(),
             PresentationReactor::new(Arc::new(NoPresentation)),
-            WorkbenchProjection::default(),
-            Arc::new(crate::audit::AuditRecorder::new(
-                audit.clone(),
-                WorkbenchProjection::default(),
-            )),
+            workbench.clone(),
+            Arc::new(crate::audit::AuditRecorder::new(audit.clone(), workbench)),
             crate::diagnostics::DiagnosticsHub::for_tests(),
         );
         executor

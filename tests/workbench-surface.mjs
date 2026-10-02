@@ -220,6 +220,8 @@ const integrationsHtml = nodes.get("integration-grid").innerHTML;
 const setupEverythingButton = nodes.get("setup-integrations");
 const setupEverythingWasActionable = !setupEverythingButton.disabled
   && setupEverythingButton.dataset.actionable === "true";
+assert.equal(typeof elementHandlers.get("setup-integrations:click"), "function",
+  `surface did not wire its controls: ${bootThrew ?? reported.join("; ")}`);
 await elementHandlers.get("setup-integrations:click")({ currentTarget: setupEverythingButton });
 const policy = nodes.get("policy-state");
 
@@ -619,6 +621,23 @@ view.collections({
 
 const historyChecks = [];
 {
+  const live = sandbox.globalThis.GhostlightEntries.entryFromOperation({ invocation: "composed-wait", workspace: "w", tool: "browser_flow",
+    phase: "running", activity: "Waiting for the requested text to appear (up to 20000 ms remaining)." });
+  const composed = sandbox.globalThis.GhostlightEntries.entryFromRecord({ invocation: live.invocation, tool: live.tool,
+    workspace: live.workspace, complete: false, allowed: true, summary: "Completed 2 of 4 steps.",
+    presentation: { summary: "Completed 2 of 4 steps." }, steps: [{ position: 1 }, { position: 2 }] }, live);
+  view.hero(composed, false);
+  historyChecks.push(["a running composed wait leads with current purpose and original budget, with child counts secondary",
+    nodes.get("hero-body").innerHTML.startsWith('<p class="hero-activity">Waiting for the requested text to appear (up to 20000 ms remaining).</p>')
+      && nodes.get("hero-body").innerHTML.includes('<p class="hero-progress">Completed 2 of 4 steps.</p>')]);
+  const next = { ...composed, activity: "Reading" };
+  view.hero(next, false);
+  historyChecks.push(["the next child clears the old wait purpose while retaining completed-step progress",
+    nodes.get("hero-body").innerHTML.startsWith('<p class="hero-activity">Reading</p>')
+      && !nodes.get("hero-body").innerHTML.includes("20000 ms remaining")
+      && nodes.get("hero-body").innerHTML.includes("Completed 2 of 4 steps.")]);
+}
+{
   const entries = sandbox.globalThis.GhostlightEntries;
   const uncertain = {
     invocation: "ux-unknown", workspace: "exact-workspace", tool: "browser_execute",
@@ -853,6 +872,56 @@ const historyChecks = [];
 }
 
 // C1: each action keeps its connection's evidence, independent of the current session label.
+{
+  const create = () => sandbox.globalThis.GhostlightStore.create({ setTimer: () => 0, clearTimer() {} });
+  const receipt = index => ({ invocation: `retained-${index}`, workspace: "retained-workspace", tool: "browser_read",
+    status: "succeeded", effect: "none", allowed: true, complete: true, timestamp_ms: index, summary: "Read 5 words." });
+  const history = Array.from({ length: 500 }, (_, index) => receipt(500 - index));
+  const base = { seq: 0, service: { runtime_state: "active" }, sessions: [], browsers: [], operations: [], history };
+  const store = create(); store.applySnapshot(structuredClone(base), true);
+  store.applyChange({ seq: 1, change: { kind: "operation_settled", record: receipt(501) } });
+  historyChecks.push(["incremental history retains 500 groups while the display stays bounded at 200",
+    store.snapshot().history.length === 500 && store.feed().length === 200 && store.band().retained === 500]);
+  const restored = create(); restored.applySnapshot(structuredClone(store.snapshot()), true);
+  historyChecks.push(["completed-only history keeps the same retained bounds and displayed order after resync",
+    JSON.stringify(restored.feed().map(item => item.invocation)) === JSON.stringify(store.feed().map(item => item.invocation))]);
+  const clearedGroups = store.clearCompleted();
+  store.applySnapshot(structuredClone(store.snapshot()), true);
+  historyChecks.push(["Clear view hides completed retained groups beyond the displayed rows across resynchronization",
+    clearedGroups === 500 && store.feed().length === 0 && store.band().retained === 500 && store.band().historyHidden]);
+  view.band(store.band()); view.hero(null, false);
+  historyChecks.push(["an empty cleared view names its scope and has a retained-activity route",
+    nodes.get("queue-count").textContent === "0 shown / 500 retained groups" && !nodes.get("show-history").hidden
+      && nodes.get("hero-body").innerHTML.includes("No activity in this view.")]);
+  store.applyChange({ seq: 2, change: { kind: "operation_settled", record: receipt(502) } });
+  historyChecks.push(["new activity after clearing does not resurrect older rows", store.feed().length === 1]);
+  store.showHistory();
+  historyChecks.push(["Show retained activity restores the recent display without audit mutation",
+    store.feed().length === 200 && store.snapshot().history.length === 500 && !store.band().historyHidden]);
+  const running = { invocation: "new-live", workspace: "retained-workspace", tool: "browser_wait",
+    phase: "running", activity: "Waiting for the requested text to appear", tab: "owned-tab" };
+  store.applyChange({ seq: 3, change: { kind: "operation_started", operation: running } });
+  store.showHistory();
+  historyChecks.push(["restoring retained activity preserves new live work and its exact reveal",
+    store.hero().invocation === running.invocation && !store.hero().settled && store.hero().tab === running.tab]);
+  store.applyChange({ seq: 4, change: { kind: "operation_settled", record: { ...receipt(503), invocation: running.invocation } } });
+  store.showHistory();
+  historyChecks.push(["a completed live operation is not revived when history is restored", store.snapshot().operations.length === 0 && store.hero().settled]);
+  const continuity = { ...snapshot(), sessions: [
+    { id: "empty-cli", client_label: "Dormant CLI", connections: [], tab_count: 0, active_operations: 0, leased: false },
+    { id: "retained-cli", client_label: "Retained CLI", connections: [], tab_count: 1, active_operations: 0, leased: false },
+    { id: "live-mcp", client_label: "Current MCP", connections: [{ channel: "mcp" }], tab_count: 0, active_operations: 0, leased: false }
+  ] };
+  view.collections(continuity, new Set());
+  historyChecks.push(["dormant empty continuity is quiet while retained tabs and actual connections remain distinct",
+    !nodes.get("connections").innerHTML.includes("Dormant CLI")
+      && nodes.get("connections").innerHTML.includes("1 tab retained")
+      && nodes.get("connections").innerHTML.includes("Current MCP")]);
+  view.band({ snapshot: continuity, runtime: "active", connected: true, running: 0, visible: 0, retained: 0 });
+  historyChecks.push(["the header counts actual connections rather than retained workspace identities",
+    nodes.get("state-facts").innerHTML.includes("<b>1</b> connections")]);
+}
+
 const provenanceChecks = [];
 {
   const evidence = {

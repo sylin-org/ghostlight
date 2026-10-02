@@ -26,6 +26,34 @@ function mockDocument() {
   };
 }
 
+test("cancelled visual observation disposes its ceiling, poll, RAF and abort listener while page animation continues", async () => {
+  const controller = new AbortController(), timers = new Set(), rafs = new Set(), listeners = new Set();
+  let next = 0, animation = true;
+  const signal = { get aborted() { return controller.signal.aborted; }, get reason() { return controller.signal.reason; },
+    addEventListener(kind, listener, options) { listeners.add(listener); controller.signal.addEventListener(kind, listener, options); },
+    removeEventListener(kind, listener) { listeners.delete(listener); controller.signal.removeEventListener(kind, listener); } };
+  const doc = mockDocument(); doc.getAnimations = () => animation ? [{ playState: "running", effect: { getTiming: () => ({ iterations: 1 }) } }] : [];
+  const observation = api.settleVisual(doc, { document: doc, signal, maxWaitMs: 20000,
+    setTimeout() { const id = ++next; timers.add(id); return id; }, clearTimeout(id) { timers.delete(id); },
+    requestAnimationFrame() { const id = ++next; rafs.add(id); return id; }, cancelAnimationFrame(id) { rafs.delete(id); } });
+  assert.equal(timers.size, 2); assert.equal(rafs.size, 1); assert.equal(listeners.size, 1);
+  const reason = new Error("exact observer cancelled"); controller.abort(reason);
+  await assert.rejects(observation, error => error === reason);
+  assert.equal(timers.size, 0); assert.equal(rafs.size, 0); assert.equal(listeners.size, 0);
+  assert.equal(animation, true, "observer cancellation does not stop the page's animation");
+  animation = false;
+});
+
+test("cancelled observation wakes a pending poll sleep and releases its timer/listener", async () => {
+  const controller = new AbortController(), timers = new Set();
+  const sleep = api.delay(20000, controller.signal, { setTimeout() { timers.add(1); return 1; }, clearTimeout(id) { timers.delete(id); } });
+  assert.equal(timers.size, 1); const reason = new Error("cancel polling"); controller.abort(reason);
+  await assert.rejects(sleep, error => error === reason); assert.equal(timers.size, 0);
+  let allocated = false;
+  await assert.rejects(api.delay(20000, controller.signal, { setTimeout() { allocated = true; } }), error => error === reason);
+  assert.equal(allocated, false);
+});
+
 function mockObserverClass(doc) {
   return class MockMutationObserver {
     constructor(callback) {
@@ -433,4 +461,3 @@ test("settleVisual stress: concurrent multi-target settlement", async () => {
     assert.ok(res.elapsed_ms > 0, `task ${index} elapsed_ms must be positive`);
   }
 });
-

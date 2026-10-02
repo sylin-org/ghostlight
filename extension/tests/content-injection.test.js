@@ -49,18 +49,13 @@ function fixture({ scoped, missing = false, preflight = false }) {
     } }
   };
   vm.createContext(sandbox);
-  for (const name of ["injectedContentPrimitive", "contentInjectionResult", "contentIn"]) {
+  for (const name of ["injectedContentPrimitive", "contentInjectionResult", "sendDocumentPrimitive", "contentIn"]) {
     const body = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`));
     assert.ok(body, name); vm.runInContext(body[0], sandbox);
   }
-  const start = source.indexOf("sendDocument: async (");
-  const end = source.indexOf("\n  frames\n});", start);
-  const callback = source.slice(start, end).trim().replace("sendDocument: async (", "async function sendDocument(")
-    .replace(") => {", ") {").replace(/,$/, "");
-  vm.runInContext(callback, sandbox);
   const raw = [{ frameId: 0, parentFrameId: -1, documentId: "document", url: "https://fixture.test/" }];
   sandbox.documents = documentsApi.create({ frames, getFrames: async () => raw,
-    sendDocument: (tab, document, message) => sandbox.sendDocument(tab, document, message) });
+    sendDocument: (tab, document, message) => sandbox.sendDocumentPrimitive(tab, document, message) });
   const fillStart = source.indexOf("function requireFillBudget(");
   vm.runInContext(source.slice(fillStart, source.indexOf("async function typeText(", fillStart)), sandbox);
   const call = () => sandbox.fill("fill", { tab_id: 7, timeout_ms: 1_000,

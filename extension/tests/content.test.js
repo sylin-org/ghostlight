@@ -265,6 +265,8 @@ function contentHarness({ chrome = {}, fullRuntime = false } = {}) {
     },
     GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
     GhostlightSensor: require("../../crates/orchestrator/src/page_runtime/sensor.js"),
+    AbortController,
+    clearTimeout() {},
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},
@@ -1013,6 +1015,49 @@ test("focused password verification and clear honor only the current allowance",
   assert.equal(harness.input.value, "");
   harness.document.hasFocus = () => false;
   assert.equal((await harness.send({ kind: "verify_focused_text", allow_credentials: true })).ok, false);
+});
+
+test("observation cancellation targets its exact runtime and token and releases its original handler", async () => {
+  const harness = contentHarness({ fullRuntime: true });
+  const runtime = harness.context.__ghostlight_page_runtime__;
+  const active = new Map();
+  let disposed = 0;
+  harness.context.GhostlightSensor.settleVisual = (_target, { signal }) => new Promise((_resolve, reject) => {
+    active.set(signal, true);
+    signal.addEventListener("abort", () => { active.delete(signal); disposed++; reject(signal.reason); }, { once: true });
+  });
+  const dispatch = message => harness.context.window.__ghostlight_dispatch__(message);
+  const request = dispatch({ kind: "observe", condition: "visual_settle", timeout_ms: 20000,
+    observation_token: "exact_one", runtime_id: runtime });
+  const other = dispatch({ kind: "observe", condition: "visual_settle", timeout_ms: 20000,
+    observation_token: "exact_two", runtime_id: runtime });
+  await assert.rejects(dispatch({ kind: "cancel_observation", observation_token: "exact_one", runtime_id: "another_runtime" }), /runtime identity/);
+  assert.equal(active.size, 2);
+  await dispatch({ kind: "cancel_observation", observation_token: "exact_one", runtime_id: runtime });
+  await assert.rejects(request, error => error.code === "operation_cancelled");
+  assert.equal(disposed, 1); assert.equal(active.size, 1);
+  await dispatch({ kind: "cancel_observation", observation_token: "exact_two", runtime_id: runtime });
+  await assert.rejects(other, error => error.code === "operation_cancelled");
+  assert.equal(disposed, 2); assert.equal(active.size, 0);
+});
+
+test("an early cancellation prevents only its original queued observation from starting", async () => {
+  const harness = contentHarness({ fullRuntime: true });
+  const runtime = harness.context.__ghostlight_page_runtime__;
+  let starts = 0;
+  harness.context.GhostlightSensor.settleVisual = async () => { starts++; return { settled: true }; };
+  const dispatch = message => harness.context.window.__ghostlight_dispatch__(message);
+  await dispatch({ kind: "cancel_observation", observation_token: "queued_one", runtime_id: runtime });
+  await assert.rejects(dispatch({ kind: "observe", condition: "visual_settle", timeout_ms: 20000,
+    observation_token: "queued_one", runtime_id: runtime }), error => error.code === "operation_cancelled");
+  assert.equal(starts, 0);
+  await dispatch({ kind: "observe", condition: "visual_settle", timeout_ms: 20000,
+    observation_token: "queued_two", runtime_id: runtime });
+  assert.equal(starts, 1);
+  await dispatch({ kind: "cancel_observation", observation_token: "same_token", runtime_id: "old_runtime" });
+  await dispatch({ kind: "observe", condition: "visual_settle", timeout_ms: 20000,
+    observation_token: "same_token", runtime_id: runtime });
+  assert.equal(starts, 2);
 });
 
 test("observation polling stops at its physical timeout without overshooting", async () => {

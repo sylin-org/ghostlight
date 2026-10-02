@@ -11,7 +11,7 @@
 })(globalThis, function createGhostlightStoreApi() {
   "use strict";
 
-  const { FEED_LIMIT, WORKING_LATCH_MS } = globalThis.GhostlightWords;
+  const { FEED_LIMIT, HISTORY_LIMIT, WORKING_LATCH_MS } = globalThis.GhostlightWords;
   const { entryFromOperation, entryFromRecord, entryTime, isRunning } = globalThis.GhostlightEntries;
 
   /**
@@ -142,7 +142,7 @@
         const previous = state.snapshot.history.findIndex((item) => item.invocation === record.invocation);
         if (previous >= 0) state.snapshot.history[previous] = record;
         else state.snapshot.history.unshift(record);
-        state.snapshot.history.length = Math.min(state.snapshot.history.length, FEED_LIMIT);
+        state.snapshot.history.length = Math.min(state.snapshot.history.length, HISTORY_LIMIT);
       }
       if (state.hidden.has(record.invocation)) return;
       const index = state.feed.findIndex((item) => item.invocation === record.invocation);
@@ -174,7 +174,10 @@
           runtime: state.runtime,
           working: working(),
           snapshot: state.snapshot,
-          running: state.feed.filter(isRunning).length
+          running: state.feed.filter(isRunning).length,
+          visible: state.feed.length,
+          retained: state.snapshot?.history.length ?? 0,
+          historyHidden: state.hidden.size > 0
         };
       },
 
@@ -194,6 +197,8 @@
         state.snapshot = snapshot;
         state.seq = snapshot.seq;
         state.runtime = snapshot.service.runtime_state;
+        const retained = new Set([...snapshot.history, ...snapshot.operations].map(item => item.invocation));
+        state.hidden = new Set([...state.hidden].filter(invocation => retained.has(invocation)));
         if (rebuild) {
           seed(snapshot);
           emit(CHANGE.Feed);
@@ -212,7 +217,17 @@
         if (!event || typeof event.seq !== "number") return "ignored";
         if (event.seq !== state.seq + 1) return "gap";
         state.seq = event.seq;
+        if (state.snapshot) state.snapshot.seq = event.seq;
         const change = event.change;
+        if (state.snapshot) {
+          if (change.kind === "operation_started" || change.kind === "operation_changed") {
+            state.snapshot.operations = [change.operation, ...state.snapshot.operations.filter(item => item.invocation !== change.operation.invocation)];
+          } else if (change.kind === "operation_settled") {
+            state.snapshot.operations = state.snapshot.operations.filter(item => item.invocation !== change.record.invocation);
+          } else if (change.kind === "runtime_changed") {
+            state.snapshot.service.runtime_state = change.runtime_state;
+          }
+        }
         switch (change.kind) {
           case "audit_health_changed": return "refresh";
           case "document_coverage_changed": {
@@ -243,11 +258,24 @@
       clearCompleted() {
         const completed = state.feed.filter((entry) => !isRunning(entry));
         if (!completed.length) return 0;
+        const previousHidden = state.hidden.size;
         for (const entry of completed) state.hidden.add(entry.invocation);
+        for (const record of state.snapshot?.history ?? []) {
+          if (record.complete !== false) state.hidden.add(record.invocation);
+        }
         state.feed = state.feed.filter(isRunning);
         emit(CHANGE.Feed);
         emit(CHANGE.Band);
-        return completed.length;
+        return state.hidden.size - previousHidden;
+      },
+
+      /** Restore the recent retained groups through the same feed projection. */
+      showHistory() {
+        if (!state.snapshot) return;
+        state.hidden.clear();
+        seed(state.snapshot);
+        emit(CHANGE.Feed);
+        emit(CHANGE.Band);
       },
 
       beginHarness(id) {

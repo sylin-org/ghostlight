@@ -25,6 +25,9 @@
   let nextLocator = 1;
   let dragObservation = null;
   let captureMask = null;
+  // Exact tokens own only Ghostlight's pending DOM observer and its timers/listeners.
+  const observations = new Map();
+  const cancelledObservations = new Set();
   // Local structural diagnostics never enter the service's work or audit stream.
   // The worker supplies the human flag and existing tab ownership; only the top
   // document observes. No page setters or event behavior are changed.
@@ -771,7 +774,47 @@
     return { uploaded_count: transfer.files.length, uploaded_bytes: files.reduce((sum, file) => sum + file.size, 0) };
   }
 
+  function observationCancellation() {
+    return Object.assign(new Error("Ghostlight's observation was cancelled."),
+      { code: shared.OBSERVATION_CONTROL.CANCELLED_CODE });
+  }
+
+  function cancelObservation(message) {
+    const token = message.observation_token;
+    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,96}$/.test(token)
+      || typeof message.runtime_id !== "string") throw new Error("invalid observation cancellation identity");
+    const record = observations.get(token);
+    if (record) {
+      if (record.runtime !== message.runtime_id || record.fingerprint !== globalThis.__ghostlight_page_runtime__) {
+        throw new Error("observation runtime identity changed");
+      }
+      record.controller.abort(observationCancellation());
+    } else {
+      // Injection can be queued when Cancel arrives. Its exact token remains bounded and
+      // prevents that original observer from starting later; it cannot cancel another token.
+      cancelledObservations.add(`${message.runtime_id}:${token}`);
+      while (cancelledObservations.size > shared.OBSERVATION_CONTROL.TOKEN_LIMIT) {
+        cancelledObservations.delete(cancelledObservations.values().next().value);
+      }
+    }
+    return { cancelled: true };
+  }
+
   async function observe(message) {
+    const token = message.observation_token;
+    if (token !== undefined && (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,96}$/.test(token)
+      || typeof message.runtime_id !== "string")) throw new Error("invalid observation identity");
+    if (token && observations.has(token)) throw new Error("observation token already active");
+    const record = { controller: new AbortController(), runtime: message.runtime_id,
+      fingerprint: globalThis.__ghostlight_page_runtime__ };
+    if (token) observations.set(token, record);
+    if (cancelledObservations.delete(`${message.runtime_id}:${token}`)) record.controller.abort(observationCancellation());
+    try { return await observeCondition(message, record.controller.signal); }
+    finally { if (observations.get(token) === record) observations.delete(token); }
+  }
+
+  async function observeCondition(message, signal) {
+    if (signal.aborted) throw signal.reason;
     const started = performance.now();
     const deadline = started + message.timeout_ms;
 
@@ -779,6 +822,7 @@
       const targetElement = message.locator ? locators.get(message.locator) : document;
       const visual = await GhostlightSensor.settleVisual(targetElement, {
         document,
+        signal,
         timeout_ms: message.timeout_ms,
         now: () => performance.now()
       });
@@ -790,6 +834,7 @@
     }
 
     while (true) {
+      if (signal.aborted) throw signal.reason;
       let satisfied = false;
       if (message.condition === "load_ready") satisfied = document.readyState === "interactive" || document.readyState === "complete";
       if (message.condition === "url_contains") satisfied = location.href.includes(message.value);
@@ -803,6 +848,7 @@
           const targetElement = message.locator ? locators.get(message.locator) : document;
           const visual = await GhostlightSensor.settleVisual(targetElement, {
             document,
+            signal,
             timeout_ms: remaining,
             now: () => performance.now()
           });
@@ -818,12 +864,12 @@
       }
       const remaining = deadline - performance.now();
       if (remaining <= 0) break;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(100, remaining)));
+      await sensor.delay(Math.min(100, remaining), signal, { setTimeout, clearTimeout });
     }
     return { satisfied: false, elapsed_ms: Math.round(performance.now() - started), readiness: document.readyState === "complete" ? "complete" : document.readyState === "interactive" ? "interactive" : "loading" };
   }
 
-  window.__ghostlight_dispatch__ = function(message) { return new Promise((resolvePromise, rejectPromise) => { const sendResponse = (resp) => { if (resp.ok) resolvePromise(resp.result); else rejectPromise(new Error(resp.error)); };
+  window.__ghostlight_dispatch__ = function(message) { return new Promise((resolvePromise, rejectPromise) => { const sendResponse = (resp) => { if (resp.ok) resolvePromise(resp.result); else rejectPromise(Object.assign(new Error(resp.error), { code: resp.code })); };
     if (message?.kind === formDiagnosticsApi.STATE_MESSAGE_KIND) {
       formDiagnostics.setEnabled(IS_TOP && message.enabled === true);
       sendResponse({ ok: true, result: { enabled: IS_TOP && message.enabled === true } });
@@ -1053,6 +1099,7 @@
       if (message.kind === "drag_observation_finish") return finishDragObservation();
       if (message.kind === "upload_files") { const element = resolve(message.locator); const subject = actionSubject(element); return { ...uploadFiles(element, message.files), subject }; }
       if (message.kind === "observe") return observe(message);
+      if (message.kind === shared.OBSERVATION_CONTROL.CANCEL_KIND) return cancelObservation(message);
       if (message.kind === "present") {
         if (!IS_TOP && !message.signal?.locator) return { presented: false };
         return { presented: renderPresentation(message.signal, message.preferences) };
@@ -1062,7 +1109,7 @@
       if (message.kind === "recording_state") { globalThis.GhostlightPresentation.setRecording(message.active); return { recording: Boolean(message.active) }; }
       if (message.kind === "runtime_state") { globalThis.GhostlightPresentation.setRuntimeState(message.state); return { state: message.state }; }
       throw new Error("unknown content primitive");
-    }).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error) }));
+    }).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message ?? error), code: error?.code }));
   });
 };
 })();

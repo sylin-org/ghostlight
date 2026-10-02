@@ -9,6 +9,7 @@ pub mod coverage;
 pub mod environment;
 pub mod history;
 pub mod outcome;
+pub(crate) mod progress;
 pub mod provenance;
 pub mod readiness;
 pub mod resolution;

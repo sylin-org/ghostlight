@@ -36,6 +36,10 @@ Typed semantic selectors (name, optional role, optional exact match) are accepte
 handles are, including `selector_present` waits, so drivers can prefer what a control is called
 over stashing handles.
 
+An ambiguous semantic lookup never activates a control. Use existing `browser_inspect` to
+identify the intended control, then its precise current target handle. If the controls remain
+indistinguishable, clarify the intent. Guidance does not repeat exhausted selector refinement.
+
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
 when that binding is no longer current. Coordinates use the returned image dimensions, with the
@@ -135,6 +139,9 @@ each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Foc
 Background close is also refused when the active target is in a focused window, has an unowned
 neighbor, or is the last tab in its window. Changed placement refuses before close. The
 attention-protection receipt identifies the physical refusal; released custody is dropped first.
+Tab-preservation refusals with no effect appear as `Tab preserved` without a repeated native
+guardrail notification. Technical blocked/effect facts remain. Partial or uncertain effects keep
+their caution presentation. The user can use exact Show tab to close manually.
 
 ### `browser_navigate`
 
@@ -381,6 +388,28 @@ Text conditions match composed visible text across the top document, open shadow
 slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
+
+For a delayed save, discover controls once, then use one `browser_flow` to fill, click Save once,
+wait for a fresh application-specific confirmation, and read. An action's short `expect` check
+does not replace this wait. A pre-existing success marker or an acknowledged click does not prove
+server persistence. Ghostlight reports the observed condition; the application determines what
+that condition proves.
+
+The requested condition and optional visual settlement share the original deadline. Settlement
+uses the latest readiness and preserves cancellation or cleanup failures. Live Workbench progress
+names the content-free purpose, phase, and budget at phase entry, with the resolved owned tab for
+Show tab. Condition text is not retained as progress. Executor-side delay
+cancellation before dispatch has no effect and does not claim a lost browser connection.
+Lost receipts from dispatched observations also have no mutation effect. Their condition is
+unconfirmed and their cancellation, deadline or connection-loss cause remains explicit. This
+does not erase an applied prefix or uncertain earlier mutation, or make replay safe for a flow.
+
+Correlated Cancel disposes the exact page observation through the existing bounded cleanup guard.
+Only the original handler's finally releases its document scope. Failed disposal or an unsettled
+callback keeps OperationCleanupRequired; cancelled/none is not itself proof of custody release.
+Live composed work leads with its current purpose and bounded phase budget, with completed-child
+counts secondary. The child receipt or next phase clears the old wait purpose. Page animation and
+arbitrary asynchronous code are not claimed stopped by observation or evaluator cleanup.
 
 ### `browser_dialog`
 

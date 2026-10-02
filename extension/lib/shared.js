@@ -9,6 +9,10 @@
 
   const NATIVE_HOST_NAME = "org.sylin.ghostlight";
   const ADAPTER_PROTOCOL_MAJOR = 3;
+  // Page-local control of Ghostlight's own observations, not arbitrary page execution.
+  const OBSERVATION_CONTROL = Object.freeze({
+    CANCEL_KIND: "cancel_observation", CANCELLED_CODE: "operation_cancelled", TOKEN_LIMIT: 256
+  });
   const BROWSER_ATTENTION = Object.freeze({ BACKGROUND: "background", FOREGROUND: "foreground" });
   const ATTENTION_PROTECTION_REASON = Object.freeze({
     FOCUS: "focus", SHARED_WINDOW_RESIZE: "shared_window_resize", ACTIVE_TAB_CLOSE: "active_tab_close", NATIVE_INPUT: "native_input"
@@ -243,6 +247,7 @@
   return Object.freeze({
     NATIVE_HOST_NAME,
     ADAPTER_PROTOCOL_MAJOR,
+    OBSERVATION_CONTROL,
     BROWSER_ATTENTION,
     ATTENTION_PROTECTION_REASON,
     attentionProtected,

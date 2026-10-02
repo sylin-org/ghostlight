@@ -427,8 +427,9 @@ function wire() {
   el["clear-monitor"].addEventListener("click", () => {
     const cleared = store.clearCompleted();
     if (!cleared) return;
-    view.toast(`Cleared ${cleared} ${cleared === 1 ? "entry" : "entries"} from this view. Audit history is unchanged.`);
+    view.toast(`Cleared ${cleared} completed ${cleared === 1 ? "group" : "groups"} from this view. Audit history is unchanged.`);
   });
+  el["show-history"].addEventListener("click", () => store.showHistory());
 
   el["refresh-integrations"].addEventListener("click", (event) =>
     withButton(event, async () => {

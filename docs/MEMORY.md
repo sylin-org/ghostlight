@@ -39,6 +39,10 @@ the owner wants, and what this project learned the hard way.
   defect, not browser troubleshooting for the user. One production installation per OS user;
   installing or invoking a package on a development machine must use the selected development
   authority. ADR-0167 records the mandate and supersedes installation-local production election.
+  The owner's 2026-10-02 realignment defines delight as quiet confident success, not reasonable
+  error messages. Judge complete journeys by first-attempt completion, unnecessary calls, human
+  interruptions, reliable confirmation, and cleanup. ADR-0192 records the bounded local candidate;
+  its fixture evidence does not replace independent native acceptance.
 
 - **Keep extension and service in version lockstep.** To simplify visual identification and user
   mental models, Chrome Web Store extension versions align in lockstep with service release versions
@@ -646,6 +650,12 @@ Every one of these cost something to learn.
   ordinary releases must carry their acquired generation token; register counts after serialized
   setup and fence old finally from new ownership. Page effects may continue after
   release, so cleanup does not revise an unknown result or authorize replay (ADR-0191).
+
+- **The first next read proves cancellation recovery.** Use a long observation budget and a
+  still-running finite animation. Read before polling for scope release, retrying or resetting.
+  Zero active requests/evaluations/watchers does not prove document custody released. Dispose
+  exact page observation tokens and await the original handler/finally within the existing
+  cleanup bound; count its timers, RAF and listeners separately from page animation (ADR-0191).
 
 ## Where to look
 

@@ -105,7 +105,7 @@ try {
   const extended = { ...receipt, invocation: "future_additive", future_optional: { text: "PRIVATE_FUTURE_FIELD" } };
   const unsupported = { ...receipt, invocation: "future_required", reason: "future_decision" };
   const optionalResolution = [
-    { cause: { refusal: "future_optional_cause" } },
+    { cause: { reason: "future_optional_cause" } },
     { verification: "future_optional_verification" },
     { progress: { attempted: 0, acknowledged: 0, confirmed_effects: 0, future_optional: true } },
     { composition_issue: { step: 1, cause: "future_optional_child_cause" } },
@@ -113,8 +113,14 @@ try {
   ].map((fields, index) => ({ ...receipt, invocation: `future_resolution_${index}`,
     resolution: { ...receipt.resolution, ...fields } }));
   const original = readFileSync(audit);
+  const cancellation = { ...receipt, invocation: "current_cancelled_before_dispatch", status: "cancelled", effect: "none",
+    refusal_facts: { reason: "cancelled_before_dispatch" },
+    resolution: { ...receipt.resolution, cause: { reason: "cancelled_before_dispatch" },
+      presentation: { ...receipt.resolution.presentation, label: "Cancelled", tone: "controlled",
+        summary: "Cancelled before sending the next browser command." } } };
   writeFileSync(audit, Buffer.concat([original, Buffer.from([
-    JSON.stringify(extended), JSON.stringify(unsupported), ...optionalResolution.map(value => JSON.stringify(value)), JSON.stringify(receipt), ""
+    JSON.stringify(extended), JSON.stringify(unsupported), ...optionalResolution.map(value => JSON.stringify(value)),
+    JSON.stringify(cancellation), JSON.stringify(receipt), ""
   ].join("\n"))]));
   await exercise(current, "future-records-preserve-startup-and-saving", 1);
   if (previous) await exercise(previous, "predecessor-keeps-new-optional-neighbors", 1);

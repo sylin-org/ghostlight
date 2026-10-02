@@ -97,6 +97,13 @@ impl OutcomePresentation {
             ("Paused by you", OutcomeTone::Controlled)
         } else if record.reason == ReasonCode::SessionEnded {
             ("Stopped by you", OutcomeTone::Controlled)
+        } else if record.effect == "none"
+            && (record.reason == ReasonCode::TabCloseDenied
+                || record.refusal_facts == Some(AuditRefusal::LocalInterlock))
+        {
+            ("Tab preserved", OutcomeTone::Controlled)
+        } else if record.status == "cancelled" {
+            ("Cancelled", OutcomeTone::Controlled)
         } else if record.status == "succeeded" {
             ("Completed", OutcomeTone::Complete)
         } else if policy_refused {

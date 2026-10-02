@@ -1,6 +1,212 @@
 //! Core executor dispatch, invocation lifecycle, and error mapping tests.
 
 use super::*;
+use std::time::Instant;
+
+#[derive(Default)]
+struct WaitEvents(Mutex<Vec<crate::workbench::WorkbenchEvent>>);
+
+impl crate::workbench::WorkbenchEventSink for WaitEvents {
+    fn publish(&self, event: crate::workbench::WorkbenchEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+#[test]
+fn a_local_wait_keeps_exact_reveal_and_cancellation_without_connection_loss() {
+    for composed in [false, true] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec![],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        let events = Arc::new(WaitEvents::default());
+        executor.workbench.attach_events(events.clone());
+        let cancellation = CancellationToken::default();
+        let worker_cancellation = cancellation.clone();
+        let executor = Arc::new(executor);
+        let worker_executor = executor.clone();
+        let worker_workspace = workspace.clone();
+        let expected_tab = opened.facts["tab"].as_str().unwrap().to_owned();
+        let worker_tab = expected_tab.clone();
+        let worker = std::thread::spawn(move || {
+            let wait = json!({"tab":worker_tab,"condition":"duration","value":"4000","visual_settle":false});
+            let (tool, args) = if composed {
+                (
+                    "browser_flow",
+                    json!({"steps":[{"tool":"browser_wait","arguments":wait},{"tool":"browser_read","arguments":{"tab":worker_tab}}]}),
+                )
+            } else {
+                ("browser_wait", wait)
+            };
+            worker_executor.execute(&worker_workspace, tool, args, None, &worker_cancellation)
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let events = events.0.lock().unwrap();
+            if events.iter().any(|event| matches!(&event.change,
+            crate::workbench::WorkbenchChange::OperationChanged { operation }
+                if operation.activity.contains("Waiting for 4000 ms") && operation.tab.as_deref() == Some(expected_tab.as_str()))) {
+            break;
+        }
+            assert!(
+                Instant::now() < deadline,
+                "wait never projected its purpose and owned tab"
+            );
+            drop(events);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        cancellation.cancel();
+        let result = worker.join().unwrap();
+        assert_eq!(result.status, Status::Cancelled);
+        assert_eq!(result.effect, Effect::None);
+        assert!(!result.summary.contains("disconnected"));
+        let record = audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| record.tool == "browser_wait")
+            .unwrap()
+            .clone();
+        if composed {
+            let events = events.0.lock().unwrap();
+            let published_wait = events.iter().position(|event| matches!(&event.change,
+            crate::workbench::WorkbenchChange::OperationChanged { operation } if operation.activity.contains("Waiting for 4000 ms"))).unwrap();
+            assert!(events.iter().skip(published_wait + 1).any(|event| matches!(&event.change,
+            crate::workbench::WorkbenchChange::OperationChanged { operation } if !operation.activity.contains("ms remaining"))), "child completion did not clear the bounded wait purpose");
+        }
+        assert_eq!(
+            record.refusal_facts,
+            Some(crate::language::audit::AuditRefusal::CancelledBeforeDispatch)
+        );
+        assert_eq!(
+            crate::language::history::OutcomePresentation::from_record(&record).label,
+            "Cancelled"
+        );
+        assert!(!serde_json::to_string(&record)
+            .unwrap()
+            .contains("Waiting for 4000 ms"));
+        assert!(!browser
+            .calls()
+            .iter()
+            .any(|command| matches!(command, BrowserCommand::Observe { .. })));
+    }
+}
+
+#[test]
+fn wait_settlement_retains_actual_readiness_and_specific_failures() {
+    for error in [
+        None,
+        Some(BrowserError::CancelledBeforeDispatch),
+        Some(BrowserError::OperationCleanupRequired),
+    ] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        let mut loading = tab(7, "https://example.com/");
+        loading.readiness = BrowserReadiness::Loading;
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: loading,
+            committed_urls: vec![],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com","new_tab":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        browser.push(Ok(BrowserOutcome::Observed {
+            tab_id: 7,
+            satisfied: true,
+            elapsed_ms: 25,
+            readiness: BrowserReadiness::Interactive,
+        }));
+        browser.push(error.clone().map_or(
+            Ok(BrowserOutcome::Observed {
+                tab_id: 7,
+                satisfied: true,
+                elapsed_ms: 15,
+                readiness: BrowserReadiness::Complete,
+            }),
+            Err,
+        ));
+        let waited = executor.execute(
+            &workspace,
+            "browser_wait",
+            json!({"tab":opened.facts["tab"],
+            "condition":"text_present","value":"PRIVATE_CONDITION_SENTINEL","visual_settle":true}),
+            None,
+            &CancellationToken::default(),
+        );
+        if let Some(error) = error {
+            assert_ne!(waited.status, Status::Succeeded);
+            assert_eq!(waited.effect, Effect::None);
+            assert_eq!(waited.facts["condition_satisfied"], true);
+            assert_eq!(waited.facts["wait_phase"], "visual_settle");
+            assert_eq!(
+                waited.facts["reason"],
+                if error == BrowserError::OperationCleanupRequired {
+                    "operation_cleanup_required"
+                } else {
+                    "cancelled"
+                }
+            );
+        } else {
+            assert_eq!(waited.status, Status::Succeeded);
+            assert_eq!(waited.readiness, Readiness::Complete);
+            assert_eq!(waited.facts["readiness"], "complete");
+            assert_eq!(waited.facts["elapsed_ms"], 40);
+        }
+        assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
+            .unwrap()
+            .contains("PRIVATE_CONDITION_SENTINEL"));
+    }
+}
+
+#[test]
+fn an_executor_side_delay_deadline_never_claims_uncertain_mutation() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    let result = executor.execute(
+        &workspace,
+        "browser_wait",
+        json!({"tab":opened.facts["tab"],
+        "condition":"duration","value":"1000","timeout_ms":100,"visual_settle":false}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert!(result.repeat_safe);
+    assert_eq!(result.facts["reason"], "deadline");
+    assert!(!browser
+        .calls()
+        .iter()
+        .any(|command| matches!(command, BrowserCommand::Observe { .. })));
+}
 
 /// A primitive error keeps volatile detail in client facts, outside frozen safe language.
 #[test]
@@ -2458,8 +2664,8 @@ fn uncertain_effect_guides_recovery_without_replay() {
     assert_eq!(
             result.next_steps,
             vec![
-                "If a JavaScript dialog may be open, use browser_dialog when document access is available. Otherwise follow the document-access recovery guidance.".to_string(),
-                "Then observe the page with browser_read or browser_inspect to learn what happened.".to_string(),
+                "Observe the current page with browser_read before preparing unfinished work. If document access is unavailable, the user can use Show tab for manual inspection.".to_string(),
+                "Do not repeat this action. Page code may continue after cancellation or a timeout.".to_string(),
             ]
         );
 }
@@ -2576,22 +2782,8 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
                 &CancellationToken::default(),
             );
             assert_eq!(browser.calls().len() - before, 2, "{tool}");
-            assert_eq!(
-                result.status,
-                if unknown {
-                    Status::Unknown
-                } else {
-                    Status::Failed
-                }
-            );
-            assert_eq!(
-                result.effect,
-                if unknown {
-                    Effect::Unknown
-                } else {
-                    Effect::Partial
-                }
-            );
+            assert_eq!(result.status, Status::Failed);
+            assert_eq!(result.effect, Effect::Partial);
             assert_eq!(result.facts["progress"]["counts"]["succeeded"], 1);
             assert_eq!(result.facts["progress"]["effects"]["applied"], 1);
             assert_eq!(result.facts["steps"][2]["status"], "not_run");

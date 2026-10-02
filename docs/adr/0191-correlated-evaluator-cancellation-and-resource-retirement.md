@@ -90,3 +90,37 @@ Discriminating source tests cover shared evaluator/ordinary leases, setup versus
 recording capture and beforeunload navigation during Cancel, old ordinary finally after reattachment,
 presentation failures and the count of a lease admitted behind an in-flight detach. Frozen candidate
 review and actual Chromium/native acceptance remain prerequisites to deployment.
+
+## Amendment: cooperative observation disposal (2026-10-02)
+
+Independent native review rejected quiet-success candidate `66213c61`. A cancelled read-only
+visual observation returned cancelled/none, but its original Chrome scripting callback retained
+the document scope for about 19.2 seconds. Active requests, evaluations and navigation watchers
+were already zero. The first immediate read still refused with OperationCleanupRequired.
+The earlier short-budget component probe waited for scope release before reading and did not
+test this recovery promise. Its eventual read was insufficient acceptance evidence.
+
+The existing correlated operation owner now includes Observe alongside Evaluate. Register epoch,
+correlation and exact document scope before setup awaits. Bind observation disposal to the captured
+page-runtime object and exact original document IDs. Each frame receives an opaque cancellation
+token. Page-local AbortControllers are transient disposal handles, not workspace authority.
+Bounded early-token markers prevent an already queued observation from starting after Cancel.
+They cannot cancel another token or another runtime's observation.
+
+Before disposal awaits, register bounded cleanup through the existing documents.cleaning seam.
+Cancel wakes polling sleep and disposes visual ceiling/poll timers, RAF callbacks and abort
+listeners. Page animation and arbitrary background code remain outside that disposal. Cancellation
+rejects the observation; it cannot become fulfilled, timeout, text-absence success or readiness.
+Multi-frame observation waits for every original callback to settle before reporting cancellation.
+
+The existing 1000 ms cleanup bound covers cooperative disposal, the original operation handler
+and its scoped finally. Only documents.run's original finally removes its scope. Failed disposal,
+runtime replacement or an unsettled Chrome callback leaves the admission guard conservative.
+No Promise.race abandons a handler, no scope is erased early, and no debugger detach is used for
+Chrome scripting observations. Evaluator exclusive-owner retirement and generation fences remain.
+
+Validation uses a 20000 ms budget and a finite 60000 ms page animation. Record the first next read
+before any recovery polling, retry or reset. Count page sensor resources and prove the animation
+continues. Source counterexamples cover unsettled original callbacks, failed disposal, shared
+debugger custody, multiple frames, runtime/navigation races, old epochs and old finally versus
+new same-correlation work. Independent native re-review remains required before deployment.

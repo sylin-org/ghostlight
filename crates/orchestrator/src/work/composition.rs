@@ -226,7 +226,9 @@ fn child_cause(terminal: &CompletedWork) -> Option<StepCause> {
         Some(R::CredentialAuthorization) => StepCause::Failed,
         Some(R::AttentionRequired | R::LocalInterlock) => StepCause::AttentionRequired,
         Some(R::DeadlineBeforeStart | R::DeadlineExpired { .. }) => StepCause::Deadline,
-        Some(R::CancelledBeforeStart | R::CancelledAfterDispatch) => StepCause::Cancelled,
+        Some(R::CancelledBeforeStart | R::CancelledBeforeDispatch | R::CancelledAfterDispatch) => {
+            StepCause::Cancelled
+        }
         Some(R::ConnectionLost | R::BrowserStopped { reconnect: true }) => {
             StepCause::ConnectionLost
         }

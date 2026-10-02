@@ -73,6 +73,7 @@
      * the host the action landed on.
      */
     function sentence(entry) {
+      if (!entry.settled && entry.activity) return entry.activity;
       if (entry.presentation?.summary) return entry.presentation.summary;
       if (entry.summary) return entry.summary;
       if (!entry.settled) return entry.activity;
@@ -276,6 +277,9 @@
         : "";
 
       return `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
+        + (!entry.settled && entry.steps?.length && entry.presentation?.summary
+          && entry.presentation.summary !== sentence(entry)
+          ? `<p class="hero-progress">${escapeHtml(entry.presentation.summary)}</p>` : "")
         + reason
         + recoveryMarkup(entry, showRecovery)
         + revealMarkup(entry)
@@ -382,7 +386,7 @@
       if (!entry) {
         el.hero.className = "hero";
         el["hero-med"].innerHTML = GLYPHS.scan;
-        el["hero-body"].innerHTML = '<p class="hero-activity">The first browser action an agent takes will appear here.</p>';
+        el["hero-body"].innerHTML = '<p class="hero-activity">No activity in this view.</p>';
         el["hero-right"].innerHTML = "";
         return;
       }
@@ -454,9 +458,7 @@
       }
     }
 
-    function queueCount(feed) {
-      const rows = Math.max(0, feed.length - 1);
-      el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
+    function clearAvailability(feed) {
       el["clear-monitor"].disabled = !feed.some((entry) => !isRunning(entry));
     }
 
@@ -474,10 +476,10 @@
       if (feed.length <= 1) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No other activity in this session.";
+        empty.textContent = "No other activity in this view.";
         el.queue.append(empty);
       }
-      queueCount(feed);
+      clearAvailability(feed);
     }
 
     function promote(entry, previous, feed) {
@@ -486,7 +488,7 @@
         el.queue.prepend(buildRow(previous, true));
       }
       hero(entry, true);
-      queueCount(feed);
+      clearAvailability(feed);
     }
 
     /* --------------------------------- band ------------------------------- */
@@ -504,11 +506,13 @@
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
       } else {
-        el["state-facts"].innerHTML = `<b>${facts.snapshot.sessions.length}</b> sessions`
+        const connections = facts.snapshot.sessions.reduce((count, session) => count + (session.connections?.length ?? 0), 0);
+        el["state-facts"].innerHTML = `<b>${connections}</b> connections`
           + ` &middot; <b>${facts.snapshot.browsers.filter(browser => browser.connected).length}</b> browsers`
-          + ` &middot; <b>${facts.running}</b> running`
-          + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
+          + ` &middot; <b>${facts.running}</b> running`;
       }
+      el["show-history"].hidden = !facts.historyHidden;
+      el["queue-count"].textContent = `${facts.visible ?? 0} shown / ${facts.retained ?? facts.snapshot?.history.length ?? 0} retained groups`;
 
       // The tab is called Policy and stays called Policy. What changes is the tone it carries and
       // the sentence behind it, and both are authored by the orchestrator: a surface that invents
@@ -549,10 +553,13 @@
     function connectionGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
+        const connections = session.connections?.length ?? 0;
+        if (!connections && !session.tab_count && !session.active_operations && !session.leased) continue;
         const group = groups.get(session.client_label)
-          ?? { label: session.client_label, count: 0, tabs: 0, busy: false };
+          ?? { label: session.client_label, count: 0, tabs: 0, connections: 0, busy: false };
         group.count += 1;
         group.tabs += session.tab_count;
+        group.connections += connections;
         group.busy = group.busy || session.active_operations > 0;
         groups.set(session.client_label, group);
       }
@@ -564,8 +571,8 @@
       const chips = connectionGroups(snapshot.sessions).map((group) => {
         // The count earns its place only when there is more than one, so the common case stays quiet.
         const many = group.count > 1 ? ` <span class="tally">${group.count}</span>` : "";
-        return `<span class="chip ${group.busy ? "busy" : "on"}"><span class="dot"></span>${escapeHtml(group.label)}${many}`
-          + `<small>${group.tabs} tabs</small></span>`;
+        return `<span class="chip ${group.busy ? "busy" : group.connections ? "on" : ""}"><span class="dot"></span>${escapeHtml(group.label)}${many}`
+          + `<small>${group.tabs} ${group.tabs === 1 ? "tab" : "tabs"}${!group.connections && !group.busy ? " retained" : ""}</small></span>`;
       });
       chips.push(...snapshot.browsers.map((browser) =>
         `<span class="chip ${browser.connected ? "on" : "unavailable"}" data-browser="${escapeHtml(browser.id)}"><span class="dot"></span>${escapeHtml(browser.family)}`
@@ -598,9 +605,9 @@
       el["about-version"].textContent = version.split(".").slice(0, 2).join(".") || "1.0";
       const facts = [
         ["Version", version || "unknown"],
-        ["Sessions", `${snapshot.sessions.length} connected`],
+        ["Workspaces", `${snapshot.sessions.length} admitted`],
         ["Browsers", `${snapshot.browsers.filter(browser => browser.connected).length} attached`],
-        ["Recorded", `${snapshot.history.length} actions on this device`],
+        ["Retained", `${snapshot.history.length} activity groups`],
         ["License", "Apache-2.0 OR MIT"]
       ];
       el["about-facts"].innerHTML = facts
@@ -1611,7 +1618,7 @@
 
     return Object.freeze({
       el, attempt,
-      hero, row, drop, promote, rebuildFeed, queueCount,
+      hero, row, drop, promote, rebuildFeed,
       band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
