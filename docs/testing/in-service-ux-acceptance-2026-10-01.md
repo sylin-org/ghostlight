@@ -1,5 +1,7 @@
 # Selected in-service UX acceptance -- 2026-10-01
 
+Paths under `.tmp/` identify local verification artifacts, not distributed files.
+
 Branch: `codex/in-service-outcome-ux`, ordinary checkout. Baseline: `22d27bd175fded4b66a731fb6b77d9fc433b8d2c`.
 Initial slice: `8d1e16ff210f0b30dd944b520b54f713dd145147`.
 Authority-only confirmation correction: `4ecbe13e14d6d22d6397c437aca26dbcccbca45c`.
@@ -91,11 +93,11 @@ receipt inputs are synthetic. Before images are the already verified baseline ob
 
 | View | Before | After |
 | --- | --- | --- |
-| Success | [Baseline](../../.tmp/quiet-native-installed-2026-10-01T01-59-12-995Z-35616-ux-ordinary-filled.png) | [Authored outcome](../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-success-after.png) |
-| Unknown | [Baseline](../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-uncertain-effect.png) | [Visible recovery](../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-unknown-after.png) |
-| Pause / Show | [Baseline](../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-paused-show-tab.png) | [Calm control and handoff](../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-paused-show-tab-after.png) |
-| Disconnect | [Baseline](../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-disconnected.png) | [Accepted global Pause](../../.tmp/quiet-native-installed-2026-10-01T03-36-43-615Z-44444-ux-final-disconnected-paused.png) |
-| About | [Baseline](../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-about-card.png) | [Full guardian card](../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-about-after.png) |
+| Success | Baseline (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T01-59-12-995Z-35616-ux-ordinary-filled.png`) | Authored outcome (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-success-after.png`) |
+| Unknown | Baseline (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-uncertain-effect.png`) | Visible recovery (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-unknown-after.png`) |
+| Pause / Show | Baseline (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-paused-show-tab.png`) | Calm control and handoff (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-paused-show-tab-after.png`) |
+| Disconnect | Baseline (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-disconnected.png`) | Accepted global Pause (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T03-36-43-615Z-44444-ux-final-disconnected-paused.png`) |
+| About | Baseline (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T02-08-13-229Z-51000-ux-about-card.png`) | Full guardian card (local evidence: `../../.tmp/quiet-native-installed-2026-10-01T03-19-09-348Z-36224-ux-about-after.png`) |
 
 Additional inspected captures from prefix `quiet-native-installed-2026-10-01T03-19-09-348Z-36224`:
 `ux-legacy-unknown-after`, `ux-refusal-unknown-history-after`, `ux-partial-children-after`,

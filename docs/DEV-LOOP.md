@@ -23,6 +23,12 @@ three binaries because every process imports the changed lifecycle seam.
 scripts/dev-loop.ps1 -Action Deploy -Component orchestrator,mcp-connector,browser-connector -RegisterNativeHost
 ```
 
+Download installers and npm replace the permanent `~/.ghostlight/bin` sibling set.
+They verify the full download before the existing native deployment seam replaces changed
+images. Their version is an artifact identity, not a directory. Native-host and MCP registrations
+stay fixed across ordinary updates. The packaged extension connects by host name and installs
+the current service-owned page runtime on reconnect; a service update needs no extension reload.
+
 The loop quiesces the shared production control root and the replaced directory, stops exact
 selected images, copies built binaries, and records development selection before resuming.
 Package setup remembers a release without taking development custody. To leave development,
@@ -125,12 +131,10 @@ start. The order matters less than the scope.
 5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight`. The tray appears
    and the workbench begins backgrounded.
 
-Replacing `ghostlight-browser-connector` has a cost the other two do not: Chromium respawns the
-native host within a second or two while the extension's service worker is awake, so the copy needs
-a short kill-and-retry loop, and afterwards the extension must be reloaded explicitly at
-`chrome://extensions` before any browser work succeeds. An MV3 worker that has since suspended will
-not reconnect on its own. That is the reason step 2 matters: if the connector did not change, none
-of this happens.
+Replacing `ghostlight-browser-connector` closes the native port. The unchanged injector uses
+its existing retry timer and alarm wakeup to reconnect by the same host name. When the service
+alone changes, leave this connector running: it reconnects and carries the current page runtime
+without native-port churn. Reload the extension only when its packaged source changed.
 
 The repository script makes that narrow swap repeatable. It defaults to planning an orchestrator
 replacement and makes no changes:
@@ -156,7 +160,7 @@ pwsh scripts/dev-loop.ps1 -Action Deploy -Component browser-connector -RegisterN
 The script builds selected packages in `.target-dev-loop`, creates `deploy.lock`, stops only exact
 destination image paths under `target/release`, copies with a bounded retry, removes the lock, and
 starts the orchestrator only when it was selected. Both directories must stay inside this
-repository. A browser-connector replacement still requires an explicit extension reload.
+repository. A browser-connector replacement uses the injector's existing reconnect path.
 
 ### Container builds and host deployment
 

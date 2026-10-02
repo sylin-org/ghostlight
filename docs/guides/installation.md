@@ -5,6 +5,12 @@ matching Chromium extension. No account, no resident launcher service, no admin 
 
 This guide covers the published package and the source-development path you can follow today.
 
+The source candidate uses fixed `~/.ghostlight/bin` paths for npm and download installs
+(ADR-0193). The packaged extension connects by the fixed native-host name; its injector
+receives the current page runtime when the service reconnects. Ordinary service updates
+do not require an extension update or reload. This candidate is not yet published; the
+exact published release installation below remains its own compatibility record.
+
 ## Release installation journey
 
 1. Run `npx -y ghostlight@1.3.12 install`. The checksum-bound launcher downloads one exact sibling

@@ -290,6 +290,9 @@ fn report_transport(error: &ClientError) -> i32 {
 /// Dispatch a parsed launch mode to its dedicated subcommand handler.
 pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
     match mode {
+        parse::LaunchMode::DeploymentInstall(directory) => {
+            crate::install::deployment::install_download(&directory)
+        }
         parse::LaunchMode::Deployment(selection) => {
             let record = crate::install::deployment::select(selection)?;
             println!("{}", serde_json::to_string(&record)?);

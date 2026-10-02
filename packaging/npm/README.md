@@ -5,9 +5,12 @@ access to your own authenticated Chromium session, keeps the work visible, and a
 boundaries when you want them. All-open is a first-class default.
 
 This npm package is a thin launcher. On first run it downloads the version-matched Ghostlight
-binaries from the GitHub release and caches them under `~/.ghostlight/bin/`, so there are no
-runtime dependencies. Every launch verifies all three cached files against the checksums carried
-by the package. A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the stdio server your
+binaries from the GitHub release into temporary storage and verifies all three before installing
+them at fixed paths under `~/.ghostlight/bin/`. Updates reuse those paths. The native deployment
+seam replaces only changed components; unchanged connectors keep running. Every launch verifies
+the installed files against the checksums carried by the package. The browser injector receives
+the current page runtime from the service without an extension update or reload.
+A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the stdio server your
 client talks to; `npx ghostlight install` connects the browser side.
 
 ## Quick start

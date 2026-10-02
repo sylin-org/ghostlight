@@ -1,5 +1,7 @@
 # Quiet confident completion -- candidate evidence
 
+Paths under `.tmp/` identify local verification artifacts, not distributed files.
+
 Date: 2026-10-02. Status: Historical first source freeze `66213c61`; native acceptance rejected.
 The [native review](quiet-success-native-review-2026-10-02.md) found retained observation custody
 and a hidden composed wait purpose. The [later correction](quiet-success-correction-2026-10-02.md)
@@ -76,9 +78,9 @@ are recorded separately.
 
 Raw final runs:
 
-- [Baseline](../../.tmp/delight-baseline-comparison-2026-10-02.json), frozen source at `8bd62ecf`
+- Baseline (local evidence: `../../.tmp/delight-baseline-comparison-2026-10-02.json`), frozen source at `8bd62ecf`
   (the implementation at `f7f00f07`, before this slice).
-- [Candidate](../../.tmp/delight-candidate-comparison-2026-10-02.json), the first frozen source.
+- Candidate (local evidence: `../../.tmp/delight-candidate-comparison-2026-10-02.json`), the first frozen source.
 
 | Journey or challenge | Baseline | Candidate |
 | --- | --- | --- |
@@ -135,11 +137,11 @@ dormant empty continuity have distinct presentation. No caller/workspace lifetim
 
 Owned bundled-UI renders and interactions passed at 1280 and 720 pixels:
 
-- [Wait, exact tool and scoped activity at 720](../../.tmp/h4-delight-wait-history-720.png).
-- [Same view at 1280](../../.tmp/h4-delight-wait-history-1280.png).
-- [Clear view with retained-history route](../../.tmp/h4-delight-cleared-720.png).
-- [Complete guardian card at 1280](../../.tmp/h4-delight-guardian-1280.png) and
-  [720](../../.tmp/h4-delight-guardian-720.png).
+- Wait, exact tool and scoped activity at 720 (local evidence: `../../.tmp/h4-delight-wait-history-720.png`).
+- Same view at 1280 (local evidence: `../../.tmp/h4-delight-wait-history-1280.png`).
+- Clear view with retained-history route (local evidence: `../../.tmp/h4-delight-cleared-720.png`).
+- Complete guardian card at 1280 (local evidence: `../../.tmp/h4-delight-guardian-1280.png`) and
+  720 (local evidence: `../../.tmp/h4-delight-guardian-720.png`).
 
 The guardian image is unchanged in both runs:
 `153e65ae92af61a7cd2dcbe38c59e6875287a9e3f0208fb4e73f781292327a67`.
@@ -163,7 +165,7 @@ script followed by an unavailable read remains uncertain. Flow replay restrictio
 The matched Chromium comparison cancels only while a finite-animation observation is still in
 flight, after its browser dispatch and document scope are recorded. Both next reads succeed, with
 zero clicks/saves and no residual evaluation, scope, watcher or request.
-[Correction comparison](../../.tmp/delight-correction-comparison-2026-10-02.json) carries the exact
+Correction comparison (local evidence: `../../.tmp/delight-correction-comparison-2026-10-02.json`) carries the exact
 baseline/candidate outcomes. The baseline reports uncertain mutation for a read and loses the
 settlement cause behind a text-never-appeared sentence; the candidate reports cancelled/none,
 unknown readiness and the unavailable observation without claiming the whole wait completed.
@@ -171,7 +173,7 @@ unknown readiness and the unavailable observation without claiming the whole wai
 Two inherited issues are outside this slice: the newest of two live operations can settle while
 the earlier still runs, and resync can reorder the hero; document/tree inspection can store
 context internally but project only metadata/counts. The fixed count/cache bounds do not establish
-general ordering equivalence. A focused [two-operation diagnostic](../../.tmp/delight-inherited-ordering-2026-10-02.json)
+general ordering equivalence. A focused two-operation diagnostic (local evidence: `../../.tmp/delight-inherited-ordering-2026-10-02.json`)
 reproduced the hero mismatch on both sources. Investigate the missing inspection context at its existing owner;
 do not add a flat list as a substitute.
 
@@ -202,23 +204,23 @@ because it includes the owner's pre-existing review entry.
 Final checks passed:
 
 - `cargo fmt --check`, strict workspace/all-target clippy, and `cargo test --workspace`, using
-  the isolated candidate target. [Rust log](../../.tmp/delight-rust-tests.log),
-  [clippy log](../../.tmp/delight-clippy.log).
-- Extension `npm test`: 393 passing, none failed. [Log](../../.tmp/delight-extension-tests.log).
+  the isolated candidate target. Rust log (local evidence: `../../.tmp/delight-rust-tests.log`),
+  clippy log (local evidence: `../../.tmp/delight-clippy.log`).
+- Extension `npm test`: 393 passing, none failed. Log (local evidence: `../../.tmp/delight-extension-tests.log`).
 - `node --check` for all changed UI and journey JavaScript; changed-file ASCII and diff whitespace.
 - Workbench surface and real bundled Chromium rendering/interaction, including Clear/restore,
   settled/live updates, Space/Enter controls in the component fixture, reveal without Resume,
   recovery details and both widths. A screenshot-only timeout during the refresh passed on one
-  fresh owned-profile retry; no product code changed for it. [Surface log](../../.tmp/delight-workbench-tests.log),
-  [browser log](../../.tmp/delight-workbench-browser.log).
-- Real process and CLI lanes. [Process log](../../.tmp/delight-process-journey.log),
-  [CLI log](../../.tmp/delight-cli-journey.log). Two CLI assertions omitted already-existing
+  fresh owned-profile retry; no product code changed for it. Surface log (local evidence: `../../.tmp/delight-workbench-tests.log`),
+  browser log (local evidence: `../../.tmp/delight-workbench-browser.log`).
+- Real process and CLI lanes. Process log (local evidence: `../../.tmp/delight-process-journey.log`),
+  CLI log (local evidence: `../../.tmp/delight-cli-journey.log`). Two CLI assertions omitted already-existing
   `Next:` guidance; the first failed identically on frozen baseline and candidate. The corrected
   lane passed on both. Its governed phase now inherits the isolated native-host environment.
 - Restart/predecessor/optional-cause checks preserve every pre-existing audit byte, with only the
   deliberately unsupported required record counted unreadable. This compares the frozen debug
   baseline reader with the candidate, not an installed predecessor package.
-  [Compatibility log](../../.tmp/delight-history-compatibility.log) prints its evidence directory.
+  Compatibility log (local evidence: `../../.tmp/delight-history-compatibility.log`) prints its evidence directory.
 - Final baseline and candidate draft/challenge runners, including continuing trusted human-fixture
   input, independent persistence, dispatched read and prefix/uncertain cancellation, Pause and
   exact cleanup. The process lane's old read-cancellation assertion was corrected to the precise

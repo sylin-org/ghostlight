@@ -666,12 +666,25 @@ try {
   const unrelatedVisual = await openVisualTab("visual-unrelated");
   const firstVisualPeer = mcp;
   await rawWorker(`chrome.tabs.update(${unrelatedVisual.physical}, {active:true})`);
-  const visualState = async tabId => rawWorker(`(async () => {
-    const {root} = await chrome.debugger.sendCommand({tabId:${tabId}}, 'DOM.getDocument', {depth:-1,pierce:true});
+  // Observe through a separate test CDP session. Cancellation releases the adapter's
+  // debugger lease; verification must not assume or reacquire product custody.
+  const visualSessions = new Map();
+  const visualCommand = async (tabId, method, params) => {
+    if (!visualSessions.has(tabId)) {
+      const tab = await rawWorker(`chrome.tabs.get(${tabId})`);
+      const target = (await cdp.send("Target.getTargets")).targetInfos.find(item => item.type === "page" && item.url === tab.url);
+      assert.ok(target, `Missing visual fixture target: ${tab.url}`);
+      const { sessionId: pageSession } = await cdp.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+      visualSessions.set(tabId, pageSession);
+    }
+    return cdp.send(method, params, visualSessions.get(tabId));
+  };
+  const visualState = async tabId => {
+    const {root} = await visualCommand(tabId, "DOM.getDocument", {depth:-1,pierce:true});
     const pending = [root], counts = {wheel:0,read:0,signature:0};
     while(pending.length) {
       const node = pending.pop(), attributes = node.attributes || [];
-      const classes = String(attributes[attributes.indexOf('class')+1] || '').split(/\\s+/);
+      const classes = String(attributes[attributes.indexOf('class')+1] || '').split(/\s+/);
       if(classes.includes('workwheel')) counts.wheel++;
       if(classes.includes('read-scan')) counts.read++;
       if(classes.includes('signature')) counts.signature++;
@@ -679,14 +692,16 @@ try {
       if(node.contentDocument) pending.push(node.contentDocument);
     }
     return counts;
-  })()`);
-  const visualPage = (target, expression) => rawWorker(`(await chrome.debugger.sendCommand({tabId:${target.physical}},
-    'Runtime.evaluate', {expression:${JSON.stringify(expression)},returnByValue:true,awaitPromise:true})).result.value`);
+  };
+  const visualPage = async (target, expression) => {
+    const result = await visualCommand(target.physical, "Runtime.evaluate", {expression,returnByValue:true,awaitPromise:true});
+    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  };
   const captureVisual = async (target, name) => {
     // The product screenshot path intentionally hides presentation. This test observes the
     // actual Chrome surface directly, retaining the wheel for human comparison with cleanup.
-    const data = await rawWorker(`(await chrome.debugger.sendCommand({tabId:${target.physical}},
-      'Page.captureScreenshot', {format:'png'})).data`);
+    const { data } = await visualCommand(target.physical, "Page.captureScreenshot", {format:'png'});
     writeFileSync(join(scratchRoot, `h6-visual-${name}.png`), Buffer.from(data, "base64"));
   };
   await rawWorker(`(() => {

@@ -1,5 +1,7 @@
 # Quiet confident completion -- native-gate correction
 
+Paths under `.tmp/` identify local verification artifacts, not distributed files.
+
 Date: 2026-10-02. Status: Architecture accepted; scoped independent native review qualified acceptance.
 No installation, push, publication or persistent access/security change was performed.
 
@@ -74,8 +76,8 @@ content-free custody snapshot is included in the read timing.
 
 Raw evidence:
 
-- [Rejected-source reproduction](../../.tmp/delight-native-gate-baseline-2026-10-02.json).
-- [Final corrected CLI/MCP and Chromium journey](../../.tmp/delight-native-gate-candidate-final-2026-10-02.json).
+- Rejected-source reproduction (local evidence: `../../.tmp/delight-native-gate-baseline-2026-10-02.json`).
+- Final corrected CLI/MCP and Chromium journey (local evidence: `../../.tmp/delight-native-gate-candidate-final-2026-10-02.json`).
 - [Journey runner](../../tests/delight-journey.mjs), including the exact timing and resource hooks.
 
 At the corrected cancellation receipt, observations, evaluations, scope, navigation watchers and
@@ -99,10 +101,10 @@ pixels. A composed operation with two completed children leads with
 "Completed 2 of 4 steps." remains secondary. Rebuilding from a snapshot retains both readings.
 The next child shows Reading and removes the old wait budget in live and rebuilt views.
 
-- [Live composed wait at 1280](../../.tmp/h4-delight-composed-wait-live-1280.png).
-- [Rebuilt composed wait at 720](../../.tmp/h4-delight-composed-wait-rebuilt-720.png).
-- [Next child without the stale budget](../../.tmp/h4-delight-composed-next-child-720.png).
-- [Bundled-browser log](../../.tmp/delight-correction-ui-browser.log) and
+- Live composed wait at 1280 (local evidence: `../../.tmp/h4-delight-composed-wait-live-1280.png`).
+- Rebuilt composed wait at 720 (local evidence: `../../.tmp/h4-delight-composed-wait-rebuilt-720.png`).
+- Next child without the stale budget (local evidence: `../../.tmp/h4-delight-composed-next-child-720.png`).
+- Bundled-browser log (local evidence: `../../.tmp/delight-correction-ui-browser.log`) and
   [surface fixture](../../tests/workbench-surface.mjs).
 
 These checks preserve the exact tool row, calm protection, 200 displayed/500 retained groups,
@@ -137,15 +139,15 @@ is a configured bound, not a ticking countdown. Installed acceptance and release
 ## Final validation
 
 - Formatting, strict workspace/all-target clippy and workspace tests pass:
-  [format](../../.tmp/delight-correction-fmt.log), [clippy](../../.tmp/delight-correction-clippy.log),
-  [Rust](../../.tmp/delight-correction-rust-tests.log). The authority library has 536 passing tests.
+  format (local evidence: `../../.tmp/delight-correction-fmt.log`), clippy (local evidence: `../../.tmp/delight-correction-clippy.log`),
+  Rust (local evidence: `../../.tmp/delight-correction-rust-tests.log`). The authority library has 536 passing tests.
 - All 403 extension tests pass, including exact-token/early-token disposal, original callback
   custody, failed cleanup, multi-frame cancellation, shared debugger custody, runtime/navigation
   replacement, old epochs and old finally:
-  [extension log](../../.tmp/delight-correction-extension-tests.log).
-- [Real process](../../.tmp/delight-correction-process.log) and
-  [CLI](../../.tmp/delight-correction-cli.log) journeys pass against the exact candidate binaries.
-- [Retained-history compatibility](../../.tmp/delight-correction-history-compatibility.log) passes
+  extension log (local evidence: `../../.tmp/delight-correction-extension-tests.log`).
+- Real process (local evidence: `../../.tmp/delight-correction-process.log`) and
+  CLI (local evidence: `../../.tmp/delight-correction-cli.log`) journeys pass against the exact candidate binaries.
+- Retained-history compatibility (local evidence: `../../.tmp/delight-correction-history-compatibility.log`) passes
   restarts and original-baseline reader checks, preserving original audit bytes and tolerant optional
   fields. The deliberately unsupported required record is counted unreadable, not discarded.
 - Owned draft/challenge journey, surface and bundled-browser checks pass. Changed JavaScript syntax,

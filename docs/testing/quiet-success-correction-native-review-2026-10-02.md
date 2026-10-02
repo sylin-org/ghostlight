@@ -1,5 +1,7 @@
 # Independent corrected quiet-success native review -- 2026-10-02
 
+Paths under `.tmp/` identify local verification artifacts, not distributed files.
+
 **Verdict: QUALIFIED ACCEPT for the scoped native draft journey.** Both reasons for the
 [earlier rejection](quiet-success-native-review-2026-10-02.md) are resolved in actual Chromium
 and Tauri execution. Cancellation now permits ordinary immediate observation. The collapsed
@@ -42,8 +44,8 @@ frames, active requests and navigation watchers were zero. The animation was sti
 advanced; the earlier acknowledged draft and once-only save remained intact. The prior native
 counterproof refused the first read and retained scope for about 19.2 seconds.
 
-[Timed proof and retained effects](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/native-observation-cleanup-repro.json),
-[exact runner](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cleanup-repro.mjs).
+Timed proof and retained effects (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/native-observation-cleanup-repro.json`),
+exact runner (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cleanup-repro.mjs`).
 
 ## Draft and human work
 
@@ -64,9 +66,9 @@ An uncertain script retained unknown effect/unsafe repeat: its independent count
 1 to 2 after cancellation, without replay or another save. Cancellation did not stop arbitrary
 page code or roll back the draft.
 
-[MCP journey](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/independent-correction-mcp-journey.json),
-[CLI journey and persistence](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cli-native-save.json),
-[final checks](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/native-bounded-final-checks-complete.json).
+MCP journey (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/independent-correction-mcp-journey.json`),
+CLI journey and persistence (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cli-native-save.json`),
+final checks (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/native-bounded-final-checks-complete.json`).
 
 ## Actual workbench judgment
 
@@ -83,11 +85,11 @@ with neutral "Tab preserved" presentation. Primary tool names and client identit
 changed 20/20 to 0/20 and back without changing audit bytes. The full guardian card, character,
 signature and Sylin identity remained present.
 
-- [Live composed wait](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/17-cli-live-composed-wait.png).
-- [Recreated native wait](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/19-cli-rebuilt-composed-wait.png).
-- [Recreated settled result](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/23-cli-completed-rebuilt-native.png).
-- [Calm protection](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/25-calm-owned-tab-protection.png).
-- [Full native guardian](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/44-full-guardian-and-sylin.png).
+- Live composed wait (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/17-cli-live-composed-wait.png`).
+- Recreated native wait (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/19-cli-rebuilt-composed-wait.png`).
+- Recreated settled result (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/23-cli-completed-rebuilt-native.png`).
+- Calm protection (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/25-calm-owned-tab-protection.png`).
+- Full native guardian (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/44-full-guardian-and-sylin.png`).
 
 ## Qualifications and cleanup
 
@@ -115,5 +117,5 @@ Audit, synthetic persistence, transcripts, screenshots and diagnostics remain as
 Original rejection evidence is preserved. No real tabs, drafts, history, persistent grants,
 security settings, Tangent, machine-local notes, personal data or installed authority were changed.
 
-[Cleanup](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cleanup.json),
-[final hashes and installed identity](../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/final-identities.json).
+Cleanup (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/cleanup.json`),
+final hashes and installed identity (local evidence: `../../.tmp/delight-native-review-8d107dca5e1e49ca9b99bcbf2c42a1dd/final-identities.json`).

@@ -43,6 +43,15 @@ Fixture provenance and update instructions are in [the fixture guide](../../../t
 
 ## Feature coverage
 
+`tests/fixed-installation-journey.mjs` runs in the full and process lanes. It creates
+an isolated user installation, migrates owned legacy paths, replaces a running service
+at the permanent path, and verifies unchanged MCP/native connector processes, runtime
+reacknowledgement, retained history and fixed registration. Windows also runs
+`tests/installer-powershell.ps1` against offline downloads and real native installation.
+Linux runs `tests/installer-shell.mjs`. npm and injector component tests separately
+cover complete-download rejection and replacement of distinct service runtime bundles.
+These fixtures do not prove a person's installed Chrome extension journey.
+
 `tests/history-compatibility.mjs` runs the real desktop authority and CLI against a preserved
 JSONL file across restarts. It proves new work is saved, additive history fields remain readable,
 unsupported records are counted without blocking startup, and original bytes stay unchanged.

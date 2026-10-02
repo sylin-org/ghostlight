@@ -96,6 +96,7 @@ if (lane !== "browser") {
   for (const [name, file] of [
     ["connector-parent", "connector-parent-lifecycle.mjs"],
     ["browser-relay-reconnect", "browser-relay-reconnect.mjs"],
+    ["fixed-installation", "fixed-installation-journey.mjs"],
     ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
     ["history-compatibility", "history-compatibility.mjs"],
     ["provenance", "provenance-journey.mjs"], ["cli", "cli-journey.mjs"],
@@ -104,6 +105,8 @@ if (lane !== "browser") {
     if (built) await node(name, `tests/${file}`); else blocked(name, "Current-source build failed.");
   }
   if (process.platform === "win32") {
+    if (built) await run("powershell-installer", "pwsh", ["-NoProfile", "-File", "tests/installer-powershell.ps1"]);
+    else blocked("powershell-installer", "Current-source build failed.");
     if (built) await run("desktop-windows", "pwsh", ["-NoProfile", "-File", "tests/windows-desktop-journey.ps1"]);
     else blocked("desktop-windows", "Current-source build failed.");
   }

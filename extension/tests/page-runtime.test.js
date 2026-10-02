@@ -55,3 +55,17 @@ test("page runtime installation refuses mismatched content before browser effect
   );
   assert.equal(sent.length, 0);
 });
+
+test("the unchanged injector replaces its runtime when a new service reconnects", async () => {
+  const { sandbox, sent } = fixture();
+  for (const release of ["previous service", "current service"]) {
+    const script = `globalThis.serviceRuntime = ${JSON.stringify(release)};`;
+    const sha256 = createHash("sha256").update(script).digest("hex");
+    const result = await sandbox.installPageRuntime({ revision: 1, sha256, script });
+    assert.equal(result.sha256, sha256);
+    assert.equal(sandbox.ghostlightPageRuntime.sha256, sha256);
+    vm.runInContext(sent.at(-1), sandbox);
+    assert.equal(sandbox.serviceRuntime, release);
+  }
+  assert.equal(sent.length, 2, "a new service bundle needs no extension reload or version change");
+});

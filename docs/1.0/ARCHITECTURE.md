@@ -40,6 +40,11 @@ orchestrator start initializes this desktop authority; there is no service-only 
 ## Local lifecycle
 
 Production has one installation per OS user, not one per executable directory (ADR-0167).
+Download installs and npm use fixed `~/.ghostlight/bin` sibling paths (ADR-0193).
+They verify the complete download before invoking the native deployment seam. Ordinary
+service replacement preserves unchanged connector streams and browser registration.
+The connected injector installs the current service-owned page runtime without an
+extension update or reload. Versions identify artifacts, never package install directories.
 The user profile's `.ghostlight` directory owns durable executable selection and the shared
 runtime, startup admission and lifetime lease. Package copies are inactive artifacts; both
 connectors and CLI invocations resolve the selected authority. Explicit development selection
@@ -274,7 +279,7 @@ same surrounding document, and uses the same backup and atomic replacement seam.
 automatic or aggregate action. The UI exposes no generic filesystem or process operation.
 
 Linux desktop integration is another installer-owned local-human capability. A per-user install
-owns one XDG desktop entry and one byte-identical icon. The entry invokes the exact versioned
+owns one XDG desktop entry and one byte-identical icon. The entry invokes the exact installed
 orchestrator with `open`; update and uninstall touch only explicitly owned files. The Debian package
 owns the equivalent system entry and does not create a per-user shadow. Browser package provenance
 is read-only and typed separately from native-host registration, so a current manifest cannot make

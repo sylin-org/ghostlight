@@ -5,6 +5,35 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.13] - 2026-10-02
+
+### Changed
+
+- Install npm and downloaded binaries at fixed `~/.ghostlight/bin` paths. Verify the
+  complete payload before replacing changed executable images. Preserve unchanged
+  connector streams, development selection, history and owned installation state.
+- Keep ordinary service runtime updates independent of packaged extension updates.
+  The existing injector installs the current service bundle on reconnect (ADR-0193).
+- Keep background browser work from taking human focus or adopting human tabs.
+  Workbench Show tab reveals the exact controlled tab when requested (ADR-0186).
+- Show live work purpose, readable outcomes, permission causes and scoped history
+  through the existing workbench and completion owners (ADRs 0187, 0190 and 0192).
+
+### Fixed
+
+- Migrate owned native-host and MCP registrations from legacy version directories
+  without deleting history or unrelated files. Reject corrupt downloads before
+  interrupting a working installation.
+- Retire cancelled evaluation and observation resources before releasing document
+  custody, while preserving shared debugger lease owners and uncertain effects.
+- Keep form diagnostics outside page messaging and exclude inactive browser pages
+  from controlled document trees.
+- Reconcile browser volatile state when the service epoch changes and preserve
+  explicit user controls through reconnect.
+
+This release also contains browser-privileged plumbing changes since 1.3.12, shipped
+in adapter 1.3.13. The installation-path fix introduces no extension path setting.
+
 ## [1.3.12] - 2026-09-30
 
 This version includes the 1.3.11 source changes recorded below; service 1.3.11 was not published.

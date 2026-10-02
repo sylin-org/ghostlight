@@ -1,7 +1,7 @@
 //! The per-user `ghostlight` command entry (ADR-0126 Decision 8).
 //!
 //! The Debian package installs `/usr/bin/ghostlight`, so a package user already has the command.
-//! The per-user route installs a versioned sibling set under a product-owned directory, which no
+//! The per-user route installs a fixed sibling set under a product-owned directory, which no
 //! shell looks in, so `ghostlight doctor` did not work in a fresh terminal unless the person had
 //! installed the npm package globally.
 //!

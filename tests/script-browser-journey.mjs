@@ -211,7 +211,7 @@ try {
     assert.equal(result.status, "unknown", JSON.stringify(result));
     assert.equal(result.effect, "unknown");
     assert.equal(result.repeat_safe, false);
-    assert.equal(result.facts.reason, "browser_effect_unknown");
+    assert.equal(result.facts.reason, "script_exception");
     assert.equal(executions - before, 1);
     assert.equal(await raw("document.getElementById('effect').textContent"), "1");
     checks += 1;
@@ -256,6 +256,7 @@ try {
     assert.equal(result.effect, "unknown"); assert.equal(result.repeat_safe, false);
     assert.equal(result.facts.completed, completed); assert.equal(result.facts.stopped, stopped);
     assert.equal(result.facts.steps[0].result.effect, "unknown");
+    assert.equal(result.facts.steps[0].result.facts.reason, "script_exception");
     assert.equal(result.facts.steps[1].status, onError === "stop" ? "not_run" : "succeeded");
     if (onError === "continue") assert.equal(result.facts.steps[1].result.facts.value, "PRIVATE_SCRIPT_RESULT");
     assert.equal(executions - before, Number(count));

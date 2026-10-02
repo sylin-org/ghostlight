@@ -222,6 +222,7 @@ history live here.
 | [0190](0190-work-owned-resolution-and-real-attempt-journal.md) | Work-owned phase-aware resolution, one Language projection, validated effect confirmation, governed keyboard prefixes and serialized attempt journaling | Core behavior and predecessor compatibility accepted; recovery amended by ADR-0191 |
 | [0191](0191-correlated-evaluator-cancellation-and-resource-retirement.md) | Bounded exact-resource evaluator Cancel, exclusive shared-attachment ownership, generation/scope/epoch fences and useful cleanup prerequisite | d936b708 withheld for shared ownership; amended source candidate review and native acceptance pending |
 | [0192](0192-quiet-confident-completion.md) | Quiet confident completion through existing flow and precise targets, exact wait truth, calm tab preservation, scoped activity and current composed purpose | Accepted unpublished local slice; architecture accepted and scoped native review qualified acceptance |
+| [0193](0193-fixed-package-paths-and-service-runtime-updates.md) | Fixed package paths and current service runtime through the existing injector | Accepted for implementation |
 
 ## Conventions
 

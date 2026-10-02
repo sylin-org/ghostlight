@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   assertAllowedDownload,
@@ -196,5 +196,62 @@ test("unverified download bytes never replace the cache", async () => {
     assert.equal(await readFile(path, "utf8"), "old-corrupt");
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("service updates reuse fixed paths and verify the whole download before replacement", async () => {
+  const area = await mkdtemp(join(tmpdir(), "ghostlight-fixed-install-"));
+  try {
+    const packageRoot = join(area, "package");
+    await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
+    await cp(fileURLToPath(new URL("../bin", import.meta.url)), join(packageRoot, "bin"), { recursive: true });
+    const { prepareLaunch } = await import(pathToFileURL(join(packageRoot, "bin/ghostlight.js")).href);
+    const cacheRoot = join(area, "home");
+    const directory = join(cacheRoot, "bin");
+    let installs = 0;
+    let corrupt = false;
+    let bytes;
+    const metadata = async version => {
+      bytes = Object.fromEntries(publishedAssetNames().map(name => [name, Buffer.from(`${version}:${name}`)]));
+      await writeFile(join(packageRoot, "package.json"), JSON.stringify({ version, type: "module" }));
+      await writeFile(join(packageRoot, "checksums.json"), JSON.stringify({ version, algorithm: "sha256",
+        binaries: Object.fromEntries(Object.entries(bytes).map(([name, body]) => [name, createHash("sha256").update(body).digest("hex")])) }));
+    };
+    const options = {
+      platform: "linux", architecture: "x64", cacheRoot, arguments_: [],
+      fetchImpl: async url => new Response(corrupt && url.endsWith("ghostlight-browser-connector-x86_64-unknown-linux-gnu")
+        ? "wrong third binary" : bytes[url.split("/").at(-1)]),
+      installImpl: async (candidate, destination) => {
+        installs++;
+        assert.equal(destination, directory);
+        assert.notEqual(dirname(candidate), directory);
+        for (const name of executableNames("linux", "x64")) {
+          await readFile(join(dirname(candidate), name));
+        }
+        await mkdir(destination, { recursive: true });
+        for (const name of executableNames("linux", "x64")) await cp(join(dirname(candidate), name), join(destination, name));
+      },
+    };
+    await metadata("1.3.12");
+    const first = await prepareLaunch(options);
+    assert.equal(first.executable, join(directory, "ghostlight-mcp-connector"));
+    await prepareLaunch({ ...options, fetchImpl: async () => { throw new Error("unexpected download"); } });
+    assert.equal(installs, 1);
+    await metadata("1.3.13");
+    corrupt = true;
+    await assert.rejects(prepareLaunch(options), /failed checksum/);
+    assert.match(await readFile(join(directory, "ghostlight"), "utf8"), /^1\.3\.12:/);
+    assert.equal(installs, 1, "a bad third download never interrupts the installed service");
+    corrupt = false;
+    const second = await prepareLaunch(options);
+    assert.equal(second.executable, first.executable);
+    assert.match(await readFile(join(directory, "ghostlight"), "utf8"), /^1\.3\.13:/);
+    const { readdir } = await import("node:fs/promises");
+    assert.deepEqual((await readdir(cacheRoot)).sort(), ["bin"]);
+    assert.deepEqual((await readdir(directory)).sort(), executableNames("linux", "x64").sort());
+  } finally {
+    assert.equal(resolve(dirname(area)), resolve(tmpdir()));
+    await rm(area, { recursive: true, force: true });
   }
 });

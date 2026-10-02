@@ -44,9 +44,13 @@ the owner wants, and what this project learned the hard way.
   interruptions, reliable confirmation, and cleanup. ADR-0192 records the bounded local candidate;
   its fixture evidence does not replace independent native acceptance.
 
-- **Keep extension and service in version lockstep.** To simplify visual identification and user
-  mental models, Chrome Web Store extension versions align in lockstep with service release versions
-  (e.g. bumping directly to v1.3.8).
+- **Use fixed install paths and the existing injector.** The owner rejected per-release
+  installation directories and an additional deployment framework on 2026-10-02.
+  Package downloads replace one permanent sibling set. Ordinary service updates carry
+  the current injected page runtime through the existing extension, without extension
+  restamping or reload. When privileged extension plumbing changes, its visible release
+  number can align with the service; equality is not an ordinary update prerequisite.
+  ADR-0193 records the implementation boundary.
 
 - **Package updates must prevent split-version authority states (npx update / install).** When a user
   upgrades Ghostlight via package install or npx while an existing service and client connectors are

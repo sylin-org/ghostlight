@@ -1,6 +1,29 @@
 # STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
 
-Last updated: 2026-10-01 (unpublished local quiet coexistence trial; public versions unchanged).
+Last updated: 2026-10-02 (1.3.13 release preparation; public versions unchanged).
+
+## 1.3.13 release preparation (2026-10-02)
+
+The owner authorized bump, changelog, commit, push and publication across configured
+channels. Source versions are 1.3.13. The release combines the committed browser and
+workbench corrections with fixed-path package updates under ADR-0193. Separate
+unfinished workspace UI edits are excluded from this isolated release checkout.
+
+Downloads verify the complete sibling set before replacement at `~/.ghostlight/bin`.
+Owned legacy routes migrate while history and development custody survive. The
+extension uses its stable native-host identity and installs the current service
+runtime on reconnect. Browser-privileged changes since public 1.3.12 also require
+this release's 1.3.13 store adapter; ordinary fixed-path updates require no restamp.
+
+Windows replacement, process reconnect and offline PowerShell installer acceptance
+are recorded in [the fixed-installation report](testing/fixed-installation-2026-10-02.md).
+Public channel state remains pinned to independently observed 1.3.12 until publication
+and reconciliation. The Linux fixed-installation and downloader checks are release
+workflow gates. No public 1.3.13 delivery is claimed by this preparation record.
+
+The isolated 1.3.13 checkout passes source, process, installer and real Chromium
+component lanes. [The release record](testing/release-1.3.13-2026-10-02.md) distinguishes
+these results from workflow candidate, dependency and public-channel acceptance.
 
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 

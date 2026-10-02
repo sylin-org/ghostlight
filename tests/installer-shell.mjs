@@ -13,6 +13,16 @@ const shims = join(area, "shims");
 mkdirSync(shims);
 const names = ["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"];
 const bodies = Object.fromEntries(names.map(name => [name, `fixture executable: ${name}\n`]));
+bodies.ghostlight = `#!/bin/sh
+if [ "$1" = deployment ] && [ "$2" = install ]; then
+  mkdir -p "$3"
+  for name in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
+    cp "$(dirname "$0")/$name" "$3/$name"
+  done
+else
+  exit 1
+fi
+`;
 const sums = names.map(name => `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-x86_64-unknown-linux-gnu`).join("\n") + "\n";
 writeFileSync(join(shims, "curl"), `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -57,7 +67,7 @@ assert.deepEqual(success.requests, [
   ...["SHA256SUMS", ...names.map(name => `${name}-x86_64-unknown-linux-gnu`)]
     .map(name => `https://github.com/sylin-org/ghostlight/releases/download/v1.2.3/${name}`)
 ]);
-const installed = join(success.userDirectory, ".ghostlight/bin/v1.2.3");
+const installed = join(success.userDirectory, ".ghostlight/bin");
 assert.deepEqual(readdirSync(installed).sort(), [...names].sort());
 for (const name of names) {
   assert.equal(readFileSync(join(installed, name), "utf8"), bodies[name]);
@@ -74,5 +84,5 @@ assert.notEqual(mismatch.status, 0);
 assert.equal(mismatch.requests.length, 1);
 const corrupt = run("corrupt-download", { bodies: { ...bodies, ghostlight: "wrong bytes" } });
 assert.notEqual(corrupt.status, 0);
-assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin/v1.2.3/ghostlight")), false);
+assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin/ghostlight")), false);
 console.log(`PASS shell installer: pinned release, CDN delivery, exact siblings, modes, invalid release/version, checksum refusal\nEvidence: ${area}`);
