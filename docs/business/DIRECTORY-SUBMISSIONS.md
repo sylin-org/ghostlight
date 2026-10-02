@@ -1,6 +1,6 @@
 # MCP directory submissions
 
-Official MCP Registry rechecked: 2026-09-30. The WinGet observation remains dated 2026-09-25.
+Official MCP Registry rechecked: 2026-10-02. The WinGet observation remains dated 2026-09-25.
 Other directory observations retain their dated 2026-08-07 state.
 
 This file separates facts, ready copy, and external gates for the Claude and OpenAI directory
@@ -17,13 +17,13 @@ These are distribution observations, not user reception. The dated evidence and 
 
 | Surface | Dated observation |
 | --- | --- |
-| Official MCP Registry | `org.sylin/ghostlight` 1.3.12 is active and latest as of 2026-09-30. |
+| Official MCP Registry | `org.sylin/ghostlight` 1.3.13 is active and latest as of 2026-10-02. |
 | Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; explicit sync reached repository commit `9546875`. |
 | mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-07 refresh request was accepted. |
 | Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.8.0 and remains open. |
 | awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) is open, clean, and has its submission check green. |
 | GitHub MCP Registry | Public search returns one `Sylin Ghostlight` result by `sylin-org` with current copy. |
-| WinGet | Version 1.3.6 is public after PR [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) merged on 2026-09-12; newer service releases have not been submitted as of 2026-09-25. |
+| WinGet | Version 1.3.6 is public after PR [#433822](https://github.com/microsoft/winget-pkgs/pull/433822) merged on 2026-09-12; version 1.3.13 is submitted in [PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923), pending review on 2026-10-02. |
 | PulseMCP | Its current form says official-registry entries are ingested daily and processed weekly. Recheck after one week before emailing. |
 | mcp.so | Its current submission path requires a $39 one-time fee. No spending was authorized. |
 

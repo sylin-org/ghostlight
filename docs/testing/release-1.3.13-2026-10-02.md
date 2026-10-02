@@ -1,5 +1,9 @@
 # Ghostlight 1.3.13 release -- 2026-10-02
 
+This is the preserved record of superseded combined browser/workbench candidates.
+They were not published. The final deployment-only 1.3.13 comes from `6656ef87`;
+[its separate release record](deployment-release-1.3.13-2026-10-02.md) is current.
+
 The owner authorized bump, changelog, commit, push and publication across configured
 channels. This release uses the committed `f2e42368` browser/workbench candidate as
 its base and adds ADR-0193's fixed-path download installation. Unfinished workspace

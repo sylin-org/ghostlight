@@ -1,8 +1,33 @@
-# STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
+# STATUS -- Ghostlight 1.3.13 published; Chrome adapter 1.3.12 compatible
 
-Last updated: 2026-10-02 (1.3.13 release preparation; public versions unchanged).
+Last updated: 2026-10-02 (deployment-only 1.3.13 published; store adapter unchanged).
 
-## 1.3.13 release preparation (2026-10-02)
+## Deployment-only 1.3.13 published (2026-10-02)
+
+The owner rejected unrelated browser investigation and narrowed the release to
+fixed-path deployment. Tag `v1.3.13` names exact source
+`6656ef87a85437ff79e8dc6ed32cec28121b4872`, the published 1.3.12 baseline plus
+the installation repair and Linux process-enumeration correction. Candidate run
+[37068025269](https://github.com/sylin-org/ghostlight/actions/runs/37068025269)
+passed all seven jobs, including real Windows replacement and Debian 12/Ubuntu
+24.04 package acceptance. All 20 release files have verified build provenance and
+matched their re-downloaded GitHub draft hashes before publication.
+
+GitHub, public npm delivery and the official MCP Registry serve 1.3.13. A fresh
+isolated consumer downloaded the public npm package, installed at permanent
+`~/.ghostlight/bin` paths and verified all three executable hashes. The public
+Chrome adapter remains 1.3.12 and is compatible; no store update or extension
+reload is required. Scoop metadata and website fallbacks follow this public record.
+WinGet [PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923) is submitted
+with validated candidate-derived manifests; acceptance remains external.
+
+Main's browser/workbench trial and source adapter 1.3.13 remain unpublished. The
+old combined-candidate blockers below apply to that trial, outside the released
+deployment repair. Further publication must use a new immutable service version.
+[The deployment release report](testing/deployment-release-1.3.13-2026-10-02.md)
+records the exact scope and evidence. The original dirty workspace is preserved.
+
+## Superseded combined 1.3.13 preparation (2026-10-02)
 
 Scope correction: the owner rejected further unrelated browser investigation.
 The release will carry only the fixed-path deployment repair on the published

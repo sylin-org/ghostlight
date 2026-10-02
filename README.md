@@ -34,12 +34,12 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-The published release is 1.3.12. It is available as the GitHub release
-[`v1.3.12`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.12), the npm package
-`ghostlight@1.3.12`, the Chrome Web Store adapter v1.3.12, and the MCP Registry record
-`org.sylin/ghostlight 1.3.12`, all observed on 2026-09-30 and recorded in
+The published release is 1.3.13. It is available as the GitHub release
+[`v1.3.13`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.13), the npm package
+`ghostlight@1.3.13`, the Chrome Web Store adapter v1.3.12, and the MCP Registry record
+`org.sylin/ghostlight 1.3.13`, all observed on 2026-10-02 and recorded in
 [`docs/public-status.json`](docs/public-status.json) and the
-[release custody record](docs/testing/candidate-custody-2026-09-30.md).
+[release custody record](docs/testing/deployment-release-1.3.13-2026-10-02.md).
 
 ## What you get
 
@@ -212,10 +212,11 @@ executables.
 browsers on development hosts; the clean installed-product evidence lanes continue after
 publication. macOS has no 1.0 artifact yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v1.3.12, paired with service
-1.3.12. This release uses adapter protocol 3; upgrade the service and extension together.
+**Extension state.** The Chrome Web Store listing serves adapter v1.3.12, compatible with
+service 1.3.13 under adapter protocol 3. Service updates use fixed installation paths and
+the existing injector; no extension update or reload is required.
 
-The service and Chrome adapter are delivered separately with matching release versions. The
+The service and Chrome adapter are delivered separately with compatible mechanisms. The
 [compatibility map](compatibility.json) is authoritative, and the
 [public status file](docs/public-status.json) owns current release, platform, and store state.
 
