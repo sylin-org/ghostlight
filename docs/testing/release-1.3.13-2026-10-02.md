@@ -130,3 +130,14 @@ checks pixel suppression, unsafe opacity refusal and expiry restoration. All 408
 extension tests, Rust source gates and the local 69-check frame lane pass. CI must
 prove the inactive capture now completes before mask expiry; Linux pointer remains
 an independent release blocker.
+
+CI run 37064476093 passes source, dependency, extension and both process lanes. Linux
+now passes masked viewport/magnified captures and fails later at native pointer
+focus; Windows still reaches mask expiry during viewport capture. The follow-up
+viewport capture requests output scale 0.99 while retaining the original CSS clip.
+Chromium's capture implementation preserves the emulated CSS view size and sizes
+the output surface from the clip scale. A different raster size is intended to
+force inactive surface refresh. Actual output scale remains in the governed view
+geometry; target/full-page capture and image bounds are unchanged. This requires
+real CI confirmation. No expiry, exclusion or focus guard is relaxed.
+Local Rust source gates, all 409 extension tests and the 69-check frame journey pass.

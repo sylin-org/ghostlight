@@ -49,6 +49,12 @@ and frame gates pass; corrected CI remains required. The mask expiry and unsafe
 capture guards retain their existing bounds. Linux quiet pointer support is still
 unresolved and prevents publication.
 
+Run 37064476093 passes both process lanes and all source/dependency gates. Linux
+masked viewport/magnified capture passes after the compositor correction; Windows
+still expires its mask. The next capture candidate changes only viewport raster
+scale to force surface refresh while retaining CSS view geometry. Linux background
+native pointer focus remains independently unresolved. Public versions stay 1.3.12.
+
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 
 The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership

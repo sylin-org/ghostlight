@@ -2366,7 +2366,7 @@ async function screenshot(command) {
       clip = screenshotApi.ordinaryClip(0, 0, Math.max(1, size.width), Math.max(1, size.height));
       scope = "full_page";
     } else {
-      clip = screenshotApi.ordinaryClip(visual.pageX ?? 0, visual.pageY ?? 0, Math.max(1, visual.clientWidth), Math.max(1, visual.clientHeight));
+      clip = screenshotApi.viewportClip(visual.pageX ?? 0, visual.pageY ?? 0, Math.max(1, visual.clientWidth), Math.max(1, visual.clientHeight));
       scope = "viewport";
     }
     masks = await prepareCaptureMasks(command.tab_id);

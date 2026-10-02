@@ -9,6 +9,18 @@ test("ordinary captures shrink when needed but never magnify", () => {
   assert.equal(screenshot.outputScale(5000, 5000, false), 0.4);
 });
 
+test("viewport capture changes raster dimensions while retaining CSS coordinates and output bounds", () => {
+  for (const [width, height] of [[1280, 900], [5000, 5000]]) {
+    const clip = screenshot.viewportClip(10, 20, width, height);
+    assert.equal(clip.x, 10); assert.equal(clip.y, 20);
+    assert.equal(clip.width, width); assert.equal(clip.height, height);
+    assert.ok(Math.round(width * clip.scale) < width);
+    assert.ok(Math.round(height * clip.scale) < height);
+    assert.ok(clip.width * clip.scale <= screenshot.MAX_SIDE);
+    assert.ok(clip.width * clip.height * clip.scale * clip.scale <= screenshot.MAX_PIXELS + 1);
+  }
+});
+
 test("region captures spend the full bounded output budget on magnification", () => {
   const clip = screenshot.regionClip({ x: 10, y: 20, width: 400, height: 300 });
   assert.equal(clip.x, 10);

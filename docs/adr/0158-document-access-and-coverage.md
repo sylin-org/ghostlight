@@ -81,6 +81,14 @@ opacity, mutation, missing geometry or changed document identity. The existing
 bounded expiry and restoration remain. Local real-image exclusion and mutation
 journeys pass; platform CI must establish the composition correction before release.
 
+Linux CI validates the opacity correction, but Windows inactive viewport capture
+still stalls until expiry. Viewport capture now requests raster scale 0.99 with
+unchanged CSS bounds. Chromium preserves the emulated CSS view and sizes its output
+surface from that scale, allowing a fresh surface without selecting the tab or
+window. The actual scale is reported in view geometry. Target and full-page scale
+rules retain their existing output budgets. Platform acceptance remains required;
+this is a physical capture correction, not an exception to exclusion verification.
+
 The September 7 full-session browser suite also exposed incomplete physical batch preparation.
 Per-field validation discovered an invalid later field only after an earlier edit. The adapter
 now validates every document group, field, option, and submit containment before the first edit,
