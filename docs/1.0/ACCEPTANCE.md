@@ -38,6 +38,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      continues its existing reconnect loop.
 14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
      indefinitely.
+    Package downloads use one permanent bin directory across releases. Verify all three
+    siblings before replacement; a failed download preserves installed bytes. A service-only
+    replacement keeps unchanged connector streams alive and installs the current runtime
+    through the existing injector. Migration redirects owned registrations, preserves
+    history and development custody, and removes only obsolete package binaries (ADR-0193).
 15. Concurrent demand-start requests converge on one lifetime-leased service authority before
      runtime publication or desktop initialization.
     Concurrent failed desktop starts share one bounded launch exchange and a short retry
@@ -385,7 +390,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    dedicated Fix action; repeat or stale Fix refuses without changing bytes.
 10. Harness paths follow the effective Windows or Linux environment. Codex honors `CODEX_HOME`
    before its home-directory fallback. An exact pre-1.0 `ghostlight-relay --role agent` entry in
-   the owned versioned install root is updatable; a different command, role, or root remains
+   the owned legacy install root is updatable; a different command, role, or root remains
    foreign and is reported rather than silently skipped.
 11. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
    remote-navigation, or network capability. File mutation terminates in the explicit harness

@@ -39,7 +39,9 @@ jobs:
       - run: npm test --prefix packaging/npm
       - run: node --test packaging/mcpb/test/launcher.test.js
       - run: sh -n scripts/*.sh
+      - run: node tests/installer-shell.mjs
       - run: node tests/connector-parent-lifecycle.mjs
+      - run: dbus-run-session -- xvfb-run -a node tests/fixed-installation-journey.mjs
       - run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
       - name: Verify one user installation across executable directories
         env:
@@ -86,6 +88,14 @@ jobs:
         run: cargo install tauri-cli --version 2.11.0 --locked
       - name: Build all three executable shores once
         run: cargo build --workspace --release --locked --target ${{ matrix.target }}
+      - name: Verify Windows fixed-path replacement and downloader
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GHOSTLIGHT_BIN_DIR = "$PWD/target/${{ matrix.target }}/release"
+          node tests/fixed-installation-journey.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Fixed installation journey failed' }
+          ./tests/installer-powershell.ps1 -BinaryDirectory $env:GHOSTLIGHT_BIN_DIR
       - name: Stage version-matched raw binaries for launchers
         shell: pwsh
         run: |

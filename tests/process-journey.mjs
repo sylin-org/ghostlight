@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, renameSync, rmdirSync, linkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -62,6 +63,7 @@ let queryCount = 0;
 let pauseBeforeFocusedReceipt = false;
 let failAuditAfterNextOpen = false;
 const physicalRequests = [];
+const installedRuntimes = [];
 let createdDeployLock = false;
 // A real one-pixel GIF89a, the shape the extension now hands over already finished.
 const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
@@ -72,6 +74,16 @@ const PROCESS_BROWSER = "browser_processjourney";
 // process journey flaky; later protocol waits retain their tighter five-second default.
 const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
 const MCP_COLD_START_TIMEOUT_MS = SERVICE_STARTUP_TIMEOUT_MS + 10_000;
+
+function acknowledgeRuntime(peer, request) {
+  const command = request.command;
+  assert.equal(command.command, "install_page_runtime");
+  assert.equal(createHash("sha256").update(command.script).digest("hex"), command.sha256);
+  installedRuntimes.push(command.sha256);
+  peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: {
+    outcome: "page_runtime_installed", revision: command.revision, sha256: command.sha256
+  } } });
+}
 
 function executable(name) {
   const path = join(name === "ghostlight" ? selectedBinDir : packageBinDir, `${name}${executableSuffix}`);
@@ -231,6 +243,10 @@ async function runAdapter(peer) {
     const request = frame.request;
     const scope = request.command.command === "in_documents" ? request.command.scope : null;
     const command = scope ? request.command.primitive : request.command;
+    if (command.command === "install_page_runtime") {
+      acknowledgeRuntime(peer, request);
+      continue;
+    }
     if (command.command === "describe_documents") {
       peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: {
         outcome: "documents", tab_id: command.tab_id, inventory: {
@@ -547,7 +563,7 @@ try {
       "document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
       "keyboard_input", "files", "script", "observation", "dialogs",
       "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
-      "chunked_commands", "adapter_liveness"
+      "chunked_commands", "adapter_liveness", "page_runtime"
     ].map((name) => ({ name, revision: { script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
   });
   assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
@@ -573,6 +589,10 @@ try {
   const browserHello = await native.next();
   assert.equal(browserHello.kind, "hello_accepted");
   assert.equal(browserHello.control_state, "active");
+  const runtimeRequest = await native.next();
+  assert.equal(runtimeRequest.kind, "request");
+  acknowledgeRuntime(native, runtimeRequest.request);
+  void runAdapter(native);
   if (singleInstallation) {
     const concurrentLaunches = Array.from({ length: 3 }, () => start(join(packageBinDir, `ghostlight${executableSuffix}`)));
     await Promise.all(concurrentLaunches.map((child) => waitForExit(child, 20000)));
@@ -580,11 +600,12 @@ try {
     assert.equal(existsSync(join(packageBinDir, "ghostlight-runtime.json")), false);
     console.log("single installation: restore preserves state; inactive uninstall preserves native registration; concurrent foreign desktop launches reuse the authority");
   }
+  const held = native.waitFor(frame => frame.kind === "control_state" && frame.state === "held");
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-  assert.deepEqual(await native.next(), { kind: "control_state", state: "held", diagnostics: { layer: "explicit" } });
+  assert.deepEqual(await held, { kind: "control_state", state: "held", diagnostics: { layer: "explicit" } });
+  const resumed = native.waitFor(frame => frame.kind === "control_state" && frame.state === "active");
   native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  assert.deepEqual(await native.next(), { kind: "control_state", state: "active", diagnostics: { layer: "explicit" } });
-  void runAdapter(native);
+  assert.deepEqual(await resumed, { kind: "control_state", state: "active", diagnostics: { layer: "explicit" } });
 
   const discovered = await discovery.promise;
   assert.equal(discovered.result.resultType, "complete");
@@ -662,6 +683,7 @@ try {
   const read = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: restartedHandle } }));
   assert.equal(read.status, "succeeded");
   assert.equal(read.facts.text, "Example Domain");
+  assert.equal(installedRuntimes.length, 2, "one unchanged native peer acknowledges the service runtime after each startup");
   assert.equal(read.summary, "Read 2 words from example.com.");
   assert.equal(physicalRequests.findLast((command) => command.command === "read_document").mode, "visible");
 

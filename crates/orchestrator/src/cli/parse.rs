@@ -23,6 +23,8 @@ pub const SUBCOMMANDS: &[&str] = &[
 /// The parsed execution intent of a Ghostlight process invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LaunchMode {
+    /// Install verified download siblings at a fixed package destination.
+    DeploymentInstall(std::path::PathBuf),
     /// Local package/development lifecycle seam, never a model-facing tool.
     Deployment(ghostlight_bridge::installation::Selection),
     /// Start or activate the desktop workbench.
@@ -105,6 +107,13 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         .is_some_and(|argument| argument == "deployment")
     {
         use ghostlight_bridge::installation::Selection;
+        if arguments
+            .get(1)
+            .is_some_and(|argument| argument == "install")
+            && arguments.len() == 3
+        {
+            return Ok(LaunchMode::DeploymentInstall(arguments[2].clone().into()));
+        }
         let selection = match arguments.get(1).and_then(|argument| argument.to_str()) {
             Some("development") if arguments.len() == 2 => Selection::Development,
             Some("release") if arguments.len() == 2 => Selection::Release,

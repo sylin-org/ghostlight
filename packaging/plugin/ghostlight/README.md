@@ -21,7 +21,7 @@ one-address marketplace in both ecosystems:
 
 The plugin's MCP server is `npx -y ghostlight` with no arguments. That is the npm launcher:
 it ensures the three checksum-verified Ghostlight binaries exist under
-`~/.ghostlight/bin/v<version>/`, downloading them from the official GitHub release only, then
+`~/.ghostlight/bin/`, downloading them from the official GitHub release only, then
 hands its inherited stdio to `ghostlight-mcp-connector`. Requirements: Node.js 18 or newer.
 The launcher's download and verification progress goes to stderr and never enters the
 protocol stream.

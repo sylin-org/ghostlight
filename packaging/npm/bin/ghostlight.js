@@ -3,9 +3,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, realpathSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -154,32 +154,59 @@ export async function prepareLaunch({
   cacheRoot = process.env.GHOSTLIGHT_HOME ?? join(homedir(), ".ghostlight"),
   fetchImpl = globalThis.fetch,
   reporter = () => {},
+  installImpl = installDownload,
 } = {}) {
   const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
   const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "checksums.json"), "utf8"));
   const assets = assetNames(platform, architecture);
   const executables = executableNames(platform, architecture);
   validateChecksums(manifest, packageJson.version, publishedAssetNames());
-  const directory = join(cacheRoot, "bin", `v${packageJson.version}`);
-  for (const [index, asset] of assets.entries()) {
-    const url = `${RELEASE_ROOT}/v${packageJson.version}/${asset}`;
-    const changed = await ensureBinary({
-      path: join(directory, executables[index]),
-      url,
-      expectedHash: manifest.binaries[asset],
-      fetchImpl,
-      onDownload: () => reporter(
-        `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${index + 1}/${assets.length})...`,
-      ),
-    });
-    if (changed) {
-      reporter(`Verified ${EXECUTABLES[index]}.`);
+  const directory = resolve(cacheRoot, "bin");
+  const matches = await Promise.all(assets.map(async (asset, index) => {
+    try { return await sha256(join(directory, executables[index])) === manifest.binaries[asset]; }
+    catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+  }));
+  if (!matches.every(Boolean)) {
+    await mkdir(cacheRoot, { recursive: true });
+    const stage = await mkdtemp(join(resolve(cacheRoot), ".download-"));
+    try {
+      for (const [index, asset] of assets.entries()) {
+        const url = `${RELEASE_ROOT}/v${packageJson.version}/${asset}`;
+        const changed = await ensureBinary({
+          path: join(stage, executables[index]),
+          url,
+          expectedHash: manifest.binaries[asset],
+          fetchImpl,
+          onDownload: () => reporter(
+            `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${index + 1}/${assets.length})...`,
+          ),
+        });
+        if (changed) {
+          reporter(`Verified ${EXECUTABLES[index]}.`);
+        }
+      }
+      await installImpl(join(stage, executables[0]), directory);
+    } finally {
+      await rm(stage, { recursive: true, force: true });
     }
   }
   return {
     executable: join(directory, selectedExecutable(arguments_, platform, architecture)),
     arguments_,
   };
+}
+
+function installDownload(executable, directory) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(executable, ["deployment", "install", directory], {
+      stdio: ["ignore", "ignore", "inherit"], windowsHide: true,
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`Ghostlight installation failed (${signal ?? code})`));
+    });
+  });
 }
 
 async function main() {

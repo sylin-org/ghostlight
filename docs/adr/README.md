@@ -217,6 +217,8 @@ history live here.
 | [0185](0185-explicit-user-control-and-passive-browser-feedback.md) | Explicit user control and passive browser feedback: no automatic denial or credential holds, no page controls, and per-request acknowledgement of user-authorized credential input | Accepted (supersedes automatic attention and page controls in [0079](0079-denial-attention-circuit-breaker.md)/[0157](0157-session-attention-and-dispatch-control.md); amends [0133](0133-behavioral-capability-restoration.md)) |
 
 
+| [0193](0193-fixed-package-paths-and-service-runtime-updates.md) | Fixed package paths and service runtime updates through the existing injector | Accepted |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

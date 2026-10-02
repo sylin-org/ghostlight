@@ -54,8 +54,7 @@ sha256_file() {
   fi
 }
 
-install_directory="${HOME}/.ghostlight/bin/v${version}"
-mkdir -p "$install_directory"
+install_directory="${HOME}/.ghostlight/bin"
 for component in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
   asset="${component}-${target}"
   expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$sums")
@@ -82,8 +81,11 @@ for component in ghostlight ghostlight-mcp-connector ghostlight-browser-connecto
     echo "  ${component}: checksum verified"
   fi
   chmod 0755 "$downloaded"
-  mv -f "$downloaded" "$install_directory/$component"
 done
+
+# The verified service owns exact-process replacement at the permanent paths.
+# Download failure cannot partially replace a working installation.
+"$temporary/ghostlight" deployment install "$install_directory"
 
 ghostlight="$install_directory/ghostlight"
 echo "Ghostlight ${version} installed at ${install_directory}"

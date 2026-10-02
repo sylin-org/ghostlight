@@ -32,52 +32,70 @@ if (-not $assets.ContainsKey("SHA256SUMS")) {
 }
 $sumLines = (Invoke-WebRequest -Uri $assets["SHA256SUMS"] -UseBasicParsing).Content -split "`n"
 
-$installDirectory = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".ghostlight/bin/v$version"
-New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
-foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
-    $assetName = "$component-x86_64-pc-windows-msvc.exe"
-    if (-not $assets.ContainsKey($assetName)) {
-        throw "Release $tag is missing $assetName."
-    }
-    $sumMatch = @($sumLines | Where-Object { $_ -match "^(?<hash>[0-9a-f]{64})  $([regex]::Escape($assetName))`r?$" })
-    if ($sumMatch.Count -ne 1) {
-        throw "SHA256SUMS does not bind exactly one $assetName."
-    }
-    [void]($sumMatch[0] -match '^(?<hash>[0-9a-f]{64})')
-    $expected = $Matches.hash
-    $destination = Join-Path $installDirectory "$component.exe"
-    $temporary = "$destination.$PID.download"
-    try {
-        Invoke-WebRequest -Uri $assets[$assetName] -OutFile $temporary -UseBasicParsing
-        $observed = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($observed -ne $expected) {
-            throw "Checksum verification failed for $assetName."
+if ([string]::IsNullOrWhiteSpace($env:USERPROFILE) -or -not [System.IO.Path]::IsPathRooted($env:USERPROFILE)) {
+    throw "Ghostlight cannot locate this user's home directory."
+}
+$installDirectory = Join-Path $env:USERPROFILE ".ghostlight/bin"
+$downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
+try {
+    foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+        $assetName = "$component-x86_64-pc-windows-msvc.exe"
+        if (-not $assets.ContainsKey($assetName)) {
+            throw "Release $tag is missing $assetName."
         }
-        $github = Get-Command gh -ErrorAction SilentlyContinue
-        if ($github) {
-            & gh attestation verify $temporary --repo $repository *> $null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  ${component}: checksum and build provenance verified"
-            } else {
-                Write-Host "  ${component}: checksum verified; GitHub provenance was not available"
+        $sumMatch = @($sumLines | Where-Object { $_ -match "^(?<hash>[0-9a-f]{64})  $([regex]::Escape($assetName))`r?$" })
+        if ($sumMatch.Count -ne 1) {
+            throw "SHA256SUMS does not bind exactly one $assetName."
+        }
+        [void]($sumMatch[0] -match '^(?<hash>[0-9a-f]{64})')
+        $expected = $Matches.hash
+        $destination = Join-Path $downloadDirectory "$component.exe"
+        $temporary = "$destination.$PID.download"
+        try {
+            Invoke-WebRequest -Uri $assets[$assetName] -OutFile $temporary -UseBasicParsing
+            $observed = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($observed -ne $expected) {
+                throw "Checksum verification failed for $assetName."
             }
-        } else {
-            Write-Host "  ${component}: checksum verified"
+            $github = Get-Command gh -ErrorAction SilentlyContinue
+            if ($github) {
+                & gh attestation verify $temporary --repo $repository *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  ${component}: checksum and build provenance verified"
+                } else {
+                    Write-Host "  ${component}: checksum verified; GitHub provenance was not available"
+                }
+            } else {
+                Write-Host "  ${component}: checksum verified"
+            }
+            Move-Item -LiteralPath $temporary -Destination $destination -Force
         }
-        Move-Item -LiteralPath $temporary -Destination $destination -Force
-    }
-    finally {
-        if (Test-Path -LiteralPath $temporary) {
-            Remove-Item -LiteralPath $temporary -Force
+        finally {
+            if (Test-Path -LiteralPath $temporary) {
+                Remove-Item -LiteralPath $temporary -Force
+            }
         }
     }
+
+    # Windows GUI-subsystem executables need an explicit waited process for CLI commands.
+    $candidate = Join-Path $downloadDirectory "ghostlight.exe"
+    $deploy = Start-Process -FilePath $candidate -ArgumentList @("deployment", "install", "`"$installDirectory`"") -WindowStyle Hidden -Wait -PassThru
+    if ($deploy.ExitCode -ne 0) { throw "Ghostlight installation failed with exit code $($deploy.ExitCode)." }
+}
+finally {
+    # The absolute temporary path was constructed directly under the OS temp directory.
+    if ([System.IO.Path]::GetDirectoryName($downloadDirectory) -ne [System.IO.Path]::GetTempPath().TrimEnd('\', '/')) {
+        throw "Unexpected Ghostlight download directory: $downloadDirectory"
+    }
+    Remove-Item -LiteralPath $downloadDirectory -Recurse -Force
 }
 
 $ghostlight = Join-Path $installDirectory "ghostlight.exe"
 Write-Host "Ghostlight $version installed at $installDirectory"
 if ($env:GHOSTLIGHT_NO_REGISTER -ne "1") {
-    & $ghostlight install
-    if ($LASTEXITCODE -ne 0) {
+    $setup = Start-Process -FilePath $ghostlight -ArgumentList "install" -WindowStyle Hidden -Wait -PassThru
+    if ($setup.ExitCode -ne 0) {
         throw "Ghostlight installation did not complete. Run '$ghostlight doctor' for details."
     }
 }

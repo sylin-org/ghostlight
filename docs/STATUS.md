@@ -1,6 +1,22 @@
 # STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
 
-Last updated: 2026-09-30 (matching service published after the owner published Chrome 1.3.12).
+## Deployment-only 1.3.13 release preparation (2026-10-02)
+
+The owner authorized bump, changelog, commit, push and publication. The release
+branch carries the fixed-path deployment repair on the published 1.3.12 baseline.
+Unpublished browser/workbench work and its investigation remain preserved on main,
+outside this release. npm and download installers use permanent `~/.ghostlight/bin`
+paths, migrate owned registrations and preserve history and development custody.
+
+The production extension and service page runtime are unchanged from 1.3.12.
+The native-host manifest resolves the fixed host identity to the installed browser
+connector; the existing injector acknowledges the current runtime on reconnect.
+Compatibility records permit public adapter 1.3.12 with service 1.3.13. No store
+update or extension reload is required. Public service state stays 1.3.12 until
+delivery is independently verified. Current acceptance will be recorded in
+[the deployment release report](testing/deployment-release-1.3.13-2026-10-02.md).
+
+Last updated: 2026-10-02 (deployment-only release preparation; public state unchanged).
 
 ## Ghostlight 1.3.12 Service Published (2026-09-30)
 

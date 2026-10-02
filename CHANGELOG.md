@@ -5,6 +5,20 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.13] - 2026-10-02
+
+### Fixed
+
+- Install npm and downloaded packages at permanent `~/.ghostlight/bin` paths.
+  Verify all three binaries before replacing changed components. Preserve running
+  unchanged connectors, history, policy and selected development installations.
+- Migrate owned native-host and MCP registrations from the former version directory.
+  The existing 1.3.12 browser injector continues loading the installed service's
+  current page runtime. Ordinary service updates require no extension update.
+
+This release contains the deployment repair on the published 1.3.12 baseline.
+Unpublished browser and workbench changes are outside this release.
+
 ## [1.3.12] - 2026-09-30
 
 This version includes the 1.3.11 source changes recorded below; service 1.3.11 was not published.
