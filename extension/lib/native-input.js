@@ -4,12 +4,17 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis, function createNativeInputApi() {
   "use strict";
+  const SELECTION_EVENT_TIMEOUT_MS = 1000;
 
   // Browser-local serialization and current-window safety, never a policy preference.
   function create(chromeApi, workspaceFor, protectedOutcome) {
     const windows = new Map();
     const changed = windowId => { const entry = windows.get(windowId); if (entry) entry.revision++; };
-    chromeApi.tabs.onActivated?.addListener(info => changed(info.windowId));
+    chromeApi.tabs.onActivated?.addListener(info => {
+      changed(info.windowId);
+      const selection = windows.get(info.windowId)?.selection;
+      if (selection?.tabId === info.tabId) selection.resolve(true);
+    });
     chromeApi.tabs.onCreated?.addListener(tab => changed(tab.windowId));
     chromeApi.tabs.onRemoved?.addListener((_id, info) => changed(info.windowId));
     chromeApi.tabs.onAttached?.addListener((_id, info) => changed(info.newWindowId));
@@ -56,7 +61,20 @@
             // The final snapshot fences movement/focus/addition before this selection.
             state = await snapshot(tabId, windowId, entry, state.revision);
             eligible(state);
-            await chromeApi.tabs.update(tabId, { active: true });
+            // Chrome can resolve update before delivering onActivated. Fence our own
+            // selection event before freezing the revision used by native packets.
+            let timer;
+            const selected = new Promise(resolve => {
+              entry.selection = { tabId, resolve };
+              timer = setTimeout(() => resolve(false), SELECTION_EVENT_TIMEOUT_MS);
+            });
+            try {
+              await chromeApi.tabs.update(tabId, { active: true });
+              if (!await selected) throw refusal();
+            } finally {
+              clearTimeout(timer);
+              delete entry.selection;
+            }
             state = await snapshot(tabId, windowId, entry, null);
             eligible(state);
             if (!state.tab.active) throw refusal();

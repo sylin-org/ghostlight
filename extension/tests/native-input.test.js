@@ -53,6 +53,28 @@ test("plural clients in one window keep selection, packets and confirmation insi
   assert.equal(f.coordinator.pendingWindows(),0);
 });
 
+test("selection completion waits for Chrome's delayed activation event before native packets",async()=>{
+  const f=fixture(),activation=deferred();
+  f.chrome.tabs.update=async(id,options)=>{
+    for(const tab of f.tabs.values())if(tab.windowId===10)tab.active=tab.id===id;
+    Object.assign(f.tabs.get(id),options);
+    setImmediate(()=>{f.events.activated({windowId:10,tabId:id});activation.resolve();});
+    return {...f.tabs.get(id)};
+  };
+  const result=await f.coordinator.run(2,{surface:true},async context=>{
+    await activation.promise;
+    await f.packet(context,2,"keyDown");await f.packet(context,2,"keyUp");return "done";
+  });
+  assert.equal(result,"done");assert.equal(f.coordinator.pendingWindows(),0);
+});
+
+test("missing selection event refuses before any native packet",async()=>{
+  const f=fixture();
+  f.chrome.tabs.update=async id=>{for(const tab of f.tabs.values())if(tab.windowId===10)tab.active=tab.id===id;return {...f.tabs.get(id)};};
+  const result=await f.coordinator.run(2,{surface:true},async context=>f.packet(context,2,"keyDown"));
+  assert.equal(result.outcome,"attention_protected");assert.deepEqual(f.effects,[]);
+});
+
 test("foreground focus or an added human tab before first packet refuses with no effect",async()=>{
   for(const change of ["focus","human"]){
     const f=fixture();const result=await f.coordinator.run(1,{surface:true},async context=>{

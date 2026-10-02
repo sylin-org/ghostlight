@@ -130,7 +130,16 @@ fn run(diagnostics: &Sink) -> Result<()> {
                     continue;
                 };
                 if write_length_frame(writer, &payload).is_err() {
-                    service = None;
+                    // The reader owns session retirement. A closing authority may still
+                    // have final control/error frames queued before its EOF. Reconnecting
+                    // here would discard those frames as belonging to an old generation.
+                    // Keep draining through ServiceClosed; never replay this failed write.
+                    diagnostics.emit(
+                        event::SERVICE_DISCONNECTED,
+                        Level::Warn,
+                        None,
+                        "browser relay write failed; draining final service frames",
+                    );
                 }
             }
             Ok(RelayEvent::ChromeClosed) | Err(_) => {

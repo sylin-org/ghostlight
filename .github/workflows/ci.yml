@@ -224,6 +224,7 @@ jobs:
             .tmp/h6-masked-sylin.jpg
             .tmp/h6-visual-*.png
             .tmp/h4-*.png
+            .tmp/quiet-browser-*.json
           retention-days: 14
 
   supply-chain:

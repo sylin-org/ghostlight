@@ -331,10 +331,10 @@ try {
   result = await call("browser_read", { tab, max_chars: 500 });
   assert.equal(result.facts.coverage.limited_by_size, true); assert.equal(result.facts.coverage.excluded_documents, 1);
   check("size ceiling and policy exclusion remain separate");
-  result = await call("browser_screenshot", { tab });
+  result = await call("browser_screenshot", { tab, timeout_ms: 30000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage.masked_regions, 1);
   const view = result.facts.view;
-  result = await call("browser_screenshot", { view, x: 300, y: 350, width: 400, height: 250 });
+  result = await call("browser_screenshot", { view, x: 300, y: 350, width: 400, height: 250, timeout_ms: 30000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage.masked_regions, 1);
   check("viewport and magnified captures preserve exclusion");
   policy("permitted_content", "all");

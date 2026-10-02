@@ -24,6 +24,10 @@ workflow gates. No public 1.3.13 delivery is claimed by this preparation record.
 The isolated 1.3.13 checkout passes source, process, installer and real Chromium
 component lanes. [The release record](testing/release-1.3.13-2026-10-02.md) distinguishes
 these results from workflow candidate, dependency and public-channel acceptance.
+Initial CI exposed Linux task enumeration and Chrome activation/relay shutdown
+ordering. Those corrections are recorded in the release report. Publication waits
+for the corrected candidate and both platform journey lanes. The initial Chrome
+staged submission was withdrawn before its corrected ZIP is submitted.
 
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 

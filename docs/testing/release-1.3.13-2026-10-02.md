@@ -22,10 +22,10 @@ The Chromium 152.0.7977.82 browser lane passes script, real MV3 frames, history 
 modern/legacy quiet-coexistence fixtures. One fixture now asserts the specific
 `script_exception` cause while retaining unknown-effect and no-replay checks. The
 visual fixture uses its own observer session after cancellation releases the
-product's debugger lease. No production mechanism was changed for these corrections.
+product's debugger lease.
 
-The deterministic adapter ZIP hash is
-`2f850ca96a35bb54e5a84b8917bb641e196b25632768aaa45c7088eb00bacf5e`.
+The initial ZIP was withdrawn from staged review after CI exposed native-input
+ordering. The final ZIP hash will be bound to the corrected workflow candidate.
 This is local packaging evidence until the workflow candidate binds and attests
 the same bytes. Local `cargo audit` was unavailable; the required CI dependency
 job must pass before publication. The workflow also runs Linux fixed-installation
@@ -40,3 +40,28 @@ remain distinct from installed-user and clean-machine acceptance.
 Pending the provenance-bound candidate and independent channel reconciliation.
 GitHub, npm, Chrome and MCP Registry access checks succeeded. Candidate, publication
 results, package-manager submissions and website delivery will be recorded here.
+
+## CI corrections
+
+Initial source `b4340ba0` failed release run 37056235264 and CI run 37056236218.
+Linux sysinfo process discovery included thread IDs. Replacement now requests
+processes without tasks; killing a task ID could fail after its process exited.
+Chrome can deliver an extension-requested activation after tabs.update resolves.
+Native selection now awaits that exact event before freezing the revision, with
+a bounded conservative refusal if delivery is missing. Foreground/takeover fences
+remain enforced. New unit cases cover delayed and missing activation delivery.
+
+The opaque native relay now drains its reader through EOF after a failed write.
+Immediate reconnect could discard the old generation's final Ended/error frames.
+The real legacy adapter journey remains the platform acceptance gate for this.
+Read cancellation fixtures now assert cancelled/none, matching ADR-0190's existing
+read-only account, and separately cancel a dispatched tab mutation to prove unknown
+effects and unsafe repeat. The CI screenshot fixture requests a 30000 ms capture
+budget; its short denied-absence observation budget and assertions stay unchanged.
+The new candidate and complete CI must pass before public publication.
+
+Corrected Windows source passes fmt, strict workspace Clippy, all workspace tests,
+406 extension tests, process and local-resilience journeys, fixed replacement and
+the complete browser lane. The local deterministic adapter ZIP SHA256 is
+`a7821d3fed44da845a1022e80b1c3682b9c0a70a9971bf79ee6fc88bff9527b3`.
+Linux acceptance remains pending the corrected workflow.

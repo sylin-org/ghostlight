@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from controlled document trees.
 - Reconcile browser volatile state when the service epoch changes and preserve
   explicit user controls through reconnect.
+- Exclude Linux thread IDs from executable replacement, drain final native relay
+  frames before reconnecting and wait for Chrome's own activation event before
+  native input freezes its window revision.
 
 This release also contains browser-privileged plumbing changes since 1.3.12, shipped
 in adapter 1.3.13. The installation-path fix introduces no extension path setting.

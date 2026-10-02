@@ -175,7 +175,9 @@ fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
+        ProcessRefreshKind::nothing()
+            .without_tasks()
+            .with_exe(UpdateKind::Always),
     );
     let mut stopped = Vec::new();
     for process in system.processes().values() {
@@ -203,7 +205,7 @@ fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&stopped),
             true,
-            ProcessRefreshKind::nothing(),
+            ProcessRefreshKind::nothing().without_tasks(),
         );
         stopped.retain(|pid| {
             system

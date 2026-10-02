@@ -24,9 +24,11 @@ function browserFixture({ grouped = true } = {}) {
     { id: 11, windowId: 21, title: "Ghostlight - fixture", collapsed: true }
   ] : [];
   let nextId = 4;
+  const activationListeners = [];
   const chrome = {
     storage: { session: { async get() { return {}; }, async set() {} } },
     tabs: {
+      onActivated: { addListener(listener) { activationListeners.push(listener); } },
       async get(id) { return { ...tabs.get(id) }; },
       async query(query) {
         return [...tabs.values()].filter(tab => query.windowId === undefined || tab.windowId === query.windowId);
@@ -38,6 +40,7 @@ function browserFixture({ grouped = true } = {}) {
         if (options.active) for (const other of tabs.values()) {
           if (other.windowId === tab.windowId && other.id !== tab.id) other.active = false;
         }
+        if (options.active) for (const listener of activationListeners) listener({ windowId: tab.windowId, tabId: tab.id });
         return { ...tab };
       },
       async update(id, options) {
@@ -47,6 +50,7 @@ function browserFixture({ grouped = true } = {}) {
         if (options.active) for (const other of tabs.values()) {
           if (other.windowId === tab.windowId && other.id !== tab.id) other.active = false;
         }
+        if (options.active) for (const listener of activationListeners) listener({ windowId: tab.windowId, tabId: id });
         return { ...tab };
       },
       async remove(id) { effects.push(["remove_tab", id]); tabs.delete(id); },

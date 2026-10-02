@@ -99,7 +99,8 @@ try {
   // Both hellos in one write pin preservation of buffered bytes across transport authentication.
   browser.socket.write(Buffer.concat([browser.encode({ kind: "hello", major: 1, token: endpoint.token }), browser.encode(adapterHello)]));
   await browser.take(value => value.kind === "hello_accepted", "adapter negotiation");
-  let nextTab = 0, hold = null, readDelay = 0;
+  let nextTab = 0, hold = null, holdOpen = false, readDelay = 0;
+  const heldMutations = [];
   const tabs = new Map(), requests = [], held = [];
   browser.onMessage = frame => {
     if (frame.kind === "heartbeat") { browser.send({ kind: "heartbeat_ack", sequence: frame.sequence }); return; }
@@ -114,6 +115,7 @@ try {
     if (command.command === "present") reply({ outcome: "presented", rendered: true });
     else if (command.command === "list_tabs") reply({ outcome: "tabs", tabs: [] });
     else if (command.command === "open_tab") {
+      if (holdOpen) { heldMutations.push(request); return; }
       const tab = { tab_id: ++nextTab, title: "H8 page", url: command.url, readiness: "complete", active: true };
       tabs.set(tab.tab_id, tab); reply({ outcome: "tab_opened", tab, committed_urls: [tab.url] });
     } else if (command.command === "describe_documents") reply({ outcome: "documents", tab_id: command.tab_id, inventory: {
@@ -147,10 +149,18 @@ try {
   a.invoke("browser_read", {}, "original");
   await a.take(value => value.kind === "error" && value.code === "duplicate_request", "duplicate rejected");
   a.send({ kind: "cancel", id: "original" });
-  const uncertain = await a.result("original", 2000);
-  assert.equal(uncertain.effect, "unknown"); assert.equal(uncertain.repeat_safe, false);
+  const cancelledRead = await a.result("original", 2000);
+  assert.equal(cancelledRead.status, "cancelled"); assert.equal(cancelledRead.effect, "none");
+  assert.equal(cancelledRead.repeat_safe, true);
   assert.equal(held.length, 1);
-  console.log("PASS duplicate rejection preserves original cancellation; uncertain work is not replayed");
+  holdOpen = true;
+  a.invoke("browser_navigate", { url: "https://sylin.org/uncertain/", new_tab: true }, "uncertain-mutation");
+  await until(() => heldMutations.length === 1, "mutation dispatched");
+  a.send({ kind: "cancel", id: "uncertain-mutation" });
+  const uncertain = await a.result("uncertain-mutation", 2000);
+  assert.equal(uncertain.effect, "unknown"); assert.equal(uncertain.repeat_safe, false);
+  assert.equal(heldMutations.length, 1); holdOpen = false;
+  console.log("PASS duplicate rejection preserves read cancellation; interrupted mutation remains uncertain and is not replayed");
 
   hold = null; readDelay = 65;
   const burst = Array.from({ length: 12 }, (_, i) => a.invoke("browser_read", {}, `burst-${i}`));
@@ -176,7 +186,7 @@ try {
   await browser.take(value => value.kind === "control_state" && value.state === "held", "human pause", 1500);
   assert.ok(Date.now() - pauseAt < 1500);
   a.send({ kind: "cancel", id: "held" });
-  assert.equal((await a.result("held", 2000)).effect, "unknown");
+  assert.equal((await a.result("held", 2000)).effect, "none");
   for (let i = 2; i < 31; i++) assert.equal((await a.result(`queued-${i}`)).effect, "none");
   assert.equal(held.length, 2, "pause and cancellation prevent queued dispatch");
   hold = null;
@@ -194,7 +204,7 @@ try {
   await browser.take(value => value.kind === "control_state" && value.state === "ended", "human Stop", 1500);
   a.send({ kind: "cancel", id: "stop-in-flight" });
   const stoppedInFlight = await a.result("stop-in-flight", 2000);
-  assert.equal(stoppedInFlight.effect, "unknown"); assert.equal(stoppedInFlight.repeat_safe, false);
+  assert.equal(stoppedInFlight.effect, "none"); assert.equal(stoppedInFlight.repeat_safe, true);
   for (const id of stoppedIds) {
     const result = await a.result(id, 2000);
     assert.equal(result.status, "blocked"); assert.equal(result.effect, "none");
@@ -215,7 +225,7 @@ try {
   assert.equal((await a.result(a.invoke("browser_read"))).status, "succeeded");
   assert.equal(requests.filter(request => ["read_document", "read_text"].includes(request.command.command)).length,
     beforeNewSession + 1, "new session permits the new request without replaying stopped or uncertain work");
-  console.log("PASS Stop drains queued work, preserves in-flight uncertainty, keeps diagnostics usable, and requires explicit new-session recovery without replay");
+  console.log("PASS Stop drains queued work, cancels in-flight observation, keeps diagnostics usable, and requires explicit new-session recovery without replay");
 
   const nonreader = await client("H8 stopped reading");
   nonreader.socket.pause();
