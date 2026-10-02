@@ -116,7 +116,7 @@ const server = createServer(async (request, response) => {
     .replace("</body>", '<label>Parent note<input aria-label="Parent note" id="h6-parent"></label></body>');
   response.end(html);
 });
-let socket, cdp, chromium;
+let socket, cdp, chromium, diagnoseFailure;
 try {
   await new Promise((done) => server.listen(0, "127.0.0.1", done)); port = server.address().port;
   policy(); const authority = start(executable("ghostlight"));
@@ -170,6 +170,9 @@ try {
     const result = await cdp.send("Runtime.evaluate", { expression: `await (${expression})`, returnByValue: true, awaitPromise: true, replMode: true }, sessionId);
     assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result.value;
   };
+  await until(() => nativeReady, "real connector negotiation");
+  await rawWorker(`(()=>{globalThis.fixtureDispatchErrors=[];const original=dispatch;dispatch=async request=>{try{return await original(request)}catch(error){fixtureDispatchErrors.push({command:request.command.command,error:String(error),stack:String(error.stack||'').slice(0,1000)});throw error}};return true})()`);
+  diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,state:liveState})`);
   await until(() => nativeReady, "real connector negotiation");
   const connector = start(executable("ghostlight-mcp-connector"));
   let mcp = channel((message) => connector.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"));
@@ -818,6 +821,9 @@ try {
     source_kind: liveSylin ? "live_html" : "checked_in_snapshot", source: sourceEvidence, passed,
     transport: "MV3 native-port shim -> real browser connector -> orchestrator -> real MCP connector" }, null, 2));
   console.log(`H6 browser journey: ${passed.length} checks passed with ${version.product}.`);
+} catch (error) {
+  if (diagnoseFailure) { try { writeFileSync(join(scratchRoot,'h6-browser-failure.json'),JSON.stringify(await diagnoseFailure(),null,2)); } catch {} }
+  throw error;
 } finally {
   if (cdp && socket?.readyState === WebSocket.OPEN) { try { await cdp.send("Browser.close"); } catch {} }
   socket?.close(); poll?.end("[]");

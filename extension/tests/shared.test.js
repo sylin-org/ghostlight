@@ -127,7 +127,8 @@ test("attention is reported on focus and at connection, never inferred from conn
   // Turning to the browser reports attention.
   assert.match(source, /chrome\.windows\.onFocusChanged\.addListener[\s\S]{0,400}?event: "attended"/);
   // Connecting reports the truth about focus rather than claiming it.
-  assert.match(source, /attended: await holdsFocusedWindow\(\)/);
+  assert.match(source, /const attended = await holdsFocusedWindow\(\);/);
+  assert.match(source, /attended,/);
   assert.match(source, /chrome\.windows\.getLastFocused\(\)/);
 });
 

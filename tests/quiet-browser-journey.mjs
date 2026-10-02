@@ -111,7 +111,7 @@ const server = createServer(async (request, response) => {
       agent.addEventListener('input',event=>{textModel=agent.value;nativeTextInputs.push({trusted:event.isTrusted,value:agent.value})});
       race.addEventListener('click',event=>nativeClicks.push({trusted:event.isTrusted}));</script>`);
 });
-let socket, cdp, chromium, observeFailure, journeyPassed = false, createdDeployLock = false;
+let socket, cdp, chromium, observeFailure, probeWorker, journeyPassed = false, createdDeployLock = false;
 const deployLock = join(binDir, "deploy.lock"), deployMarker = `quiet custody fixture ${randomUUID()}`;
 const check = name => { report.checks.push(name); save(); console.log(`PASS quiet: ${name}`); };
 function receipt(edge, tool, result) {
@@ -213,7 +213,8 @@ try {
       awaitPromise: true, replMode: true }, workerSession);
     assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result.value;
   };
-  observeFailure = () => rawWorker(`Promise.all([chrome.windows.getAll(),chrome.tabs.query({})]).then(([windows,tabs])=>({windows:windows.map(({id,focused,state})=>({id,focused,state})),tabs:tabs.map(({id,windowId,active})=>({id,windowId,active})),activations:globalThis.quietActivations||[],focuses:globalThis.quietWindowFocuses||[]}))`);
+  probeWorker = rawWorker;
+  observeFailure = () => rawWorker(`Promise.all([chrome.windows.getAll(),chrome.tabs.query({})]).then(([windows,tabs])=>({windows:windows.map(({id,focused,state})=>({id,focused,state})),tabs:tabs.map(({id,windowId,active})=>({id,windowId,active})),activations:globalThis.quietActivations||[],focuses:globalThis.quietWindowFocuses||[],native:globalThis.quietNativeTrace||[]}))`);
   if (legacy) {
     await until(() => controls.includes("ended") && nativeErrors.some(frame => frame.code === "browser_attention_upgrade_required"), "old adapter receives Ended and explicit upgrade error");
     await until(() => rawWorker("liveState.control_state==='ended' && Boolean(liveState.last_error?.includes('Update Ghostlight'))"), "legacy worker applies retirement state and displays upgrade detail");
@@ -328,8 +329,12 @@ try {
     report.desktop_foreground_before = desktopForeground();
     report.observations.push({ name: "human_before", ...baseline }); save();
     await rawWorker(`(()=>{globalThis.quietActivations=[];globalThis.quietWindowFocuses=[];
+      globalThis.quietNativeTrace=[];
+      const record=value=>{quietNativeTrace.push({at:performance.now(),...value});if(quietNativeTrace.length>64)quietNativeTrace.shift()};
+      const sendCommand=chrome.debugger.sendCommand.bind(chrome.debugger);
+      chrome.debugger.sendCommand=async(target,method,params)=>{if(method.startsWith('Input.'))record({method,type:params?.type,tab:target.tabId,phase:'before'});const result=await sendCommand(target,method,params);if(method.startsWith('Input.'))record({method,type:params?.type,tab:target.tabId,phase:'after'});return result};
       chrome.tabs.onActivated.addListener(info=>quietActivations.push(info));
-      chrome.windows.onFocusChanged.addListener(id=>quietWindowFocuses.push(id));return true})()`);
+      chrome.windows.onFocusChanged.addListener(id=>{quietWindowFocuses.push(id);record({focus:id})});return true})()`);
     const fragments = ["Human ", "keeps ", "typing ", "during ", "agent ", "work."];
     const typing = (async () => {
       for (const text of fragments) { await cdp.send("Input.insertText", { text }, humanSession); await delay(100); }
@@ -619,6 +624,37 @@ try {
   journeyPassed = true;
 } catch (error) {
   if (observeFailure) { try { report.browser_at_failure = await observeFailure(); } catch (diagnosticError) { report.browser_diagnostic_failure = String(diagnosticError); } }
+  if (process.platform === 'linux' && report.browser_at_failure) {
+    const humanWindow = report.observations.find(item=>item.name==='human_before')?.tab.window;
+    const workWindow = report.browser_at_failure.windows.find(item=>item.focused && item.id!==humanWindow)?.id;
+    const workTab = report.browser_at_failure.tabs.find(item=>item.windowId===workWindow && item.active)?.id;
+    if (humanWindow && workTab) try {
+      const probeTarget=(await cdp.send('Target.getTargets')).targetInfos.find(item=>item.type==='page' && item.url.endsWith('/native-peer'));
+      if (probeTarget) {
+        const {sessionId:probeSession}=await cdp.send('Target.attachToTarget',{targetId:probeTarget.targetId,flatten:true});
+        const coordinates=await cdp.send('Runtime.evaluate',{expression:'(()=>{const r=race.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()',returnByValue:true},probeSession);
+        report.native_probes=[];
+        for(const [method,params] of [
+          ['Input.dispatchMouseEvent',{...coordinates.result.value,type:'mouseMoved'}],
+          ['Input.synthesizeTapGesture',{...coordinates.result.value,gestureSourceType:'mouse',duration:0,tapCount:1}]
+        ]) {
+          await probeWorker(`chrome.windows.update(${humanWindow},{focused:true})`);await delay(100);
+          const before=await observeFailure();
+          await cdp.send(method,params,probeSession);await delay(100);
+          const after=await observeFailure();
+          const effects=await cdp.send('Runtime.evaluate',{expression:'({clicks:nativeClicks,effects:raceEffects})',returnByValue:true},probeSession);
+          report.native_probes.push({method,before,after,effects:effects.result.value});
+        }
+        const sibling=report.browser_at_failure.tabs.find(item=>item.windowId===workWindow && !item.active)?.id;
+        if(sibling) {
+          await probeWorker(`chrome.windows.update(${humanWindow},{focused:true})`);await delay(100);
+          const before=await observeFailure();
+          await probeWorker(`chrome.tabs.update(${sibling},{active:true})`);await delay(100);
+          report.native_probes.push({method:'tabs.update',before,after:await observeFailure()});
+        }
+      }
+    } catch (probeError) { report.native_probe_error=String(probeError); }
+  }
   try { report.desktop_foreground_at_failure = desktopForeground(); } catch (diagnosticError) { report.desktop_foreground_failure = String(diagnosticError); }
   report.failure = String(error.stack || error); report.finished_at = new Date().toISOString(); save(); throw error;
 } finally {

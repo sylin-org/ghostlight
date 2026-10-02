@@ -79,3 +79,23 @@ the first post-restart mutation. It preserves foreground, trusted-effect and
 no-replay assertions. These fixture arguments are distinct from installed browser
 evidence. Local source gates, process and full Windows browser lanes pass with the
 fixture changes. Corrected CI acceptance is still required.
+
+Candidate run 37059666240 passes both native package lanes, source gates and Linux
+package smoke. CI run 37059666479 passes both process lanes, Rust, extension and
+dependency checks, but fails the browser lanes. Openbox does not resolve Linux
+background mouse focus: the owned window becomes focused and subsequent input is
+correctly refused. Windows still fails the excluded-frame screenshot. Publication
+remains held, and the corrected Chrome staged review was also cancelled.
+
+The native startup path now finishes its asynchronous attendance query before
+exposing the port. Browser events could previously precede hello while that query
+was pending. A new VM regression test proves hello is first under that interleave;
+407 extension tests and the Rust source gates pass. Failure-only browser probes
+record bounded native-packet/focus ordering and raw screenshot dispatch errors.
+The Linux probe compares mouse dispatch, synthetic mouse tap and owned tab selection
+in the disposable fixture after failure, then rethrows the original failure.
+It cannot turn a failed acceptance lane into success. The first local run stalled
+when the diagnostic worker was evaluated before native readiness; evaluation now
+waits for the fixture handshake. These diagnostics are test-only.
+The corrected local frame journey passes all 69 checks with pinned Chrome 152;
+the other browser component lanes passed in that same local source run.

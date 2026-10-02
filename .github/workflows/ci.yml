@@ -221,6 +221,7 @@ jobs:
           path: |
             .tmp/hardening-suite/
             .tmp/h6-browser-evidence.json
+            .tmp/h6-browser-failure.json
             .tmp/h6-masked-sylin.jpg
             .tmp/h6-visual-*.png
             .tmp/h4-*.png

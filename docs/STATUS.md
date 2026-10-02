@@ -29,6 +29,13 @@ ordering. Those corrections are recorded in the release report. Publication wait
 for the corrected candidate and both platform journey lanes. The initial Chrome
 staged submission was withdrawn before its corrected ZIP is submitted.
 
+Both candidate package lanes and process CI now pass. Browser CI remains blocked
+on Linux background mouse focus and a Windows excluded-frame screenshot failure.
+Chrome staged review is cancelled while these are investigated. Native startup
+now preserves hello-first ordering through the attendance query, with a focused
+regression test. Failure-only fixture diagnostics collect the remaining causes;
+no public 1.3.13 channel has been advanced.
+
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 
 The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership

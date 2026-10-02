@@ -298,6 +298,7 @@ async function establishNativeConnection() {
   try {
     if (!browserId) await initializeLocalState();
     if (nativePort) return;
+    const attended = await holdsFocusedWindow();
     stage = "connect_native";
     const port = chrome.runtime.connectNative(HOST_NAME);
     connectionLog.record(connectionEvents.NATIVE_PORT_OPENED, { attempt });
@@ -326,7 +327,7 @@ async function establishNativeConnection() {
       browser_id: browserId,
       adapter_epoch: adapterEpoch,
       browser_name: shared.browserName(navigator.userAgentData?.brands),
-      attended: await holdsFocusedWindow(),
+      attended,
       capabilities: ADAPTER_CAPABILITIES
     });
     connectionLog.record(helloSent ? connectionEvents.NATIVE_HELLO_SENT : connectionEvents.NATIVE_HELLO_SKIPPED,
