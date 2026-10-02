@@ -42,6 +42,13 @@ Windows failure diagnostics locate post-capture mask verification. Source/proces
 gates pass, and local Windows frame/quiet fixtures pass. Full background pointer
 support remains the release target; no blanket Linux refusal is implemented.
 
+Mask timing in run 37063534506 confirms viewport capture outlives the mask on both
+platforms. A compositor correction keeps the excluded iframe at important zero
+opacity beneath its opaque cover without changing renderer visibility. Local source
+and frame gates pass; corrected CI remains required. The mask expiry and unsafe
+capture guards retain their existing bounds. Linux quiet pointer support is still
+unresolved and prevents publication.
+
 ## Reviewed recovery pipeline (2026-10-01, installed locally)
 
 The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership

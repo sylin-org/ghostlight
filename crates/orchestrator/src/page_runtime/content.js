@@ -83,7 +83,10 @@
         label.textContent = String(message.label ?? "").slice(0, 80);
         shadow.append(label);
         document.documentElement.append(mask);
-        const styles = [["transition", "none"], ["animation", "none"], ["visibility", "hidden"], ["opacity", "0"]].map(([name, applied]) => {
+        // Keep the embedded renderer participating in composition. Changing its
+        // visibility can stall an inactive-tab capture until mask expiry. Zero
+        // opacity still removes every embedded pixel beneath the opaque mask.
+        const styles = [["transition", "none"], ["animation", "none"], ["opacity", "0"]].map(([name, applied]) => {
           const previous = [name, element.style.getPropertyValue(name), element.style.getPropertyPriority(name), applied];
           element.style.setProperty(name, applied, "important");
           return previous;
@@ -109,7 +112,7 @@
     if (!state || state.dirty || state.observer.takeRecords().length) return { valid: false };
     return { valid: state.items.every(({ element, mask }) => {
       const style = window.getComputedStyle(element);
-      return element.isConnected && mask.isConnected && style.visibility === "hidden" && Number(style.opacity) === 0;
+      return element.isConnected && mask.isConnected && Number(style.opacity) === 0;
     }) };
   }
 

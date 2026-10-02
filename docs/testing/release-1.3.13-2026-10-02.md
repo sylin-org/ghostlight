@@ -118,3 +118,15 @@ the local frame journey still passes all 69 checks with capture diagnostics enab
 Publication remains held. A blanket Linux background-pointer refusal was discussed
 as a safe fallback, but is not implemented; the coordinator recommended resolving
 background pointer support to preserve useful work in the default attention mode.
+
+Run 37063534506 isolates mask expiry on both platforms: viewport capture returns
+after about 11 seconds on Linux and 12 seconds on Windows, past the 10-second mask
+lifetime, and the iframe styles are already restored before failed verification.
+The attempted compositor correction leaves the iframe renderer's visibility alone
+while applying important zero opacity, disabled transitions/animations and the same
+opaque exclusion cover. Pixel suppression, mutation refusal and bounded restoration
+remain enforced. No mask lifetime or timeout guard is enlarged. A focused VM test
+checks pixel suppression, unsafe opacity refusal and expiry restoration. All 408
+extension tests, Rust source gates and the local 69-check frame lane pass. CI must
+prove the inactive capture now completes before mask expiry; Linux pointer remains
+an independent release blocker.

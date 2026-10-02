@@ -70,6 +70,17 @@ This adds no source access and changes no recording containment or delivery mech
 
 ## Evidence required
 
+### Capture composition amendment (2026-10-02)
+
+Inactive viewport captures in pinned Chrome 152 can finish only after an excluded
+iframe's visibility mask expires. Failed post-capture verification correctly
+discards those bytes. The physical mask now suppresses iframe pixels with important
+zero opacity and disabled transitions/animations beneath the existing opaque cover,
+while leaving renderer visibility unchanged. Verification still rejects nonzero
+opacity, mutation, missing geometry or changed document identity. The existing
+bounded expiry and restoration remain. Local real-image exclusion and mutation
+journeys pass; platform CI must establish the composition correction before release.
+
 The September 7 full-session browser suite also exposed incomplete physical batch preparation.
 Per-field validation discovered an invalid later field only after an earlier edit. The adapter
 now validates every document group, field, option, and submit containment before the first edit,
