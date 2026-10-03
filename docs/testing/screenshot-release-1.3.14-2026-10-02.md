@@ -35,3 +35,26 @@ fixture also replaces its predecessor mask expectation with original embedded pi
 refusal/restoration; its syntax is checked, but that installed lane was not run on this Windows host.
 The earlier trial-source component and local installation evidence is preserved separately and
 does not attest this narrowed release. No public 1.3.14 delivery is claimed yet.
+
+## Installed stable-baseline service
+
+The existing development loop built the orchestrator from this release branch and replaced only
+the selected service at `E:/repo/github/sylin-org/ghostlight/target/release/ghostlight.exe`.
+The installed command reports 1.3.14. Chrome PID 20572 and browser/MCP connector PIDs 9540/30964
+survive; the new service PID is 24076. Selection, policy and history directories are preserved.
+The ordinary browser reconnects without a browser restart or extension reload.
+
+Actual MCP navigation opens a synthetic localhost fixture containing a separate-origin magenta
+frame. Viewport and full-page capture succeed at 1424x1558 and visually include its original
+pixels. Magnification succeeds at 2400x960 using the current full-page view. An earlier attempt
+used the superseded viewport view and correctly returned `stale_view`; that is not capture
+failure with a current handle. The preserve-tabs interlock refuses fixture closure and is
+respected; the temporary HTTP server is stopped. No owner policy is edited for this smoke.
+Binary false and all four capture modes are covered by the separate 70-check component suites.
+
+Candidate run 37083577255 passes source, dependency policy, both native package builds and both
+Linux package lifecycles, but final assembly refuses the unchanged 1.3.13 MCPB source manifest.
+The bundle manifest and Linux manual version headers are corrected to 1.3.14. The existing
+public-surface source check now also compares the npm and MCPB manifest versions with Cargo,
+so this demonstrated packaging mismatch fails before native builds. That failed run is preserved
+as failed evidence and cannot be published. A new candidate will bind the corrected source.
