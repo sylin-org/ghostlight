@@ -44,6 +44,44 @@ component behavior, including the inactive screenshot cases that previously fail
 It is not installed ordinary-profile acceptance or Linux browser evidence. The unrelated Linux
 background pointer focus issue remains outside this change.
 
+## Installed local acceptance
+
+The owner requested local deployment after source commit `d06892f9`. The existing Windows
+development loop built that clean worktree's manifest in release mode and replaced only the
+orchestrator in the existing `target/release` installation. A process-scoped Cargo wrapper selected
+the clean manifest while retaining the original checkout's build and live directories. The original
+dirty checkout was not changed. The built and installed executable SHA-256 values match:
+
+```text
+CDCFB3272EE60DDB21D42B0A061745E0058E430E1DC9760D21FC34C7A09DBB31
+```
+
+The installation selection retained its serving, state, and policy directories. The replacement
+service is running; doctor reports the existing native-host registrations current and browser
+readiness Ready. The independently launched ordinary Chrome process remained running. Neither
+connector nor the installed extension was replaced, and no browser restart or extension reload
+was performed.
+
+The current Codex MCP connection opened one disposable loopback fixture in that ordinary browser.
+All-open authority was confirmed without changing policy. Background captures returned JPEGs:
+
+| Capture | Image size |
+| --- | --- |
+| Viewport | 1409 x 1558 |
+| Full page | 1409 x 1800 |
+| Target | 228 x 56 |
+| Magnified iframe region | 2400 x 1200 |
+
+Decoding the delivered viewport JPEG in the fixture returned RGBA `[255,0,254,255]` at the embedded
+document's magenta marker. Before and after capture, the iframe had no inline style, visibility
+was visible, opacity was 1, and no mask overlays existed. Magnification passed with a fresh view;
+an earlier view invalidated by intervening captures was refused as stale. The test tab remains
+open because the installed preserve-tabs interlock refused closure. The fixture server was stopped.
+
+Bounded receipts are saved locally in `.tmp/local-capture-evidence.json`. This is installed Windows
+acceptance for permitted screenshots. Binary refusal was verified in the real Chromium component
+lane above; this installed check did not change the user's full-open policy or attest Linux behavior.
+
 ## Delivery
 
 Unpublished source follow-up. Public 1.3.13 artifacts and the Chrome Store adapter remain unchanged.

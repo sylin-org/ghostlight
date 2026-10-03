@@ -717,8 +717,9 @@ because its state and UI are small and Chrome-native.
 
 For the narrow compatibility question consulted from the archived public development instructions:
 Chromium loads `extension/` directly with id `cjcmhepmagomefjggkcohdbfemacojoa`, connects through
-`org.sylin.ghostlight`, and reloads explicitly after changes. Repo-built shores remain under
-`target/release`. No prior implementation code was reused.
+`org.sylin.ghostlight`. Reload only after changing privileged adapter files; ordinary service-owned
+page-runtime updates arrive through the existing injector on reconnect (ADR-0193). Repo-built
+shores remain under `target/release`. No prior implementation code was reused.
 
 ## Explicit human control and final dispatch (ADR-0185)
 
@@ -743,7 +744,7 @@ Completed landings are still checked against policy after dispatch. A later runt
 change does not create a permanent policy hold on an otherwise permitted tab; the next command
 checks the live control again. Recovery tests prove the same tab remains usable after Resume.
 
-## Document authority and coverage (ADR-0158)
+## Document authority and coverage (ADRs 0158 and 0194)
 
 The common executor browser boundary obtains a bounded document inventory and exact request
 subjects before extraction. Governance admits actual documents through the immutable snapshot;
@@ -753,7 +754,12 @@ mechanism binds frame routing to document identity. Neither relay interprets pol
 
 Language owns the content-free coverage qualification. Completion adds bounded coverage to
 model results and audit. Volatile workbench details hold excluded host names for the human only.
-Screenshots mask before capture, verify afterward, restore styles, and expire abandoned masks.
+Screenshots use the separate binary `browser.screenshots.enabled` permission. Existing tab Read
+and custody checks still apply. An allowed capture dispatches directly without document inventory,
+partial coverage, mask overlays, or iframe style changes. Its pixels include visible embedded
+content even when semantic grants exclude that document. Any authority layer setting the permission
+to false refuses viewport, full-page, target, and magnified captures before dispatch, including in
+observe mode. Screenshot coordinates confer no additional text or action authority.
 Restricted recordings stop when their admitted document set changes. Every replay destination
 rechecks recorded embedded sources; incomplete provenance cannot pass restricted disclosure.
 

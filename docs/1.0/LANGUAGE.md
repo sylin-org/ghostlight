@@ -241,6 +241,10 @@ Capture the viewport, full page, one target, or a magnified region from a curren
 capture returns a view handle for later coordinate actions or another region capture. Shortest
 call: `{}`.
 
+Configured `browser.screenshots.enabled:false` refuses every branch before capture. Allowed images
+include visible embedded content without masks; frame text and action authority remain separate.
+See [screenshot permission](../guides/governance-configuration.md#screenshot-permission).
+
 Inputs use one of four schema branches: optional `tab` only for viewport capture; optional `tab`
 plus required `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
 required `view`, `x`, `y`, `width`, and `height`. Region coordinates are image pixels and must form

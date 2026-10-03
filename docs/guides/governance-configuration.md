@@ -62,12 +62,6 @@ the manifest mode; the strictest effective layer wins.
 
 Supported settings are:
 
-Screenshot permission applies to the complete rendered image, including visible embedded content.
-Frame host exclusions continue to restrict semantic text, targets, and actions; they do not redact
-screenshots. Set `browser.screenshots.enabled` to `false` to prevent that visual disclosure.
-An organization refusal cannot be overridden by a local allowance. Recording source restrictions
-remain separate.
-
 | Key | Value | Effect |
 | --- | --- | --- |
 | `browser.tabs.allow_close` | boolean | `false` removes model-driven close. |
@@ -80,6 +74,32 @@ remain separate.
 | `browser.attention` | `background` or `foreground` | Background is the default and protects the person's active tab, unowned pages, and placement from direct agent mechanisms. Foreground restores direct activation and unbound same-host adoption. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 | `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
+
+### Screenshot permission
+
+This setting is implemented in the unreleased screenshot follow-up, deployed locally and verified
+on Windows. Published 1.3.13 contains the deployment repair only. See [current status](../STATUS.md)
+before applying this setting to a packaged service.
+
+With no policy, screenshots capture directly. With policy, `browser.screenshots.enabled` defaults
+to true. An allowed image includes visible embedded content; frame host exclusions still govern
+semantic text, targets, and actions but do not redact pixels. Existing tab Read permission,
+runtime controls, and current-view checks still apply. Screenshot permission grants no additional
+authority to act on the embedded content.
+
+To refuse viewport, full-page, target, and magnified screenshots, add this entry to the policy's
+`config` array:
+
+```json
+{"key": "browser.screenshots.enabled", "value": false, "level": "mandatory"}
+```
+
+A false value in either authority layer prevents capture even in observe mode. A local true value
+cannot override an organization false value. Refusal returns no image and sends no capture command.
+Recording source restrictions remain separate; this setting does not disable recordings.
+[ADR-0194](../adr/0194-binary-screenshot-permission.md) records the decision and verification.
+
+### Other operational settings
 
 `policy.user.enabled` is honored only from an organization layer, and it gates authoring rather than
 enforcement. A user policy that already exists keeps applying when it is switched off, because a

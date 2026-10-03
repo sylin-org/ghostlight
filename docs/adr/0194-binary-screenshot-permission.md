@@ -1,6 +1,6 @@
 # ADR-0194: Binary screenshot permission
 
-- Status: Accepted; source and Windows Chromium component verification pass
+- Status: Accepted; implemented, locally deployed, and verified on Windows
 - Date: 2026-10-02
 - Supersedes: ADR-0158 Decision 6
 - Builds on: ADR-0131, ADR-0162, and ADR-0181
@@ -13,7 +13,8 @@ It does not mean that Ghostlight has independently admitted semantic access to e
 
 1. `browser.screenshots.enabled` is a registered boolean, enabled by default. Any configured
    authority layer authoring `false` refuses screenshot capture. A lower layer cannot restore
-   it. Invalid authority still refuses work. Existing Read and controlled-tab checks remain.
+   it, including in observe mode. Invalid authority still refuses work. Existing Read and
+   controlled-tab checks remain.
 2. Viewport, full-page, target, and magnified captures share this permission. The orchestrator
    admits or refuses the complete operation before dispatch. An allowed capture goes directly
    to the existing capture primitive, without document inventory, partial coverage, or masks.
@@ -41,7 +42,7 @@ Source reviewed on October 2:
   are optional locator-selected overlays; the MCP screenshot tool does not use them.
 
 This supports a simple capture primitive. It does not prove that every background capture works
-on every platform. The Windows background stall needs verification with the mask path removed.
+on every platform. The Windows checks below verify capture with the mask path removed.
 
 ## Verification
 
@@ -50,4 +51,7 @@ for every capture branch before dispatch, organization precedence, original embe
 real Chrome images, and preservation of separate semantic and coordinate-action restrictions.
 
 [The verification record](../testing/binary-screenshot-policy-2026-10-02.md) records passing
-source gates and all 70 real Chrome component checks. Linux installed behavior is not claimed.
+source gates, all 70 real Chrome component checks, and installed Windows acceptance for all four
+capture modes through the existing ordinary Chrome connection. No browser restart or extension
+reload was needed. Binary refusal was verified in the component lane; the installed acceptance
+kept the user's full-open policy. Linux installed behavior is not claimed.

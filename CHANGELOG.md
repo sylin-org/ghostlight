@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The browser and workbench trial on main is outside the deployment-only 1.3.13 release.
 Linux background pointer focus remains unresolved. Windows mask expiry is superseded by the
-binary screenshot policy below; the Windows Chrome component journey passes without masking.
+binary screenshot policy below; the Windows Chrome component journey and installed captures pass
+without masking.
 
 ### Changed
 
@@ -27,7 +28,9 @@ binary screenshot policy below; the Windows Chrome component journey passes with
 - Keep form diagnostics outside page messaging and scope access to active documents.
 - Improve service-epoch reconciliation, native startup ordering and relay completion.
 
-These browser-privileged changes require a future compatible store adapter.
+Changes to privileged browser plumbing require a future compatible store adapter. The screenshot
+policy and current service-owned page runtime work through the existing installed adapter;
+local Windows acceptance required no extension reload. This follow-up is not in published 1.3.13.
 
 ## [1.3.13] - 2026-10-02
 

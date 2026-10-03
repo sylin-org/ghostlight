@@ -1,8 +1,8 @@
 # STATUS -- Ghostlight 1.3.13 published; Chrome adapter 1.3.12 compatible
 
-Last updated: 2026-10-02 (deployment-only 1.3.13 published; store adapter unchanged).
+Last updated: 2026-10-02 (screenshot follow-up deployed and verified locally; public release unchanged).
 
-## Deployment-only 1.3.13 published (2026-10-02)
+## Local screenshot follow-up (unpublished)
 
 Screenshot follow-up: [ADR-0194](adr/0194-binary-screenshot-permission.md) replaces masking with
 binary `browser.screenshots.enabled`. Full-open and permitted work capture complete images,
@@ -13,6 +13,14 @@ pass on Windows, including original embedded pixels and background capture witho
 The fresh-binary process journey, repository integrity and offline public-surface checks also pass.
 [The verification record](testing/binary-screenshot-policy-2026-10-02.md) states the scope. This follow-up
 is unpublished and does not change tag `v1.3.13` or its public artifacts.
+Source commit `d06892f9` is now deployed locally through the existing Windows development loop.
+Installed viewport, full-page, target, and magnified captures pass through the existing ordinary
+Chrome connection without an extension reload. Delivered JPEG pixels include the embedded marker;
+the build and installed hashes match. The verification record distinguishes this installed
+all-open acceptance from the component policy-refusal checks. The preserve-tabs interlock kept
+the disposable test tab open; its loopback server is stopped.
+
+## Deployment-only 1.3.13 published (2026-10-02)
 
 The owner rejected unrelated browser investigation and narrowed the release to
 fixed-path deployment. Tag `v1.3.13` names exact source
