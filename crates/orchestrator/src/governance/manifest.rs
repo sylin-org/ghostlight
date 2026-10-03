@@ -581,6 +581,7 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
             }
         }
         "browser.tabs.allow_close"
+        | super::SCREENSHOTS_ENABLED_KEY
         | "privacy.preserve_target_names"
         | "channels.mcp.enabled"
         | "channels.cli.enabled"

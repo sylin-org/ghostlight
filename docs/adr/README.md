@@ -219,6 +219,8 @@ history live here.
 
 | [0193](0193-fixed-package-paths-and-service-runtime-updates.md) | Fixed package paths and service runtime updates through the existing injector | Accepted |
 
+| [0194](0194-binary-screenshot-permission.md) | Binary screenshot permission without document masks; stable-baseline service delivery | Accepted; 1.3.14 candidate verification in progress; supersedes ADR-0158 Decision 6 |
+
 ## Conventions
 
 - Filenames: `NNNN-kebab-title.md`, zero-padded, monotonically increasing.

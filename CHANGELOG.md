@@ -5,6 +5,21 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.14] - 2026-10-02
+
+### Changed
+
+- Capture complete screenshots without document inventories or privacy masks, including visible
+  embedded content. Full-open capture goes directly to the existing browser primitive.
+- Add binary `browser.screenshots.enabled` policy permission for viewport, full-page, target, and
+  magnified screenshots. A false value in either authority layer prevents capture and returns no
+  image. Tab Read permission and separate frame text/action restrictions still apply (ADR-0194).
+- Keep the public 1.3.12 browser adapter compatible. Its existing injector installs the current
+  service-owned page runtime; no extension update or reload is required.
+
+This release contains the screenshot fix on stable 1.3.13. The browser/workbench trial remains
+outside this release. Recording source restrictions are unchanged.
+
 ## [1.3.13] - 2026-10-02
 
 ### Fixed

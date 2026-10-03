@@ -643,7 +643,10 @@ mechanism binds frame routing to document identity. Neither relay interprets pol
 
 Language owns the content-free coverage qualification. Completion adds bounded coverage to
 model results and audit. Volatile workbench details hold excluded host names for the human only.
-Screenshots mask before capture, verify afterward, restore styles, and expire abandoned masks.
+Screenshots use binary `browser.screenshots.enabled` permission (ADR-0194). Existing tab Read
+and custody checks remain. Allowed images include visible embedded content without inventory or
+masking. A false value in either layer refuses all four branches before dispatch, even in observe
+mode. Screenshot coordinates confer no extra semantic or action authority.
 Restricted recordings stop when their admitted document set changes. Every replay destination
 rechecks recorded embedded sources; incomplete provenance cannot pass restricted disclosure.
 

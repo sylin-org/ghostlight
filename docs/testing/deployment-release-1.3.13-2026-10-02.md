@@ -12,8 +12,8 @@ Installations keep one permanent sibling set at `~/.ghostlight/bin`. The service
 owns registration migration and runtime handoff through existing seams (ADR-0193).
 
 The original [fixed-installation report](fixed-installation-2026-10-02.md) records
-earlier Windows fixture results. This branch requires its own source, process,
-installation and candidate checks. Public delivery is not yet claimed.
+earlier Windows fixture results. The narrowed branch's independent source, process,
+installation, candidate and public-delivery evidence follows below.
 
 ## Current source and Windows installation evidence
 
@@ -40,3 +40,32 @@ unchanged production 1.3.12 MV3 adapter, installs the service runtime and comple
 governed reads, forms, captures, scripts, recording and cleanup. Its native port
 transport is a fixture shim around real relay framing; it is component evidence,
 not an installed Chrome Web Store acceptance claim.
+
+## Candidate and public delivery
+
+Candidate run [37068025269](https://github.com/sylin-org/ghostlight/actions/runs/37068025269)
+passes all seven jobs from `6656ef87a85437ff79e8dc6ed32cec28121b4872`. Linux source,
+process, fixed-path and shell-downloader checks pass. Windows release executables
+pass fixed-path replacement and PowerShell downloader checks. Native packages
+build, and Debian 12/Ubuntu 24.04 package lifecycle checks pass. Assembly verifies
+18 artifacts and attests all 20 files including the manifest and checksum list.
+
+Tag `v1.3.13` names that exact source. The publisher verifies all 20 provenance
+records, creates a GitHub draft and re-downloads every asset to compare hashes
+before publication. GitHub 1.3.13 is public. npm accepts version 1.3.13 at latest;
+the public tarball SHA-256 matches the candidate. A fresh consumer with isolated
+user state installs that public package, downloads and verifies all three real
+Windows binaries at fixed paths, and invokes version 1.3.13 twice. This consumer
+does not register against the owner's browser or deploy into their installation.
+
+The official MCP Registry publishes `org.sylin/ghostlight` 1.3.13. Candidate-derived
+Scoop metadata is reconciled in the repository. WinGet's three 1.12 manifests pass
+local validation and are submitted in
+[PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923); its initial manifest
+and existing CLA checks pass, with further checks/review pending. No new legal
+agreement is signed. Website delivery is verified after the public fallback push.
+
+The production adapter is unchanged 1.3.12. Its candidate ZIP SHA-256 is
+`9d5521b3f34562051ea6b07d9d5d0e07267ff6d7bacf274bd38234d43659a25d`.
+No Chrome package is submitted or published for this ordinary service update.
+Main's separate source adapter 1.3.13 is an unpublished trial, outside this release.

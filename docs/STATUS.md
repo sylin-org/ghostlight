@@ -1,6 +1,26 @@
-# STATUS -- Ghostlight 1.3.12 published; Chrome adapter 1.3.12 published
+# STATUS -- Ghostlight 1.3.13 published; screenshot-only 1.3.14 preparation
 
-## Deployment-only 1.3.13 release preparation (2026-10-02)
+Last updated: 2026-10-02 (stable-baseline screenshot release preparation).
+
+## Screenshot-only 1.3.14 preparation
+
+The owner authorized bump, commit, push, and publication, and selected the screenshot fix on the
+published stable 1.3.13 baseline. The browser/workbench trial stays outside this release.
+The service admits complete screenshots or refuses them through `browser.screenshots.enabled`.
+Production adapter 1.3.12 is unchanged and its injector supplies the current page runtime.
+Source and candidate checks for this exact backport are recorded in
+[the 1.3.14 release report](testing/screenshot-release-1.3.14-2026-10-02.md). Public channels remain
+1.3.13 until independent delivery verification. The earlier trial-source local acceptance is
+separate evidence, not acceptance of this exact candidate.
+
+## Deployment-only 1.3.13 published
+
+GitHub, npm and the official MCP Registry serve 1.3.13 from `6656ef87`. Production adapter 1.3.12
+is compatible and unchanged. Candidate run 37068025269 passes all seven jobs, including both
+package platforms and fixed-path replacement. The original dirty workspace is preserved.
+[The release record](testing/deployment-release-1.3.13-2026-10-02.md) identifies scope and delivery.
+
+## Historical deployment-only 1.3.13 preparation (superseded by publication)
 
 The owner authorized bump, changelog, commit, push and publication. The release
 branch carries the fixed-path deployment repair on the published 1.3.12 baseline.

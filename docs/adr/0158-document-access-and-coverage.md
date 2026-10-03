@@ -7,6 +7,9 @@
 
 ## Decision
 
+Decision 6 is superseded by [ADR-0194](0194-binary-screenshot-permission.md). The mask experiments
+below remain historical evidence; current screenshot permission admits or refuses a complete image.
+
 The owner accepted H6's remaining choices on September 7: embedded host names in human-only
 details, mask excluded screenshot regions, stop recordings at the access boundary, and refuse
 unrestricted script execution when access to excluded documents cannot be bounded.

@@ -166,7 +166,7 @@ test("content state survives delayed startup responses and embedded documents st
       chrome: { runtime: { sendMessage: () => new Promise(resolve => { resolveStartup = resolve; }) } }
     };
     vm.createContext(sandbox);
-    const startup = section(source, "  const formDiagnosticsApi =", "  function clearCaptureMask(");
+    const startup = section(source, "  const formDiagnosticsApi =", "  function finishDragObservation(");
     const receiver = section(source, "  window.__ghostlight_dispatch__ = function(message) {", "    // Resolve and scroll inside");
     vm.runInContext(startup + receiver + "return false;\n});\n};", sandbox);
     assert.equal(Boolean(resolveStartup), isTop, "only the top document requests observation state");
