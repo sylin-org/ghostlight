@@ -14,7 +14,7 @@ release asset from 2026-07 onward; earlier releases attest the packaged archives
 also carry a canonical `SHA256SUMS` manifest. A read-only assembly job creates the complete
 release bundle, including the SBOM; the privileged publisher can only download that bundle,
 verify its exact file list and hashes, attest it, and create the release.
-The public service channels currently serve 1.3.13. The Chrome Web Store adapter serves 1.3.12 and
+The public service channels currently serve 1.3.14. The Chrome Web Store adapter serves 1.3.12 and
 is compatible with that service release under adapter protocol 3.
 The workflow builds and attests a complete candidate without publishing it; channel publication
 remains an explicit owner-approved operation after verification. Scoop and WinGet metadata is
@@ -64,4 +64,4 @@ the best-effort advisory target in [SECURITY.md](../../SECURITY.md).
 
 See [security-overview.md](security-overview.md) for the vendor-side security posture.
 
-Last reviewed: 2026-10-02 against published service 1.3.13 | Contact: hello@sylin.org
+Last reviewed: 2026-10-02 against published service 1.3.14 | Contact: hello@sylin.org

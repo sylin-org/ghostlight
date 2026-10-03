@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The browser and workbench trial on main is outside the deployment-only 1.3.13 release.
+The browser and workbench trial on main is outside the stable-baseline 1.3.14 release.
 Linux background pointer focus remains unresolved. Windows mask expiry is superseded by the
 binary screenshot policy below; the Windows Chrome component journey and installed captures pass
 without masking.
@@ -15,9 +15,8 @@ without masking.
 ### Changed
 
 - Trial quiet browser coexistence and scoped Show tab behavior (ADR-0186).
-- Replace partial screenshot masks with binary `browser.screenshots.enabled`.
-  Allowed screenshots return the complete rendered image, including embedded content;
-  refusal sends no capture command. Text and action restrictions remain separate (ADR-0194).
+- Remove dormant legacy mask code from the trial source adapter. Stable 1.3.14 ships the
+  service screenshot fix through the unchanged public adapter (ADR-0194).
 - Show current work purpose, readable outcomes, permission causes and scoped history
   through the existing workbench and completion owners (ADRs 0187, 0190 and 0192).
 
@@ -30,7 +29,22 @@ without masking.
 
 Changes to privileged browser plumbing require a future compatible store adapter. The screenshot
 policy and current service-owned page runtime work through the existing installed adapter;
-local Windows acceptance required no extension reload. This follow-up is not in published 1.3.13.
+local Windows acceptance required no extension reload. The extra trial changes remain outside published 1.3.14.
+
+## [1.3.14] - 2026-10-02
+
+### Changed
+
+- Capture complete screenshots without document inventories or privacy masks, including visible
+  embedded content. Full-open capture goes directly to the existing browser primitive.
+- Add binary `browser.screenshots.enabled` policy permission for viewport, full-page, target, and
+  magnified screenshots. A false value in either authority layer prevents capture and returns no
+  image. Tab Read permission and separate frame text/action restrictions still apply (ADR-0194).
+- Keep the public 1.3.12 browser adapter compatible. Its existing injector installs the current
+  service-owned page runtime; no extension update or reload is required.
+
+This release contains the screenshot fix on stable 1.3.13. The browser/workbench trial remains
+outside this release. Recording source restrictions are unchanged.
 
 ## [1.3.13] - 2026-10-02
 

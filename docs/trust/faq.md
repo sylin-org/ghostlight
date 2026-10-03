@@ -289,7 +289,7 @@ Yes. The release pipeline generates a CycloneDX software bill of materials for e
 and publishes it as a release asset (introduced 2026-07; earlier releases carry checksums and
 attestations but no SBOM), alongside per-file SHA-256 checksums and build-provenance
 attestations. You can verify what you downloaded against the published checksums and confirm its
-provenance with one command before deploying. The public service channels currently serve 1.3.13.
+provenance with one command before deploying. The public service channels currently serve 1.3.14.
 The Chrome Web Store adapter serves 1.3.12 and is compatible with that service release under adapter
 protocol 3.
 The workflow builds and attests a candidate without publishing it; each channel advances only after

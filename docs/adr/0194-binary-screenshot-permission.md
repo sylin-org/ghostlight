@@ -55,3 +55,13 @@ source gates, all 70 real Chrome component checks, and installed Windows accepta
 capture modes through the existing ordinary Chrome connection. No browser restart or extension
 reload was needed. Binary refusal was verified in the component lane; the installed acceptance
 kept the user's full-open policy. Linux installed behavior is not claimed.
+
+## Stable-baseline delivery amendment (1.3.14)
+
+The owner selected the screenshot fix on published 1.3.13, excluding the browser/workbench trial.
+This release keeps production adapter 1.3.12 byte-identical. Its legacy mask preparation remains
+dormant because new service captures dispatch without document scopes. The injected runtime
+removes mask handlers. The adapter cleanup and explicit legacy-mask rejection described above
+remain preserved on the trial source branch and are not prerequisites for this service release.
+The trial source verification record is historical evidence; the separate 1.3.14 report identifies
+the exact narrowed source, unchanged adapter, candidate, and publication results.

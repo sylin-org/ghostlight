@@ -1,8 +1,27 @@
-# STATUS -- Ghostlight 1.3.13 published; Chrome adapter 1.3.12 compatible
+# STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-02 (screenshot follow-up deployed and verified locally; public release unchanged).
+Last updated: 2026-10-02 (stable-baseline screenshot release published).
 
-## Local screenshot follow-up (unpublished)
+## Screenshot-only 1.3.14 published
+
+The owner selected the screenshot fix on stable 1.3.13. Tag `v1.3.14` names exact source
+`d1e9fdd3b35b1fc7d5a0e1604b141cbb49855af9`. GitHub, npm latest and the official MCP Registry
+serve 1.3.14. All eight candidate jobs pass, including dependency policy, native package builds,
+Debian/Ubuntu package lifecycles and 70 real Chromium component checks on Linux. The installed
+Windows service passes actual MCP capture without restarting Chrome, either connector, or the
+extension. The public adapter stays byte-identical 1.3.12 and compatible through its injector.
+
+[The release report](testing/screenshot-release-1.3.14-2026-10-02.md) records exact custody and
+verification scope. Scoop points at the candidate-bound portable archive. WinGet 1.3.14 is
+submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987); 1.3.13 has merged.
+
+The browser/workbench trial remains preserved in main and separate branches, outside this tag.
+Its source version marker remains 1.3.13; it is unpublished source, not the source of the public
+1.3.13 or 1.3.14 artifacts. A future trial publication needs a new version and its own acceptance.
+Linux background pointer focus remains unresolved in that trial. The original dirty checkout is
+preserved. The earlier local trial deployment below is superseded by the stable screenshot service.
+
+## Historical local screenshot follow-up (trial source, unpublished)
 
 Screenshot follow-up: [ADR-0194](adr/0194-binary-screenshot-permission.md) replaces masking with
 binary `browser.screenshots.enabled`. Full-open and permitted work capture complete images,

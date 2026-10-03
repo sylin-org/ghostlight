@@ -1,5 +1,5 @@
 {
-  "version": "1.3.13",
+  "version": "1.3.14",
   "description": "Visible local browser automation in your signed-in Chromium profile, with optional policy and audit.",
   "homepage": "https://sylin.org/ghostlight/",
   "license": {
@@ -8,9 +8,9 @@
     },
   "architecture": {
     "64bit": {
-      "url": "https://github.com/sylin-org/ghostlight/releases/download/v1.3.13/ghostlight-v1.3.13-x86_64-pc-windows-msvc.zip",
-      "hash": "301a5fa4533aaed613611eb44dcc5aca75802e62e6749db816a32551b1097f67",
-      "extract_dir": "ghostlight-v1.3.13-x86_64-pc-windows-msvc"
+      "url": "https://github.com/sylin-org/ghostlight/releases/download/v1.3.14/ghostlight-v1.3.14-x86_64-pc-windows-msvc.zip",
+      "hash": "017b40d5a875b36c3f56e47b74bb8435215b80b4f33afef0ac94f7f37d7ae146",
+      "extract_dir": "ghostlight-v1.3.14-x86_64-pc-windows-msvc"
     }
   },
   "bin": [
