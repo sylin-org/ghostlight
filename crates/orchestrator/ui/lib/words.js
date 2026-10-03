@@ -249,6 +249,12 @@
           off: "Closing a tab stays something only you do."
         },
         {
+          key: "browser.screenshots.enabled",
+          name: "Screenshots",
+          on: "Agents may capture complete images, including embedded content.",
+          off: "Agents cannot take screenshots."
+        },
+        {
           key: "browser.startup",
           kind: "choice",
           name: "Auto-open browser on request",

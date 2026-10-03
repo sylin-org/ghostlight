@@ -19,7 +19,7 @@ pub struct Coverage {
     pub unavailable_documents: usize,
     /// An output ceiling omitted otherwise permitted content.
     pub limited_by_size: bool,
-    /// Excluded regions visibly masked in a returned capture.
+    /// Historical masked-capture count. New screenshots are complete or refused.
     pub masked_regions: usize,
 }
 
@@ -89,8 +89,6 @@ pub fn qualify(summary: &str, coverage: &Coverage) -> String {
     }
 }
 
-/// Visible content-free replacement for an excluded screenshot region.
-pub const MASK_LABEL: &str = "Excluded by policy";
 /// Human-only disclosure explanation, separate from the completed operation sentence.
 pub const HUMAN_EXPLANATION: &str =
     "Visible in your browser; excluded from Ghostlight access by policy.";

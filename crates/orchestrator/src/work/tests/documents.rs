@@ -68,6 +68,132 @@ fn open(executor: &ApplicationExecutor, browser: &FakeBrowser, workspace: &Works
     );
 }
 
+fn captured_image() -> BrowserOutcome {
+    BrowserOutcome::Screenshot {
+        tab_id: 7,
+        mime_type: "image/jpeg".into(),
+        data: "aW1hZ2U=".into(),
+        width: 1280,
+        height: 720,
+        viewport: ViewportGeometry {
+            scope: CaptureScope::Viewport,
+            page_x: 0.0,
+            page_y: 0.0,
+            css_width: 1280.0,
+            css_height: 720.0,
+            visual_page_x: 0.0,
+            visual_page_y: 0.0,
+            visual_css_width: 1280.0,
+            visual_css_height: 720.0,
+            device_scale: 1.0,
+            zoom: 1.0,
+            output_scale: 1.0,
+        },
+    }
+}
+
+#[test]
+fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
+    for mode in [
+        None,
+        Some("permitted_content"),
+        Some("complete_operation"),
+        Some("complete_page"),
+    ] {
+        let path = mode.map(|mode| policy_file(mode, "when_affected", false));
+        let (executor, browser, _, workspace, _) =
+            fixture_with_governance(GovernanceFacade::new(path.clone(), None));
+        open(&executor, &browser, &workspace);
+        browser.set_documents(7, DocumentInventory::default());
+        for arguments in [json!({}), json!({"full_page":true})] {
+            browser.push(Ok(captured_image()));
+            let result = executor.execute(
+                &workspace,
+                "browser_screenshot",
+                arguments,
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+            assert!(result.facts.get("coverage").is_none());
+            assert!(
+                browser.scopes().is_empty(),
+                "capture never enters document filtering"
+            );
+        }
+        if let Some(path) = path {
+            fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
+    let path = policy_file("permitted_content", "on_demand", true);
+    let (executor, browser, _, workspace, audit) =
+        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+    open(&executor, &browser, &workspace);
+    browser.push(Ok(BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "heading".into(),
+            role: "heading".into(),
+            name: "Page".into(),
+            state: vec![],
+            credential_class: false,
+        }],
+    }));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    let target = inspected.facts["items"][0]["target"].as_str().unwrap();
+    browser.push(Ok(captured_image()));
+    let image = executor.execute(
+        &workspace,
+        "browser_screenshot",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    let view = image.facts["view"].as_str().unwrap();
+    let mut policy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    policy["config"].as_array_mut().unwrap().push(json!({
+        "key":crate::governance::SCREENSHOTS_ENABLED_KEY,"value":false,"level":"mandatory",
+    }));
+    fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    let prior = browser.calls().len();
+    for arguments in [
+        json!({}),
+        json!({"full_page":true}),
+        json!({"target":target}),
+        json!({"view":view,"x":0,"y":0,"width":100,"height":100}),
+    ] {
+        let result = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            arguments,
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
+        assert_eq!(
+            result.summary,
+            "Blocked: screenshots are disabled by policy."
+        );
+        assert_eq!(result.effect, Effect::None);
+        assert_eq!(browser.calls().len(), prior, "no capture command is sent");
+        assert_eq!(
+            audit.0.lock().unwrap().last().unwrap().reason,
+            crate::governance::ReasonCode::ScreenshotDenied
+        );
+    }
+    fs::remove_file(path).unwrap();
+}
+
 #[test]
 fn page_modes_filter_before_extraction_and_keep_hosts_only_in_human_details() {
     for mode in ["permitted_content", "complete_operation", "complete_page"] {

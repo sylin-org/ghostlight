@@ -8,11 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 The browser and workbench trial on main is outside the deployment-only 1.3.13 release.
-Linux background pointer focus and Windows masked viewport capture remain unresolved.
+Linux background pointer focus remains unresolved. Windows mask expiry is superseded by the
+binary screenshot policy below; the Windows Chrome component journey passes without masking.
 
 ### Changed
 
 - Trial quiet browser coexistence and scoped Show tab behavior (ADR-0186).
+- Replace partial screenshot masks with binary `browser.screenshots.enabled`.
+  Allowed screenshots return the complete rendered image, including embedded content;
+  refusal sends no capture command. Text and action restrictions remain separate (ADR-0194).
 - Show current work purpose, readable outcomes, permission causes and scoped history
   through the existing workbench and completion owners (ADRs 0187, 0190 and 0192).
 

@@ -60,13 +60,13 @@ function channel(write) {
     }
   };
 }
-function policy(mode = "permitted_content", child = "denied", notice = "when_affected") {
+function policy(mode = "permitted_content", child = "denied", notice = "when_affected", screenshots = true) {
   writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 3, name: "H6 isolated Sylin journey", version: randomUUID(),
     grants: [{ id: "parent", hosts: { allow: child === "unrestricted" ? ["*"] : ["sylin.org", "localhost"] }, allowed: ["read", "action", "write", "execute"] },
       ...(["denied", "unrestricted"].includes(child) ? [] : [{ id: "child", hosts: { allow: ["127.0.0.1"] }, allowed: child === "read" ? ["read"] : ["read", "action", "write", "execute"] }])],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" },
       { key: "content.frames.handling", value: mode, level: "mandatory" },
-      { key: "content.frames.notice", value: notice, level: "mandatory" }]
+      { key: "content.frames.notice", value: notice, level: "mandatory" }, { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
   }));
 }
 const sourceUrls = ["https://sylin.org/ghostlight/demo/iframe/", "https://sylin.org/ghostlight/demo/iframe/form/"];
@@ -173,7 +173,6 @@ try {
   await until(() => nativeReady, "real connector negotiation");
   await rawWorker(`(()=>{globalThis.fixtureDispatchErrors=[];const original=dispatch;dispatch=async request=>{try{return await original(request)}catch(error){fixtureDispatchErrors.push({command:request.command.command,error:String(error),stack:String(error.stack||'').slice(0,1000)});throw error}};return true})()`);
   await rawWorker(`(()=>{globalThis.fixtureCaptureTrace=[];const record=value=>{fixtureCaptureTrace.push({at:performance.now(),...value});if(fixtureCaptureTrace.length>64)fixtureCaptureTrace.shift()};
-    const route=documents.route;documents.route=async(...args)=>{const result=await route(...args);const [tabId,frameId,message]=args;if(message.kind.startsWith('capture_mask')){record({kind:message.kind,result});if(message.kind==='capture_mask_check'&&!result.valid){try{const state=await chrome.scripting.executeScript({target:{tabId,frameIds:[frameId]},world:'MAIN',func:()=>Array.from(document.querySelectorAll('iframe')).map(frame=>({visibility:getComputedStyle(frame).visibility,opacity:getComputedStyle(frame).opacity}))});record({kind:'invalid_mask_styles',state:state.map(item=>item.result)})}catch(error){record({kind:'invalid_mask_styles',error:String(error)})}}}return result};
     const send=chrome.debugger.sendCommand.bind(chrome.debugger);chrome.debugger.sendCommand=async(target,method,params)=>{if(method==='Page.captureScreenshot')record({method,phase:'before'});const result=await send(target,method,params);if(method==='Page.captureScreenshot')record({method,phase:'after'});return result};return true})()`);
   diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,capture:fixtureCaptureTrace,state:liveState})`);
   await until(() => nativeReady, "real connector negotiation");
@@ -237,29 +236,43 @@ try {
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!dispatchedSince(beforeBlockedScript).includes("evaluate_script"));
   assert.notEqual(await rawPage("document.title"), "must not execute"); check("script refused before execution");
+  await rawWorker(`chrome.scripting.executeScript({ target: { tabId: ${physical}, allFrames: true },
+    world: "MAIN", func: () => {
+      if (window === window.top) return;
+      const marker = document.createElement("div"); marker.id = "capture-pixel-fixture";
+      marker.style.cssText = "position:fixed;left:0;top:0;width:100px;height:100px;background:rgb(255,0,255);z-index:2147483647;pointer-events:none";
+      document.documentElement.append(marker);
+    } })`);
   result = await call("browser_screenshot", { tab, full_page: true });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
-  assert.equal(result.facts.coverage.masked_regions, 1, JSON.stringify(result));
+  assert.equal(result.facts.coverage, undefined);
   const screenshot = lastResponse.content.find((item) => item.type === "image"); assert.ok(screenshot);
-  writeFileSync(join(scratchRoot, "h6-masked-sylin.jpg"), Buffer.from(screenshot.data, "base64"));
-  // Inspect the delivered JPEG itself. A coverage counter cannot prove that excluded pixels
-  // were actually hidden; deliberately removing the mask makes these samples fail.
-  const maskPixels = await rawPage(`(async () => {
+  writeFileSync(join(scratchRoot, "h6-complete-sylin.jpg"), Buffer.from(screenshot.data, "base64"));
+  const embeddedPixel = await rawPage(`(async () => {
     const image = new Image(); image.src = ${JSON.stringify(`data:${screenshot.mimeType};base64,${screenshot.data}`)};
-    await image.decode(); const canvas = document.createElement('canvas');
+    await image.decode(); const canvas = document.createElement("canvas");
     canvas.width = image.width; canvas.height = image.height;
-    const context = canvas.getContext('2d'); context.drawImage(image,0,0);
-    const rectangle = document.querySelector('iframe').getBoundingClientRect();
+    const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
+    const box = document.querySelector("iframe").getBoundingClientRect();
     const scale = image.width / document.documentElement.scrollWidth;
-    return [0.2,0.8].flatMap(x => [0.2,0.8].map(y => [...context.getImageData(
-      Math.round((rectangle.left + scrollX + rectangle.width*x)*scale),
-      Math.round((rectangle.top + scrollY + rectangle.height*y)*scale),1,1).data]));
+    return [...context.getImageData(Math.round((box.left + scrollX + 25) * scale),
+      Math.round((box.top + scrollY + 25) * scale), 1, 1).data];
   })()`);
-  for (const pixel of maskPixels) for (const [index, expected] of [32, 36, 43, 255].entries()) {
-    assert.ok(Math.abs(pixel[index] - expected) <= 5, `Excluded region pixel: ${pixel}`);
-  }
+  assert.ok(embeddedPixel[0] > 200 && embeddedPixel[1] < 40 && embeddedPixel[2] > 200,
+    `Complete capture must contain the actual embedded pixels: ${embeddedPixel}`);
+  await rawWorker(`chrome.scripting.executeScript({ target: { tabId: ${physical}, allFrames: true },
+    world: "MAIN", func: () => document.getElementById("capture-pixel-fixture")?.remove() })`);
   assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
-  check("excluded Sylin form masked and original styles restored");
+  check("complete screenshot remains available with embedded text access excluded");
+  policy("permitted_content", "denied", "when_affected", false);
+  const beforeDeniedCapture = commands.length;
+  for (const full_page of [false, true]) {
+    result = await call("browser_screenshot", { tab, full_page });
+    assert.equal(result.status, "blocked", JSON.stringify(result));
+    assert.ok(!lastResponse.content.some(item => item.type === "image"));
+  }
+  assert.ok(!dispatchedSince(beforeDeniedCapture).some(command => command.startsWith("screenshot")));
+  check("binary screenshot refusal dispatches no capture and returns no image");
   policy("permitted_content", "all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   const runtimeCoverage = await rawWorker(`chrome.scripting.executeScript({
@@ -338,11 +351,11 @@ try {
   assert.equal(result.facts.coverage.limited_by_size, true); assert.equal(result.facts.coverage.excluded_documents, 1);
   check("size ceiling and policy exclusion remain separate");
   result = await call("browser_screenshot", { tab, timeout_ms: 30000 });
-  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage.masked_regions, 1);
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage, undefined);
   const view = result.facts.view;
   result = await call("browser_screenshot", { view, x: 300, y: 350, width: 400, height: 250, timeout_ms: 30000 });
-  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage.masked_regions, 1);
-  check("viewport and magnified captures preserve exclusion");
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage, undefined);
+  check("viewport and magnified captures return complete images");
   policy("permitted_content", "all");
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const oldProject = result.facts.items.find((item) => item.name === "Project name"); assert.ok(oldProject);
@@ -389,30 +402,26 @@ try {
   assert.match(JSON.stringify(result), /The frame confirmed receipt locally/);
   check("permitted Sylin embedded form fills and submits its local simulation");
   policy();
-  // Deliberately change the embedding element during capture, while preserving the browser's
-  // document inventory. Verification must discard the image, then restore the original styles.
-  await rawWorker(`(() => { globalThis.h6OriginalCapture = chrome.debugger.sendCommand;
-    chrome.debugger.sendCommand = async function(target, method, params) {
-      if (method === 'Page.captureScreenshot') await h6OriginalCapture(target, 'Runtime.evaluate', { expression: "document.querySelector('iframe').style.opacity='1'", returnByValue:true });
-      return h6OriginalCapture(target, method, params);
-    }; return true; })()`);
+  policy("permitted_content", "denied", "when_affected", false);
   result = await call("browser_screenshot", { tab });
-  assert.equal(result.status, "failed", JSON.stringify(result));
-  assert.ok(!lastResponse.content.some((item) => item.type === "image"));
-  await rawWorker("(chrome.debugger.sendCommand = h6OriginalCapture, true)");
-  assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
-  check("mask mutation discards the capture and cleanup restores the embed");
+  assert.equal(result.status, "blocked", JSON.stringify(result));
+  assert.ok(!lastResponse.content.some(item => item.type === "image"));
+  policy();
+  result = await call("browser_screenshot", { tab });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.ok(lastResponse.content.some(item => item.type === "image"));
+  check("policy toggle restores complete capture without iframe style mutation");
   result = await call("browser_inspect", { tab, scope: "structure", max_items: 100 });
   const heading = result.facts.items.find((item) => item.name === "Apply to the Sylin Foundry"); assert.ok(heading);
   result = await call("browser_screenshot", { tab, target: heading.target });
-  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage.masked_regions, 1);
-  check("target captures use the same exclusion mechanism");
+  assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage, undefined);
+  check("target captures use the same binary screenshot permission");
   await rawPage("window.scrollTo(0,0); true");
   result = await call("browser_screenshot", { tab }); const pointView = result.facts.view;
   const point = await rawPage("(()=>{const box=document.querySelector('iframe').getBoundingClientRect();return {x:box.left+60,y:box.top+60};})()");
   result = await call("browser_click", { view: pointView, x: point.x, y: point.y });
   assert.equal(result.status, "blocked", JSON.stringify(result)); assert.equal(result.effect, "none");
-  check("coordinates from a masked image cannot act inside the excluded document");
+  check("complete screenshot coordinates do not grant action inside an excluded document");
   await rawPage("document.querySelector('iframe').src='about:blank'; true"); await delay(200);
   result = await call("browser_read", { tab });
   assert.equal(result.status, "succeeded", JSON.stringify(result));

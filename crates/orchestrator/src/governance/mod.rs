@@ -36,6 +36,9 @@ const RUNTIME_HOLD: u8 = 1;
 const RUNTIME_ATTENTION: u8 = 2;
 const RUNTIME_END: u8 = 3;
 
+/// Binary permission for complete screenshots, including visible embedded documents.
+pub const SCREENSHOTS_ENABLED_KEY: &str = "browser.screenshots.enabled";
+
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -203,6 +206,8 @@ pub enum ReasonCode {
     CapabilityDenied,
     /// Model-driven tab closure was denied by an authority layer.
     TabCloseDenied,
+    /// Screenshot capture was disabled by an authority layer.
+    ScreenshotDenied,
     /// Host was not granted by every authority layer.
     HostDenied,
     /// Host or scheme is independently protected.
@@ -231,6 +236,7 @@ impl ReasonCode {
             Self::Permitted => "permitted",
             Self::CapabilityDenied => "capability_denied",
             Self::TabCloseDenied => "tab_close_denied",
+            Self::ScreenshotDenied => "screenshot_denied",
             Self::HostDenied => "host_denied",
             Self::ProtectedHost => "protected_host",
             Self::InvalidAuthority => "invalid_authority",
@@ -257,6 +263,8 @@ pub enum PolicyRule {
     Capability,
     /// A monotonic setting prevents tab closure.
     TabClose,
+    /// A binary setting prevents screenshots.
+    Screenshot,
     /// A manifest does not admit an intake channel.
     Channel,
 }
@@ -270,6 +278,7 @@ impl PolicyRule {
             Self::DeniedHost => "denied_host",
             Self::Capability => "capability",
             Self::TabClose => "tab_close",
+            Self::Screenshot => "screenshot",
             Self::Channel => "channel",
             Self::AuditAvailability => "audit_availability",
         }
@@ -427,6 +436,30 @@ struct LayerOutcome {
 }
 
 impl AuthoritySnapshot {
+    /// Admit the complete rendered image, without per-document capture filtering.
+    #[must_use]
+    pub fn authorize_screenshot(&self) -> Decision {
+        if !self.valid {
+            return Decision::deny(ReasonCode::InvalidAuthority);
+        }
+        for (index, layer) in self.layers.iter().enumerate() {
+            if layer.manifest.boolean_setting(SCREENSHOTS_ENABLED_KEY) == Some(false) {
+                return Decision::policy(
+                    ReasonCode::ScreenshotDenied,
+                    PolicyAttribution {
+                        layer: u16::try_from(index).expect("policy layer count is bounded"),
+                        grant: None,
+                        rule: PolicyRule::Screenshot,
+                        denial: denial_bytes(&layer.manifest.hash, "", PolicyRule::Screenshot),
+                        mode: manifest::PolicyMode::Enforce,
+                    },
+                    manifest::PolicyMode::Enforce,
+                );
+            }
+        }
+        Decision::allow()
+    }
+
     /// Opaque version recorded in audit.
     #[must_use]
     pub fn id(&self) -> &str {

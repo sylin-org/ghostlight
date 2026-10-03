@@ -11,7 +11,7 @@
     ACTIVE: "active", PRERENDER: "prerender", CACHED: "cached", PENDING_DELETION: "pending_deletion"
   });
   const DOCUMENT_LIFECYCLES = new Set(Object.values(DOCUMENT_LIFECYCLE));
-  const METADATA_KINDS = new Set(["document_route", "frame_boxes", "capture_mask", "capture_mask_check", "capture_mask_clear", "presentation_visibility", "scroll_offset", "viewport_point"]);
+  const METADATA_KINDS = new Set(["document_route", "frame_boxes", "presentation_visibility", "scroll_offset", "viewport_point"]);
   const changed = () => Object.assign(new Error("document scope changed before access"), { code: "document_scope_changed", effectUnknown: false });
   const cleanupRequired = () => Object.assign(new Error("an earlier operation still holds this tab's document scope"), { code: "operation_cleanup_required", effectUnknown: false });
 
@@ -114,6 +114,8 @@
     }
 
     async function run(tabId, scope, operation) {
+      // Older services may request the retired masking mechanism. Refuse it explicitly.
+      if (scope.mask != null) throw changed();
       const previous = active.get(tabId);
       if (previous?.cleanup) await previous.cleanup;
       if (active.has(tabId)) throw cleanupRequired();
@@ -123,14 +125,14 @@
       // Inventory discovery awaited. A concurrent owner may have entered while it ran.
       if (active.has(tabId)) throw cleanupRequired();
       let settled;
-      const context = { ...snapshot, tabId, scope, visited: new Set(), unavailable: new Set(), masked: 0, dispatched: false, limited: false,
+      const context = { ...snapshot, tabId, scope, visited: new Set(), unavailable: new Set(), dispatched: false, limited: false,
         settled: new Promise(resolve => { settled = resolve; }), cleanup: null };
       active.set(tabId, context);
       try {
         const result = await operation(context);
         return { outcome: "in_documents", result, observation: {
           visited: Array.from(context.visited), unavailable: Array.from(context.unavailable),
-          limited_by_size: Boolean(result.truncated || context.limited), masked_regions: context.masked
+          limited_by_size: Boolean(result.truncated || context.limited), masked_regions: 0
         } };
       } catch (error) {
         if (error.code === "document_scope_changed") error.effectUnknown = context.dispatched;

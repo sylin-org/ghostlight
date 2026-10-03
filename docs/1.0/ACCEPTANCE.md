@@ -501,14 +501,17 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 3. Distinguish unavailable content, policy exclusions, and size limits; negatives describe only
    inspected content. Durable coverage excludes observed origins and payloads; human host details
    are volatile. Preserve limitations across physical preparation and action receipts.
-4. Full, viewport, target, and magnified screenshots share verified masking and cleanup. A changed
-   mask discards the image; masked coordinates cannot authorize access. Restricted recordings stop
+4. Full, viewport, target, and magnified screenshots share one binary policy allowance. Full-open
+   and permitted captures return complete images without document inventory or masks. A disabled
+   screenshot returns no image and sends no capture command. Visible embedded pixels do not grant
+   semantic or coordinate-action authority. Organization refusal cannot be relaxed locally.
+   Restricted recordings stop
    at document-set changes, and their prior frames remain subject to current source authority on
    every export destination. Source-bound overflow is explicit rather than silent eviction.
 5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
    All-open scripts keep browser behavior without an inferred sandbox or website network filter.
-6. `tests/frame-browser-journey.mjs` passes 69 Chrome/MV3 checks in a visible browser using the live
-   Sylin iframe demo and its form content on distinct local hosts, with real orchestrator and
+6. `tests/frame-browser-journey.mjs` passes 70 Chrome/MV3 checks on Windows using independently
+   checked Sylin iframe demo snapshots and form content on distinct local hosts, with real orchestrator and
    connector processes.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
    separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.

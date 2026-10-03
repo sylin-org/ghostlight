@@ -62,9 +62,16 @@ the manifest mode; the strictest effective layer wins.
 
 Supported settings are:
 
+Screenshot permission applies to the complete rendered image, including visible embedded content.
+Frame host exclusions continue to restrict semantic text, targets, and actions; they do not redact
+screenshots. Set `browser.screenshots.enabled` to `false` to prevent that visual disclosure.
+An organization refusal cannot be overridden by a local allowance. Recording source restrictions
+remain separate.
+
 | Key | Value | Effect |
 | --- | --- | --- |
 | `browser.tabs.allow_close` | boolean | `false` removes model-driven close. |
+| `browser.screenshots.enabled` | boolean | `false` refuses every screenshot; enabled by default. |
 | `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
 | `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
 | `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |

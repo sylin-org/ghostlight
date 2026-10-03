@@ -672,15 +672,19 @@ No-effect claims apply only to work that has not dispatched; lost effectful repl
 ## Document coverage (ADR-0158)
 
 Scoped results carry `facts.coverage`: targeted versus whole-page scope, inspected/excluded/page
-excluded/unavailable document counts, `limited_by_size`, and `masked_regions`. Counts retain
+excluded/unavailable document counts and `limited_by_size`. Historical `masked_regions` is retained
+for receipt compatibility; new operations report zero. Counts retain
 observed maxima across physical preparation and execution, not repeated-read sums. Policy
 exclusions, unavailable content, and size ceilings have separate qualifications. Negative findings
 are limited to inspected content; absence across unseen content is never established.
 
 Human notice preferences do not remove coverage from model results. Excluded document hosts,
 identities, URLs, labels, values, and locators are not copied into the model/audit coverage.
-The workbench keeps bounded excluded host names only in volatile human details. A mask says
-`Excluded by policy`. Unverifiable document access and recording stops at the document boundary
+The workbench keeps bounded excluded host names only in volatile human details.
+Screenshots use the separate binary `browser.screenshots.enabled` permission (ADR-0194): an allowed
+capture returns the complete rendered image, including embedded content. It has no frame inventory,
+partial coverage, or masking. Tab Read checks still apply. Frame grants continue to govern text,
+targets, and coordinate actions independently. Unverifiable document access and recording stops at the document boundary
 have language-owned outcomes. No script scanner or retry is treated as document containment.
 
 ## History storage (ADR-0159)

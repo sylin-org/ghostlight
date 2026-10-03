@@ -13,7 +13,6 @@ struct RequestScope {
     points: Vec<PhysicalPoint>,
     focused: bool,
     whole: bool,
-    capture: bool,
     unbounded: bool,
 }
 
@@ -25,7 +24,6 @@ impl RequestScope {
             points: vec![],
             focused: false,
             whole: false,
-            capture: false,
             unbounded: false,
         };
         scope.tab = match command {
@@ -47,19 +45,6 @@ impl RequestScope {
             | BrowserCommand::Find { tab_id, .. }
             | BrowserCommand::QuerySemantic { tab_id, .. } => {
                 scope.whole = true;
-                *tab_id
-            }
-            BrowserCommand::Screenshot {
-                tab_id, locator, ..
-            } => {
-                scope.locators.extend(locator.clone());
-                scope.whole = locator.is_none();
-                scope.capture = true;
-                *tab_id
-            }
-            BrowserCommand::ScreenshotRegion { tab_id, .. } => {
-                scope.whole = true;
-                scope.capture = true;
                 *tab_id
             }
             BrowserCommand::DescribeTargets { tab_id, locators } => {
@@ -169,6 +154,8 @@ impl RequestScope {
                 *tab_id
             }
             BrowserCommand::ListTabs
+            | BrowserCommand::Screenshot { .. }
+            | BrowserCommand::ScreenshotRegion { .. }
             | BrowserCommand::FocusTab { .. }
             | BrowserCommand::OpenTab { .. }
             | BrowserCommand::Navigate { .. }
@@ -236,6 +223,22 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
+        if matches!(
+            command,
+            BrowserCommand::Screenshot { .. } | BrowserCommand::ScreenshotRegion { .. }
+        ) {
+            let decision = context.snapshot.authorize_screenshot();
+            if !decision.allowed {
+                self.retain_permission(
+                    context,
+                    context
+                        .snapshot
+                        .decision_evidence(context.requirements, None, decision),
+                );
+                return Err(BrowserError::DocumentAccess(decision));
+            }
+            return self.dispatch_physical(context, command);
+        }
         let Some(requested) = RequestScope::from(&command) else {
             return self.dispatch_physical(context, command);
         };
@@ -314,7 +317,7 @@ impl ApplicationExecutor {
             || allowed.is_empty()
             || (policy.handling == Handling::CompleteOperation
                 && coverage.unavailable_documents > 0)
-            || (((requested.unbounded || requested.capture) && !unrestricted_documents
+            || ((requested.unbounded && !unrestricted_documents
                 || policy.handling == Handling::CompletePage)
                 && inventory
                     .documents
@@ -330,8 +333,7 @@ impl ApplicationExecutor {
                 documents: inventory.documents,
                 allowed,
                 subjects: inventory.subjects,
-                mask: (requested.capture && coverage.page_excluded_documents > 0)
-                    .then(|| language::coverage::MASK_LABEL.into()),
+                mask: None,
                 watch_changes: !unrestricted_documents,
             },
             primitive: Box::new(command),

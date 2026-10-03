@@ -43,7 +43,7 @@ pub struct DocumentScope {
     pub allowed: Vec<String>,
     /// Exact routed subjects, when the primitive names particular documents.
     pub subjects: Vec<String>,
-    /// Mask other document regions for this capture.
+    /// Retired mask request, kept for wire decoding. Current services always send None.
     pub mask: Option<String>,
     /// Stop retained recording when this admitted document set changes.
     pub watch_changes: bool,
@@ -59,7 +59,7 @@ pub struct DocumentObservation {
     pub unavailable: Vec<String>,
     /// The single output budget omitted supported content.
     pub limited_by_size: bool,
-    /// Number of excluded regions masked before image capture.
+    /// Historical masked-region count; current adapters report zero.
     pub masked_regions: usize,
 }
 

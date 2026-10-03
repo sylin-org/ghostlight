@@ -175,6 +175,8 @@ pub enum BlockedReason {
     Capability,
     /// Model-driven tab closure was refused.
     TabClose,
+    /// Binary screenshot permission was refused.
+    Screenshot,
     /// Configured policy could not be validated.
     InvalidAuthority,
     /// A runtime control is holding browser work.
@@ -1415,6 +1417,7 @@ fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
             "Blocked: this session may not take that kind of action.".into()
         }
         (BlockedReason::TabClose, _) => "Blocked: this session may not close tabs.".into(),
+        (BlockedReason::Screenshot, _) => "Blocked: screenshots are disabled by policy.".into(),
         (BlockedReason::InvalidAuthority, _) => {
             "Blocked: the Ghostlight policy could not be read.".into()
         }

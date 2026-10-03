@@ -2166,6 +2166,7 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::ProtectedHost => BlockedReason::ProtectedHost,
         ReasonCode::CapabilityDenied => BlockedReason::Capability,
         ReasonCode::TabCloseDenied => BlockedReason::TabClose,
+        ReasonCode::ScreenshotDenied => BlockedReason::Screenshot,
         ReasonCode::InvalidAuthority => BlockedReason::InvalidAuthority,
         ReasonCode::RuntimeHold => BlockedReason::Hold,
         ReasonCode::SessionEnded => BlockedReason::SessionEnded,

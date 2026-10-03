@@ -44,7 +44,7 @@ async function fixture({ enabled = true, control = "active", owned = [7], failWr
       setTimeout: () => ++timerId, clearTimeout() {}, chrome: { runtime: { sendMessage: forbidden("page messaging") } } };
     vm.createContext(main);
     vm.runInContext(readFileSync(join(__dirname, "../lib/form-diagnostics.js"), "utf8"), main);
-    vm.runInContext(section(content, "  const formDiagnosticsApi =", "  function clearCaptureMask(")
+    vm.runInContext(section(content, "  const formDiagnosticsApi =", "  function finishDragObservation(")
       + section(content, "  window.__ghostlight_dispatch__ = function(message) {", "    // Resolve and scroll inside") + "return false;\n});\n};", main);
     const isolated = { window, chrome: { runtime: { sendMessage: payload => message(payload, sender({ tab: { id: tabId } })) } } };
     vm.createContext(isolated);

@@ -4,6 +4,16 @@ Last updated: 2026-10-02 (deployment-only 1.3.13 published; store adapter unchan
 
 ## Deployment-only 1.3.13 published (2026-10-02)
 
+Screenshot follow-up: [ADR-0194](adr/0194-binary-screenshot-permission.md) replaces masking with
+binary `browser.screenshots.enabled`. Full-open and permitted work capture complete images,
+including embedded content, without a document inventory. Refusal sends no capture command.
+Separate text/target/action restrictions and recording boundaries remain. Rust, strict Clippy,
+formatting, 410 extension tests, and Workbench checks pass. All 70 real Chrome component checks
+pass on Windows, including original embedded pixels and background capture without mask expiry.
+The fresh-binary process journey, repository integrity and offline public-surface checks also pass.
+[The verification record](testing/binary-screenshot-policy-2026-10-02.md) states the scope. This follow-up
+is unpublished and does not change tag `v1.3.13` or its public artifacts.
+
 The owner rejected unrelated browser investigation and narrowed the release to
 fixed-path deployment. Tag `v1.3.13` names exact source
 `6656ef87a85437ff79e8dc6ed32cec28121b4872`, the published 1.3.12 baseline plus

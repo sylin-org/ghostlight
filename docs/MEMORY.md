@@ -232,8 +232,10 @@ the owner wants, and what this project learned the hard way.
   its children. Human controls remain independent (ADR-0159).
 - **Embedded authority follows the document.** H6/ADR-0158 bind access to Chrome document identity,
   not reusable frame ids. Handling and notice preferences are separate. Excluded hosts belong
-  only in volatile human details; model/audit coverage stays content-free. Screenshots mask before
-  capture, unverifiable captures refuse, restricted recordings stop at document-set changes, and
+  only in volatile human details; model/audit coverage stays content-free. ADR-0194 replaces screenshot
+  masking with binary `browser.screenshots.enabled`: allowed captures include visible embedded
+  content without document inventory; a refusal sends no capture command. Separate text, target,
+  and action restrictions remain. Restricted recordings stop at document-set changes, and
   replay export checks every captured source. Scripts have no inferred containment mechanism.
 - **One desktop authority startup.** Connectors, CLI demand-start, and direct execution all launch
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts

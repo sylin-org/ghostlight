@@ -15,6 +15,16 @@ function fixture() {
   return { state, documents, scope };
 }
 
+test("retired mask requests refuse before content access", async () => {
+  const { documents, scope, state } = fixture();
+  let invoked = false;
+  await assert.rejects(documents.run(7, { ...scope, mask: "Excluded" }, async () => {
+    invoked = true; return {};
+  }), { code: "document_scope_changed" });
+  assert.equal(invoked, false);
+  assert.deepEqual(state.calls, []);
+});
+
 test("concurrent scope admission never overlaps unresolved handlers after inventory awaits", async () => {
   const { documents, scope } = fixture();
   let finish;

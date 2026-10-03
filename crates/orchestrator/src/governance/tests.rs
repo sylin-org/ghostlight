@@ -25,6 +25,44 @@ fn all_open_grant() -> &'static str {
 }
 
 #[test]
+fn screenshot_permission_is_binary_default_on_and_tighten_only() {
+    assert!(
+        GovernanceFacade::new(None, None)
+            .snapshot()
+            .authorize_screenshot()
+            .allowed
+    );
+    let local = temporary("screenshot-local");
+    let managed = temporary("screenshot-managed");
+    for (local_value, managed_value, author) in [(true, false, "managed"), (false, true, "user")] {
+        for (path, value) in [(&local, local_value), (&managed, managed_value)] {
+            fs::write(path, policy("capture", all_open_grant(), &format!(
+                r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
+            ))).unwrap();
+        }
+        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
+        let decision = snapshot.authorize_screenshot();
+        assert!(!decision.allowed);
+        assert_eq!(decision.reason, ReasonCode::ScreenshotDenied);
+        assert_eq!(snapshot.attribution(decision), Some((author, None)));
+        assert!(snapshot.authorize_capability(Capability::Read).allowed);
+    }
+    assert!(manifest::parse(
+        &policy(
+            "invalid",
+            all_open_grant(),
+            &format!(
+                r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":"masked","level":"mandatory"}}]"#,
+            )
+        ),
+        "test"
+    )
+    .is_err());
+    fs::remove_file(local).unwrap();
+    fs::remove_file(managed).unwrap();
+}
+
+#[test]
 fn browser_attention_is_persisted_and_live_in_the_operator_policy() {
     use ghostlight_bridge::browser::BrowserAttention;
 

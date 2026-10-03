@@ -2289,47 +2289,8 @@ async function detachDebugger(tabId, debuggerLease) {
   await debuggerLifecycle.release(tabId, debuggerLease);
 }
 
-async function prepareCaptureMasks(tabId) {
-  const context = documents.context(tabId);
-  const maskedParents = [];
-  const clear = async () => {
-    for (const frameId of maskedParents) await contentIn(tabId, frameId, { kind: "capture_mask_clear" }, true);
-  };
-  try {
-    if (context?.scope.mask) {
-      const excluded = context.documents.filter((document) => !context.scope.allowed.includes(document.id));
-      const groups = new Map();
-      for (const document of excluded) {
-        // An excluded ancestor already hides every document nested beneath it.
-        if (excluded.some((ancestor) => ancestor.id === document.parent)) continue;
-        if (!document.parent) throw globalThis.GhostlightDocuments.changed();
-        const parent = context.raw.find((frame) => frame.documentId === document.parent);
-        if (!parent) throw globalThis.GhostlightDocuments.changed();
-        if (!groups.has(parent.frameId)) groups.set(parent.frameId, []);
-        groups.get(parent.frameId).push(document.url);
-      }
-      for (const [frameId, urls] of groups) {
-        const result = await contentIn(tabId, frameId, { kind: "capture_mask", urls, label: context.scope.mask });
-        maskedParents.push(frameId);
-        context.masked += result.masked;
-      }
-    }
-    return {
-      clear,
-      verify: async () => {
-        await documents.verify(tabId);
-        for (const frameId of maskedParents) {
-          const result = await contentIn(tabId, frameId, { kind: "capture_mask_check" });
-          if (!result.valid) throw globalThis.GhostlightDocuments.changed();
-        }
-      }
-    };
-  } catch (error) { await clear(); throw error; }
-}
-
 async function screenshot(command) {
   const debuggerLease = await ensureDebugger(command.tab_id);
-  let masks;
   try {
     await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
     if (command.visual_settle !== false) {
@@ -2369,11 +2330,8 @@ async function screenshot(command) {
       clip = screenshotApi.ordinaryClip(visual.pageX ?? 0, visual.pageY ?? 0, Math.max(1, visual.clientWidth), Math.max(1, visual.clientHeight));
       scope = "viewport";
     }
-    masks = await prepareCaptureMasks(command.tab_id);
-    await masks.verify();
     let capture = await sendDebugger({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
     if (capture.data.length > screenshotApi.MAX_BASE64_CHARS) capture = await sendDebugger({ tabId: command.tab_id }, "Page.captureScreenshot", { format: "jpeg", quality: screenshotApi.FALLBACK_JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
-    await masks.verify();
     const ratio = await sendDebugger({ tabId: command.tab_id }, "Runtime.evaluate", { expression: "window.devicePixelRatio", returnByValue: true });
     const dimensions = await imageDimensions(capture.data, clip);
     return {
@@ -2399,11 +2357,8 @@ async function screenshot(command) {
       }
     };
   } finally {
-    try { await masks?.clear(); }
-    finally {
-      try { await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false }); }
-      finally { await detachDebugger(command.tab_id, debuggerLease); }
-    }
+    try { await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false }); }
+    finally { await detachDebugger(command.tab_id, debuggerLease); }
   }
 }
 

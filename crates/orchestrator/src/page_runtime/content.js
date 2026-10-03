@@ -16,7 +16,6 @@
   ]);
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
-  const CAPTURE_MASK_TTL_MS = 10_000;
   const FILL_STABLE_MS = 750;
   const FILL_SETTLE_LIMIT_MS = 8_000;
   const MAX_LOCATORS = 500;
@@ -24,7 +23,6 @@
   const reverse = new WeakMap();
   let nextLocator = 1;
   let dragObservation = null;
-  let captureMask = null;
   // Exact tokens own only Ghostlight's pending DOM observer and its timers/listeners.
   const observations = new Map();
   const cancelledObservations = new Set();
@@ -45,76 +43,6 @@
       }));
     }
   });
-
-  function clearCaptureMask() {
-    const state = captureMask;
-    captureMask = null;
-    if (!state) return { cleared: true };
-    clearTimeout(state.timer);
-    state.observer.disconnect();
-    for (const item of state.items) {
-      item.mask.remove();
-      for (const [name, value, priority, applied] of item.styles) {
-        if (item.element.style.getPropertyValue(name) !== applied) continue;
-        if (value) item.element.style.setProperty(name, value, priority);
-        else item.element.style.removeProperty(name);
-      }
-    }
-    return { cleared: true };
-  }
-
-  function installCaptureMask(message) {
-    clearCaptureMask();
-    const state = { items: [], dirty: false, observer: null };
-    const normalize = (value) => new URL(value, location.href).href.split("#")[0];
-    const urls = new Set(message.urls.map(normalize));
-    const found = new Set();
-    try {
-      for (const element of queryAll("iframe,frame")) {
-        const source = normalize(element.src || "about:blank");
-        if (!urls.has(source)) continue;
-        found.add(source);
-        const rectangle = element.getBoundingClientRect();
-        if (![rectangle.left, rectangle.top, rectangle.width, rectangle.height].every(Number.isFinite)) throw new Error("unverifiable capture geometry");
-        const mask = document.createElement("div");
-        mask.style.cssText = `all:initial!important;position:absolute!important;left:${rectangle.left + scrollX}px!important;top:${rectangle.top + scrollY}px!important;width:${rectangle.width}px!important;height:${rectangle.height}px!important;background:#20242b!important;color:#ffffff!important;z-index:2147483647!important;pointer-events:none!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;opacity:1!important;visibility:visible!important;font:14px sans-serif!important;`;
-        const shadow = mask.attachShadow({ mode: "closed" });
-        const label = document.createElement("span");
-        label.textContent = String(message.label ?? "").slice(0, 80);
-        shadow.append(label);
-        document.documentElement.append(mask);
-        // Keep the embedded renderer participating in composition. Changing its
-        // visibility can stall an inactive-tab capture until mask expiry. Zero
-        // opacity still removes every embedded pixel beneath the opaque mask.
-        const styles = [["transition", "none"], ["animation", "none"], ["opacity", "0"]].map(([name, applied]) => {
-          const previous = [name, element.style.getPropertyValue(name), element.style.getPropertyPriority(name), applied];
-          element.style.setProperty(name, applied, "important");
-          return previous;
-        });
-        state.items.push({ element, mask, styles });
-      }
-      if (found.size !== urls.size) throw new Error("capture cannot locate every excluded document");
-      state.observer = new MutationObserver(() => { state.dirty = true; });
-      for (const root of roots()) state.observer.observe(root, { subtree: true, attributes: true, childList: true, characterData: true });
-      captureMask = state;
-      state.timer = setTimeout(clearCaptureMask, CAPTURE_MASK_TTL_MS);
-      return { masked: state.items.length };
-    } catch (error) {
-      state.observer ??= { disconnect() {} };
-      captureMask = state;
-      clearCaptureMask();
-      throw error;
-    }
-  }
-
-  function verifyCaptureMask() {
-    const state = captureMask;
-    if (!state || state.dirty || state.observer.takeRecords().length) return { valid: false };
-    return { valid: state.items.every(({ element, mask }) => {
-      const style = window.getComputedStyle(element);
-      return element.isConnected && mask.isConnected && Number(style.opacity) === 0;
-    }) };
-  }
 
   function finishDragObservation() {
     if (!dragObservation) return { started: false, cancelled: false };
@@ -925,9 +853,6 @@
       return false;
     }
     Promise.resolve().then(async () => {
-      if (message.kind === "capture_mask") return installCaptureMask(message);
-      if (message.kind === "capture_mask_check") return verifyCaptureMask();
-      if (message.kind === "capture_mask_clear") return clearCaptureMask();
       if (message.kind === "prepare_fill") {
         const prepared = await prepareStableFill(message);
         return { prepared: true, field_kinds: prepared.fieldKinds };
