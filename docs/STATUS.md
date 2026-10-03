@@ -14,6 +14,8 @@ extension. The public adapter stays byte-identical 1.3.12 and compatible through
 [The release report](testing/screenshot-release-1.3.14-2026-10-02.md) records exact custody and
 verification scope. Scoop points at the candidate-bound portable archive. WinGet 1.3.14 is
 submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987); 1.3.13 has merged.
+Website commit `4aea5a0` deploys successfully. Independent HTTP reads confirm release 1.3.14 and
+the exact current install guide. The final online public-surface check passes all five channels.
 
 The browser/workbench trial remains preserved in main and separate branches, outside this tag.
 Its source version marker remains 1.3.13; it is unpublished source, not the source of the public

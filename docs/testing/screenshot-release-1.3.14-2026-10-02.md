@@ -96,4 +96,12 @@ The candidate's adapter 1.3.12 archive is byte-identical to the independently do
 public adapter, SHA-256 `9d5521b3f34562051ea6b07d9d5d0e07267ff6d7bacf274bd38234d43659a25d`.
 Chrome API status reports that version published to 100 percent. No upload, submission, adapter
 restamp or reload occurs for this service release. Public docs, compatibility and package-manager
-metadata are reconciled from observed delivery. Canonical website refresh follows that source push.
+metadata are reconciled from observed delivery.
+
+Website commit `4aea5a035eb85d169c42581061b094437c1020dc` refreshes both public fallbacks after the
+Ghostlight documentation push. The first push stalls in its credential helper; only that owned
+process tree is stopped. A scoped GitHub CLI credential helper pushes the existing commit without
+changing shared credential settings. Cloudflare Pages deployment succeeds. Independent HTTP reads
+confirm service 1.3.14 on the live page and an exact normalized match of the live install guide with
+the committed 1.3.14 source. The final online public-surface check passes GitHub latest, npm latest,
+Chrome update feed 1.3.12, official MCP Registry latest and the canonical website.
