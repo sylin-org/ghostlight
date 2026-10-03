@@ -252,7 +252,10 @@ try {
   const contentRequests = physicalRequests.filter(({ command }) => ["read_text", "read_document", "screenshot"].includes(command.command));
   assert.equal(contentRequests.filter(({ command }) => command.command !== "screenshot").length, 1, "the read physically executes once");
   assert.equal(contentRequests.filter(({ command }) => command.command === "screenshot").length, 1, "the capture physically executes once");
-  for (const request of contentRequests) assert.deepEqual(request.scope?.allowed, ["powershell-document"], "read and capture use document admission");
+  for (const request of contentRequests) {
+    if (request.command.command === "screenshot") assert.equal(request.scope, null, "capture dispatches without document admission");
+    else assert.deepEqual(request.scope?.allowed, ["powershell-document"], "read uses document admission");
+  }
 
   await sleep(300);
   const records = readFileSync(auditFile, "utf8")

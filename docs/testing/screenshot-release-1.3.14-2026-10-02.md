@@ -25,5 +25,13 @@ native pipe; the installed ordinary-browser check above used the prior trial sou
 The candidate workflow runs the same frame journey on Linux before native package builds. Local
 `cargo audit` is unavailable on this machine; dependency audit and license/source checks use the
 existing CI policy tools. Native candidate, provenance and public delivery verification are in progress.
+Initial candidate run 37082954269 passed dependency policy and Linux source/process checks but
+stopped at an obsolete PowerShell CLI assertion that both read and capture use document admission.
+The CLI capture succeeded and delivered the expected JPEG bytes. The corrected test preserves
+document admission for read and requires direct dispatch for capture. That failed candidate is
+not publication evidence; a fresh candidate must pass the corrected exact source.
+The corrected PowerShell CLI journey passes locally. The dedicated installed Linux governance
+fixture also replaces its predecessor mask expectation with original embedded pixels and binary
+refusal/restoration; its syntax is checked, but that installed lane was not run on this Windows host.
 The earlier trial-source component and local installation evidence is preserved separately and
 does not attest this narrowed release. No public 1.3.14 delivery is claimed yet.
