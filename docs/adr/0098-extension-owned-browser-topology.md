@@ -2,6 +2,9 @@
 
 Status: Accepted
 
+Amended by ADR-0186 for request-scoped background placement, no unowned adoption or duplicate
+group movement, and explicit operator foreground opt-out. The original decision remains below.
+
 Date: 2026-08-05
 
 Supersedes: ADR-0085 Decisions 2-4, ADR-0090's stale native-window recovery, and

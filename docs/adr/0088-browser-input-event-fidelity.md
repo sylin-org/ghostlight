@@ -2,6 +2,10 @@
 
 Status: Accepted
 
+Amended by ADR-0186 for background ordinary form fill: exact DOM selection, one native
+whole-value insertion, validated blur commit, and complete-batch retention. Foreground fill
+and explicit keyboard tools retain their semantics. The historical evidence remains below.
+
 Date: 2026-07-20
 
 ## Context

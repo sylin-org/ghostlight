@@ -8,7 +8,7 @@ The service owns default-enabled binary screenshot permission and dispatches com
 without document inventory or masks. Tab Read checks, text/action authority, coordinate admission,
 recording source restrictions, fixed install paths, and connector contracts remain.
 
-## Verification
+## Source and preparation evidence
 
 The narrowed source passes formatting, strict workspace Clippy, all 570 Rust tests, all 295
 extension tests, 11 npm launcher tests and four MCPB tests. JavaScript syntax, repository integrity
@@ -24,7 +24,7 @@ native pipe; the installed ordinary-browser check above used the prior trial sou
 
 The candidate workflow runs the same frame journey on Linux before native package builds. Local
 `cargo audit` is unavailable on this machine; dependency audit and license/source checks use the
-existing CI policy tools. Native candidate, provenance and public delivery verification are in progress.
+existing CI policy tools. Final candidate and public verification are recorded below.
 Initial candidate run 37082954269 passed dependency policy and Linux source/process checks but
 stopped at an obsolete PowerShell CLI assertion that both read and capture use document admission.
 The CLI capture succeeded and delivered the expected JPEG bytes. The corrected test preserves
@@ -34,7 +34,7 @@ The corrected PowerShell CLI journey passes locally. The dedicated installed Lin
 fixture also replaces its predecessor mask expectation with original embedded pixels and binary
 refusal/restoration; its syntax is checked, but that installed lane was not run on this Windows host.
 The earlier trial-source component and local installation evidence is preserved separately and
-does not attest this narrowed release. No public 1.3.14 delivery is claimed yet.
+does not attest this narrowed release.
 
 ## Installed stable-baseline service
 
@@ -51,10 +51,57 @@ used the superseded viewport view and correctly returned `stale_view`; that is n
 failure with a current handle. The preserve-tabs interlock refuses fixture closure and is
 respected; the temporary HTTP server is stopped. No owner policy is edited for this smoke.
 Binary false and all four capture modes are covered by the separate 70-check component suites.
+The installed semantic heading target capture also succeeds, completing all four capture modes.
+The local service SHA-256 is
+`cf4c75d94e37f06588581db53603a1f90a6801106bc4aaa0806de12a253dd551`.
+This installed image was built at `2363c7a3`; the later `d1e9fdd3` changes only packaging headers,
+source version checks and evidence, with product source and the adapter unchanged.
 
 Candidate run 37083577255 passes source, dependency policy, both native package builds and both
 Linux package lifecycles, but final assembly refuses the unchanged 1.3.13 MCPB source manifest.
 The bundle manifest and Linux manual version headers are corrected to 1.3.14. The existing
 public-surface source check now also compares the npm and MCPB manifest versions with Cargo,
 so this demonstrated packaging mismatch fails before native builds. That failed run is preserved
-as failed evidence and cannot be published. A new candidate will bind the corrected source.
+as failed evidence and cannot be published. The successful candidate binds the corrected source.
+
+## Candidate and public delivery
+
+Candidate run [37085021976](https://github.com/sylin-org/ghostlight/actions/runs/37085021976)
+passes all eight jobs from `d1e9fdd3b35b1fc7d5a0e1604b141cbb49855af9`. This includes source,
+dependency audit and license/source policy, both native builds, Debian 12 and Ubuntu 24.04 package
+lifecycles, and all 70 real Chromium/MV3 frame checks on Linux with Chrome 152.0.7977.82.
+The exact source excludes the earlier browser/workbench trial.
+
+Independent local verification checks all 18 artifact coordinates, sizes and SHA-256 values
+against the manifest and checksum list. Tag `v1.3.14` names that exact source. The publisher
+verifies all 20 GitHub provenance records before draft creation and again before publication,
+then re-downloads every draft asset for exact byte comparison. The public GitHub release contains
+all 20 files and is neither draft nor prerelease.
+
+npm accepts the exact candidate tarball, briefly processes it asynchronously, and then serves
+1.3.14 at both the exact coordinate and latest. The independently downloaded public tarball
+SHA-256 is `4c658c8f2ed6e34e90fd14e9e4d475a8533aee0c9ec1c33efbdc4672494d5518` and matches the
+candidate. A fresh Windows consumer with isolated user state downloads and checks all three real
+executables at fixed paths, invokes 1.3.14 twice and reuses the verified installation on the second
+run. It does not register against the owner's browser or replace the selected development stack.
+This is public Windows delivery evidence; no fresh ordinary Linux browser consumer is claimed.
+
+The official MCP Registry independently returns `org.sylin/ghostlight` 1.3.14 as latest after
+publication. Candidate-derived Scoop and WinGet references match the verified Windows archive;
+all three WinGet manifests pass local validation. [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987)
+submits 1.3.14. Its initial PR, manifest and existing CLA checks pass; further checks/review remain
+pending. Earlier 1.3.13 PR #445923 is merged. No new legal agreement is signed.
+
+The candidate's adapter 1.3.12 archive is byte-identical to the independently downloaded previous
+public adapter, SHA-256 `9d5521b3f34562051ea6b07d9d5d0e07267ff6d7bacf274bd38234d43659a25d`.
+Chrome API status reports that version published to 100 percent. No upload, submission, adapter
+restamp or reload occurs for this service release. Public docs, compatibility and package-manager
+metadata are reconciled from observed delivery.
+
+Website commit `4aea5a035eb85d169c42581061b094437c1020dc` refreshes both public fallbacks after the
+Ghostlight documentation push. The first push stalls in its credential helper; only that owned
+process tree is stopped. A scoped GitHub CLI credential helper pushes the existing commit without
+changing shared credential settings. Cloudflare Pages deployment succeeds. Independent HTTP reads
+confirm service 1.3.14 on the live page and an exact normalized match of the live install guide with
+the committed 1.3.14 source. The final online public-surface check passes GitHub latest, npm latest,
+Chrome update feed 1.3.12, official MCP Registry latest and the canonical website.

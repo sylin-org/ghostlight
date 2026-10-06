@@ -69,7 +69,7 @@ $env:GHOSTLIGHT_BIN_DIR = (Resolve-Path target/release).Path
 node tests/live-journey.mjs
 ```
 
-That lane exercises all 23 advertised tools through actual MCP stdio, the installed authority,
+That lane exercises all 24 advertised tools through actual MCP stdio, the installed authority,
 registered native executable, and loaded extension. Its disposable localhost documents test
 retained editor values, shadow/frame composition, typing, keyboard caret, drag effects, byte-exact
 uploads, dialogs, diagnostics, zoom/scroll, history, recording and erase, flow effect truth,

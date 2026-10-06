@@ -160,7 +160,9 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let _ = self.take_permissions(context.invocation);
         let started = Instant::now();
+        let settlement_pending = AtomicBool::new(language::settlement::enabled(operation));
         let context = InvocationContext {
+            settlement_pending: &settlement_pending,
             requirements: language::capability_map::requirements(operation),
             ..*context
         };

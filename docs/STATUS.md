@@ -1,42 +1,398 @@
-# STATUS -- Ghostlight 1.3.13 published; screenshot-only 1.3.14 preparation
+# STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-02 (stable-baseline screenshot release preparation).
+Last updated: 2026-10-05 (1.3.15 release integration in progress).
 
-## Screenshot-only 1.3.14 preparation
+## Settlement-only 1.3.15 preparation
 
-The owner authorized bump, commit, push, and publication, and selected the screenshot fix on the
-published stable 1.3.13 baseline. The browser/workbench trial stays outside this release.
-The service admits complete screenshots or refuses them through `browser.screenshots.enabled`.
-Production adapter 1.3.12 is unchanged and its injector supplies the current page runtime.
-Source and candidate checks for this exact backport are recorded in
-[the 1.3.14 release report](testing/screenshot-release-1.3.14-2026-10-02.md). Public channels remain
-1.3.13 until independent delivery verification. The earlier trial-source local acceptance is
-separate evidence, not acceptance of this exact candidate.
+The authorized release carries only bounded settlement on public 1.3.14.
+The initial main-based attempt accidentally included the older unpublished browser/workbench
+trial and reproduced its Linux focus failure. That candidate remains preserved on
+`codex/release-1.3.15`, outside this release. No public 1.3.15 package has been published.
+The store has an uploaded draft from that attempt; replace it with the verified narrowed
+artifact before submission. Public service remains 1.3.14 and public adapter 1.3.12.
 
-## Deployment-only 1.3.13 published
+ADR-0195 records one optional wait across thirteen page tools, subject/ancestry validation
+and separate visual settlement facts. The narrowed adapter uses published observation and
+input mechanisms. Source, real-browser, old-service compatibility, package custody and
+installed acceptance are being verified for this source. Older reports remain historical.
 
-GitHub, npm and the official MCP Registry serve 1.3.13 from `6656ef87`. Production adapter 1.3.12
-is compatible and unchanged. Candidate run 37068025269 passes all seven jobs, including both
-package platforms and fixed-path replacement. The original dirty workspace is preserved.
-[The release record](testing/deployment-release-1.3.13-2026-10-02.md) identifies scope and delivery.
+The narrowed Windows source, fresh process and 70-check Chrome lanes pass. The same
+adapter also passes all 70 checks with the checksum-verified public 1.3.14 binaries.
+Linux candidate packages, exact artifact custody and installed acceptance remain pending.
 
-## Historical deployment-only 1.3.13 preparation (superseded by publication)
+## Bounded settlement implementation (2026-10-05; source and installed acceptance passed)
 
-The owner authorized bump, changelog, commit, push and publication. The release
-branch carries the fixed-path deployment repair on the published 1.3.12 baseline.
-Unpublished browser/workbench work and its investigation remain preserved on main,
-outside this release. npm and download installers use permanent `~/.ghostlight/bin`
-paths, migrate owned registrations and preserve history and development custody.
+The owner authorized a common best-effort default across ordinary page tools and live
+verification. ADR-0195 records the change: one maximum 1000 ms budget per call, explicit
+opt-out, subject/ancestry checks for targeted work, and preserved primary conditions in
+composite waits. Broad restricted document checks and explicit visual waits remain.
 
-The production extension and service page runtime are unchanged from 1.3.12.
-The native-host manifest resolves the fixed host identity to the installed browser
-connector; the existing injector acknowledges the current runtime on reconnect.
-Compatibility records permit public adapter 1.3.12 with service 1.3.13. No store
-update or extension reload is required. Public service state stays 1.3.12 until
-delivery is independently verified. Current acceptance will be recorded in
-[the deployment release report](testing/deployment-release-1.3.13-2026-10-02.md).
+The unrelated-frame counterproof is repaired in the adapter module. Formatting, strict
+Clippy, 628 Rust tests, 414 extension tests, syntax, fresh process, CLI and workbench
+checks pass. After the owner's adapter reload, the development loop deployed only the
+authority. Two installed-browser runs passed all thirteen tool families with and
+without settlement during animation and iframe churn. Independent counters confirmed
+actual input effects and retained values. The final run recorded 40 calls; opt-out
+removed roughly one second of preparation. All exact owned fixture tabs were closed.
+The first run's background-input refusal remains separately recorded. The
+[verification report](testing/bounded-settlement-2026-10-05.md) records identity, gates,
+timings and the still-unproven exact SharePoint routing trigger. The local build also
+contains existing installation and UI source candidates; their broader acceptance
+claims remain separate work. No public version or publication is changed.
 
-Last updated: 2026-10-02 (deployment-only release preparation; public state unchanged).
+## Screenshot-only 1.3.14 published
+
+The owner selected the screenshot fix on stable 1.3.13. Tag `v1.3.14` names exact source
+`d1e9fdd3b35b1fc7d5a0e1604b141cbb49855af9`. GitHub, npm latest and the official MCP Registry
+serve 1.3.14. All eight candidate jobs pass, including dependency policy, native package builds,
+Debian/Ubuntu package lifecycles and 70 real Chromium component checks on Linux. The installed
+Windows service passes actual MCP capture without restarting Chrome, either connector, or the
+extension. The public adapter stays byte-identical 1.3.12 and compatible through its injector.
+
+[The release report](testing/screenshot-release-1.3.14-2026-10-02.md) records exact custody and
+verification scope. Scoop points at the candidate-bound portable archive. WinGet 1.3.14 is
+submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987); 1.3.13 has merged.
+Website commit `4aea5a0` deploys successfully. Independent HTTP reads confirm release 1.3.14 and
+the exact current install guide. The final online public-surface check passes all five channels.
+
+The browser/workbench trial remains preserved in main and separate branches, outside this tag.
+Its source version marker remains 1.3.13; it is unpublished source, not the source of the public
+1.3.13 or 1.3.14 artifacts. A future trial publication needs a new version and its own acceptance.
+Linux background pointer focus remains unresolved in that trial. The original dirty checkout is
+preserved. The earlier local trial deployment below is superseded by the stable screenshot service.
+
+## Historical local screenshot follow-up (trial source, unpublished)
+
+Screenshot follow-up: [ADR-0194](adr/0194-binary-screenshot-permission.md) replaces masking with
+binary `browser.screenshots.enabled`. Full-open and permitted work capture complete images,
+including embedded content, without a document inventory. Refusal sends no capture command.
+Separate text/target/action restrictions and recording boundaries remain. Rust, strict Clippy,
+formatting, 410 extension tests, and Workbench checks pass. All 70 real Chrome component checks
+pass on Windows, including original embedded pixels and background capture without mask expiry.
+The fresh-binary process journey, repository integrity and offline public-surface checks also pass.
+[The verification record](testing/binary-screenshot-policy-2026-10-02.md) states the scope. This follow-up
+is unpublished and does not change tag `v1.3.13` or its public artifacts.
+Source commit `d06892f9` is now deployed locally through the existing Windows development loop.
+Installed viewport, full-page, target, and magnified captures pass through the existing ordinary
+Chrome connection without an extension reload. Delivered JPEG pixels include the embedded marker;
+the build and installed hashes match. The verification record distinguishes this installed
+all-open acceptance from the component policy-refusal checks. The preserve-tabs interlock kept
+the disposable test tab open; its loopback server is stopped.
+
+## Deployment-only 1.3.13 published (2026-10-02)
+
+The owner rejected unrelated browser investigation and narrowed the release to
+fixed-path deployment. Tag `v1.3.13` names exact source
+`6656ef87a85437ff79e8dc6ed32cec28121b4872`, the published 1.3.12 baseline plus
+the installation repair and Linux process-enumeration correction. Candidate run
+[37068025269](https://github.com/sylin-org/ghostlight/actions/runs/37068025269)
+passed all seven jobs, including real Windows replacement and Debian 12/Ubuntu
+24.04 package acceptance. All 20 release files have verified build provenance and
+matched their re-downloaded GitHub draft hashes before publication.
+
+GitHub, public npm delivery and the official MCP Registry serve 1.3.13. A fresh
+isolated consumer downloaded the public npm package, installed at permanent
+`~/.ghostlight/bin` paths and verified all three executable hashes. The public
+Chrome adapter remains 1.3.12 and is compatible; no store update or extension
+reload is required. Scoop metadata and website fallbacks follow this public record.
+WinGet [PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923) is submitted
+with validated candidate-derived manifests; acceptance remains external.
+
+Main's browser/workbench trial and source adapter 1.3.13 remain unpublished. The
+old combined-candidate blockers below apply to that trial, outside the released
+deployment repair. Further publication must use a new immutable service version.
+[The deployment release report](testing/deployment-release-1.3.13-2026-10-02.md)
+records the exact scope and evidence. The original dirty workspace is preserved.
+
+## Superseded combined 1.3.13 preparation (2026-10-02)
+
+Scope correction: the owner rejected further unrelated browser investigation.
+The release will carry only the fixed-path deployment repair on the published
+1.3.12 baseline. The unpublished browser trial and its failed capture experiments
+remain preserved on main, outside this deployment release. The compatible public
+injector remains usable without a store update. The older combined-candidate
+publication blockers below describe that trial, not the narrowed release.
+
+The owner authorized bump, changelog, commit, push and publication across configured
+channels. Source versions are 1.3.13. The release combines the committed browser and
+workbench corrections with fixed-path package updates under ADR-0193. Separate
+unfinished workspace UI edits are excluded from this isolated release checkout.
+
+Downloads verify the complete sibling set before replacement at `~/.ghostlight/bin`.
+Owned legacy routes migrate while history and development custody survive. The
+extension uses its stable native-host identity and installs the current service
+runtime on reconnect. Browser-privileged changes since public 1.3.12 also require
+this release's 1.3.13 store adapter; ordinary fixed-path updates require no restamp.
+
+Windows replacement, process reconnect and offline PowerShell installer acceptance
+are recorded in [the fixed-installation report](testing/fixed-installation-2026-10-02.md).
+Public channel state remains pinned to independently observed 1.3.12 until publication
+and reconciliation. The Linux fixed-installation and downloader checks are release
+workflow gates. No public 1.3.13 delivery is claimed by this preparation record.
+
+The isolated 1.3.13 checkout passes source, process, installer and real Chromium
+component lanes. [The release record](testing/release-1.3.13-2026-10-02.md) distinguishes
+these results from workflow candidate, dependency and public-channel acceptance.
+Initial CI exposed Linux task enumeration and Chrome activation/relay shutdown
+ordering. Those corrections are recorded in the release report. Publication waits
+for the corrected candidate and both platform journey lanes. The initial Chrome
+staged submission was withdrawn before its corrected ZIP is submitted.
+
+Both candidate package lanes and process CI now pass. Browser CI remains blocked
+on Linux background mouse focus and a Windows excluded-frame screenshot failure.
+Chrome staged review is cancelled while these are investigated. Native startup
+now preserves hello-first ordering through the attendance query, with a focused
+regression test. Failure-only fixture diagnostics collect the remaining causes;
+no public 1.3.13 channel has been advanced.
+
+CI run 37061973736 confirms the remaining Linux focus issue occurs with native mouse
+presses and synthetic mouse taps, while owned tab selection retains human focus.
+Windows failure diagnostics locate post-capture mask verification. Source/process
+gates pass, and local Windows frame/quiet fixtures pass. Full background pointer
+support remains the release target; no blanket Linux refusal is implemented.
+
+Mask timing in run 37063534506 confirms viewport capture outlives the mask on both
+platforms. A compositor correction keeps the excluded iframe at important zero
+opacity beneath its opaque cover without changing renderer visibility. Local source
+and frame gates pass; corrected CI remains required. The mask expiry and unsafe
+capture guards retain their existing bounds. Linux quiet pointer support is still
+unresolved and prevents publication.
+
+Run 37064476093 passes both process lanes and all source/dependency gates. Linux
+masked viewport/magnified capture passes after the compositor correction; Windows
+still expires its mask. The next capture candidate changes only viewport raster
+scale to force surface refresh while retaining CSS view geometry. Linux background
+native pointer focus remains independently unresolved. Public versions stay 1.3.12.
+
+Run 37065889684 rejects the viewport raster-scale attempt: Windows still reaches
+mask expiry. That unproven resampling change is removed. The source retains the
+opacity correction with positive Linux capture evidence. Linux native background
+pointer focus and Windows masked viewport capture remain release blockers. Source
+and process gates pass; no public 1.3.13 publication or release tag is claimed.
+
+## Reviewed recovery pipeline (2026-10-01, installed locally)
+
+The parent accepted exact `f7f00f071b79b0ff42b51cacd116287953ab945a` after architect ownership
+review and independent source/native/predecessor acceptance, then authorized supported local
+deployment. The orchestrator-only update and explicit reload of the existing unpacked adapter
+are complete. Installed authority SHA256:
+`bade8ca680362fb0a5e16d523f3381d41c8319e07a815c53458d37f8f6750945`.
+Both connector images, installation selection, policy-file state, adapter grants and prior audit
+bytes are preserved. No native registration or public version changed.
+
+The final installed localhost read/fill/uncertain-deadline/read smoke passed. Correlated Cancel
+restored an ordinary read, retaining the draft and one observed effect without replay or global
+End/Start. The existing preserve-tabs interlock correctly refused automatic close; only the owned
+fixture and maintenance tab were then closed through exact native Chrome controls. The work view
+shows published tool names, deadline cause and safe recovery. The complete guardian About card is
+preserved, and the actual installed app is open at At a glance with Ready state. The
+[deployment record](testing/evaluation-cancel-local-deployment-2026-10-01.md) records hashes,
+rollback and limits. The accepted matrix was not repeated.
+
+## Shared attachment ownership correction (2026-10-01, reviewed locally)
+
+Architect review withheld `d936b708`: generation alone did not establish exclusive debugger
+attachment ownership, and old ordinary release callbacks could decrement a replacement generation.
+The `codex/evaluation-cancel-lease-fence` follow-on requires one live lease before and at targeted
+retirement, registers leases after serialized setup and passes the original token through every
+ordinary release. Shared recording/beforeunload owners remain intact; bounded cleanup refuses with
+the existing typed human prerequisite. The marked ADR-0191 amendment and
+[source evidence](testing/evaluation-cancel-lease-fence-2026-10-01.md) record the exact correction.
+
+All source gates pass: 615 Rust tests, 393 extension tests, 110 executable Workbench assertions,
+formatting, strict Clippy, JavaScript syntax and isolated build. Seven discriminating cases cover
+shared owners, setup/retirement races, recording, beforeunload and old ordinary finally after
+reattachment. A counterproof reproduces the baseline ownership/count failures and corrected results.
+Architect/independent review and actual Chromium/native acceptance accepted the exact follow-on.
+The supported local deployment is recorded above. About identity, existing data and public versions
+remain preserved. Physical Enter activation remains unproven.
+
+## Correlated evaluation cleanup (2026-10-01, local source only)
+
+Independent review accepted `fcb4bce` core behavior and real predecessor compatibility, including
+11 native checks and seven predecessor-reader phases. It withheld complete agent recovery UX
+acceptance: a pending evaluation kept the document scope occupied, and ordinary observation guidance
+looped. The architect recommended repairing the existing Cancel lifecycle. [ADR-0191](adr/0191-correlated-evaluator-cancellation-and-resource-retirement.md)
+records targeted bounded retirement, exact generation/scope/epoch ownership and a typed fallback.
+
+The follow-on candidate is on `codex/evaluation-cancel-recovery`. Synthetic worker checks verify
+fresh read recovery without End/Start, full-journal cleanup, failed cleanup without observation
+effects, unrelated workspaces, setup/epoch/generation fences and delayed page continuation without
+replay or a stopped-effects claim. Work and human recovery share canonical Language; generic
+unverified document access points to existing Show tab for manual inspection. The active architecture
+contract now records the actual lease/snapshot/completion and child ordering. Source gates pass:
+615 Rust tests, 386 extension tests, 110 executable Workbench assertions, formatting, strict Clippy,
+changed-JavaScript syntax and an isolated workspace build. The
+[source evidence](testing/evaluation-cancel-recovery-2026-10-01.md) records the exact mechanism,
+retirements and limits. Architect review then withheld `d936b708` for the shared ownership gap;
+the corrected follow-on is recorded above. No installed state, runtime, public version or
+deployment changed.
+
+## Work resolution cleanup (2026-10-01, local source only)
+
+Leo approved the bounded architecture cleanup after investigation. [ADR-0190](adr/0190-work-owned-resolution-and-real-attempt-journal.md)
+records Work-owned evidence and a single frozen resolution, one Language projection, direct child
+accounting and real serialized adapter journal boundaries. The source candidate remains on
+`codex/in-service-outcome-ux`; no installation, browser, registry, service startup or deployment
+change is authorized by this implementation. The preceding paused patch is preserved in the
+ignored investigation artifacts and reconciled into this cleanup rather than kept as a second path.
+
+The migration has removed old Terminal assembly, result-buffer completion, result overwrites after
+verification, final-effect audit repair, audit-based child-cause inference and duplicate recovery
+rendering. All source gates pass: 613 Rust tests, 372 extension tests, 109 executable Workbench
+assertions, formatting, strict Clippy and changed-JavaScript syntax. The
+[source evidence](testing/work-resolution-2026-10-01.md) records independent handler/effect counters,
+the exact retirements, privacy and optional-history coverage, corrected gate failures and limits.
+Parent review now accepts the demonstrated core behavior and real predecessor-reader compatibility
+at `fcb4bce`. Isolated native checks verify the unchanged About card and restored activity history,
+but complete human/agent acceptance remains qualified by the recovery gap above and unverified
+physical Enter activation. The installed About card and source selection remain unchanged.
+History search targeting stays deferred.
+
+## Activity-list comprehension correction (2026-10-01, installed locally)
+
+Leo rejected the repeating Completed/Effects uncertain labels in the white activity column.
+The candidate restores exact tool names, preserving secondary outcome sentences and exceptional
+recovery. It changes one renderer line plus mixed-list regression checks; no new retained data,
+task inference, policy, safety, Show tab, About or installation change. Fresh native inspection
+reproduces the regression. Paired component snapshots verify the whole mixed list at large and
+narrow widths. The [candidate evidence](testing/activity-tool-column-2026-10-01.md) records the
+Library screenshot limitation, source diff, exact examples and review/deployment boundary.
+All gates pass: 594 Rust tests, 365 extension tests, 105 executable Workbench assertions,
+formatting, strict Clippy and changed-JavaScript syntax. The parent independently approved exact
+`696275e66fb69c9412b1a1b56533066a948f82a4` and authorized the supported orchestrator-only update.
+Actual native acceptance verifies tool names primary across mixed history, secondary uncertainty
+and recovery, expandable details, exact owned Show tab, Ready, and the complete About card.
+Installed hash: `8f4bc1ee0bd7bdecee90d2ed5c307dcdf5e0319ab3932f311a8dce6985402a7a`.
+Selection, policy, prior audit bytes, both connector images and adapter source/grants are preserved.
+Rollback capture: `.tmp/local-deployment-2026-10-01T12-51-36Z/`. The application remains running.
+
+## Authorized Local Deployment (2026-10-01)
+
+Leo explicitly requested local deployment and live testing. Reviewed implementation `c491a264`
+was built and deployed through the supported exact-path workflow; only the orchestrator and
+browser connector were replaced. The existing unpacked adapter was reloaded. The application is
+left running; installed service/browser readiness is Ready, and the unchanged MCP connector
+negotiates the 24-tool catalog. Selection, policy-file state, browser grants, and prior audit bytes
+were verified preserved. The [local deployment record](testing/local-deployment-2026-10-01.md)
+contains candidate hashes, opening instructions, rollback, and exact limits.
+
+The initial localhost read returned `document_unavailable` with no effect. A later installed
+open/read/fill smoke passed after Chrome restarted and the existing adapter was reloaded, but a
+subsequent UX fixture reproduced the read failure. Recovery remains in progress. Actual native
+captures verify the readable fill outcome and complete
+guardian About card. Public versions and publication state are unchanged.
+
+[ADR-0188](adr/0188-page-world-independent-form-diagnostics.md) records a separately reproduced
+source defect and its bounded correction: MAIN-world automation no longer depends on extension
+messaging; local opt-in tracing uses an isolated relay and exact document custody through worker
+suspension. Source gates pass: 594 Rust tests, 357 extension tests, 101 Workbench assertions,
+formatting, strict Clippy, and changed-JavaScript syntax. Independent review approves the correction
+after replaying failed-stop retry, overlapping off/on, and unrelated-tab capacity regressions.
+The supported orchestrator-only deployment of `7af79ed4` completed at 05:56 UTC. Installed
+synthetic execute/read still failed before dispatch. At 06:16 UTC Leo reported repeated live
+verification refusals; further smoke/deployment actions were paused and the audit preserved.
+
+[ADR-0189](adr/0189-current-document-trees-exclude-inactive-browser-pages.md) records the observed
+cause: an active root plus a prerender root makes the existing inventory reject the whole tab.
+Historical replay confirms the same failure at `22d27bd1`, `c491a264`, and `7af79ed4`; the verifier
+is unchanged. A source-only correction excludes inactive trees from inventory and routing while
+retaining exact active identity, scope, malformed-tree, stale-target and uncertainty guards.
+Independent Sol Max source review passes. Aggregate gates pass: 594 Rust tests, 365 extension
+tests, 101 Workbench assertions, formatting, strict Clippy and changed-JavaScript syntax.
+The parent independently accepted the exact frozen hashes. Source correction `1485b8a4` was
+committed and the existing adapter reloaded. Two installed read/fill/read rounds passed while
+Chrome reported an active HTTP root plus two prerender roots; only the active document entered
+scope. Installed uncertainty, Pause, Show while held, Resume without replay, Stop and Start
+passed. Ready is restored and the full About card verified. Native source remains `7af79ed4`;
+no further native image swap occurred. The foreground lane is released for final independent
+live review. [Recovery evidence](testing/document-lifecycle-recovery-2026-10-01.md) preserves
+the first failures, exact source acceptance, actual lifecycle inventory and final screenshots.
+Six of nine preserved verification failures match exact synthetic receipts; three remain
+unclassified. Other owner failures are not individually attributed. One post-reload harness
+attempt used a stale saved handle and correctly returned `tab_unavailable`; a fresh owned
+fixture resolved that test setup limitation. No permission,
+public version, publication, or installation selection changed.
+
+## Quiet Browser Coexistence Local Trial (2026-09-30, unpublished)
+
+The follow-on in-service UX source slice is on `codex/in-service-outcome-ux`, based on clean
+`22d27bd175fded4b66a731fb6b77d9fc433b8d2c`. [ADR-0187](adr/0187-readable-workbench-outcomes-and-reconnection-controls.md)
+keeps safe outcome/recovery facts in the existing work view, separates global human control from
+browser reconnection, and clarifies Show tab versus takeover. The full guardian About card and
+all five destinations remain intact. Source validation is in the
+[UX evidence record](testing/in-service-ux-2026-10-01.md); the
+[selected native acceptance](testing/in-service-ux-acceptance-2026-10-01.md) records outcomes,
+legacy history, child recovery, controls, narrow/enlarged text, About fidelity, and limits.
+The parent handed off the foreground lane; bounded acceptance is complete and ownership released.
+At that source/native-isolated acceptance point, no serving installation or registration had changed.
+Independent source review of `8d1e16ff` found a topology/publication race in control confirmation.
+The focused correction makes confirmations depend only on the applied authority state and adds
+a deterministic last-adapter disconnect regression. Browser publication is not acknowledgement.
+Native observation also caught a background-attention refusal whose independent capability check
+had passed. Typed refusal evidence now selects its refusal tone without changing machine facts;
+unknown/partial effects still take precedence. Final gates pass: 594 Rust tests, 349 extension
+tests, 101 executable Workbench assertions, formatting, and strict Clippy. Keyboard Tab/Shift-Tab
+is verified; Enter activation remains inconclusive. The guarded native attempt sent no key because
+Windows could not foreground the verified isolated candidate. Temporary profiles/registrations
+are removed; production registry state and existing live process IDs were verified unchanged.
+
+The owner authorized a bounded local engineering trial. The starting repository was clean at
+`de1a686761af5430afc50763d1a282efaa80f615`; no pending-change checkpoint commit was needed.
+Work proceeds on `codex/quiet-coexistence-trial` in the ordinary repository. This source trial
+does not bump versions, push, release, or change public availability. Disposable isolated local
+installation and browser-profile tests are authorized; production, public, and remote rollout
+remain outside scope.
+
+[ADR-0186](adr/0186-quiet-browser-coexistence.md) records the chosen design:
+
+- One persisted operator `browser.attention` preference defaults to background. Foreground is
+  an operator opt-out; mandatory organization background cannot be weakened. Recommended
+  values are defaults. Existing Pause/Stop/Attention states remain compatible and distinct.
+- The shared executor applies attention to CLI, MCP, flows, and compensation. Negotiated
+  `browser_attention` revision 1 prevents old adapters from silently claiming enforcement.
+  Background blocks model focus, unowned same-host adoption, human-window tab switching, duplicate-group
+  movement, focused/shared-window resize, and active close in a focused window, with an unowned
+  neighbor, or in a last-tab window. Missing-browser recovery requests human startup under background.
+  Opening prefers unfocused all-owned work windows. Trusted keyboard/pointer preparation can
+  select a controlled tab there. Native mechanical coordination is per window with target,
+  ownership, placement, selection, and focus checks before input packets. Focused/shared targets
+  refuse before input even when active; a human event after possible input preserves uncertainty
+  or partial effects rather than replaying or reselecting. No global hold is added.
+  Background textual fill uses one native replacement and validated blur commit, preserving
+  preflight and complete-batch retention. Foreground and explicit key semantics stay unchanged.
+  An incompatible legacy adapter receives bounded Ended retirement without physical tab close
+  or global Stop; reconnect remains excluded until an updated capable adapter connects.
+  A different modern service epoch clears stale ownership and detaches retained custody before
+  Active, while same-epoch reconnect preserves continuity. Legacy retirement proves neither.
+- The existing Workbench gains a bounded exact-owned-tab Show tab control. Reveal grants no
+  permission, changes no runtime state, and replays no action. Page feedback remains passive;
+  controlled-tab focus-emulation custody and cleanup remain unchanged.
+- Active contracts and scripting guidance now describe background work, fresh-tab recipes,
+  actual stdin continuation behavior, flow continuation limits, and uncertainty before repeats.
+  Superseded automatic child-tab adoption claims are reconciled with ADR-0164.
+
+Checkpoint `8c8d856cdc3eca635f69c1a0a21c6b632687e1a7` preserves the trial before final validation.
+Implementation and first verification are complete; independent exact-commit execution and UX
+review remain the next step. This is not a release or production-installation claim.
+The [trial record](testing/quiet-coexistence-trial-2026-09-30.md) retains every failed run and
+the exact commands, hashes and artifact paths. Final workspace format, strict Clippy, 588 Rust
+tests and 349 extension tests passed. The final full suite passed 26 gates and failed two new
+fixture expectations: future requests after Stop are blocked with `session_ended`, not cancelled.
+Those assertions were corrected and strengthened; both complete affected journeys then passed.
+Real frame acceptance passed all 69 checks, including screenshots and later-field invalidation.
+Current quiet, legacy refusal/custody/reconnect, and isolated installed native messaging with
+actual Workbench Show tab, Pause, Resume and Stop all passed. Test-owned services, profiles and
+the unique native registration were cleaned up; existing registrations remained unchanged.
+
+A logged ordinary never-emulated control and pinned baseline adapter comparison distinguish
+native document focus reporting from debugger emulation. Cleanup requires an inactive never-native
+sentinel and actual owned-debugger detachment, with native-filled page observations retained.
+No observer uses Playwright. The isolated installed proof remains distinct from the selected
+everyday installation, store packaging, Linux runtime and physical input; those were not run.
+The rule governs direct Ghostlight mechanisms, not OS
+containment or browser-originated focus/popups from explicit page scripts and actions. A new
+unfocused work window can still appear, and preserved tabs can accumulate across released runs.
 
 ## Ghostlight 1.3.12 Service Published (2026-09-30)
 

@@ -73,6 +73,33 @@ This adds no source access and changes no recording containment or delivery mech
 
 ## Evidence required
 
+### Capture composition amendment (2026-10-02)
+
+Inactive viewport captures in pinned Chrome 152 can finish only after an excluded
+iframe's visibility mask expires. Failed post-capture verification correctly
+discards those bytes. The physical mask now suppresses iframe pixels with important
+zero opacity and disabled transitions/animations beneath the existing opaque cover,
+while leaving renderer visibility unchanged. Verification still rejects nonzero
+opacity, mutation, missing geometry or changed document identity. The existing
+bounded expiry and restoration remain. Local real-image exclusion and mutation
+journeys pass; platform CI must establish the composition correction before release.
+
+Linux CI validates the opacity correction, but Windows inactive viewport capture
+still stalls until expiry. Viewport capture now requests raster scale 0.99 with
+unchanged CSS bounds. Chromium preserves the emulated CSS view and sizes its output
+surface from that scale, allowing a fresh surface without selecting the tab or
+window. The actual scale is reported in view geometry. Target and full-page scale
+rules retain their existing output budgets. Platform acceptance remains required;
+this is a physical capture correction, not an exception to exclusion verification.
+
+### Raster experiment rejected (2026-10-02)
+
+CI run 37065889684 disproves the preceding raster-scale remedy on Windows: capture
+still returns after mask expiry. This supersedes only the viewport scale change
+described above; it is removed from the source. The opacity mask retains positive
+Linux capture evidence. Windows capture remains an unpublished release blocker.
+Neither expiry nor exclusion verification is weakened to make the journey pass.
+
 The September 7 full-session browser suite also exposed incomplete physical batch preparation.
 Per-field validation discovered an invalid later field only after an earlier edit. The adapter
 now validates every document group, field, option, and submit containment before the first edit,

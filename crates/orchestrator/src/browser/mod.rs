@@ -1533,6 +1533,7 @@ pub(crate) mod testing {
                 locators,
                 points,
                 focused,
+                ..
             } = &command
             {
                 let mut inventory = lock(&self.documents)

@@ -319,6 +319,12 @@ the owner wants, and what this project learned the hard way.
   Ghostlight's own key. Re-check at the writer, preserve siblings, and back up first; malformed
   whole documents remain manual (ADR-0154).
 
+- **Settlement is a timing preference, not an action prerequisite.** The owner directs a
+  bounded default across similar page tools, then current valid execution even on busy pages.
+  `visual_settle:false` skips waiting. Unrelated active-frame churn cannot invalidate a targeted
+  operation; explicit waits and configured document authority retain their actual promises
+  (ADR-0195).
+
 ## Durable lessons
 
 - **Warm MCP success does not prove cold desktop demand-start.** A client can

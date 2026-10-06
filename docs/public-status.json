@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "release": "1.3.13",
-  "platformSummary": "Windows and Linux are supported. Release 1.3.13 passes installation and process gates on both; Windows Chromium component acceptance passes with the unchanged 1.3.12 adapter.",
-  "extensionSummary": "The Chrome Web Store serves Chrome adapter v1.3.12, compatible with service 1.3.13. The existing injector loads the installed service runtime without an extension update or reload. Compatibility is recorded in compatibility.json.",
+  "release": "1.3.14",
+  "platformSummary": "Windows and Linux are supported. Release 1.3.14 passes source, installation and process gates on both; Chromium component screenshot acceptance passes on both with the unchanged 1.3.12 adapter. The selected Windows installation also passes actual MCP capture after service-only deployment.",
+  "extensionSummary": "The Chrome Web Store serves Chrome adapter v1.3.12, compatible with service 1.3.14. Its candidate archive is byte-identical to the previous public release. The existing injector loads the installed service runtime without an extension update or reload. Compatibility is recorded in compatibility.json.",
   "chromeStore": {
     "itemId": "lejccfmoeogmhemakeknjjdhkfkgncdl",
     "publicAdapterVersion": "1.3.12"

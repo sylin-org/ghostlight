@@ -414,6 +414,7 @@ mod tests {
                 token.cancel();
             }
             let context = InvocationContext {
+                settlement_pending: &std::sync::atomic::AtomicBool::new(false),
                 provenance: None,
                 requirements: crate::governance::CapabilitySet::READ,
                 invocation: "parent",
