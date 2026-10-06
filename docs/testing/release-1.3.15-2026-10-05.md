@@ -54,7 +54,10 @@ GitHub, npm and Chrome access passed. The old 1.3.13 Chrome submission was alrea
 cancelled; no existing submission was cancelled by this release work.
 
 Initial source commit `149a62c4ac697d5f780cd1d7a476a33ad77d2eb0` was pushed and candidate
-run 37401291161 started. Its dependency policy job passed. Chrome Upload independently
+run 37401291161 started. Its dependency policy job passed; the Linux Rust tests exposed
+a Windows-only absolute path in the new upload-decoder fixture. The fixture now uses
+the platform's absolute temporary directory. This is test-only and changes no runtime
+or adapter package bytes. Chrome Upload independently
 returned SUCCEEDED for the exact ZIP and draft 1.3.15. No review was submitted yet.
 
 Compatibility was tightened before publication: the older 1.3.14 injected runtime has

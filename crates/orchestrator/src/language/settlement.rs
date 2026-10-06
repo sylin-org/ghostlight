@@ -72,7 +72,7 @@ mod tests {
             ),
             (
                 "browser_upload",
-                json!({"target":"target_one","paths":["C:/test.txt"]}),
+                json!({"target":"target_one","paths":[std::env::temp_dir().join("settlement-attachment.txt")]}),
             ),
             ("browser_execute", json!({"script":"return 1"})),
         ];
