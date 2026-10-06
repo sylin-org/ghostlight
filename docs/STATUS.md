@@ -18,7 +18,11 @@ installed acceptance are being verified for this source. Older reports remain hi
 
 The narrowed Windows source, fresh process and 70-check Chrome lanes pass. The same
 adapter also passes all 70 checks with the checksum-verified public 1.3.14 binaries.
-Linux candidate packages, exact artifact custody and installed acceptance remain pending.
+Installed narrowed acceptance also passes all 40 calls across thirteen tool families
+after the owner's reload, with independent effect counters and owned-tab cleanup.
+The replacement Chrome draft upload succeeded. Linux candidate packages, exact artifact
+custody and public publication remain pending. The stale PowerShell fixture capability
+was corrected without changing production source; the fresh CLI journey passes.
 
 ## Bounded settlement implementation (2026-10-05; source and installed acceptance passed)
 

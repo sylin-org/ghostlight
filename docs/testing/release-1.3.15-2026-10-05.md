@@ -81,3 +81,23 @@ journeys. Logs are `.tmp/settlement-adapter-with-public14.log` and
 `.tmp/settlement-stable-frame.log`; the public baseline archive was verified
 against its published candidate manifest before use. Installed acceptance and
 Linux candidate/package acceptance remain separate pending work.
+
+Installed narrowed acceptance passed after the owner's reload. The development loop
+replaced the selected sibling set; the service SHA-256 is
+`119aa506429682fc31a43a7194bca54b683a03fa29910b16b99b0efc7dbca34d`.
+Evidence `.tmp/settlement-live/a827662b-3a08-4935-b3cd-36748630a795/evidence.json`
+records 40 calls across all thirteen tool families. The animation kept running and
+the child navigated 141 times. Independent counters confirmed two actual clicks,
+keys, hovers, drags, drops, uploads and scripts, with retained typed text and file bytes.
+Opt-out removed bounded waiting. The owned fixture was inspected and closed.
+
+The narrowed adapter ZIP SHA-256 is
+`36e0d841cabf235da3833d6a74b9e1f3aca752ab8667a291f2aad2303d6b8224`.
+Chrome accepted it as the replacement 1.3.15 draft with upload state SUCCEEDED.
+No review or public delivery is claimed by upload. Public service remains 1.3.14
+and public adapter 1.3.12 until independently observed publication.
+
+The PowerShell process fixture initially advertised document-scope revision 1.
+The expected upgrade refusal confirmed negotiation; the fixture now advertises
+revision 2 and the actual CLI journey passes. The first narrowed CI run was cancelled
+before that known fixture error. Production source is unchanged by this correction.
