@@ -577,8 +577,9 @@
   // A browser document can be ready while a client-rendered form is still hydrating from an
   // API response. Editing during that window produces real trusted events and a temporary dirty
   // state, then the hydration result replaces the draft. Require a stable target set and
-  // ready state before the worker begins its irreversible browser input sequence.
+  // ready state briefly; the final current target set remains usable when the budget expires.
   async function prepareStableFill(message) {
+    if (message.visual_settle === false) return prepareFill(message);
     const started = performance.now();
     let stableSince = started;
     let signature = null;
@@ -594,8 +595,8 @@
       if (ready && now - stableSince >= FILL_STABLE_MS) {
         return prepared;
       }
-      if (now - started >= FILL_SETTLE_LIMIT_MS) {
-        throw new Error("form did not settle before fill");
+      if (now - started >= Math.min(FILL_SETTLE_LIMIT_MS, message.settle_ms ?? FILL_SETTLE_LIMIT_MS)) {
+        return prepareFill(message);
       }
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
@@ -854,36 +855,36 @@
           : message.mode === "article"
             ? extractArticle(message.max_chars)
             : composedVisibleText(document.body || document.documentElement, message.max_chars);
-        const result = sensor
-          ? await sensor.settle(extract, (res) => Boolean(res?.text && res.text.trim().length > 0))
+        const result = sensor && message.visual_settle !== false
+          ? await sensor.settle(extract, (res) => Boolean(res?.text && res.text.trim().length > 0), { maxWaitMs: message.settle_ms })
           : extract();
         return { ...result, title: shared.bounded(document.title, 500), url: location.href };
       }
       if (message.kind === "inspect_tree") {
         const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
         const extract = () => inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
-        const result = sensor
-          ? await sensor.settle(extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0))
+        const result = sensor && message.visual_settle !== false
+          ? await sensor.settle(extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0), { maxWaitMs: message.settle_ms })
           : extract();
         return result;
       }
       if (message.kind === "inspect") {
         const extract = () => inspect(message.inspect_kind, message.max_items);
-        return sensor
-          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+        return sensor && message.visual_settle !== false
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0, { maxWaitMs: message.settle_ms })
           : extract();
       }
       if (message.kind === "find") {
         const extract = () => findTargets(message.text, message.find_kind, message.max_results);
-        return sensor
-          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+        return sensor && message.visual_settle !== false
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0, { maxWaitMs: message.settle_ms })
           : extract();
       }
       if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
       if (message.kind === "query_semantic") {
         const extract = () => querySemanticTargets(message);
-        return sensor
-          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0)
+        return sensor && message.visual_settle !== false
+          ? await sensor.settle(extract, (targets) => Array.isArray(targets) && targets.length > 0, { maxWaitMs: message.settle_ms })
           : extract();
       }
       if (message.kind === "describe_focused") { const element = deepestActiveElement(); if (!element || element === document.body || element === document.documentElement) throw new Error("no editable control is focused"); return { targets: [observation(element)] }; }

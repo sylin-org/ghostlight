@@ -95,7 +95,7 @@ try {
   const browser = new Peer(endpoint.browser_port, true);
   const adapterHello = { kind: "hello", major: 3, adapter_version: "1.0.0", browser_id: "browser_h8",
     adapter_epoch: "adapter_h8", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "presentation", "adapter_liveness"]
-      .map(name => ({ name, revision: { navigation: 2, semantic_document: 4 }[name] ?? 1 })) };
+      .map(name => ({ name, revision: { document_scope: 2, navigation: 2, semantic_document: 4 }[name] ?? 1 })) };
   // Both hellos in one write pin preservation of buffered bytes across transport authentication.
   browser.socket.write(Buffer.concat([browser.encode({ kind: "hello", major: 1, token: endpoint.token }), browser.encode(adapterHello)]));
   await browser.take(value => value.kind === "hello_accepted", "adapter negotiation");

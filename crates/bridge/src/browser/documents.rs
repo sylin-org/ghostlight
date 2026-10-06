@@ -47,6 +47,16 @@ pub struct DocumentScope {
     pub mask: Option<String>,
     /// Stop retained recording when this admitted document set changes.
     pub watch_changes: bool,
+    /// Require the complete admitted tree to stay fixed for a broad restricted operation.
+    #[serde(default = "strict_tree_default")]
+    pub strict_tree: bool,
+    /// Remaining shared preparation budget for local collectors; zero skips implicit waiting.
+    #[serde(default)]
+    pub settle_ms: u64,
+}
+
+fn strict_tree_default() -> bool {
+    true
 }
 
 /// Physical coverage facts; no model-facing interpretation or excluded host disclosure.
@@ -83,6 +93,8 @@ mod tests {
                 subjects: vec![],
                 mask: Some("Excluded by policy".into()),
                 watch_changes: true,
+                strict_tree: true,
+                settle_ms: 0,
             },
             primitive: Box::new(BrowserCommand::ReadText {
                 tab_id: 7,

@@ -78,7 +78,7 @@ Raw evidence:
 
 - Rejected-source reproduction (local evidence: `../../.tmp/delight-native-gate-baseline-2026-10-02.json`).
 - Final corrected CLI/MCP and Chromium journey (local evidence: `../../.tmp/delight-native-gate-candidate-final-2026-10-02.json`).
-- [Journey runner](https://github.com/sylin-org/ghostlight/blob/9671ccc04d00f80a4166293e808e714ec64ebd95/tests/delight-journey.mjs), including the exact timing and resource hooks.
+- [Journey runner](../../tests/delight-journey.mjs), including the exact timing and resource hooks.
 
 At the corrected cancellation receipt, observations, evaluations, scope, navigation watchers and
 active requests were already zero. Both outcomes were cancelled/none with unknown readiness;

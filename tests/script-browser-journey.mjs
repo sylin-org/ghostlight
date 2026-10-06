@@ -182,7 +182,7 @@ try {
     browser_id: "browser_scriptjourney",
     adapter_epoch: "adapter_scriptjourney", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "script",
       "operation_recovery", "presentation", "adapter_liveness"].map((name) => ({ name,
-      revision: name === "script" || name === "navigation" ? 2 : 1 })) });
+      revision: ["document_scope", "script", "navigation"].includes(name) ? 2 : 1 })) });
   await until(() => ready, "browser relay negotiation");
   const connector = startGhostlight("ghostlight-mcp-connector");
   const mcp = requestChannel((message) => connector.stdin.write(`${JSON.stringify(message)}\n`));

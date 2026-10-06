@@ -5,11 +5,6 @@ every implemented package from `48ef29ec` through the current hardening work: H1
 H5, H6, H7, H8, the accepted C1 reporting foundation, and the editor/caller-restriction corrections.
 It does not turn deferred signer/hash verification or C2/C3 admission into implemented features.
 
-ADR-0194 supersedes H6 screenshot masking. Current checks prove complete permitted images and
-binary policy refusal before capture; semantic frame access and recording checks remain separate.
-The dated mask results below preserve predecessor evidence. Current source, component, and
-installed Windows results are in [the screenshot verification record](../../testing/binary-screenshot-policy-2026-10-02.md).
-
 ## Run the suite
 
 Use Rust from `rust-toolchain.toml`, Node 22 or newer, and Chrome for Testing with unpacked-extension
@@ -48,15 +43,6 @@ Fixture provenance and update instructions are in [the fixture guide](../../../t
 
 ## Feature coverage
 
-`tests/fixed-installation-journey.mjs` runs in the full and process lanes. It creates
-an isolated user installation, migrates owned legacy paths, replaces a running service
-at the permanent path, and verifies unchanged MCP/native connector processes, runtime
-reacknowledgement, retained history and fixed registration. Windows also runs
-`tests/installer-powershell.ps1` against offline downloads and real native installation.
-Linux runs `tests/installer-shell.mjs`. npm and injector component tests separately
-cover complete-download rejection and replacement of distinct service runtime bundles.
-These fixtures do not prove a person's installed Chrome extension journey.
-
 `tests/history-compatibility.mjs` runs the real desktop authority and CLI against a preserved
 JSONL file across restarts. It proves new work is saved, additive history fields remain readable,
 unsupported records are counted without blocking startup, and original bytes stay unchanged.
@@ -78,7 +64,7 @@ effects where the browser can change. Test counts alone do not close a row.
 | H4 grouped history | Incremental child receipts precede parent completion; reload, retention, missing receipts, permission details, and focused/expanded UI state remain truthful. | Rust history/governance tests; process, workbench-surface, and history-browser journeys. |
 | H5 runtime controls and caller limits | Exact capability sets permit each supported operation; missing requirements prevent dispatch; attention stays local; Pause/Stop/cancellation/deadlines stop later effects; diagnostics remain usable without releasing controls. | Complete Rust capability matrix and control tests; process, continuity, and installed live journeys. |
 | H6 document authority and coverage | All handling/notice combinations permit fully allowed content; mixed grants omit denied values/handles before extraction; negatives do not claim unseen absence; stale documents cannot regain authority; coverage reasons remain distinct. | Rust governance/frame tests; extension document tests; frame-browser and installed live journeys. |
-| H6 captures, scripts, and recordings | Permitted screenshots contain original embedded pixels without masks; binary permission refuses every capture branch before dispatch; screenshot coordinates do not bypass frame action authority; excluded-document scripts refuse; restricted recordings stop at document changes and every export destination reauthorizes source history. | Rust frame/recording tests; extension capture/document/recording tests; frame-browser and installed live journeys; ADR-0194 verification record. |
+| H6 captures, scripts, and recordings | Delivered screenshot pixels mask denied regions; tampered masks discard output; ordinary captures/scripts/recordings still work; excluded-document scripts refuse; restricted recordings stop at document changes and every export destination reauthorizes source history. | Rust frame/recording tests; extension capture/document/recording tests; frame-browser and installed live journeys. |
 | H7 audit health | Keep working preserves browser results; Require audit prevents new work during failure, including composition children; live receipt storage is independent; repair never replays/backfills or hides historical gaps. | Rust audit/work tests; real process failure/repair/cold-start cases; actual history UI. |
 | H8 continuity and local runtime | Bursts wait within original deadlines; duplicate IDs retain cancellation; incomplete/stalled peers expire independently; Pause/Stop drains queues without replay; fresh sessions recover; runtime publication uses exact private permissions. | Rust bridge/service tests; process and local-resilience journeys on each platform. |
 | C1 reporting | Distinct processes are observed correctly; queued/composed/refused work keeps its original connection across shared sessions/reconnects; claims remain transient; restored history cannot borrow a new claim. | Rust provenance/audit/history tests; real provenance processes; actual Chromium history rendering/escaping. |
@@ -123,11 +109,10 @@ the public Sylin form's local-only simulation and captures. It honors the browse
 setting, reports the retained tab, and never uses the existing Reddit draft or submits a Reddit
 comment. `GHOSTLIGHT_BIN_DIR` selects the installation, defaulting to `target/release`.
 
-The lane writes a unique `.tmp/installed-browser/<run>.json` with installed executable hashes,
-named checks, a `passed` boolean, and bounded tool invocation receipts. `GHOSTLIGHT_LIVE_EVIDENCE`
-can select another report path. It invalidates earlier success before startup and retains failure
-evidence. Run it after the changed binaries are active; reload the extension only when privileged
-adapter files changed. An isolated MV3/native-port shim cannot establish native-host installation, and
+The lane writes `.tmp/installed-hardening-evidence.json` with installed executable hashes, named
+checks, a `passed` boolean, and every tool invocation, plus a masked screenshot. It invalidates
+earlier success before startup and retains failure evidence. Run it after the changed binaries and extension are
+actually active. An isolated MV3/native-port shim cannot establish native-host installation, and
 an installed live check cannot replace deterministic audit-failure or control-race tests.
 
 ## Native workbench regression follow-up (2026-09-07)

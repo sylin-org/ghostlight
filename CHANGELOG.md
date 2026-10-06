@@ -5,6 +5,21 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.15] - 2026-10-05
+
+### Fixed
+
+- Give read, inspect, find, screenshot, click, scroll, hover, fill, typing, key, drag,
+  upload and script tools one bounded preparation wait. Busy pages remain usable after
+  at most one second. `visual_settle: false` skips optional preparation.
+- Validate targeted work against its required documents and ancestry. Unrelated frame
+  navigation and same-document routes no longer interrupt permitted actions. Required
+  document replacement and excluded input still stop execution.
+- Preserve a satisfied wait condition when optional visual settlement expires, with
+  `visual_settled` reporting that separate result. Explicit visual waits retain their timeout.
+- Ship this fix on the published 1.3.14 baseline. The unpublished browser/workbench trial
+  remains separate. Adapter 1.3.15 retains compatibility with service 1.3.14 during rollout.
+
 ## [1.3.14] - 2026-10-02
 
 ### Changed

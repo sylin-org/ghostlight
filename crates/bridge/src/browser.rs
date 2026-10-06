@@ -20,6 +20,8 @@ pub mod adapter_capability {
     pub const PAGE_RUNTIME: &str = "page_runtime";
     /// Document inventory and execution bound to exact browser document identities.
     pub const DOCUMENT_SCOPE: &str = "document_scope";
+    /// Subject-scoped validation and bounded optional page settlement.
+    pub const DOCUMENT_SCOPE_REVISION_SETTLEMENT: u16 = 2;
     /// Physical tab, window, grouping, and zoom mechanisms.
     pub const TABS: &str = "tabs";
     /// Atomic creation, navigation, and grouping of a new physical tab.
@@ -666,6 +668,9 @@ pub enum BrowserCommand {
         locators: Vec<String>,
         points: Vec<PhysicalPoint>,
         focused: bool,
+        /// Optional bounded geometry preparation before binding current subjects.
+        #[serde(default)]
+        settle_ms: u64,
     },
     /// Install the exact service-owned page runtime for future and already attached documents.
     InstallPageRuntime {
@@ -1035,6 +1040,9 @@ impl BrowserCommand {
     #[must_use]
     pub fn required_revision(&self) -> u16 {
         match self {
+            Self::DescribeDocuments { .. } | Self::InDocuments { .. } => {
+                adapter_capability::DOCUMENT_SCOPE_REVISION_SETTLEMENT
+            }
             Self::Fill {
                 allow_credentials: true,
                 ..
