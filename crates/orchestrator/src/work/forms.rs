@@ -709,17 +709,26 @@ impl ApplicationExecutor {
                     "visual_settle" | "layout_stable" => false,
                     _ => value.visual_settle == Some(true),
                 };
-                if observed.satisfied && should_settle {
+                let mut visual_settled = None;
+                if observed.satisfied && should_settle && wait_budget_ms(&context) > 0 {
                     self.workbench.wait_progress(
                         context.invocation,
                         context.workspace.as_str(),
                         crate::language::progress::WaitProgress::Settlement {
-                            budget_ms: wait_budget_ms(&context),
+                            budget_ms: wait_budget_ms(&context)
+                                .min(crate::language::settlement::MAX_WAIT_MS),
                         },
                     );
-                    match self.observe_wait(&context, selected, locator, "visual_settle", None) {
+                    match self.observe_wait(
+                        &context,
+                        selected,
+                        locator,
+                        "visual_settle",
+                        None,
+                        crate::language::settlement::MAX_WAIT_MS,
+                    ) {
                         Ok(settled) => {
-                            observed.satisfied = settled.satisfied;
+                            visual_settled = Some(settled.satisfied);
                             observed.elapsed_ms =
                                 observed.elapsed_ms.saturating_add(settled.elapsed_ms);
                             observed.readiness = settled.readiness;
@@ -763,6 +772,7 @@ impl ApplicationExecutor {
                         "elapsed_ms":observed.elapsed_ms,
                         "readiness":readiness(observed.readiness),
                         "visual_settle":should_settle,
+                        "visual_settled":visual_settled,
                     }),
                     decision,
                     Some(selected.physical_id),
@@ -862,6 +872,7 @@ impl ApplicationExecutor {
             locator,
             &value.condition,
             value.value.clone(),
+            wait_budget_ms(context),
         )
     }
 
@@ -873,6 +884,7 @@ impl ApplicationExecutor {
         locator: Option<String>,
         condition: &str,
         value: Option<String>,
+        budget_ms: u64,
     ) -> Result<WaitObservation, crate::browser::BrowserError> {
         match self.dispatch(
             context,
@@ -882,7 +894,7 @@ impl ApplicationExecutor {
                 value,
                 locator,
                 timeout_ms: adapter_budget_ms(
-                    wait_budget_ms(context),
+                    budget_ms.min(wait_budget_ms(context)),
                     context.deadline.saturating_duration_since(Instant::now()),
                 ),
             },

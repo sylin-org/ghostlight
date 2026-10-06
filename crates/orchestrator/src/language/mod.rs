@@ -13,6 +13,7 @@ pub(crate) mod progress;
 pub mod provenance;
 pub mod readiness;
 pub mod resolution;
+pub(crate) mod settlement;
 #[path = "catalog.rs"]
 mod tool_catalog;
 
@@ -328,6 +329,9 @@ pub struct CloseTab {
 /// Input for bounded page reading.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ReadPage {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -363,6 +367,9 @@ impl ReadMode {
 /// Input for semantic inspection.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct InspectPage {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_inspect_kind")]
@@ -380,6 +387,9 @@ pub struct InspectPage {
 /// Input for semantic finding.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Find {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     pub text: String,
     #[serde(default)]
     pub tab: Option<String>,
@@ -441,6 +451,9 @@ pub struct Postcondition {
 /// Input for semantic activation.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Click {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
@@ -469,6 +482,9 @@ pub struct Click {
 /// Input for page scrolling or target reveal.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ScrollPage {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -509,6 +525,9 @@ pub struct ResizeWindow {
 /// Input for semantic or screenshot-coordinate hover.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Hover {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
@@ -549,6 +568,9 @@ pub enum FormFieldValue {
 /// Input for grouped form filling.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct FillForm {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     pub fields: Vec<FormField>,
     /// Acknowledge the user's explicit instruction to enter credentials in this request.
     #[serde(default)]
@@ -567,6 +589,9 @@ pub struct FillForm {
 /// Input for typing ordinary text through browser input events.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct TypeText {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     /// Acknowledge the user's explicit instruction to enter credentials in this request.
     #[serde(default)]
     pub user_authorized_credentials: bool,
@@ -593,6 +618,9 @@ pub struct TypeText {
 /// Input for one keyboard action.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct PressKey {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub key: String,
     /// Ordered keystroke sequence replacing `key`; at most twenty entries.
@@ -615,6 +643,9 @@ pub struct PressKey {
 /// Input for semantic or screenshot-coordinate drag.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Drag {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub source_target: Option<String>,
     #[serde(default)]
@@ -638,6 +669,9 @@ pub struct Drag {
 /// Input for bounded local file upload.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct UploadFiles {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
@@ -683,6 +717,9 @@ fn default_media_type() -> String {
 /// Input for explicit page script evaluation.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct RunScript {
+    /// Best-effort bounded settlement before page work; false skips waiting.
+    #[serde(default)]
+    pub visual_settle: Option<bool>,
     pub script: String,
     #[serde(default)]
     pub tab: Option<String>,
@@ -837,7 +874,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_window" => decode_window(input),
         "browser_read" => Operation::ReadPage(parse(
             input,
-            &["tab", "target", "mode", "max_chars"],
+            &["visual_settle", "tab", "target", "mode", "max_chars"],
             |value: &ReadPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_optional_handle(value.target.as_deref(), "target_")?;
@@ -853,7 +890,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_inspect" => Operation::InspectPage(parse(
             input,
-            &["tab", "scope", "root", "max_depth", "max_items"],
+            &["visual_settle", "tab", "scope", "root", "max_depth", "max_items"],
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_choice(
@@ -880,7 +917,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_find" => Operation::Find(parse(
             input,
-            &["text", "tab", "scope", "max_results"],
+            &["visual_settle", "text", "tab", "scope", "max_results"],
             |value: &Find| {
                 validate_text(&value.text, 500, "text")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
@@ -910,6 +947,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_click" => Operation::Click(parse(
             input,
             &[
+                "visual_settle",
                 "target",
                 "selector",
                 "view",
@@ -928,6 +966,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_scroll" => Operation::ScrollPage(parse(
             input,
             &[
+                "visual_settle",
                 "tab",
                 "target",
                 "direction",
@@ -943,19 +982,20 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_hover" => Operation::Hover(parse(
             input,
-            &["target", "view", "x", "y", "tab", "timeout_ms"],
+            &["visual_settle", "target", "view", "x", "y", "tab", "timeout_ms"],
             validate_hover,
         )?)
         .into_ok(),
         "browser_fill_form" => Operation::FillForm(parse(
             input,
-            &["fields", "tab", "submit_target", "user_authorized_credentials", "expect", "timeout_ms"],
+            &["visual_settle", "fields", "tab", "submit_target", "user_authorized_credentials", "expect", "timeout_ms"],
             validate_fill,
         )?)
         .into_ok(),
         "browser_type_text" => Operation::TypeText(parse(
             input,
             &[
+                "visual_settle",
                 "target",
                 "focused",
                 "selector",
@@ -972,6 +1012,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_press_key" => Operation::PressKey(parse(
             input,
             &[
+                "visual_settle",
                 "key",
                 "strokes",
                 "repeat",
@@ -986,6 +1027,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_drag" => Operation::Drag(parse(
             input,
             &[
+                "visual_settle",
                 "source_target",
                 "destination_target",
                 "view",
@@ -1002,6 +1044,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_upload" => Operation::UploadFiles(parse(
             input,
             &[
+                "visual_settle",
                 "target",
                 "selector",
                 "paths",
@@ -1018,7 +1061,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_execute" => Operation::RunScript(parse(
             input,
-            &["script", "tab", "max_result_chars", "timeout_ms"],
+            &["visual_settle", "script", "tab", "max_result_chars", "timeout_ms"],
             |value: &RunScript| {
                 validate_text(&value.script, 20_000, "script")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;

@@ -10,6 +10,21 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  supply-chain:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install existing dependency policy tools
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-deny --locked
+      - run: cargo audit
+      - run: cargo deny check licenses bans sources
+
   quality-gate:
     runs-on: ubuntu-24.04
     env:
@@ -50,6 +65,29 @@ jobs:
       - run: dbus-run-session -- xvfb-run -a node tests/cli-journey.mjs
       - run: dbus-run-session -- xvfb-run -a node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
+      - name: Install pinned Chrome for screenshot policy verification
+        shell: pwsh
+        run: |
+          $chromeRoot = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome'
+          $chromeArchive = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome.zip'
+          Invoke-WebRequest 'https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/linux64/chrome-linux64.zip' -OutFile $chromeArchive
+          Expand-Archive -LiteralPath $chromeArchive -DestinationPath $chromeRoot
+          $chromeDirectory = Join-Path $chromeRoot 'chrome-linux64'
+          $chromeExecutable = Join-Path $chromeDirectory 'chrome'
+          chmod +x $chromeExecutable (Join-Path $chromeDirectory 'chrome_crashpad_handler') (Join-Path $chromeDirectory 'chrome_sandbox')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Verify complete screenshots and binary refusal with the candidate adapter
+        env:
+          GHOSTLIGHT_TEST_NO_SANDBOX: "1"
+        run: dbus-run-session -- xvfb-run -a node tests/frame-browser-journey.mjs
+      - name: Keep screenshot policy component evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-policy-linux
+          path: .tmp/h6-browser-evidence.json
+          if-no-files-found: warn
       - shell: pwsh
         run: ./scripts/check-public-surfaces.ps1
       - shell: pwsh
@@ -188,7 +226,7 @@ jobs:
           retention-days: 7
 
   candidate-bundle:
-    needs: [quality-gate, native-packages, extension-artifact, linux-package-smoke]
+    needs: [supply-chain, quality-gate, native-packages, extension-artifact, linux-package-smoke]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

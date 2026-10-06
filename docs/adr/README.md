@@ -224,6 +224,7 @@ history live here.
 | [0192](0192-quiet-confident-completion.md) | Quiet confident completion through existing flow and precise targets, exact wait truth, calm tab preservation, scoped activity and current composed purpose | Accepted unpublished local slice; architecture accepted and scoped native review qualified acceptance |
 | [0193](0193-fixed-package-paths-and-service-runtime-updates.md) | Fixed package paths and current service runtime through the existing injector | Accepted for implementation |
 | [0194](0194-binary-screenshot-permission.md) | Binary screenshot permission: complete images without document inventories or masks; separate text and action authority | Accepted; implemented, locally deployed, and verified on Windows; supersedes ADR-0158 Decision 6 |
+| [0195](0195-bounded-settlement-and-subject-scoped-page-work.md) | Bounded best-effort settlement across ordinary page tools, subject-scoped validation and literal explicit waits | Accepted by owner direction; original installed acceptance passed; release integration pending |
 
 ## Conventions
 

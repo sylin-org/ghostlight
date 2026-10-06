@@ -635,3 +635,16 @@ Production, public, and remote rollout remain outside scope. Visible Chromium co
 isolated installed native messaging/Tauri journeys, the person's selected everyday installation,
 and Linux runtime evidence must be reported separately. Direct mechanism enforcement does not
 contain focus or popups initiated by explicit page scripts or page actions.
+
+## Bounded settlement and dynamic documents (ADR-0195)
+
+- Every similar page tool accepts the same bounded default and explicit opt-out.
+- Lookup and execution share one budget; flow children retain independent preferences.
+- An unsettled page permits valid work after the cap. Opt-out allocates no implicit observer.
+- Unrelated active-frame navigation does not stop an unchanged target. Exact target-document
+  replacement and restricted full-page coverage still refuse before unauthorized work.
+- Cancellation during preparation dispatches no action and releases exact observation custody.
+- A composite wait preserves its met condition when optional settlement expires; an explicit
+  visual-settle wait still reports whether its requested condition held.
+- Installed browser evidence counts actual handlers, verifies retained values and compares
+  bounded waiting with opt-out while animation and auxiliary document churn continue.

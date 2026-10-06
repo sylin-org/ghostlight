@@ -174,7 +174,8 @@ try {
   await rawWorker(`(()=>{globalThis.fixtureDispatchErrors=[];const original=dispatch;dispatch=async request=>{try{return await original(request)}catch(error){fixtureDispatchErrors.push({command:request.command.command,error:String(error),stack:String(error.stack||'').slice(0,1000)});throw error}};return true})()`);
   await rawWorker(`(()=>{globalThis.fixtureCaptureTrace=[];const record=value=>{fixtureCaptureTrace.push({at:performance.now(),...value});if(fixtureCaptureTrace.length>64)fixtureCaptureTrace.shift()};
     const send=chrome.debugger.sendCommand.bind(chrome.debugger);chrome.debugger.sendCommand=async(target,method,params)=>{if(method==='Page.captureScreenshot')record({method,phase:'before'});const result=await send(target,method,params);if(method==='Page.captureScreenshot')record({method,phase:'after'});return result};return true})()`);
-  diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,capture:fixtureCaptureTrace,state:liveState})`);
+  diagnoseFailure = () => rawWorker(`({errors:fixtureDispatchErrors,capture:fixtureCaptureTrace,state:liveState,
+    presentations:globalThis.visualPresentations || [], outcomes:globalThis.visualOutcomes || []})`);
   await until(() => nativeReady, "real connector negotiation");
   const connector = start(executable("ghostlight-mcp-connector"));
   let mcp = channel((message) => connector.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"));
@@ -721,10 +722,10 @@ try {
   };
   await rawWorker(`(() => {
     globalThis.visualOriginalExecuteScript=chrome.scripting.executeScript.bind(chrome.scripting);
-    globalThis.visualPresentations=[]; globalThis.visualReadTarget=${targetVisual.physical};
+    globalThis.visualPresentations=[]; globalThis.visualOutcomes=[]; globalThis.visualReadTarget=${targetVisual.physical};
     chrome.scripting.executeScript=async function(details) {
       const message=details?.args?.[0]; const tabId=details?.target?.tabId;
-      if(message?.kind==='present') visualPresentations.push({tabId,signal:message.signal});
+      if(message?.kind==='present') visualPresentations.push({at:performance.now(),tabId,signal:message.signal});
       if(message?.kind==='read_text' && tabId===visualReadTarget) {
         await new Promise(resolve=>{globalThis.visualReleaseRead=resolve;});
       }
@@ -735,6 +736,8 @@ try {
   const visualRequests = [];
   const beginVisual = (peer, name, args) => {
     const request = peer.begin("tools/call", { name, arguments: args });
+    request.promise.then(result => rawWorker(`visualOutcomes.push(${JSON.stringify({tool:name,id:request.id})},
+      ${JSON.stringify(result.structuredContent)})`)).catch(() => {});
     request.promise.catch(() => {}); // The main assertion or cleanup awaits this same promise.
     visualRequests.push({ peer, ...request });
     return request;

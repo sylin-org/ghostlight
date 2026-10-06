@@ -118,8 +118,8 @@ let liveState = {
 // advertised unless it has an entry here and a production branch in dispatch below.
 const COMMAND_HANDLERS = Object.freeze({
   install_page_runtime: { capability: "page_runtime", revision: 1 },
-  describe_documents: { capability: "document_scope", revision: 1 },
-  in_documents: { capability: "document_scope", revision: 1 },
+  describe_documents: { capability: "document_scope", revision: 2 },
+  in_documents: { capability: "document_scope", revision: 2 },
   list_tabs: { capability: "tabs", revision: 1 },
   focus_tab: { capability: "tabs", revision: 1 },
   close_tab: { capability: "tabs", revision: 1 },
@@ -753,6 +753,22 @@ async function installPageRuntime(command) {
   return { outcome: "page_runtime_installed", revision: command.revision, sha256: command.sha256 };
 }
 
+// Settlement observes only geometry, then routing binds fresh identities after it completes.
+async function prepareDocumentDiscovery(request, command) {
+  if (!(command.settle_ms > 0)) return;
+  const snapshot = await documents.current(command.tab_id);
+  const root = snapshot.documents.find(item => item.parent === null && item.supported);
+  if (!root) return;
+  const scope = { documents: snapshot.documents, allowed: [root.id], subjects: [root.id],
+    mask: null, watch_changes: false, strict_tree: false, settle_ms: 0 };
+  await documents.run(command.tab_id, scope, async documentScope => {
+    await observeOperation({ ...request, documentScope }, { command: "observe", tab_id: command.tab_id,
+      condition: "visual_settle", timeout_ms: Math.min(1000, command.settle_ms), visual_settle: false });
+    await documents.verify(command.tab_id);
+    return {};
+  });
+}
+
 async function dispatch(request) {
   const command = request.command;
   const background = shared.browserAttention(request.attention) === shared.BROWSER_ATTENTION.BACKGROUND;
@@ -764,6 +780,7 @@ async function dispatch(request) {
     throw new Error("unknown browser primitive");
   }
   if (command.command === "describe_documents") {
+    await prepareDocumentDiscovery(request, command);
     return { outcome: "documents", tab_id: command.tab_id, inventory: await documents.describe(command) };
   }
   if (command.command === "install_page_runtime") return installPageRuntime(command);
@@ -2293,7 +2310,7 @@ async function screenshot(command) {
   const debuggerLease = await ensureDebugger(command.tab_id);
   try {
     await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: true });
-    if (command.visual_settle !== false) {
+    if (command.visual_settle !== false && !requestHasSettlementScope(command.tab_id)) {
       try {
         await contentIn(command.tab_id, frames.TOP_FRAME_ID, {
           kind: "observe",
@@ -2360,6 +2377,10 @@ async function screenshot(command) {
     try { await contentAll(command.tab_id, { kind: "presentation_visibility", hidden: false }); }
     finally { await detachDebugger(command.tab_id, debuggerLease); }
   }
+}
+
+function requestHasSettlementScope(tabId) {
+  return Object.hasOwn(documents.context(tabId)?.scope ?? {}, "settle_ms");
 }
 
 async function imageDimensions(base64, clip) {

@@ -3597,7 +3597,7 @@ fn cross_workspace_tab_discovery_stress_permutations() {
 }
 
 #[test]
-fn composite_visual_settle_stress_timeout_exhaustion() {
+fn composite_wait_keeps_its_met_condition_when_optional_settlement_expires() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -3642,13 +3642,12 @@ fn composite_visual_settle_stress_timeout_exhaustion() {
         &CancellationToken::default(),
     );
 
-    assert_eq!(waited.status, Status::Failed);
-    assert_eq!(waited.facts["satisfied"], false);
+    assert_eq!(waited.status, Status::Succeeded);
+    assert_eq!(waited.facts["satisfied"], true);
+    assert_eq!(waited.facts["visual_settled"], false);
     assert_eq!(waited.facts["visual_settle"], true);
     assert_eq!(waited.facts["elapsed_ms"], 100);
-    assert!(waited.next_steps.contains(
-        &"Read or inspect the page to see its current state before choosing another action.".into()
-    ));
+    assert!(waited.next_steps.is_empty());
 }
 
 #[test]

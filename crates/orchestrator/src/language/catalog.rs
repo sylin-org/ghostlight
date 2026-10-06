@@ -284,9 +284,17 @@ fn tool(
     input_schema: Value,
     hints: Hints,
 ) -> ToolDefinition {
+    let mut input_schema = input_schema;
+    let mut description = description.to_owned();
+    if super::settlement::PAGE_TOOLS.contains(&name) {
+        input_schema["properties"]["visual_settle"] = boolean(true,
+            "Wait briefly for page settlement, then proceed even if it remains busy. False skips waiting. The wait shares the command deadline.");
+        description
+            .push_str(" Page settlement is best effort and bounded; visual_settle:false skips it.");
+    }
     ToolDefinition {
         name: name.into(),
-        description: description.into(),
+        description,
         input_schema,
         output_schema: Some(outcome_schema()),
         annotations: Some(ToolAnnotations {

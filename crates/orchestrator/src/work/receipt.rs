@@ -181,7 +181,10 @@ impl ApplicationExecutor {
         let _ = self.take_permissions(context.invocation);
         let started = Instant::now();
         let execution = Mutex::new(ExecutionEvidence::default());
+        let settlement_pending =
+            std::sync::atomic::AtomicBool::new(language::settlement::enabled(operation));
         let context = InvocationContext {
+            settlement_pending: &settlement_pending,
             requirements: language::capability_map::requirements(operation),
             execution: &execution,
             phase: Phase::RequestedEffect,

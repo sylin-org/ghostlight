@@ -1,6 +1,34 @@
 # STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-02 (stable-baseline screenshot release published).
+Last updated: 2026-10-05 (1.3.15 release integration in progress).
+
+## 1.3.15 release preparation (2026-10-05)
+
+The owner authorized bump, changelog, commit, push, service publication and Chrome Store
+publication. This candidate integrates the bounded-settlement fix with latest main.
+Original installed acceptance predates the latest screenshot changes; the integrated
+candidate requires fresh source and live checks before publication. Public service
+remains 1.3.14 and public adapter remains 1.3.12 until independently observed delivery.
+
+## Bounded settlement implementation (2026-10-05; source and installed acceptance passed)
+
+The owner authorized a common best-effort default across ordinary page tools and live
+verification. ADR-0195 records the change: one maximum 1000 ms budget per call, explicit
+opt-out, subject/ancestry checks for targeted work, and preserved primary conditions in
+composite waits. Broad restricted document checks and explicit visual waits remain.
+
+The unrelated-frame counterproof is repaired in the adapter module. Formatting, strict
+Clippy, 628 Rust tests, 414 extension tests, syntax, fresh process, CLI and workbench
+checks pass. After the owner's adapter reload, the development loop deployed only the
+authority. Two installed-browser runs passed all thirteen tool families with and
+without settlement during animation and iframe churn. Independent counters confirmed
+actual input effects and retained values. The final run recorded 40 calls; opt-out
+removed roughly one second of preparation. All exact owned fixture tabs were closed.
+The first run's background-input refusal remains separately recorded. The
+[verification report](testing/bounded-settlement-2026-10-05.md) records identity, gates,
+timings and the still-unproven exact SharePoint routing trigger. The local build also
+contains existing installation and UI source candidates; their broader acceptance
+claims remain separate work. No public version or publication is changed.
 
 ## Screenshot-only 1.3.14 published
 

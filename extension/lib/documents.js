@@ -64,6 +64,34 @@
     return JSON.stringify(left) === JSON.stringify(right);
   }
 
+  // A targeted operation depends on its actual documents and their ancestry, not siblings.
+  function requiredDocuments(context) {
+    const required = new Set(context.scope.subjects);
+    for (const document of context.documents) if (document.parent === null) required.add(document.id);
+    for (const id of context.inputSubjects ?? []) required.add(id);
+    for (const id of required) {
+      let document = context.documents.find(item => item.id === id);
+      while (document?.parent) {
+        required.add(document.parent);
+        document = context.documents.find(item => item.id === document.parent);
+      }
+    }
+    return required;
+  }
+
+  function validateCurrent(context, snapshot) {
+    if (context.scope.strict_tree !== false) {
+      if (!same(snapshot.documents, context.documents)) throw changed();
+      return;
+    }
+    for (const id of requiredDocuments(context)) {
+      const before = context.documents.find(item => item.id === id);
+      const now = snapshot.documents.find(item => item.id === id);
+      if (!before || !now || now.parent !== before.parent || now.supported !== before.supported
+        || new URL(now.url).origin !== new URL(before.url).origin) throw changed();
+    }
+  }
+
   function create({ getFrames, sendDocument, frames }) {
     const active = new Map();
 
@@ -120,12 +148,15 @@
       if (previous?.cleanup) await previous.cleanup;
       if (active.has(tabId)) throw cleanupRequired();
       const snapshot = await current(tabId);
-      if (!same(snapshot.documents, scope.documents) || scope.allowed.length > DOCUMENT_LIMIT
-        || scope.allowed.some((id) => !snapshot.documents.some((document) => document.id === id && document.supported))) throw changed();
+      validateCurrent({ documents: scope.documents, scope }, snapshot);
+      if (scope.allowed.length > DOCUMENT_LIMIT
+        || scope.allowed.some((id) => !scope.documents.some((document) => document.id === id && document.supported))) throw changed();
       // Inventory discovery awaited. A concurrent owner may have entered while it ran.
       if (active.has(tabId)) throw cleanupRequired();
       let settled;
-      const context = { ...snapshot, tabId, scope, visited: new Set(), unavailable: new Set(), dispatched: false, limited: false,
+      const context = { raw: snapshot.raw, documents: scope.documents, tabId, scope,
+        settleDeadline: Date.now() + Math.min(1000, Math.max(0, scope.settle_ms ?? 0)),
+        inputSubjects: new Set(), visited: new Set(), unavailable: new Set(scope.allowed.filter(id => !snapshot.documents.some(item => item.id === id))), dispatched: false, limited: false,
         settled: new Promise(resolve => { settled = resolve; }), cleanup: null };
       active.set(tabId, context);
       try {
@@ -158,7 +189,11 @@
       if (!metadata && !context.scope.allowed.includes(frame.documentId)) throw changed();
       try {
         if (["activate", "fill", "fill_local", "prepare_text_fill", "submit_fill", "focus", "clear", "clear_focused", "type_text", "scroll", "scroll_point", "hover", "drop_files"].includes(message.kind)) context.dispatched = true;
-        const result = await sendDocument(tabId, frame.documentId, message);
+        const localPreparation = ["read_text", "inspect_tree", "inspect", "find", "query_semantic", "prepare_text_fill"].includes(message.kind);
+        const remaining = Math.max(0, context.settleDeadline - Date.now());
+        const result = await sendDocument(tabId, frame.documentId,
+          localPreparation && scopeHasSettlement(context.scope)
+            ? { ...message, visual_settle: remaining > 0, settle_ms: remaining } : message);
         if (result?.error) throw new Error(result.error);
         if (!metadata) context.visited.add(frame.documentId);
         if (!metadata && result?.truncated) context.limited = true;
@@ -181,7 +216,7 @@
 
     async function verify(tabId) {
       const context = active.get(tabId);
-      if (context && !same((await current(tabId)).documents, context.documents)) throw changed();
+      if (context) validateCurrent(context, await current(tabId));
     }
 
     async function verifyInput(tabId, method, params) {
@@ -191,19 +226,17 @@
       if (method.startsWith("Input.")) {
         const point = Number.isFinite(params?.x) && Number.isFinite(params?.y);
         if (point) {
-          if (context.verifiedPoint && context.verifiedPoint.x === params.x && context.verifiedPoint.y === params.y) {
-            return;
-          }
           const subject = await describe({ tab_id: tabId, locators: [],
             points: [{ x: params.x, y: params.y }], focused: false, viewport: true });
           if (subject.unresolved || subject.subjects.some((id) => !context.scope.allowed.includes(id))) throw changed();
-          context.verifiedPoint = { x: params.x, y: params.y };
+          for (const id of subject.subjects) context.inputSubjects.add(id);
+          await verify(tabId);
         } else {
-          if (context.verifiedFocus) return;
           const subject = await describe({ tab_id: tabId, locators: [],
             points: [], focused: true, viewport: true });
           if (subject.unresolved || subject.subjects.some((id) => !context.scope.allowed.includes(id))) throw changed();
-          context.verifiedFocus = true;
+          for (const id of subject.subjects) context.inputSubjects.add(id);
+          await verify(tabId);
         }
       }
     }
@@ -230,5 +263,6 @@
     function limit(tabId) { const context = active.get(tabId); if (context) context.limited = true; }
     return { describe, run, route, frameIds, locator, verify, verifyInput, input, targetedInput, limit, cleaning, context: (tabId) => active.get(tabId), current };
   }
+  function scopeHasSettlement(scope) { return Object.hasOwn(scope, "settle_ms"); }
   return { create, inventory, same, changed, cleanupRequired, DOCUMENT_LIMIT, DOCUMENT_LIFECYCLE };
 });

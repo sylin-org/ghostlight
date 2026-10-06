@@ -426,6 +426,7 @@ mod tests {
             }
             let execution = std::sync::Mutex::new(super::super::ExecutionEvidence::default());
             let context = InvocationContext {
+                settlement_pending: &std::sync::atomic::AtomicBool::new(false),
                 provenance: None,
                 requirements: crate::governance::CapabilitySet::READ,
                 invocation: "parent",

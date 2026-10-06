@@ -5,18 +5,23 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.15] - 2026-10-05
 
-The browser and workbench trial on main is outside the stable-baseline 1.3.14 release.
-Linux background pointer focus remains unresolved. Windows mask expiry is superseded by the
-binary screenshot policy below; the Windows Chrome component journey and installed captures pass
-without masking.
+This release requires Chrome adapter 1.3.15 for the new document-scope mechanism.
+The adapter also supports service 1.3.14 during rollout. Older adapters do not implement
+the settlement and subject-scoped page work required by service 1.3.15.
 
 ### Changed
 
-- Trial quiet browser coexistence and scoped Show tab behavior (ADR-0186).
-- Remove dormant legacy mask code from the trial source adapter. Stable 1.3.14 ships the
-  service screenshot fix through the unchanged public adapter (ADR-0194).
+- Apply bounded best-effort settlement to read, inspect, find, screenshot, click,
+  scroll, hover, fill, type, key, drag, upload and script tools. A busy page proceeds
+  after at most one second of preparation; `visual_settle: false` skips that wait.
+  Semantic lookup and execution share the same preparation budget (ADR-0195).
+- Validate the documents and ancestry required by targeted work. Unrelated iframe
+  navigation no longer invalidates an otherwise current target.
+- Quiet browser coexistence and scoped Show tab behavior (ADR-0186).
+- Remove dormant legacy mask code while preserving complete screenshots and binary
+  screenshot permission (ADR-0194).
 - Show current work purpose, readable outcomes, permission causes and scoped history
   through the existing workbench and completion owners (ADRs 0187, 0190 and 0192).
 
@@ -24,12 +29,13 @@ without masking.
 
 - Retire cancelled evaluation and observation resources while preserving shared
   debugger lease owners and uncertain effects (ADR-0191).
+- Preserve a satisfied primary wait condition when optional visual settlement
+  expires. Explicit visual-settle and layout-stable waits keep their requested condition.
 - Keep form diagnostics outside page messaging and scope access to active documents.
 - Improve service-epoch reconciliation, native startup ordering and relay completion.
 
-Changes to privileged browser plumbing require a future compatible store adapter. The screenshot
-policy and current service-owned page runtime work through the existing installed adapter;
-local Windows acceptance required no extension reload. The extra trial changes remain outside published 1.3.14.
+Fixed install paths, existing service-runtime injection, policy enforcement, explicit
+human controls and uncertain-effect non-replay remain in place.
 
 ## [1.3.14] - 2026-10-02
 
