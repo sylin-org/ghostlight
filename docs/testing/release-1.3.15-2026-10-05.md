@@ -67,3 +67,11 @@ This corrects metadata only; the uploaded adapter bytes remain unchanged.
 
 Final candidate build, exact source revision, attestations, tag, public service delivery,
 Chrome review/publication and final reconciliation remain pending in this record.
+
+Run 37401781244 passed dependency policy, Linux source, process and CLI checks but
+stopped at focused typing after native pointer input. The guard reported a changed
+or focused work window and unknown effects; it was not bypassed or relabeled.
+The stable-baseline release workflow omitted OpenBox, although regular CI already
+uses it for background input. The release job now uses the same actual window-manager
+setup, retaining all protections and failure evidence. A new exact-source run must
+verify this correction; prior no-window-manager failure is preserved.
