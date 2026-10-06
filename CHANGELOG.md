@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.15] - 2026-10-05
 
-This release requires Chrome adapter 1.3.15 for the new document-scope mechanism.
-The adapter also supports service 1.3.14 during rollout. Older adapters do not implement
-the settlement and subject-scoped page work required by service 1.3.15.
+This release requires matching service and Chrome adapter 1.3.15 for the new
+document-scope mechanism and cancellation-aware injected runtime. Older adapters
+do not implement the settlement and subject-scoped page work required by service 1.3.15.
 
 ### Changed
 

@@ -53,5 +53,14 @@ Release credentials were checked through the existing scripts without printing v
 GitHub, npm and Chrome access passed. The old 1.3.13 Chrome submission was already
 cancelled; no existing submission was cancelled by this release work.
 
-Candidate build, exact source revision, attestations, tag, public service delivery,
+Initial source commit `149a62c4ac697d5f780cd1d7a476a33ad77d2eb0` was pushed and candidate
+run 37401291161 started. Its dependency policy job passed. Chrome Upload independently
+returned SUCCEEDED for the exact ZIP and draft 1.3.15. No review was submitted yet.
+
+Compatibility was tightened before publication: the older 1.3.14 injected runtime has
+neither observation tokens nor observation cancellation control. It is not claimed
+compatible with the new adapter. The release requires matching 1.3.15 service and adapter.
+This corrects metadata only; the uploaded adapter bytes remain unchanged.
+
+Final candidate build, exact source revision, attestations, tag, public service delivery,
 Chrome review/publication and final reconciliation remain pending in this record.
