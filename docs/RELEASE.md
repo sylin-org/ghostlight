@@ -26,6 +26,15 @@ directory work independent. Do not recreate the 0.8 master release conductor, ma
 date a build gate, commit generated checksums after tagging, or hold a release for an optional
 directory submission.
 
+## Branches
+
+Prepare all work on `dev`; build and publish its exact candidate commit. Advance
+`main` only after public delivery and compatible store delivery are observed.
+Do not create a release branch. Incomplete experiments stay outside the candidate
+in preserved archive tags or stashes until their work resumes on dev. Historical
+records remain intact. Dependency updates are made on dev without automated PR
+branches.
+
 ## Release unit
 
 One Ghostlight version comprises:

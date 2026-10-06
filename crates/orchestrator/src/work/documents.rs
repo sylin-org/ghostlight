@@ -221,7 +221,7 @@ impl ApplicationExecutor {
     pub(super) fn dispatch_documents(
         &self,
         context: &InvocationContext<'_>,
-        mut command: BrowserCommand,
+        command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         if matches!(
             command,
@@ -237,39 +237,10 @@ impl ApplicationExecutor {
                 );
                 return Err(BrowserError::DocumentAccess(decision));
             }
-            if let BrowserCommand::Screenshot { visual_settle, .. }
-            | BrowserCommand::ScreenshotRegion { visual_settle, .. } = &mut command
-            {
-                // Target lookup may already have spent this invocation's preparation.
-                // Direct capture retains its binary permission and avoids document inventory.
-                *visual_settle = Some(context.settlement_pending.swap(false, Ordering::SeqCst));
-            }
             return self.dispatch_physical(context, command);
         }
         let Some(requested) = RequestScope::from(&command) else {
             return self.dispatch_physical(context, command);
-        };
-        let preparation_started = Instant::now();
-        let settle_ms = if !matches!(
-            command,
-            BrowserCommand::Observe { .. }
-                | BrowserCommand::DescribeTargets { .. }
-                | BrowserCommand::DescribeFocused { .. }
-                | BrowserCommand::InspectDialog { .. }
-                | BrowserCommand::HandleDialog { .. }
-                | BrowserCommand::ReadDiagnostics { .. }
-                | BrowserCommand::StartRecording { .. }
-        ) && context.settlement_pending.swap(false, Ordering::SeqCst)
-        {
-            // Reserve at least half the remaining deadline for actual work.
-            (context
-                .deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis() as u64
-                / 2)
-            .min(language::settlement::MAX_WAIT_MS)
-        } else {
-            0
         };
         let inventory = match self.dispatch_physical(
             context,
@@ -278,7 +249,6 @@ impl ApplicationExecutor {
                 locators: requested.locators.clone(),
                 points: requested.points.clone(),
                 focused: requested.focused,
-                settle_ms,
             },
         )? {
             BrowserOutcome::Documents { tab_id, inventory } if tab_id == requested.tab => inventory,
@@ -365,11 +335,6 @@ impl ApplicationExecutor {
                 subjects: inventory.subjects,
                 mask: None,
                 watch_changes: !unrestricted_documents,
-                strict_tree: policy.handling == Handling::CompletePage
-                    || (requested.unbounded && !unrestricted_documents),
-                settle_ms: Duration::from_millis(settle_ms)
-                    .saturating_sub(preparation_started.elapsed())
-                    .as_millis() as u64,
             },
             primitive: Box::new(command),
         };

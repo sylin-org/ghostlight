@@ -5,6 +5,15 @@ repository, regardless of which tool or model you are. `CLAUDE.md` is a thin poi
 Assume you have no memory of prior sessions: everything you need is in this file and the
 documents it points to.
 
+## Branches
+
+There are only two branches: `main` and `dev`, locally and on the remote.
+`main` contains the published product. All implementation, experiments, dependency
+updates and release preparation happen on `dev`. Do not create feature, agent or
+release branches. Advance `main` from `dev` only after the release is publicly
+delivered with its compatible adapter. Preserve historical work in archive tags
+and pending edits in Git stashes; never discard it to clean up branch names.
+
 ## Read this first (in order)
 
 1. [docs/MEMORY.md](docs/MEMORY.md) -- the cross-agent project memory: the owner's standing

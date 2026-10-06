@@ -304,9 +304,7 @@ impl ApplicationExecutor {
             None
         };
         let snapshot = self.governance.snapshot();
-        let settlement_pending = AtomicBool::new(language::settlement::enabled(operation));
         let context = InvocationContext {
-            settlement_pending: &settlement_pending,
             requirements,
             provenance: prepared.provenance.as_deref(),
             invocation: &invocation,
@@ -1805,7 +1803,6 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
 
 #[derive(Clone, Copy)]
 struct InvocationContext<'a> {
-    settlement_pending: &'a AtomicBool,
     requirements: CapabilitySet,
     provenance: Option<&'a ConnectionEvidence>,
     invocation: &'a str,

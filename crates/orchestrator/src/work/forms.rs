@@ -672,31 +672,39 @@ impl ApplicationExecutor {
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let should_settle = value.visual_settle != Some(false);
-                    let settlement = if should_settle {
-                        match self.settle_wait(
+                    let (final_satisfied, final_elapsed_ms) = if should_settle {
+                        let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                        let remaining_deadline =
+                            context.deadline.saturating_duration_since(Instant::now());
+                        let settle_timeout =
+                            adapter_budget_ms(remaining_budget, remaining_deadline);
+                        match self.dispatch(
                             context,
-                            lease,
-                            selected,
-                            locator.clone(),
-                            value.timeout_ms.saturating_sub(elapsed_ms),
+                            BrowserCommand::Observe {
+                                tab_id: selected.physical_id,
+                                condition: "visual_settle".into(),
+                                value: None,
+                                locator: locator.clone(),
+                                timeout_ms: settle_timeout,
+                            },
                         ) {
-                            Ok(observation) => observation,
-                            Err(error) => {
-                                return self.browser_failure(
-                                    context,
-                                    decision,
-                                    error,
-                                    Some(selected.physical_id),
+                            Ok(BrowserOutcome::Observed {
+                                tab_id: settle_tab_id,
+                                satisfied: settle_satisfied,
+                                elapsed_ms: settle_elapsed_ms,
+                                readiness: settle_readiness,
+                            }) if settle_tab_id == selected.physical_id => {
+                                let _ = lease.update_readiness(&selected.handle, settle_readiness);
+                                (
+                                    settle_satisfied,
+                                    elapsed_ms.saturating_add(settle_elapsed_ms),
                                 )
                             }
+                            _ => (false, elapsed_ms),
                         }
                     } else {
-                        None
+                        (true, elapsed_ms)
                     };
-                    let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                    let final_satisfied = true;
-                    let final_elapsed_ms =
-                        elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
                     let status = if final_satisfied {
                         Status::Succeeded
                     } else {
@@ -715,7 +723,6 @@ impl ApplicationExecutor {
                         "elapsed_ms": final_elapsed_ms,
                         "readiness": readiness(selected.readiness),
                         "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
                     });
                     return Terminal {
                         result: InvocationResult::new(
@@ -798,31 +805,39 @@ impl ApplicationExecutor {
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let should_settle = value.visual_settle != Some(false);
-                    let settlement = if satisfied && should_settle {
-                        match self.settle_wait(
+                    let (final_satisfied, final_elapsed_ms) = if satisfied && should_settle {
+                        let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                        let remaining_deadline =
+                            context.deadline.saturating_duration_since(Instant::now());
+                        let settle_timeout =
+                            adapter_budget_ms(remaining_budget, remaining_deadline);
+                        match self.dispatch(
                             context,
-                            lease,
-                            selected,
-                            locator.clone(),
-                            value.timeout_ms.saturating_sub(elapsed_ms),
+                            BrowserCommand::Observe {
+                                tab_id: selected.physical_id,
+                                condition: "visual_settle".into(),
+                                value: None,
+                                locator: locator.clone(),
+                                timeout_ms: settle_timeout,
+                            },
                         ) {
-                            Ok(observation) => observation,
-                            Err(error) => {
-                                return self.browser_failure(
-                                    context,
-                                    decision,
-                                    error,
-                                    Some(selected.physical_id),
+                            Ok(BrowserOutcome::Observed {
+                                tab_id: settle_tab_id,
+                                satisfied: settle_satisfied,
+                                elapsed_ms: settle_elapsed_ms,
+                                readiness: settle_readiness,
+                            }) if settle_tab_id == selected.physical_id => {
+                                let _ = lease.update_readiness(&selected.handle, settle_readiness);
+                                (
+                                    settle_satisfied,
+                                    elapsed_ms.saturating_add(settle_elapsed_ms),
                                 )
                             }
+                            _ => (false, elapsed_ms),
                         }
                     } else {
-                        None
+                        (satisfied, elapsed_ms)
                     };
-                    let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                    let final_satisfied = satisfied;
-                    let final_elapsed_ms =
-                        elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
                     let status = if final_satisfied {
                         Status::Succeeded
                     } else {
@@ -840,7 +855,6 @@ impl ApplicationExecutor {
                         "satisfied": final_satisfied,
                         "elapsed_ms": final_elapsed_ms,
                         "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
                     });
                     return Terminal {
                         result: InvocationResult::new(
@@ -881,41 +895,49 @@ impl ApplicationExecutor {
                         let _ = lease.update_readiness(&selected.handle, browser_readiness);
                         let is_composite_default =
                             value.condition == "load_ready" || value.condition == "target_present";
-                        let should_settle = if matches!(
-                            value.condition.as_str(),
-                            "visual_settle" | "layout_stable"
-                        ) {
-                            false
-                        } else if is_composite_default {
+                        let should_settle = if is_composite_default {
                             value.visual_settle != Some(false)
                         } else {
                             value.visual_settle == Some(true)
                         };
-                        let settlement = if satisfied && should_settle {
-                            match self.settle_wait(
+                        let (final_satisfied, final_elapsed_ms) = if satisfied
+                            && should_settle
+                            && value.condition != "visual_settle"
+                            && value.condition != "layout_stable"
+                        {
+                            let remaining_budget = value.timeout_ms.saturating_sub(elapsed_ms);
+                            let remaining_deadline =
+                                context.deadline.saturating_duration_since(Instant::now());
+                            let settle_timeout =
+                                adapter_budget_ms(remaining_budget, remaining_deadline);
+                            match self.dispatch(
                                 context,
-                                lease,
-                                selected,
-                                locator.clone(),
-                                value.timeout_ms.saturating_sub(elapsed_ms),
+                                BrowserCommand::Observe {
+                                    tab_id: selected.physical_id,
+                                    condition: "visual_settle".into(),
+                                    value: None,
+                                    locator: locator.clone(),
+                                    timeout_ms: settle_timeout,
+                                },
                             ) {
-                                Ok(observation) => observation,
-                                Err(error) => {
-                                    return self.browser_failure(
-                                        context,
-                                        decision,
-                                        error,
-                                        Some(selected.physical_id),
+                                Ok(BrowserOutcome::Observed {
+                                    tab_id: settle_tab_id,
+                                    satisfied: settle_satisfied,
+                                    elapsed_ms: settle_elapsed_ms,
+                                    readiness: settle_readiness,
+                                }) if settle_tab_id == selected.physical_id => {
+                                    let _ =
+                                        lease.update_readiness(&selected.handle, settle_readiness);
+                                    (
+                                        settle_satisfied,
+                                        elapsed_ms.saturating_add(settle_elapsed_ms),
                                     )
                                 }
+                                _ => (false, elapsed_ms),
                             }
                         } else {
-                            None
+                            (satisfied, elapsed_ms)
                         };
-                        let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                        let final_satisfied = satisfied;
-                        let final_elapsed_ms =
-                            elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
                         let status = if final_satisfied {
                             Status::Succeeded
                         } else {
@@ -939,7 +961,6 @@ impl ApplicationExecutor {
                             "elapsed_ms": final_elapsed_ms,
                             "readiness": readiness(browser_readiness),
                             "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
                         });
                         Terminal {
                             result: InvocationResult::new(
@@ -965,47 +986,6 @@ impl ApplicationExecutor {
                 }
             },
         )
-    }
-
-    /// Best-effort visual preparation never changes a satisfied primary wait condition.
-    fn settle_wait(
-        &self,
-        context: &InvocationContext<'_>,
-        lease: &WorkspaceLease,
-        selected: &SelectedTab,
-        locator: Option<String>,
-        budget_ms: u64,
-    ) -> Result<Option<(bool, u64)>, crate::browser::BrowserError> {
-        let budget = budget_ms.min(crate::language::settlement::MAX_WAIT_MS);
-        if budget == 0 {
-            return Ok(None);
-        }
-        match self.dispatch(
-            context,
-            BrowserCommand::Observe {
-                tab_id: selected.physical_id,
-                condition: "visual_settle".into(),
-                value: None,
-                locator,
-                timeout_ms: adapter_budget_ms(
-                    budget,
-                    context.deadline.saturating_duration_since(Instant::now()),
-                ),
-            },
-        )? {
-            BrowserOutcome::Observed {
-                tab_id,
-                satisfied,
-                elapsed_ms,
-                readiness,
-            } if tab_id == selected.physical_id => {
-                let _ = lease.update_readiness(&selected.handle, readiness);
-                Ok(Some((satisfied, elapsed_ms)))
-            }
-            _ => Err(crate::browser::BrowserError::Protocol(
-                "expected visual settlement observation".into(),
-            )),
-        }
     }
 
     fn type_focused(

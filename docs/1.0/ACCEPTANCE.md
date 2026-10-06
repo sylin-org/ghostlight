@@ -549,20 +549,6 @@ unsupported; source portability does not replace a live Linux runtime check.
 
 ## Consolidated tool surface (ADR-0162)
 
-### Bounded preparation (ADR-0195)
-
-All thirteen ordinary page tools accept `visual_settle`, default true. Each call
-spends at most 1000 ms on optional preparation and proceeds when the page stays busy.
-Opt-out spends no preparation budget. Targeted operations tolerate unrelated frame
-churn while required document replacement, excluded input and human controls stop work.
-Composite waits preserve satisfied primary conditions and separately report visual
-settlement. Explicit visual and layout waits retain their requested conditions.
-Verify actual effects and retained values in the ordinary installed browser, including
-animation and auxiliary-frame navigation. This does not prove the original incident's
-exact routing trigger. Older adapter compatibility is verified independently.
-
-### Consolidated inputs
-
 1. No schema exposes request host/capability restrictions, flow dry-run, or browser_sequence.
    Their presence is rejected without browser effects, including obsolete fields in later children.
 2. Short and named flows use ordinary tool arguments. IDs default deterministically, duplicates

@@ -165,7 +165,7 @@ async function journey() {
     browser.send({ kind: "hello", major: 1, token: endpoint.token });
     browser.send({ kind: "hello", major: 3, adapter_version: "1.0.0", browser_id: "browser_c1", adapter_epoch: "adapter_c1",
       capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "presentation", "adapter_liveness"]
-        .map(name => ({ name, revision: { document_scope: 2, navigation: 2, semantic_document: 4 }[name] ?? 1 })) });
+        .map(name => ({ name, revision: { navigation: 2, semantic_document: 4 }[name] ?? 1 })) });
     await browser.take(value => value.kind === "hello_accepted", "adapter negotiation");
     let tab, holdNextRead = false, heldRead;
     const physicalCommands = [];

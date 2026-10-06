@@ -671,14 +671,3 @@ History and policy simulation use a bounded line reader, preserve valid adjacent
 report malformed/oversized omissions. Recovery markers are separate content-free JSONL entries,
 not operation receipts. A failed sync can leave bytes behind, and a crash during an outage can lose
 volatile gap counts; no atomic website/disk coupling or tamper-proof guarantee is made.
-
-## Bounded page preparation (ADR-0195)
-
-Work supplies one optional settlement budget through the negotiated document scope.
-The adapter uses the published bounded observation mechanism before ordinary page work,
-checking cancellation before and after that read. Later dispatch retains executor custody.
-The page runtime shares the remaining budget across useful-content and form preparation.
-Expiration permits current valid work; it never authorizes an unknown target or a replay.
-Targeted validation follows the actual documents and ancestry, not unrelated active frames.
-Broad restricted operations retain complete-tree checks where their promise requires them.
-Composite waits preserve their primary condition independently of optional visual readiness.

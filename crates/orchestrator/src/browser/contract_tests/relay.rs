@@ -105,15 +105,14 @@ fn an_older_capability_revision_refuses_before_dispatch() {
                 tab_id: 1,
                 locators: vec![],
                 points: vec![],
-                focused: false,
-                settle_ms: 0
+                focused: false
             },
             Instant::now() + Duration::from_millis(200),
             &AtomicBool::new(false)
         ),
         Err(BrowserError::CapabilityVersion {
             capability: adapter_capability::DOCUMENT_SCOPE.into(),
-            required: adapter_capability::DOCUMENT_SCOPE_REVISION_SETTLEMENT,
+            required: 1,
             advertised: 0
         })
     );

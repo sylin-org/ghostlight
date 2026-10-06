@@ -26,43 +26,6 @@ fn inventory(child_supported: bool) -> DocumentInventory {
     }
 }
 
-#[test]
-fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
-    for enabled in [true, false] {
-        let (executor, browser, _, workspace, _) = fixture();
-        open(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 7,
-            targets: vec![ObservedTarget {
-                locator: "0:doc_top:locator_button".into(),
-                role: "button".into(),
-                name: "Save".into(),
-                state: vec![],
-                credential_class: false,
-            }],
-        }));
-        browser.push(Ok(BrowserOutcome::Activated {
-            tab: tab(7, "https://example.com/"),
-            subject: None,
-            committed_urls: vec![],
-        }));
-        let result = executor.execute(
-            &workspace,
-            "browser_click",
-            json!({"selector":{"name":"Save","exact":true},"visual_settle":enabled}),
-            None,
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-        let scopes = browser.scopes();
-        assert_eq!(scopes.len(), 2);
-        assert!(scopes[0].settle_ms <= 1000);
-        assert_eq!(scopes[0].settle_ms > 0, enabled);
-        assert_eq!(scopes[1].settle_ms, 0);
-        assert!(scopes.iter().all(|scope| !scope.strict_tree));
-    }
-}
-
 fn policy_file(mode: &str, notice: &str, child_read: bool) -> PathBuf {
     let path = std::env::temp_dir().join(format!("ghostlight-h6-{}.json", Uuid::new_v4()));
     let mut grants = vec![

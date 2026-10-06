@@ -1,48 +1,15 @@
 # STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-05 (1.3.15 release integration in progress).
+Last updated: 2026-10-02 (stable-baseline screenshot release published).
 
-## Settlement-only 1.3.15 preparation
+## Two-branch correction (2026-10-05)
 
-The authorized release carries only bounded settlement on public 1.3.14.
-The initial main-based attempt accidentally included the older unpublished browser/workbench
-trial and reproduced its Linux focus failure. That candidate remains preserved on
-`codex/release-1.3.15`, outside this release. No public 1.3.15 package has been published.
-The store has an uploaded draft from that attempt; replace it with the verified narrowed
-artifact before submission. Public service remains 1.3.14 and public adapter 1.3.12.
-
-ADR-0195 records one optional wait across thirteen page tools, subject/ancestry validation
-and separate visual settlement facts. The narrowed adapter uses published observation and
-input mechanisms. Source, real-browser, old-service compatibility, package custody and
-installed acceptance are being verified for this source. Older reports remain historical.
-
-The narrowed Windows source, fresh process and 70-check Chrome lanes pass. The same
-adapter also passes all 70 checks with the checksum-verified public 1.3.14 binaries.
-Installed narrowed acceptance also passes all 40 calls across thirteen tool families
-after the owner's reload, with independent effect counters and owned-tab cleanup.
-The replacement Chrome draft upload succeeded. Linux candidate packages, exact artifact
-custody and public publication remain pending. The stale PowerShell fixture capability
-was corrected without changing production source; the fresh CLI journey passes.
-
-## Bounded settlement implementation (2026-10-05; source and installed acceptance passed)
-
-The owner authorized a common best-effort default across ordinary page tools and live
-verification. ADR-0195 records the change: one maximum 1000 ms budget per call, explicit
-opt-out, subject/ancestry checks for targeted work, and preserved primary conditions in
-composite waits. Broad restricted document checks and explicit visual waits remain.
-
-The unrelated-frame counterproof is repaired in the adapter module. Formatting, strict
-Clippy, 628 Rust tests, 414 extension tests, syntax, fresh process, CLI and workbench
-checks pass. After the owner's adapter reload, the development loop deployed only the
-authority. Two installed-browser runs passed all thirteen tool families with and
-without settlement during animation and iframe churn. Independent counters confirmed
-actual input effects and retained values. The final run recorded 40 calls; opt-out
-removed roughly one second of preparation. All exact owned fixture tabs were closed.
-The first run's background-input refusal remains separately recorded. The
-[verification report](testing/bounded-settlement-2026-10-05.md) records identity, gates,
-timings and the still-unproven exact SharePoint routing trigger. The local build also
-contains existing installation and UI source candidates; their broader acceptance
-claims remain separate work. No public version or publication is changed.
+The owner requires only main and dev. Main's runtime and active contracts are restored
+to the publicly delivered 1.3.14 baseline with the public 1.3.12 adapter. This ordinary
+commit preserves history; no force-push rewrites main. Dev carries release preparation.
+Previous branch heads are preserved under `archive/branches/2026-10-05/` tags.
+The two other worktrees retain their files and commits on detached heads. Original
+pending edits remain in Git stashes. Automated version PR branches are disabled.
 
 ## Screenshot-only 1.3.14 published
 
@@ -59,7 +26,7 @@ submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987);
 Website commit `4aea5a0` deploys successfully. Independent HTTP reads confirm release 1.3.14 and
 the exact current install guide. The final online public-surface check passes all five channels.
 
-The browser/workbench trial remains preserved in main and separate branches, outside this tag.
+The browser/workbench trial remains preserved in archive tags, outside main and this tag.
 Its source version marker remains 1.3.13; it is unpublished source, not the source of the public
 1.3.13 or 1.3.14 artifacts. A future trial publication needs a new version and its own acceptance.
 Linux background pointer focus remains unresolved in that trial. The original dirty checkout is

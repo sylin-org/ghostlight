@@ -51,16 +51,6 @@ capacity refusal returns `reason: capacity`, no effect, and safe guidance for a 
 started. Human Pause/Stop preserves its fixed directive and terminal history without repeated
 guardrail popups while queued work drains (ADR-0160).
 
-Ordinary page tools share optional `visual_settle`, default true: read, inspect, find,
-screenshot, click, scroll, hover, fill, type, key input, drag, upload and script execution.
-Settlement is best effort, with one maximum 1000 ms preparation budget per invocation.
-A quiet page completes preparation sooner; a busy page remains usable after that budget.
-False skips implicit waiting. Lookup and execution share the budget; each flow child has
-its own preference within the parent deadline. Actual targets and permissions still apply.
-Composite waits keep a met primary condition when optional settlement expires and report
-`visual_settled` separately. Explicit visual/layout-stability waits retain their condition.
-See [ADR-0195](../adr/0195-bounded-settlement-and-subject-scoped-page-work.md).
-
 ## Result envelope
 
 Every invocation returns one envelope:
@@ -593,7 +583,7 @@ are limited to inspected content; absence across unseen content is never establi
 Human notice preferences do not remove coverage from model results. Excluded document hosts,
 identities, URLs, labels, values, and locators are not copied into the model/audit coverage.
 The workbench keeps bounded excluded host names only in volatile human details.
-Screenshots use the separate binary `browser.screenshots.enabled` permission (ADR-0195): an allowed
+Screenshots use the separate binary `browser.screenshots.enabled` permission (ADR-0194): an allowed
 capture returns the complete rendered image, including embedded content. It has no frame inventory,
 partial coverage, or masking. Tab Read checks still apply. Frame grants continue to govern text,
 targets, and coordinate actions independently. Unverifiable document access and recording stops at the document boundary

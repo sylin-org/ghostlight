@@ -649,7 +649,6 @@ mod tests {
                     locators: vec![],
                     points: vec![],
                     focused: false,
-                    settle_ms: 0,
                 },
             );
             reactor.react(&DomainEvent::WorkBlocked {

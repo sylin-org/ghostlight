@@ -25,6 +25,12 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Only main and dev.** The owner directed this on 2026-10-05. Main contains the
+  published product; every new change and release candidate comes from dev. No
+  feature, agent or release branches. Archive tags retain earlier branch heads,
+  and stashes retain pending edits. Do not merge unfinished trials into main.
+
+
 - **The browser offering is Chromium-only.** Chrome, Edge, Brave, and Chromium are the
   supported browsers. Do not describe a Firefox adapter as paused, planned, or
   awaiting parity in current product contracts or public guidance (ADR-0184). Preserve
@@ -39,12 +45,17 @@ the owner wants, and what this project learned the hard way.
   defect, not browser troubleshooting for the user. One production installation per OS user;
   installing or invoking a package on a development machine must use the selected development
   authority. ADR-0167 records the mandate and supersedes installation-local production election.
+  The owner's 2026-10-02 realignment defines delight as quiet confident success, not reasonable
+  error messages. Judge complete journeys by first-attempt completion, unnecessary calls, human
+  interruptions, reliable confirmation, and cleanup. ADR-0192 records the bounded local candidate;
+  its fixture evidence does not replace independent native acceptance.
 
 - **Use fixed install paths and the existing injector.** The owner rejected per-release
   installation directories and an additional deployment framework on 2026-10-02.
   Package downloads replace one permanent sibling set. Ordinary service updates carry
   the current injected page runtime through the existing extension, without extension
-  restamping or reload. Privileged extension changes have independent releases.
+  restamping or reload. When privileged extension plumbing changes, its visible release
+  number can align with the service; equality is not an ordinary update prerequisite.
   ADR-0193 records the implementation boundary.
 
 - **Package updates must prevent split-version authority states (npx update / install).** When a user
@@ -123,6 +134,10 @@ the owner wants, and what this project learned the hard way.
 - **Preserve product identity; redesign internals deliberately.** The name, the original icon bytes,
   the visual language, the motion character, and user expectations are identity. Model-facing tools
   and descriptions are mechanisms the orchestrator owns and may redesign.
+  Ghostlight's About must keep its complete TCG-like guardian card: lantern pixel art, softly lit
+  dark frame, cyan divider/diamond, circular version medallion, name/title, ability icons, and
+  flavor line, with the adjacent real local facts and help links. Normal-screen refinement must
+  not flatten or replace that identity.
 - **Prefer the root fix.** No wrapper, alternate id, guarded installer, or parallel protocol added
   to route around the abstraction that should own the change.
 - **Understand the architecture before fixing.** Several failures in one capability means stop
@@ -155,6 +170,14 @@ the owner wants, and what this project learned the hard way.
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **Solve the immediate need, then reveal useful depth.** Lead Ghostlight with private, controlled
+  browser access and legible agent activity. Its integrations across MCP clients, models and
+  harnesses, and its configurable policies should be understandable optional depth. This is
+  product direction, not permission to make unverified privacy or compatibility claims.
+- **Activity lists lead with tool identity.** The owner rejected replacing the white tool column
+  with repeated Completed/Effects uncertain labels. Keep exact tool names primary, outcomes
+  secondary, and exceptional recovery visible. Evaluate the whole mixed list for scanability;
+  successful technical checks or one readable card do not prove user comprehension (ADR-0187).
 - **Absorb ordinary bursts.** The owner rejected a refusal-led local-resilience experience. Keep
   permitted work flowing within its original deadline, make sustained waiting legible, contain
   stalled connections, preserve other sessions and human controls, and recover without replay.
@@ -319,13 +342,13 @@ the owner wants, and what this project learned the hard way.
   Ghostlight's own key. Re-check at the writer, preserve siblings, and back up first; malformed
   whole documents remain manual (ADR-0154).
 
-- **Settlement is a timing preference, not an action prerequisite.** The owner directs a
-  bounded default across similar page tools, then current valid execution even on busy pages.
-  `visual_settle:false` skips waiting. Unrelated active-frame churn cannot invalidate a targeted
-  operation; explicit waits and configured document authority retain their actual promises
-  (ADR-0195).
-
 ## Durable lessons
+
+- **Execution world is part of browser correctness.** A service-owned MAIN-world runtime cannot
+  use extension-context messaging. Another installed extension can expose a webpage messaging API
+  with different calling requirements, so an isolated test profile can conceal a startup failure.
+  Keep optional diagnostics outside automation initialization, project local rows at each physical
+  boundary, and retain exact document custody through worker suspension (ADR-0188).
 
 - **Warm MCP success does not prove cold desktop demand-start.** A client can
   filter DISPLAY, Wayland, XDG runtime and session-bus variables from its stdio
@@ -628,7 +651,30 @@ Every one of these cost something to learn.
   calling into a native event loop that shutdown may already have destroyed; a console handler alone
   is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment).
 
+- **A reply is not yet validated effect evidence.** Match request identity and admitted document
+  scope before confirming effects. Preserve acknowledged keyboard landings before later strokes.
+  Journal a fresh command before the first awaited save and serialize snapshots across overlapping
+  commands and acknowledgments. Work freezes action truth; Language projects its readings (ADR-0190).
+
+- **A timed-out wait is not resource cleanup.** Correlated Cancel must retire the exact evaluator,
+  attachment generation and document scope before observations can enter. Confirm custody release
+  and handler settlement; require exclusive attachment ownership before targeted detach. All
+  ordinary releases must carry their acquired generation token; register counts after serialized
+  setup and fence old finally from new ownership. Page effects may continue after
+  release, so cleanup does not revise an unknown result or authorize replay (ADR-0191).
+
+- **The first next read proves cancellation recovery.** Use a long observation budget and a
+  still-running finite animation. Read before polling for scope release, retrying or resetting.
+  Zero active requests/evaluations/watchers does not prove document custody released. Dispose
+  exact page observation tokens and await the original handler/finally within the existing
+  cleanup bound; count its timers, RAF and listeners separately from page animation (ADR-0191).
+
 ## Where to look
+
+- **A Chrome tab can contain several outermost pages.** Build document authority and routing
+  from the active tree, excluding prerender, cached and pending-deletion pages before root checks.
+  Keep exact active identities and fail closed on ambiguous lifecycle or malformed active graphs.
+  Generic verification refusals need per-operation evidence before assigning a cause (ADR-0189).
 
 | Need | Source |
 | --- | --- |
