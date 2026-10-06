@@ -119,3 +119,29 @@ heads. Stashes retain the original inputs and later pending docs. Main was resto
 the exact published runtime through an ordinary correction prepared on dev; no history
 was rewritten. GitHub restricts new branch creation to main/dev, and automatic version
 PR branches are disabled. Dev holds the release until the compatible adapter is public.
+
+Independent candidate verification passed exact size and SHA-256 checks for all 18
+artifacts. The candidate extension hash matches the submitted Chrome ZIP. Tag
+`v1.3.15` resolves to the candidate's exact source, `6e35a0bb`. The existing GitHub
+publisher verified repository-, workflow- and source-bound provenance for all 20
+files, then created a draft containing those 20 assets:
+[GitHub draft](https://github.com/sylin-org/ghostlight/releases/tag/untagged-0ed07a325f34a79b1163).
+The draft remains private to release maintainers; it is not public service delivery.
+Chrome's independent status still reports 1.3.15 PENDING_REVIEW and public 1.3.12.
+No npm, MCP Registry or website 1.3.15 publication has occurred.
+
+Main `86952a8a` has byte-identical runtime and adapter source to public v1.3.14,
+with accurate public docs and repository housekeeping. Dev retains the exact tested
+1.3.15 runtime plus the branch policy. GitHub ruleset 24553376 prohibits creation
+of other branches; existing main protection remains. All previous 49 local/remote
+branch heads have checked archive tags, and both other worktrees kept their exact
+commits and file state. The original inputs remain in stash
+`517d4a6cc020f57af81d12e7e19d24270dfd12f8`; original unrelated reports are restored
+to the ordinary checkout. The extra temporary policy stash is removed after its
+reports are hash-verified, since the final policy is committed.
+
+Resume publication after Chrome approval using the existing individual publisher
+commands and this local candidate directory. Publish/observe Chrome first, publish
+the GitHub draft, publish the checksum-bound npm tarball and verify fresh delivery,
+then reconcile Registry, public metadata and website before advancing main from dev.
+Do not rebuild or retag this already verified candidate for documentation changes.

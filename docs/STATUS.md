@@ -35,6 +35,15 @@ staged review, pending approval. Service publication waits for compatible public
 store delivery. Main remains at the published release during this wait. The stale PowerShell fixture capability
 was corrected without changing production source; the fresh CLI journey passes.
 
+The verified source is tagged `v1.3.15` at `6e35a0bb`. All 18 candidate artifacts
+passed independent size/hash checks; the existing publisher verified GitHub build
+provenance for all 20 release files before creating the GitHub draft. The draft has
+20 assets and is not public. Chrome API still reports 1.3.15 PENDING_REVIEW and
+public 1.3.12. npm, registry, website and public main remain at 1.3.14 while waiting.
+After Chrome approval, publish the adapter, observe public delivery, then publish
+the prepared GitHub draft and npm package, reconcile downstream metadata and advance
+main from dev. Existing owner publication authorization remains in force.
+
 ## Bounded settlement implementation (2026-10-05; source and installed acceptance passed)
 
 The owner authorized a common best-effort default across ordinary page tools and live
