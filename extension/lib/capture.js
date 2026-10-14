@@ -113,6 +113,7 @@
     return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= tolerance;
   }
 
+  /** Measures an encoded JPEG: resolves `{ width, height }` in pixels. Rejects when the browser cannot decode it. */
   async function decodeImageSize(base64) {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -261,5 +262,5 @@
     return Object.freeze({ view, capture });
   }
 
-  return Object.freeze({ create, outputScale, clipFor });
+  return Object.freeze({ create, outputScale, clipFor, decodeImageSize });
 });
