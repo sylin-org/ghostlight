@@ -15,10 +15,9 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-3`. The port accepts protocol-4 hellos beside protocol 3. A protocol-4
-connection is ready at once, routes events and receipts, and answers every command with
-`CapabilityVersion` until service-5 translates work into primitives. Nothing sets the page assets
-yet (switch-2 wires them), so a running service still refuses protocol 4.
+Next slice: `service-4`. `chromium/level4/{world,locator,tree,scope}.rs` exist and are tested but
+unwired: `merge.rs`, `keys.rs` and `geometry.rs` come next, then the Link (service-5). Nothing sets
+the page assets yet (switch-2 wires them), so a running service still refuses protocol 4.
 
 ## Landed
 
@@ -26,6 +25,7 @@ yet (switch-2 wires them), so a running service still refuses protocol 4.
 |---|---|---|
 | service-1-p4-wire | `chromium/level4/{mod.rs, wire.rs}`: protocol 4 frames, primitives, arguments, outcomes, `Failure`, `CallFailure`, and tolerant mirrors of the physical vocabulary. 23 inline tests from the spec's JSON examples. | see `git log` |
 | service-2-p4-attach | `Adapter::select` reads the first frame as JSON (`protocol` field for level 4, `major` for level 3); `Level::Four`; `level4/connection.rs` (hello rules, reader, `Receipts`, `write_request`); `level4/fake.rs` FakeExtension; `adapter_incompatible` error frame with its sentence in `language/adapter.rs`; `BrowserSummary.protocol` and the workbench row; `set_protocol4_assets`. Level-3 byte goldens in `contract_tests/level3_bytes.rs`, captured before the change. | see `git log` |
+| service-3-p4-world-scope | `level4/world.rs` (one typed constructor per world kind with its scope and effect class, `AssetErrorCode` with `is_pre_effect`, envelope decoding, typed answer values), `locator.rs` (`{frame}:{loader}:{local}` codec), `tree.rs` (`FrameTree` from an inventory or from the admitted documents, depth-first, placeholders, owner-box chains), `scope.rs` (`Scope`, `PlannedCall`: admission, guards, settle budget, observation). Ported from `documents.test.js`; all 32 payloads equal `tests/golden/protocol4/world`. | see `git log` |
 
 ## Notes
 
@@ -47,3 +47,11 @@ yet (switch-2 wires them), so a running service still refuses protocol 4.
 - Optional arguments follow the spec's Rust sketch literally: only the fields the spec marks
   `skip_serializing_if` are left out when absent; the others serialize as `null`. switch-2 binds
   both sides to the shared fixtures and reconciles any difference.
+- `FrameTree` puts unseen placeholders (`unseen.{n}`) under the top, after its real children. A
+  frame is supported when it is reachable and its URL is http or https, as the level-3 inventory
+  decided.
+- World coordinates are written as whole numbers when they are whole, so a built message equals
+  the golden fixture value for value. `world::Rect` is `{left, top, width, height}` (the asset's
+  `getBoundingClientRect` shape); `wire::Rect` is the capture clip.
+- `Scope::doc_of` decodes a locator and does not check the tree: `Scope::call` refuses a document
+  that is not admitted, so a replaced document fails there, before anything is sent.

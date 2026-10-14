@@ -1,0 +1,557 @@
+use serde_json::json;
+
+use super::*;
+
+fn field(locator: &str, value: &str) -> PhysicalField {
+    PhysicalField {
+        locator: locator.into(),
+        value: value.into(),
+    }
+}
+
+fn file() -> PhysicalFile {
+    PhysicalFile {
+        name: "notes.txt".into(),
+        media_type: "text/plain".into(),
+        data: "aGVsbG8=".into(),
+        size: 5,
+    }
+}
+
+fn two_fields() -> [PhysicalField; 2] {
+    [
+        field("locator_a1b2c3d4_6", "Ada Lovelace"),
+        field("locator_a1b2c3d4_7", "ada@example.com"),
+    ]
+}
+
+#[test]
+fn every_kind_has_one_constructor_and_the_classes_of_its_table_row() {
+    let fields = two_fields();
+    let files = [file()];
+    let table = [
+        (
+            read_text(None, None, 10),
+            kind::READ_TEXT,
+            Content,
+            Read,
+            true,
+        ),
+        (inspect("controls", 5), kind::INSPECT, Content, Read, true),
+        (
+            inspect_tree(None, 6, 400),
+            kind::INSPECT_TREE,
+            Content,
+            Read,
+            true,
+        ),
+        (find("Save", "control", 8), kind::FIND, Content, Read, true),
+        (
+            query_semantic("Email", None, false, true),
+            kind::QUERY_SEMANTIC,
+            Content,
+            Read,
+            true,
+        ),
+        (describe(&[]), kind::DESCRIBE, Content, Read, false),
+        (
+            describe_focused(),
+            kind::DESCRIBE_FOCUSED,
+            Content,
+            Read,
+            false,
+        ),
+        (
+            verify_focused_text(false),
+            kind::VERIFY_FOCUSED_TEXT,
+            Content,
+            Read,
+            false,
+        ),
+        (box_("l"), kind::BOX, Content, Read, false),
+        (
+            prepare_fill(&fields, false, None),
+            kind::PREPARE_FILL,
+            Content,
+            Read,
+            false,
+        ),
+        (
+            verify_fill_retained(&fields, false, 3_000),
+            kind::VERIFY_FILL_RETAINED,
+            Content,
+            Read,
+            false,
+        ),
+        (
+            observe("load_ready", None, None, 5_000, false),
+            kind::OBSERVE,
+            Content,
+            Read,
+            false,
+        ),
+        (activate("l"), kind::ACTIVATE, Content, Prepare, false),
+        (hover("l"), kind::HOVER, Content, Prepare, false),
+        (focus("l"), kind::FOCUS, Content, Prepare, false),
+        (
+            scroll_point(1.0, 2.0),
+            kind::SCROLL_POINT,
+            Content,
+            Prepare,
+            false,
+        ),
+        (
+            viewport_point(1.0, 2.0),
+            kind::VIEWPORT_POINT,
+            Metadata,
+            Read,
+            false,
+        ),
+        (scroll_offset(), kind::SCROLL_OFFSET, Metadata, Read, false),
+        (
+            hit_point(1.0, 2.0, false),
+            kind::HIT_POINT,
+            Metadata,
+            Read,
+            false,
+        ),
+        (owner_box(), kind::OWNER_BOX, Metadata, Read, false),
+        (
+            owner_probe(1.0, 2.0),
+            kind::OWNER_PROBE,
+            Metadata,
+            Read,
+            false,
+        ),
+        (focus_probe(), kind::FOCUS_PROBE, Metadata, Read, false),
+        (
+            require_focused(),
+            kind::REQUIRE_FOCUSED,
+            Metadata,
+            Read,
+            false,
+        ),
+        (
+            fill_local(&fields[0], false),
+            kind::FILL_LOCAL,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            focus_text_field(&fields[0], false),
+            kind::FOCUS_TEXT_FIELD,
+            Content,
+            Effect,
+            true,
+        ),
+        (
+            submit_fill(&fields, "l", false),
+            kind::SUBMIT_FILL,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            type_text("l", "t", true, false),
+            kind::TYPE_TEXT,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            clear_focused(false),
+            kind::CLEAR_FOCUSED,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            scroll(None, None, None),
+            kind::SCROLL,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            upload_files("l", &files),
+            kind::UPLOAD_FILES,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            drop_files(1.0, 2.0, &files),
+            kind::DROP_FILES,
+            Content,
+            Effect,
+            false,
+        ),
+        (
+            attach_file("l", "demo.gif"),
+            kind::ATTACH_FILE,
+            Content,
+            Effect,
+            false,
+        ),
+    ];
+    assert_eq!(table.len(), 32);
+    for (message, name, scope, effect, settles) in table {
+        assert_eq!(message.kind(), name);
+        assert_eq!(message.payload()["kind"], name);
+        assert_eq!(message.scope_class(), scope, "{name}");
+        assert_eq!(message.effect_class(), effect, "{name}");
+        assert_eq!(message.takes_settle(), settles, "{name}");
+    }
+}
+
+#[test]
+fn constructors_build_the_payloads_the_assets_read() {
+    let fields = two_fields();
+    let files = [file()];
+    let cases = [
+        (
+            read_text(Some("locator_a1b2c3d4_1"), Some("article"), 20_000),
+            json!({"kind":"read_text","locator":"locator_a1b2c3d4_1","mode":"article","max_chars":20000}),
+        ),
+        (
+            read_text(None, None, 20_000),
+            json!({"kind":"read_text","max_chars":20000}),
+        ),
+        (
+            inspect("controls", 50),
+            json!({"kind":"inspect","inspect_kind":"controls","max_items":50}),
+        ),
+        (
+            inspect_tree(Some("locator_a1b2c3d4_2"), 6, 400),
+            json!({"kind":"inspect_tree","locator":"locator_a1b2c3d4_2","max_depth":6,"max_nodes":400}),
+        ),
+        (
+            find("Save changes", "control", 8),
+            json!({"kind":"find","text":"Save changes","find_kind":"control","max_results":8}),
+        ),
+        (
+            query_semantic("Email address", Some("textbox"), false, true),
+            json!({"kind":"query_semantic","name":"Email address","role":"textbox","exact":false,"form_scope":true}),
+        ),
+        (
+            describe(&["locator_a1b2c3d4_3".into(), "locator_a1b2c3d4_4".into()]),
+            json!({"kind":"describe","locators":["locator_a1b2c3d4_3","locator_a1b2c3d4_4"]}),
+        ),
+        (describe_focused(), json!({"kind":"describe_focused"})),
+        (
+            verify_focused_text(false),
+            json!({"kind":"verify_focused_text","allow_credentials":false}),
+        ),
+        (
+            box_("locator_a1b2c3d4_5"),
+            json!({"kind":"box","locator":"locator_a1b2c3d4_5"}),
+        ),
+        (
+            prepare_fill(&fields, false, Some("locator_a1b2c3d4_8")),
+            json!({
+                "kind":"prepare_fill",
+                "fields":[
+                    {"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},
+                    {"locator":"locator_a1b2c3d4_7","value":"ada@example.com"}],
+                "allow_credentials":false,
+                "submit_locator":"locator_a1b2c3d4_8"}),
+        ),
+        (
+            verify_fill_retained(&fields, false, 3_000),
+            json!({
+                "kind":"verify_fill_retained",
+                "fields":[
+                    {"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},
+                    {"locator":"locator_a1b2c3d4_7","value":"ada@example.com"}],
+                "allow_credentials":false,
+                "stable_ms":250,"poll_ms":25,"limit_ms":3000}),
+        ),
+        (
+            observe(
+                "text_present",
+                Some("Saved"),
+                Some("locator_a1b2c3d4_9"),
+                5_000,
+                true,
+            ),
+            json!({"kind":"observe","condition":"text_present","value":"Saved",
+                "locator":"locator_a1b2c3d4_9","timeout_ms":5000,"until_satisfied":true}),
+        ),
+        (
+            observe("load_ready", None, None, 5_000, false),
+            json!({"kind":"observe","condition":"load_ready","timeout_ms":5000,"until_satisfied":false}),
+        ),
+        (
+            activate("locator_a1b2c3d4_8"),
+            json!({"kind":"activate","locator":"locator_a1b2c3d4_8"}),
+        ),
+        (
+            hover("locator_a1b2c3d4_8"),
+            json!({"kind":"hover","locator":"locator_a1b2c3d4_8"}),
+        ),
+        (
+            focus("locator_a1b2c3d4_6"),
+            json!({"kind":"focus","locator":"locator_a1b2c3d4_6"}),
+        ),
+        (
+            scroll_point(640.0, 1800.0),
+            json!({"kind":"scroll_point","x":640,"y":1800}),
+        ),
+        (
+            viewport_point(640.0, 360.0),
+            json!({"kind":"viewport_point","x":640,"y":360}),
+        ),
+        (scroll_offset(), json!({"kind":"scroll_offset"})),
+        (
+            hit_point(320.0, 240.0, false),
+            json!({"kind":"hit_point","x":320,"y":240,"page":false}),
+        ),
+        (
+            hit_point(320.5, 240.25, true),
+            json!({"kind":"hit_point","x":320.5,"y":240.25,"page":true}),
+        ),
+        (owner_box(), json!({"kind":"owner_box"})),
+        (
+            owner_probe(320.0, 240.0),
+            json!({"kind":"owner_probe","x":320,"y":240}),
+        ),
+        (focus_probe(), json!({"kind":"focus_probe"})),
+        (require_focused(), json!({"kind":"require_focused"})),
+        (
+            fill_local(&field("locator_a1b2c3d4_10", "Canada"), false),
+            json!({"kind":"fill_local",
+                "field":{"locator":"locator_a1b2c3d4_10","value":"Canada"},
+                "allow_credentials":false}),
+        ),
+        (
+            focus_text_field(&field("locator_a1b2c3d4_6", "Ada Lovelace"), false),
+            json!({"kind":"focus_text_field",
+                "field":{"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},
+                "allow_credentials":false}),
+        ),
+        (
+            submit_fill(&fields[..1], "locator_a1b2c3d4_8", false),
+            json!({"kind":"submit_fill",
+                "fields":[{"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"}],
+                "submit_locator":"locator_a1b2c3d4_8","allow_credentials":false}),
+        ),
+        (
+            type_text("locator_a1b2c3d4_6", "Ada Lovelace", true, false),
+            json!({"kind":"type_text","locator":"locator_a1b2c3d4_6","text":"Ada Lovelace",
+                "clear_first":true,"allow_credentials":false}),
+        ),
+        (
+            clear_focused(false),
+            json!({"kind":"clear_focused","allow_credentials":false}),
+        ),
+        (
+            scroll(Some("locator_a1b2c3d4_11"), Some("down"), Some("page")),
+            json!({"kind":"scroll","locator":"locator_a1b2c3d4_11","direction":"down","amount":"page"}),
+        ),
+        (scroll(None, None, None), json!({"kind":"scroll"})),
+        (
+            upload_files("locator_a1b2c3d4_12", &files),
+            json!({"kind":"upload_files","locator":"locator_a1b2c3d4_12",
+                "files":[{"name":"notes.txt","media_type":"text/plain","data":"aGVsbG8=","size":5}]}),
+        ),
+        (
+            drop_files(400.0, 300.0, &files),
+            json!({"kind":"drop_files","x":400,"y":300,
+                "files":[{"name":"notes.txt","media_type":"text/plain","data":"aGVsbG8=","size":5}]}),
+        ),
+        (
+            attach_file("locator_a1b2c3d4_12", "demo.gif"),
+            json!({"kind":"attach_file","locator":"locator_a1b2c3d4_12","file_name":"demo.gif"}),
+        ),
+    ];
+    for (message, expected) in cases {
+        assert_eq!(message.to_json(), expected, "{}", message.kind());
+    }
+}
+
+#[test]
+fn a_settle_budget_reaches_only_the_kinds_that_settle() {
+    let settled = find("Save changes", "control", 8).with_settle(1_500);
+    assert_eq!(
+        settled.to_json(),
+        json!({"kind":"find","text":"Save changes","find_kind":"control","max_results":8,
+            "settle_ms":1500,"visual_settle":true})
+    );
+    let spent = read_text(None, None, 100).with_settle(0);
+    assert_eq!(spent.payload()["settle_ms"], 0);
+    assert_eq!(spent.payload()["visual_settle"], false);
+    let typed = focus_text_field(&field("locator_a1b2c3d4_6", "Ada"), false).with_settle(40);
+    assert_eq!(typed.payload()["settle_ms"], 40);
+    assert_eq!(typed.payload()["visual_settle"], true);
+    let read = describe(&[]);
+    assert_eq!(read.clone().with_settle(500), read);
+}
+
+#[test]
+fn only_cancelled_not_retained_and_page_exception_can_follow_an_effect() {
+    let every = [
+        "stale_locator",
+        "not_visible",
+        "disabled",
+        "read_only",
+        "not_editable",
+        "not_fillable",
+        "option_missing",
+        "credential_authorization_required",
+        "submit_outside_form",
+        "not_file_input",
+        "no_focused_control",
+        "focus_lost",
+        "outside_viewport",
+        "no_subject",
+        "unknown_kind",
+        "invalid_request",
+        "runtime_missing",
+        "cancelled",
+        "unsatisfied",
+        "not_retained",
+        "payload_mismatch",
+        "page_exception",
+    ];
+    for name in every {
+        let code: AssetErrorCode = serde_json::from_value(json!(name)).expect(name);
+        assert_eq!(serde_json::to_value(code).expect(name), json!(name));
+        let after_effect = matches!(name, "cancelled" | "not_retained" | "page_exception");
+        assert_eq!(code.is_pre_effect(), !after_effect, "{name}");
+    }
+}
+
+#[test]
+fn an_unknown_code_is_a_page_exception() {
+    let code: AssetErrorCode = serde_json::from_value(json!("quota_exceeded")).unwrap();
+    assert_eq!(code, AssetErrorCode::PageException);
+    assert!(!code.is_pre_effect());
+}
+
+#[test]
+fn an_envelope_carries_a_value_or_a_coded_failure() {
+    assert_eq!(
+        decode_envelope(&json!({"ok": true, "value": {"submitted": true}})),
+        Ok(json!({"submitted": true}))
+    );
+    assert_eq!(decode_envelope(&json!({"ok": true})), Ok(Value::Null));
+    assert_eq!(
+        decode_envelope(&json!({"ok": false,
+            "error": {"code": "stale_locator", "message": "stale browser locator"}})),
+        Err(AssetError {
+            code: AssetErrorCode::StaleLocator,
+            message: "stale browser locator".into()
+        })
+    );
+}
+
+#[test]
+fn a_failure_the_service_cannot_read_assumes_the_page_changed() {
+    for envelope in [
+        json!({"ok": false}),
+        json!({"ok": false, "error": {"code": 7}}),
+        json!({"ok": false, "error": {"code": "invented", "message": "x"}}),
+        json!({"value": 1}),
+        json!("text"),
+        json!(null),
+    ] {
+        let error = decode_envelope(&envelope).unwrap_err();
+        assert_eq!(error.code, AssetErrorCode::PageException, "{envelope}");
+        assert!(!error.code.is_pre_effect());
+    }
+}
+
+#[test]
+fn a_failure_description_is_bounded() {
+    let error = decode_envelope(&json!({"ok": false,
+        "error": {"code": "disabled", "message": "x".repeat(2_000)}}))
+    .unwrap_err();
+    assert_eq!(error.message.chars().count(), 500);
+}
+
+#[test]
+fn only_a_returned_answer_has_an_envelope() {
+    let returned = CallAnswer::Returned {
+        envelope: json!({"ok": true, "value": 3}),
+    };
+    assert_eq!(decode_answer(&returned), Some(Ok(json!(3))));
+    assert_eq!(decode_answer(&CallAnswer::Skipped), None);
+    assert_eq!(decode_answer(&CallAnswer::Unknown), None);
+    let failed = CallAnswer::Failed {
+        code: super::super::wire::CallFailure::Timeout,
+        message: String::new(),
+        started: true,
+    };
+    assert_eq!(decode_answer(&failed), None);
+}
+
+#[test]
+fn typed_values_read_what_the_asset_returns() {
+    let prepared: Prepared = serde_json::from_value(json!({
+        "activated": true,
+        "subject": {"role": "button", "name": "Save"},
+        "rectangle": {"left": 10.0, "top": 20.0, "width": 100.0, "height": 40.0}}))
+    .unwrap();
+    assert_eq!(prepared.subject.name, "Save");
+    assert_eq!(prepared.rectangle.center(), Point { x: 60.0, y: 40.0 });
+
+    let text: Text = serde_json::from_value(json!({"text": "hi", "truncated": true,
+        "title": "T", "url": "https://example.com/"}))
+    .unwrap();
+    assert!(text.truncated);
+
+    let article: Article = serde_json::from_value(json!({"text": "body", "truncated": false,
+        "article_found": true, "title": "T", "url": "https://example.com/"}))
+    .unwrap();
+    assert!(article.article_found);
+    assert_eq!(
+        article.into_text(7),
+        BrowserOutcome::Text {
+            tab_id: 7,
+            text: "body".into(),
+            truncated: false,
+            title: "T".into(),
+            url: "https://example.com/".into()
+        }
+    );
+
+    let targets: Targets = serde_json::from_value(json!({"targets": [{
+        "locator": "locator_a1b2c3d4_1", "role": "button", "name": "Save",
+        "state": ["focused"], "credential_class": false}], "truncated": true}))
+    .unwrap();
+    assert_eq!(targets.targets.len(), 1);
+    assert!(targets.truncated);
+
+    let tree: TreeValue = serde_json::from_value(json!({"tree": {"kind": "container",
+        "label": "", "children": [{"kind": "heading", "label": "Title", "children": []}]},
+        "nodes": 2, "truncated": false}))
+    .unwrap();
+    assert_eq!(tree.tree.children[0].label, "Title");
+    assert_eq!(tree.nodes, 2);
+
+    let submitted: Submitted = serde_json::from_value(json!({"submitted": true})).unwrap();
+    assert!(submitted.submitted);
+
+    let hit: Hit = serde_json::from_value(json!({"x": 3.0, "y": 4.0, "embed": true,
+        "subject": null}))
+    .unwrap();
+    assert!(hit.embed && hit.subject.is_none());
+
+    let owner: OwnerBox = serde_json::from_value(json!({"left": 8.0, "top": 9.0,
+        "width": 300.0, "height": 150.0}))
+    .unwrap();
+    assert_eq!(owner.left, 8.0);
+
+    let probe: OwnerProbe =
+        serde_json::from_value(json!({"hit": true, "left": 8.0, "top": 9.0})).unwrap();
+    assert!(probe.hit);
+
+    let focus: FocusProbe = serde_json::from_value(json!({"focused": false})).unwrap();
+    assert!(!focus.focused);
+
+    let observed: Observed = serde_json::from_value(json!({"satisfied": true,
+        "elapsed_ms": 120, "readiness": "complete"}))
+    .unwrap();
+    assert_eq!(observed.elapsed_ms, 120);
+}
