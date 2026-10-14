@@ -1,5 +1,7 @@
 # ADR-0119: Durable desktop authority and disposable workbench
 
+Amended by ADR-0197 Decision 11: Quit holds until the next request, open, or client or browser launch.
+
 - Status: Accepted
 - Date: 2026-08-13
 - Supersedes: ADR-0102 Decision 1 close-to-hide behavior

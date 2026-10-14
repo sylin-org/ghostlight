@@ -1,5 +1,7 @@
 # ADR-0181: Capability-Negotiated Thin Adapters and an Acknowledged Page Runtime
 
+Superseded by ADR-0197 Decision 5 (adapter protocol 4 replaces it).
+
 Date: 2026-09-25. Status: Accepted; Decision 6 superseded by ADR-0183.
 
 Supersedes ADR-0178 Decisions 1 and 2 and amends ADR-0179 Decision 2. Builds on ADR-0005,

@@ -1,5 +1,7 @@
 # ADR-0096: Protocol-versioned MCP edge and neutral service boundary
 
+Superseded by ADR-0197 Decision 17 for Decisions 1-3 (MCP moves into the service).
+
 Status: Accepted
 
 Date: 2026-08-04

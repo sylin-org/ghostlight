@@ -25,6 +25,7 @@ tree.
 
 | Batch | What it was | Where its ledger stops | Last touched |
 | --- | --- | --- | --- |
+| [break-2.0](break-2.0/BOOTSTRAP.md) | ADR-0197: the 2.0 break set built by service, extension and connectors lanes in one checkout, then a switch | Connectors lane opened; see [connectors.md](break-2.0/connectors.md) | 2026-10-14 |
 | [security-hardening](security-hardening/EPIC.md) | Dependable governance for delightful browser work: assessment, decisions, bounded cycles, and ideation for unresolved choices | H2a committed as 8103c69b; H1/H2b/H3/H4 implemented locally; 463 Rust and 183 extension tests, JSONL/process checks, and 19 H3 Chromium/MCP cases; H4 grouped-history Chromium checks; no deployment; next H5 ideation | 2026-09-06 |
 | [process-diagnostics](process-diagnostics/) | ADR-0145: one shared local diagnostics directory all three executables write bounded, content-free operational logs into; watch-driven marker, CLI, popup, and workbench surfaces | D1-D10 complete | 2026-08-29 |
 | [public-distribution](public-distribution/) | ADR-0144: Ghostlight as an installable plugin member (twin manifests, one-address catalogs, bundled skill) and drafted external submissions | P1-P3, X1, D1 complete | 2026-08-29 |

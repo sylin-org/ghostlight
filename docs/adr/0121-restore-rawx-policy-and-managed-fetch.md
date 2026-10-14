@@ -1,5 +1,7 @@
 # ADR-0121: Restore RAWX policy and managed fetching for 1.0
 
+Amended by ADR-0197 Decisions 18 and 19: managed policy is an administrator-owned file, and observe mode is removed.
+
 - Status: Accepted
 - Date: 2026-08-14
 - Local-address protected-resource scope superseded by [ADR-0155](0155-policy-owned-local-destinations.md).

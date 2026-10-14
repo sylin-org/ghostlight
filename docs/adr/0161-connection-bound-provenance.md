@@ -1,5 +1,7 @@
 # ADR-0161: Connection-bound provenance reporting
 
+Stage 2 superseded by ADR-0197 Decision 22 (observed peer identity is removed).
+
 - Status: Accepted; reporting foundation implemented and verified locally; not deployed
 - Date: 2026-09-07
 - Amends: ADR-0105's reporting stage

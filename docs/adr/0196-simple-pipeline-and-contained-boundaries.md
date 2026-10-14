@@ -1,5 +1,7 @@
 # ADR-0196: Simple pipeline and contained boundaries
 
+Decision 7 superseded by ADR-0197 Decision 5 (the break is strict, with no transition level).
+
 Date: 2026-10-13. Status: Accepted by owner direction.
 
 Supersedes ADR-0175 (workspace switching), the shared connector release version in ADR-0142,

@@ -1,5 +1,7 @@
 # ADR-0126: Reference experience contract
 
+Amended by ADR-0197 Decision 19: the Attention runtime state and its control file are removed.
+
 - Status: Accepted
 - Date: 2026-08-16
 - Amends: ADR-0102 Decision 2 (the workbench landing destination), and the runtime-control wording

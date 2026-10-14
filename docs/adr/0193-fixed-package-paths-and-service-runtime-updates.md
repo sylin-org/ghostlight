@@ -1,5 +1,7 @@
 # ADR-0193: Fixed package paths and service runtime updates
 
+Decisions 2-3 superseded by ADR-0197 Decisions 13 and 14 (the deployment seam).
+
 Date: 2026-10-02. Status: Accepted for implementation by the owner.
 
 Amends ADR-0115 and ADR-0167's package-directory selection. Builds on ADR-0181.

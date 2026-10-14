@@ -1,5 +1,7 @@
 # ADR-0167: One user installation and one serving authority
 
+Installation selection superseded by ADR-0197 Decisions 10 and 13 (one install root, one service per OS user, a development marker).
+
 - Status: Accepted
 - Date: 2026-09-12
 - Supersedes: ADR-0124 installation-local production discovery and ADR-0150

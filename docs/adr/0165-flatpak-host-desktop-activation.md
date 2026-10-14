@@ -1,5 +1,7 @@
 # ADR-0165: Named host desktop activation for Flatpak Chromium
 
+Superseded by ADR-0197 Decision 22 (the Flatpak route is removed).
+
 - Status: Accepted; bounded Bluefin installed acceptance passed (see amendment below).
 - Date: 2026-09-09
 - Authority: coordinator engineering decision under the owner's delegated control

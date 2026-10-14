@@ -1,5 +1,7 @@
 # ADR-0158: Document-bound access and truthful coverage
 
+Amended by ADR-0197 Decision 19: frame handling and frame notice options are fixed at their defaults.
+
 - Status: Accepted; implemented and verified locally; not deployed
 - Date: 2026-09-07
 - Amends: ADR-0138, ADR-0151, ADR-0152, ADR-0131, and ADR-0109

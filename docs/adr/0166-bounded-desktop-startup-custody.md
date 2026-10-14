@@ -1,5 +1,7 @@
 # ADR-0166: Bounded desktop startup custody
 
+Amended by ADR-0197 Decision 10: a service start that has not published discovery within 30 s exits.
+
 - Status: Accepted
 - Date: 2026-09-09
 - Amends: ADR-0096 local admission, ADR-0127 desktop startup, ADR-0145 diagnostics,
