@@ -131,10 +131,6 @@ pub fn run(startup: Startup) -> Result<()> {
             if result.changed {
                 eprintln!("Ghostlight updated the packaged browser connector registration");
             }
-            let migration = crate::install::migration::retire_obsolete_supervisor();
-            for warning in migration.warnings {
-                eprintln!("Ghostlight package migration warning: {warning}");
-            }
         }
         Ok(None) => {}
         Err(error) => {

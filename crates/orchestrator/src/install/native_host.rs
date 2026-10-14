@@ -134,6 +134,20 @@ impl NativeHostRegistry {
         inspect(&self.context, &SystemRegistrationIo)
     }
 
+    /// The connector each browser's Ghostlight-owned registration names, by browser id.
+    ///
+    /// Browsers without an owned registration are left out. Nothing is changed.
+    pub fn registered_connectors(&self) -> Result<Vec<(String, PathBuf)>, NativeHostError> {
+        let mut registered = Vec::new();
+        for browser in BROWSERS {
+            let (_, connector) = inspect_browser(&self.context, &SystemRegistrationIo, browser)?;
+            if let Some(connector) = connector {
+                registered.push((browser.id.to_owned(), connector));
+            }
+        }
+        Ok(registered)
+    }
+
     /// Resolve the ordinary installed executable for one supported browser without changing the
     /// machine.
     #[must_use]

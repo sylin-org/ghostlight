@@ -2,7 +2,7 @@
 //!
 //! This module coordinates machine-level integration: registering the native
 //! messaging host with Chromium browsers, updating MCP client configurations,
-//! and handling uninstallation and migration.
+//! and handling uninstallation.
 
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
 
@@ -41,16 +41,6 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
                 && browser.state == NativeHostState::Current
                 && (browser.package.native_messaging_usable() || options.all_browsers)
         });
-        let migration = crate::install::migration::retire_obsolete_supervisor();
-        for removed in migration.removed {
-            println!("Retired: {removed}");
-        }
-        for preserved in migration.preserved {
-            println!("Preserved: {preserved}");
-        }
-        for warning in migration.warnings {
-            eprintln!("Migration warning: {warning}");
-        }
     } else {
         let result = if options.browser_ids.is_empty() {
             native_hosts.uninstall()?
@@ -362,17 +352,15 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
 
     ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
-    let (verb, changed, report, migration) = match command {
-        NativeHostCommand::Check => ("checked", false, registry.check()?, None),
+    let (verb, changed, report) = match command {
+        NativeHostCommand::Check => ("checked", false, registry.check()?),
         NativeHostCommand::Install => {
-            let result = registry.install();
-            let migration = crate::install::migration::retire_obsolete_supervisor();
-            let result = result?;
-            ("installed", result.changed, result.report, Some(migration))
+            let result = registry.install()?;
+            ("installed", result.changed, result.report)
         }
         NativeHostCommand::Uninstall => {
             let result = registry.uninstall()?;
-            ("uninstalled", result.changed, result.report, None)
+            ("uninstalled", result.changed, result.report)
         }
     };
     println!("Ghostlight native host {verb}; changed: {changed}");
@@ -386,17 +374,6 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
             NativeHostState::NeedsAttention => "needs attention",
         };
         println!("{}: {state} -- {}", browser.name, browser.detail);
-    }
-    if let Some(migration) = migration {
-        for removed in migration.removed {
-            println!("Retired: {removed}");
-        }
-        for preserved in migration.preserved {
-            println!("Preserved: {preserved}");
-        }
-        for warning in migration.warnings {
-            eprintln!("Migration warning: {warning}");
-        }
     }
     Ok(())
 }

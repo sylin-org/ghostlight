@@ -31,9 +31,6 @@ const INSTALL_LOCK_WAIT: Duration = Duration::from_secs(35);
 /// Pause between attempts to take the install lock.
 const INSTALL_LOCK_POLL: Duration = Duration::from_millis(25);
 
-/// How long a replaced process may take to exit.
-const STOP_WAIT: Duration = Duration::from_secs(10);
-
 /// Install the verified siblings of this executable into `destination`.
 ///
 /// Downloaders verify the complete payload before invoking this package seam. The install lock
@@ -129,7 +126,7 @@ fn replace_changed(source: &Path, destination: &Path) -> anyhow::Result<()> {
         .collect();
     let mut backups = Vec::new();
     let replaced = (|| -> anyhow::Result<()> {
-        stop_exact_images(&images)?;
+        super::migration::stop_legacy_images(&images)?;
         for (temporary, target) in &replacements {
             let backup = target.with_extension(format!("backup-{}", uuid::Uuid::new_v4().simple()));
             if target.exists() {
@@ -219,61 +216,6 @@ fn changed_components(source: &Path, destination: &Path) -> io::Result<Vec<Strin
         }
     }
     Ok(changed)
-}
-
-/// Stop every process running one of `images`, and wait for them to exit.
-fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing()
-            .without_tasks()
-            .with_exe(UpdateKind::Always),
-    );
-    let mut stopped = Vec::new();
-    for process in system.processes().values() {
-        let Some(executable) = process.exe().and_then(|path| fs::canonicalize(path).ok()) else {
-            continue;
-        };
-        if images
-            .iter()
-            .any(|image| fs::canonicalize(image).is_ok_and(|path| path == executable))
-        {
-            anyhow::ensure!(
-                process.pid().as_u32() != std::process::id(),
-                "Cannot replace the running installer"
-            );
-            anyhow::ensure!(
-                process.kill(),
-                "Could not stop Ghostlight process {}",
-                process.pid()
-            );
-            stopped.push(process.pid());
-        }
-    }
-    let deadline = Instant::now() + STOP_WAIT;
-    while !stopped.is_empty() {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&stopped),
-            true,
-            ProcessRefreshKind::nothing().without_tasks(),
-        );
-        stopped.retain(|pid| {
-            system
-                .process(*pid)
-                .is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
-        });
-        anyhow::ensure!(
-            stopped.is_empty() || Instant::now() < deadline,
-            "Ghostlight processes did not finish their replacement"
-        );
-        if !stopped.is_empty() {
-            std::thread::sleep(Duration::from_millis(25));
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
