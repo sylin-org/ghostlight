@@ -1,8 +1,9 @@
 //! Form fill: several fields, in one or more documents, then an optional submit.
 //!
 //! A fill validates before it edits. Its first round trip asks every document that holds a
-//! field to check its fields and the submit control and to wait for a stable form, in one
-//! sequence, so a field that cannot take its value refuses before any other field is touched.
+//! field, all at once and inside the one settle budget, to check its fields and the submit
+//! control and to wait for a stable form, so a field that cannot take its value refuses before
+//! any other field is touched.
 //! The plans that come back say how each field takes its value. Consecutive fields the page sets
 //! itself share one call; a text field is one input that focuses the control as its
 //! precondition and types the value as trusted keystrokes. Then every document confirms its
