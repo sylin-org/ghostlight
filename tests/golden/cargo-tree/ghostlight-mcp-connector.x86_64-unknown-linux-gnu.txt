@@ -1,0 +1,16 @@
+anyhow v1.0.104
+ghostlight-mcp-connector
+ghostlight-relay
+itoa v1.0.18
+memchr v2.8.3
+proc-macro2 v1.0.107
+quote v1.0.47
+serde v1.0.229
+serde_core v1.0.229
+serde_derive v1.0.229 (proc-macro)
+serde_json v1.0.151
+syn v3.0.3
+thiserror v2.0.20
+thiserror-impl v2.0.20 (proc-macro)
+unicode-ident v1.0.24
+zmij v1.0.23
