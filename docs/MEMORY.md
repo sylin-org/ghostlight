@@ -175,6 +175,10 @@ the owner wants, and what this project learned the hard way.
   the workbench, controls, preferences, diagnostics, and CLI depth appear progressively. Behavior
   that can unexpectedly change the user's environment or attention, such as opening a browser or
   drawing on a page, has one small closed preference.
+- **Delight is clarity.** Say only what the person needs to know or do. Never narrate the
+  interface's own behavior ("this page updates on its own", "you can close this"); let the change
+  itself be the message. Fallback actions appear only when they become needed, never up front.
+  Filler such as "That is it." goes.
 - **Solve the immediate need, then reveal useful depth.** Lead Ghostlight with private, controlled
   browser access and legible agent activity. Its integrations across MCP clients, models and
   harnesses, and its configurable policies should be understandable optional depth. This is
