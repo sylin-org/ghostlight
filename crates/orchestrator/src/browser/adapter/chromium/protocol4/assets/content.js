@@ -140,7 +140,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const tag = String(element.tagName ?? "").toLowerCase();
     const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
     if (editable) return "";
-    return shared.bounded(composedVisibleText(element, 500).text || renderedText(element), 500);
+    return shared.bounded(plainText(element, 500).text || renderedText(element), 500);
   }
 
   function roleFor(element) {
@@ -269,7 +269,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // the service worker; this half walks the rendered composed tree inside one frame. An open
   // shadow root replaces its host's light children, while slots reinsert only assigned nodes.
   // Closed roots remain closed, and layout-less unslotted light children stay absent.
-  function composedVisibleText(root, maxChars) {
+  // With values on (a read), form controls contribute their state: typed values, checked words,
+  // and the masked marker for credential fields. With values off (names, find, text conditions),
+  // controls and editable content contribute nothing, so what the agent typed never reads back.
+  function composedVisibleText(root, maxChars, { values = true } = {}) {
     const limit = maxChars + 1;
     const visited = new Set();
     let output = "";
@@ -317,7 +320,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       const tag = String(node.tagName ?? "").toLowerCase();
       if (node.nodeType === 1) {
         if (!isComposedVisible(node)) return;
-        if (tag === "input" || tag === "textarea") {
+        if (!values && node.isContentEditable) return;
+        if (values && (tag === "input" || tag === "textarea")) {
           const type = String(node.type ?? "").toLowerCase();
           if (type === "checkbox" || type === "radio") {
             append(node.checked ? "checked" : "unchecked");
@@ -325,7 +329,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
             // A placeholder is a hint, never a value. Every credential-class field is masked.
             if (node.value) append(credentialClass(node) ? MASKED_VALUE : node.value);
           }
-        } else if (tag === "select") {
+        } else if (values && tag === "select") {
           const selectedText = Array.from(node.selectedOptions ?? []).map((opt) => opt.text).join(", ");
           if (selectedText) append(credentialClass(node) ? MASKED_VALUE : selectedText);
         }
@@ -344,6 +348,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     visit(root);
     const text = output.trim();
     return { text: text.slice(0, maxChars), truncated: truncated || text.length > maxChars };
+  }
+
+  // The page's own text: composedVisibleText without any field value or editable content.
+  function plainText(root, maxChars) {
+    return composedVisibleText(root, maxChars, { values: false });
   }
 
   function candidates(kind) {
@@ -369,7 +378,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const pool = kind === "control" ? candidates("controls") : queryAll(TEXT_FIND_SELECTOR);
     const hits = [];
     for (const element of pool.slice(0, 3000)) {
-      const haystack = `${accessibleName(element)} ${composedVisibleText(element, 2000).text}`.toLocaleLowerCase();
+      const haystack = `${accessibleName(element)} ${plainText(element, 2000).text}`.toLocaleLowerCase();
       const isControl = element.matches("a[href],button,input,textarea,select,summary,[role],[contenteditable='true']");
       if (haystack.includes(needle) && (kind !== "control" || isControl) && (kind !== "text" || !isControl)) {
         hits.push({ element, isControl });
@@ -785,6 +794,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   async function observe(message, ctx) {
     const started = performance.now();
     const deadline = started + message.timeout_ms;
+    const needle = typeof message.value === "string" ? shared.normalizeNeedle(message.value) : "";
+    const pageHasText = (value) => plainText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(value);
     const readiness = () => document.readyState === "complete" ? "complete" : "interactive";
     const elapsed = () => Math.round(performance.now() - started);
     const unmet = (readyState) => {
@@ -810,8 +821,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       let satisfied = false;
       if (message.condition === "load_ready") satisfied = document.readyState === "interactive" || document.readyState === "complete";
       if (message.condition === "url_contains") satisfied = location.href.includes(message.value);
-      if (message.condition === "text_present") satisfied = composedVisibleText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(message.value);
-      if (message.condition === "text_absent") satisfied = !composedVisibleText(document.body || document.documentElement, Number.MAX_SAFE_INTEGER).text.includes(message.value);
+      if (message.condition === "text_present") satisfied = pageHasText(needle);
+      if (message.condition === "text_absent") satisfied = !pageHasText(needle);
       if (message.condition === "target_present") satisfied = Boolean(locators.get(message.locator)?.isConnected);
       if (message.condition === "target_absent") satisfied = !locators.get(message.locator)?.isConnected;
       if (satisfied) {

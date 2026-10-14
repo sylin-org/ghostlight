@@ -21,6 +21,15 @@ function isCredentialMetadata(metadata) {
   return /(^|[^a-z])(password|passwd|passcode|otp|one.?time|secret|token|cvv|cvc)([^a-z]|$)/.test(identity);
 }
 
+// The agent's text-condition value, shaped like page text: a whitespace run holding a newline
+// is one newline, any other whitespace run is one space, and the ends are trimmed. Page block
+// breaks stay as they are and matching stays case-sensitive.
+function normalizeNeedle(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, (run) => (run.includes("\n") ? "\n" : " "))
+    .trim();
+}
+
 function presentationLabel(signal) {
   const labels = {
     start: "Ghostlight starting",
@@ -56,4 +65,4 @@ function activityLabel(activity) {
   return labels[activity] ?? "Ghostlight";
 }
 
-const shared = Object.freeze({ bounded, isCredentialMetadata, presentationLabel, activityLabel });
+const shared = Object.freeze({ bounded, isCredentialMetadata, normalizeNeedle, presentationLabel, activityLabel });

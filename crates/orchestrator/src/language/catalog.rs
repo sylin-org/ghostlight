@@ -1052,7 +1052,7 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
     match input {
         None => {}
         Some(WaitInput::Text) => {
-            fields.push(("value", text(1, 2_000, "Text or URL fragment for url_contains, text_present, and text_absent. For duration, whole milliseconds from 0 to 10000, written as a string.")));
+            fields.push(("value", text(1, 2_000, "Text or URL fragment for url_contains, text_present, and text_absent, page text, not field values. For duration, whole milliseconds from 0 to 10000, written as a string.")));
             required.push("value");
         }
         Some(kind @ (WaitInput::Target | WaitInput::OptionalTarget)) => {
@@ -1612,7 +1612,7 @@ fn with_expect(mut schema: Value) -> Value {
         "description":"Optional condition checked after the effect. Requires read as well as the action's capabilities, admitted before the effect. A failed check preserves the applied effect.",
         "properties":{
             "condition":{"type":"string","enum":["load_ready","url_contains","text_present","text_absent"]},
-            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Required text for url_contains, text_present, and text_absent; omit for load_ready."}
+            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Required text for url_contains, text_present, and text_absent, page text, not field values; omit for load_ready."}
         },
         "required":["condition"]
     });

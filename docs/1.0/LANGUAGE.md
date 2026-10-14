@@ -342,7 +342,7 @@ new node, a node whose kind or label changed, or a node that lost children.
 Find current semantic targets by visible or accessible text across the composed page, including
 open shadow roots and http(s) embedded frames. Use it when the desired label or text is known.
 Text search also matches `div`, `[draggable]`, `[aria-label]`, and `[tabindex]` elements, and
-prefers the deepest match over a container that only holds it.
+prefers the deepest match over a container that only holds it. Names never include field values.
 Shortest call: `{"text":"Submit"}`.
 
 Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,
@@ -474,7 +474,8 @@ Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 The optional `expect` on click, fill, type, and key calls uses one condition: `load_ready` with no
 value, or `url_contains`, `text_present`, or `text_absent` with a required non-empty `value` of at
 most 2,000 characters. Lookup and postcondition Read requirements are admitted with the complete
-request before an effect. The check runs after the action for at most 2 seconds.
+request before an effect. The check runs after the action for at most 2 seconds. Text conditions
+match page text, not field values.
 
 When the check does not confirm the expectation, the action still happened. The result keeps
 `effect: applied`, `repeat_safe: false`, and the action's own facts, and adds a `reason`. The
@@ -527,8 +528,9 @@ default for `url_contains`, `text_present`, `text_absent`, and `target_absent` a
 other conditions, so the schema declares no single default for it. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
-slots, and http(s) embedded frames. Hidden content and closed roots remain absent; form values follow
-the `browser_read` contract.
+slots, and http(s) embedded frames. Hidden content and closed roots remain absent. Text conditions
+match page text, not field values. The expected `value` is normalized: a whitespace run holding a
+newline matches one page line break and any other whitespace run matches one space.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 

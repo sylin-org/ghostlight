@@ -1346,6 +1346,112 @@ test("submit_fill without a submit locator is an invalid request", async () => {
 
 // ---- observe -----------------------------------------------------------------------------------
 
+// ---- plain text: names and text conditions never read field values -----------------------------
+
+/** A form named from its content: a legend and an unrelated paragraph around a typed input. */
+function typedForm(harness, { typed = "Ada" } = {}) {
+  const body = harness.element("body");
+  const form = harness.element("form");
+  const legend = harness.element("legend");
+  legend.append(harness.text("Contact details"));
+  const field = harness.element("input");
+  field.type = "text";
+  field.value = typed;
+  field.setAttribute("aria-label", "Name");
+  const area = harness.element("textarea");
+  area.value = "private note";
+  const secret = harness.element("input");
+  secret.type = "password";
+  secret.setAttribute("type", "password");
+  secret.value = "hunter2";
+  form.append(legend, field, area, secret);
+  body.append(form);
+  harness.setBody(body);
+  return form;
+}
+
+async function textCondition(harness, condition, value) {
+  const observed = await harness.send({ kind: "observe", condition, value, timeout_ms: 0 });
+  return observed.value.satisfied;
+}
+
+test("a form named from its content never carries a typed value in its name", async () => {
+  const harness = contentHarness();
+  typedForm(harness);
+
+  const structure = await harness.send({ kind: "inspect", inspect_kind: "structure", max_items: 20, visual_settle: false });
+  const names = structure.value.targets.map((target) => target.name);
+
+  assert.deepEqual(names, ["Contact details"]);
+});
+
+test("find does not match a typed value through its input or its form", async () => {
+  const harness = contentHarness();
+  typedForm(harness);
+
+  for (const text of ["Ada", "private note", "hunter2", "[hidden]"]) {
+    const found = await harness.send({ kind: "find", text, find_kind: "any", max_results: 5 });
+    assert.deepEqual(found.value.targets, [], `find ${text}`);
+  }
+  const named = await harness.send({ kind: "find", text: "Name", find_kind: "control", max_results: 5 });
+  assert.equal(named.value.targets.length, 1);
+});
+
+test("a typed value alone never satisfies a text condition", async () => {
+  const harness = contentHarness();
+  typedForm(harness);
+
+  assert.equal(await textCondition(harness, "text_present", "Ada"), false);
+  assert.equal(await textCondition(harness, "text_absent", "Ada"), true);
+  assert.equal(await textCondition(harness, "text_present", "[hidden]"), false);
+  assert.equal(await textCondition(harness, "text_present", "unchecked"), false);
+  assert.equal(await textCondition(harness, "text_present", "Contact details"), true);
+});
+
+test("text conditions skip editable content but still read page text", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const editor = harness.element("div");
+  editor.isContentEditable = true;
+  editor.append(harness.text("draft body"));
+  body.append(harness.text("Saved"), editor);
+  harness.setBody(body);
+
+  assert.equal(await textCondition(harness, "text_present", "draft body"), false);
+  assert.equal(await textCondition(harness, "text_present", "Saved"), true);
+});
+
+test("the agent's text value is normalized to page text and matching stays exact", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const first = harness.element("p");
+  first.append(harness.text("Order placed"));
+  const second = harness.element("p");
+  second.append(harness.text("Thank you"));
+  const line = harness.element("div");
+  line.append(harness.text("Total paid"), harness.element("br"), harness.text("Receipt sent"));
+  body.append(first, second, line);
+  harness.setBody(body);
+
+  assert.equal(await textCondition(harness, "text_present", "Total paid\n  Receipt sent"), true);
+  assert.equal(await textCondition(harness, "text_present", "  Total paid \r\n Receipt sent  "), true);
+  assert.equal(await textCondition(harness, "text_present", "Order   placed"), true);
+  assert.equal(await textCondition(harness, "text_present", "Order placed Thank you"), false);
+  assert.equal(await textCondition(harness, "text_present", "order placed"), false);
+});
+
+test("browser_read keeps field values while plain text leaves them out", async () => {
+  const harness = contentHarness();
+  typedForm(harness);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
+
+  assert.match(read.value.text, /Ada/);
+  assert.match(read.value.text, /private note/);
+  assert.match(read.value.text, /\[hidden\]/);
+  assert.doesNotMatch(read.value.text, /hunter2/);
+});
+
 test("observation polling stops at its physical timeout without overshooting", async () => {
   const harness = contentHarness();
   let answered = null;
