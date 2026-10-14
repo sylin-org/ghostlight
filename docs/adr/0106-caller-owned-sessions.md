@@ -134,3 +134,13 @@ close is the browser's setting to decide.
   it is wrong in both directions: it reaps a slow script and keeps a dead one.
 - **Keying on pid plus name.** Rejected as identity for the recycling reason in Decision 2. Kept as
   attribution.
+
+## Amendment (2026-10-14)
+
+Decision 1 named the parent process as the caller. In practice the parent is often a throwaway.
+The caller is now the nearest ancestor that is not a Ghostlight executable, so the hops a command
+is forwarded through are skipped. A run of consecutive ancestors sharing one image name folds into
+its outermost member: a Git Bash or Cygwin per-command stub and its shell are one terminal. The
+walk ends at a parent that started after its child, because a recycled pid cannot be a real parent;
+the caller is then the last trustworthy member reached, or none. `GHOSTLIGHT_SESSION` still wins
+over all of this. Decision 2 (identity is pid plus start time) is unchanged.

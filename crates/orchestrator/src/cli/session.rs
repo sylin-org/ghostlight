@@ -19,8 +19,8 @@ pub const SESSION_VARIABLE: &str = "GHOSTLIGHT_SESSION";
 /// Describe what owns this command's session.
 ///
 /// An explicit key wins when one is set. Otherwise the caller is the nearest ancestor that is not a
-/// Ghostlight executable, widened to the outermost of the same-named ancestors around it (a shell
-/// and its per-command stubs), identified by the pair the operating system keeps unique.
+/// Ghostlight executable, widened to the outermost of the same-named ancestors above it (a
+/// shell and its per-command stubs), identified by the pair the operating system keeps unique.
 #[must_use]
 pub fn marker() -> Option<SessionMarker> {
     if let Some(key) = declared() {
@@ -38,11 +38,12 @@ fn declared() -> Option<String> {
     Some(trimmed.chars().take(120).collect())
 }
 
-/// How many forwarding hops the caller walk will climb before it gives up.
+/// How many ancestors the caller walk reads before it stops.
 ///
-/// A carrier hands over to the installed command, which may hand over to a development build: two
-/// hops in practice. The bound keeps a malformed process tree from looping the walk.
-const MAX_FORWARDING_HOPS: usize = 8;
+/// The bound covers the whole climb: the Ghostlight hops (a carrier hands over to the installed
+/// command, which may hand over to a development build) and the run of same-named ancestors above
+/// them. It keeps a malformed process tree from looping the walk.
+const MAX_ANCESTORS_READ: usize = 8;
 
 /// One process as the caller walk sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,26 +70,36 @@ fn is_ghostlight(name: &str) -> bool {
 /// case-insensitively) is therefore one terminal, and its outermost member is the caller. That also
 /// treats a shell nested in the same shell as one terminal, which is the intended model.
 ///
-/// `lookup` answers one process by pid. The whole climb shares one hop budget of
-/// `MAX_FORWARDING_HOPS`. Returns `None` when the chain ends or the budget is spent before any
-/// foreign ancestor is found; once one is found, an ended chain or spent budget settles on the
-/// outermost member reached.
+/// Operating systems recycle pids, so a parent link can point at an unrelated process. A parent
+/// that started after its child cannot be that child's real parent (equal times are allowed), so
+/// the walk treats it as unknown and stops before it, for the hop skip and the fold alike.
+///
+/// `lookup` answers one process by pid. The whole climb reads at most `MAX_ANCESTORS_READ`
+/// ancestors. Returns `None` when the chain ends, turns untrustworthy, or the budget is spent
+/// before any foreign ancestor is found; once one is found, any of those settles on the outermost
+/// member reached.
 fn nearest_foreign_ancestor(
     start: u32,
     mut lookup: impl FnMut(u32) -> Option<Ancestor>,
 ) -> Option<Ancestor> {
     let mut next = start;
     let mut caller: Option<Ancestor> = None;
-    for _ in 0..=MAX_FORWARDING_HOPS {
+    let mut child_started_at: Option<u64> = None;
+    for _ in 0..MAX_ANCESTORS_READ {
         let Some(process) = lookup(next) else {
             return caller;
         };
+        if child_started_at.is_some_and(|child| process.started_at > child) {
+            return caller;
+        }
+        child_started_at = Some(process.started_at);
+        let parent = process.parent;
         match &caller {
             None if is_ghostlight(&process.name) => {}
             Some(inner) if !inner.name.eq_ignore_ascii_case(&process.name) => return caller,
-            _ => caller = Some(process.clone()),
+            _ => caller = Some(process),
         }
-        match process.parent {
+        match parent {
             Some(parent) => next = parent,
             None => return caller,
         }
@@ -135,7 +146,7 @@ fn caller() -> Option<SessionMarker> {
 #[cfg(test)]
 mod tests {
     use super::{
-        caller, marker, nearest_foreign_ancestor, Ancestor, MAX_FORWARDING_HOPS,
+        caller, marker, nearest_foreign_ancestor, Ancestor, MAX_ANCESTORS_READ,
         SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
     };
     use crate::intake::session::SessionMarker;
@@ -185,7 +196,7 @@ mod tests {
     #[test]
     fn the_walk_is_bounded() {
         let g = SERVICE_EXECUTABLE_NAME;
-        let hops = u32::try_from(MAX_FORWARDING_HOPS).unwrap();
+        let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
         let mut chain: Vec<Ancestor> = (0..=hops + 3)
             .map(|pid| process(pid, g, Some(pid + 1)))
             .collect();
@@ -213,10 +224,44 @@ mod tests {
         let mut second = shells.to_vec();
         second.push(process(449_200, g, Some(448_296)));
         second.push(process(448_296, "bash.exe", Some(444_668)));
-        let a = walk(&first, 448_356);
-        let b = walk(&second, 448_296);
+        let a = walk(&first, 448_400);
+        let b = walk(&second, 449_200);
         assert_eq!(a, Some(447_552));
         assert_eq!(a, b, "two commands from one shell are one session");
+    }
+
+    fn started(pid: u32, name: &str, parent: Option<u32>, started_at: u64) -> Ancestor {
+        Ancestor {
+            started_at,
+            ..process(pid, name, parent)
+        }
+    }
+
+    #[test]
+    fn a_parent_that_started_after_its_child_is_a_recycled_pid() {
+        // The stub's recorded parent pid now names a newer bash that is not its real parent.
+        let g = SERVICE_EXECUTABLE_NAME;
+        let chain = [
+            started(40, g, Some(30), 400),
+            started(30, "bash.exe", Some(20), 300),
+            started(20, "bash.exe", Some(10), 900),
+            started(10, "claude.exe", None, 100),
+        ];
+        assert_eq!(
+            walk(&chain, 40),
+            Some(30),
+            "the fold stops at the recycled parent"
+        );
+        let orphan = [
+            started(40, g, Some(20), 400),
+            started(20, "bash.exe", None, 900),
+        ];
+        assert_eq!(walk(&orphan, 40), None, "the hop skip stops at it too");
+        let equal = [
+            started(40, g, Some(20), 400),
+            started(20, "bash.exe", None, 400),
+        ];
+        assert_eq!(walk(&equal, 40), Some(20), "equal start times are allowed");
     }
 
     #[test]
@@ -252,16 +297,20 @@ mod tests {
     }
 
     #[test]
-    fn a_same_name_run_is_bounded_by_the_hop_budget() {
-        let hops = u32::try_from(MAX_FORWARDING_HOPS).unwrap();
+    fn a_same_name_run_is_bounded_by_the_ancestor_budget() {
+        let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
         let chain: Vec<Ancestor> = (0..hops + 6)
             .map(|pid| process(pid, "bash.exe", Some(pid + 1)))
             .collect();
-        assert_eq!(walk(&chain, 0), Some(hops), "the climb stops at the bound");
+        assert_eq!(
+            walk(&chain, 0),
+            Some(hops - 1),
+            "the climb stops at the bound"
+        );
     }
 
     #[test]
-    fn the_caller_is_this_process_parent() {
+    fn the_caller_of_this_process_is_identified() {
         let Some(SessionMarker::Process {
             pid,
             started_at,

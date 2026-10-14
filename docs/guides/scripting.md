@@ -66,8 +66,10 @@ those hops are skipped, and the owner is the first process above them that is no
 of consecutive ancestors with the same program name counts as one terminal, and its outermost member
 is the owner. That is what makes Git Bash work: MSYS starts every command through a short-lived stub
 of `bash.exe`, so the stub folds into the shell above it. A shell nested in the same shell is one
-terminal too. A program that spawns `ghostlight call` repeatedly gets the same treatment: one
-session for as long as that program runs.
+terminal too. A program that spawns `ghostlight call` repeatedly usually gets one session for as long as it
+runs, but a program that shares its parent's program name (a bash script run from bash, Python
+multiprocessing workers, a venv `python` launcher pair) joins the outer process's session, and
+parallel workers with the same name share tabs. Such callers should set `GHOSTLIGHT_SESSION`.
 
 Tabs live as long as their session, and a tab you open in one shell is not visible from another.
 When the terminal exits, Ghostlight releases its tabs and asks the browser to close them -- but the
