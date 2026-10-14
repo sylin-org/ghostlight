@@ -4,7 +4,7 @@ Lane rules are in [BOOTSTRAP.md](BOOTSTRAP.md). Target: ADR-0197 Decisions 1-4, 
 
 ## RESUME HERE
 
-Next slice: connectors-6 onward, per the lane plan. No blockers.
+Next slice: connectors-7 onward, per the lane plan. No blockers.
 
 ## Landed
 
@@ -51,6 +51,25 @@ Next slice: connectors-6 onward, per the lane plan. No blockers.
   wait so a detached service holding the pipes cannot hang the script. The script was
   parse-checked and not run. It depends on `deployment install --development/--restore/--plan`
   from the switch deployment slice.
+
+- connectors-6: the installed protocol-4 journey. `tests/lib/cdp-pipe.mjs` launches branded Chrome
+  on a scratch profile with `--remote-debugging-pipe` and `--enable-unsafe-extension-debugging`
+  (never `--load-extension`), speaks NUL-framed JSON on fds 3 and 4, loads the unpacked extension
+  with `Extensions.loadUnpacked`, closes through `Browser.close`, and copies the user-level
+  native-host manifest into the scratch profile on Linux and macOS. `tests/lib/cdp-pipe.test.mjs`
+  covers framing and id matching with a fake child (16 tests, no Chrome).
+  `tests/installed-journey.mjs` refuses to run with `GHOSTLIGHT_TEST_HOME` set or without the
+  installed runtime file and MCP connector, never starts a service, asserts the extension id,
+  drives the installed MCP connector, and runs the named checks of the validation plan against
+  fixtures on two origins (a `127.0.0.1` one and a `localhost` one, so frames are cross-site).
+  `--live` adds the nine public demo checks; `--hold` keeps the scratch browser for the demo
+  scripts. It was parse-checked, its fixture pages were served and script-checked, and its relay
+  control stream was exercised against a fake listener; it was not run against Chrome or the
+  installed service. Two things in it are guesses to confirm on the first run: the fields of the
+  `ghostlight status --json` output (it reads `running`), and the user policy file name and schema
+  in the policy check (`~/.ghostlight/policy/user-policy.json`, schema 4). The `--live` checks
+  for pages other than desk, the iframe pair, brief and foundry are generic because those pages
+  are not in the repository.
 
 ## Blockers
 
