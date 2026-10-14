@@ -89,17 +89,28 @@ jobs:
           node --check extension/offscreen.js
           node --check extension/options.js
           node --check extension/popup.js
-          node --check extension/service-worker.js
+          node --check extension/worker.js
+          node --check extension/lib/arguments.js
+          node --check extension/lib/buffers.js
+          node --check extension/lib/capture.js
           node --check extension/lib/chunks.js
-          node --check extension/lib/debugger.js
+          node --check extension/lib/connection-log.js
           node --check extension/lib/diagnostics.js
-          node --check extension/lib/engine.js
+          node --check extension/lib/evaluate.js
           node --check extension/lib/gif.js
+          node --check extension/lib/input.js
+          node --check extension/lib/inventory.js
+          node --check extension/lib/notice.js
           node --check extension/lib/presentation-queue.js
+          node --check extension/lib/primitives.js
+          node --check extension/lib/protocol.js
           node --check extension/lib/recording.js
+          node --check extension/lib/script-evaluator.js
+          node --check extension/lib/sessions.js
           node --check extension/lib/shared.js
           node --check extension/lib/state.js
-          node --check extension/lib/topology.js
+          node --check extension/lib/tabs.js
+          node --check extension/lib/world.js
           node --check crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/content.js
           node --check crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/page-shared.js
           node --check crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/presentation-css.js

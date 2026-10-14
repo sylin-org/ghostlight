@@ -6,8 +6,6 @@
   "use strict";
 
   const BROWSER_ID_KEY = "ghostlight.browser_id";
-  const TOPOLOGY_KEY = "ghostlight.topology";
-  const OPERATIONS_KEY = "ghostlight.operations";
   const PRESENTATIONS_KEY = "ghostlight.presentations";
   const EFFECTS_KEY = "ghostlight_effects";
   const CAPTIONS_KEY = "ghostlight_captions";
@@ -19,7 +17,7 @@
     diagnostics: false,
     preserveTabs: true
   });
-  const CONTROL_STATES = Object.freeze(["active", "held", "attention", "ended"]);
+  const CONTROL_STATES = Object.freeze(["active", "held", "ended"]);
 
   function newBrowserId(randomUuid) {
     return `browser_${randomUuid().replaceAll("-", "")}`;
@@ -63,13 +61,11 @@
     if (!snapshot.connected) return "Service disconnected";
     if (!snapshot.compatible) return "Version mismatch";
     if (snapshot.control_state === "held") return "Paused";
-    if (snapshot.control_state === "attention") return "Needs attention";
     if (snapshot.control_state === "ended") return "Session ended";
     return "Connected";
   }
 
   function badge(snapshot) {
-    if (snapshot.control_state === "attention") return { text: "!", color: "#dc2626" };
     if (snapshot.control_state === "held") return { text: "II", color: "#38bdf8" };
     if (snapshot.recording_tabs > 0) return { text: "REC", color: "#ef4444" };
     return { text: "", color: "#38bdf8" };
@@ -77,8 +73,6 @@
 
   return Object.freeze({
     BROWSER_ID_KEY,
-    TOPOLOGY_KEY,
-    OPERATIONS_KEY,
     PRESENTATIONS_KEY,
     EFFECTS_KEY,
     CAPTIONS_KEY,

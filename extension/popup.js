@@ -7,13 +7,12 @@
   const sessionStatus = document.getElementById("session-status");
   const sessionButton = document.getElementById("session-button");
   const releaseDebuggerButton = document.getElementById("release-debugger-button");
-  const diagnosticsRow = document.getElementById("diagnostics-row");
-  const diagnosticsStatus = document.getElementById("diagnostics-status");
-  const diagnosticsToggle = document.getElementById("diagnostics-toggle");
   const setupSection = document.getElementById("setup-section");
   const setupRoute = document.getElementById("setup-route");
   const captions = document.getElementById("captions-toggle");
   const HOST_ABSENT = "host_absent";
+  const SERVICE_OUTDATED = "service_outdated";
+  const UPDATE_SERVICE = "Update Ghostlight on this computer.";
   const NOT_INSTALLED_HERE = "Ghostlight is not installed on this computer yet.";
   let latestSnapshot = null;
   let latestPreferences = null;
@@ -31,6 +30,9 @@
     } else if (snapshot.connected && snapshot.compatible) {
       linkDot.className = "on";
       linkDot.title = "Connected to Ghostlight";
+    } else if (snapshot.link_state === SERVICE_OUTDATED) {
+      linkDot.className = "wait";
+      linkDot.title = UPDATE_SERVICE;
     } else if (snapshot.link_state === HOST_ABSENT) {
       linkDot.className = "wait";
       linkDot.title = NOT_INSTALLED_HERE;
@@ -56,11 +58,7 @@
       return;
     }
     toggle.disabled = false;
-    // Preserve distinct labels for explicit attention and the person's Pause control.
-    if (snapshot.control_state === "attention") {
-      status.textContent = "Agent browsing is STOPPED and needs you.";
-      toggle.textContent = "Resume agent browsing";
-    } else if (snapshot.control_state === "held") {
+    if (snapshot.control_state === "held") {
       status.textContent = "Agent browsing is PAUSED.";
       toggle.textContent = "Resume agent browsing";
     } else {
@@ -80,8 +78,9 @@
     }
     const connectedLine = snapshot.connected && snapshot.compatible
       ? "Connected to Ghostlight."
-      : snapshot.link_state === HOST_ABSENT ? NOT_INSTALLED_HERE
-        : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
+      : snapshot.link_state === SERVICE_OUTDATED ? UPDATE_SERVICE
+        : snapshot.link_state === HOST_ABSENT ? NOT_INSTALLED_HERE
+          : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
     const recordingLine = snapshot.recording_tabs > 0 ? ` REC on ${snapshot.recording_tabs} tab(s).` : "";
     sessionStatus.textContent = `${connectedLine} Debugger attached to ${snapshot.attached_tabs || 0} tab(s).${recordingLine}`;
     sessionButton.textContent = "End session now";
@@ -104,19 +103,6 @@
       : `Release debugger sessions (${attached} tabs)`;
   }
 
-  // The service advertises diagnostics state in its hello; when it does not (an older
-  // Ghostlight), the whole row stays hidden instead of offering a button that cannot work.
-  function renderDiagnostics(snapshot) {
-    const state = snapshot.diagnostics;
-    diagnosticsRow.hidden = !state;
-    if (!state) return;
-    const layer = state.layer === "off" ? "off" : `on (${state.layer})`;
-    diagnosticsStatus.textContent = `Process diagnostics log: ${layer}.`;
-    diagnosticsToggle.textContent = state.layer === "off"
-      ? "Turn on the diagnostics log"
-      : "Turn off the diagnostics log";
-  }
-
   function render(snapshot) {
     latestSnapshot = snapshot;
     renderLink(snapshot);
@@ -124,7 +110,6 @@
     renderSession(snapshot);
     renderReleaseDebugger(snapshot);
     renderSetup(snapshot);
-    renderDiagnostics(snapshot);
   }
 
   async function refresh() {
@@ -165,16 +150,6 @@
       await request({ kind: "release_debugger_sessions" });
     } catch (error) {
       sessionStatus.textContent = String(error?.message ?? error);
-    } finally {
-      await refresh();
-    }
-  });
-  diagnosticsToggle.addEventListener("click", async () => {
-    diagnosticsToggle.disabled = true;
-    try {
-      await request({ kind: "diagnostics_toggle" });
-    } catch (error) {
-      diagnosticsStatus.textContent = String(error?.message ?? error);
     } finally {
       await refresh();
     }

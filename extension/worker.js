@@ -21,7 +21,6 @@ const SERVICE_UNAVAILABLE = "The local Ghostlight service is unavailable.";
 const ASSETS_REJECTED = "The service sent page code that failed its checksum.";
 const NATIVE_ENDED = "Native connection ended.";
 const OPTIONS_ONLY = "Open extension options to export developer diagnostics.";
-const WORKBENCH_OWNS_DIAGNOSTICS = "The Ghostlight workbench owns diagnostics.";
 const UNKNOWN_MESSAGE = "Unknown extension message.";
 const RECONNECT_ALARM = "ghostlight-reconnect";
 const RECONNECT_DELAY_MS = 3_000;
@@ -33,7 +32,6 @@ const PLACEHOLDER_BRAND = /not.*a.*brand/i;
 const ENGINE_BRAND = "Chromium";
 const OFFSCREEN_TARGET = "ghostlight-offscreen";
 const CONTROLLED_KEY = "ghostlight.controlled";
-const LINK_SERVICE_OUTDATED = "service_outdated";
 const UNKNOWN_DIALOG = "unknown";
 
 const CONTROL = Object.freeze({ MANAGED: "managed", RELEASED: "released" });
@@ -67,7 +65,6 @@ const MESSAGE = Object.freeze({
   RUNTIME_CONTROL: "runtime_control",
   RELEASE_DEBUGGER_SESSIONS: "release_debugger_sessions",
   CONNECTION_DIAGNOSTICS: "connection_diagnostics",
-  DIAGNOSTICS_TOGGLE: "diagnostics_toggle",
   UI_STATE_CHANGED: "ui_state_changed"
 });
 const DEBUGGER_EVENT = Object.freeze({
@@ -189,9 +186,12 @@ function uiSnapshot() {
     activity: notice.activityList(),
     // Classified from the raw reason before it is generalized below, so surfaces get the closed
     // value and never the message text.
-    link_state: outdated
-      ? LINK_SERVICE_OUTDATED
-      : shared.linkState({ connected: liveState.connected, compatible: liveState.compatible, lastError: liveState.last_error }),
+    link_state: shared.linkState({
+      connected: liveState.connected,
+      compatible: liveState.compatible,
+      outdated,
+      lastError: liveState.last_error
+    }),
     last_error: outdated ? OUTDATED_SERVICE : preferences.diagnostics ? liveState.last_error : generalized
   };
 }
@@ -781,8 +781,6 @@ async function handleUiMessage(message, sender) {
     case MESSAGE.CONNECTION_DIAGNOSTICS:
       if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("options.html")) throw new Error(OPTIONS_ONLY);
       return connectionLog.snapshot();
-    case MESSAGE.DIAGNOSTICS_TOGGLE:
-      throw new Error(WORKBENCH_OWNS_DIAGNOSTICS);
     default:
       throw new Error(UNKNOWN_MESSAGE);
   }

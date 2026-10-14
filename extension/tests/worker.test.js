@@ -819,11 +819,7 @@ test("the extension pages' messages", async () => {
     assert.deepEqual(worker.ambient().at(-1).preferences, { effects: false, captions: true });
     assert.equal(worker.browser.store.local.get("ghostlight_captions"), true);
 
-    const toggle = await worker.ask({ kind: "diagnostics_toggle" });
-    assert.equal(toggle.ok, false);
-    assert.match(toggle.error, /workbench owns diagnostics/);
-
-    const unknown = await worker.ask({ kind: "form_diagnostics_state" });
+    const unknown = await worker.ask({ kind: "diagnostics_toggle" });
     assert.equal(unknown.ok, false);
     assert.equal(unknown.error, "Unknown extension message.");
 
@@ -865,6 +861,9 @@ test("the popup snapshot reports activity, tabs and the link before any service"
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.connected, false);
     assert.equal(snapshot.link_state, "host_absent");
+    // The closed classification is computed before the reason is generalized, so a surface can tell
+    // the states apart without ever seeing Chrome's message text.
+    assert.equal(snapshot.last_error, "The local Ghostlight service is unavailable.");
     assert.equal(snapshot.attached_tabs, 0);
     assert.equal(snapshot.recording_tabs, 0);
     assert.deepEqual(snapshot.activity, []);

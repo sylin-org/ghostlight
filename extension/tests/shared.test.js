@@ -6,59 +6,27 @@ const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const shared = require("../lib/shared.js");
+const protocol = require("../lib/protocol.js");
 const state = require("../lib/state.js");
-const topology = require("../lib/topology.js");
 const presentationQueue = require("../lib/presentation-queue.js");
 
-test("credential metadata is classified without inspecting values", () => {
-  assert.equal(shared.isCredentialMetadata({ type: "password" }), true);
-  assert.equal(shared.isCredentialMetadata({ autocomplete: "current-password" }), true);
-  assert.equal(shared.isCredentialMetadata({ name: "otp_code" }), true);
-  assert.equal(shared.isCredentialMetadata({ type: "text", name: "display_name" }), false);
-});
-
-test("presentation labels are fixed and content-free", () => {
-  assert.equal(shared.presentationLabel("start"), "Ghostlight starting");
-  assert.equal(shared.presentationLabel("attention"), "Ghostlight needs you");
-  assert.equal(shared.presentationLabel("page secret"), "Ghostlight");
+test("activity labels are fixed and content-free", () => {
   assert.equal(shared.activityLabel("read"), "Reading page");
   assert.equal(shared.activityLabel("script"), "Running JavaScript");
   assert.equal(shared.activityLabel("page secret"), "Ghostlight");
 });
 
-
-test("modifier masks match the CDP vocabulary", () => {
-  assert.equal(shared.modifierMask(["Alt", "Control", "Shift"]), 11);
-  assert.equal(shared.modifierMask([]), 0);
+test("bounded text is cut to the limit and never throws on a missing value", () => {
+  assert.equal(shared.bounded("abcdef", 3), "abc");
+  assert.equal(shared.bounded(undefined, 3), "");
+  assert.equal(shared.bounded(null, 3), "");
 });
 
-test("named keys receive physical CDP codes", () => {
-  assert.deepEqual(shared.keyDescriptor("Enter"), { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
-  assert.deepEqual(shared.keyDescriptor("x"), { key: "x", code: "KeyX", windowsVirtualKeyCode: 88, nativeVirtualKeyCode: 88, text: "x", unmodifiedText: "x" });
-  assert.deepEqual(shared.keyDescriptor("G"), { key: "G", code: "KeyG", windowsVirtualKeyCode: 71, nativeVirtualKeyCode: 71, modifiers: 8, text: "G", unmodifiedText: "g" });
-  assert.deepEqual(shared.keyDescriptor("7"), { key: "7", code: "Digit7", windowsVirtualKeyCode: 55, nativeVirtualKeyCode: 55, text: "7", unmodifiedText: "7" });
-});
-
-test("drag packets hold the left button through movement and always release", () => {
-  const packets = shared.dragPackets({ x: 10, y: 20 }, { x: 30, y: 60 }, 2);
-  assert.deepEqual(packets, [
-    { type: "mouseMoved", x: 10, y: 20 },
-    { type: "mousePressed", x: 10, y: 20, button: "left", clickCount: 1 },
-    { type: "mouseMoved", x: 20, y: 40, button: "left", buttons: 1, force: 1 },
-    { type: "mouseMoved", x: 30, y: 60, button: "left", buttons: 1, force: 1 },
-    { type: "mouseReleased", x: 30, y: 60, button: "left", clickCount: 1 }
-  ]);
-  assert.throws(() => shared.dragPackets({ x: 0, y: 0 }, { x: 1, y: 1 }, 0), /drag steps/);
-});
-
-test("drag execution scopes native interception and keeps drag data inside the worker", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(worker, /Input\.setInterceptDrags", \{ enabled: true \}/);
-  assert.match(worker, /method === "Input\.dragIntercepted"/);
-  assert.match(worker, /for \(const type of \["dragEnter", "dragOver", "drop"\]\)/);
-  assert.match(worker, /Input\.dispatchDragEvent/);
-  assert.match(worker, /Input\.cancelDragging/);
-  assert.doesNotMatch(worker, /params\.data\.(items|files|dragOperationsMask)/);
+test("tab status maps to the closed readiness vocabulary", () => {
+  assert.equal(shared.readinessForStatus("loading"), "loading");
+  assert.equal(shared.readinessForStatus("complete"), "complete");
+  assert.equal(shared.readinessForStatus("unloaded"), "unknown");
+  assert.equal(shared.readinessForStatus(undefined), "unknown");
 });
 
 test("browser events use the nested typed bridge envelope", () => {
@@ -68,33 +36,6 @@ test("browser events use the nested typed bridge envelope", () => {
   });
 });
 
-test("the adapter advertises stable versioned physical capabilities", () => {
-  assert.equal(shared.ADAPTER_PROTOCOL_MAJOR, 3);
-  assert.deepEqual(shared.adapterCapabilities({
-    install_page_runtime: { capability: "page_runtime", revision: 1 },
-    evaluate_script: { capability: "script", revision: 2 },
-    evaluate_script_legacy: { capability: "script", revision: 1 }
-  }, [{ capability: "adapter_liveness", revision: 1 }]), [
-    { name: "page_runtime", revision: 1 },
-    { name: "script", revision: 2 },
-    { name: "adapter_liveness", revision: 1 }
-  ]);
-});
-
-test("the production command table is the advertised handler inventory", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  const tableSource = worker.match(/const COMMAND_HANDLERS = Object\.freeze\((\{[^]*?\n\})\);/);
-  assert.ok(tableSource, "closed command table");
-  const handlers = Function(`"use strict"; return (${tableSource[1]});`)();
-  const capabilities = shared.adapterCapabilities(handlers);
-  assert.ok(capabilities.some((item) => item.name === "page_runtime" && item.revision === 1));
-  assert.ok(capabilities.some((item) => item.name === "semantic_document" && item.revision === 4));
-  assert.ok(!Object.hasOwn(handlers, "cdp"));
-  assert.ok(!Object.hasOwn(handlers, "bidi"));
-  for (const command of Object.keys(handlers)) {
-    assert.match(worker, new RegExp(`command\\.command === ["']${command}["']`), command);
-  }
-});
 
 test("adapter liveness acknowledgements echo only bounded heartbeat sequences", () => {
   assert.deepEqual(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 7 }), {
@@ -105,6 +46,7 @@ test("adapter liveness acknowledgements echo only bounded heartbeat sequences", 
   assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 0 }), null);
   assert.equal(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 2 ** 32 }), null);
 });
+
 
 test("browser names come from the specific brand, never a generic or placeholder one", () => {
   assert.equal(shared.browserName([
@@ -122,181 +64,6 @@ test("browser names come from the specific brand, never a generic or placeholder
   assert.equal(shared.browserName([{ brand: "x".repeat(80) }]).length, 40);
 });
 
-test("attention is reported on focus and at connection, never inferred from connecting", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  // Turning to the browser reports attention.
-  assert.match(source, /chrome\.windows\.onFocusChanged\.addListener[\s\S]{0,400}?event: "attended"/);
-  // Connecting reports the truth about focus rather than claiming it.
-  assert.match(source, /attended: await holdsFocusedWindow\(\)/);
-  assert.match(source, /chrome\.windows\.getLastFocused\(\)/);
-});
-
-test("native-host startup is one connection attempt across concurrent wake signals", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(source, /let nativeConnectionAttempt = null;/);
-  assert.match(source, /if \(nativeConnectionAttempt\) return nativeConnectionAttempt;/);
-  assert.match(source, /nativeConnectionAttempt = establishNativeConnection\(\)/);
-  assert.match(source, /if \(!browserId\) await initializeLocalState\(\);\s+if \(nativePort\) return;/);
-  assert.doesNotMatch(source, /initializeLocalState\(\)\s*\.then\(connectNative\)/);
-});
-
-test("every native-port disconnect consumes Chrome's callback error", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(
-    source,
-    /port\.onDisconnect\.addListener\(\(\) => \{\s+const disconnectError = chrome\.runtime\.lastError\?\.message[^;]+;\s+if \(nativePort !== port\) return;/
-  );
-});
-
-test("a first extension install opens the service-first handoff", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(source, /const SERVICE_INSTALL_URL = "https:\/\/sylin\.org\/ghostlight\/chromium-extension\/post-install\/";/);
-  assert.match(source, /if \(details\?\.reason === "install"\) \{\s+chrome\.tabs\.create\(\{ url: SERVICE_INSTALL_URL \}\)/);
-  assert.match(source, /chrome\.runtime\.onInstalled\.addListener\(onExtensionInstalled\)/);
-});
-
-test("page opening is one atomic physical primitive", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(source, /topology\.open\(command\.url, workspace, command\.group_title/);
-  assert.doesNotMatch(source, /chrome\.tabs\.create\(\{ url: "about:blank"/);
-  assert.doesNotMatch(source, /command\.command === "create_tab"/);
-});
-
-test("debugger attachment lifetime follows controlled tab ownership", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(source, /openedTab = await topology\.open[\s\S]*?await retainManagedDebugger\(openedTab\.id\);/);
-  assert.match(source, /await debuggerLifecycle\.retain\(tabId\);/);
-  assert.match(source, /chrome\.tabs\.onRemoved[\s\S]*?debuggerLifecycle\.forget\(tabId\);/);
-  assert.match(source, /controlState === "ended"[\s\S]*?debuggerLifecycle\.detachAll\(\);/);
-});
-
-test("releasing a debugger session never depends on the native connection", () => {
-  // A disconnected service leaves the automatic path -- controlState === "ended" above -- unable
-  // to fire at all, since it only runs in response to a signal the service has to send. Without
-  // a local escape hatch, Chrome's own "controlled by automated software" banner could then
-  // outlive the service indefinitely: crashed, uninstalled, or simply never restarted. The fix is
-  // this message kind, which must call detachAll() directly and must never be gated behind
-  // nativePort the way requestRuntimeControl (used by every other popup action) is.
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  const handler = source.match(
-    /"release_debugger_sessions"\)\s*\{([\s\S]*?)\n\s{4}\}/
-  );
-  assert.ok(handler, "the release_debugger_sessions message handler was not found");
-  assert.match(handler[1], /debuggerLifecycle\.detachAll\(\)/);
-  assert.doesNotMatch(
-    handler[1],
-    /nativePort|requestRuntimeControl/,
-    "release_debugger_sessions must stay reachable with no live service connection"
-  );
-
-  const popup = readFileSync(join(__dirname, "..", "popup.js"), "utf8");
-  assert.match(popup, /kind:\s*"release_debugger_sessions"/);
-  const button = popup.match(/function renderReleaseDebugger\(snapshot\) \{([\s\S]*?)\n {2}\}/);
-  assert.ok(button, "renderReleaseDebugger was not found");
-  assert.doesNotMatch(
-    button[1],
-    /snapshot\.connected|snapshot\.compatible/,
-    "the release button must not be gated on connection state the way End session is"
-  );
-});
-
-test("giving up on a stuck download cancels it before its blob URL is revoked", () => {
-  // exportRecording's finally block revokes the object_url unconditionally the moment
-  // downloadSettled's promise settles, success or failure. Timing out without also requesting
-  // cancellation used to leave Chrome writing from a URL that had just gone dead -- on a slow
-  // disk or a large recording, that can truncate the delivered file instead of merely failing
-  // to report on time.
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  const timeoutBody = source.match(/setTimeout\(\(\) => \{([\s\S]*?)\}, DOWNLOAD_SETTLE_MS\)/);
-  assert.ok(timeoutBody, "the download settle timeout was not found");
-  assert.match(timeoutBody[1], /chrome\.downloads\.cancel\(downloadId\)/);
-  const cancelIndex = timeoutBody[1].indexOf("chrome.downloads.cancel");
-  const settleIndex = timeoutBody[1].indexOf("settle(new Error");
-  assert.ok(
-    cancelIndex >= 0 && settleIndex > cancelIndex,
-    "cancellation must be requested before the promise settles and the caller revokes the URL"
-  );
-});
-
-test("adapter protocol three wires the closed physical mechanisms at the Chrome seam", () => {
-  const root = join(__dirname, "..");
-  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
-  assert.match(worker, /command\.command === "resize_window"/);
-  assert.match(worker, /command\.command === "screenshot_region"/);
-  assert.match(worker, /command\.command === "screenshot_region"[\s\S]*?validateView\(command\.tab_id, command\.expected_viewport\)/);
-  assert.match(worker, /screenshotApi\.regionClip\(command\.region\)/);
-  assert.match(worker, /command\.command === "read_diagnostics"/);
-  assert.match(worker, /command\.command === "clear_diagnostics"/);
-  assert.match(worker, /command\.command === "start_recording"/);
-  assert.match(worker, /command\.command === "status_recording"/);
-  assert.match(worker, /command\.command === "stop_recording"/);
-  assert.match(worker, /command\.command === "export_recording"/);
-  assert.match(worker, /command\.command === "discard_recording"/);
-  assert.match(worker, /frame\.kind === "command_chunk"/);
-  assert.match(worker, /Page\.screencastFrameAck/);
-  assert.match(worker, /GhostlightRecording\.MAX_WIDTH \/ visual\.clientWidth/);
-  assert.match(worker, /quality: globalThis\.GhostlightRecording\.JPEG_QUALITY/);
-  assert.match(worker, /await setRecordingPresentation\(command\.tab_id, true\)/);
-  assert.match(worker, /setRecordingPresentation\(tabId, false\)/);
-  assert.match(worker, /syncPresentationState\(tabId\)/);
-  assert.match(worker, /recording_tabs: recording\.count\(\)/);
-  assert.match(worker, /stateApi\.badge\(\{ \.\.\.liveState, recording_tabs: recording\.count\(\) \}\)/);
-  assert.match(worker, /frame\.kind === "backend_unavailable"[\s\S]*?settleServiceBoundaryState\(\)/);
-  assert.match(worker, /chrome\.tabs\.query\(\{ windowId: tab\.windowId \}\)/);
-});
-
-test("the browser owns the whole recording capability, encoding included", () => {
-  const root = join(__dirname, "..");
-  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
-  const page = readFileSync(join(root, "offscreen.html"), "utf8");
-  const offscreen = readFileSync(join(root, "offscreen.js"), "utf8");
-
-  // The encode runs in an offscreen document, not in a worker Chrome may evict mid-encode.
-  assert.match(worker, /chrome\.offscreen\.createDocument/);
-  assert.match(page, /vendor\/gifenc\.js/);
-  assert.match(page, /lib\/gif\.js/);
-  assert.match(offscreen, /GhostlightGif\.create\(\{ decode: decodeFrame \}\)/);
-
-  const body = worker.match(/async function exportRecording[\s\S]*?\n}\n/)[0];
-  // The negative control: frames really do travel, from the registry to the encoder beside it.
-  // Without this, the assertion below would pass just as happily if nothing moved at all.
-  assert.match(body, /frames: selected\.frames/);
-  // And they stop there. What comes back is one artifact and its measurements.
-  const receipt = body.match(/return \{\n\s+outcome: "recording_exported"[\s\S]*?\n\s+\};/)[0];
-  assert.doesNotMatch(receipt, /frames/);
-  assert.match(receipt, /encoded: encoded\.measurements/);
-
-  // Bytes take one form, chosen by where they are going. A download never gets base64 and a
-  // client return never gets an object URL the caller could not read anyway.
-  assert.match(offscreen, /transfer === "object_url"/);
-  // An open offscreen document keeps this worker awake, and a worker that never sleeps never
-  // forgets recording bytes.
-  assert.match(body, /closeEncoder\(\)/);
-});
-
-test("service epochs and browser loss share one volatile-state teardown seam", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  const cleanup = worker.match(/async function settleServiceBoundaryState[\s\S]*?\n}\n/)[0];
-  assert.match(cleanup, /commandChunks\.clear\(\)[\s\S]*?interruptAllRecordings\("service_disconnected"\)[\s\S]*?diagnostics\.clearAll\(\)/);
-  assert.match(worker, /onDisconnect[\s\S]*?settleServiceBoundaryState\(\)/);
-  assert.match(worker, /operationEngine\.activate\(frame\.service_epoch\)[\s\S]*?if \(changed\) await settleServiceBoundaryState\(\)/);
-  assert.match(worker, /frame\.kind === "command_chunk"[\s\S]*?await browserNegotiation[\s\S]*?commandChunks\.accept/);
-  assert.match(worker, /onNativeMessage\(frame, port\)/);
-});
-
-test("console diagnostics receive execution-context provenance before disclosure", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(worker, /Runtime\.executionContextCreated[\s\S]*?diagnostics\.executionContextCreated/);
-  assert.match(worker, /Runtime\.executionContextDestroyed[\s\S]*?diagnostics\.executionContextDestroyed/);
-  assert.match(worker, /Runtime\.executionContextsCleared[\s\S]*?diagnostics\.executionContextsCleared/);
-});
-
-test("diagnostic teardown forgets volatile rings before disabling optional CDP domains", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  const cleanup = worker.match(/async function clearDiagnostics[\s\S]*?\n}\n/)[0];
-  assert.match(cleanup, /diagnostics\.forgetMany\(command\.tab_ids\)[\s\S]*?disableDiagnosticCapture\(command\.tab_ids\)/);
-  assert.match(cleanup, /outcome: "diagnostics_cleared", cleared_count: clearedCount/);
-});
 
 test("the unpacked rewrite preserves the established extension and host identity", () => {
   const manifest = JSON.parse(readFileSync(join(__dirname, "..", "manifest.json"), "utf8"));
@@ -304,8 +71,9 @@ test("the unpacked rewrite preserves the established extension and host identity
   const alphabet = "abcdefghijklmnop";
   const id = Array.from(digest).map((byte) => `${alphabet[byte >> 4]}${alphabet[byte & 15]}`).join("");
   assert.equal(id, "cjcmhepmagomefjggkcohdbfemacojoa");
-  assert.equal(shared.NATIVE_HOST_NAME, "org.sylin.ghostlight");
+  assert.equal(protocol.NATIVE_HOST_NAME, "org.sylin.ghostlight");
 });
+
 
 test("the manifest declares the complete local product surface", () => {
   const root = join(__dirname, "..");
@@ -313,6 +81,8 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.name, "Ghostlight in Browser");
   assert.equal(manifest.description, "Governed browser automation over your own authenticated session, for AI agents.");
   assert.equal(manifest.minimum_chrome_version, "125");
+  assert.equal(manifest.version, "2.0.0");
+  assert.equal(manifest.background.service_worker, "worker.js");
   assert.equal(manifest.action.default_title, "Ghostlight in Browser");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.equal(manifest.options_ui.page, "options.html");
@@ -320,7 +90,7 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.commands["toggle-hold"].description, "Pause or resume agent browsing (take the wheel)");
   assert.deepEqual(
     manifest.permissions,
-    ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "scripting", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
+    ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
   );
   const iconDigests = {
     16: "95d754348d4fabfb0412e32319226dd52615864ae511b8b492bef739f555d224",
@@ -339,8 +109,8 @@ test("the manifest declares the complete local product surface", () => {
   }
 });
 
+
 test("adapter state is content-free and deterministic", () => {
-  assert.equal(state.OPERATIONS_KEY, "ghostlight.operations");
   assert.equal(state.PRESENTATIONS_KEY, "ghostlight.presentations");
   assert.equal(state.newBrowserId(() => "1234-5678"), "browser_12345678");
   assert.deepEqual(state.preferences({ effects: false, captions: 0, diagnostics: true }), {
@@ -357,10 +127,11 @@ test("adapter state is content-free and deterministic", () => {
     ghostlight_debug: true,
     ghostlight_preserve_tabs: true
   });
-  assert.equal(state.connectionLabel({ connected: true, compatible: true, control_state: "attention" }), "Needs attention");
+  assert.equal(state.connectionLabel({ connected: true, compatible: true, control_state: "held" }), "Paused");
+  assert.equal(state.controlState("attention"), "active");
   assert.deepEqual(state.badge({ connected: true, compatible: true, control_state: "held" }), { text: "II", color: "#38bdf8" });
-  assert.deepEqual(state.badge({ connected: true, compatible: true, control_state: "attention" }), { text: "!", color: "#dc2626" });
 });
+
 
 test("unseen denial delivery is bounded, coalesced, and expires", () => {
   let now = 1000;
@@ -387,318 +158,9 @@ test("unseen denial delivery is bounded, coalesced, and expires", () => {
   assert.equal(queue.size(), 0);
 });
 
-test("the adapter defers unseen denials without focusing browser tabs", () => {
-  const worker = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.match(worker, /signal\.signal === "denial" && !\(await tabIsVisible\(tabId\)\)/);
-  assert.match(worker, /chrome\.tabs\.onActivated[\s\S]*?flushPendingPresentation/);
-  assert.match(worker, /chrome\.windows\.onFocusChanged[\s\S]*?flushPendingPresentation/);
-  const flush = worker.match(/async function flushPendingPresentation[\s\S]*?\n}\n/)[0];
-  assert.doesNotMatch(flush, /chrome\.tabs\.update|chrome\.windows\.update/);
-});
 
-test("model-driven close obeys the local preserve-tabs interlock", () => {
-  const root = join(__dirname, "..");
-  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
-  const options = readFileSync(join(root, "options.html"), "utf8");
-  assert.match(worker, /async function tabPreservationEnabled\(\)[\s\S]*?chrome\.storage\.local\.get\(stateApi\.PRESERVE_TABS_KEY\)/);
-  assert.match(worker, /if \(await tabPreservationEnabled\(\)\)[\s\S]*?code: "local_interlock"[\s\S]*?chrome\.tabs\.remove/);
-  // A released close that the interlock refuses unbinds the tab, so the reuse ladder can adopt
-  // it later (ADR-0137).
-  assert.match(
-    worker,
-    /if \(command\.released\) \{[\s\S]*?topology\.forget\(command\.tab_id\)[\s\S]*?code: "local_interlock"/
-  );
+test("the preserve-tabs choice is offered on the options page", () => {
+  const options = readFileSync(join(__dirname, "..", "options.html"), "utf8");
   assert.match(options, /id="preserve-tabs"/);
   assert.match(options, /You can always close tabs yourself\./);
-});
-
-test("workspace topology accepts only bounded Ghostlight group titles", () => {
-  assert.equal(topology.GROUP_PREFIX, "Ghostlight - ");
-  assert.equal(topology.GROUP_COLOR, "blue");
-  assert.equal(topology.validTitle("Ghostlight - Codex"), true);
-  assert.equal(topology.validTitle("Personal"), false);
-});
-
-test("reuse picks the exact-url unbound tab, then lowest id, and never a bound or non-web tab", async () => {
-  const bound = { id: 1, url: "https://example.com/", windowId: 4 };
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async query() {
-        return [
-          { id: 2, url: "https://example.com/other", windowId: 4 },
-          bound,
-          { id: 3, url: "https://example.net/", windowId: 4 },
-          { id: 4, url: "chrome://version", windowId: 4 },
-          { id: undefined, url: "https://example.com/", windowId: 4 }
-        ];
-      },
-      async get(id) { return { id, windowId: 4 }; },
-      async group(value) { return value.groupId ?? 11; }
-    },
-    tabGroups: {
-      async get(id) { return { id, windowId: 4, title: "Ghostlight - Codex" }; },
-      async query() { return []; },
-      async update() {}
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  // Tab 1 belongs to a workspace, so it must never be adopted even on an exact match.
-  await manager.assign(bound.id, "workspace_a", "Ghostlight - Codex");
-  assert.deepEqual(await manager.findReusable("https://example.com/other"), {
-    id: 2, url: "https://example.com/other", windowId: 4
-  });
-  // Without an exact match, the lowest-id same-host unbound tab wins.
-  assert.deepEqual(await manager.findReusable("https://example.com/"), {
-    id: 2, url: "https://example.com/other", windowId: 4
-  });
-  assert.equal(await manager.findReusable("https://no-host-match.test/"), null);
-  assert.equal(await manager.findReusable("chrome://version"), null);
-});
-
-test("same-title duplicate groups merge into the one canonical group", async () => {  const merged = [];
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async get(id) { return { id, windowId: 4 }; },
-      async query(value) {
-        return value.groupId === 12 ? [{ id: 12, windowId: 5 }] : [{ id: 13, windowId: 6 }];
-      },
-      async group(value) { merged.push(value); return value.groupId; }
-    },
-    tabGroups: {
-      async get(id) { return { id, windowId: 4, title: "Ghostlight - Codex" }; },
-      async query() {
-        return [
-          { id: 12, windowId: 5, title: "Ghostlight - Codex" },
-          { id: 9, windowId: 4, title: "Ghostlight - Codex" },
-          { id: 13, windowId: 6, title: "Ghostlight - Codex" }
-        ];
-      },
-      async update() {}
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.assign(7, "workspace_a", "Ghostlight - Codex");
-  // Strays move into the lowest-id canonical group first; Chromium then deletes the emptied
-  // duplicates itself. The new tab joins the same canonical group afterwards.
-  assert.deepEqual(merged, [
-    { groupId: 9, tabIds: [12] },
-    { groupId: 9, tabIds: [13] },
-    { groupId: 9, tabIds: [7] }
-  ]);
-});
-
-test("workspace topology reuses the established exact-title blue group", async () => {  let grouped = null;
-  let updated = null;
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async get(id) { return { id, windowId: 4 }; },
-      async group(value) { grouped = value; return value.groupId ?? 11; }
-    },
-    tabGroups: {
-      async get(id) { return { id, windowId: 4 }; },
-      async query() { return [{ id: 9, windowId: 4, title: "Ghostlight - Codex" }]; },
-      async update(id, value) { updated = { id, ...value }; }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.assign(7, "workspace_a", "Ghostlight - Codex");
-  assert.deepEqual(grouped, { groupId: 9, tabIds: [7] });
-  assert.deepEqual(updated, { id: 9, title: "Ghostlight - Codex", color: "blue", collapsed: false });
-  assert.equal(manager.titleFor("workspace_a"), "Ghostlight - Codex");
-  assert.deepEqual(manager.tabsFor("workspace_a"), [7]);
-  assert.deepEqual(manager.tabsFor("workspace_b"), []);
-});
-
-test("opening reuses the exact-title group across browser windows", async () => {
-  let created = null;
-  let grouped = null;
-  let focused = null;
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async create(value) { created = value; return { id: 7, windowId: value.windowId }; },
-      async get(id) { return { id, windowId: 22 }; },
-      async move() { throw new Error("the tab was created in the wrong window"); },
-      async group(value) { grouped = value; return value.groupId ?? 11; }
-    },
-    tabGroups: {
-      async get(id) { return { id, windowId: 22, title: "Ghostlight - Codex" }; },
-      async query() { return [{ id: 9, windowId: 22, title: "Ghostlight - Codex" }]; },
-      async update() {}
-    },
-    windows: {
-      async create() { throw new Error("an existing group must not create a window"); },
-      async update(id, value) { focused = { id, ...value }; return { id, ...value }; }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.open("https://example.com", "workspace_a", "Ghostlight - Codex");
-  assert.deepEqual(created, { url: "https://example.com", active: true, windowId: 22 });
-  assert.deepEqual(grouped, { groupId: 9, tabIds: [7] });
-  assert.deepEqual(focused, { id: 22, focused: true });
-});
-
-test("only the first tab for a workspace brings its Ghostlight window forward", async () => {
-  let nextTabId = 7;
-  let focusCount = 0;
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async create(value) { return { id: nextTabId++, windowId: value.windowId }; },
-      async get(id) { return { id, windowId: 22 }; },
-      async group(value) { return value.groupId; }
-    },
-    tabGroups: {
-      async get(id) { return { id, windowId: 22, title: "Ghostlight - Codex" }; },
-      async query() { return [{ id: 9, windowId: 22, title: "Ghostlight - Codex" }]; },
-      async update() {}
-    },
-    windows: {
-      async update(id, value) { focusCount += 1; return { id, ...value }; }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.open("https://example.com/one", "workspace_a", "Ghostlight - Codex");
-  await manager.open("https://example.com/two", "workspace_a", "Ghostlight - Codex");
-  assert.equal(focusCount, 1);
-});
-
-test("opening creates the first URL directly in a dedicated Ghostlight window", async () => {
-  let createdWindow = null;
-  let grouped = null;
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async create() { throw new Error("the user's active window must not receive the tab"); },
-      async query() { return []; },
-      async get(id) { return { id, windowId: 30 }; },
-      async group(value) { grouped = value; return 11; }
-    },
-    tabGroups: {
-      async get() { throw new Error("no cached group"); },
-      async query() { return []; },
-      async update() {}
-    },
-    windows: {
-      async create(value) {
-        createdWindow = value;
-        return { id: 30, tabs: [{ id: 8, windowId: 30 }] };
-      },
-      async update() { throw new Error("the new window already has the requested focus"); }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.open("https://example.com", "workspace_a", "Ghostlight - Codex");
-  assert.deepEqual(createdWindow, {
-    url: "https://example.com",
-    focused: true,
-    type: "normal"
-  });
-  assert.deepEqual(grouped, { tabIds: [8] });
-});
-
-test("an unobservable created window reports an unknown physical effect", async () => {
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: { async query() { return []; } },
-    tabGroups: { async query() { return []; } },
-    windows: { async create() { return undefined; } }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await assert.rejects(
-    manager.open("https://example.com", "workspace_a", "Ghostlight - Codex"),
-    (error) => error.effectUnknown === true
-  );
-});
-
-test("a new group reuses the existing Ghostlight work window", async () => {
-  let created = null;
-  let windowCreates = 0;
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async create(value) { created = value; return { id: 8, windowId: value.windowId }; },
-      async get(id) { return { id, windowId: 41 }; },
-      async group() { return 12; }
-    },
-    tabGroups: {
-      async get() { throw new Error("no cached group"); },
-      async query() { return [{ id: 4, windowId: 41, title: "Ghostlight - Another client" }]; },
-      async update() {}
-    },
-    windows: {
-      async create() { windowCreates += 1; },
-      async update(id, value) { return { id, ...value }; }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await manager.open("https://example.com", "workspace_a", "Ghostlight - Codex");
-  assert.deepEqual(created, { url: "https://example.com", active: true, windowId: 41 });
-  assert.equal(windowCreates, 0);
-});
-
-test("concurrent same-name opens create one canonical group and window", async () => {
-  const tabs = new Map();
-  const groups = new Map();
-  let nextTabId = 1;
-  let windowCreates = 0;
-  const grouped = [];
-  const chromeApi = {
-    storage: { session: { async get() { return {}; }, async set() {} } },
-    tabs: {
-      async create(value) {
-        const tab = { id: nextTabId++, windowId: value.windowId };
-        tabs.set(tab.id, tab);
-        return tab;
-      },
-      async query() { return []; },
-      async get(id) { return tabs.get(id); },
-      async group(value) {
-        grouped.push(value);
-        return value.groupId ?? 100;
-      }
-    },
-    tabGroups: {
-      async get(id) {
-        const group = groups.get(id);
-        if (!group) throw new Error("stale group");
-        return group;
-      },
-      async query() { return Array.from(groups.values()); },
-      async update(id, value) {
-        groups.set(id, { id, windowId: 30, ...value });
-      }
-    },
-    windows: {
-      async create() {
-        windowCreates += 1;
-        const tab = { id: nextTabId++, windowId: 30 };
-        tabs.set(tab.id, tab);
-        return { id: 30, tabs: [tab] };
-      },
-      async update(id, value) { return { id, ...value }; }
-    }
-  };
-  const manager = topology.create(chromeApi, "topology");
-  await Promise.all([
-    manager.open("https://example.com/one", "workspace_a", "Ghostlight - Codex"),
-    manager.open("https://example.com/two", "workspace_b", "Ghostlight - Codex")
-  ]);
-  assert.equal(windowCreates, 1);
-  assert.deepEqual(grouped, [
-    { tabIds: [1] },
-    { groupId: 100, tabIds: [2] }
-  ]);
-});
-
-// These global Chrome events cannot distinguish an agent popup from a person's Ctrl-click.
-test("creating or moving a tab never implicitly binds, groups, or debugs it", () => {
-  const source = readFileSync(join(__dirname, "..", "service-worker.js"), "utf8");
-  assert.doesNotMatch(source, /chrome\.tabs\.(?:onCreated|onAttached)\.addListener/);
-  assert.doesNotMatch(source, /event: "child_tab_opened"/);
-  // Assignment remains available to the explicit OpenTab command.
-  assert.match(source, /topology\.open\(/);
 });

@@ -6,7 +6,6 @@ const vm = require("node:vm");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const scriptEvaluator = require("../lib/script-evaluator.js");
-const engineApi = require("../lib/engine.js");
 
 function fakeSend(scripted) {
   const calls = [];
@@ -216,29 +215,15 @@ test("a lost evaluation reply is uncertain and is never retried", async () => {
   assert.equal(attempts, 1);
 });
 
-test("a runtime syntax exception stays non-replayable after operation-engine recovery", async () => {
-  const { context, send } = executingSend();
-  let stored;
-  const persistence = { load: async () => stored, save: async (next) => { stored = structuredClone(next); } };
-  const engine = engineApi.create(persistence);
-  await engine.activate("service_script_test");
-  const operation = () => scriptEvaluator.evaluate(send, "effects += 1; throw new SyntaxError('runtime')", 1000);
-  await assert.rejects(engine.execute("script_test", operation));
-  assert.equal(stored.records[0].phase, "uncertain");
-  const recovered = engineApi.create(persistence);
-  await recovered.activate("service_script_test");
-  await assert.rejects(recovered.execute("script_test", operation),
-    (error) => error.code === "operation_result_unavailable" && error.effectUnknown === true);
-  assert.equal(context.effects, 1);
-});
-
 test("the actual worker import list loads its packaged parser before the evaluator", async () => {
   const extension = join(__dirname, "..");
   const context = vm.createContext({});
   context.importScripts = (...paths) => {
     for (const path of paths) vm.runInContext(readFileSync(join(extension, path), "utf8"), context, { filename: path });
   };
-  vm.runInContext(readFileSync(join(extension, "service-worker.js"), "utf8").split("\n")[0], context);
+  const imports = readFileSync(join(extension, "worker.js"), "utf8").match(/importScripts\([^)]*\);/);
+  assert.ok(imports, "worker.js imports its scripts in one call");
+  vm.runInContext(imports[0], context);
   assert.equal(context.acorn.version, "8.18.0");
   const { calls, send } = executingSend();
   assert.equal(await context.GhostlightScriptEvaluator.evaluate(send, "return 4;", 1000), 4);

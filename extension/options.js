@@ -55,6 +55,10 @@
       linkPill.className = "pill on";
       linkText.textContent = "Connected";
       linkSub.textContent = "The agent can reach this browser.";
+    } else if (snapshot.link_state === "service_outdated") {
+      linkPill.className = "pill wait";
+      linkText.textContent = "Update needed";
+      linkSub.textContent = "Update Ghostlight on this computer.";
     } else if (snapshot.link_state === "host_absent") {
       linkPill.className = "pill wait";
       linkText.textContent = "Not installed here";

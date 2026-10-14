@@ -100,24 +100,34 @@ test("the bundled setup page is packaged for the store build", () => {
   assert.match(packaging, /"setup\.html"/);
 });
 
-test("the snapshot carries the closed classification and never the raw reason", () => {
-  const worker = read("service-worker.js");
-  assert.match(worker, /link_state: shared\.linkState\(\{/);
-  // The classification is computed from the live state before last_error is generalized, so a
-  // surface can distinguish the states without ever seeing Chrome's message text.
-  const snapshotStart = worker.indexOf("function uiSnapshot()");
-  const snapshotEnd = worker.indexOf("function updateBadge()");
-  const body = worker.slice(snapshotStart, snapshotEnd);
-  assert.ok(body.indexOf("link_state") < body.indexOf("last_error: preferences.diagnostics"));
+test("an outdated service outranks every disconnect reason, and a connected link is never reclassified", () => {
+  assert.equal(
+    shared.linkState({ connected: false, compatible: false, outdated: true, lastError: "Specified native messaging host not found." }),
+    shared.LINK_SERVICE_OUTDATED
+  );
+  assert.equal(shared.linkState({ connected: false, compatible: false, outdated: true }), "service_outdated");
+  assert.equal(shared.linkState({ connected: true, compatible: true, outdated: false }), shared.LINK_CONNECTED);
+});
+
+test("the popup and the options card name the outdated service with the pinned sentence", () => {
+  const sentence = "Update Ghostlight on this computer.";
+  assert.ok(read("popup.js").includes(sentence));
+  assert.ok(read("options.js").includes(sentence));
+  assert.match(read("popup.js"), /snapshot\.link_state === SERVICE_OUTDATED/);
+  assert.match(read("options.js"), /snapshot\.link_state === "service_outdated"/);
+});
+
+test("the popup has no diagnostics row and sends no diagnostics request", () => {
+  assert.doesNotMatch(read("popup.html"), /diagnostics-row|diagnostics-toggle/);
+  assert.doesNotMatch(read("popup.js"), /diagnostics_toggle|diagnosticsToggle/);
 });
 
 test("the popup renders control state and computes none of its own", () => {
   const script = read("popup.js");
-  // A policy attention hold and a person's pause both stop work, but the popup must not tell
-  // someone they paused Ghostlight when policy did (ADR-0126 Decision 6).
-  assert.match(script, /snapshot\.control_state === "attention"/);
+  // The wire carries three states: active, held and ended. The popup names each and decides none.
   assert.match(script, /snapshot\.control_state === "held"/);
-  assert.doesNotMatch(script, /\["held", "attention"\]\.includes/);
+  assert.match(script, /snapshot\.control_state === "ended"/);
+  assert.doesNotMatch(script, /attention/);
   // Control is requested from the orchestrator; the popup never decides the state itself.
   assert.match(script, /kind: "runtime_control"/);
 });

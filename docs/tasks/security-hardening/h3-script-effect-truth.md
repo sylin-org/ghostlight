@@ -70,11 +70,10 @@ records this correction to Decision 6's fallback. The mechanism remains implemen
 - [extension/tests/evaluate.test.js](../../../extension/tests/evaluate.test.js): closest existing
   tests. Some tests currently pin the unsafe retry mechanism; replace those expectations while
   retaining the supported user behavior. Queueing fake CDP replies alone does not prove effects.
-- [extension/service-worker.js](../../../extension/service-worker.js): invokes the evaluator and
-  relays its result/error. Trace its receipt through bridge types and orchestrator completion so
-  uncertainty reaches the model accurately.
-- [extension/lib/engine.js](../../../extension/lib/engine.js): consumes effect uncertainty for
-  engine state. Check that the correction does not turn an uncertain failure into a safe replay.
+- [extension/lib/evaluate.js](../../../extension/lib/evaluate.js): invokes the evaluator and
+  relays its result/error. Trace its receipt through the browser port and orchestrator completion
+  so uncertainty reaches the model accurately. (The protocol-3 worker and its operation engine,
+  which once consumed effect uncertainty, are gone; the protocol-4 receipt carries it.)
 
 Before production changes, apply the explore workflow, read current contracts and DEV-LOOP, map
 the whole error path, and check actual browser parsing/evaluation semantics. Do not infer that an

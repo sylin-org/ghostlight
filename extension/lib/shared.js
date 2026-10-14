@@ -1,3 +1,5 @@
+// Ghostlight -- the small helpers the worker and the other extension modules share: bounded text,
+// readiness and activity vocabulary, the browser name, the link classification and the heartbeat reply.
 (function installGhostlightShared(root, factory) {
   const api = factory();
   root.GhostlightShared = api;
@@ -7,30 +9,6 @@
 })(globalThis, function createGhostlightShared() {
   "use strict";
 
-  const NATIVE_HOST_NAME = "org.sylin.ghostlight";
-  const ADAPTER_PROTOCOL_MAJOR = 3;
-
-  function adapterCapabilities(commandHandlers, passiveHandlers = []) {
-    const revisions = new Map();
-    for (const handler of [...Object.values(commandHandlers), ...passiveHandlers]) {
-      if (!handler || typeof handler.capability !== "string" || handler.capability.length === 0) {
-        throw new TypeError("adapter handler capability must be a non-empty string");
-      }
-      if (!Number.isSafeInteger(handler.revision) || handler.revision < 1 || handler.revision > 0xffff) {
-        throw new RangeError("adapter handler revision must be a positive u16");
-      }
-      revisions.set(handler.capability, Math.max(revisions.get(handler.capability) ?? 0, handler.revision));
-    }
-    return Object.freeze(Array.from(revisions, ([name, revision]) => Object.freeze({ name, revision })));
-  }
-  const CREDENTIAL_AUTOCOMPLETE = new Set([
-    "current-password",
-    "new-password",
-    "one-time-code",
-    "cc-number",
-    "cc-csc"
-  ]);
-
   function bounded(value, maximum) {
     return String(value ?? "").slice(0, maximum);
   }
@@ -39,121 +17,6 @@
     if (status === "loading") return "loading";
     if (status === "complete") return "complete";
     return "unknown";
-  }
-
-  function isCredentialMetadata(metadata) {
-    const type = String(metadata.type ?? "").toLowerCase();
-    if (type === "password") return true;
-    const autocomplete = String(metadata.autocomplete ?? "").toLowerCase().split(/\s+/);
-    if (autocomplete.some((token) => CREDENTIAL_AUTOCOMPLETE.has(token))) return true;
-    const identity = `${metadata.name ?? ""} ${metadata.id ?? ""}`.toLowerCase();
-    return /(^|[^a-z])(password|passwd|passcode|otp|one.?time|secret|token|cvv|cvc)([^a-z]|$)/.test(identity);
-  }
-
-  function modifierMask(modifiers) {
-    let mask = 0;
-    for (const modifier of modifiers ?? []) {
-      if (modifier === "Alt") mask |= 1;
-      if (modifier === "Control") mask |= 2;
-      if (modifier === "Meta") mask |= 4;
-      if (modifier === "Shift") mask |= 8;
-    }
-    return mask;
-  }
-
-  function keyDescriptor(key) {
-    const named = {
-      Enter: ["Enter", 13], Tab: ["Tab", 9], Escape: ["Escape", 27], Backspace: ["Backspace", 8],
-      Delete: ["Delete", 46], ArrowUp: ["ArrowUp", 38], ArrowDown: ["ArrowDown", 40],
-      ArrowLeft: ["ArrowLeft", 37], ArrowRight: ["ArrowRight", 39], Home: ["Home", 36],
-      End: ["End", 35], PageUp: ["PageUp", 33], PageDown: ["PageDown", 34], Space: ["Space", 32]
-    };
-    if (named[key]) {
-      const [code, virtualKey] = named[key];
-      // Chromium needs Enter's character payload to perform its editing default action.
-      // A physical key packet alone fires keyboard events but drops textarea line breaks.
-      const text = key === "Enter" ? "\r" : undefined;
-      return { key: key === "Space" ? " " : key, code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey,
-        ...(text === undefined ? {} : { text, unmodifiedText: text }) };
-    }
-    const shiftBase = {
-      "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
-      "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "~": "`"
-    };
-    const punctuationCodes = {
-      ";": ["Semicolon", 186], "=": ["Equal", 187], ",": ["Comma", 188], "-": ["Minus", 189],
-      ".": ["Period", 190], "/": ["Slash", 191], "`": ["Backquote", 192], "[": ["BracketLeft", 219],
-      "\\": ["Backslash", 220], "]": ["BracketRight", 221], "'": ["Quote", 222], " ": ["Space", 32]
-    };
-    let base = key;
-    let modifiers = 0;
-    if (/^[A-Z]$/.test(key)) {
-      base = key.toLowerCase();
-      modifiers = 8;
-    } else if (shiftBase[key]) {
-      base = shiftBase[key];
-      modifiers = 8;
-    }
-    let code;
-    let virtualKey;
-    if (/^[a-z]$/i.test(base)) {
-      const upper = base.toUpperCase();
-      code = `Key${upper}`;
-      virtualKey = upper.charCodeAt(0);
-    } else if (/^[0-9]$/.test(base)) {
-      code = `Digit${base}`;
-      virtualKey = base.charCodeAt(0);
-    } else if (punctuationCodes[base]) {
-      [code, virtualKey] = punctuationCodes[base];
-    }
-    return {
-      key,
-      ...(code ? { code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey } : {}),
-      ...(modifiers ? { modifiers } : {}),
-      text: key,
-      unmodifiedText: base
-    };
-  }
-
-  function dragPackets(start, end, steps = 12) {
-    if (!Number.isSafeInteger(steps) || steps < 1 || steps > 60) {
-      throw new RangeError("drag steps must be from 1 through 60");
-    }
-    const packets = [
-      { type: "mouseMoved", x: start.x, y: start.y },
-      { type: "mousePressed", x: start.x, y: start.y, button: "left", clickCount: 1 }
-    ];
-    for (let step = 1; step <= steps; step += 1) {
-      const ratio = step / steps;
-      packets.push({
-        type: "mouseMoved",
-        x: start.x + (end.x - start.x) * ratio,
-        y: start.y + (end.y - start.y) * ratio,
-        button: "left",
-        buttons: 1,
-        force: 1
-      });
-    }
-    packets.push({
-      type: "mouseReleased",
-      x: end.x,
-      y: end.y,
-      button: "left",
-      clickCount: 1
-    });
-    return packets;
-  }
-
-  function presentationLabel(signal) {
-    const labels = {
-      start: "Ghostlight starting",
-      target: "Ghostlight target",
-      progress: "Ghostlight working",
-      completion: "Ghostlight complete",
-      denial: "Ghostlight blocked",
-      attention: "Ghostlight needs you"
-    };
-    return labels[signal] ?? "Ghostlight";
   }
 
   function activityLabel(activity) {
@@ -209,8 +72,12 @@
   const LINK_CONNECTED = "connected";
   const LINK_UNREACHABLE = "unreachable";
   const LINK_HOST_ABSENT = "host_absent";
+  const LINK_SERVICE_OUTDATED = "service_outdated";
 
-  function linkState({ connected, compatible, lastError }) {
+  // The closed classification a surface renders. An outdated service is known from the hello that
+  // never came, so it outranks a disconnect reason; a connected link is never reclassified.
+  function linkState({ connected, compatible, outdated = false, lastError }) {
+    if (outdated) return LINK_SERVICE_OUTDATED;
     if (connected && compatible) return LINK_CONNECTED;
     const reason = typeof lastError === "string" ? lastError.toLowerCase() : "";
     if (reason.includes(NATIVE_HOST_ABSENT_MARKER)) return LINK_HOST_ABSENT;
@@ -226,16 +93,8 @@
   }
 
   return Object.freeze({
-    NATIVE_HOST_NAME,
-    ADAPTER_PROTOCOL_MAJOR,
-    adapterCapabilities,
     bounded,
     readinessForStatus,
-    isCredentialMetadata,
-    modifierMask,
-    keyDescriptor,
-    dragPackets,
-    presentationLabel,
     activityLabel,
     browserEventFrame,
     browserName,
@@ -244,6 +103,7 @@
     LINK_CONNECTED,
     LINK_UNREACHABLE,
     LINK_HOST_ABSENT,
+    LINK_SERVICE_OUTDATED,
     linkState
   });
 });

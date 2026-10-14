@@ -46,9 +46,9 @@ try {
         "options.js",
         "popup.html",
         "popup.js",
-        "service-worker.js",
         "setup.html",
-        "ui.css"
+        "ui.css",
+        "worker.js"
     )
     $iconFiles = @(
         "icon16.png",
