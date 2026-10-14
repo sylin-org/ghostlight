@@ -2,101 +2,13 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const Buffers = require("../lib/buffers.js");
-const Capture = require("../lib/capture.js");
-const Diagnostics = require("../lib/diagnostics.js");
-const Evaluate = require("../lib/evaluate.js");
 const Primitives = require("../lib/primitives.js");
-const Recording = require("../lib/recording.js");
-const Tabs = require("../lib/tabs.js");
 const World = require("../lib/world.js");
 const protocol = require("../lib/protocol.js");
 const sessions = require("../lib/sessions.js");
-const { TOP, TOP_LOADER, fakeChrome, assets, wire } = require("./p4-fakes.js");
-const { golden, fakeBrowser } = require("./p4-chrome.js");
-
-const GOLDEN = path.join(__dirname, "..", "..", "tests", "golden", "protocol4");
-const TAB = 12;
-const URL = "https://example.com/account";
-const ACCOUNT_TAB = { id: TAB, windowId: 1, url: URL, title: "Account", active: true, status: "complete" };
-const names = (directory) => fs.readdirSync(path.join(GOLDEN, directory)).filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -5)).sort();
-const wireFrame = (frame) => JSON.parse(JSON.stringify(frame));
-const gate = () => { let open; const promise = new Promise((resolve) => { open = resolve; }); return { promise, open }; };
-
-// Builds the dispatcher over the real modules and a scripted browser. `clock` moves the cancel
-// registry's time. With `stubs`, the primitives named in the map run the given function instead
-// of their module (their real validators still run).
-function rig({ tabs = [ACCOUNT_TAB], stubs = new Map(), attach, tabHandlers = {}, onSleep = () => {} } = {}) {
-  const chrome = fakeChrome();
-  if (attach) chrome.attach = attach;
-  let clock = 0;
-  const cancellations = Primitives.createCancellations({ now: () => clock });
-  const parts = wire(chrome, { isCancelled: cancellations.isCancelled });
-  const browser = fakeBrowser({ tabs });
-  const hook = {
-    calls: [],
-    async manage(id) { this.calls.push(id); },
-    async release() {},
-    managedIds() { return []; }
-  };
-  const real = {
-    tabs: Tabs.create({ chromeApi: browser, lifecycle: parts.lifecycle, controlled: hook, isCancelled: cancellations.isCancelled }),
-    capture: Capture.create({ lifecycle: parts.lifecycle, worldCalls: parts.world, chromeApi: browser }),
-    evaluate: Evaluate.create({ lifecycle: parts.lifecycle, inventory: parts.inventory }),
-    buffers: Buffers.create({
-      chromeApi: browser,
-      lifecycle: parts.lifecycle,
-      inventory: parts.inventory,
-      worldCalls: parts.world,
-      diagnostics: Diagnostics.create({ cursorSecret: "secret" }),
-      recording: Recording.create()
-    })
-  };
-  const via = (name, handler) => (stubs.has(name)
-    ? Object.freeze({ ...handler, run: (args, fx, correlation) => stubs.get(name)(args, fx, correlation) })
-    : handler);
-  const frames = [];
-  const worldLog = { cancelled: [], inflight: new Map() };
-  const modules = {
-    tabs: {
-      listTabs: via("list_tabs", real.tabs.listTabs),
-      openTab: via("open_tab", real.tabs.openTab),
-      navigate: via("navigate", real.tabs.navigate),
-      focusTab: via("focus_tab", real.tabs.focusTab),
-      closeTab: via("close_tab", real.tabs.closeTab),
-      setZoom: via("set_zoom", real.tabs.setZoom),
-      resizeWindow: via("resize_window", real.tabs.resizeWindow),
-      ...tabHandlers
-    },
-    capture: { view: via("view", real.capture.view), capture: via("capture", real.capture.capture) },
-    evaluate: { evaluateMain: via("evaluate_main", real.evaluate.evaluateMain) },
-    buffers: { diagnostics: via("diagnostics", real.buffers.diagnostics), recording: via("recording", real.buffers.recording) },
-    input: { run: stubs.get("input") ?? parts.input.run },
-    inventory: { ...parts.inventory, framesPrimitive: stubs.get("frames") ?? parts.inventory.framesPrimitive },
-    world: {
-      ...parts.world,
-      callPrimitive: stubs.get("call") ?? parts.world.callPrimitive,
-      inflight: (correlation) => worldLog.inflight.get(correlation) ?? [],
-      cancelToken: (entry) => worldLog.cancelled.push(entry)
-    }
-  };
-  const slept = [];
-  const primitives = Primitives.create({
-    chromeApi: browser,
-    send: (frame) => frames.push(frame),
-    controlled: hook,
-    cancellations,
-    lifecycle: parts.lifecycle,
-    sleep: async (ms) => { slept.push(ms); onSleep(ms); },
-    ...modules
-  });
-  return { chrome, browser, hook, frames, primitives, cancellations, slept, worldLog, advance: (ms) => { clock += ms; }, ...parts };
-}
-
-const request = (name, args) => ({ name, args });
-const focus = { tab_id: TAB };
+const { TOP, TOP_LOADER, assets } = require("./p4-fakes.js");
+const { golden } = require("./p4-chrome.js");
+const { TAB, URL, ACCOUNT_TAB, names, wireFrame, gate, request, focus, rig } = require("./p4-rig.js");
 
 // ---- the table ------------------------------------------------------------------------------
 
@@ -447,8 +359,11 @@ test("the message of a failure is bounded, and left out when empty", async () =>
   assert.equal("message" in parts.frames[1], false);
 });
 
-// ---- every golden receipt -------------------------------------------------------------------
+// ---- the receipt envelope -------------------------------------------------------------------
 
+// The handlers are stubbed here, so this pins only the envelope: how the dispatcher turns an
+// outcome, a thrown failure and the effect facts into receipt frames. The receipts the real modules
+// build are pinned in golden-receipts.test.js.
 const REAL = new Set(["dialog", "accessibility_snapshot"]);
 
 // The golden request that stands for a primitive: the plain file, else the first variant.
@@ -457,7 +372,7 @@ function requestFor(name) {
   return golden(`requests/${stem}`);
 }
 
-test("the dispatcher builds every golden receipt from the outcome and facts of its handler", async () => {
+test("the dispatcher frames any handler outcome and its effect facts in the golden receipt envelope", async () => {
   let checked = 0;
   for (const stem of names("receipts")) {
     const [name] = stem.split(".");
@@ -478,7 +393,7 @@ test("the dispatcher builds every golden receipt from the outcome and facts of i
     assert.deepEqual(wireFrame(parts.frames), [receipt], stem);
     checked += 1;
   }
-  assert.equal(checked, 80 - 5 - 3 - 1, "all 80 receipts except the 5 dialog, 3 snapshot and 1 unknown-primitive ones");
+  assert.equal(checked, 80 - 5 - 3 - 1, "every envelope except the 5 dialog, 3 snapshot and 1 unknown-primitive ones");
 });
 
 test("the unknown-primitive tolerance fixture is answered with its golden receipt", async () => {

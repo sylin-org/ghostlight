@@ -79,7 +79,7 @@ function assets(source = "\"use strict\";\nglobalThis.__ghostlightRuntime = { id
   return { id: crypto.createHash("sha256").update(source, "utf8").digest("hex"), source };
 }
 
-/** Wires sessions, inventory, world and input the way the worker does. */
+/** Wires sessions, inventory, world and input the way the worker does. `now` and `sleep` replace the clock of the world and input. */
 function wire(chrome, options = {}) {
   const box = {};
   const lifecycle = sessions.create(chrome, {
@@ -88,8 +88,9 @@ function wire(chrome, options = {}) {
     onSessionGone: (tabId, sessionId) => box.world.sessionGone(tabId, sessionId)
   });
   const inventory = Inventory.create({ lifecycle, webNavigation: chrome.webNavigation });
-  box.world = World.create({ lifecycle, inventory, isCancelled: options.isCancelled, local: options.local });
-  const input = Input.create({ lifecycle, inventory, worldCalls: box.world, isCancelled: options.isCancelled });
+  const clock = { now: options.now, sleep: options.sleep };
+  box.world = World.create({ lifecycle, inventory, isCancelled: options.isCancelled, local: options.local, ...clock });
+  const input = Input.create({ lifecycle, inventory, worldCalls: box.world, isCancelled: options.isCancelled, ...clock });
   return { lifecycle, inventory, world: box.world, input };
 }
 
