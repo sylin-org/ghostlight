@@ -1637,6 +1637,15 @@ impl ApplicationExecutor {
         if error == BrowserError::StaleView {
             return self.workspace_failure(context, WorkspaceError::StaleView);
         }
+        if error == BrowserError::DialogOpen {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::DialogOpen,
+                json!({"reason":"dialog_open"}),
+            );
+        }
         if error == BrowserError::DocumentUnavailable {
             return self.failed(
                 context,
@@ -2266,6 +2275,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
             (governed_check(*reason), Decision::refused(*reason))
         }
         BrowserError::DocumentUnavailable => (CheckFailure::DocumentUnavailable, admitted),
+        BrowserError::DialogOpen => (CheckFailure::BrowserRefused, admitted),
         BrowserError::CancelledBeforeDispatch | BrowserError::CancelledAfterDispatch => {
             (CheckFailure::Cancelled, admitted)
         }
@@ -2589,6 +2599,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::DialogOpen => "dialog_open",
         BrowserError::StaleView => "stale_view",
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)

@@ -924,18 +924,21 @@ pub enum BrowserOutcome {
         elapsed_ms: u64,
         readiness: BrowserReadiness,
     },
-    /// Dialog observation, with the dialog's bounded message when the adapter reports one.
+    /// Dialog observation, with the dialog's bounded message and the url of the document that
+    /// raised it when the adapter reports them.
     Dialog {
         tab_id: u64,
         present: bool,
         dialog_type: String,
         message: Option<String>,
+        url: Option<String>,
     },
-    /// Dialog handling receipt.
+    /// Dialog handling receipt, with the url of the document that raised the dialog.
     DialogHandled {
         tab_id: u64,
         dialog_type: String,
         accepted: bool,
+        url: Option<String>,
     },
     /// No dialog was showing when the handling attempt landed.
     DialogAbsent { tab_id: u64 },

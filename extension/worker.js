@@ -724,7 +724,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (method === DEBUGGER_EVENT.DIALOG_OPENING) {
     const type = params.type || UNKNOWN_DIALOG;
     const sessionId = source.sessionId ?? null;
-    lifecycle.openDialog(tabId, { type, message: params.message, sessionId });
+    lifecycle.openDialog(tabId, { type, message: params.message, url: params.url, sessionId });
     world.announceDialog(tabId, type);
     sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: true, dialog_type: type });
     tabs.acceptBeforeUnload(tabId, { type, sessionId }).catch(() => {});

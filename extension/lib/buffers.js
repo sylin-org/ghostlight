@@ -264,7 +264,8 @@
     // One still frame of the visible viewport, taken inside the caller's lease with Ghostlight's own
     // presentation hidden. Resolves true when the frame was kept.
     async function captureFrame(tabId, frameKind) {
-      if (!(await scopeCurrent(tabId))) return false;
+      // A dialog blocks the renderer, so no frame can be taken until it is handled.
+      if (lifecycle.currentDialog(tabId) || !(await scopeCurrent(tabId))) return false;
       worldCalls.holdHidden(tabId);
       try {
         await worldCalls.ambientAll(tabId);

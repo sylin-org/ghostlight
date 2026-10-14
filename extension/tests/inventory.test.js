@@ -135,6 +135,22 @@ test("currentLoader reads the frame tree of the session", async () => {
   assert.equal(await inventory.currentLoader({ tabId: TAB }, "GONE"), null);
 });
 
+test("no document is read while a dialog is open: every read refuses with dialog_open and sends nothing", async () => {
+  const chrome = fakeChrome();
+  const { inventory, lifecycle } = await attached(chrome);
+  lifecycle.openDialog(TAB, { type: "prompt", message: "Name?", url: TOP_URL });
+  chrome.calls.length = 0;
+  const refused = { code: "dialog_open", message: "A JavaScript dialog blocks the page." };
+  await assert.rejects(inventory.snapshot(TAB), refused);
+  await assert.rejects(inventory.topSnapshot(TAB), refused);
+  await assert.rejects(inventory.currentLoader({ tabId: TAB }, TOP), refused);
+  await assert.rejects(inventory.framesPrimitive({ tab_id: TAB }), refused);
+  assert.equal(methods(chrome, "Page.getFrameTree").length, 0, "the frame tree is never asked for");
+  await lifecycle.closeDialog(TAB);
+  assert.equal((await inventory.snapshot(TAB)).owner.size > 0, true, "reads resume once the dialog is handled");
+  await lifecycle.detachAll();
+});
+
 test("the frames primitive answers the fixture shape inside a debugger lease", async () => {
   const chrome = fakeChrome({
     trees: { root: node(TOP, TOP_LOADER, TOP_URL, null, [node(CHILD, CHILD_LOADER, "https://widgets.example.net/embed", TOP)]) },

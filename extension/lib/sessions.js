@@ -34,6 +34,8 @@
   const EVENT_DETACHED = "Target.detachedFromTarget";
   const TARGET_IFRAME = "iframe";
   const DIALOG_UNKNOWN = "unknown";
+  const DIALOG_OPEN = "dialog_open";
+  const DIALOG_OPEN_MESSAGE = "A JavaScript dialog blocks the page.";
 
   /**
    * Builds a coded failure: an Error whose `code` is a protocol 4 receipt failure code.
@@ -41,6 +43,14 @@
    */
   function failure(code, message) {
     return Object.assign(new Error(message), { code });
+  }
+
+  /**
+   * The failure for work that needs a renderer a JavaScript dialog is blocking: the receipt code
+   * `dialog_open` with its one message. Anything that would wait on the page throws it at once.
+   */
+  function dialogOpen() {
+    return failure(DIALOG_OPEN, DIALOG_OPEN_MESSAGE);
   }
 
   const iframeAutoAttach = Object.freeze({
@@ -330,11 +340,12 @@
     }
 
     /**
-     * Records that a JavaScript dialog is open on a tab, as `{ type, message, sessionId }`. An open
+     * Records that a JavaScript dialog is open on a tab, as `{ type, message, url, sessionId }`.
+     * `url` is the url of the frame that raised it, or empty when the browser did not say. An open
      * dialog keeps the session attached until closeDialog, so the dialog can still be answered.
      */
-    function openDialog(tabId, { type, message = "", sessionId = null } = {}) {
-      tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, sessionId };
+    function openDialog(tabId, { type, message = "", url = "", sessionId = null } = {}) {
+      tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, url, sessionId };
     }
 
     /**
@@ -349,7 +360,7 @@
     }
 
     /**
-     * Returns a copy of the open dialog of a tab as `{ type, message, sessionId }`, or null when
+     * Returns a copy of the open dialog of a tab as `{ type, message, url, sessionId }`, or null when
      * none is open. Changing the copy does not change the recorded dialog.
      */
     function currentDialog(tabId) {
@@ -507,5 +518,5 @@
     });
   }
 
-  return Object.freeze({ create, CDP_ALLOW, failure });
+  return Object.freeze({ create, CDP_ALLOW, failure, dialogOpen, DIALOG_OPEN, DIALOG_OPEN_MESSAGE });
 });

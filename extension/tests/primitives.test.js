@@ -435,9 +435,9 @@ test("an attach the browser refuses is debugger_unavailable with nothing dispatc
 
 // ---- dialog ---------------------------------------------------------------------------------
 
-test("dialog status reports the open dialog with its bounded message, matching the golden receipt", async () => {
+test("dialog status reports the open dialog with its bounded message and the url of the frame that raised it, matching the golden receipt", async () => {
   const parts = rig();
-  parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?" });
+  parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?", url: URL });
   await parts.primitives.run("p4_001d", request("dialog", { tab_id: TAB, op: { op: "status" } }));
   assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok")]);
   parts.frames.length = 0;
@@ -460,9 +460,19 @@ test("dialog status finds a dialog that was already open when the debugger attac
   assert.deepEqual(parts.frames[0].ok, { present: true, dialog_type: "prompt", message: "Name?" });
 });
 
+test("a dialog the browser gave no url for reports none, and a long url is bounded", async () => {
+  const parts = rig();
+  parts.lifecycle.openDialog(TAB, { type: "alert", message: "Hi" });
+  await parts.primitives.run("a", request("dialog", { tab_id: TAB, op: { op: "status" } }));
+  assert.equal("url" in JSON.parse(JSON.stringify(parts.frames[0].ok)), false);
+  parts.lifecycle.openDialog(TAB, { type: "alert", message: "Hi", url: `https://example.com/${"x".repeat(protocol.URL_CHARS * 2)}` });
+  await parts.primitives.run("b", request("dialog", { tab_id: TAB, op: { op: "status" } }));
+  assert.ok(parts.frames[1].ok.url.length <= protocol.URL_CHARS);
+});
+
 test("dialog handle answers on the session that raised the dialog and closes it, matching the golden receipt", async () => {
   const parts = rig();
-  parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?", sessionId: "CHILD-SESSION" });
+  parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?", url: URL, sessionId: "CHILD-SESSION" });
   await parts.primitives.run("p4_001e", request("dialog", { tab_id: TAB, op: { op: "handle", accept: true, text: "yes" } }));
   assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok_handled")]);
   const sent = parts.chrome.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
@@ -547,6 +557,18 @@ test("an accessibility snapshot of a frame reports bounded nodes with only the p
   assert.deepEqual(sent.params, { frameId: TOP, depth: 6 });
   assert.equal(parts.chrome.calls.some((call) => call.method === "Accessibility.enable"), false, "nothing enables the domain");
   assert.equal(parts.lifecycle.attachedCount(), 0);
+});
+
+test("an accessibility snapshot refuses at once with dialog_open while a dialog is open", async () => {
+  const parts = axRig({ nodes: goldenNodes });
+  parts.lifecycle.openDialog(TAB, { type: "alert", message: "Hi", url: URL });
+  await parts.primitives.run("blocked", request("accessibility_snapshot", { tab_id: TAB, frame: top, max_nodes: 10 }));
+  assert.equal(parts.frames[0].failure, "dialog_open");
+  assert.equal(parts.frames[0].message, "A JavaScript dialog blocks the page.");
+  assert.equal(parts.frames[0].dispatched, false);
+  const sent = parts.chrome.calls.map((call) => call.method);
+  assert.equal(sent.includes("Page.getFrameTree"), false);
+  assert.equal(sent.includes("Accessibility.getFullAXTree"), false);
 });
 
 test("a snapshot with a query asks for the matching nodes under the frame's document", async () => {

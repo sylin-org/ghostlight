@@ -29,6 +29,11 @@ impl ApplicationExecutor {
         }
     }
 
+    /// Report or answer the dialog showing on a tab.
+    ///
+    /// Status asks the browser what is showing. Every other action sends one handling command,
+    /// whose own answer says whether a dialog was there; the browser step looks first, so no
+    /// separate look is needed here.
     pub(super) fn handle_dialog(
         &self,
         context: &InvocationContext<'_>,
@@ -46,49 +51,46 @@ impl ApplicationExecutor {
             value.tab.as_deref(),
             capability,
             |selected, decision| {
-                let observed = match self.dispatch(
-                    context,
-                    BrowserCommand::InspectDialog {
-                        tab_id: selected.physical_id,
-                    },
-                ) {
-                    Ok(BrowserOutcome::Dialog {
-                        tab_id,
-                        present,
-                        dialog_type,
-                        message,
-                    }) if tab_id == selected.physical_id => (present, dialog_type, message),
-                    Ok(_) => {
-                        return self.protocol_failure(context, decision, Some(selected.physical_id))
-                    }
-                    Err(error) => {
-                        return self.browser_failure(
+                if value.action == "status" {
+                    return match self.dispatch(
+                        context,
+                        BrowserCommand::InspectDialog {
+                            tab_id: selected.physical_id,
+                        },
+                    ) {
+                        Ok(BrowserOutcome::Dialog {
+                            tab_id,
+                            present,
+                            dialog_type,
+                            message,
+                            ..
+                        }) if tab_id == selected.physical_id => {
+                            self.note_dialog(
+                                context,
+                                tab_id,
+                                present.then(|| DialogKind::classify(&dialog_type)),
+                            );
+                            self.succeeded(
+                                context,
+                                decision,
+                                Some(tab_id),
+                                Effect::None,
+                                readiness(selected.readiness),
+                                true,
+                                Outcome::DialogObserved { present, message },
+                                json!({"tab":selected.handle.as_str(),"present":present,"dialog_type":dialog_type}),
+                            )
+                        }
+                        Ok(_) => {
+                            self.protocol_failure(context, decision, Some(selected.physical_id))
+                        }
+                        Err(error) => self.browser_failure(
                             context,
                             decision,
                             error,
                             Some(selected.physical_id),
-                        )
-                    }
-                };
-                self.note_dialog(
-                    context,
-                    selected.physical_id,
-                    observed.0.then(|| DialogKind::classify(&observed.1)),
-                );
-                if value.action == "status" {
-                    return self.succeeded(
-                        context,
-                        decision,
-                        Some(selected.physical_id),
-                        Effect::None,
-                        readiness(selected.readiness),
-                        true,
-                        Outcome::DialogObserved {
-                            present: observed.0,
-                            message: observed.2,
-                        },
-                        json!({"tab":selected.handle.as_str(),"present":observed.0,"dialog_type":observed.1}),
-                    );
+                        ),
+                    };
                 }
                 let accept = value.action != "dismiss";
                 let text = (value.action == "respond")
@@ -104,24 +106,26 @@ impl ApplicationExecutor {
                 ) {
                     Ok(BrowserOutcome::DialogHandled {
                         tab_id,
-                        dialog_type: handled_type,
+                        dialog_type,
                         accepted,
+                        ..
                     }) if tab_id == selected.physical_id => {
                         self.note_dialog(context, tab_id, None);
                         self.succeeded(
-                        context,
-                        decision,
-                        Some(tab_id),
-                        Effect::Applied,
-                        readiness(selected.readiness),
-                        false,
-                        Outcome::DialogHandled { accepted },
-                        json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){observed.1}else{handled_type},"accepted":accepted,"handled":true}),
-                    )
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::Applied,
+                            readiness(selected.readiness),
+                            false,
+                            Outcome::DialogHandled { accepted },
+                            json!({"tab":selected.handle.as_str(),"dialog_type":dialog_type,"accepted":accepted,"handled":true}),
+                        )
                     }
                     Ok(BrowserOutcome::DialogAbsent { tab_id })
                         if tab_id == selected.physical_id =>
                     {
+                        self.note_dialog(context, tab_id, None);
                         self.failed(
                             context,
                             decision,

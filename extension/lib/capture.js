@@ -23,7 +23,6 @@
   const CLIP = Object.freeze({ VIEWPORT: "viewport", FULL_PAGE: "full_page", VIEWPORT_RECT: "viewport_rect", PAGE_RECT: "page_rect" });
   const FAILURE = Object.freeze({
     INVALID_REQUEST: "invalid_request",
-    DIALOG_OPEN: "dialog_open",
     CAPTURE_TOO_LARGE: "capture_too_large",
     OTHER: "other"
   });
@@ -146,7 +145,7 @@
     const rootTarget = (tabId) => ({ tabId });
 
     function requireNoDialog(tabId) {
-      if (lifecycle.currentDialog(tabId)) throw sessions.failure(FAILURE.DIALOG_OPEN, "A JavaScript dialog blocks the page.");
+      if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
     }
 
     // Reads the layout metrics once and derives the view facts. The caller holds a lease.

@@ -4244,6 +4244,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         present: true,
         dialog_type: "prompt".into(),
         message: Some("Name?".into()),
+        url: Some("https://example.com/".into()),
     }));
     let status = executor.execute(
         &workspace,
@@ -4263,11 +4264,13 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         present: true,
         dialog_type: "prompt".into(),
         message: None,
+        url: Some("https://example.com/".into()),
     }));
     browser.push(Ok(BrowserOutcome::DialogHandled {
         tab_id: 7,
         dialog_type: "prompt".into(),
         accepted: true,
+        url: Some("https://example.com/".into()),
     }));
     executor.execute(
         &workspace,
@@ -4286,6 +4289,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         present: false,
         dialog_type: String::new(),
         message: None,
+        url: None,
     }));
     executor.execute(
         &workspace,

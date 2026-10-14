@@ -188,6 +188,7 @@ pub fn inspect_dialog(l: &mut Link<'_>, tab_id: u64) -> Result<BrowserOutcome, B
         present: facts.present,
         dialog_type: facts.dialog_type,
         message: facts.message,
+        url: facts.url,
     })
 }
 
@@ -213,6 +214,7 @@ pub fn handle_dialog(
         tab_id,
         dialog_type: facts.dialog_type,
         accepted: facts.accepted,
+        url: facts.url,
     })
 }
 

@@ -125,6 +125,18 @@ fn opened(
     FakeExtension,
     crate::workspace::WorkspaceId,
 ) {
+    opened_under(fault, GovernanceFacade::new(None, None))
+}
+
+/// [`opened`] under the given governance.
+fn opened_under(
+    fault: Fault,
+    governance: GovernanceFacade,
+) -> (
+    ApplicationExecutor,
+    FakeExtension,
+    crate::workspace::WorkspaceId,
+) {
     let port = Arc::new(RelayBrowserPort::new(
         "service_protocol4".into(),
         Arc::new(wire::Assets {
@@ -146,7 +158,7 @@ fn opened(
     let workspaces = WorkspaceStore::default();
     let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
     let mut executor = ApplicationExecutor::new(
-        GovernanceFacade::new(None, None),
+        governance,
         workspaces,
         port,
         PresentationReactor::new(Arc::new(NoPresentation)),
@@ -322,5 +334,186 @@ fn a_read_that_was_cancelled_or_ran_out_of_time_changed_nothing() {
         }));
         let result = execute(&executor, &workspace, "browser_read", json!({}));
         assert_plain(&result, status, summary, reason);
+    }
+}
+
+/// The message the scripted dialog carries.
+const DIALOG_MESSAGE: &str = "Your name?";
+/// The document inside the page that raised the scripted dialog.
+const DIALOG_FRAME: &str = "https://private-frame.invalid/inner";
+
+/// A fault that has a prompt open: `status` reports it as raised by `url`, `handle` answers it.
+fn dialog_fault(url: Option<&'static str>) -> Fault {
+    Box::new(move |correlation, primitive| {
+        let wire::Primitive::Dialog(dialog) = primitive else {
+            return None;
+        };
+        let mut facts =
+            json!({"present": true, "dialog_type": "prompt", "message": DIALOG_MESSAGE});
+        if let Some(url) = url {
+            facts["url"] = json!(url);
+        }
+        Some(match dialog.op {
+            wire::DialogOp::Status => FakeExtension::ok(correlation, facts),
+            wire::DialogOp::Handle { .. } => {
+                facts["handled"] = json!(true);
+                facts["accepted"] = json!(true);
+                wire::Receipt {
+                    dispatched: true,
+                    ..FakeExtension::ok(correlation, facts)
+                }
+            }
+        })
+    })
+}
+
+/// The primitives the service sent after the first `before` requests, as `name` or
+/// `dialog:status` and `dialog:handle`.
+fn sent_since(fake: &FakeExtension, before: usize) -> Vec<String> {
+    fake.wait(|_| true).requests[before..]
+        .iter()
+        .map(|(_, primitive)| {
+            let encoded = serde_json::to_value(primitive).unwrap();
+            let name = encoded["name"].as_str().unwrap().to_owned();
+            match encoded["args"]["op"]["op"].as_str() {
+                Some(op) if name == "dialog" => format!("{name}:{op}"),
+                _ => name,
+            }
+        })
+        .collect()
+}
+
+fn requests_so_far(fake: &FakeExtension) -> usize {
+    fake.wait(|_| true).requests.len()
+}
+
+#[test]
+fn dialog_status_is_one_dialog_primitive_and_never_reads_the_frames() {
+    let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
+    let before = requests_so_far(&fake);
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_dialog",
+        json!({"action": "status"}),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert!(
+        result.summary.contains(DIALOG_MESSAGE),
+        "{}",
+        result.summary
+    );
+    assert_eq!(sent_since(&fake, before), ["dialog:status"]);
+}
+
+#[test]
+fn responding_to_a_dialog_looks_once_then_handles_and_never_reads_the_frames() {
+    let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
+    let before = requests_so_far(&fake);
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_dialog",
+        json!({"action": "respond", "text": "Ada"}),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(result.effect, Effect::Applied);
+    assert_eq!(
+        sent_since(&fake, before),
+        ["dialog:status", "dialog:handle"]
+    );
+}
+
+#[test]
+fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
+    let policy = temporary_policy("dialog-denied");
+    fs::write(
+        &policy,
+        serde_json::to_vec(&json!({"schema": 3, "name": "dialogs", "version": "1",
+            "grants": [{"id": "main", "hosts": {"allow": ["example.com"]},
+                "allowed": ["read", "action", "write", "execute"]}],
+            "config": []}))
+        .unwrap(),
+    )
+    .unwrap();
+    let (executor, fake, workspace) = opened_under(
+        dialog_fault(Some(DIALOG_FRAME)),
+        GovernanceFacade::new(Some(policy.clone()), None),
+    );
+    let before = requests_so_far(&fake);
+    for arguments in [json!({"action": "status"}), json!({"action": "dismiss"})] {
+        let result = execute(&executor, &workspace, "browser_dialog", arguments);
+        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
+        assert_eq!(result.effect, Effect::None);
+        assert!(
+            !serde_json::to_string(&result)
+                .unwrap()
+                .contains(DIALOG_MESSAGE),
+            "the dialog's message never reaches a refused result"
+        );
+    }
+    assert!(
+        !sent_since(&fake, before).contains(&"dialog:handle".to_owned()),
+        "a refused dialog is never handled"
+    );
+    fs::remove_file(policy).unwrap();
+}
+
+#[test]
+fn a_dialog_that_names_no_document_cannot_be_authorized() {
+    let (executor, fake, workspace) = opened(dialog_fault(None));
+    let before = requests_so_far(&fake);
+    for arguments in [json!({"action": "status"}), json!({"action": "accept"})] {
+        let result = execute(&executor, &workspace, "browser_dialog", arguments);
+        assert_plain(
+            &result,
+            Status::Failed,
+            "Document access could not be verified.",
+            "document_unavailable",
+        );
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains(DIALOG_MESSAGE));
+    }
+    assert!(!sent_since(&fake, before).contains(&"dialog:handle".to_owned()));
+}
+
+#[test]
+fn page_work_blocked_by_a_dialog_says_so_and_points_at_the_dialog() {
+    let blocked: [Fault; 3] = [
+        primitive_fault(
+            |primitive| matches!(primitive, wire::Primitive::Frames(_)),
+            wire::Failure::DialogOpen,
+        ),
+        primitive_fault(
+            |primitive| matches!(primitive, wire::Primitive::Call(_)),
+            wire::Failure::DialogOpen,
+        ),
+        Box::new(|correlation, primitive| {
+            let wire::Primitive::Call(call) = primitive else {
+                return None;
+            };
+            let answer = json!({"status": "failed", "code": "dialog_open",
+                "message": "A JavaScript dialog blocks the page.", "started": false});
+            Some(FakeExtension::ok(
+                correlation,
+                json!({"answers": call.calls.iter().map(|_| answer.clone()).collect::<Vec<_>>()}),
+            ))
+        }),
+    ];
+    for fault in blocked {
+        let (executor, _fake, workspace) = opened(fault);
+        let result = execute(&executor, &workspace, "browser_read", json!({}));
+        assert_plain(
+            &result,
+            Status::Failed,
+            "A JavaScript dialog is open on this page, so nothing was sent.",
+            "dialog_open",
+        );
+        assert_eq!(
+            result.next_steps,
+            crate::language::outcome::Refusal::DialogOpen.next_steps()
+        );
+        assert!(result.next_steps[0].contains("browser_dialog"));
     }
 }

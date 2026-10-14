@@ -164,7 +164,8 @@ pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserErr
 /// # Errors
 ///
 /// Returns the asset's own failure as a plain failure, [`BrowserError::DocumentUnavailable`]
-/// when the document was gone or replaced, and [`BrowserError::Protocol`] for a value that
+/// when the document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog
+/// blocks the page, and [`BrowserError::Protocol`] for a value that
 /// does not have the kind's shape.
 pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError> {
     match answer {
@@ -182,6 +183,10 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
             code: CallFailure::DocumentChanged | CallFailure::FrameMissing,
             ..
         } => Err(BrowserError::DocumentUnavailable),
+        CallAnswer::Failed {
+            code: CallFailure::DialogOpen,
+            ..
+        } => Err(BrowserError::DialogOpen),
         CallAnswer::Failed { code, message, .. } => {
             Err(BrowserError::Primitive(if message.is_empty() {
                 wire_name(code)

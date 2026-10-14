@@ -180,6 +180,12 @@
     check.requireInteger(request.timeout_ms, "timeout_ms", { minimum: 1 });
   }
 
+  // The url fact of a dialog: the bounded url of the frame that raised it, and nothing when the
+  // browser did not say.
+  function dialogUrl(dialog) {
+    return dialog?.url ? { url: shared.bounded(dialog.url, protocol.URL_CHARS) } : {};
+  }
+
   function validateDialog(request) {
     validateTab(request);
     if (!check.isObject(request.op) || !protocol.isKnown("dialog_ops", request.op.op)) throw check.invalid("op must name a dialog operation.");
@@ -315,7 +321,8 @@
       return {
         present: Boolean(dialog),
         dialog_type: dialog?.type ?? DIALOG_UNKNOWN,
-        message: dialog ? shared.bounded(dialog.message, MESSAGE_CHARS) : undefined
+        message: dialog ? shared.bounded(dialog.message, MESSAGE_CHARS) : undefined,
+        ...dialogUrl(dialog)
       };
     }
 
@@ -331,7 +338,7 @@
         const target = dialog?.sessionId ? { tabId, sessionId: dialog.sessionId } : { tabId };
         await cdp(target, METHOD.HANDLE_DIALOG, { accept: request.op.accept, promptText: request.op.text ?? undefined });
         await lifecycle.closeDialog(tabId);
-        return { present: true, dialog_type: dialog?.type ?? DIALOG_UNKNOWN, handled: true, accepted: request.op.accept };
+        return { present: true, dialog_type: dialog?.type ?? DIALOG_UNKNOWN, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
       } catch (error) {
         if (!NO_DIALOG.test(String(error?.message))) throw error;
         // The dialog was already gone: nothing was handled, so nothing was dispatched.

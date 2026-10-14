@@ -96,14 +96,18 @@
     if (!lifecycle?.cdp || !webNavigation?.getAllFrames) throw new TypeError("the inventory requires debugger sessions and webNavigation");
     const cdp = lifecycle.cdp;
 
+    // No document is read while a dialog is open: a JavaScript dialog blocks the renderer, so
+    // Page.getFrameTree would not answer until the dialog is handled.
     function rootOf(tabId) {
+      if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
       const session = lifecycle.rootSession(tabId);
       if (!session) throw sessions.failure(SESSION_LOST, "The debugger is not attached to this tab.");
       return session;
     }
 
     /**
-     * Reads every document of an attached tab. Resolves `{ owner, complete, unseen, top }`: `owner`
+     * Reads every document of an attached tab; fails at once with `dialog_open` while a dialog is
+     * open on it. Resolves `{ owner, complete, unseen, top }`: `owner`
      * maps a frame id to `{ session, loaderId, fact }` where `session` is the CDP target that owns
      * the frame; `complete` is false when a session could not be read; `unseen` lists the urls of
      * active child frames no session reported; `top` is the top document `{ frame_id, loader_id }`.
@@ -175,6 +179,7 @@
 
     /** Resolves the current loader id of a frame in a session, or null when the frame is gone. */
     async function currentLoader(target, frameId) {
+      if (lifecycle.currentDialog(target.tabId)) throw sessions.dialogOpen();
       const tree = (await cdp(target, GET_FRAME_TREE)).frameTree;
       return findFrame(tree, frameId)?.loaderId ?? null;
     }

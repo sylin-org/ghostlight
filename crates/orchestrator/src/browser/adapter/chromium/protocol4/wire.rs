@@ -1235,6 +1235,10 @@ pub struct DialogFacts {
     /// The dialog's message, bounded to 500 characters; status only.
     #[serde(default)]
     pub message: Option<String>,
+    /// The url of the frame that raised the dialog, bounded to the url limit; absent when the
+    /// browser did not say.
+    #[serde(default)]
+    pub url: Option<String>,
     /// Whether the dialog was handled.
     #[serde(default)]
     pub handled: bool,

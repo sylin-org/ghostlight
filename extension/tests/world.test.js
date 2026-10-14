@@ -196,7 +196,7 @@ test("the deadline sends CANCEL, then answers timeout", async () => {
   assert.equal(cancel.params.objectId, `global:${TOP}`);
 });
 
-test("a dialog that opens during a call answers dialog_open, started; a known dialog refuses before the call", async () => {
+test("a dialog that opens during a call answers dialog_open, started; a known dialog refuses the whole call before any renderer work", async () => {
   const { chrome, lifecycle, world } = await ready();
   chrome.handlers["Runtime.callFunctionOn"] = (target, params) => {
     if (params.functionDeclaration === World.SHIMS.CALL) {
@@ -212,9 +212,19 @@ test("a dialog that opens during a call answers dialog_open, started; a known di
   await lifecycle.retain(TAB);
   lifecycle.openDialog(TAB, { type: "alert" });
   chrome.calls.length = 0;
-  const refused = await world.callPrimitive(callArgs([box]), effects(), "p4_11");
-  assert.deepEqual(refused.answers[0], { status: "failed", code: "dialog_open", message: "A JavaScript dialog blocks the page.", started: false });
-  assert.equal(worldCalls(chrome).length, 0);
+  await assert.rejects(world.callPrimitive(callArgs([box]), effects(), "p4_11"),
+    { code: "dialog_open", message: "A JavaScript dialog blocks the page." });
+  assert.equal(chrome.calls.length, 0, "nothing is sent to a renderer a dialog blocks");
+  await lifecycle.detachAll();
+});
+
+test("ambient facts are not sent to the worlds of a tab a dialog blocks", async () => {
+  const { chrome, lifecycle, world } = await ready();
+  await lifecycle.retain(TAB);
+  lifecycle.openDialog(TAB, { type: "alert", url: "https://example.com/" });
+  chrome.calls.length = 0;
+  assert.equal(await world.ambientAll(TAB), false);
+  assert.equal(chrome.calls.length, 0, "nothing is sent to a renderer a dialog blocks");
   await lifecycle.detachAll();
 });
 

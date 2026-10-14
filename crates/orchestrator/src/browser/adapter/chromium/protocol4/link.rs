@@ -469,8 +469,9 @@ impl<'a> Link<'a> {
     ///
     /// # Errors
     ///
-    /// Returns the receipt's failure, or [`BrowserError::Protocol`] when the answers do not pair
-    /// with the calls. Answers that do not pair cannot say which calls ran, so the receipt's
+    /// Returns the receipt's failure, [`BrowserError::DialogOpen`] when a dialog refused every call
+    /// before it started, or [`BrowserError::Protocol`] when the answers do not pair with the
+    /// calls. Answers that do not pair cannot say which calls ran, so the receipt's
     /// `dispatched` flag decides whether that failure follows an effect.
     #[expect(
         clippy::too_many_arguments,
@@ -500,6 +501,10 @@ impl<'a> Link<'a> {
         if called.answers.len() != plans.len() {
             self.effect_started |= dispatched;
             return Err(self.settle(BrowserError::Protocol(ANSWERS_UNPAIRED.into())));
+        }
+        if !called.answers.is_empty() && called.answers.iter().all(refused_by_dialog) {
+            // The page was never entered: a dialog blocks it, and no document can be read.
+            return Err(self.settle(BrowserError::DialogOpen));
         }
         for (plan, answer) in plans.iter().zip(&called.answers) {
             if let Some(scope) = scope.as_deref_mut() {
@@ -685,13 +690,13 @@ impl<'a> Link<'a> {
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,
             wire::Failure::TabMissing => BrowserError::Primitive(TAB_MISSING.into()),
+            wire::Failure::DialogOpen => BrowserError::DialogOpen,
             wire::Failure::Unsupported => BrowserError::Unsupported {
                 primitive: P::NAME.into(),
             },
             wire::Failure::InvalidRequest => BrowserError::Protocol(message),
             wire::Failure::DebuggerUnavailable
             | wire::Failure::BrowserRefused
-            | wire::Failure::DialogOpen
             | wire::Failure::CaptureTooLarge
             | wire::Failure::SessionLost
             | wire::Failure::Other => BrowserError::Primitive(message),
@@ -748,6 +753,19 @@ impl<'a> Link<'a> {
     fn cancel_requested(&self) -> bool {
         self.dispatch.cancelled.load(Ordering::SeqCst)
     }
+}
+
+/// Whether a world call's answer is a refusal because a JavaScript dialog blocks the page, before
+/// the call started.
+fn refused_by_dialog(answer: &wire::CallAnswer) -> bool {
+    matches!(
+        answer,
+        wire::CallAnswer::Failed {
+            code: wire::CallFailure::DialogOpen,
+            started: false,
+            ..
+        }
+    )
 }
 
 /// Whether an effect-class world call's answer shows it may have changed the page: it

@@ -1112,6 +1112,9 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// A JavaScript dialog blocks the page, so the renderer cannot take the work.
+    #[error("a JavaScript dialog blocks the page")]
+    DialogOpen,
     /// The page's view moved on from the screenshot the point was chosen on, and nothing was sent.
     #[error("the view moved since the screenshot was taken")]
     StaleView,

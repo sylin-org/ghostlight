@@ -1220,6 +1220,8 @@ pub enum Refusal {
     CaptureTooLarge,
     /// No JavaScript dialog was visible.
     NoDialogVisible,
+    /// A JavaScript dialog blocks the page, so the browser could not take the work.
+    DialogOpen,
     /// This session has no recording to act on.
     RecordingUnavailable,
     /// This session already holds a recording, so another cannot start.
@@ -1335,6 +1337,7 @@ impl Refusal {
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
             Self::CaptureTooLarge => "The screenshot was too large to return.",
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
+            Self::DialogOpen => "A JavaScript dialog is open on this page, so nothing was sent.",
             Self::RecordingUnavailable => "This session has no recording.",
             Self::RecordingHeld => "This session already has a recording.",
             Self::RecordingExportFailed => "The recording could not be turned into a replay.",
@@ -1468,6 +1471,7 @@ impl Refusal {
             Self::CaptureTooLarge => vec![
                 "Capture the viewport or a smaller region instead of the full page.".into(),
             ],
+            Self::DialogOpen => vec![HANDLE_DIALOG_FIRST.into()],
             Self::RecordingUnavailable => vec![
                 "Call browser_record with action start to begin a recording.".into(),
             ],
@@ -2814,6 +2818,10 @@ Changes are \"unsaved\".".into()),
             (
                 Refusal::NoDialogVisible,
                 "No JavaScript dialog is currently visible.",
+            ),
+            (
+                Refusal::DialogOpen,
+                "A JavaScript dialog is open on this page, so nothing was sent.",
             ),
             (
                 Refusal::RecordingUnavailable,

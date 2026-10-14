@@ -29,7 +29,7 @@
   // either way.
 
   const METHOD = Object.freeze({ TERMINATE: "Runtime.terminateExecution" });
-  const FAILURE = Object.freeze({ DIALOG_OPEN: "dialog_open", TIMEOUT: "timeout" });
+  const FAILURE = Object.freeze({ TIMEOUT: "timeout" });
   const SCRIPT_CODE = Object.freeze({ INVALID: "invalid_script", FAILED: "primitive_failed" });
 
   /**
@@ -88,7 +88,7 @@
         const send = async (method, params) => {
           await acquire(tabId);
           leased = true;
-          if (lifecycle.currentDialog(tabId)) throw sessions.failure(FAILURE.DIALOG_OPEN, "A JavaScript dialog blocks the page.");
+          if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
           inventory.checkGuard(request.guard, await inventory.snapshot(tabId));
           fx.watch(tabId);
           fx.dispatched = true;

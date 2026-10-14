@@ -7,6 +7,9 @@ use crate::language::coverage::{Coverage, HumanCoverage};
 
 use super::*;
 
+/// The longest document url the executor accepts from an adapter.
+const URL_LIMIT: usize = 8192;
+
 struct RequestScope {
     tab: u64,
     locators: Vec<String>,
@@ -135,13 +138,6 @@ impl RequestScope {
                 scope.whole = matches!(condition.as_str(), "text_present" | "text_absent");
                 *tab_id
             }
-            BrowserCommand::InspectDialog { tab_id }
-            | BrowserCommand::HandleDialog { tab_id, .. } => {
-                // Browser dialogs may originate in any embedded document.
-                scope.whole = true;
-                scope.unbounded = true;
-                *tab_id
-            }
             BrowserCommand::SetZoom { tab_id, .. } => *tab_id,
             BrowserCommand::ExportRecording {
                 destination:
@@ -171,7 +167,9 @@ impl RequestScope {
             | BrowserCommand::DiscardRecording
             | BrowserCommand::Present { .. }
             | BrowserCommand::DescribeDocuments { .. }
-            | BrowserCommand::InDocuments { .. } => return None,
+            | BrowserCommand::InDocuments { .. }
+            | BrowserCommand::InspectDialog { .. }
+            | BrowserCommand::HandleDialog { .. } => return None,
         };
         Some(scope)
     }
@@ -216,11 +214,81 @@ impl ApplicationExecutor {
         });
     }
 
+    /// Run a dialog command, authorized by the one document that raised the dialog.
+    ///
+    /// A JavaScript dialog blocks its renderer, so the document inventory a scoped command
+    /// starts with cannot be read while one is open. The dialog primitive is answered from the
+    /// extension's own record and names the url of the frame that raised the dialog, and that
+    /// document is the subject of the decision: the dialog's message is page text from it. The
+    /// status is read first and withheld until the document is allowed. A dialog that names no
+    /// usable document cannot be authorized, so it fails closed. Handling asks for the status
+    /// first too, and sends nothing when no dialog is showing.
+    fn dispatch_dialog(
+        &self,
+        context: &InvocationContext<'_>,
+        tab_id: u64,
+        handling: Option<(bool, Option<String>)>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        let status = self.dispatch_physical(context, BrowserCommand::InspectDialog { tab_id })?;
+        let BrowserOutcome::Dialog {
+            tab_id: answered,
+            present,
+            url,
+            ..
+        } = &status
+        else {
+            return Err(BrowserError::Protocol("expected dialog status".into()));
+        };
+        if *answered != tab_id {
+            return Err(BrowserError::Protocol("expected dialog status".into()));
+        }
+        if *present {
+            let Some(url) = url
+                .as_deref()
+                .filter(|url| !url.is_empty() && url.len() <= URL_LIMIT)
+            else {
+                return Err(BrowserError::DocumentUnavailable);
+            };
+            let (decision, evidence) = context
+                .snapshot
+                .authorize_with_evidence(context.requirements, Some(url));
+            self.retain_permission(context, evidence);
+            if !decision.allowed {
+                return Err(BrowserError::DocumentAccess(decision));
+            }
+        }
+        let Some((accept, text)) = handling else {
+            return Ok(status);
+        };
+        if !present {
+            return Ok(BrowserOutcome::DialogAbsent { tab_id });
+        }
+        self.dispatch_physical(
+            context,
+            BrowserCommand::HandleDialog {
+                tab_id,
+                accept,
+                text,
+            },
+        )
+    }
+
     pub(super) fn dispatch_documents(
         &self,
         context: &InvocationContext<'_>,
-        mut command: BrowserCommand,
+        command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
+        let mut command = match command {
+            BrowserCommand::InspectDialog { tab_id } => {
+                return self.dispatch_dialog(context, tab_id, None);
+            }
+            BrowserCommand::HandleDialog {
+                tab_id,
+                accept,
+                text,
+            } => return self.dispatch_dialog(context, tab_id, Some((accept, text))),
+            other => other,
+        };
         if matches!(
             command,
             BrowserCommand::Screenshot { .. } | BrowserCommand::ScreenshotRegion { .. }
@@ -253,8 +321,6 @@ impl ApplicationExecutor {
             BrowserCommand::Observe { .. }
                 | BrowserCommand::DescribeTargets { .. }
                 | BrowserCommand::DescribeFocused { .. }
-                | BrowserCommand::InspectDialog { .. }
-                | BrowserCommand::HandleDialog { .. }
                 | BrowserCommand::ReadDiagnostics { .. }
                 | BrowserCommand::StartRecording { .. }
         ) && context.settlement_pending.swap(false, Ordering::SeqCst)
@@ -442,7 +508,7 @@ fn validate_inventory(inventory: &DocumentInventory) -> Result<(), BrowserError>
         || inventory.documents.iter().any(|document| {
             document.id.is_empty()
                 || document.id.len() > 160
-                || document.url.len() > 8192
+                || document.url.len() > URL_LIMIT
                 || !ids.insert(document.id.as_str())
         })
         || inventory

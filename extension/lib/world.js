@@ -54,7 +54,7 @@
     DOCUMENT_CHANGED: "document_changed",
     FRAME_MISSING: "frame_missing",
     OWNER_MISSING: "owner_missing",
-    DIALOG_OPEN: "dialog_open",
+    DIALOG_OPEN: sessions.DIALOG_OPEN,
     TIMEOUT: "timeout",
     CANCELLED: "cancelled",
     SESSION_LOST: "session_lost",
@@ -379,7 +379,7 @@
 
     async function attemptCall(tabId, call, ctx) {
       if (!assets) return failed(CALL.OTHER, false, "No page assets have been received.");
-      if (lifecycle.currentDialog(tabId)) return failed(CALL.DIALOG_OPEN, false, "A JavaScript dialog blocks the page.");
+      if (lifecycle.currentDialog(tabId)) return failed(CALL.DIALOG_OPEN, false, sessions.DIALOG_OPEN_MESSAGE);
       let reinstalled = false;
       for (;;) {
         let handle;
@@ -534,7 +534,8 @@
      * of a tab, best effort. Never attaches and never installs. Resolves true when any world took it.
      */
     async function ambientAll(tabId, patch = {}) {
-      if (!assets) return false;
+      // A dialog blocks every world of the tab, so none can be told until it is handled.
+      if (!assets || lifecycle.currentDialog(tabId)) return false;
       const facts = { ...localFacts(tabId), ...patch };
       const targets = new Map(tabHandles(tabId));
       try {

@@ -251,13 +251,15 @@ fn rows() -> Vec<Row> {
             command: BrowserCommand::InspectDialog { tab_id: 12 },
             primitive: json!({"name": "dialog", "args": {"tab_id": 12, "op": {"op": "status"}}}),
             receipt: answer(
-                json!({"present": true, "dialog_type": "confirm", "message": "Leave?"}),
+                json!({"present": true, "dialog_type": "confirm", "message": "Leave?",
+                    "url": "https://example.com/form"}),
             ),
             outcome: BrowserOutcome::Dialog {
                 tab_id: 12,
                 present: true,
                 dialog_type: "confirm".into(),
                 message: Some("Leave?".into()),
+                url: Some("https://example.com/form".into()),
             },
         },
         Row {
@@ -269,13 +271,15 @@ fn rows() -> Vec<Row> {
             primitive: json!({"name": "dialog",
                 "args": {"tab_id": 12, "op": {"op": "handle", "accept": true, "text": "yes"}}}),
             receipt: effect(
-                json!({"present": true, "dialog_type": "prompt", "handled": true, "accepted": true}),
+                json!({"present": true, "dialog_type": "prompt", "handled": true, "accepted": true,
+                    "url": "https://example.com/form"}),
                 &[],
             ),
             outcome: BrowserOutcome::DialogHandled {
                 tab_id: 12,
                 dialog_type: "prompt".into(),
                 accepted: true,
+                url: Some("https://example.com/form".into()),
             },
         },
         Row {

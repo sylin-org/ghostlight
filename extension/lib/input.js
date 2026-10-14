@@ -32,7 +32,7 @@
   const BUTTON_NONE = "none";
   const BUTTON_LEFT = "left";
   const STOP = Object.freeze({ DIALOG: "dialog", CANCELLED: "cancelled" });
-  const FAILURE = Object.freeze({ INVALID_REQUEST: "invalid_request", DIALOG_OPEN: "dialog_open", TIMEOUT: "timeout" });
+  const FAILURE = Object.freeze({ INVALID_REQUEST: "invalid_request", TIMEOUT: "timeout" });
   // How long a held drag move waits for interception data, and the grace for late data at the end.
   const INTERCEPT_STEP_MS = 10;
   const INTERCEPT_GRACE_MS = 100;
@@ -205,7 +205,7 @@
           snap = await inventory.snapshot(args.tab_id);
           inventory.checkGuard(args.guard, snap);
         }
-        if (lifecycle.currentDialog(args.tab_id)) throw sessions.failure(FAILURE.DIALOG_OPEN, "A JavaScript dialog blocks the page.");
+        if (lifecycle.currentDialog(args.tab_id)) throw sessions.dialogOpen();
         const dialog = worldCalls.watchForDialog(args.tab_id);
         try {
           for (const step of args.steps) {

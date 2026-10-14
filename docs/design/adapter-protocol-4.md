@@ -514,6 +514,7 @@ pub struct Captured { pub mime_type: String, pub data: String, pub width: u32, p
 #[derive(Deserialize)]
 pub struct DialogFacts { pub present: bool, #[serde(default)] pub dialog_type: String,
                          #[serde(default)] pub message: Option<String>, // bounded 500, status only
+                         #[serde(default)] pub url: Option<String>,     // the frame that raised it, bounded to URL_CHARS
                          #[serde(default)] pub handled: bool, #[serde(default)] pub accepted: bool }
 #[derive(Deserialize)]
 pub struct DiagnosticsFacts { #[serde(default)] pub entries: Vec<DiagnosticEntry>, #[serde(default)] pub cursor: Option<String>,
@@ -1381,7 +1382,8 @@ async function dialog(args, fx) {
   if (args.op.op === "status") {
     let d = debuggerLifecycle.currentDialog(args.tab_id);
     if (!d) { await ensureDebugger(args.tab_id); try { await sleep(50); d = debuggerLifecycle.currentDialog(args.tab_id); } finally { await releaseDebugger(args.tab_id); } }
-    return { present: Boolean(d), dialog_type: d?.type ?? "unknown", message: d ? shared.bounded(d.message, 500) : undefined };
+    return { present: Boolean(d), dialog_type: d?.type ?? "unknown", message: d ? shared.bounded(d.message, 500) : undefined,
+             ...(d?.url ? { url: shared.bounded(d.url, URL_CHARS) } : {}) };
   }
   await ensureDebugger(args.tab_id);
   const d = debuggerLifecycle.currentDialog(args.tab_id);
@@ -1389,7 +1391,8 @@ async function dialog(args, fx) {
     fx.dispatched = true;
     await cdp(d?.session ?? root(args.tab_id), "Page.handleJavaScriptDialog", { accept: args.op.accept, promptText: args.op.text });
     await debuggerLifecycle.closeDialog(args.tab_id);
-    return { present: true, dialog_type: d?.type ?? "unknown", handled: true, accepted: args.op.accept };
+    return { present: true, dialog_type: d?.type ?? "unknown", handled: true, accepted: args.op.accept,
+             ...(d?.url ? { url: shared.bounded(d.url, URL_CHARS) } : {}) };
   } catch (error) {
     if (!/No dialog is showing/.test(String(error?.message))) throw error;   // other, dispatched:true
     fx.dispatched = false; await debuggerLifecycle.closeDialog(args.tab_id);
@@ -1400,6 +1403,22 @@ async function dialog(args, fx) {
 
 The dialog is handled on the session that raised it, so out-of-process frame dialogs work too. Today the
 dialog is always handled on the root session.
+
+`url` is the `url` of `Page.javascriptDialogOpening`: the frame that raised the dialog. The worker records it
+with the dialog, and it is omitted when the browser did not say.
+
+A JavaScript dialog blocks its renderer, so a primitive that needs the renderer must not wait on it. Every
+read of the frame tree (`inventory.snapshot`, `topSnapshot`, `currentLoader`, and so the `frames`, `call`,
+`input`, `diagnostics`, `recording` and `accessibility_snapshot` primitives) refuses at once with
+`dialog_open` while a dialog is recorded for the tab, as `capture`, `evaluate_main` and `input` already
+did. `dialog` itself is answered from the extension's record and never reads the renderer.
+
+The service therefore authorizes a dialog by the one document that raised it: it sends `dialog{status}`
+alone (no `frames`, no document inventory), authorizes `url` for the invocation's capabilities, and only then
+returns the message or sends `dialog{handle}`. A denied document is document access; a dialog with no usable
+`url` fails closed as `DocumentUnavailable`. `HandleDialog` looks first and sends no `handle` when no dialog
+is showing. A `dialog_open` receipt on any other primitive becomes `BrowserError::DialogOpen`, which the
+executor says as the dialog refusal.
 
 **`diagnostics` and `recording` (`lib/buffers.js`)**
 
@@ -1880,8 +1899,8 @@ Abbreviations:
 | 39 | DropImageAt | `view`; `call(T, scroll_point)`; route; `call(deepest doc, drop_files{local x, y})` G | 3+depth |
 | 40 | EvaluateScript | `evaluate_main{settle 100}` G; `exception` becomes `EffectUnknown(description)` (today's semantics) | 1 |
 | 41 | Observe | section 4.6 | 1-2 |
-| 42 | InspectDialog | `dialog{status}` becomes `Dialog{present, dialog_type, message}` | 1 |
-| 43 | HandleDialog | `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when `handled:false` | 1 |
+| 42 | InspectDialog | `dialog{status}` becomes `Dialog{present, dialog_type, message, url}`; no inventory; `url` is authorized | 1 |
+| 43 | HandleDialog | `dialog{status}`, authorize `url`, then `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when no dialog was showing or `handled:false`; no inventory | 1-2 |
 | 44 | ReadDiagnostics | `diagnostics{read{binding: hex(sha256(sorted scope ids)), guard}}` | 1 |
 | 45 | ClearDiagnostics | `diagnostics{clear}` | 1 |
 | 46 | StartRecording | a held recording is checked with `recording{status}` first (still capturing the same tab: answer it; gone: forget it; stopped and already saved: `recording{discard}` then go ahead; otherwise `RecordingHeld`); then `recording{start{tab_id, watch: scope.watch_changes then the real scope docs as GuardDoc}}`; record the id in RecordingIndex | 1-2 |
@@ -2000,7 +2019,7 @@ Rules:
 - An extension `document_changed`, from the guard or from a call failure with `started:false`, becomes
   `BrowserError::DocumentUnavailable` when nothing effectful was dispatched, and `EffectUnknown` otherwise.
   This matches today (`documents.js:126`).
-- Unbounded commands (drag, script, diagnostics, recording, dialogs) need no per-packet check. Admission
+- Unbounded commands (drag, script, diagnostics, recording) need no per-packet check. Admission
   already refused any denied document (`work/documents.rs:333-358`). Under `strict_tree`, the exact guard pins
   the whole tree.
 - Key input: the precondition (`require_focused`, `verify_focused_text`, `focus_text_field` or `focus`) runs

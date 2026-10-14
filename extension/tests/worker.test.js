@@ -499,14 +499,15 @@ test("events go only for controlled tabs", async () => {
   } finally { worker.dispose(); }
 });
 
-test("a dialog is recorded with its message and session", async () => {
+test("a dialog is recorded with its message, the frame that raised it and its session", async () => {
   const worker = await connected();
   try {
-    worker.chrome.debugger.emit({ tabId: TAB, sessionId: "CHILD" }, "Page.javascriptDialogOpening", { type: "prompt", message: "Name?" });
+    worker.chrome.debugger.emit({ tabId: TAB, sessionId: "CHILD" }, "Page.javascriptDialogOpening",
+      { type: "prompt", message: "Name?", url: "https://example.com/frame" });
     await flush();
     await worker.request("p4_dialog", "dialog", { tab_id: TAB, op: { op: "status" } });
     const receipt = worker.receipts().find((entry) => entry.correlation === "p4_dialog");
-    assert.deepEqual(receipt.ok, { present: true, dialog_type: "prompt", message: "Name?" });
+    assert.deepEqual(receipt.ok, { present: true, dialog_type: "prompt", message: "Name?", url: "https://example.com/frame" });
   } finally { worker.dispose(); }
 });
 
