@@ -316,6 +316,17 @@ mod tests {
     }
 
     #[test]
+    fn a_carrier_older_than_the_installed_service_hands_over_without_installing() {
+        let home = Home::new();
+        let carrier = home.carrier();
+        let installed = home.installed();
+        home.record("999.0.0");
+        let (result, calls) = home.start(&carrier, &["open"]);
+        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+        assert_eq!(calls, vec![Call::Run(installed, os(&["open"]))]);
+    }
+
+    #[test]
     fn inspection_never_installs() {
         let home = Home::new();
         let carrier = home.carrier();

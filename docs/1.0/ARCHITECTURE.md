@@ -54,8 +54,10 @@ Before any command runs, `main` applies the entry rule (`install/entry.rs`, carr
 forwards to it with the same arguments; a forwarded `serve` starts detached and the parent exits.
 Without a marker, only `bin/ghostlight` serves. Any other copy is a carrier: a command that uses
 the service installs from the carrier's own directory when the installed service is absent,
-older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version` never
-install.
+older or damaged, then runs the installed one. The install itself owns `bin/install.json`: under
+the install lock it compares the record with the package, refuses a package older than the
+installed service, leaves an intact install of the same version alone, and writes the record once
+the copy succeeds. `doctor`, `status`, `help` and `--version` never install.
 
 The orchestrator acquires an operating-system lifetime lease beside its runtime document before
 opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
