@@ -143,7 +143,7 @@ impl HarnessRegistry {
                 changed: false,
                 message: format!(
                     "{} was checked without changing configuration.",
-                    label(&self.inner.context, &definition)
+                    definition.label
                 ),
                 summary: inspect(&self.inner.context, &definition),
             },
@@ -195,7 +195,7 @@ impl HarnessRegistry {
                 Ok(_) => {}
                 Err(error) => failures.push(HarnessSetupFailure {
                     id: definition.id.into(),
-                    name: label(&self.inner.context, &definition),
+                    name: definition.label,
                     detail: bounded_disclosure(&error.to_string())
                         .unwrap_or_else(|| "The target could not be changed.".into()),
                 }),
@@ -610,6 +610,8 @@ struct HarnessDefinition {
     id: &'static str,
     product_id: &'static str,
     name: &'static str,
+    /// The name a person reads: `name`, with the host added when several targets share the name.
+    label: String,
     target: &'static str,
     icon: &'static str,
     download_url: Option<&'static str>,
@@ -987,6 +989,16 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             }
         }
     }
+    let shared: Vec<&'static str> = rows
+        .iter()
+        .filter(|row| rows.iter().filter(|other| other.name == row.name).count() > 1)
+        .map(|row| row.name)
+        .collect();
+    for definition in &mut rows {
+        if shared.contains(&definition.name) {
+            definition.label = format!("{} ({})", definition.name, definition.target);
+        }
+    }
     rows
 }
 
@@ -1006,6 +1018,7 @@ fn row(
         id,
         product_id,
         name,
+        label: name.to_owned(),
         target,
         icon,
         download_url,
@@ -1016,21 +1029,6 @@ fn row(
         executables,
         dialect,
         own_package: None,
-    }
-}
-
-/// The name a person reads for a target: the host is named whenever another target of the same
-/// product exists, so coexisting hosts of one client never share a label.
-fn label(context: &HarnessContext, definition: &HarnessDefinition) -> String {
-    let shared = definitions(context)
-        .iter()
-        .filter(|other| other.product_id == definition.product_id)
-        .count()
-        > 1;
-    if shared {
-        format!("{} ({})", definition.name, definition.target)
-    } else {
-        definition.name.to_owned()
     }
 }
 
@@ -1107,7 +1105,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         id: definition.id.into(),
         product_id: definition.product_id.into(),
         name: definition.name.into(),
-        label: label(context, definition),
+        label: definition.label.clone(),
         target: definition.target.into(),
         icon: definition.icon.into(),
         state,
@@ -3634,6 +3632,8 @@ mod tests {
         assert_eq!(label_of("cline-cursor"), "Cline (Cursor)");
         assert_eq!(label_of("cline-cli"), "Cline (CLI)");
         assert_eq!(label_of("claude-desktop"), "Claude Desktop");
+        assert_eq!(label_of("windsurf"), "Windsurf");
+        assert_eq!(label_of("devin"), "Devin");
         let mut labels: Vec<_> = summaries.iter().map(|summary| &summary.label).collect();
         let total = labels.len();
         labels.sort();
