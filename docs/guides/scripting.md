@@ -53,8 +53,12 @@ ghostlight call browser_tabs '{"action":"close","tab":"tab_a1b2"}'
 
 Ghostlight keys the session on the process that called it, identified by its process id and start
 time. A command can be forwarded through other Ghostlight executables on its way to the service;
-those hops are skipped, and the owner is the first process above them that is not Ghostlight. A program that spawns `ghostlight call` repeatedly gets the same treatment: one session for as
-long as that program runs.
+those hops are skipped, and the owner is the first process above them that is not Ghostlight. A run
+of consecutive ancestors with the same program name counts as one terminal, and its outermost member
+is the owner. That is what makes Git Bash work: MSYS starts every command through a short-lived stub
+of `bash.exe`, so the stub folds into the shell above it. A shell nested in the same shell is one
+terminal too. A program that spawns `ghostlight call` repeatedly gets the same treatment: one
+session for as long as that program runs.
 
 Tabs live as long as their session, and a tab you open in one shell is not visible from another.
 When the terminal exits, Ghostlight releases its tabs and asks the browser to close them -- but the

@@ -19,7 +19,8 @@ pub const SESSION_VARIABLE: &str = "GHOSTLIGHT_SESSION";
 /// Describe what owns this command's session.
 ///
 /// An explicit key wins when one is set. Otherwise the caller is the nearest ancestor that is not a
-/// Ghostlight executable, identified by the pair the operating system keeps unique.
+/// Ghostlight executable, widened to the outermost of the same-named ancestors around it (a shell
+/// and its per-command stubs), identified by the pair the operating system keeps unique.
 #[must_use]
 pub fn marker() -> Option<SessionMarker> {
     if let Some(key) = declared() {
@@ -57,28 +58,45 @@ fn is_ghostlight(name: &str) -> bool {
     name.eq_ignore_ascii_case(SERVICE_EXECUTABLE_NAME)
 }
 
-/// Climb from `start` past every Ghostlight executable to the first other ancestor.
+/// Climb from `start` past every Ghostlight executable, then to the outermost of the run of
+/// same-named ancestors the caller sits in.
 ///
 /// A command is forwarded through fresh child processes (a carrier, the installed command, a
 /// development build), so the immediate parent is a throwaway Ghostlight process that differs on
-/// every call. The caller is the nearest ancestor that is not Ghostlight. `lookup` answers one
-/// process by pid. Returns `None` when the chain ends or the hop bound is reached first.
+/// every call. Past those, MSYS and Cygwin run every native program through a per-command stub with
+/// the same image as the shell, so the first foreign ancestor differs on every command while the
+/// shell above it is stable. A run of consecutive ancestors sharing one image name (compared
+/// case-insensitively) is therefore one terminal, and its outermost member is the caller. That also
+/// treats a shell nested in the same shell as one terminal, which is the intended model.
+///
+/// `lookup` answers one process by pid. The whole climb shares one hop budget of
+/// `MAX_FORWARDING_HOPS`. Returns `None` when the chain ends or the budget is spent before any
+/// foreign ancestor is found; once one is found, an ended chain or spent budget settles on the
+/// outermost member reached.
 fn nearest_foreign_ancestor(
     start: u32,
     mut lookup: impl FnMut(u32) -> Option<Ancestor>,
 ) -> Option<Ancestor> {
     let mut next = start;
+    let mut caller: Option<Ancestor> = None;
     for _ in 0..=MAX_FORWARDING_HOPS {
-        let process = lookup(next)?;
-        if !is_ghostlight(&process.name) {
-            return Some(process);
+        let Some(process) = lookup(next) else {
+            return caller;
+        };
+        match &caller {
+            None if is_ghostlight(&process.name) => {}
+            Some(inner) if !inner.name.eq_ignore_ascii_case(&process.name) => return caller,
+            _ => caller = Some(process.clone()),
         }
-        next = process.parent?;
+        match process.parent {
+            Some(parent) => next = parent,
+            None => return caller,
+        }
     }
-    None
+    caller
 }
 
-/// The nearest ancestor of this process that is not a Ghostlight executable.
+/// The caller of this process: its nearest non-Ghostlight ancestor, widened to its same-named run.
 ///
 /// Returns `None` when it cannot be identified, which leaves the workspace bound to the
 /// connection exactly as it was before. A caller that loses session continuity is a smaller failure
@@ -178,6 +196,68 @@ mod tests {
             "a long chain must not be walked forever"
         );
         assert_eq!(walk(&chain, hops + 3), Some(hops + 4));
+    }
+
+    #[test]
+    fn a_git_bash_stub_folds_into_its_shell() {
+        // Two commands from one bash: the per-command stub differs, the shells above it do not.
+        let g = SERVICE_EXECUTABLE_NAME;
+        let shells = [
+            process(444_668, "bash.exe", Some(447_552)),
+            process(447_552, "bash.exe", Some(100)),
+            process(100, "claude.exe", Some(1)),
+        ];
+        let mut first = shells.to_vec();
+        first.push(process(448_400, g, Some(448_356)));
+        first.push(process(448_356, "bash.exe", Some(444_668)));
+        let mut second = shells.to_vec();
+        second.push(process(449_200, g, Some(448_296)));
+        second.push(process(448_296, "bash.exe", Some(444_668)));
+        let a = walk(&first, 448_356);
+        let b = walk(&second, 448_296);
+        assert_eq!(a, Some(447_552));
+        assert_eq!(a, b, "two commands from one shell are one session");
+    }
+
+    #[test]
+    fn a_direct_terminal_chain_is_unchanged() {
+        let chain = [
+            process(10, "pwsh.exe", Some(5)),
+            process(5, "WindowsTerminal.exe", Some(1)),
+        ];
+        assert_eq!(walk(&chain, 10), Some(10));
+    }
+
+    #[test]
+    fn a_forwarding_hop_above_a_stub_is_climbed_then_folded() {
+        let g = SERVICE_EXECUTABLE_NAME;
+        let chain = [
+            process(40, g, Some(30)),
+            process(30, "bash.exe", Some(20)),
+            process(20, "BASH.EXE", Some(10)),
+            process(10, "claude.exe", None),
+        ];
+        assert_eq!(walk(&chain, 40), Some(20));
+    }
+
+    #[test]
+    fn nested_same_name_shells_are_one_terminal() {
+        let chain = [
+            process(30, "bash.exe", Some(20)),
+            process(20, "bash.exe", Some(10)),
+            process(10, "bash.exe", Some(5)),
+            process(5, "tmux.exe", None),
+        ];
+        assert_eq!(walk(&chain, 30), Some(10));
+    }
+
+    #[test]
+    fn a_same_name_run_is_bounded_by_the_hop_budget() {
+        let hops = u32::try_from(MAX_FORWARDING_HOPS).unwrap();
+        let chain: Vec<Ancestor> = (0..hops + 6)
+            .map(|pid| process(pid, "bash.exe", Some(pid + 1)))
+            .collect();
+        assert_eq!(walk(&chain, 0), Some(hops), "the climb stops at the bound");
     }
 
     #[test]
