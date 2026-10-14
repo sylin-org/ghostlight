@@ -397,3 +397,225 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
 
     assert!(facade.preview_user_policy("not a policy").is_err());
 }
+
+/// A browser port whose connection and control publication a test chooses.
+///
+/// Browser work panics: a runtime control changes authority state and never dispatches or
+/// replays a browser command.
+struct ControlledBrowser {
+    connected: bool,
+    publish_fails: bool,
+    published: Mutex<Vec<ghostlight_bridge::browser::RuntimeControlState>>,
+}
+
+impl ControlledBrowser {
+    fn new(connected: bool, publish_fails: bool) -> Arc<Self> {
+        Arc::new(Self {
+            connected,
+            publish_fails,
+            published: Mutex::default(),
+        })
+    }
+}
+
+impl crate::browser::BrowserPort for ControlledBrowser {
+    fn call(
+        &self,
+        _: &str,
+        _: &str,
+        _: ghostlight_bridge::browser::BrowserCommand,
+        _: std::time::Instant,
+        _: &std::sync::atomic::AtomicBool,
+    ) -> Result<ghostlight_bridge::browser::BrowserOutcome, crate::browser::BrowserError> {
+        panic!("a workbench control must not dispatch browser work");
+    }
+
+    fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+        if !self.connected {
+            return Vec::new();
+        }
+        vec![crate::browser::BrowserSummary {
+            id: "browser-1".into(),
+            name: Some("Chrome".into()),
+            adapter_version: "1.0.0".into(),
+            platform: ghostlight_bridge::browser::BrowserPlatform::Chromium,
+            attended: true,
+        }]
+    }
+
+    fn publish_control_state(
+        &self,
+        state: ghostlight_bridge::browser::RuntimeControlState,
+    ) -> Result<(), crate::browser::BrowserError> {
+        self.published.lock().unwrap().push(state);
+        if self.publish_fails {
+            Err(crate::browser::BrowserError::DisconnectedAfterDispatch)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn facade_over(governance: GovernanceFacade, browser: Arc<ControlledBrowser>) -> WorkbenchFacade {
+    WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        governance,
+        browser,
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    )
+}
+
+fn authority_card(snapshot: &super::WorkbenchSnapshot) -> super::DiagnosticItem {
+    snapshot
+        .diagnostics
+        .iter()
+        .find(|item| item.id == "authority")
+        .cloned()
+        .expect("the Status page always carries an authority card")
+}
+
+fn temporary_policy(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "ghostlight-workbench-{name}-{}.json",
+        uuid::Uuid::new_v4()
+    ))
+}
+
+const READ_ONLY_POLICY: &str = r#"{"schema":3,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[]}"#;
+
+#[test]
+fn pause_and_resume_apply_while_no_browser_is_connected() {
+    use super::WorkbenchRuntimeIntent;
+    use crate::language::readiness::Readiness;
+    use ghostlight_bridge::browser::RuntimeControlState;
+
+    let governance = GovernanceFacade::new(None, None);
+    let browser = ControlledBrowser::new(false, false);
+    let facade = facade_over(governance.clone(), browser.clone());
+    let before = facade.snapshot();
+    assert_eq!(before.readiness.state, Readiness::NotConnected);
+    assert!(
+        before.readiness.invites_control,
+        "the reachable authority must offer Pause without a browser"
+    );
+
+    for (intent, state) in [
+        (WorkbenchRuntimeIntent::Hold, RuntimeControlState::Held),
+        (WorkbenchRuntimeIntent::Resume, RuntimeControlState::Active),
+        (
+            WorkbenchRuntimeIntent::EndSession,
+            RuntimeControlState::Ended,
+        ),
+        (
+            WorkbenchRuntimeIntent::StartSession,
+            RuntimeControlState::Active,
+        ),
+    ] {
+        let result = facade.apply_runtime_intent(intent);
+        assert!(result.accepted);
+        assert_eq!(result.runtime_state, state);
+        assert_eq!(
+            result.message,
+            crate::language::control::confirmation(state)
+        );
+        assert_eq!(governance.runtime_state(), state);
+        assert_eq!(
+            governance.runtime_decision().allowed,
+            state == RuntimeControlState::Active,
+            "the authority enforces {state:?} with no browser connected"
+        );
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.service.runtime_state, state);
+        assert_eq!(snapshot.readiness.state, Readiness::NotConnected);
+        assert!(snapshot.readiness.invites_control);
+    }
+}
+
+#[test]
+fn a_control_confirmation_states_the_authority_and_never_browser_delivery() {
+    use super::WorkbenchRuntimeIntent;
+    use ghostlight_bridge::browser::RuntimeControlState;
+
+    let expected = crate::language::control::confirmation(RuntimeControlState::Held);
+    // Connected and published, connected but publication failed, and no browser at all: the
+    // person hears the same thing, because the authority's state is the whole effect.
+    for (connected, publish_fails) in [(true, false), (true, true), (false, false)] {
+        let browser = ControlledBrowser::new(connected, publish_fails);
+        let facade = facade_over(GovernanceFacade::new(None, None), browser.clone());
+        let result = facade.apply_runtime_intent(WorkbenchRuntimeIntent::Hold);
+        assert_eq!(result.runtime_state, RuntimeControlState::Held);
+        assert_eq!(result.message, expected);
+        assert_eq!(
+            *browser.published.lock().unwrap(),
+            vec![RuntimeControlState::Held],
+            "every adapter still gets the best-effort notice"
+        );
+        let wire = serde_json::to_value(&result).unwrap();
+        assert!(
+            wire.get("browser_notified").is_none(),
+            "the result makes no browser delivery claim: {wire}"
+        );
+    }
+}
+
+#[test]
+fn an_invalid_policy_reads_as_not_ready_on_every_surface() {
+    use crate::governance::effective::Situation;
+    use crate::language::readiness::Readiness;
+
+    let path = temporary_policy("invalid");
+    std::fs::write(&path, "{half-written").unwrap();
+    let facade = facade_over(
+        GovernanceFacade::new(Some(path.clone()), None),
+        ControlledBrowser::new(true, false),
+    );
+    let snapshot = facade.snapshot();
+    assert_eq!(snapshot.readiness.state, Readiness::PolicyInvalid);
+    assert_eq!(snapshot.readiness.word, Readiness::PolicyInvalid.word());
+    assert_eq!(snapshot.readiness.tone, "attention");
+    assert!(snapshot.readiness.detail.contains("Open Policy"));
+    assert!(snapshot.readiness.invites_control);
+    assert_eq!(
+        authority_card(&snapshot).severity,
+        super::DiagnosticSeverity::Failing
+    );
+    assert_eq!(
+        snapshot.configuration.policy.situation,
+        Situation::FailingClosed
+    );
+    assert_eq!(facade.policy().situation, Situation::FailingClosed);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
+    use crate::governance::effective::Situation;
+    use crate::language::readiness::Readiness;
+
+    let path = temporary_policy("retained");
+    std::fs::write(&path, READ_ONLY_POLICY).unwrap();
+    let facade = facade_over(
+        GovernanceFacade::new(Some(path.clone()), None),
+        ControlledBrowser::new(true, false),
+    );
+    let applied = facade.snapshot();
+    assert_eq!(applied.readiness.state, Readiness::Ready);
+    assert_eq!(
+        authority_card(&applied).severity,
+        super::DiagnosticSeverity::Passing
+    );
+
+    std::fs::write(&path, "{half-written").unwrap();
+    let retained = facade.snapshot();
+    // The last valid policy is still enforced, so nothing fails closed: the header stays Ready,
+    // the Policy tab keeps its applied situation, and Status warns about the invalid edit.
+    assert_eq!(retained.readiness.state, Readiness::Ready);
+    assert_eq!(retained.configuration.policy.situation, Situation::UserOnly);
+    assert_eq!(facade.policy().situation, Situation::UserOnly);
+    assert_eq!(
+        authority_card(&retained).severity,
+        super::DiagnosticSeverity::Warning
+    );
+    let _ = std::fs::remove_file(path);
+}

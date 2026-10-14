@@ -317,15 +317,22 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
             summary: "3 of the last 42 recorded actions would have been refused."
           };
         }
-        if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are applied: Your rules 2026-08-14." };
-        if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", browser_notified: false, message: "Your rules are removed." };
+        if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are applied: Your rules 2026-08-14." };
+        if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are removed." };
         if (command === "apply_runtime_intent") {
           const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";
           preview.service.runtime_state = state;
           preview.configuration.runtime_state = state;
           publish({ kind: "runtime_changed", runtime_state: state });
           if (state === "active") runOne();
-          return { accepted: true, runtime_state: state, browser_notified: true, message: "Runtime control updated." };
+          // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
+          // authority's state only, never browser delivery.
+          const confirmation = {
+            active: "Running. Agents can ask for browser work again. Earlier actions are not repeated.",
+            held: "Paused. Agents' browser actions will be refused until you resume.",
+            ended: "Session ended. Agents' browser actions will be refused until you start a new session."
+          };
+          return { accepted: true, runtime_state: state, message: confirmation[state] };
         }
         if (command === "refresh_harnesses") return preview.harnesses;
         if (command === "test_notification") return null;

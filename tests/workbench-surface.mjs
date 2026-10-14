@@ -698,6 +698,32 @@ const checks = [
         && !source.includes("el.wheel.disabled = !facts.connected");
     })(),
     "the wheel derives its own availability"],
+  ["Pause and Resume stay available while the authority answers without a browser",
+    (() => {
+      // The orchestrator offers runtime control whenever it answers, because a pause is its own
+      // state rather than something a browser holds. Only an unreachable authority disables it.
+      const wheel = nodes.get("wheel");
+      const notConnected = {
+        sessions: [], browsers: [], history: [],
+        readiness: { state: "not_connected", word: "Not connected", detail: "No browser.", tone: "offline", invites_control: true }
+      };
+      view.band({ connected: true, snapshot: notConnected, runtime: "active", running: 0 });
+      const pause = { disabled: wheel.disabled, intent: wheel.dataset.intent };
+      view.band({ connected: true, snapshot: notConnected, runtime: "held", running: 0 });
+      const resume = { disabled: wheel.disabled, intent: wheel.dataset.intent };
+      // A failed resync marks the window disconnected but keeps the last snapshot, whose readiness
+      // still invites control. The lost connection must win over that stale answer.
+      view.band({ connected: false, snapshot: notConnected, runtime: "held", running: 0 });
+      const lost = wheel.disabled;
+      view.band({ connected: false, snapshot: null, runtime: "held", running: 0 });
+      const neverReached = wheel.disabled;
+      view.band({ connected: true, snapshot: notConnected, runtime: "held", running: 0 });
+      const regained = !wheel.disabled;
+      return !pause.disabled && pause.intent === "hold"
+        && !resume.disabled && resume.intent === "resume"
+        && lost && neverReached && regained;
+    })(),
+    "the wheel follows a lost authority, or is disabled while a reachable authority offers control"],
   ["the policy tab is a tab, keeps its name, and carries the authored state behind it",
     markup.includes('class="tab policy-state"')
       && !ids.includes("policy-state-label")

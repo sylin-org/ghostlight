@@ -16,7 +16,7 @@ use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::browser::{BrowserPort, RelayBrowserPort};
+use crate::browser::BrowserPort;
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{
@@ -369,7 +369,7 @@ pub struct WorkbenchFacade {
     projection: WorkbenchProjection,
     workspaces: WorkspaceStore,
     governance: GovernanceFacade,
-    browser: Arc<RelayBrowserPort>,
+    browser: Arc<dyn BrowserPort>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
     started_at_ms: u64,
@@ -382,7 +382,7 @@ impl WorkbenchFacade {
         projection: WorkbenchProjection,
         workspaces: WorkspaceStore,
         governance: GovernanceFacade,
-        browser: Arc<RelayBrowserPort>,
+        browser: Arc<dyn BrowserPort>,
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         Self {
@@ -471,21 +471,27 @@ impl WorkbenchFacade {
                 "A compatible browser adapter is connected.",
             )
         });
-        diagnostics.push(
-            if governance.local_policy_valid && governance.managed_authority_valid {
-                DiagnosticItem::passing(
-                    "authority",
-                    "Authority",
-                    "Configured authority sources are valid.",
-                )
-            } else {
-                DiagnosticItem::failing(
-                    "authority",
-                    "Authority",
-                    "A configured authority source is invalid; work fails closed.",
-                )
-            },
-        );
+        // The same validity governance enforces, so this card, the header, and the Policy tab
+        // agree. A failed reload that keeps the last valid policy in force is not failing closed.
+        diagnostics.push(if !governance.authority_valid {
+            DiagnosticItem::failing(
+                "authority",
+                "Authority",
+                "A configured authority source is invalid; work fails closed.",
+            )
+        } else if !governance.local_policy_valid {
+            DiagnosticItem::warning(
+                "authority",
+                "Authority",
+                "The latest local policy edit is not valid. Its last valid version stays in force.",
+            )
+        } else {
+            DiagnosticItem::passing(
+                "authority",
+                "Authority",
+                "Configured authority sources are valid.",
+            )
+        });
         let history = self.projection.history();
         // Read the sequence after gathering, so a snapshot never claims to be newer than it is.
         // A change published mid-assembly is re-delivered and applied idempotently by key.
@@ -499,6 +505,7 @@ impl WorkbenchFacade {
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
             needs_attention: runtime_state == RuntimeControlState::Attention,
+            authority_invalid: !governance.authority_valid,
             working: !operations.is_empty(),
         });
         diagnostics.push(if audit_health.quiet() {
@@ -705,21 +712,21 @@ impl WorkbenchFacade {
     }
 
     /// Apply an explicit local-human runtime control through the authoritative owners.
+    ///
+    /// The authority's state is the whole effect: it is checked before every browser effect, with
+    /// or without a connected browser. Publishing it to adapters is a best-effort notice with no
+    /// receipt, and the relay replays it to adapters that connect later, so its result never
+    /// changes what the person is told.
     pub fn apply_runtime_intent(&self, intent: WorkbenchRuntimeIntent) -> WorkbenchIntentResult {
         let state = self.governance.apply_runtime_intent(intent.into());
-        let browser_notified = self.browser.publish_control_state(state).is_ok();
+        let _ = self.browser.publish_control_state(state);
         self.projection.publish(WorkbenchChange::RuntimeChanged {
             runtime_state: state,
         });
         WorkbenchIntentResult {
             accepted: true,
             runtime_state: state,
-            browser_notified,
-            message: if browser_notified {
-                "Runtime control updated.".into()
-            } else {
-                "Runtime control updated; the browser will receive it after reconnecting.".into()
-            },
+            message: crate::language::control::confirmation(state).to_owned(),
         }
     }
 
@@ -827,7 +834,6 @@ impl WorkbenchFacade {
         WorkbenchIntentResult {
             accepted: true,
             runtime_state: state,
-            browser_notified: false,
             message,
         }
     }
@@ -1095,6 +1101,9 @@ pub struct ReadinessSummary {
     /// Presentation tone, so the surface styles without classifying.
     pub tone: String,
     /// Whether the front door should offer runtime control here.
+    ///
+    /// Runtime control is this authority's own state, so a reachable authority always offers it,
+    /// with or without a connected browser.
     pub invites_control: bool,
 }
 
@@ -1566,8 +1575,6 @@ pub struct WorkbenchIntentResult {
     pub accepted: bool,
     /// Resulting authoritative runtime state.
     pub runtime_state: RuntimeControlState,
-    /// Whether a currently connected browser received the new state immediately.
-    pub browser_notified: bool,
     /// Fixed user-facing outcome.
     pub message: String,
 }

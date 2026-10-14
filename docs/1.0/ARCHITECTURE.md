@@ -268,6 +268,14 @@ decisions, runtime-control intents, and explicit supported-harness management. I
 closed domain-event vocabulary through direct typed reactions and reconstructs bounded terminal
 history from the existing durable audit file. The WebView owns only disposable view state.
 
+Readiness is resolved from content-free facts, including governance's own enforcement validity, so
+the header cannot read Ready while every governed call fails closed. Runtime-control intents
+change governance state first. The workbench then publishes that state to adapters as a
+best-effort notice and confirms only the governance state, in words from `language/control.rs`.
+Runtime control does not depend on a connected browser. Readiness offers it in every state, so
+the WebView disables the header control only while it cannot reach the authority, because its
+last snapshot outlives that connection.
+
 Harness registration is an orchestrator-owned local-human capability. Each supported harness has
 one explicit config resolver and schema. The resolver applies Windows or Linux environment
 precedence before its documented fallback, including `CODEX_HOME` for Codex. Check is read-only.

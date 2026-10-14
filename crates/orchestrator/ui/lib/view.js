@@ -466,8 +466,11 @@
         el["policy-state"].setAttribute("aria-label", `Open Policy. ${policy.detail}`);
       }
 
+      // The orchestrator offers runtime control in every readiness state, browser or not. What it
+      // cannot say is that this window lost it: the last snapshot outlives the connection, so a lost
+      // authority disables the wheel here rather than letting a stale answer keep it enabled.
       const paused = facts.runtime !== "active";
-      el.wheel.disabled = !(facts.snapshot?.readiness?.invites_control ?? false);
+      el.wheel.disabled = facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
       el.wheel.dataset.intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
       el["wheel-icon"].innerHTML = paused

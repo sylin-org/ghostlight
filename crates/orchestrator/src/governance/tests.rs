@@ -806,6 +806,29 @@ fn invalid_managed_authority_fails_closed() {
         snapshot.authorize_capability(Capability::Read).reason,
         ReasonCode::InvalidAuthority
     );
+    assert!(!facade.diagnostics().authority_valid);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn a_local_policy_that_never_validated_fails_closed_everywhere_it_is_reported() {
+    let path = temporary("invalid-local");
+    fs::write(&path, "{half-written").unwrap();
+    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    assert_eq!(
+        facade
+            .snapshot()
+            .authorize_capability(Capability::Read)
+            .reason,
+        ReasonCode::InvalidAuthority
+    );
+    let diagnostics = facade.diagnostics();
+    assert!(!diagnostics.local_policy_valid);
+    assert!(!diagnostics.authority_valid);
+    assert_eq!(
+        facade.policy_chip().situation,
+        effective::Situation::FailingClosed
+    );
     let _ = fs::remove_file(path);
 }
 
@@ -879,6 +902,14 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
     let retained_diagnostics = facade.diagnostics();
     assert!(retained_diagnostics.local_policy_active);
     assert!(!retained_diagnostics.local_policy_valid);
+    assert!(
+        retained_diagnostics.authority_valid,
+        "the retained policy is enforced, so authority is not failing closed"
+    );
+    assert_ne!(
+        facade.policy_chip().situation,
+        effective::Situation::FailingClosed
+    );
 
     fs::write(
         &path,
@@ -895,6 +926,7 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
     let replaced_diagnostics = facade.diagnostics();
     assert!(replaced_diagnostics.local_policy_active);
     assert!(replaced_diagnostics.local_policy_valid);
+    assert!(replaced_diagnostics.authority_valid);
     let _ = fs::remove_file(path);
 }
 

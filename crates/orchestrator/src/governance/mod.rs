@@ -1007,6 +1007,14 @@ impl PolicySources {
         )
     }
 
+    /// Whether configured authority can be enforced, which is the one validity every surface uses.
+    ///
+    /// False means every governed call fails closed. A user policy whose reload failed while its
+    /// last valid version is still applied stays valid here, because that version is enforced.
+    fn authority_valid(&self) -> bool {
+        self.managed_valid() && self.user.has_authority()
+    }
+
     fn managed_manifest(&self) -> Option<&manifest::Manifest> {
         self.managed_remote
             .as_ref()
@@ -1150,7 +1158,10 @@ pub struct GovernanceDiagnostics {
     pub local_policy_configured: bool,
     /// Whether a validated local policy is currently applied.
     pub local_policy_active: bool,
-    /// Whether the configured local policy can be read and validated.
+    /// Whether the configured local policy's latest read validated.
+    ///
+    /// False after a failed reload even while the last valid version stays applied. Whether work
+    /// is refused is `authority_valid`, not this.
     pub local_policy_valid: bool,
     /// Whether a managed authority source is configured.
     pub managed_authority_configured: bool,
@@ -1158,6 +1169,11 @@ pub struct GovernanceDiagnostics {
     pub managed_authority_active: bool,
     /// Whether the configured managed authority can be read and validated.
     pub managed_authority_valid: bool,
+    /// Whether configured authority is enforceable now, exactly as governance enforces it.
+    ///
+    /// False means every governed call fails closed. The workbench header, its Status card, and
+    /// the Policy destination all read this one answer.
+    pub authority_valid: bool,
     /// Whether a runtime-control file is configured.
     pub runtime_control_file_configured: bool,
     /// User-visible provenance for the active signed managed policy.
@@ -1242,6 +1258,7 @@ impl GovernanceFacade {
             managed_authority_configured: policies.managed_configured(),
             managed_authority_active: policies.managed_manifest().is_some(),
             managed_authority_valid: policies.managed_valid(),
+            authority_valid: policies.authority_valid(),
             runtime_control_file_configured: self.runtime_control.is_some(),
             managed_policy: policies.managed_passport(),
         }
@@ -1331,7 +1348,7 @@ impl GovernanceFacade {
             .policies
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !policies.managed_valid() || !policies.user.has_authority() {
+        if !policies.authority_valid() {
             return Decision::deny(ReasonCode::InvalidAuthority);
         }
         for policy in [policies.managed_manifest(), policies.user.active.as_ref()]
@@ -1357,7 +1374,7 @@ impl GovernanceFacade {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let organization = policies.managed_manifest();
-        let valid = policies.managed_valid() && policies.user.has_authority();
+        let valid = policies.authority_valid();
         let situation = if !valid {
             effective::Situation::FailingClosed
         } else {
@@ -1401,7 +1418,7 @@ impl GovernanceFacade {
         let inputs = effective::Inputs {
             organization: organization.as_ref(),
             user: user.as_ref(),
-            valid: policies.managed_valid() && policies.user.has_authority(),
+            valid: policies.authority_valid(),
             sacred_hosts,
             organization_source: policies.managed.path.as_ref().map_or_else(
                 || organization.as_ref().map(|_| passport_source(&passport)),
@@ -1438,7 +1455,7 @@ impl GovernanceFacade {
         let inputs = effective::Inputs {
             organization: policies.managed_manifest(),
             user: policies.user.active.as_ref(),
-            valid: policies.managed_valid() && policies.user.has_authority(),
+            valid: policies.authority_valid(),
             sacred_hosts: Vec::new(),
             organization_source: None,
             organization_document: None,
@@ -1468,7 +1485,7 @@ impl GovernanceFacade {
                     (policies.user.active.clone(), AuthorityTier::User),
                 ],
                 policies.managed_sequence(),
-                policies.managed_valid() && policies.user.has_authority(),
+                policies.authority_valid(),
             )
         };
         assemble(sources, managed_sequence, valid)

@@ -425,6 +425,15 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     readiness projection and use the same word and detail as At a glance. Inspection does not
     demand-start, reveal the workbench, admit a channel, open a session, or write audit. An absent
     or lost authority never causes `doctor` to fabricate live readiness.
+18. When configured authority fails closed, readiness reads Policy not valid in the attention tone
+    and points to the Policy page, never Ready. The header, the Status authority card, and the
+    Policy tab read the one validity governance enforces. A failed reload that keeps the last valid
+    policy in force stays Ready, keeps its Policy situation, and shows a Status warning.
+19. Pause, Resume, End session, and Start session are offered and applied while the authority is
+    reachable and no browser is connected. A workbench that loses the authority disables the header
+    control until it reaches the authority again, even though its last snapshot offered control.
+    Each confirmation states only the resulting authority state, identically whether control
+    publication to adapters succeeded, failed, or reached none.
 
 ## Integration and release-readiness gates
 

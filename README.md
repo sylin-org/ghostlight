@@ -166,7 +166,12 @@ configuration with a backup; **Status**, which answers whether the stack is heal
 which states what the current rules allow, one plain line per capability, naming the layer that
 decided each one; and **About**, which carries the promise underneath it: it never phones home.
 
-Pause and resume sit in the header beside the lamp, the same control the tray offers. Closing the
+Pause and resume sit in the header beside the lamp, the same control the tray offers. They work
+with or without a connected browser, because Ghostlight itself holds the pause. When configured
+policy is not valid, Ghostlight refuses all browser work and the header never reads Ready. It reads
+Policy not valid and points to Policy, unless a more urgent state such as Not connected or Paused
+comes first. A broken edit to a local policy that is already in force is different: the last valid
+version stays in force, Status warns about the edit, and the header does not change. Closing the
 window returns it to the tray and leaves the authority running. If the desktop shell cannot start,
 Ghostlight exits instead of leaving an invisible authority.
 

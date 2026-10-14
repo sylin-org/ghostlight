@@ -86,6 +86,11 @@ Internal browser commands are combined when a person experiences them as one job
   ready, connected, working, paused, recovering, or in need of attention, with the action queue
   beneath that answer and no sixth destination added. The reference-experience epic's S6 delivered
   it, and `language/readiness.rs` owns the answer.
+- The header never reads Ready while configured policy refuses all work. When authority fails
+  closed it reads Policy not valid, in the attention tone, and points to the Policy page. It uses
+  the same validity governance enforces, so the header, the Status authority card, and the Policy
+  tab agree. A failed reload that keeps the last valid policy in force is not failing closed;
+  Status warns about it instead.
 
 ## Desktop workbench experience
 
@@ -120,7 +125,11 @@ the Applications entry as interaction routes.
   does not launch a browser; a refused browser call tells the model to ask the person to open any
   eligible installed browser it names, with the Ghostlight extension installed.
 - Pause, resume, and start-session apply from the persistent header before At a glance
-  and match the tray, so taking the wheel has one affordance rather than several.
+  and match the tray, so taking the wheel has one affordance rather than several. They are the
+  authority's own state, so they stay available whenever the authority answers, with or without a
+  connected browser. A workbench that loses the authority disables them until it reaches it again.
+  The confirmation, owned by `language/control.rs`, states only that state. It never claims or
+  denies browser delivery, because publication to adapters has no receipt.
 - A pause prevents the next browser effect by refusing it at the existing final boundary. It does
   not suspend an invocation or hold a client's request open, because a human-scale pause outlives
   MCP request timeouts and would compete with the ADR-0113 deadline. The refusal is non-terminal and
