@@ -175,7 +175,7 @@ history live here.
 
 | [0159](0159-audit-health-and-recovery.md) | Audit health, optional strict admission, explicit storage gaps, and bounded recovery without replay | Accepted; implemented and verified locally; not deployed |
 | [0160](0160-local-service-continuity.md) | Bounded local exchanges, quiet burst admission, waiting progress, cancellation isolation, and private runtime publication | Accepted; implemented and verified locally; not deployed |
-| [0161](0161-connection-bound-provenance.md) | Immutable per-connection attribution, transient application claims, narrow durable observations, and quiet human details | Accepted; reporting foundation implemented and verified locally; not deployed; verification deferred (stage 2 superseded by [0197](0197-contained-seams-and-the-2-0-break.md): observed peer identity is removed) |
+| [0161](0161-connection-bound-provenance.md) | Immutable per-connection attribution, transient application claims, narrow durable observations, and quiet human details | Accepted; reporting foundation implemented and verified locally; not deployed; verification deferred (observed executable reporting, ADR-0105 stage 2, superseded by [0197](0197-contained-seams-and-the-2-0-break.md) Decision 22: observed peer identity is removed) |
 
 | [0162](0162-configured-authority-and-one-flow-tool.md) | Configured policy owns authority; one flow tool replaces sequence and removes request restrictions and flow dry-run | Accepted; implemented, verified locally, and deployed |
 

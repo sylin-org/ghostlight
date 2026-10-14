@@ -138,6 +138,8 @@ session at all, which is a different and weaker claim than knowing who is callin
 
 ## Amendment 2026-08-24 (stage 2 lands through one audited FFI crate; stage 3 stays deferred)
 
+Stage 2 (observed attribution) is superseded by ADR-0197 Decision 22: observed peer identity is removed.
+
 The owner revisited the deferred question on 2026-08-24 and decided it in two halves.
 
 **Stage 2 (observed attribution) ships.** The owner chose to relax the invariant for one audited
