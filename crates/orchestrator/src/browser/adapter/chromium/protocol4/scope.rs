@@ -92,6 +92,7 @@ pub struct Scope {
     strict: bool,
     watch: bool,
     settle_until: Instant,
+    settle_requested: bool,
     observation: Observation,
 }
 
@@ -126,6 +127,7 @@ impl Scope {
             strict: scope.strict_tree,
             watch: scope.watch_changes,
             settle_until: Instant::now() + settle,
+            settle_requested: scope.settle_requested,
             observation: Observation::default(),
         })
     }
@@ -147,6 +149,7 @@ impl Scope {
             strict: false,
             watch: false,
             settle_until: Instant::now(),
+            settle_requested: false,
             observation: Observation::default(),
         }
     }
@@ -228,7 +231,7 @@ impl Scope {
             return Err(BrowserError::DocumentUnavailable);
         }
         let message = if message.takes_settle() {
-            message.with_settle(self.remaining_settle_ms())
+            message.with_settle(self.remaining_settle_ms(), self.settle_requested)
         } else {
             message
         };

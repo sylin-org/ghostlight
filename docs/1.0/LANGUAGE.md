@@ -420,6 +420,7 @@ Ordinary textual inputs, textareas, and rich-text controls use the browser's edi
 so controlled forms and editors retain the replacement across later renders. Selects, checkboxes,
 and radios keep their semantic control setters. Empty values clear only the named control. Filling
 never activates a submit control unless the caller supplied `submit_target`.
+Form preparation shares the call's settle budget; only `visual_settle` false skips it.
 
 Active controlled tabs emulate focus between calls to avoid focus-triggered refresh interrupting
 automation (ADR-0168). Pause, stop, disconnection, and release restore normal browser lifecycle.

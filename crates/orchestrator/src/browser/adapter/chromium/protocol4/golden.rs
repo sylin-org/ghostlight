@@ -738,7 +738,12 @@ fn build(kind_name: &str, f: &Value) -> Message {
         other => panic!("no constructor for world kind {other}"),
     };
     match f.get("settle_ms").and_then(Value::as_u64) {
-        Some(settle_ms) => message.with_settle(settle_ms),
+        Some(settle_ms) => message.with_settle(
+            settle_ms,
+            f.get("visual_settle")
+                .and_then(Value::as_bool)
+                .expect("a fixture with a budget states the agent's intent"),
+        ),
         None => message,
     }
 }

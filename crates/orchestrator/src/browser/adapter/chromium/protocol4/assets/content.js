@@ -34,7 +34,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     ["fieldset", "group"], ["img", "image"], ["summary", "button"]
   ]);
   const FILL_STABLE_MS = 750;
-  const FILL_SETTLE_LIMIT_MS = 8_000;
+  const FILL_RECHECK_MS = 50;
   const FILL_RETAINED_STABLE_MS = 250;
   const FILL_RETAINED_POLL_MS = 25;
   const OBSERVE_POLL_MS = 100;
@@ -602,10 +602,19 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
 
   // A browser document can be ready while a client-rendered form is still hydrating from an
   // API response. Editing during that window produces real trusted events and a temporary dirty
-  // state, then the hydration result replaces the draft. Require a stable target set and
-  // ready state briefly; the final current target set remains usable when the budget expires.
+  // state, then the hydration result replaces the draft. Wait for a stable target set and ready
+  // state, but only within the budget the call has left: visual_settle false skips the wait,
+  // and a spent budget (settle_ms 0) with the agent's intent intact still rechecks the values
+  // once. The final current target set remains usable when the budget expires.
   async function prepareStableFill(message, ctx) {
     if (message.visual_settle === false) return prepareFill(message);
+    const budget = message.settle_ms ?? 0;
+    if (budget <= 0) {
+      prepareFill(message);
+      await sleep(FILL_RECHECK_MS);
+      throwIfCancelled(ctx);
+      return prepareFill(message);
+    }
     const started = performance.now();
     let stableSince = started;
     let signature = null;
@@ -622,10 +631,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       if (ready && now - stableSince >= FILL_STABLE_MS) {
         return prepared;
       }
-      if (now - started >= Math.min(FILL_SETTLE_LIMIT_MS, message.settle_ms ?? FILL_SETTLE_LIMIT_MS)) {
+      if (now - started >= budget) {
         return prepareFill(message);
       }
-      await sleep(FILL_SETTLE_POLL_MS);
+      await sleep(Math.min(FILL_SETTLE_POLL_MS, budget - (now - started)));
     }
   }
 

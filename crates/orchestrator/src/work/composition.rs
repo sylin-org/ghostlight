@@ -484,6 +484,7 @@ mod tests {
             }
             let context = InvocationContext {
                 settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+                settlement_requested: false,
                 provenance: None,
                 requirements: crate::governance::CapabilitySet::READ,
                 invocation: "parent",
@@ -554,6 +555,7 @@ mod tests {
         let token = super::super::CancellationToken::default();
         let context = InvocationContext {
             settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+            settlement_requested: false,
             provenance: None,
             requirements: crate::governance::CapabilitySet::READ,
             invocation: "parent",

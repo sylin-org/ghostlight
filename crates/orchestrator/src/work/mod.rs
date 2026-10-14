@@ -315,9 +315,11 @@ impl ApplicationExecutor {
             None
         };
         let snapshot = self.governance.snapshot();
-        let settlement_pending = AtomicBool::new(language::settlement::enabled(operation));
+        let settlement_requested = language::settlement::enabled(operation);
+        let settlement_pending = AtomicBool::new(settlement_requested);
         let context = InvocationContext {
             settlement_pending: &settlement_pending,
+            settlement_requested,
             requirements,
             provenance: prepared.provenance.as_deref(),
             invocation: &invocation,
@@ -1926,7 +1928,12 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
 
 #[derive(Clone, Copy)]
 struct InvocationContext<'a> {
+    /// Whether this call's preparation budget is still unspent. The first dispatch that settles
+    /// takes it.
     settlement_pending: &'a AtomicBool,
+    /// The agent's intent: false only when the call said `visual_settle: false`. It never
+    /// changes once the budget is spent, so a spent budget is not read as an opt-out.
+    settlement_requested: bool,
     requirements: CapabilitySet,
     provenance: Option<&'a ConnectionEvidence>,
     invocation: &'a str,

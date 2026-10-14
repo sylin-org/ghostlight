@@ -160,6 +160,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
     let cancellation = CancellationToken::default();
     let context = InvocationContext {
         settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+        settlement_requested: false,
         provenance: None,
         invocation: "queued",
         workspace: &workspace,

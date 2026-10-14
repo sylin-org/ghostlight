@@ -74,7 +74,7 @@ fn every_kind_has_one_constructor_and_the_classes_of_its_table_row() {
             kind::PREPARE_FILL,
             Content,
             Read,
-            false,
+            true,
         ),
         (
             verify_fill_retained(&fields, false, 3_000),
@@ -372,20 +372,26 @@ fn constructors_build_the_payloads_the_assets_read() {
 
 #[test]
 fn a_settle_budget_reaches_only_the_kinds_that_settle() {
-    let settled = find("Save changes", "control", 8).with_settle(1_500);
+    let settled = find("Save changes", "control", 8).with_settle(1_500, true);
     assert_eq!(
         settled.to_json(),
         json!({"kind":"find","text":"Save changes","find_kind":"control","max_results":8,
             "settle_ms":1500,"visual_settle":true})
     );
-    let spent = read_text(None, None, 100).with_settle(0);
+    let spent = read_text(None, None, 100).with_settle(0, true);
     assert_eq!(spent.payload()["settle_ms"], 0);
-    assert_eq!(spent.payload()["visual_settle"], false);
-    let typed = focus_text_field(&field("locator_a1b2c3d4_6", "Ada"), false).with_settle(40);
+    assert_eq!(spent.payload()["visual_settle"], true);
+    let declined = read_text(None, None, 100).with_settle(800, false);
+    assert_eq!(declined.payload()["settle_ms"], 800);
+    assert_eq!(declined.payload()["visual_settle"], false);
+    let typed = focus_text_field(&field("locator_a1b2c3d4_6", "Ada"), false).with_settle(40, true);
     assert_eq!(typed.payload()["settle_ms"], 40);
     assert_eq!(typed.payload()["visual_settle"], true);
+    let prepared = prepare_fill(&[], false, None).with_settle(0, true);
+    assert_eq!(prepared.payload()["settle_ms"], 0);
+    assert_eq!(prepared.payload()["visual_settle"], true);
     let read = describe(&[]);
-    assert_eq!(read.clone().with_settle(500), read);
+    assert_eq!(read.clone().with_settle(500, true), read);
 }
 
 #[test]

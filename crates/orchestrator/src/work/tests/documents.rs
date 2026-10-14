@@ -59,6 +59,7 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
         assert!(scopes[0].settle_ms <= 1000);
         assert_eq!(scopes[0].settle_ms > 0, enabled);
         assert_eq!(scopes[1].settle_ms, 0);
+        assert!(scopes.iter().all(|scope| scope.settle_requested == enabled));
         assert!(scopes.iter().all(|scope| !scope.strict_tree));
     }
 }

@@ -1139,11 +1139,11 @@ test("successful fill preparation changes nothing and reports each field's input
   fields[2].value = "us";
 
   const started = harness.dom.context.performance.now();
-  const prepared = await harness.send({ kind: "prepare_fill", fields });
+  const prepared = await harness.send({ kind: "prepare_fill", fields, visual_settle: true, settle_ms: 1000 });
   const elapsed = harness.dom.context.performance.now() - started;
 
   assert.deepEqual(prepared.value, { prepared: true, field_kinds: ["browser_text", "browser_text", "local"] });
-  assert.ok(elapsed >= 750 && elapsed < 6000, `waited for the form to settle (${elapsed} ms)`);
+  assert.ok(elapsed >= 750 && elapsed < 1000, `waited for the form to settle (${elapsed} ms)`);
   assert.equal(harness.input.value, "Original input");
   assert.equal(editor.textContent, "Original rich draft");
   assert.deepEqual(harness.edits, []);
@@ -1158,6 +1158,33 @@ test("prepare_fill with visual_settle false answers at once", async () => {
   const prepared = await harness.send({ kind: "prepare_fill", fields: [{ locator, value: "x" }], visual_settle: false });
   assert.equal(prepared.ok, true);
   assert.equal(harness.dom.context.performance.now(), before);
+});
+
+async function preparationTime(message) {
+  const harness = contentHarness();
+  textInput(harness);
+  const locator = await harness.locatorOf("Name");
+  const started = harness.dom.context.performance.now();
+  const prepared = await harness.send({ kind: "prepare_fill", fields: [{ locator, value: "x" }], ...message });
+  return { prepared, elapsed: harness.dom.context.performance.now() - started };
+}
+
+test("prepare_fill with the budget spent and the intent kept runs one 50 ms recheck", async () => {
+  const { prepared, elapsed } = await preparationTime({ visual_settle: true, settle_ms: 0 });
+  assert.equal(prepared.ok, true);
+  assert.ok(elapsed >= 50 && elapsed < 200, `rechecked once (${elapsed} ms)`);
+});
+
+test("prepare_fill with an explicit false skips the stability wait whatever the budget", async () => {
+  const { prepared, elapsed } = await preparationTime({ visual_settle: false, settle_ms: 800 });
+  assert.equal(prepared.ok, true);
+  assert.equal(elapsed, 0);
+});
+
+test("prepare_fill waits at most the budget it was given", async () => {
+  const { prepared, elapsed } = await preparationTime({ visual_settle: true, settle_ms: 400 });
+  assert.equal(prepared.ok, true);
+  assert.ok(elapsed >= 400 && elapsed < 600, `stopped at the budget (${elapsed} ms)`);
 });
 
 test("fill_local sets a select by its visible label or value and verify_fill_retained confirms it", async () => {

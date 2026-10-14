@@ -1658,7 +1658,9 @@ Every kind is built only by a typed constructor in `world.rs`.
 - **Scope class.** *Content* needs the document in `allowed`. *Metadata* needs it in the admitted tree.
 - **Effect class.** *Read*, *Prepare* (positions things but is not the action), or *Effect*.
 - **Settle.** *Settle* kinds receive the scope's remaining preparation budget as `settle_ms` and
-  `visual_settle`.
+  `visual_settle`. `visual_settle` is the agent's intent and is false only when the agent turned
+  settling off; `settle_ms` is what is left of the budget. A spent budget is zero with
+  `visual_settle` still true (ADR-0198 Decision 35).
 
 | Kind | Scope | Effect | Settle | Notes |
 |---|---|---|---|---|
@@ -1671,7 +1673,7 @@ Every kind is built only by a typed constructor in `world.rs`.
 | `describe_focused` | Content | Read | | today |
 | `verify_focused_text{allow_credentials}` | Content | Read | | today |
 | `box{locator}` | Content | Read | | today |
-| `prepare_fill{fields, allow_credentials, submit_locator?}` | Content | Read | own 8 s loop | today; cancellable |
+| `prepare_fill{fields, allow_credentials, submit_locator?}` | Content | Read | yes | carries `settle_ms` and `visual_settle` like the other settling calls: false skips the stability wait, a spent budget with true rechecks values once for 50 ms, otherwise it waits for stable values up to `settle_ms`; cancellable |
 | `verify_fill_retained{fields, allow_credentials, stable_ms:250, poll_ms:25, limit_ms}` | Content | Read | | **new**; ok when stable, else `not_retained`; replaces the worker loop `service-worker.js:1700-1728` |
 | `observe{condition, value?, locator?, timeout_ms, until_satisfied}` | Content | Read | | changed: with `until_satisfied` it throws `unsatisfied` at its timeout (race mode) |
 | `activate{locator}` | Content | Prepare | | today: scroll into view, rect and subject |
@@ -1951,6 +1953,7 @@ pub struct Scope {
     input_subjects: Vec<FrameRef>,
     strict: bool,
     settle_until: Instant,
+    settle_requested: bool,           // the agent's intent; false only for an explicit visual_settle false
     observation: Observation,         // visited, unavailable, limited
 }
 
@@ -1963,6 +1966,7 @@ impl Scope {
         let subjects = scope.subjects.iter().filter_map(|id| tree.real_ref(id)).collect();
         Ok(Self { tree, allowed, subjects, input_subjects: vec![], strict: scope.strict_tree,
                   settle_until: Instant::now() + Duration::from_millis(scope.settle_ms.min(1_000)),
+                  settle_requested: scope.settle_requested,
                   observation: Observation::default() })
     }
 
@@ -1973,7 +1977,7 @@ impl Scope {
             ScopeClass::Metadata => self.tree.contains(doc),
         };
         if !admitted { return Err(BrowserError::DocumentUnavailable); }      // nothing sent
-        let message = if message.takes_settle() { message.with_settle(self.remaining_settle_ms()) } else { message };
+        let message = if message.takes_settle() { message.with_settle(self.remaining_settle_ms(), self.settle_requested) } else { message };
         Ok(PlannedCall { call: WorldCall { frame: Some(doc.clone()), owner_of: None, message: message.to_json() },
                          doc: doc.clone(), scope: message.scope_class(), effect: message.effect_class() })
     }

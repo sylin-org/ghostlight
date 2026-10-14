@@ -215,14 +215,16 @@ impl Message {
         self.settles
     }
 
-    /// Give a settling kind the preparation budget left in milliseconds. A budget of zero turns
-    /// the visual wait off. Any other kind is returned unchanged.
+    /// Give a settling kind the preparation budget left in milliseconds and the agent's intent.
+    /// `requested` is false only when the agent turned settling off; a budget that is spent
+    /// (zero) with `requested` true still tells the page the agent wants settling. Any other kind
+    /// is returned unchanged.
     #[must_use]
-    pub fn with_settle(mut self, settle_ms: u64) -> Self {
+    pub fn with_settle(mut self, settle_ms: u64, requested: bool) -> Self {
         if self.settles {
             if let Value::Object(members) = &mut self.payload {
                 members.insert(SETTLE_MS_FIELD.to_owned(), json!(settle_ms));
-                members.insert(VISUAL_SETTLE_FIELD.to_owned(), json!(settle_ms > 0));
+                members.insert(VISUAL_SETTLE_FIELD.to_owned(), json!(requested));
             }
         }
         self
@@ -319,7 +321,7 @@ pub fn box_(locator: &str) -> Message {
 }
 
 /// Validate every field and the submit control, and wait for the form to be stable, before any
-/// field is edited.
+/// field is edited. The wait draws on the request's shared settle budget.
 #[must_use]
 pub fn prepare_fill(
     fields: &[PhysicalField],
@@ -336,6 +338,7 @@ pub fn prepare_fill(
             "submit_locator": submit_locator,
         }),
     )
+    .settling()
 }
 
 /// Wait until every filled value has kept its value for the stable interval, or fail with

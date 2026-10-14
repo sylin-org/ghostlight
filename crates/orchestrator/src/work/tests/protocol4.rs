@@ -46,9 +46,11 @@ fn page(world: &wire::WorldCall) -> Value {
     match world.message["kind"].as_str().unwrap_or_default() {
         "observe" => returned(json!({"satisfied": true, "elapsed_ms": 0,
             "readiness": "complete"})),
-        "inspect" | "find" | "describe" => returned(json!({"targets": [{"locator": CONTROL,
+        "inspect" | "find" | "describe" | "query_semantic" => {
+            returned(json!({"targets": [{"locator": CONTROL,
             "role": "button", "name": "Save", "state": [], "credential_class": false}],
-            "truncated": false})),
+            "truncated": false}))
+        }
         "activate" => returned(json!({"activated": true, "subject": control,
             "rectangle": {"left": 10, "top": 20, "width": 40, "height": 10}})),
         "read_text" => returned(json!({"text": "Hello world", "truncated": false,
@@ -545,4 +547,74 @@ fn page_work_blocked_by_a_dialog_says_so_and_points_at_the_dialog() {
         );
         assert!(result.next_steps[0].contains("browser_dialog"));
     }
+}
+
+#[test]
+fn a_fill_after_a_read_spent_the_budget_still_asks_the_page_to_settle() {
+    let seen: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let record = seen.clone();
+    let (executor, _fake, workspace) = opened(Box::new(move |correlation, primitive| {
+        let wire::Primitive::Call(call) = primitive else {
+            return None;
+        };
+        let mut messages = record.lock().unwrap();
+        messages.extend(call.calls.iter().map(|world| world.message.clone()));
+        call.calls
+            .iter()
+            .any(|world| world.message["kind"] == "prepare_fill")
+            .then(|| {
+                let answers: Vec<Value> = call
+                    .calls
+                    .iter()
+                    .map(|world| {
+                        if world.message["kind"] == "prepare_fill" {
+                            refused("not_editable")
+                        } else {
+                            page(world)
+                        }
+                    })
+                    .collect();
+                FakeExtension::ok(correlation, json!({"answers": answers}))
+            })
+    }));
+    seen.lock().unwrap().clear();
+
+    let _ = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}]}),
+    );
+
+    let messages = seen.lock().unwrap();
+    let of = |kind: &str| {
+        messages
+            .iter()
+            .find(|message| message["kind"] == kind)
+            .unwrap_or_else(|| panic!("no {kind} message was sent"))
+    };
+    let semantic = of("query_semantic");
+    assert!(semantic["settle_ms"].as_u64().unwrap() > 0);
+    assert_eq!(semantic["visual_settle"], true);
+    let prepare = of("prepare_fill");
+    assert_eq!(prepare["settle_ms"], 0, "the read spent the budget");
+    assert_eq!(
+        prepare["visual_settle"], true,
+        "a spent budget is not an opt-out"
+    );
+
+    drop(messages);
+    seen.lock().unwrap().clear();
+    let _ = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}], "visual_settle": false}),
+    );
+    let messages = seen.lock().unwrap();
+    let prepare = messages
+        .iter()
+        .find(|message| message["kind"] == "prepare_fill")
+        .expect("a declined settle still prepares the fill");
+    assert_eq!(prepare["visual_settle"], false);
 }

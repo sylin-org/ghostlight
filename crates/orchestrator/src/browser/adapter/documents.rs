@@ -50,12 +50,20 @@ pub struct DocumentScope {
     /// Require the complete admitted tree to stay fixed for a broad restricted operation.
     #[serde(default = "strict_tree_default")]
     pub strict_tree: bool,
-    /// Remaining shared preparation budget for local collectors; zero skips implicit waiting.
+    /// Remaining shared preparation budget for local collectors in milliseconds. A spent budget
+    /// is zero; it does not say the agent declined settling.
     #[serde(default)]
     pub settle_ms: u64,
+    /// The agent's intent: false only when the call turned settling off.
+    #[serde(default = "settle_requested_default")]
+    pub settle_requested: bool,
 }
 
 fn strict_tree_default() -> bool {
+    true
+}
+
+fn settle_requested_default() -> bool {
     true
 }
 

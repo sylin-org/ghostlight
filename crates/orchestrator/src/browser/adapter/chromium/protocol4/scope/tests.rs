@@ -47,6 +47,7 @@ fn scope_of(documents: Vec<PhysicalDocument>, allowed: &[&str]) -> DocumentScope
         watch_changes: true,
         strict_tree: true,
         settle_ms: 0,
+        settle_requested: true,
     }
 }
 
@@ -241,7 +242,7 @@ fn input_cannot_be_admitted_into_a_document_that_is_not_allowed() {
 }
 
 #[test]
-fn settling_calls_share_one_remaining_budget_and_zero_turns_the_wait_off() {
+fn settling_calls_share_one_remaining_budget_and_zero_leaves_no_wait() {
     for (budget, waits) in [(0, false), (1_000, true)] {
         let mut authority = scope_of(two_documents(), &["T.t1"]);
         authority.settle_ms = budget;
@@ -249,7 +250,7 @@ fn settling_calls_share_one_remaining_budget_and_zero_turns_the_wait_off() {
         let planned = scope
             .call(&doc("T", "t1"), world::read_text(None, None, 10))
             .unwrap();
-        assert_eq!(planned.call.message["visual_settle"], waits);
+        assert_eq!(planned.call.message["visual_settle"], true);
         assert!(planned.call.message["settle_ms"].as_u64().unwrap() <= budget);
         assert_eq!(
             planned.call.message["settle_ms"].as_u64().unwrap() > 0,
@@ -270,6 +271,17 @@ fn a_spent_budget_leaves_nothing_for_the_next_call() {
         .unwrap_or_else(Instant::now);
     let planned = read(&scope, &doc("T", "t1"));
     assert_eq!(planned.call.message["settle_ms"], 0);
+    assert_eq!(planned.call.message["visual_settle"], true);
+}
+
+#[test]
+fn a_declined_settle_stays_declined_whatever_the_budget() {
+    let mut authority = scope_of(two_documents(), &["T.t1"]);
+    authority.settle_ms = 1_000;
+    authority.settle_requested = false;
+    let scope = Scope::admit(&authority).unwrap();
+    let planned = read(&scope, &doc("T", "t1"));
+    assert!(planned.call.message["settle_ms"].as_u64().unwrap() > 0);
     assert_eq!(planned.call.message["visual_settle"], false);
 }
 

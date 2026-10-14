@@ -437,6 +437,7 @@ impl ApplicationExecutor {
                 settle_ms: Duration::from_millis(settle_ms)
                     .saturating_sub(preparation_started.elapsed())
                     .as_millis() as u64,
+                settle_requested: context.settlement_requested,
             },
             primitive: Box::new(command),
         };

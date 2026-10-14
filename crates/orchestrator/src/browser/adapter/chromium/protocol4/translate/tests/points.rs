@@ -123,6 +123,7 @@ fn nested_scope(allowed: &[&str]) -> DocumentScope {
         watch_changes: false,
         strict_tree: false,
         settle_ms: 0,
+        settle_requested: true,
     }
 }
 

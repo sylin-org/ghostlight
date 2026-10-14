@@ -115,6 +115,7 @@ fn scope(allowed: &[&str], strict: bool) -> DocumentScope {
         watch_changes: true,
         strict_tree: strict,
         settle_ms: 0,
+        settle_requested: true,
     }
 }
 
@@ -304,6 +305,7 @@ fn an_unseen_frame_is_an_unsupported_document_that_a_strict_guard_pins() {
         watch_changes: true,
         strict_tree: true,
         settle_ms: 0,
+        settle_requested: true,
     };
     call(
         &port,
