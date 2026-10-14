@@ -203,7 +203,7 @@ history live here.
 
 | [0174](0174-delight-through-sane-defaults.md) | Delight through sane defaults: autonomous settle on screenshots, default visual stabilization on composite wait conditions, and zero-overhead opt-out | Accepted |
 
-| [0175](0175-first-class-workspace-switching.md) | First-class workspace discovery and switching: browser_workspace tool, zero-friction session rebinding, and cross-workspace tab handoff | Accepted |
+| [0175](0175-first-class-workspace-switching.md) | First-class workspace discovery and switching: browser_workspace tool, zero-friction session rebinding, and cross-workspace tab handoff | Superseded by [0196](0196-simple-pipeline-and-contained-boundaries.md) |
 
 | [0176](0176-ergonomic-pipeline-simplification.md) | Ergonomic pipeline simplification, invariant centralization, and settle policy unification | Accepted |
 | [0177](0177-modular-cli-decomposition-and-execution-templates.md) | Modular CLI decomposition and universal execution templates | Accepted |
@@ -225,6 +225,7 @@ history live here.
 | [0193](0193-fixed-package-paths-and-service-runtime-updates.md) | Fixed package paths and current service runtime through the existing injector | Accepted for implementation |
 | [0194](0194-binary-screenshot-permission.md) | Binary screenshot permission: complete images without document inventories or masks; separate text and action authority | Accepted; implemented, locally deployed, and verified on Windows; supersedes ADR-0158 Decision 6 |
 | [0195](0195-bounded-settlement-and-subject-scoped-page-work.md) | Bounded best-effort settlement across ordinary page tools, subject-scoped validation and literal explicit waits | Accepted by owner direction; original installed acceptance passed; release integration pending |
+| [0196](0196-simple-pipeline-and-contained-boundaries.md) | Simple pipeline and contained boundaries: service-owned browser adapter and page assets, isolated-world injection, a frozen primitive set, contained sessions, protocol-versioned connectors, no downgrades, and tested guarantees | Accepted (supersedes [0175](0175-first-class-workspace-switching.md); amends [0137](0137-tab-and-group-reuse.md), [0142](0142-per-member-release-version-spaces.md), [0181](0181-capability-negotiated-thin-adapters-and-page-runtime.md), [0193](0193-fixed-package-paths-and-service-runtime-updates.md)) |
 
 ## Conventions
 

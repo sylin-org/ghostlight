@@ -1,6 +1,7 @@
 # ADR-0175: First-Class Workspace Discovery and Switching
 
-Date: 2026-09-14. Status: Accepted by owner direction.
+Date: 2026-09-14. Status: Accepted by owner direction. Superseded by ADR-0196 on 2026-10-13:
+sessions are contained and `browser_workspace` is removed.
 
 Builds on ADR-0005, ADR-0007, ADR-0008, ADR-0105, and ADR-0172.
 
