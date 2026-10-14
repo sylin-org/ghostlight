@@ -208,8 +208,11 @@ test("only doctor, status, help and version never install", () => {
   for (const command of ["doctor", "status", "help", "--help", "-h", "--version", "-V"]) {
     assert.equal(neverInstalls([command, "--json"]), true, command);
   }
+  for (const arguments_ of [["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"]]) {
+    assert.equal(neverInstalls(arguments_), true, arguments_.join(" "));
+  }
   for (const arguments_ of [[], ["install"], ["open"], ["serve"], ["diagnostics", "path"],
-    ["policy", "validate"], ["call", "--catalog"], ["uninstall"], ["deployment", "install"], ["unknown"]]) {
+    ["policy", "validate"], ["call", "--catalog"], ["uninstall"], ["install", "--force"], ["deployment", "install"], ["unknown"]]) {
     assert.equal(neverInstalls(arguments_), false, arguments_.join(" ") || "(no arguments)");
   }
 });
@@ -368,14 +371,30 @@ test("a bad download never touches the installed service", async () => {
 });
 
 test("never-install commands run the installed service whatever its version and never install", async () => {
-  for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"]]) {
+  for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"],
+    ["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"]]) {
     const f = await launcherFixture();
     try {
       await f.install("1.0.0");
       const launch = await f.prepareLaunch({ ...f.options, arguments_, fetchImpl: NO_DOWNLOAD });
       assert.equal(launch.executable, join(f.bin, "ghostlight"));
       assert.deepEqual(launch.arguments_, arguments_);
-      assert.equal(f.activity.installs.length, 0, arguments_[0]);
+      assert.equal(f.activity.installs.length, 0, arguments_.join(" "));
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("subcommand help with nothing installed stages the service and installs nothing", async () => {
+  for (const arguments_ of [["install", "--help"], ["uninstall", "-h"]]) {
+    const f = await launcherFixture();
+    try {
+      const launch = await f.prepareLaunch({ ...f.options, arguments_ });
+      assert.equal(f.activity.installs.length, 0, arguments_.join(" "));
+      assert.deepEqual(f.activity.downloads, ["ghostlight-x86_64-unknown-linux-gnu"]);
+      await launch.cleanup();
+      assert.deepEqual(await readdir(f.home), [], "nothing is installed");
     } finally {
       await f.cleanup();
     }

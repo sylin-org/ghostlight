@@ -30,6 +30,10 @@ const INSTALL_RECORD_NAME = "install.json";
 const DEVELOPMENT_MARKER_NAME = "development";
 /** First arguments of the commands that never install (ADR-0197 Decision 13). */
 const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-h", "--version", "-V"]);
+/** Commands whose own help the service prints when exactly one help flag follows them. */
+const HELP_COMMANDS = new Set(["install", "uninstall"]);
+/** The flags that ask a command for its help. */
+const HELP_FLAGS = new Set(["--help", "-h"]);
 
 /** The Linux shared library the desktop service links, and the packages that provide it. */
 const WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
@@ -80,10 +84,14 @@ export function selectedExecutable(arguments_, platform = process.platform, arch
 }
 
 /**
- * True for the commands that never install: `doctor`, `status`, `help` and `--version`. Every
- * other command, including no arguments (the MCP connector), needs the installed set.
+ * True for the commands that never install: `doctor`, `status`, `help`, `--version`, and the
+ * help of `install` and `uninstall` (`install --help`). Every other command, including no
+ * arguments (the MCP connector), needs the installed set.
  */
 export function neverInstalls(arguments_) {
+  if (arguments_.length === 2 && HELP_COMMANDS.has(arguments_[0]) && HELP_FLAGS.has(arguments_[1])) {
+    return true;
+  }
   return arguments_.length > 0 && NEVER_INSTALL_COMMANDS.has(arguments_[0]);
 }
 
