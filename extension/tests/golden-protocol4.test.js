@@ -446,6 +446,18 @@ const OK_CHECKS = {
   }
 };
 
+/** Effect-class ok receipts (spec section 5): the Effect primitives, a dialog handle and a recording export into a page. */
+const EFFECT_PRIMITIVES = new Set([
+  "open_tab", "navigate", "focus_tab", "close_tab", "set_zoom", "resize_window", "evaluate_main", "input", "call"
+]);
+
+function isEffectOk(name, outcome, ok) {
+  if (EFFECT_PRIMITIVES.has(name)) return true;
+  if (name === "dialog") return outcome === "ok_handled";
+  if (name === "recording") return ok.delivery?.delivery === "attached";
+  return false;
+}
+
 test("receipt fixtures name a primitive and one outcome, and use known codes", () => {
   const covered = new Set();
   const okPrimitives = new Set();
@@ -469,6 +481,10 @@ test("receipt fixtures name a primitive and one outcome, and use known codes", (
       assert.ok(name !== "unknown_primitive" && known("primitives", name), `${stem}: unknown primitive`);
       assert.ok(outcome === "ok" || outcome.startsWith("ok_"), `${stem}: an ok receipt is named <primitive>.ok[_case]`);
       OK_CHECKS[name](value.ok);
+      if (!isEffectOk(name, outcome, value.ok)) {
+        assert.equal(value.dispatched, false, `${stem}: a Read receipt is never dispatched`);
+        assert.equal(value.tab, undefined, `${stem}: a Read receipt carries no tab`);
+      }
       okPrimitives.add(name);
     } else {
       assert.ok(known("receipt_failures", value.failure), `${stem}: unknown failure ${value.failure}`);
