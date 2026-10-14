@@ -1,0 +1,8 @@
+{
+  "relay": 3,
+  "token": "k3mP9xQ2vLr7TnA4",
+  "stream": {
+    "kind": "control",
+    "op": "readiness"
+  }
+}

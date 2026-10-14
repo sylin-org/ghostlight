@@ -1,0 +1,5 @@
+{
+  "kind": "refused",
+  "code": "authentication_failed",
+  "message": "The token does not match this service."
+}

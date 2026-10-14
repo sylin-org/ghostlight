@@ -1,0 +1,24 @@
+{
+  "relay": 3,
+  "later": "ignored",
+  "cut_off": {
+    "default": {
+      "jsonrpc": "2.0",
+      "id": null,
+      "error": {
+        "code": -32603,
+        "message": "Cut off."
+      }
+    }
+  },
+  "expired": {
+    "default": {
+      "jsonrpc": "2.0",
+      "id": null,
+      "error": {
+        "code": -32603,
+        "message": "Expired."
+      }
+    }
+  }
+}

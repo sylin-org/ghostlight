@@ -1,0 +1,14 @@
+{
+  "relay": 3,
+  "token": "k3mP9xQ2vLr7TnA4",
+  "stream": {
+    "kind": "mcp",
+    "channel": "cli",
+    "session": {
+      "kind": "process",
+      "pid": 18244,
+      "started_at": 1790000123,
+      "name": "ghostlight"
+    }
+  }
+}

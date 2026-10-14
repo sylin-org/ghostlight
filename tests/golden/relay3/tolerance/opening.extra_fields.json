@@ -1,0 +1,13 @@
+{
+  "relay": 3,
+  "token": "k3mP9xQ2vLr7TnA4",
+  "later": true,
+  "stream": {
+    "kind": "mcp",
+    "channel": "npm",
+    "later": [
+      1,
+      2
+    ]
+  }
+}

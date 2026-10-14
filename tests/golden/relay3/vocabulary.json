@@ -1,0 +1,58 @@
+{
+  "relay": 3,
+  "frame": {
+    "header": "u32_le",
+    "payload": "utf8_json",
+    "max_bytes": 8388608
+  },
+  "streams": [
+    "mcp",
+    "browser",
+    "control"
+  ],
+  "control_ops": [
+    "activate_workbench",
+    "readiness",
+    "quit"
+  ],
+  "reply_kinds": [
+    "accepted",
+    "refused"
+  ],
+  "refusal_codes": [
+    "authentication_failed",
+    "unsupported",
+    "capacity",
+    "shutting_down",
+    "malformed"
+  ],
+  "mcp_frame_kinds": [
+    "message",
+    "resume"
+  ],
+  "control_result_kind": "result",
+  "failure_template_kinds": [
+    "cut_off",
+    "expired"
+  ],
+  "failure_template_default": "default",
+  "files": {
+    "home_directory": ".ghostlight",
+    "runtime": "ghostlight-runtime.json",
+    "lease": "ghostlight-runtime.lock",
+    "templates": "relay-templates.json",
+    "bin": "bin",
+    "diagnostics_marker": "diagnostics.on",
+    "diagnostics_directory": "diagnostics"
+  },
+  "service_executable": {
+    "windows": "ghostlight.exe",
+    "other": "ghostlight"
+  },
+  "test_home_variable": "GHOSTLIGHT_TEST_HOME",
+  "hold_limit_bytes": 4194304,
+  "hold_limit_ms": 30000,
+  "backoff_first_ms": 500,
+  "backoff_max_ms": 30000,
+  "opening_deadline_ms": 5000
+}

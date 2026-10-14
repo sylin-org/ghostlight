@@ -1,0 +1,9 @@
+{
+  "relay": 3,
+  "token": "k3mP9xQ2vLr7TnA4",
+  "stream": {
+    "kind": "mcp",
+    "channel": "npm",
+    "resume": "rs1.eyJyZXZpc2lvbiI6IjIwMjUtMDYtMTgifQ"
+  }
+}
