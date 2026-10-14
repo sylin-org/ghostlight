@@ -262,8 +262,6 @@ pub enum RecordingStopReason {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhysicalRecordingSummary {
-    /// Opaque extension-minted recording identity.
-    pub recording_id: String,
     /// Physical Chromium tab captured by this recording.
     pub tab_id: u64,
     /// Current extension-owned lifecycle.
@@ -747,21 +745,20 @@ pub enum BrowserCommand {
     },
     /// Erase volatile diagnostics for tabs released by the owning workspace.
     ClearDiagnostics { tab_ids: Vec<u64> },
-    /// Start one extension-owned bounded recording on a physical tab.
+    /// Start the workspace's one bounded recording on a physical tab.
     StartRecording { tab_id: u64 },
-    /// Return one extension-owned recording summary.
-    StatusRecording { recording_id: Option<String> },
-    /// Capture a final screenshot and freeze one extension-owned recording.
-    StopRecording { recording_id: Option<String> },
-    /// Encode one extension-owned recording as an animated GIF and deliver it.
+    /// Return the workspace's recording summary.
+    StatusRecording,
+    /// Capture a final screenshot and freeze the workspace's recording.
+    StopRecording,
+    /// Encode the workspace's recording as an animated GIF and deliver it.
     ExportRecording {
-        recording_id: Option<String>,
         destination: RecordingDestination,
         /// Output budget the browser meets by trading fidelity, never coverage.
         max_output_bytes: usize,
     },
-    /// Erase one extension-owned recording immediately.
-    DiscardRecording { recording_id: Option<String> },
+    /// Erase the workspace's recording immediately.
+    DiscardRecording,
     /// Render content-free feedback.
     Present { signal: PresentationSignal },
 }
@@ -976,13 +973,10 @@ pub enum BrowserOutcome {
     /// The browser could not encode or deliver the recording.
     RecordingExportFailed { reason: String },
     /// Extension memory was decisively erased.
-    RecordingDiscarded {
-        recording_id: String,
-        released_bytes: usize,
-    },
-    /// Omission selected more than one recording in the caller's opaque namespace.
-    RecordingAmbiguous { recording_ids: Vec<String> },
-    /// No recording in the caller's opaque namespace matched the request.
+    RecordingDiscarded { released_bytes: usize },
+    /// The workspace already holds a recording, so none was started.
+    RecordingHeld,
+    /// The workspace holds no recording.
     RecordingNotFound,
     /// Presentation was attempted without affecting product work.
     Presented { rendered: bool },

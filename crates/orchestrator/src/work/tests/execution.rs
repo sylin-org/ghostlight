@@ -35,6 +35,7 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("deadline_before", BrowserError::DeadlineBeforeDispatch),
         ("deadline_after", BrowserError::DeadlineAfterDispatch),
         ("primitive", BrowserError::Primitive("x".into())),
+        ("stale_view", BrowserError::StaleView),
         ("interlock", BrowserError::LocalInterlock("x".into())),
         ("effect_unknown", BrowserError::EffectUnknown("x".into())),
         ("protocol", BrowserError::Protocol("x".into())),
@@ -359,10 +360,11 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
     );
 }
 
-/// A tool with a fixed deadline is never told to raise a `timeout_ms` it does not have, and the
-/// call that advice would describe really is rejected.
+/// Every tool takes `timeout_ms`, so a read that ran out of time is told to raise it, and the
+/// call that advice describes really decodes. Only a call already at the longest value is told
+/// to narrow itself instead.
 #[test]
-fn fixed_deadline_tools_get_advice_they_can_follow() {
+fn every_tool_gets_deadline_advice_it_can_follow() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -390,9 +392,23 @@ fn fixed_deadline_tools_get_advice_they_can_follow() {
     assert_eq!(read.facts["phase"], "before_dispatch");
     assert_eq!(
         read.next_steps,
+        vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
+    );
+    assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_000})).is_ok());
+
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let longest = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"timeout_ms":30_000}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        longest.next_steps,
         vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
     );
-    assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_000})).is_err());
+    assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_001})).is_err());
 
     // An edge-supplied deadline overrides timeout_ms, so it is not advice either.
     browser.push(Err(BrowserError::DeadlineBeforeDispatch));
@@ -1807,10 +1823,7 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         &CancellationToken::default(),
     );
 
-    browser.push(Ok(BrowserOutcome::RecordingDiscarded {
-        recording_id: "recording_one".into(),
-        released_bytes: 1,
-    }));
+    browser.push(Ok(BrowserOutcome::RecordingDiscarded { released_bytes: 1 }));
     executor.execute(
         &workspace,
         "browser_record",
@@ -1824,9 +1837,9 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         calls[1],
         BrowserCommand::StartRecording { tab_id: 7 }
     ));
-    assert!(matches!(calls[2], BrowserCommand::StatusRecording { .. }));
-    assert!(matches!(calls[3], BrowserCommand::StopRecording { .. }));
-    assert!(matches!(calls[4], BrowserCommand::DiscardRecording { .. }));
+    assert!(matches!(calls[2], BrowserCommand::StatusRecording));
+    assert!(matches!(calls[3], BrowserCommand::StopRecording));
+    assert!(matches!(calls[4], BrowserCommand::DiscardRecording));
     assert!(!calls
         .iter()
         .any(|call| matches!(call, BrowserCommand::ExportRecording { .. })));
@@ -1893,14 +1906,14 @@ fn a_save_asks_the_browser_for_one_finished_replay() {
     let result = executor.execute(
         &workspace,
         "browser_record",
-        json!({"action":"save","recording":"recording_one"}),
+        json!({"action":"save"}),
         None,
         &CancellationToken::default(),
     );
 
     // Stop, then export. Nothing in between: the frames never come here to be encoded.
     let calls = browser.calls();
-    assert!(matches!(calls[0], BrowserCommand::StopRecording { .. }));
+    assert!(matches!(calls[0], BrowserCommand::StopRecording));
     assert!(matches!(
         calls[1],
         BrowserCommand::ExportRecording {
@@ -1945,7 +1958,7 @@ fn a_download_save_never_returns_the_replay_bytes() {
     let result = executor.execute(
         &workspace,
         "browser_record",
-        json!({"action":"save","recording":"recording_one","download":true}),
+        json!({"action":"save","download":true}),
         None,
         &CancellationToken::default(),
     );
@@ -1986,7 +1999,7 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
     let result = executor.execute(
         &workspace,
         "browser_record",
-        json!({"action":"save","recording":"recording_one"}),
+        json!({"action":"save"}),
         None,
         &CancellationToken::default(),
     );
@@ -1994,7 +2007,7 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
     assert_eq!(result.status, Status::Blocked);
     assert!(matches!(
         browser.calls().as_slice(),
-        [BrowserCommand::StopRecording { .. }]
+        [BrowserCommand::StopRecording]
     ));
 }
 
@@ -3971,4 +3984,263 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
     }));
     assert_eq!(confirmed.status, Status::Succeeded);
     assert_eq!(confirmed.summary, TYPED);
+}
+
+/// A workspace with one open tab and one current target, ready for an action.
+fn workspace_with_a_target() -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    WorkspaceStore,
+    crate::workspace::WorkspaceId,
+    String,
+    String,
+) {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    browser.push(Ok(BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "delete".into(),
+            role: "button".into(),
+            name: "Delete".into(),
+            state: vec![],
+            credential_class: false,
+        }],
+    }));
+    let found = executor.execute(
+        &workspace,
+        "browser_find",
+        json!({"tab":tab_handle,"text":"Delete"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let target = found.facts["matches"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    (executor, browser, workspaces, workspace, tab_handle, target)
+}
+
+fn delete_click(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    tab_handle: &str,
+    target: &str,
+) -> crate::work::result::InvocationResult {
+    browser.push(Ok(BrowserOutcome::Activated {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+        subject: Some(PhysicalActionSubject {
+            role: "button".into(),
+            name: "Delete".into(),
+        }),
+    }));
+    executor.execute(
+        workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    )
+}
+
+/// The browser reports a dialog the moment it opens, before the click that caused it answers, so
+/// the click's own result says so and points at the one tool that clears it.
+#[test]
+fn a_click_that_opens_a_dialog_says_so() {
+    use crate::language::outcome::DialogKind;
+    let (executor, browser, workspaces, workspace, tab_handle, target) = workspace_with_a_target();
+
+    let plain = delete_click(&executor, &browser, &workspace, &tab_handle, &target);
+    assert_eq!(
+        plain.summary,
+        "Clicked the \"Delete\" button on example.com."
+    );
+    assert!(plain.facts.get("dialog_opened").is_none());
+
+    workspaces.apply_browser_dialog(FAKE_BROWSER, 7, Some(DialogKind::Confirm));
+    let opened = delete_click(&executor, &browser, &workspace, &tab_handle, &target);
+    assert_eq!(opened.status, Status::Succeeded);
+    assert_eq!(
+        opened.summary,
+        "Clicked the \"Delete\" button on example.com. A confirm dialog is now open."
+    );
+    assert_eq!(opened.facts["dialog_opened"], "confirm");
+    assert_eq!(
+        opened.next_steps,
+        vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
+    );
+
+    workspaces.apply_browser_dialog(FAKE_BROWSER, 7, None);
+    let closed = delete_click(&executor, &browser, &workspace, &tab_handle, &target);
+    assert!(closed.facts.get("dialog_opened").is_none());
+    assert!(closed.next_steps.is_empty());
+}
+
+/// A view the page moved on from is a stale view with the way out, not a refusal by the browser.
+#[test]
+fn a_moved_view_is_a_stale_view_with_a_screenshot_next_step() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(BrowserError::StaleView));
+    let clicked = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(clicked.status, Status::Failed);
+    assert_eq!(clicked.effect, Effect::None);
+    assert_eq!(
+        clicked.summary,
+        "The page has moved since that screenshot was taken."
+    );
+    assert_eq!(clicked.facts["reason"], "stale_view");
+    assert_eq!(
+        clicked.next_steps,
+        vec!["Call browser_screenshot to obtain a current view handle."]
+    );
+}
+
+/// A session holds one recording, so the tool never takes or reports a recording handle.
+#[test]
+fn a_session_holds_one_recording_and_never_names_it() {
+    let (executor, browser, _, workspace, tab_handle, _) = workspace_with_a_target();
+
+    browser.push(Ok(BrowserOutcome::RecordingHeld));
+    let held = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"start","tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(held.status, Status::Failed);
+    assert_eq!(held.summary, "This session already has a recording.");
+    assert_eq!(held.facts["reason"], "held");
+    assert_eq!(
+        held.next_steps,
+        vec!["Call browser_record with action save or discard to finish the current recording, then start again."]
+    );
+
+    browser.push(Ok(BrowserOutcome::RecordingNotFound));
+    let missing = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"status"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(missing.summary, "This session has no recording.");
+    assert_eq!(missing.facts["reason"], "not_found");
+
+    browser.push(Ok(BrowserOutcome::RecordingStatus {
+        summary: recording_summary(RecordingState::Recording, "https://example.com/"),
+    }));
+    let status = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"status"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(status.status, Status::Succeeded);
+    assert!(status.facts.get("recording").is_none());
+
+    let named = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"stop","recording":"recording_one"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(named.status, Status::Failed);
+    assert!(
+        named
+            .facts
+            .to_string()
+            .contains("unknown field `recording`"),
+        "{}",
+        named.facts
+    );
+}
+
+/// What the browser says in answer to a dialog call corrects the record of the tab's dialog, so
+/// a missed event never leaves a later result claiming a dialog that is gone.
+#[test]
+fn dialog_calls_keep_the_record_of_the_tab_current() {
+    use crate::language::outcome::DialogKind;
+    let (executor, browser, workspaces, workspace, tab_handle, target) = workspace_with_a_target();
+    let dialog_open = || workspaces.dialog_open(&workspace, 7);
+
+    browser.push(Ok(BrowserOutcome::Dialog {
+        tab_id: 7,
+        present: true,
+        dialog_type: "prompt".into(),
+        message: Some("Name?".into()),
+    }));
+    let status = executor.execute(
+        &workspace,
+        "browser_dialog",
+        json!({"action":"status","tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        status.summary,
+        "A JavaScript dialog is currently visible: \"Name?\"."
+    );
+    assert_eq!(dialog_open(), Some(DialogKind::Prompt));
+
+    browser.push(Ok(BrowserOutcome::Dialog {
+        tab_id: 7,
+        present: true,
+        dialog_type: "prompt".into(),
+        message: None,
+    }));
+    browser.push(Ok(BrowserOutcome::DialogHandled {
+        tab_id: 7,
+        dialog_type: "prompt".into(),
+        accepted: true,
+    }));
+    executor.execute(
+        &workspace,
+        "browser_dialog",
+        json!({"action":"respond","text":"Ada","tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(dialog_open(), None);
+    let clicked = delete_click(&executor, &browser, &workspace, &tab_handle, &target);
+    assert!(clicked.facts.get("dialog_opened").is_none());
+
+    workspaces.apply_browser_dialog(FAKE_BROWSER, 7, Some(DialogKind::Alert));
+    browser.push(Ok(BrowserOutcome::Dialog {
+        tab_id: 7,
+        present: false,
+        dialog_type: String::new(),
+        message: None,
+    }));
+    executor.execute(
+        &workspace,
+        "browser_dialog",
+        json!({"action":"status","tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(dialog_open(), None);
 }

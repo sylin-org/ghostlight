@@ -881,10 +881,7 @@ impl ApplicationExecutor {
                         let _ = lease.update_readiness(&selected.handle, browser_readiness);
                         let is_composite_default =
                             value.condition == "load_ready" || value.condition == "target_present";
-                        let should_settle = if matches!(
-                            value.condition.as_str(),
-                            "visual_settle" | "layout_stable"
-                        ) {
+                        let should_settle = if value.condition == "visual_settle" {
                             false
                         } else if is_composite_default {
                             value.visual_settle != Some(false)

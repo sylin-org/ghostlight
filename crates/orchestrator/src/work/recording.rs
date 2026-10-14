@@ -50,12 +50,7 @@ impl ApplicationExecutor {
                         json!({"reason":decision.reason.as_str()}),
                     );
                 }
-                match self.dispatch(
-                    context,
-                    BrowserCommand::StatusRecording {
-                        recording_id: value.recording.clone(),
-                    },
-                ) {
+                match self.dispatch(context, BrowserCommand::StatusRecording) {
                     Ok(BrowserOutcome::RecordingStatus { summary }) => {
                         self.recording_observed(context, decision, &summary)
                     }
@@ -63,9 +58,9 @@ impl ApplicationExecutor {
                     Err(error) => self.browser_failure(context, decision, error, None),
                 }
             }
-            "stop" => self.stop_recording(context, value.recording.as_deref()),
+            "stop" => self.stop_recording(context),
             "save" => self.save_recording(context, lease, value),
-            "discard" => self.discard_recording(context, value.recording.as_deref()),
+            "discard" => self.discard_recording(context),
             _ => unreachable!("recording action was validated"),
         }
     }
@@ -121,6 +116,9 @@ impl ApplicationExecutor {
                     facts,
                 )
             }
+            Ok(outcome @ BrowserOutcome::RecordingHeld) => {
+                self.recording_selection_failure(context, outcome)
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
@@ -128,7 +126,7 @@ impl ApplicationExecutor {
         }
     }
 
-    fn stop_recording(&self, context: &InvocationContext<'_>, requested: Option<&str>) -> Terminal {
+    fn stop_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause/attention gate -- this one used to dispatch straight through it, so a
         // paused session could still have its recording stopped from underneath it.
@@ -143,12 +141,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
-            BrowserCommand::StopRecording {
-                recording_id: requested.map(str::to_owned),
-            },
-        ) {
+        match self.dispatch(context, BrowserCommand::StopRecording) {
             Ok(BrowserOutcome::RecordingStopped { summary, changed }) => self.succeeded(
                 context,
                 decision,
@@ -173,14 +166,8 @@ impl ApplicationExecutor {
     fn ensure_recording_stopped(
         &self,
         context: &InvocationContext<'_>,
-        requested: Option<&str>,
     ) -> Result<PhysicalRecordingSummary, Box<Terminal>> {
-        match self.dispatch(
-            context,
-            BrowserCommand::StopRecording {
-                recording_id: requested.map(str::to_owned),
-            },
-        ) {
+        match self.dispatch(context, BrowserCommand::StopRecording) {
             Ok(BrowserOutcome::RecordingStopped { summary, .. }) => Ok(summary),
             Ok(outcome) => Err(Box::new(self.recording_selection_failure(context, outcome))),
             Err(error) => Err(Box::new(self.browser_failure(
@@ -216,7 +203,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        let stopped = match self.ensure_recording_stopped(context, value.recording.as_deref()) {
+        let stopped = match self.ensure_recording_stopped(context) {
             Ok(summary) => summary,
             Err(terminal) => return *terminal,
         };
@@ -238,7 +225,6 @@ impl ApplicationExecutor {
         match self.dispatch(
             &delivery_context,
             BrowserCommand::ExportRecording {
-                recording_id: Some(stopped.recording_id.clone()),
                 destination,
                 max_output_bytes: budget,
             },
@@ -247,18 +233,15 @@ impl ApplicationExecutor {
                 summary,
                 encoded,
                 delivery,
-            }) if summary.recording_id == stopped.recording_id
-                && summary.state != RecordingState::Recording =>
-            {
+            }) if summary.state != RecordingState::Recording => {
                 self.recording_delivered(context, decision, &summary, encoded, delivery)
             }
             Ok(BrowserOutcome::RecordingExportFailed { reason }) => {
                 self.recording_export_failure(context, &reason)
             }
-            Ok(
-                outcome @ (BrowserOutcome::RecordingAmbiguous { .. }
-                | BrowserOutcome::RecordingNotFound),
-            ) => self.recording_selection_failure(context, outcome),
+            Ok(outcome @ BrowserOutcome::RecordingNotFound) => {
+                self.recording_selection_failure(context, outcome)
+            }
             Ok(_) => self.protocol_failure(context, decision, tab_id),
             Err(error) => self.browser_failure(context, decision, error, tab_id),
         }
@@ -419,7 +402,6 @@ impl ApplicationExecutor {
             _ => Some(summary.tab_id),
         };
         let facts = json!({
-            "recording":summary.recording_id,
             "state":recording_state_name(summary.state),
             "duration_ms":encoded.duration_ms,
             "frame_count":encoded.frame_count,
@@ -462,11 +444,7 @@ impl ApplicationExecutor {
         terminal
     }
 
-    fn discard_recording(
-        &self,
-        context: &InvocationContext<'_>,
-        requested: Option<&str>,
-    ) -> Terminal {
+    fn discard_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause/attention gate -- this one used to dispatch straight through it.
         let decision = self.authorize(context, CapabilitySet::EMPTY, None);
@@ -480,16 +458,8 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
-            context,
-            BrowserCommand::DiscardRecording {
-                recording_id: requested.map(str::to_owned),
-            },
-        ) {
-            Ok(BrowserOutcome::RecordingDiscarded {
-                recording_id,
-                released_bytes,
-            }) => self.succeeded(
+        match self.dispatch(context, BrowserCommand::DiscardRecording) {
+            Ok(BrowserOutcome::RecordingDiscarded { released_bytes }) => self.succeeded(
                 context,
                 decision,
                 None,
@@ -497,11 +467,7 @@ impl ApplicationExecutor {
                 Readiness::NotApplicable,
                 true,
                 Outcome::RecordingDiscarded,
-                json!({
-                    "recording":recording_id,
-                    "discarded":true,
-                    "released_bytes":released_bytes
-                }),
+                json!({"discarded":true,"released_bytes":released_bytes}),
             ),
             Ok(outcome) => self.recording_selection_failure(context, outcome),
             Err(error) => self.browser_failure(context, decision, error, None),
@@ -540,20 +506,14 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         outcome: BrowserOutcome,
     ) -> Terminal {
-        let facts = match outcome {
-            BrowserOutcome::RecordingAmbiguous { recording_ids } => {
-                json!({"reason":"ambiguous","recordings":recording_ids})
+        let (refusal, facts) = match outcome {
+            BrowserOutcome::RecordingHeld => (Refusal::RecordingHeld, json!({"reason":"held"})),
+            BrowserOutcome::RecordingNotFound => {
+                (Refusal::RecordingUnavailable, json!({"reason":"not_found"}))
             }
-            BrowserOutcome::RecordingNotFound => json!({"reason":"not_found"}),
             _ => return self.protocol_failure(context, permitted(), None),
         };
-        self.failed(
-            context,
-            permitted(),
-            None,
-            Refusal::RecordingUnavailable,
-            facts,
-        )
+        self.failed(context, permitted(), None, refusal, facts)
     }
 
     fn recording_export_failure(&self, context: &InvocationContext<'_>, reason: &str) -> Terminal {

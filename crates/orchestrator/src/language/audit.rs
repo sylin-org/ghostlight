@@ -117,6 +117,7 @@ pub enum AuditRefusal {
     CaptureTooLarge,
     NoDialogVisible,
     RecordingUnavailable,
+    RecordingHeld,
     RecordingExportFailed,
     ActionUnconfirmed { cause: CheckFailure },
 }
@@ -196,6 +197,7 @@ impl Refusal {
             Self::CaptureTooLarge => AuditRefusal::CaptureTooLarge,
             Self::NoDialogVisible => AuditRefusal::NoDialogVisible,
             Self::RecordingUnavailable => AuditRefusal::RecordingUnavailable,
+            Self::RecordingHeld => AuditRefusal::RecordingHeld,
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,
             Self::ActionUnconfirmed { cause, .. } => {
                 AuditRefusal::ActionUnconfirmed { cause: *cause }

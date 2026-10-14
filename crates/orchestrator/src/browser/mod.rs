@@ -1112,6 +1112,9 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// The page's view moved on from the screenshot the point was chosen on, and nothing was sent.
+    #[error("the view moved since the screenshot was taken")]
+    StaleView,
     /// A browser-local human safety choice refused the primitive without an effect.
     #[error("browser local interlock refused the primitive: {0}")]
     LocalInterlock(String),

@@ -271,44 +271,31 @@ impl Spec for wire::RecordingOp {
 /// The answers of one `call`, in the order of its calls.
 pub type Answers = Vec<wire::CallAnswer>;
 
-/// The recordings each workspace started on one connection.
+/// The recording each workspace holds on one connection.
 ///
-/// The extension keeps recordings without knowing workspaces. The service remembers which
-/// workspace started each one, so a workspace reaches only its own recordings and an omitted id
-/// can resolve to the only one it has.
+/// The extension keeps recordings without knowing workspaces, and a workspace holds at most one.
+/// The service remembers which recording is whose, so a workspace reaches only its own and never
+/// has to name it.
 #[derive(Debug, Default)]
 pub struct RecordingIndex {
-    by_workspace: Mutex<HashMap<String, Vec<String>>>,
+    by_workspace: Mutex<HashMap<String, String>>,
 }
 
 impl RecordingIndex {
-    /// Remember that `workspace` started `recording_id`.
+    /// Remember that `workspace` holds `recording_id`.
     pub fn learn(&self, workspace: &str, recording_id: &str) {
-        let mut index = lock(&self.by_workspace);
-        let ids = index.entry(workspace.to_owned()).or_default();
-        if !ids.iter().any(|id| id == recording_id) {
-            ids.push(recording_id.to_owned());
-        }
+        lock(&self.by_workspace).insert(workspace.to_owned(), recording_id.to_owned());
     }
 
-    /// Forget one recording of `workspace`.
-    pub fn forget(&self, workspace: &str, recording_id: &str) {
-        let mut index = lock(&self.by_workspace);
-        if let Some(ids) = index.get_mut(workspace) {
-            ids.retain(|id| id != recording_id);
-            if ids.is_empty() {
-                index.remove(workspace);
-            }
-        }
+    /// Forget the recording `workspace` held.
+    pub fn forget(&self, workspace: &str) {
+        lock(&self.by_workspace).remove(workspace);
     }
 
-    /// The recordings `workspace` started, oldest first.
+    /// The recording `workspace` holds, if any.
     #[must_use]
-    pub fn ids(&self, workspace: &str) -> Vec<String> {
-        lock(&self.by_workspace)
-            .get(workspace)
-            .cloned()
-            .unwrap_or_default()
+    pub fn id(&self, workspace: &str) -> Option<String> {
+        lock(&self.by_workspace).get(workspace).cloned()
     }
 }
 
@@ -319,7 +306,7 @@ pub struct Line {
     pub writer: Arc<SocketWriter>,
     /// The calls awaiting receipts on the connection.
     pub receipts: Arc<Receipts>,
-    /// The recordings each workspace started on the connection.
+    /// The recording each workspace holds on the connection.
     pub recordings: Arc<RecordingIndex>,
 }
 
@@ -353,7 +340,7 @@ impl<'a> Link<'a> {
         self.workspace
     }
 
-    /// The recordings each workspace started on this connection.
+    /// The recording each workspace holds on this connection.
     #[must_use]
     pub fn recordings(&self) -> &RecordingIndex {
         &self.line.recordings

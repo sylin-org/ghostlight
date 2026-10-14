@@ -49,6 +49,7 @@ use crate::intake::listener::{self, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::language::catalog_for;
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
+use crate::language::outcome::DialogKind;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
@@ -1236,7 +1237,15 @@ impl BrowserEventSink for ServiceBrowserEvents {
             // Attention never reaches this sink: it is browser routing state, and the port that
             // knows which connection reported it is the only thing that needs it.
             BrowserEvent::Attended => {}
-            BrowserEvent::DialogChanged { .. } => {}
+            BrowserEvent::DialogChanged {
+                tab_id,
+                present,
+                dialog_type,
+            } => self.workspaces.apply_browser_dialog(
+                browser,
+                tab_id,
+                present.then(|| DialogKind::classify(&dialog_type)),
+            ),
         }
     }
 }
@@ -1525,6 +1534,59 @@ mod tests {
         );
         assert_eq!(reusable_example_tab(&workspaces), Some(2));
         assert_eq!(reusable_example_tab(&workspaces), None);
+    }
+
+    #[test]
+    fn the_browser_reporting_a_dialog_is_recorded_for_the_tab_that_holds_it() {
+        use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
+        use crate::browser::BrowserEventSink;
+        use crate::governance::GovernanceFacade;
+        use crate::language::outcome::DialogKind;
+        use crate::workspace::WorkspaceStore;
+
+        let workspaces = WorkspaceStore::default();
+        let workspace = workspaces.admit("dialogs".into(), IntakeChannel::Mcp, None);
+        workspaces
+            .pin_browser(workspace.as_str(), FAKE_BROWSER)
+            .unwrap();
+        let lease = workspaces.acquire(&workspace).unwrap();
+        lease
+            .add_tab(&PhysicalTab {
+                tab_id: 4,
+                url: "https://example.com/".into(),
+                title: "Example".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            })
+            .unwrap();
+        drop(lease);
+        let sink = super::ServiceBrowserEvents {
+            governance: GovernanceFacade::new(None, None),
+            workspaces: workspaces.clone(),
+            browser: Arc::new(FakeBrowser::default()),
+        };
+        let dialog = |tab_id, present, dialog_type: &str| BrowserEvent::DialogChanged {
+            tab_id,
+            present,
+            dialog_type: dialog_type.into(),
+        };
+
+        sink.on_event(FAKE_BROWSER, dialog(4, true, "confirm"));
+        assert_eq!(
+            workspaces.dialog_open(&workspace, 4),
+            Some(DialogKind::Confirm)
+        );
+        // A tab this session does not control is not its dialog.
+        sink.on_event(FAKE_BROWSER, dialog(9, true, "alert"));
+        assert_eq!(workspaces.dialog_open(&workspace, 9), None);
+        // The browser closing it, and a kind this build does not name.
+        sink.on_event(FAKE_BROWSER, dialog(4, false, "unknown"));
+        assert_eq!(workspaces.dialog_open(&workspace, 4), None);
+        sink.on_event(FAKE_BROWSER, dialog(4, true, "a kind from the future"));
+        assert_eq!(
+            workspaces.dialog_open(&workspace, 4),
+            Some(DialogKind::Other)
+        );
     }
 
     #[test]

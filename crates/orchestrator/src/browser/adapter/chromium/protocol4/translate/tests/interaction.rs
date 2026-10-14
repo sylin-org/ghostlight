@@ -814,7 +814,7 @@ fn a_region_capture_of_a_moved_view_is_stale_and_drops_the_image() {
                     visual_settle: None,
                 },
             ),
-            Err(BrowserError::Primitive("stale screenshot view".into())),
+            Err(BrowserError::StaleView),
             "{moved}"
         );
     }

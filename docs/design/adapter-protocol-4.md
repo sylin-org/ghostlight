@@ -68,7 +68,7 @@ Line references such as `service-worker.js:1472` point at dev `95a7e646`.
 | `Acknowledge`, ledger and probe kept | Deleted at level 4 | D3 |
 | `form_diagnostics` local fact and `drain()` | Removed; the form-reset trace is deleted | OD14, task |
 | `OpenTab{url, group_title, ...}` | `open_tab{url?, group_key, group_title, adopt_tab_id?, focus_window, ready_timeout_ms}` | D4, CRITIQUE (group identity) |
-| Recording ops with optional ids, ambiguity outcomes | Ids required on the wire; the service resolves omitted ids | OD13, D3 (no workspace field) |
+| Recording ops with optional ids, ambiguity outcomes | Ids required on the wire; a workspace holds one recording and the service supplies its id | OD13, D3 (no workspace field), ADR-0197 D21 |
 | No child-tab story | `list_tabs` reports `opener_tab_id`; adoption only by explicit `adopt_tab_id` | D4, CRITIQUE (OD18 contradiction) |
 | Dialog inspect returns type only | Status returns a bounded message | D4, LU-5 |
 | No accessibility primitive | `accessibility_snapshot` | D4, OD18 |
@@ -1761,7 +1761,7 @@ Link state:
 - `committed: Vec<String>`: the union of receipt `committed_urls`, in order, de-duplicated;
 - `last_tab: Option<Tab>`;
 - the `BrowserDispatch` (deadline, cancelled flag, `admit`);
-- the per-connection `RecordingIndex` (workspace to recording ids), learned from `RecordingFacts::Started`.
+- the per-connection `RecordingIndex` (workspace to its one recording id), learned from `RecordingFacts::Started`.
 
 `Link::tab(tab_id)` returns `last_tab` when its id matches. Otherwise it sends one
 `list_tabs{tab_ids:[tab_id]}`.
@@ -1884,8 +1884,8 @@ Abbreviations:
 | 43 | HandleDialog | `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when `handled:false` | 1 |
 | 44 | ReadDiagnostics | `diagnostics{read{binding: hex(sha256(sorted scope ids)), guard}}` | 1 |
 | 45 | ClearDiagnostics | `diagnostics{clear}` | 1 |
-| 46 | StartRecording | `recording{start{tab_id, watch: scope.watch_changes then the real scope docs as GuardDoc}}`; record the id in RecordingIndex | 1 |
-| 47-50 | Status, Stop, Export, Discard Recording | resolve an omitted id through RecordingIndex (none: `RecordingNotFound`; several: `RecordingAmbiguous`), then `recording{op}`; a Target export becomes `page{tab_id, call: attach_file at F (Scope::call), guard}` | 0-1 |
+| 46 | StartRecording | a held recording is checked with `recording{status}` first (still capturing the same tab: answer it; gone: forget it; otherwise `RecordingHeld`); then `recording{start{tab_id, watch: scope.watch_changes then the real scope docs as GuardDoc}}`; record the id in RecordingIndex | 1-2 |
+| 47-50 | Status, Stop, Export, Discard Recording | take the workspace's id from RecordingIndex (none: `RecordingNotFound`), then `recording{op}`; a Target export becomes `page{tab_id, call: attach_file at F (Scope::call), guard}` | 0-1 |
 | 51 | Cancel | write the `cancel` frame for that correlation; `Cancelled` | 0 |
 | 52 | Present | section 4.7; write `notice`; `Presented{rendered:false}` at once | 0 |
 
@@ -2424,7 +2424,7 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
   - a cancel during navigate writes `cancel`, and the receipt facts decide Before (`dispatched:false`) or
     After;
   - the deadline writes `cancel` and returns at once;
-  - omitted recording ids resolve, or answer ambiguous or not found;
+  - the workspace's one recording resolves, or answers not found, and a second start is held;
   - a denial notice carries `defer_until_visible`, and no receipt is awaited;
   - level-3 `OpenTab` bytes are unchanged (golden);
   - a level-3 receipt without `message` still decodes.
@@ -2614,7 +2614,7 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
 | **Effect-classification drift changes model wording** | The class table in `world.rs`, the C3 pre-effect invariant tests, and the C10 language goldens |
 | **Merge order changes** (DFS instead of creation order) | The top stays first. Documented and pinned in C5 |
 | **The level-3 decode path now goes through `serde_json::Value`** | Same types and same results; the C4 byte goldens and the relay suite. Only duplicate JSON keys behave differently (last wins), which no adapter sends |
-| **`RecordingIndex` is lost on a service restart** | Recordings are interrupted on an epoch change anyway; an omitted id then answers `RecordingNotFound` |
+| **`RecordingIndex` is lost on a service restart** | Recordings are interrupted on an epoch change anyway; a status or stop then answers `RecordingNotFound` |
 | **`list_tabs` still returns every tab** | Unchanged from today. `tab_ids` is reserved, so the privacy improvement needs no store release once Work carries ids |
 | **The worker is killed mid-primitive** | The port closes, and the service maps that to `DisconnectedAfterDispatch` (effect unknown). Correlations are never resent, so no ledger is needed |
 | **The relay replays hellos until M4a** | A repeated `hello_accepted` on one port is idempotent and re-registers new assets. C14 test |
@@ -2623,8 +2623,8 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
 
 1. **OD14.** `hello_accepted` carries no diagnostics state, so the popup diagnostics toggle is gone at
    protocol 4. The workbench and CLI keep it. Adding it back later is an optional field.
-2. **OD13.** Recording ops require ids on the wire. The service resolves omitted ids per workspace (section
-   4.3, rows 47-50). Ambiguity outcomes stay a service fact.
+2. **OD13.** Recording ops require ids on the wire. A workspace holds one recording and the service supplies
+   its id (section 4.3, rows 46-50).
 3. **Wording for Before variants.** A cancelled or timed-out read maps to a Before variant (FINAL open choice
    4). Its sentence should say "nothing changed", not "nothing reached the browser". The typed
    `Cancelled{dispatched}` in S6 settles this later.

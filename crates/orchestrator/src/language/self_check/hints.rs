@@ -28,7 +28,7 @@ use crate::language::composition::{
 };
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
+    CheckFailure, DialogKind, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
 };
 
 /// Words a hint may put between `with` and the field it names.
@@ -272,6 +272,7 @@ fn outcome_variant(outcome: &Outcome) -> &'static str {
         Outcome::RecordingBoundary { .. } => "RecordingBoundary",
         Outcome::RecordingSaved { .. } => "RecordingSaved",
         Outcome::RecordingDiscarded => "RecordingDiscarded",
+        Outcome::DialogOpened { .. } => "DialogOpened",
     }
 }
 
@@ -320,6 +321,7 @@ const OUTCOME_VARIANTS: &[&str] = &[
     "RecordingBoundary",
     "RecordingSaved",
     "RecordingDiscarded",
+    "DialogOpened",
 ];
 
 /// The variant a refusal is, by name. No wildcard, for the same reason as `outcome_variant`.
@@ -355,6 +357,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::CaptureTooLarge => "CaptureTooLarge",
         Refusal::NoDialogVisible => "NoDialogVisible",
         Refusal::RecordingUnavailable => "RecordingUnavailable",
+        Refusal::RecordingHeld => "RecordingHeld",
         Refusal::RecordingExportFailed => "RecordingExportFailed",
         Refusal::ActionUnconfirmed { .. } => "ActionUnconfirmed",
     }
@@ -392,6 +395,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "CaptureTooLarge",
     "NoDialogVisible",
     "RecordingUnavailable",
+    "RecordingHeld",
     "RecordingExportFailed",
     "ActionUnconfirmed",
 ];
@@ -755,6 +759,21 @@ fn outcome_samples() -> Vec<Outcome> {
         },
         Outcome::RecordingDiscarded,
     ];
+    for dialog in [
+        DialogKind::Alert,
+        DialogKind::Confirm,
+        DialogKind::Prompt,
+        DialogKind::BeforeUnload,
+        DialogKind::Other,
+    ] {
+        samples.push(
+            Outcome::TargetClicked {
+                host: host(),
+                subject: ActionSubject::unnamed(TargetRole::Button),
+            }
+            .with_open_dialog(dialog),
+        );
+    }
     for noun in [TargetNoun::Match, TargetNoun::Control, TargetNoun::Item] {
         for count in [0, 3] {
             samples.push(Outcome::TargetsListed {
@@ -811,6 +830,7 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::CaptureTooLarge,
         Refusal::NoDialogVisible,
         Refusal::RecordingUnavailable,
+        Refusal::RecordingHeld,
         Refusal::RecordingExportFailed,
     ];
     for before_dispatch in [false, true] {
@@ -921,8 +941,8 @@ fn the_hint_checker_catches_calls_the_decoder_would_reject() {
             "no catalog tool has a field `timeout_millis`",
         ),
         (
-            "Call browser_read with `timeout_ms` set higher.",
-            "`browser_read` has no field `timeout_ms`",
+            "Call browser_read with `max_result_chars` set higher.",
+            "`browser_read` has no field `max_result_chars`",
         ),
     ] {
         let found = hint_violations(hint, &advertised);

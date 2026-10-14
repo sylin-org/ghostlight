@@ -211,9 +211,10 @@ fn a_drift_beyond_a_pixel_is_stale() {
     ] {
         let mut current = view();
         change(&mut current);
-        assert!(
-            matches!(check_view(&current, &expected()), Err(BrowserError::Primitive(message)) if message == STALE_VIEW)
-        );
+        assert!(matches!(
+            check_view(&current, &expected()),
+            Err(BrowserError::StaleView)
+        ));
     }
 }
 

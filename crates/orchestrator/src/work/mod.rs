@@ -86,8 +86,8 @@ pub(crate) struct PreparedInvocation {
     provenance: Option<Arc<ConnectionEvidence>>,
     started: Instant,
     deadline: Instant,
-    /// Whether a longer `timeout_ms` would give this call more time: the tool takes the field,
-    /// its value is below the maximum, and no edge-supplied deadline overrides it.
+    /// Whether a longer `timeout_ms` would give this call more time: its value is below the
+    /// maximum, and no edge-supplied deadline overrides it.
     deadline_adjustable: bool,
     decoded: Result<Operation, language::LanguageError>,
     stage: Mutex<InvocationStage>,
@@ -115,8 +115,12 @@ impl PreparedInvocation {
         let started = Instant::now();
         let decoded = language::decode(tool, input);
         let timeout = caller_deadline_ms
-            .unwrap_or_else(|| decoded.as_ref().map(operation_timeout).unwrap_or(8_000))
-            .clamp(100, 30_000);
+            .unwrap_or_else(|| {
+                decoded
+                    .as_ref()
+                    .map_or(language::DEFAULT_TIMEOUT_MS, Operation::timeout_ms)
+            })
+            .clamp(language::MIN_TIMEOUT_MS, language::MAX_TIMEOUT_MS);
         // An edge-supplied deadline overrides the input field, so only an input-set deadline
         // below the maximum is one the caller can raise by changing the call.
         let deadline_adjustable =
@@ -1444,8 +1448,18 @@ impl ApplicationExecutor {
         readiness: Readiness,
         repeat_safe: bool,
         outcome: Outcome,
-        facts: Value,
+        mut facts: Value,
     ) -> Terminal {
+        let outcome = match physical_id
+            .filter(|_| outcome.can_open_dialog())
+            .and_then(|physical_id| self.workspaces.dialog_open(context.workspace, physical_id))
+        {
+            Some(dialog) => {
+                facts["dialog_opened"] = json!(dialog.name());
+                outcome.with_open_dialog(dialog)
+            }
+            None => outcome,
+        };
         let summary = outcome.summary();
         let next_steps = outcome.next_steps();
         let observed = outcome.observed();
@@ -1619,6 +1633,9 @@ impl ApplicationExecutor {
                 false,
                 json!({"reason":decision.reason.as_str()}),
             );
+        }
+        if error == BrowserError::StaleView {
+            return self.workspace_failure(context, WorkspaceError::StaleView);
         }
         if error == BrowserError::DocumentUnavailable {
             return self.failed(
@@ -1975,7 +1992,6 @@ fn permitted() -> Decision {
 
 fn recording_facts(summary: &PhysicalRecordingSummary) -> Value {
     json!({
-        "recording":summary.recording_id,
         "state":recording_state_name(summary.state),
         "frame_count":summary.frame_count,
         "bytes_held":summary.bytes_held,
@@ -2168,14 +2184,6 @@ fn operation_target(operation: &Operation) -> Option<&str> {
     }
 }
 
-/// The invocation deadline: the caller's `timeout_ms` where the tool takes one, else a fixed budget.
-fn operation_timeout(operation: &Operation) -> u64 {
-    operation.timeout_ms().unwrap_or(match operation {
-        Operation::Record(_) => 30_000,
-        _ => 8_000,
-    })
-}
-
 /// What a click landed on, so the completed sentence can say which it was.
 enum Clicked {
     Target(TargetRole),
@@ -2276,6 +2284,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::RecoveryManual { .. }
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
         BrowserError::Primitive(_)
+        | BrowserError::StaleView
         | BrowserError::LocalInterlock(_)
         | BrowserError::EffectUnknown(_)
         | BrowserError::Protocol(_)
@@ -2492,7 +2501,7 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::RecordingExported { .. }
         | BrowserOutcome::RecordingExportFailed { .. }
         | BrowserOutcome::RecordingDiscarded { .. }
-        | BrowserOutcome::RecordingAmbiguous { .. }
+        | BrowserOutcome::RecordingHeld
         | BrowserOutcome::RecordingNotFound
         | BrowserOutcome::Presented { .. }
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
@@ -2580,6 +2589,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::StaleView => "stale_view",
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)
         | BrowserError::Authentication
@@ -2668,7 +2678,6 @@ mod tests {
 
     fn recording_summary(state: RecordingState, source_url: &str) -> PhysicalRecordingSummary {
         PhysicalRecordingSummary {
-            recording_id: "recording_one".into(),
             tab_id: 7,
             state,
             frame_count: usize::from(state != RecordingState::Recording),

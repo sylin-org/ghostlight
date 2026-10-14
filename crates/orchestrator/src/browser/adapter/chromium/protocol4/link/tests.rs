@@ -611,7 +611,7 @@ fn runtime_control_refusing_an_effect_writes_nothing() {
 }
 
 #[test]
-fn an_omitted_recording_id_resolves_to_the_only_one_and_otherwise_sends_nothing() {
+fn a_workspace_reaches_only_its_one_recording_without_naming_it() {
     let next = Arc::new(Mutex::new(answer(
         json!({"result": "status", "summary": summary()}),
     )));
@@ -619,32 +619,20 @@ fn an_omitted_recording_id_resolves_to_the_only_one_and_otherwise_sends_nothing(
     let index = recordings(&port);
 
     assert_eq!(
-        call(
-            &port,
-            BrowserCommand::StatusRecording { recording_id: None }
-        ),
+        call(&port, BrowserCommand::StatusRecording),
         Ok(BrowserOutcome::RecordingNotFound)
     );
     index.learn("workspace_other", "recording_9");
     assert_eq!(
-        call(
-            &port,
-            BrowserCommand::StopRecording {
-                recording_id: Some("recording_9".into())
-            }
-        ),
+        call(&port, BrowserCommand::StopRecording),
         Ok(BrowserOutcome::RecordingNotFound),
         "another workspace's recording is not this workspace's to reach"
     );
 
     index.learn(WORKSPACE, "recording_1");
-    let status = call(
-        &port,
-        BrowserCommand::StatusRecording { recording_id: None },
-    );
     assert!(matches!(
-        status,
-        Ok(BrowserOutcome::RecordingStatus { ref summary }) if summary.recording_id == "recording_1"
+        call(&port, BrowserCommand::StatusRecording),
+        Ok(BrowserOutcome::RecordingStatus { .. })
     ));
     *next.lock().unwrap() = answer(json!({"result": "exported", "summary": summary(),
         "encoded": {"frame_count": 3, "captured_frame_count": 3, "duration_ms": 900,
@@ -654,7 +642,6 @@ fn an_omitted_recording_id_resolves_to_the_only_one_and_otherwise_sends_nothing(
         call(
             &port,
             BrowserCommand::ExportRecording {
-                recording_id: None,
                 destination: RecordingDestination::Download {
                     file_name: "flow.gif".into()
                 },
@@ -663,32 +650,14 @@ fn an_omitted_recording_id_resolves_to_the_only_one_and_otherwise_sends_nothing(
         ),
         Ok(BrowserOutcome::RecordingExported { .. })
     ));
-
-    index.learn(WORKSPACE, "recording_2");
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::DiscardRecording { recording_id: None }
-        ),
-        Ok(BrowserOutcome::RecordingAmbiguous {
-            recording_ids: vec!["recording_1".into(), "recording_2".into()]
-        })
-    );
     *next.lock().unwrap() =
-        answer(json!({"result": "discarded", "recording_id": "recording_2", "released_bytes": 10}));
+        answer(json!({"result": "discarded", "recording_id": "recording_1", "released_bytes": 10}));
     assert_eq!(
-        call(
-            &port,
-            BrowserCommand::DiscardRecording {
-                recording_id: Some("recording_2".into())
-            }
-        ),
-        Ok(BrowserOutcome::RecordingDiscarded {
-            recording_id: "recording_2".into(),
-            released_bytes: 10
-        })
+        call(&port, BrowserCommand::DiscardRecording),
+        Ok(BrowserOutcome::RecordingDiscarded { released_bytes: 10 })
     );
-    assert_eq!(index.ids(WORKSPACE), ["recording_1"]);
+    assert_eq!(index.id(WORKSPACE), None);
+    assert_eq!(index.id("workspace_other").as_deref(), Some("recording_9"));
 
     let seen = fake.wait(|seen| seen.requests.len() == 3);
     let args: Vec<Value> = seen
@@ -703,9 +672,84 @@ fn an_omitted_recording_id_resolves_to_the_only_one_and_otherwise_sends_nothing(
             json!({"name": "recording", "args": {"op": "export", "recording_id": "recording_1",
                 "destination": {"destination": "download", "file_name": "flow.gif"},
                 "max_output_bytes": 4096}}),
-            json!({"name": "recording", "args": {"op": "discard", "recording_id": "recording_2"}}),
+            json!({"name": "recording", "args": {"op": "discard", "recording_id": "recording_1"}}),
         ]
     );
+}
+
+/// The ops a scripted extension saw, in order, for the recording tests below.
+fn recording_ops(fake: &FakeExtension, count: usize) -> Vec<String> {
+    fake.wait(|seen| seen.requests.len() == count)
+        .of_kind("request")
+        .iter()
+        .map(|request| {
+            request["primitive"]["args"]["op"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn a_second_recording_is_held_until_the_first_is_finished() {
+    let next = Arc::new(Mutex::new(answer(json!({"result": "status", "summary": {
+        "recording_id": "recording_1", "tab_id": 12, "state": "recording", "frame_count": 3,
+        "bytes_held": 100, "duration_ms": 900, "source_urls": ["https://example.com/"]}}))));
+    let (port, fake) = port(scripted(&next));
+    let index = recordings(&port);
+    index.learn(WORKSPACE, "recording_1");
+
+    // The tab it is capturing answers with the recording it already has.
+    assert!(matches!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        Ok(BrowserOutcome::RecordingStarted { existing: true, .. })
+    ));
+    // Another tab is held: nothing is started.
+    assert_eq!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        Ok(BrowserOutcome::RecordingHeld)
+    );
+    // A stopped recording is held too, until it is saved or discarded.
+    *next.lock().unwrap() = answer(json!({"result": "status", "summary": summary()}));
+    assert_eq!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        Ok(BrowserOutcome::RecordingHeld)
+    );
+    assert_eq!(index.id(WORKSPACE).as_deref(), Some("recording_1"));
+    assert_eq!(recording_ops(&fake, 3), ["status", "status", "status"]);
+}
+
+#[test]
+fn a_held_recording_the_extension_lost_is_forgotten_and_the_start_goes_ahead() {
+    let script: Script = Box::new(|correlation, primitive| {
+        let facts = match primitive {
+            wire::Primitive::Recording(wire::RecordingOp::Status { .. }) => {
+                json!({"result": "not_found"})
+            }
+            _ => json!({"result": "started", "summary": {
+                "recording_id": "recording_2", "tab_id": 12, "state": "recording",
+                "frame_count": 0, "bytes_held": 0, "duration_ms": 0, "source_urls": []},
+                "existing": false}),
+        };
+        Reply::Now(wire::Receipt {
+            correlation: correlation.into(),
+            ..answer(facts)
+        })
+    });
+    let (port, fake) = port(script);
+    let index = recordings(&port);
+    index.learn(WORKSPACE, "recording_1");
+
+    assert!(matches!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        Ok(BrowserOutcome::RecordingStarted {
+            existing: false,
+            ..
+        })
+    ));
+    assert_eq!(index.id(WORKSPACE).as_deref(), Some("recording_2"));
+    assert_eq!(recording_ops(&fake, 2), ["status", "start"]);
 }
 
 fn signal(

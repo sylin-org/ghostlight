@@ -958,7 +958,7 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 );
                 assert!(matches!(
                     commands.last().unwrap(),
-                    BrowserCommand::StopRecording { .. }
+                    BrowserCommand::StopRecording
                 ));
                 assert_eq!(result.effect, Effect::None);
             }

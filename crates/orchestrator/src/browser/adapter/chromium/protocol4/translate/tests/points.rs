@@ -413,7 +413,7 @@ fn a_stale_view_refuses_the_point_before_anything_is_sent() {
         let (port, fake) = rig(Owners::Exact, moved.clone());
         assert_eq!(
             call(&port, scoped(all_open(), command)),
-            Err(BrowserError::Primitive("stale screenshot view".into()))
+            Err(BrowserError::StaleView)
         );
         assert_eq!(primitives_seen(&fake), ["view"]);
     }
@@ -839,7 +839,6 @@ fn a_dropped_image_is_delivered_inside_the_document_under_the_point() {
 
 fn export_to(locator: &str) -> BrowserCommand {
     BrowserCommand::ExportRecording {
-        recording_id: None,
         destination: RecordingDestination::Target {
             tab_id: 12,
             locator: locator.into(),

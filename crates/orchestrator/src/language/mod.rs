@@ -29,14 +29,20 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-const DEFAULT_TIMEOUT_MS: u64 = 8_000;
-const MIN_TIMEOUT_MS: u64 = 100;
-const MAX_TIMEOUT_MS: u64 = 30_000;
+/// The call time a tool gets when the caller names none.
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 8_000;
+/// The shortest `timeout_ms` any tool accepts.
+pub(crate) const MIN_TIMEOUT_MS: u64 = 100;
+/// The longest `timeout_ms` any tool accepts.
+pub(crate) const MAX_TIMEOUT_MS: u64 = 30_000;
 pub(super) const DEFAULT_FILL_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
+pub(super) const DEFAULT_RECORD_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
 pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 /// How many levels a document-scope inspection reaches when the call names no `max_depth`.
 pub const DEFAULT_DOCUMENT_DEPTH: usize = 6;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
+/// A wait condition name for the concept `visual_settle` already names, refused with a pointer to it.
+const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
 ///
@@ -179,53 +185,52 @@ impl Operation {
         }
     }
 
-    /// Return the caller's `timeout_ms`, or `None` when this operation's tool has no such field.
+    /// Return the caller's `timeout_ms`: the call time every tool accepts.
     ///
-    /// This is the one record of which calls the caller may give more time. The executor derives
-    /// the invocation deadline from it, and [`Operation::timeout_can_grow`] decides from it
-    /// whether a deadline refusal may suggest a longer `timeout_ms`.
+    /// The executor derives the invocation deadline from it, and [`Operation::timeout_can_grow`]
+    /// decides from it whether a deadline refusal may suggest a longer `timeout_ms`.
     #[must_use]
-    pub const fn timeout_ms(&self) -> Option<u64> {
+    pub const fn timeout_ms(&self) -> u64 {
         match self {
-            Self::OpenPage(value) => Some(value.timeout_ms),
-            Self::NavigatePage(value) => Some(value.timeout_ms),
-            Self::NavigateHistory(value) => Some(value.timeout_ms),
-            Self::ReloadPage(value) => Some(value.timeout_ms),
-            Self::TakeScreenshot(value) => Some(value.timeout_ms),
-            Self::Click(value) => Some(value.timeout_ms),
-            Self::ScrollPage(value) => Some(value.timeout_ms),
-            Self::Hover(value) => Some(value.timeout_ms),
-            Self::FillForm(value) => Some(value.timeout_ms),
-            Self::TypeText(value) => Some(value.timeout_ms),
-            Self::Drag(value) => Some(value.timeout_ms),
-            Self::UploadFiles(value) => Some(value.timeout_ms),
-            Self::RunScript(value) => Some(value.timeout_ms),
-            Self::Wait(value) => Some(value.timeout_ms),
-            Self::RunFlow(value) => Some(value.timeout_ms),
-            Self::ListTabs(_)
-            | Self::ActivateTab(_)
-            | Self::CloseTab(_)
-            | Self::ReadPage(_)
-            | Self::InspectPage(_)
-            | Self::Find(_)
-            | Self::SetZoom(_)
-            | Self::ResizeWindow(_)
-            | Self::PressKey(_)
-            | Self::HandleDialog(_)
-            | Self::Record(_)
-            | Self::Diagnose(_)
-            | Self::ExplainPolicy(_) => None,
+            Self::ListTabs(value) => value.timeout_ms,
+            Self::ActivateTab(value) => value.timeout_ms,
+            Self::OpenPage(value) => value.timeout_ms,
+            Self::NavigatePage(value) => value.timeout_ms,
+            Self::NavigateHistory(value) => value.timeout_ms,
+            Self::ReloadPage(value) => value.timeout_ms,
+            Self::CloseTab(value) => value.timeout_ms,
+            Self::ReadPage(value) => value.timeout_ms,
+            Self::InspectPage(value) => value.timeout_ms,
+            Self::Find(value) => value.timeout_ms,
+            Self::TakeScreenshot(value) => value.timeout_ms,
+            Self::Click(value) => value.timeout_ms,
+            Self::ScrollPage(value) => value.timeout_ms,
+            Self::SetZoom(value) => value.timeout_ms,
+            Self::ResizeWindow(value) => value.timeout_ms,
+            Self::Hover(value) => value.timeout_ms,
+            Self::FillForm(value) => value.timeout_ms,
+            Self::TypeText(value) => value.timeout_ms,
+            Self::PressKey(value) => value.timeout_ms,
+            Self::Drag(value) => value.timeout_ms,
+            Self::UploadFiles(value) => value.timeout_ms,
+            Self::RunScript(value) => value.timeout_ms,
+            Self::Wait(value) => value.timeout_ms,
+            Self::RunFlow(value) => value.timeout_ms,
+            Self::HandleDialog(value) => value.timeout_ms,
+            Self::Record(value) => value.timeout_ms,
+            Self::Diagnose(value) => value.timeout_ms,
+            Self::ExplainPolicy(value) => value.timeout_ms,
         }
     }
 
     /// Whether repeating this call with a longer `timeout_ms` is a call the decoder accepts.
     ///
-    /// True only when the tool takes `timeout_ms` and the value in force is below the maximum.
-    /// A call already at the maximum, such as `browser_fill_form` with its default, cannot be
-    /// given more time, so a deadline refusal must not suggest it.
+    /// True while the value in force is below the maximum. A call already at the maximum, such as
+    /// `browser_fill_form` with its default, cannot be given more time, so a deadline refusal
+    /// must not suggest it.
     #[must_use]
     pub fn timeout_can_grow(&self) -> bool {
-        self.timeout_ms().is_some_and(|ms| ms < MAX_TIMEOUT_MS)
+        self.timeout_ms() < MAX_TIMEOUT_MS
     }
 }
 
@@ -235,6 +240,8 @@ pub struct TabsRequest {
     pub action: String,
     #[serde(default)]
     pub tab: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Model input for the cohesive history controller.
@@ -283,16 +290,23 @@ pub struct WindowRequest {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for listing controlled tabs.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-pub struct ListTabs {}
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ListTabs {
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+}
 
 /// Input for bringing one exact tab into view.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ActivateTab {
     pub tab: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Whether opening a page may reuse a tab instead of creating one (ADR-0137, ADR-0196).
@@ -382,6 +396,8 @@ pub struct ReloadPage {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct CloseTab {
     pub tab: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for bounded page reading.
@@ -399,6 +415,8 @@ pub struct ReadPage {
     pub mode: Option<ReadMode>,
     #[serde(default = "default_max_chars")]
     pub max_chars: usize,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// The closed document-reading strategy.
@@ -440,6 +458,8 @@ pub struct InspectPage {
     pub max_depth: Option<usize>,
     #[serde(default = "default_max_items")]
     pub max_items: usize,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for semantic finding.
@@ -455,6 +475,8 @@ pub struct Find {
     pub scope: String,
     #[serde(default = "default_max_results")]
     pub max_results: usize,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for a screenshot.
@@ -569,6 +591,8 @@ pub struct SetZoom {
     pub percent: u16,
     #[serde(default)]
     pub tab: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for resizing the browser window that contains a controlled tab.
@@ -578,6 +602,8 @@ pub struct ResizeWindow {
     pub height: u32,
     #[serde(default)]
     pub tab: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for semantic or screenshot-coordinate hover.
@@ -696,6 +722,8 @@ pub struct PressKey {
     /// Optional expectation checked after the applied effect.
     #[serde(default)]
     pub expect: Option<Postcondition>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for semantic or screenshot-coordinate drag.
@@ -858,6 +886,8 @@ pub struct HandleDialog {
     pub tab: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for the memory-only recording lifecycle.
@@ -865,14 +895,14 @@ pub struct HandleDialog {
 pub struct Record {
     pub action: String,
     #[serde(default)]
-    pub recording: Option<String>,
-    #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
     /// Let the browser write the replay to a file instead of returning it.
     #[serde(default)]
     pub download: bool,
+    #[serde(default = "default_record_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for bounded opt-in browser diagnostics.
@@ -890,14 +920,19 @@ pub struct Diagnose {
     pub after: Option<String>,
     #[serde(default = "default_diagnostic_limit")]
     pub limit: usize,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
 }
 
 /// Input for the always-available policy explain operation (ADR-0136).
 ///
-/// There is nothing to configure: the projection is compiled from the authority in force, so the
-/// input has no arguments.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-pub struct ExplainPolicy {}
+/// There is nothing to configure beyond the call time: the projection is compiled from the
+/// authority in force.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ExplainPolicy {
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+}
 
 /// A model-language validation failure before work starts.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -948,9 +983,17 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_window" => decode_window(input),
         "browser_read" => Operation::ReadPage(parse(
             input,
-            &["visual_settle", "tab", "target", "mode", "max_chars"],
+            &[
+                "visual_settle",
+                "tab",
+                "target",
+                "mode",
+                "max_chars",
+                "timeout_ms",
+            ],
             |value: &ReadPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_timeout(value.timeout_ms)?;
                 validate_optional_handle(value.target.as_deref(), "target_")?;
                 if value.mode.is_some() && value.target.is_some() {
                     return Err(LanguageError::Invalid(
@@ -971,9 +1014,11 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "root",
                 "max_depth",
                 "max_items",
+                "timeout_ms",
             ],
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_timeout(value.timeout_ms)?;
                 validate_choice(
                     &value.scope,
                     &["controls", "structure", "all", "document"],
@@ -998,9 +1043,17 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_find" => Operation::Find(parse(
             input,
-            &["visual_settle", "text", "tab", "scope", "max_results"],
+            &[
+                "visual_settle",
+                "text",
+                "tab",
+                "scope",
+                "max_results",
+                "timeout_ms",
+            ],
             |value: &Find| {
                 validate_text(&value.text, 500, "text")?;
+                validate_timeout(value.timeout_ms)?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
                 validate_range(value.max_results, 1, 50, "max_results")?;
@@ -1117,6 +1170,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "target",
                 "modifiers",
                 "expect",
+                "timeout_ms",
             ],
             validate_press_key,
         )?)
@@ -1208,34 +1262,43 @@ impl OperationResult for Operation {
 }
 
 fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
-    let value: TabsRequest = parse(input, &["action", "tab"], |value: &TabsRequest| {
-        validate_choice(&value.action, &["list", "focus", "close"], "action")?;
-        match value.action.as_str() {
-            "list" if value.tab.is_some() => {
-                return Err(LanguageError::Invalid(
-                    "tab is not valid when action is list".into(),
-                ))
-            }
-            "focus" | "close" => validate_handle(
-                value.tab.as_deref().ok_or_else(|| {
-                    LanguageError::Invalid(
+    let value: TabsRequest = parse(
+        input,
+        &["action", "tab", "timeout_ms"],
+        |value: &TabsRequest| {
+            validate_choice(&value.action, &["list", "focus", "close"], "action")?;
+            validate_timeout(value.timeout_ms)?;
+            match value.action.as_str() {
+                "list" if value.tab.is_some() => {
+                    return Err(LanguageError::Invalid(
+                        "tab is not valid when action is list".into(),
+                    ))
+                }
+                "focus" | "close" => validate_handle(
+                    value.tab.as_deref().ok_or_else(|| {
+                        LanguageError::Invalid(
                         "action focus and action close need a tab: the handle of the tab to act on"
                             .into(),
                     )
-                })?,
-                "tab_",
-            )?,
-            _ => {}
-        }
-        Ok(())
-    })?;
+                    })?,
+                    "tab_",
+                )?,
+                _ => {}
+            }
+            Ok(())
+        },
+    )?;
     Ok(match value.action.as_str() {
-        "list" => Operation::ListTabs(ListTabs {}),
+        "list" => Operation::ListTabs(ListTabs {
+            timeout_ms: value.timeout_ms,
+        }),
         "focus" => Operation::ActivateTab(ActivateTab {
             tab: value.tab.expect("validated tab"),
+            timeout_ms: value.timeout_ms,
         }),
         "close" => Operation::CloseTab(CloseTab {
             tab: value.tab.expect("validated tab"),
+            timeout_ms: value.timeout_ms,
         }),
         _ => unreachable!("validated action"),
     })
@@ -1353,9 +1416,10 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
 fn decode_window(input: Value) -> Result<Operation, LanguageError> {
     let value: WindowRequest = parse(
         input,
-        &["action", "tab", "percent", "width", "height"],
+        &["action", "tab", "percent", "width", "height", "timeout_ms"],
         |value: &WindowRequest| {
             validate_choice(&value.action, &["zoom", "resize"], "action")?;
+            validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
             match value.action.as_str() {
                 "zoom" => {
@@ -1399,64 +1463,72 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
         Operation::SetZoom(SetZoom {
             percent: value.percent.expect("validated percent"),
             tab: value.tab,
+            timeout_ms: value.timeout_ms,
         })
     } else {
         Operation::ResizeWindow(ResizeWindow {
             width: value.width.expect("validated width"),
             height: value.height.expect("validated height"),
             tab: value.tab,
+            timeout_ms: value.timeout_ms,
         })
     })
 }
 
 fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
     let text_present = has_field(&input, "text");
-    let value: HandleDialog = parse(input, &["action", "tab", "text"], |value: &HandleDialog| {
-        validate_choice(
-            &value.action,
-            &["status", "accept", "dismiss", "respond"],
-            "action",
-        )?;
-        validate_optional_handle(value.tab.as_deref(), "tab_")?;
-        match value.action.as_str() {
-            "respond" => validate_text_allow_empty(
-                value.text.as_deref().ok_or_else(|| {
-                    LanguageError::Invalid(
-                        "action respond needs text: the prompt response, which may be empty".into(),
-                    )
-                })?,
-                2_000,
-                "text",
-            )?,
-            _ if text_present => {
-                return Err(LanguageError::Invalid(
-                    "text is only valid when action is respond".into(),
-                ))
+    let value: HandleDialog = parse(
+        input,
+        &["action", "tab", "text", "timeout_ms"],
+        |value: &HandleDialog| {
+            validate_choice(
+                &value.action,
+                &["status", "accept", "dismiss", "respond"],
+                "action",
+            )?;
+            validate_timeout(value.timeout_ms)?;
+            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            match value.action.as_str() {
+                "respond" => validate_text_allow_empty(
+                    value.text.as_deref().ok_or_else(|| {
+                        LanguageError::Invalid(
+                            "action respond needs text: the prompt response, which may be empty"
+                                .into(),
+                        )
+                    })?,
+                    2_000,
+                    "text",
+                )?,
+                _ if text_present => {
+                    return Err(LanguageError::Invalid(
+                        "text is only valid when action is respond".into(),
+                    ))
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
     Ok(Operation::HandleDialog(value))
 }
 
 fn decode_record(input: Value) -> Result<Operation, LanguageError> {
     let value: Record = parse(
         input,
-        &["action", "recording", "tab", "target", "download"],
+        &["action", "tab", "target", "download", "timeout_ms"],
         |value: &Record| {
             validate_choice(
                 &value.action,
                 &["start", "status", "stop", "save", "discard"],
                 "action",
             )?;
-            validate_optional_handle(value.recording.as_deref(), "recording_")?;
+            validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
             validate_optional_handle(value.target.as_deref(), "target_")?;
             match value.action.as_str() {
-                "start" if value.recording.is_some() || value.target.is_some() => {
+                "start" if value.target.is_some() => {
                     return Err(LanguageError::Invalid(
-                        "start accepts tab but not recording or target".into(),
+                        "start accepts tab but not target".into(),
                     ))
                 }
                 "start" => {}
@@ -1490,9 +1562,18 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
 fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
     let value: Diagnose = parse(
         input,
-        &["tab", "source", "detail", "match", "after", "limit"],
+        &[
+            "tab",
+            "source",
+            "detail",
+            "match",
+            "after",
+            "limit",
+            "timeout_ms",
+        ],
         |value: &Diagnose| {
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_timeout(value.timeout_ms)?;
             validate_choice(&value.source, &["both", "console", "network"], "source")?;
             validate_choice(&value.detail, &["problems", "all"], "detail")?;
             if let Some(pattern) = &value.r#match {
@@ -1507,7 +1588,9 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
 }
 
 fn decode_explain_policy(input: Value) -> Result<Operation, LanguageError> {
-    let value: ExplainPolicy = parse(input, &[], |_| Ok(()))?;
+    let value: ExplainPolicy = parse(input, &["timeout_ms"], |value: &ExplainPolicy| {
+        validate_timeout(value.timeout_ms)
+    })?;
     Ok(Operation::ExplainPolicy(value))
 }
 
@@ -2154,6 +2237,7 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
     validate_optional_handle(value.target.as_deref(), "target_")?;
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
+    validate_timeout(value.timeout_ms)?;
     Ok(())
 }
 
@@ -2195,6 +2279,12 @@ fn validate_condition(
     value: Option<&str>,
     target: Option<&str>,
 ) -> Result<(), LanguageError> {
+    if condition == RETIRED_LAYOUT_STABLE {
+        return Err(LanguageError::Invalid(
+            "condition layout_stable was merged into visual_settle; use condition visual_settle"
+                .into(),
+        ));
+    }
     validate_choice(
         condition,
         &[
@@ -2205,7 +2295,6 @@ fn validate_condition(
             "target_present",
             "target_absent",
             "visual_settle",
-            "layout_stable",
             "duration",
         ],
         "condition",
@@ -2231,7 +2320,7 @@ fn validate_condition(
         "load_ready" if value.is_some() || target.is_some() => Err(LanguageError::Invalid(
             "load_ready accepts neither value nor target".into(),
         )),
-        "visual_settle" | "layout_stable" => {
+        "visual_settle" => {
             if value.is_some() {
                 return Err(LanguageError::Invalid(format!(
                     "{condition} does not accept value"
@@ -2398,6 +2487,9 @@ fn default_timeout() -> u64 {
 fn default_fill_timeout() -> u64 {
     DEFAULT_FILL_TIMEOUT_MS
 }
+fn default_record_timeout() -> u64 {
+    DEFAULT_RECORD_TIMEOUT_MS
+}
 fn default_max_chars() -> usize {
     8_000
 }
@@ -2440,43 +2532,57 @@ mod tests {
 
     use super::{
         catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy, CATALOG_TOOL_COUNT,
-        DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS,
-        MIN_TIMEOUT_MS, SERVER_INSTRUCTIONS,
+        DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
+        EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, SERVER_INSTRUCTIONS,
     };
 
-    /// The operation's own `timeout_ms` record agrees with the advertised schema, so a deadline
-    /// refusal that suggests a longer `timeout_ms` always describes a call the decoder accepts,
-    /// and one that does not names no field the tool lacks.
+    /// Every tool advertises `timeout_ms` with the default its decoder applies, and a call may
+    /// carry any value in range, so a deadline refusal that suggests a longer `timeout_ms`
+    /// always names a field the tool has.
     #[test]
-    fn timeout_support_matches_the_advertised_schema_and_decodes() {
+    fn every_tool_accepts_timeout_ms_with_its_advertised_default() {
         for tool in catalog() {
-            let example = tool.input_schema["examples"][0].clone();
-            let operation = decode(&tool.name, example.clone())
+            let advertised = &tool.input_schema["properties"]["timeout_ms"];
+            assert_eq!(advertised["minimum"], MIN_TIMEOUT_MS, "{}", tool.name);
+            assert_eq!(advertised["maximum"], MAX_TIMEOUT_MS, "{}", tool.name);
+            let mut bare = tool.input_schema["examples"][0].clone();
+            bare.as_object_mut().unwrap().remove("timeout_ms");
+            let operation = decode(&tool.name, bare.clone())
                 .unwrap_or_else(|error| panic!("{} example: {error}", tool.name));
-            let advertised = tool.input_schema["properties"].get("timeout_ms").is_some();
             assert_eq!(
-                operation.timeout_ms().is_some(),
-                advertised,
-                "{} timeout_ms support drifted from its schema",
+                advertised["default"],
+                operation.timeout_ms(),
+                "{} timeout_ms default drifted from its schema",
                 tool.name
             );
-            let mut longer = example;
-            longer["timeout_ms"] = json!(MAX_TIMEOUT_MS);
-            match decode(&tool.name, longer) {
-                Ok(operation) => assert_eq!(
+            for ms in [MIN_TIMEOUT_MS, MAX_TIMEOUT_MS] {
+                let mut input = bare.clone();
+                input["timeout_ms"] = json!(ms);
+                let operation = decode(&tool.name, input).unwrap_or_else(|error| {
+                    panic!("{} rejects timeout_ms {ms}: {error}", tool.name)
+                });
+                assert_eq!(
                     operation.timeout_ms(),
-                    Some(MAX_TIMEOUT_MS),
-                    "{} accepted timeout_ms without using it",
+                    ms,
+                    "{} ignored timeout_ms",
                     tool.name
-                ),
-                Err(_) => assert!(!advertised, "{} rejects its own timeout_ms", tool.name),
+                );
+            }
+            for ms in [MIN_TIMEOUT_MS - 1, MAX_TIMEOUT_MS + 1] {
+                let mut input = bare.clone();
+                input["timeout_ms"] = json!(ms);
+                assert!(
+                    decode(&tool.name, input).is_err(),
+                    "{} took {ms}",
+                    tool.name
+                );
             }
         }
     }
 
     /// A call may be told to raise `timeout_ms` exactly when a call with a longer value decodes:
-    /// never for a tool without the field, and never once the value is at the maximum. Filling a
-    /// form starts at the maximum, so its default call cannot grow.
+    /// below the maximum, and never at it. Filling a form and recording start at the maximum, so
+    /// their default calls cannot grow.
     #[test]
     fn timeout_can_grow_exactly_when_a_longer_call_decodes() {
         for tool in catalog() {
@@ -2497,29 +2603,31 @@ mod tests {
                 let Ok(operation) = decode(&tool.name, input.clone()) else {
                     continue;
                 };
-                let longer_decodes = operation.timeout_ms().is_some_and(|ms| {
-                    let mut longer = input.clone();
-                    longer["timeout_ms"] = json!(ms + 1);
-                    decode(&tool.name, longer).is_ok()
-                });
+                let mut longer = input.clone();
+                longer["timeout_ms"] = json!(operation.timeout_ms() + 1);
                 assert_eq!(
                     operation.timeout_can_grow(),
-                    longer_decodes,
+                    decode(&tool.name, longer).is_ok(),
                     "{} with {input}",
                     tool.name
                 );
             }
         }
-        let mut fill = catalog()
-            .into_iter()
-            .find(|tool| tool.name == "browser_fill_form")
-            .unwrap()
-            .input_schema["examples"][0]
-            .clone();
-        fill.as_object_mut().unwrap().remove("timeout_ms");
-        let operation = decode("browser_fill_form", fill).unwrap();
-        assert_eq!(operation.timeout_ms(), Some(DEFAULT_FILL_TIMEOUT_MS));
-        assert!(!operation.timeout_can_grow());
+        for (tool, default) in [
+            ("browser_fill_form", DEFAULT_FILL_TIMEOUT_MS),
+            ("browser_record", DEFAULT_RECORD_TIMEOUT_MS),
+        ] {
+            let mut input = catalog()
+                .into_iter()
+                .find(|candidate| candidate.name == tool)
+                .unwrap()
+                .input_schema["examples"][0]
+                .clone();
+            input.as_object_mut().unwrap().remove("timeout_ms");
+            let operation = decode(tool, input).unwrap();
+            assert_eq!(operation.timeout_ms(), default);
+            assert!(!operation.timeout_can_grow());
+        }
     }
 
     /// The instructions a deferred-loading client reads first stay short and name only tools

@@ -77,8 +77,14 @@ when that binding is no longer current. Coordinates use the returned image dimen
 top-left pixel at `(0, 0)`. A bounded region screenshot returns a new view with its own transform,
 so another region can be selected from the magnified image.
 
-Timeouts are bounded from 100 to 30000 milliseconds and default to 8000 milliseconds. Text is
+Every tool accepts `timeout_ms`, bounded from 100 to 30000 milliseconds. It defaults to 8000
+milliseconds, except that `browser_fill_form` and `browser_record` default to 30000. Text is
 UTF-8 and bounded. URLs must be absolute `http` or `https` URLs.
+
+Handles are short. Ghostlight issues `tab_`, `target_`, `view_`, `snapshot_` and `image_` handles
+as the prefix and eight random base32 characters (`tab_k3m9x2ab`), 12 to 17 characters in all
+where the same handles were 36 to 41. A handle is still checked against the session that issued
+it, and it is unique within that session.
 
 Ordinary bursts may wait within the original invocation deadline. Sustained waiting is visible
 in the human workbench; it does not create a new tool call or a popup. An exceptional admission
@@ -93,7 +99,7 @@ A quiet page completes preparation sooner; a busy page remains usable after that
 False skips implicit waiting. Lookup and execution share the budget; each flow child has
 its own preference within the parent deadline. Actual targets and permissions still apply.
 Composite waits keep a met primary condition when optional settlement expires and report
-`visual_settled` separately. Explicit visual/layout-stability waits retain their condition.
+`visual_settled` separately. An explicit `visual_settle` wait retains its condition.
 See [ADR-0195](../adr/0195-bounded-settlement-and-subject-scoped-page-work.md).
 
 ## Server instructions
@@ -174,15 +180,14 @@ Refusals say what is true, and their next steps suggest only what the caller can
   model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). The contract summary
   does not say whether anything was sent. A receipt in the wrong shape arrives after the
   browser already received the request.
-- A deadline before dispatch suggests a longer `timeout_ms` only when the call that set the
-  deadline accepts that field, its value is below the 30000 ms maximum, and no edge deadline
-  overrides it. Tools with a fixed deadline (read, inspect, find, press key, dialog, diagnose,
-  tabs, window, record), and calls already at the maximum (such as `browser_fill_form` with its
-  default), are told to repeat the call and narrow a very large page first. A deadline after
-  dispatch has an unknown effect, so it says to check the page with `browser_read` or
-  `browser_screenshot` before repeating.
-  Which operations accept `timeout_ms` is recorded once, on the decoded operation, and the
-  deadline itself is derived from the same record.
+- A deadline before dispatch suggests a longer `timeout_ms` only when the call's own value is
+  below the 30000 ms maximum and no edge deadline overrides it. Every tool takes the field, so
+  the suggestion always describes a call the decoder accepts. Calls already at the maximum (such
+  as `browser_fill_form` with its default) are told to repeat the call and narrow a very large
+  page first. A deadline after dispatch has an unknown effect, so it says to check the page with
+  `browser_read` or `browser_screenshot` before repeating.
+  The `timeout_ms` of a decoded operation is the one record of its call time, and the deadline
+  itself is derived from it.
 - A policy denial (host, protected host, capability, tab close, screenshot, client kind, or an
   unspecified policy reason) points to `policy_explain`. Pause, Stop, a required-history outage,
   and an unreadable policy keep no next step.
@@ -285,13 +290,13 @@ Read useful bounded visible text from the full composed page or one target. A fu
 includes visible top-document text, open shadow trees, and http(s) embedded frames in stable frame
 order. Visible form values are included, checkboxes and radios read as checked or unchecked, and
 placeholders are never values. Every credential-class field, as the write path classifies it, is
-masked. Closed shadow roots and hidden content remain absent. Use
+masked: its value reads as the short marker `[hidden]`. Closed shadow roots and hidden content remain absent. Use
 `browser_inspect` or `browser_find` when an action target is needed. Shortest call: `{}`.
 
 Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
 the default; explicit `article` prefers a useful article in the top document and falls back to the
 same full-page visible read; ignored with `target`); optional `max_chars` from 500 to 50000, default
-8000. Capability: `read`.
+8000; optional `timeout_ms`. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 `document_generation`.
@@ -303,15 +308,20 @@ fresh target handles; the `document` scope returns the page outline as a tree. S
 
 Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `document`, default
 `controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12,
-default 6; optional `max_items` from 1 to 200, default 80. Capability: `read`.
+default 6; optional `max_items` from 1 to 200, default 80; optional `timeout_ms`. Capability: `read`.
 
-Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, semantic role,
-bounded accessible name, state, and credential-class flag. Selectors are not exposed.
+Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, an accessibility
+role, bounded accessible name, state, and credential-class flag. An element with no role of its
+own reads as `generic`, never as a tag name. A field with no label, `aria-label` or title is named
+by its placeholder, as browsers do, so `browser_find` and semantic selectors reach it by that
+text. Selectors are not exposed.
 
 A `document` scope returns no target handles. Its facts are `tab`, `document_generation`,
 `tree`, `nodes`, `truncated`, `snapshot`, and sometimes `diff`. `tree` is one bounded
 structure-only composed tree. Each node has a `kind` of `control`, `heading`, or `container`, a
-`label` of at most 120 characters, and a `children` array. Without a root, the tree includes open
+`label` of at most 120 characters, and a `children` array. A control or heading is labelled by its
+accessible name. A container is labelled only by a name the page declared for it, and by no text
+from inside it, because its descendants carry that text themselves. Without a root, the tree includes open
 shadow roots, assigned slots, and http(s) embedded frames in stable order under one 400-node
 ceiling. A root limits it to that target's composed subtree. Editable values, hidden
 content, closed roots, and frame identity are never returned. A summary reads, for example:
@@ -507,8 +517,9 @@ Inputs use one condition-specific branch: `load_ready` accepts neither value nor
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
 live page until a control matching it exists; `duration` requires a decimal string `value`
 of whole milliseconds from 0 to 10000 (for example, `"1200"`) and waits executor-side;
-`visual_settle` and `layout_stable` are one condition, met when the page, or an optional
-`target`, stops moving and repainting. Every branch accepts optional `tab`, `timeout_ms`.
+`visual_settle` is met when the page, or an optional `target`, stops moving and repainting;
+`layout_stable` was the same condition and is refused with a pointer to `visual_settle`. Every
+branch accepts optional `tab`, `timeout_ms`.
 Optional `visual_settle` adds a short layout settle after the condition holds. It is off by
 default for `url_contains`, `text_present`, `text_absent`, and `target_absent` and on for the
 other conditions, so the schema declares no single default for it. Capability: `read`.
@@ -528,11 +539,18 @@ Inspect or resolve the current JavaScript dialog.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
 - `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `action`.
 
-All branches accept optional `tab`. `text` is required only for `respond` and is
+All branches accept optional `tab` and `timeout_ms`. `text` is required only for `respond` and is
 invalid for every other action. Facts: `tab`, `dialog_type`, `present`, `accepted`, and `handled`
-as applicable. Dialog text is never audited. When status finds a dialog, its next step is `Call
+as applicable. Status also reports the dialog's message, one line of at most 500 characters, in its
+summary. Dialog text is never audited. When status finds a dialog, its next step is `Call
 browser_dialog with action accept or dismiss (or respond with text for a prompt) before
 continuing.`
+
+A dialog the page opens while an action runs is reported by the browser as it opens. When the
+action completes with a dialog open on its tab, the result keeps the action's own sentence, adds
+`A confirm dialog is now open.` (or alert, prompt, leave-page, or a plain JavaScript dialog), carries a
+`dialog_opened` fact naming the kind, and takes the dialog next step above. This holds for clicks,
+key presses, typing, form fills, drags, uploads, scripts, scrolls, hovers and navigation.
 
 ### `browser_upload`
 
@@ -639,21 +657,25 @@ Create a short memory-only GIF of browser work. Usual flow:
 
 Actions are:
 
-- `start`: optional `tab`; ask the extension to start an owned recording; capability `read`.
-- `status`: optional `recording`; report state and deadlines; no new capability.
-- `stop`: optional `recording`; capture a final frame, stop, and freeze; no new capability.
-- `save`: optional `recording`; auto-stop if active. One replay goes to one place: with `target`,
+- `start`: optional `tab`; ask the extension to start the session's recording; capability `read`.
+  A session holds one recording. Starting again on the tab it is still capturing answers with that
+  recording. Any other recording the session holds, stopped or not, refuses the start with
+  `This session already has a recording.` and the next step to save or discard it.
+- `status`: report state and deadlines; no new capability.
+- `stop`: capture a final frame, stop, and freeze; no new capability.
+- `save`: auto-stop if active. One replay goes to one place: with `target`,
   the browser attaches it to that file input and Ghostlight requires `read + write`; with
   `"download": true`, the browser saves it as a file and Ghostlight requires `read`; with neither,
   the GIF is returned to the client and Ghostlight requires `read`. `target` and `download`
   together are refused. Credential-like metadata on a file input does not block an explicit save.
-- `discard`: optional `recording`; erase captured bytes; no new capability.
+- `discard`: erase captured bytes; no new capability.
 
 Save checks its complete capability requirement before stopping active capture. Read still
 authorizes every captured source; Write separately authorizes the attachment destination.
 
-`recording` may be omitted only when exactly one owned recording can be resolved. `target` and
-`download` are valid only for save. The extension owns recording identity, frames, bounds,
+No call names a recording, and no result reports one: the session has one or none, and an action
+with none answers `This session has no recording.` `target` and `download` are valid only for
+save. The extension owns recording identity, frames, bounds,
 deadlines, stop, retention, erase, and the encode. Frames never leave the browser, and neither
 frames nor encoded bytes are written to Ghostlight storage, extension storage, logs, audit, or
 restart state. Save can be repeated until retention expires; a target or download delivery is a
@@ -668,7 +690,7 @@ claims the tab itself moved, because often it did not.
 
 A saved replay's sentence says how long it plays and where it went, because that is what someone
 who asked for a recording wants to know. How many frames survived, how many were captured, and how
-many bytes they became are real and stay in the facts, alongside `recording`, state, deadlines,
+many bytes they became are real and stay in the facts, alongside state, deadlines,
 stop reason, exact `duration_ms`, dimensions, and the delivery disposition. A client save returns one bounded
 `image/gif` content block; the other two return none, and neither claims remote acceptance.
 

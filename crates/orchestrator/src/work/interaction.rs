@@ -7,7 +7,7 @@ use crate::browser::adapter::{
 };
 
 use crate::governance::Capability;
-use crate::language::outcome::{Outcome, Refusal};
+use crate::language::outcome::{DialogKind, Outcome, Refusal};
 use crate::language::{Diagnose, HandleDialog};
 use crate::workspace::WorkspaceLease;
 
@@ -15,6 +15,20 @@ use super::result::Effect;
 use super::{observed_host, readiness, ApplicationExecutor, InvocationContext, Terminal};
 
 impl ApplicationExecutor {
+    /// Keep the workspace's record of a tab's dialog in line with what the browser just said,
+    /// whether or not the matching event arrived.
+    fn note_dialog(
+        &self,
+        context: &InvocationContext<'_>,
+        physical_id: u64,
+        dialog: Option<DialogKind>,
+    ) {
+        if let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) {
+            self.workspaces
+                .apply_browser_dialog(&browser, physical_id, dialog);
+        }
+    }
+
     pub(super) fn handle_dialog(
         &self,
         context: &InvocationContext<'_>,
@@ -56,6 +70,11 @@ impl ApplicationExecutor {
                         )
                     }
                 };
+                self.note_dialog(
+                    context,
+                    selected.physical_id,
+                    observed.0.then(|| DialogKind::classify(&observed.1)),
+                );
                 if value.action == "status" {
                     return self.succeeded(
                         context,
@@ -87,7 +106,9 @@ impl ApplicationExecutor {
                         tab_id,
                         dialog_type: handled_type,
                         accepted,
-                    }) if tab_id == selected.physical_id => self.succeeded(
+                    }) if tab_id == selected.physical_id => {
+                        self.note_dialog(context, tab_id, None);
+                        self.succeeded(
                         context,
                         decision,
                         Some(tab_id),
@@ -96,7 +117,8 @@ impl ApplicationExecutor {
                         false,
                         Outcome::DialogHandled { accepted },
                         json!({"tab":selected.handle.as_str(),"dialog_type":if handled_type.is_empty(){observed.1}else{handled_type},"accepted":accepted,"handled":true}),
-                    ),
+                    )
+                    }
                     Ok(BrowserOutcome::DialogAbsent { tab_id })
                         if tab_id == selected.physical_id =>
                     {

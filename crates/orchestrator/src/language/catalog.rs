@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value};
 use crate::governance::AuthoritySnapshot;
 
 use super::{
-    DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
+    DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
     MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
 };
 
@@ -189,7 +189,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_record",
             "Record browser",
-            "Record browser work as a short memory-only GIF: start, check status, stop, save, or discard. Save auto-stops an active capture; omit recording only when exactly one is eligible.",
+            "Record browser work as a short memory-only GIF: start, check status, stop, save, or discard. A session holds one recording at a time. Save auto-stops an active capture.",
             record_schema(),
             Hints::browser_action(true),
         ),
@@ -283,6 +283,7 @@ fn tool(
     hints: Hints,
 ) -> ToolDefinition {
     let mut input_schema = input_schema;
+    input_schema["properties"]["timeout_ms"] = timeout(name);
     if super::settlement::PAGE_TOOLS.contains(&name) {
         input_schema["properties"]["visual_settle"] = boolean(true, VISUAL_SETTLE);
     }
@@ -391,7 +392,6 @@ fn navigate_schema() -> Value {
                             "domain reuses a tab an earlier session of this client opened for this host and released (exact URL preferred); it never takes over a tab the person opened. never always creates. new_tab always creates, so domain cannot be combined with it.",
                         ),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["url"],
             ),
@@ -406,7 +406,6 @@ fn navigate_schema() -> Value {
                             "Optional exact browser from browser_tabs list. Omit to use the browser the user attended most recently.",
                         ),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["url", "new_tab"],
             ),
@@ -438,7 +437,6 @@ fn history_schema() -> Value {
                         "bypass_cache",
                         boolean(false, "Request a reload that bypasses browser cache."),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["action"],
             ),
@@ -452,11 +450,7 @@ fn history_schema() -> Value {
 
 fn history_branch(action: &str, description: &str) -> Value {
     object(
-        vec![
-            ("action", constant(action, description)),
-            ("tab", tab()),
-            ("timeout_ms", timeout()),
-        ],
+        vec![("action", constant(action, description)), ("tab", tab())],
         vec!["action"],
     )
 }
@@ -606,7 +600,7 @@ fn find_schema() -> Value {
 fn screenshot_schema() -> Value {
     union(
         vec![
-            object(vec![("tab", tab()), ("timeout_ms", timeout())], vec![]),
+            object(vec![("tab", tab())], vec![]),
             object(
                 vec![
                     ("tab", tab()),
@@ -617,7 +611,6 @@ fn screenshot_schema() -> Value {
                             "True captures the whole document instead of the viewport. Not with target or a region.",
                         ),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["full_page"],
             ),
@@ -628,7 +621,6 @@ fn screenshot_schema() -> Value {
                         "target",
                         handle("target_", "Current semantic target to capture."),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["target"],
             ),
@@ -649,7 +641,6 @@ fn screenshot_schema() -> Value {
                     ("y", coordinate("Vertical image coordinate of the region.")),
                     ("width", extent("Region width in image pixels.")),
                     ("height", extent("Region height in image pixels.")),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["view", "x", "y", "width", "height"],
             ),
@@ -683,7 +674,6 @@ fn click_schema() -> Value {
             json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
         ),
         ("selector", semantic_selector()),
-        ("timeout_ms", timeout()),
     ];
     union(
         vec![
@@ -746,7 +736,6 @@ fn scroll_schema() -> Value {
                         "target",
                         handle("target_", "Current semantic target to reveal."),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["target"],
             ),
@@ -769,7 +758,6 @@ fn scroll_schema() -> Value {
                             "Scroll distance.",
                         ),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec![],
             ),
@@ -790,7 +778,6 @@ fn scroll_schema() -> Value {
                     ("x", coordinate(IMAGE_X)),
                     ("y", coordinate(IMAGE_Y)),
                     ("ticks", integer(1, 10, None, "Wheel ticks to send.")),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["direction", "view", "x", "y", "ticks"],
             ),
@@ -818,7 +805,6 @@ fn hover_schema() -> Value {
                         "target",
                         handle("target_", "Current semantic target to hover."),
                     ),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["target"],
             ),
@@ -834,7 +820,6 @@ fn hover_schema() -> Value {
                     ),
                     ("x", coordinate(IMAGE_X)),
                     ("y", coordinate(IMAGE_Y)),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["view", "x", "y"],
             ),
@@ -858,7 +843,6 @@ fn fill_schema() -> Value {
                 ("tab", tab()),
                 ("submit_target", handle("target_", "Optional current submit control. Supplying it may produce an external effect.")),
                 credential_authorization(),
-                ("timeout_ms", timeout_with_default(DEFAULT_FILL_TIMEOUT_MS)),
             ],
             vec!["fields"],
         ),
@@ -885,7 +869,6 @@ fn type_schema() -> Value {
         ),
         credential_authorization(),
         ("tab", tab()),
-        ("timeout_ms", timeout()),
     ];
     union(
         vec![
@@ -979,7 +962,6 @@ fn drag_schema() -> Value {
                         handle("target_", "Current drop destination."),
                     ),
                     ("tab", tab()),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["source_target", "destination_target"],
             ),
@@ -994,7 +976,6 @@ fn drag_schema() -> Value {
                     ("end_x", coordinate("Horizontal destination pixel in the view's screenshot image.")),
                     ("end_y", coordinate("Vertical destination pixel in the view's screenshot image.")),
                     ("tab", tab()),
-                    ("timeout_ms", timeout()),
                 ],
                 vec!["view", "start_x", "start_y", "end_x", "end_y"],
             ),
@@ -1024,11 +1005,6 @@ fn wait_schema() -> Value {
             wait_branch(
                 "visual_settle",
                 "The page, or target when given, stopped moving and repainting.",
-                Some(OptionalTarget),
-            ),
-            wait_branch(
-                "layout_stable",
-                "Same as visual_settle.",
                 Some(OptionalTarget),
             ),
             wait_branch(
@@ -1067,7 +1043,6 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
     let mut fields = vec![
         ("condition", constant(condition, description)),
         ("tab", tab()),
-        ("timeout_ms", timeout()),
         (
             "visual_settle",
             json!({"type":"boolean","description":"Also wait briefly for the layout to settle once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest."}),
@@ -1081,7 +1056,7 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
             required.push("value");
         }
         Some(kind @ (WaitInput::Target | WaitInput::OptionalTarget)) => {
-            fields.push(("target", handle("target_", "Current target for target_present and target_absent, or the optional subject of visual_settle and layout_stable.")));
+            fields.push(("target", handle("target_", "Current target for target_present and target_absent, or the optional subject of visual_settle.")));
             if matches!(kind, WaitInput::Target) {
                 required.push("target");
             }
@@ -1153,7 +1128,6 @@ fn upload_schema() -> Value {
                 ("x", coordinate(IMAGE_X)),
                 ("y", coordinate(IMAGE_Y)),
                 ("tab", tab()),
-                ("timeout_ms", timeout()),
             ],
             vec![],
         ),
@@ -1196,7 +1170,6 @@ fn evaluate_schema() -> Value {
                         "Maximum serialized result characters.",
                     ),
                 ),
-                ("timeout_ms", timeout()),
             ],
             vec!["script"],
         ),
@@ -1221,7 +1194,6 @@ fn flow_schema() -> Value {
                     ),
                 ),
                 ("tab", tab()),
-                ("timeout_ms", timeout()),
             ],
             vec!["steps"],
         ),
@@ -1245,8 +1217,8 @@ fn record_schema() -> Value {
                 ],
                 vec!["action"],
             ),
-            record_id_branch("status", "Return content-free recording state and bounds."),
-            record_id_branch("stop", "Stop capture and keep the frozen frames in memory."),
+            record_branch("status", "Return content-free recording state and bounds."),
+            record_branch("stop", "Stop capture and keep the frozen frames in memory."),
             object(
                 vec![
                     (
@@ -1256,7 +1228,6 @@ fn record_schema() -> Value {
                             "Save an immutable animated GIF. Requires read for captured sources, plus write when attaching to a target; active capture stops after capability admission.",
                         ),
                     ),
-                    ("recording", recording()),
                     (
                         "target",
                         handle(
@@ -1274,7 +1245,7 @@ fn record_schema() -> Value {
                 ],
                 vec!["action"],
             ),
-            record_id_branch("discard", "Erase captured bytes. This cannot be undone."),
+            record_branch("discard", "Erase captured bytes. This cannot be undone."),
         ],
         vec![
             json!({"action":"start"}),
@@ -1284,12 +1255,9 @@ fn record_schema() -> Value {
     )
 }
 
-fn record_id_branch(action: &str, description: &str) -> Value {
+fn record_branch(action: &str, description: &str) -> Value {
     object(
-        vec![
-            ("action", constant(action, description)),
-            ("recording", recording()),
-        ],
+        vec![("action", constant(action, description))],
         vec!["action"],
     )
 }
@@ -1710,22 +1678,17 @@ fn tab() -> Value {
     )
 }
 
-fn recording() -> Value {
-    handle(
-        "recording_",
-        "Optional recording handle. Omit only when exactly one recording is eligible.",
-    )
-}
-
 fn url() -> Value {
     json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":4096,"description":"Absolute HTTP(S) URL."})
 }
 
-fn timeout() -> Value {
-    timeout_with_default(DEFAULT_TIMEOUT_MS)
-}
-
-fn timeout_with_default(default: u64) -> Value {
+/// The `timeout_ms` field every tool accepts, defaulting to what that tool has always been given.
+fn timeout(tool: &str) -> Value {
+    let default = match tool {
+        "browser_fill_form" => DEFAULT_FILL_TIMEOUT_MS,
+        "browser_record" => DEFAULT_RECORD_TIMEOUT_MS,
+        _ => DEFAULT_TIMEOUT_MS,
+    };
     json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default,"description":"Maximum call time in milliseconds."})
 }
 
@@ -2056,7 +2019,7 @@ mod tests {
 
         let wait = tool_schema("browser_wait");
         let condition = property(&wait, "condition").expect("condition property");
-        assert_eq!(condition["enum"].as_array().map(Vec::len), Some(10));
+        assert_eq!(condition["enum"].as_array().map(Vec::len), Some(9));
         let meaning = condition["description"]
             .as_str()
             .expect("condition meaning");

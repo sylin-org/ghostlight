@@ -23,6 +23,16 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   ]);
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
+  // What a masked credential value reads as. One short marker keeps masking cheap to read.
+  const MASKED_VALUE = "[hidden]";
+  // The accessibility role an element has by its tag alone, beyond the control roles roleFor
+  // names. A tag that is not in this table has no role of its own and reads as generic.
+  const IMPLICIT_ROLES = new Map([
+    ["nav", "navigation"], ["main", "main"], ["header", "banner"], ["footer", "contentinfo"],
+    ["aside", "complementary"], ["form", "form"], ["section", "region"], ["article", "article"],
+    ["table", "table"], ["ul", "list"], ["ol", "list"], ["li", "listitem"],
+    ["fieldset", "group"], ["img", "image"], ["summary", "button"]
+  ]);
   const FILL_STABLE_MS = 750;
   const FILL_SETTLE_LIMIT_MS = 8_000;
   const FILL_RETAINED_STABLE_MS = 250;
@@ -103,7 +113,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return Array.from(node.childNodes ?? []);
   }
 
-  function accessibleName(element) {
+  // The name the page declares for an element: aria-labelledby, aria-label, its labels, or its
+  // alt, title or placeholder text. A field with no label of its own falls back to its
+  // placeholder, as browsers do. Null when the page declared none; an empty string is a declared
+  // empty label.
+  function declaredName(element) {
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy) {
       const root = element.getRootNode();
@@ -117,7 +131,13 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const type = String(element.getAttribute("type") ?? "").toLowerCase();
     const buttonLikeInput = tag === "input" && ["button", "submit", "reset"].includes(type);
     const fixed = element.getAttribute("alt") || element.getAttribute("title") || element.getAttribute("placeholder") || (buttonLikeInput ? element.getAttribute("value") : "");
-    if (fixed) return shared.bounded(fixed, 500).trim();
+    return fixed ? shared.bounded(fixed, 500).trim() : null;
+  }
+
+  function accessibleName(element) {
+    const declared = declaredName(element);
+    if (declared !== null) return declared;
+    const tag = String(element.tagName ?? "").toLowerCase();
     const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
     if (editable) return "";
     return shared.bounded(composedVisibleText(element, 500).text || renderedText(element), 500);
@@ -137,7 +157,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     if (tag === "input" && ["button", "submit", "reset"].includes(type)) return "button";
     if (tag === "input") return "textbox";
     if (/^h[1-6]$/.test(tag)) return "heading";
-    return tag;
+    return IMPLICIT_ROLES.get(tag) ?? "generic";
   }
 
   function stateFor(element) {
@@ -303,11 +323,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
             append(node.checked ? "checked" : "unchecked");
           } else if (type !== "hidden") {
             // A placeholder is a hint, never a value. Every credential-class field is masked.
-            if (node.value) append(credentialClass(node) ? "*".repeat(64) : node.value);
+            if (node.value) append(credentialClass(node) ? MASKED_VALUE : node.value);
           }
         } else if (tag === "select") {
           const selectedText = Array.from(node.selectedOptions ?? []).map((opt) => opt.text).join(", ");
-          if (selectedText) append(credentialClass(node) ? "*".repeat(64) : selectedText);
+          if (selectedText) append(credentialClass(node) ? MASKED_VALUE : selectedText);
         }
         if (TEXT_OMIT_TAGS.has(tag)) return;
         if (tag === "br") {
@@ -416,7 +436,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       count += 1;
       const role = roleFor(element);
       const kind = controlRoles.includes(role) ? "control" : /^h[1-6]$/.test(element.tagName.toLowerCase()) ? "heading" : "container";
-      const node = { kind, label: shared.bounded(accessibleName(element), 120), children: [] };
+      // A container's text is its descendants' text, which their own nodes already carry, so a
+      // container is labelled only by a name the page declared for it.
+      const label = kind === "container" ? declaredName(element) ?? "" : accessibleName(element);
+      const node = { kind, label: shared.bounded(label, 120), children: [] };
       if (depth < maxDepth && count < maximum) {
         for (const child of composedChildren(element)) {
           if (count >= maximum) break;

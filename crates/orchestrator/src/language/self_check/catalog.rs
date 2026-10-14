@@ -226,11 +226,6 @@ fn known_good_calls() -> Vec<(&'static str, Value)> {
             "browser_wait",
             json!({"condition":"visual_settle","target":"target_1"}),
         ),
-        ("browser_wait", json!({"condition":"layout_stable"})),
-        (
-            "browser_wait",
-            json!({"condition":"layout_stable","target":"target_1"}),
-        ),
         (
             "browser_wait",
             json!({"condition":"selector_present","selector":{"name":"Done"}}),
@@ -275,18 +270,16 @@ fn known_good_calls() -> Vec<(&'static str, Value)> {
         ),
         ("browser_record", json!({"action":"start"})),
         ("browser_record", json!({"action":"status"})),
-        (
-            "browser_record",
-            json!({"action":"stop","recording":"recording_1"}),
-        ),
+        ("browser_record", json!({"action":"stop"})),
         ("browser_record", json!({"action":"save","download":true})),
         (
             "browser_record",
             json!({"action":"save","target":"target_1"}),
         ),
+        ("browser_record", json!({"action":"discard"})),
         (
             "browser_record",
-            json!({"action":"discard","recording":"recording_1"}),
+            json!({"action":"status","timeout_ms":5000}),
         ),
         ("browser_diagnose", json!({})),
         (
@@ -294,6 +287,14 @@ fn known_good_calls() -> Vec<(&'static str, Value)> {
             json!({"source":"network","detail":"all","match":"api","after":"diag_1","limit":10}),
         ),
         ("policy_explain", json!({})),
+        ("policy_explain", json!({"timeout_ms":1000})),
+        ("browser_tabs", json!({"action":"list","timeout_ms":2000})),
+        ("browser_read", json!({"timeout_ms":15000})),
+        ("browser_find", json!({"text":"Save","timeout_ms":15000})),
+        (
+            "browser_dialog",
+            json!({"action":"status","timeout_ms":500}),
+        ),
     ]
 }
 
@@ -486,6 +487,12 @@ fn the_checker_rejects_invalid_calls_against_the_real_catalog() {
         ("browser_navigate", json!({"url":"ftp://example.com"})),
         ("browser_press_key", json!({"strokes":["Control","a"]})),
         ("browser_click", json!({"target":"view_1"})),
+        ("browser_wait", json!({"condition":"layout_stable"})),
+        (
+            "browser_record",
+            json!({"action":"stop","recording":"recording_1"}),
+        ),
+        ("browser_read", json!({"timeout_ms":99})),
     ];
     for (tool, call) in invalid {
         assert!(

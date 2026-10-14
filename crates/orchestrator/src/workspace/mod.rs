@@ -10,11 +10,38 @@ use crate::browser::adapter::{
 };
 
 use crate::intake::session::{IntakeChannel, SessionMarker};
-use crate::language::outcome::TargetRole;
+use crate::language::outcome::{DialogKind, TargetRole};
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
+
+/// How many random characters follow the prefix of a handle Ghostlight issues.
+///
+/// Eight base32 characters are 40 random bits. Handles are checked against the workspace that
+/// owns them, so they only have to be unique there and hard to confuse with a handle from an
+/// earlier session, which a short counter would not be.
+const HANDLE_SUFFIX_CHARS: usize = 8;
+
+/// The characters a handle's random part is drawn from: lowercase RFC 4648 base32.
+const HANDLE_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+
+/// Mint a short handle with `prefix` that `taken` does not already name.
+fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
+    loop {
+        let mut random = [0_u8; HANDLE_SUFFIX_CHARS];
+        getrandom::getrandom(&mut random).expect("the operating system supplies random bytes");
+        let mut handle = String::from(prefix);
+        handle.extend(
+            random
+                .iter()
+                .map(|byte| char::from(HANDLE_ALPHABET[usize::from(byte % 32)])),
+        );
+        if !taken(&handle) {
+            return handle;
+        }
+    }
+}
 
 /// Immutable user-facing summary of one admitted workspace.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -281,6 +308,8 @@ struct ViewState {
 
 #[derive(Clone, Debug)]
 struct TabState {
+    /// The kind of JavaScript dialog the browser last reported open on this tab, if one is.
+    dialog: Option<DialogKind>,
     physical_id: u64,
     generation: u64,
     url: String,
@@ -954,6 +983,45 @@ impl WorkspaceStore {
         }
     }
 
+    /// Record that a JavaScript dialog opened or closed on a controlled tab.
+    ///
+    /// The browser reports the change as it happens, which is before the call that caused it
+    /// answers, so a result can say a dialog is open without asking the browser again.
+    pub fn apply_browser_dialog(
+        &self,
+        browser: &str,
+        physical_id: u64,
+        dialog: Option<DialogKind>,
+    ) {
+        let mut state = self.lock();
+        for workspace in state
+            .workspaces
+            .values_mut()
+            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+        {
+            if let Some(tab) = workspace
+                .tabs
+                .values_mut()
+                .find(|tab| tab.physical_id == physical_id)
+            {
+                tab.dialog = dialog;
+                return;
+            }
+        }
+    }
+
+    /// The kind of dialog open on one of this workspace's tabs, if the browser reported one.
+    #[must_use]
+    pub fn dialog_open(&self, workspace: &WorkspaceId, physical_id: u64) -> Option<DialogKind> {
+        self.lock()
+            .workspaces
+            .get(workspace)?
+            .tabs
+            .values()
+            .find(|tab| tab.physical_id == physical_id)?
+            .dialog
+    }
+
     /// Remove a tab closed outside an invocation, including from the released pool.
     pub fn apply_browser_close(&self, browser: &str, physical_id: u64) {
         let mut state = self.lock();
@@ -1086,7 +1154,9 @@ impl WorkspaceLease {
         for known in workspace.tabs.values_mut() {
             known.active = false;
         }
-        let handle = TabHandle(format!("tab_{}", Uuid::new_v4().simple()));
+        let handle = TabHandle(short_handle("tab_", |candidate| {
+            workspace.tabs.contains_key(&TabHandle(candidate.into()))
+        }));
         let value = TabState {
             physical_id: tab.tab_id,
             generation: 0,
@@ -1095,6 +1165,7 @@ impl WorkspaceLease {
             readiness: BrowserReadiness::Unknown,
             active: true,
             held: false,
+            dialog: None,
         };
         workspace.tabs.insert(handle.clone(), value.clone());
         Ok(selected(&handle, &value))
@@ -1230,7 +1301,11 @@ impl WorkspaceLease {
         workspace
             .snapshots
             .retain(|_, snapshot| snapshot.tab != tab.handle);
-        let handle = SnapshotHandle(format!("snapshot_{}", Uuid::new_v4().simple()));
+        let handle = SnapshotHandle(short_handle("snapshot_", |candidate| {
+            workspace
+                .snapshots
+                .contains_key(&SnapshotHandle(candidate.into()))
+        }));
         workspace.snapshots.insert(
             handle.clone(),
             SnapshotState {
@@ -1293,7 +1368,11 @@ impl WorkspaceLease {
             return Err(WorkspaceError::StaleTab);
         }
         workspace.images.retain(|_, image| image.tab != tab.handle);
-        let handle = ImageHandle(format!("image_{}", Uuid::new_v4().simple()));
+        let handle = ImageHandle(short_handle("image_", |candidate| {
+            workspace
+                .images
+                .contains_key(&ImageHandle(candidate.into()))
+        }));
         workspace.images.insert(
             handle.clone(),
             ImageState {
@@ -1388,6 +1467,7 @@ impl WorkspaceLease {
             readiness: tab.readiness,
             active: true,
             held,
+            dialog: None,
         };
         workspace.tabs.insert(handle.clone(), value.clone());
         Ok(selected(&handle, &value))
@@ -1413,7 +1493,11 @@ impl WorkspaceLease {
         }
         let mut mapped = Vec::with_capacity(targets.len());
         for target in targets {
-            let handle = TargetHandle(format!("target_{}", Uuid::new_v4().simple()));
+            let handle = TargetHandle(short_handle("target_", |candidate| {
+                workspace
+                    .targets
+                    .contains_key(&TargetHandle(candidate.into()))
+            }));
             workspace.targets.insert(
                 handle.clone(),
                 TargetState {
@@ -1520,7 +1604,9 @@ impl WorkspaceLease {
             return Err(WorkspaceError::StaleTab);
         }
         workspace.views.retain(|_, view| view.tab != tab.handle);
-        let handle = ViewHandle(format!("view_{}", Uuid::new_v4().simple()));
+        let handle = ViewHandle(short_handle("view_", |candidate| {
+            workspace.views.contains_key(&ViewHandle(candidate.into()))
+        }));
         workspace.views.insert(
             handle.clone(),
             ViewState {
@@ -1799,7 +1885,11 @@ mod tests {
 
     use crate::language::outcome::TargetRole;
 
-    use super::{ReleasedTabs, WorkspaceError, WorkspaceId, WorkspaceStore};
+    use super::{
+        short_handle, ReleasedTabs, SnapshotScope, WorkspaceError, WorkspaceId, WorkspaceStore,
+        HANDLE_ALPHABET, HANDLE_SUFFIX_CHARS,
+    };
+    use crate::language::outcome::DialogKind;
 
     const TEST_BROWSER: &str = "browser_test";
 
@@ -2246,6 +2336,107 @@ mod tests {
                 .unwrap_err(),
             WorkspaceError::StaleTab
         );
+    }
+
+    /// Every handle Ghostlight issues is its prefix and eight base32 characters, however many a
+    /// workspace holds, and no two of a kind collide.
+    #[test]
+    fn handles_are_short_base32_and_unique_within_their_workspace() {
+        let shaped = |handle: &str, prefix: &str| {
+            let suffix = handle.strip_prefix(prefix).expect("the prefix");
+            suffix.len() == HANDLE_SUFFIX_CHARS
+                && suffix.bytes().all(|byte| HANDLE_ALPHABET.contains(&byte))
+        };
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        assert!(
+            shaped(tab.handle.as_str(), "tab_"),
+            "{}",
+            tab.handle.as_str()
+        );
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let observed: Vec<ObservedTarget> = (0..200)
+            .map(|index| ObservedTarget {
+                locator: format!("locator_{index}"),
+                role: "button".into(),
+                name: format!("Button {index}"),
+                state: vec![],
+                credential_class: false,
+            })
+            .collect();
+        let targets = lease.register_targets(&tab, &observed).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for (handle, _) in &targets {
+            assert!(shaped(handle.as_str(), "target_"), "{}", handle.as_str());
+            assert!(seen.insert(handle.as_str().to_owned()), "a handle repeated");
+        }
+        let view = lease
+            .register_view(
+                &tab,
+                ViewportGeometry {
+                    scope: CaptureScope::Viewport,
+                    page_x: 0.0,
+                    page_y: 0.0,
+                    css_width: 800.0,
+                    css_height: 600.0,
+                    visual_page_x: 0.0,
+                    visual_page_y: 0.0,
+                    visual_css_width: 800.0,
+                    visual_css_height: 600.0,
+                    device_scale: 1.0,
+                    zoom: 1.0,
+                    output_scale: 1.0,
+                },
+                800,
+                600,
+            )
+            .unwrap();
+        assert!(shaped(view.as_str(), "view_"), "{}", view.as_str());
+        let snapshot = lease
+            .register_snapshot(
+                &tab,
+                SnapshotScope {
+                    root: None,
+                    max_depth: 3,
+                },
+                serde_json::json!({}),
+            )
+            .unwrap();
+        assert!(
+            shaped(snapshot.as_str(), "snapshot_"),
+            "{}",
+            snapshot.as_str()
+        );
+        let image = lease
+            .register_image(&tab, "image/png", "AAAA", 3)
+            .unwrap()
+            .expect("a small capture is kept");
+        assert!(shaped(image.as_str(), "image_"), "{}", image.as_str());
+        assert_eq!(short_handle("tab_", |_| false).len(), "tab_".len() + 8);
+    }
+
+    /// The dialog the browser reports open on a tab is remembered for that tab alone, and a
+    /// report that it closed forgets it.
+    #[test]
+    fn a_dialog_is_remembered_for_its_own_tab_until_it_closes() {
+        let store = WorkspaceStore::default();
+        let workspace = workspace_with_tabs(
+            &store,
+            TEST_BROWSER,
+            &[(1, "https://a.test/"), (2, "https://b.test/")],
+        );
+        assert_eq!(store.dialog_open(&workspace, 1), None);
+        store.apply_browser_dialog(TEST_BROWSER, 1, Some(DialogKind::Prompt));
+        assert_eq!(store.dialog_open(&workspace, 1), Some(DialogKind::Prompt));
+        assert_eq!(store.dialog_open(&workspace, 2), None);
+        store.apply_browser_dialog("another_browser", 2, Some(DialogKind::Alert));
+        assert_eq!(store.dialog_open(&workspace, 2), None);
+        store.apply_browser_dialog(TEST_BROWSER, 1, None);
+        assert_eq!(store.dialog_open(&workspace, 1), None);
     }
 
     #[test]

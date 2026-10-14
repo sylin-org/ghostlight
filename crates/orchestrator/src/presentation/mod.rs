@@ -384,10 +384,10 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         BrowserCommand::ListTabs
         | BrowserCommand::OpenTab { .. }
         | BrowserCommand::ClearDiagnostics { .. }
-        | BrowserCommand::StatusRecording { .. }
-        | BrowserCommand::StopRecording { .. }
+        | BrowserCommand::StatusRecording
+        | BrowserCommand::StopRecording
         | BrowserCommand::ExportRecording { .. }
-        | BrowserCommand::DiscardRecording { .. }
+        | BrowserCommand::DiscardRecording
         | BrowserCommand::Present { .. } => None,
     }
 }

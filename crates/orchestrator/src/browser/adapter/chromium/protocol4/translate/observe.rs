@@ -33,8 +33,6 @@ const UNKNOWN_CONDITION: &str = "unknown wait condition";
 pub mod condition {
     /// The page stops moving.
     pub const VISUAL_SETTLE: &str = "visual_settle";
-    /// The layout stops changing.
-    pub const LAYOUT_STABLE: &str = "layout_stable";
     /// The top document is interactive or complete.
     pub const LOAD_READY: &str = "load_ready";
     /// The top document's URL contains the value.
@@ -192,7 +190,7 @@ pub fn observe(
     let mut reach = reach(l, scope, tab_id)?;
     let budget = wait.timeout_ms.saturating_add(CALL_MARGIN_MS);
     let (doc, local) = match wait.condition {
-        condition::VISUAL_SETTLE | condition::LAYOUT_STABLE => reach.target(wait.locator)?,
+        condition::VISUAL_SETTLE => reach.target(wait.locator)?,
         condition::LOAD_READY | condition::URL_CONTAINS => reach.target(None)?,
         condition::TARGET_PRESENT | condition::TARGET_ABSENT => {
             reach.target(Some(wait.locator.unwrap_or_default()))?

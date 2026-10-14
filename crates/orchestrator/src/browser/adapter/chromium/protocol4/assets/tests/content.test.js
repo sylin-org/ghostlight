@@ -205,8 +205,8 @@ test("composed reads include form values and editable text while masking passwor
   assert.equal(read.ok, true);
   assert.match(read.value.text, /John Doe/);
   assert.doesNotMatch(read.value.text, /Enter email/);
-  assert.match(read.value.text, /\*{64}/);
-  assert.doesNotMatch(read.value.text, /secret123/);
+  assert.match(read.value.text, /\[hidden\]/);
+  assert.doesNotMatch(read.value.text, /secret123|\*{8}/);
   assert.match(read.value.text, /Option B/);
   assert.match(read.value.text, /Editable prose/);
 });
@@ -263,7 +263,8 @@ test("reads mask every credential-class field, not only type password", async ()
   const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
 
   assert.doesNotMatch(read.value.text, /482913|tok-live-77/);
-  assert.match(read.value.text, /\*{64}/);
+  assert.equal(read.value.text.match(/\[hidden\]/g).length, 2);
+  assert.doesNotMatch(read.value.text, /\*{8}/);
 });
 
 test("reads report checkboxes and radios by state and never show a placeholder as a value", async () => {
@@ -308,8 +309,83 @@ test("find and document trees use composed shadow content", async () => {
   assert.equal(inspected.ok, true);
   assert.equal(inspected.value.tree.children[0].kind, "control");
   assert.equal(inspected.value.tree.children[0].label, "Approve garden task");
-  assert.equal(inspected.value.tree.children[0].children[0].label, "Approve garden task");
+  assert.equal(inspected.value.tree.children[0].children[0].label, "");
   assert.doesNotMatch(JSON.stringify(inspected.value.tree), /unassigned decoy/);
+});
+
+test("elements with no role of their own report an accessibility role, never a tag name", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const plain = harness.element("div");
+  plain.append(harness.text("plain container"));
+  const navigation = harness.element("nav");
+  navigation.setAttribute("aria-label", "Site");
+  const list = harness.element("ul");
+  list.setAttribute("aria-label", "Items");
+  const banner = harness.element("header");
+  banner.setAttribute("aria-label", "Top");
+  const region = harness.element("section");
+  region.setAttribute("aria-label", "Billing");
+  body.append(plain, navigation, list, banner, region);
+  harness.setBody(body);
+
+  const found = await harness.send({ kind: "find", text: "plain container", find_kind: "any", max_results: 5 });
+  assert.equal(found.value.targets[0].role, "generic");
+  const structure = await harness.send({ kind: "inspect", inspect_kind: "structure", max_items: 20, visual_settle: false });
+  const roles = Object.fromEntries(structure.value.targets.map((target) => [target.name, target.role]));
+  assert.deepEqual(roles, { Site: "navigation", Items: "list", Top: "banner", Billing: "region" });
+});
+
+test("document tree containers carry a declared name only, never a dump of their text", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const panel = harness.element("section");
+  panel.setAttribute("aria-label", "Billing");
+  const paragraph = harness.element("div");
+  paragraph.append(harness.text("A long paragraph of text that a container label must never repeat."));
+  const heading = harness.element("h2");
+  heading.append(harness.text("Invoices"));
+  const button = harness.element("button");
+  button.append(harness.text("Pay now"));
+  panel.append(heading, paragraph, button);
+  body.append(panel);
+  harness.setBody(body);
+
+  const inspected = await harness.send({ kind: "inspect_tree", max_depth: 5, max_nodes: 400 });
+
+  const [section] = inspected.value.tree.children;
+  assert.deepEqual(
+    [section.kind, section.label],
+    ["container", "Billing"]
+  );
+  const [title, text, control] = section.children;
+  assert.deepEqual([title.kind, title.label], ["heading", "Invoices"]);
+  assert.deepEqual([text.kind, text.label], ["container", ""]);
+  assert.deepEqual([control.kind, control.label], ["control", "Pay now"]);
+  assert.doesNotMatch(JSON.stringify(inspected.value.tree), /long paragraph/);
+});
+
+test("a field with no label, aria-label or title is found by its placeholder", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const bare = harness.element("input");
+  bare.setAttribute("type", "text");
+  bare.setAttribute("placeholder", "Search the archive");
+  const titled = harness.element("input");
+  titled.setAttribute("type", "text");
+  titled.setAttribute("title", "Order number");
+  titled.setAttribute("placeholder", "ignored while a title exists");
+  body.append(bare, titled);
+  harness.setBody(body);
+
+  const found = await harness.send({ kind: "find", text: "archive", find_kind: "control", max_results: 5 });
+  assert.equal(found.value.targets.length, 1);
+  assert.equal(found.value.targets[0].name, "Search the archive");
+  assert.equal(found.value.targets[0].role, "textbox");
+  const selected = await harness.send({ kind: "query_semantic", name: "search the archive", exact: true });
+  assert.equal(selected.value.targets.length, 1);
+  const titledName = await harness.send({ kind: "find", text: "order number", find_kind: "control", max_results: 5 });
+  assert.equal(titledName.value.targets[0].name, "Order number");
 });
 
 test("text find reaches div containers and draggable, labelled and focusable elements", async () => {
@@ -358,7 +434,7 @@ test("text find prefers a shadow-root descendant over light wrappers around its 
 
   assert.equal(found.ok, true);
   assert.equal(found.value.targets.length, 1);
-  assert.equal(found.value.targets[0].role, "span");
+  assert.equal(found.value.targets[0].role, "generic");
   assert.equal(found.value.truncated, false);
 });
 
@@ -607,7 +683,7 @@ test("point subjects cross the shadow boundary to the nearest actionable host", 
   const orphan = { tagName: "SPAN", id: "", labels: [], matches() { return false; }, getRootNode() { return {}; }, getAttribute() { return null; } };
   harness.document.elementFromPoint = () => orphan;
   const bare = await harness.send({ kind: "scroll_point", x: 30, y: 30 });
-  assert.equal(bare.value.subject.role, "span");
+  assert.equal(bare.value.subject.role, "generic");
 });
 
 test("viewport_point converts a page point and refuses one outside the viewport", async () => {

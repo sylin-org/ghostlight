@@ -497,8 +497,9 @@ browser `File` objects for the already selected file input. The relay never read
 Credential-like metadata on that file control does not block explicitly requested file upload or
 recording save; the physical file-target checks and configured authority remain in force.
 
-Recording follows one-owner semantics, and the owner is the browser. The extension's plural
-registry owns Chrome screencast start, frame acknowledgement, identity, compressed frames, fixed
+Recording follows one-owner semantics, and the owner is the browser. The extension's registry,
+which the service addresses by recording id on the wire (a session holds at most one, so no model
+call names it), owns Chrome screencast start, frame acknowledgement, identity, compressed frames, fixed
 bounds, autonomous stop, frozen retention, erase, the truthful recording indicator, and the
 animated GIF encode. The orchestrator sends only start, status, stop, export, and discard requests.
 The extension folds byte-identical successive JPEGs into one visual span before retention, so

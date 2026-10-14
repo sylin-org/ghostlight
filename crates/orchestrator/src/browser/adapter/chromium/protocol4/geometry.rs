@@ -22,9 +22,6 @@ use crate::browser::BrowserError;
 /// The most documents deep a point is routed.
 pub const MAX_ROUTE_DEPTH: usize = 8;
 
-/// The failure of a view that no longer matches the one a screenshot was taken in.
-pub const STALE_VIEW: &str = "stale screenshot view";
-
 /// How far a view position or size may drift, in CSS pixels, and still be the same view.
 const POSITION_TOLERANCE: f64 = 1.0;
 /// How far the device scale may drift and still be the same view.
@@ -156,8 +153,8 @@ fn near(left: f64, right: f64, tolerance: f64) -> bool {
 ///
 /// # Errors
 ///
-/// Returns a plain primitive failure, [`STALE_VIEW`], when the visual viewport, device scale or
-/// zoom has moved beyond the tolerance. Nothing was sent, so nothing happened.
+/// Returns [`BrowserError::StaleView`] when the visual viewport, device scale or zoom has moved
+/// beyond the tolerance. Nothing was sent, so nothing happened.
 pub fn check_view(current: &ViewFacts, expected: &ViewportGeometry) -> Result<(), BrowserError> {
     let agrees = near(
         current.visual_page_x,
@@ -183,7 +180,7 @@ pub fn check_view(current: &ViewFacts, expected: &ViewportGeometry) -> Result<()
     if agrees {
         Ok(())
     } else {
-        Err(BrowserError::Primitive(STALE_VIEW.to_owned()))
+        Err(BrowserError::StaleView)
     }
 }
 

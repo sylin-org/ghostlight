@@ -1677,16 +1677,6 @@ pub enum RecordingState {
     Unknown,
 }
 
-impl From<physical::RecordingState> for RecordingState {
-    fn from(state: physical::RecordingState) -> Self {
-        match state {
-            physical::RecordingState::Recording => Self::Recording,
-            physical::RecordingState::Frozen => Self::Frozen,
-            physical::RecordingState::Interrupted => Self::Interrupted,
-        }
-    }
-}
-
 impl TryFrom<RecordingState> for physical::RecordingState {
     type Error = UnknownVariant;
 
@@ -1723,21 +1713,6 @@ pub enum RecordingStopReason {
     /// A reason this service does not know.
     #[serde(other)]
     Unknown,
-}
-
-impl From<physical::RecordingStopReason> for RecordingStopReason {
-    fn from(reason: physical::RecordingStopReason) -> Self {
-        match reason {
-            physical::RecordingStopReason::DocumentBoundary => Self::DocumentBoundary,
-            physical::RecordingStopReason::Explicit => Self::Explicit,
-            physical::RecordingStopReason::HardTimeout => Self::HardTimeout,
-            physical::RecordingStopReason::MemoryLimit => Self::MemoryLimit,
-            physical::RecordingStopReason::BrowserDetached => Self::BrowserDetached,
-            physical::RecordingStopReason::RuntimeHeld => Self::RuntimeHeld,
-            physical::RecordingStopReason::ServiceDisconnected => Self::ServiceDisconnected,
-            physical::RecordingStopReason::FrameTooLarge => Self::FrameTooLarge,
-        }
-    }
 }
 
 impl TryFrom<RecordingStopReason> for physical::RecordingStopReason {
@@ -1789,30 +1764,11 @@ pub struct RecordingSummary {
     pub source_urls_complete: bool,
 }
 
-impl From<physical::PhysicalRecordingSummary> for RecordingSummary {
-    fn from(summary: physical::PhysicalRecordingSummary) -> Self {
-        Self {
-            recording_id: summary.recording_id,
-            tab_id: summary.tab_id,
-            state: summary.state.into(),
-            frame_count: summary.frame_count,
-            bytes_held: summary.bytes_held,
-            duration_ms: summary.duration_ms,
-            hard_expires_unix_ms: summary.hard_expires_unix_ms,
-            retention_expires_unix_ms: summary.retention_expires_unix_ms,
-            stop_reason: summary.stop_reason.map(Into::into),
-            source_urls: summary.source_urls,
-            source_urls_complete: summary.source_urls_complete,
-        }
-    }
-}
-
 impl TryFrom<RecordingSummary> for physical::PhysicalRecordingSummary {
     type Error = UnknownVariant;
 
     fn try_from(summary: RecordingSummary) -> Result<Self, UnknownVariant> {
         Ok(Self {
-            recording_id: summary.recording_id,
             tab_id: summary.tab_id,
             state: summary.state.try_into()?,
             frame_count: summary.frame_count,
@@ -2738,7 +2694,6 @@ mod tests {
         );
 
         let summary = physical::PhysicalRecordingSummary {
-            recording_id: "r1".into(),
             tab_id: 3,
             state: physical::RecordingState::Interrupted,
             frame_count: 4,
@@ -2750,11 +2705,19 @@ mod tests {
             source_urls: vec!["https://example.com/".into()],
             source_urls_complete: true,
         };
-        let wire = RecordingSummary::from(summary.clone());
-        assert_eq!(
-            encode(&wire),
-            serde_json::to_value(&summary).expect("physical encodes")
-        );
+        let wire = RecordingSummary {
+            recording_id: "r1".into(),
+            tab_id: 3,
+            state: RecordingState::Interrupted,
+            frame_count: 4,
+            bytes_held: 100,
+            duration_ms: 900,
+            hard_expires_unix_ms: Some(7),
+            retention_expires_unix_ms: None,
+            stop_reason: Some(RecordingStopReason::MemoryLimit),
+            source_urls: vec!["https://example.com/".into()],
+            source_urls_complete: true,
+        };
         assert_eq!(
             physical::PhysicalRecordingSummary::try_from(wire.clone()),
             Ok(summary)

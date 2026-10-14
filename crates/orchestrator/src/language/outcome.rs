@@ -209,6 +209,62 @@ pub enum SavedTo {
     Client,
 }
 
+/// The kind of JavaScript dialog a page has open, narrowed to the browser's own closed names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DialogKind {
+    /// `alert`: a message with one button.
+    Alert,
+    /// `confirm`: a question to accept or dismiss.
+    Confirm,
+    /// `prompt`: a question that takes typed text.
+    Prompt,
+    /// `beforeunload`: the leave-this-page question.
+    BeforeUnload,
+    /// A kind the browser reported that this build does not name.
+    Other,
+}
+
+impl DialogKind {
+    /// Narrow the kind the browser reported.
+    #[must_use]
+    pub fn classify(reported: &str) -> Self {
+        match reported {
+            "alert" => Self::Alert,
+            "confirm" => Self::Confirm,
+            "prompt" => Self::Prompt,
+            "beforeunload" => Self::BeforeUnload,
+            _ => Self::Other,
+        }
+    }
+
+    /// The name the `dialog_opened` fact carries.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Alert => "alert",
+            Self::Confirm => "confirm",
+            Self::Prompt => "prompt",
+            Self::BeforeUnload => "beforeunload",
+            Self::Other => "other",
+        }
+    }
+
+    /// The sentence that says this dialog is open.
+    const fn sentence(self) -> &'static str {
+        match self {
+            Self::Alert => "An alert dialog is now open.",
+            Self::Confirm => "A confirm dialog is now open.",
+            Self::Prompt => "A prompt dialog is now open.",
+            Self::BeforeUnload => "A leave-page dialog is now open.",
+            Self::Other => "A JavaScript dialog is now open.",
+        }
+    }
+}
+
+/// The one step that clears a dialog, shared by every result that leaves one open.
+const HANDLE_DIALOG_FIRST: &str =
+    "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.";
+
 /// What one completed browser action did in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Outcome {
@@ -380,6 +436,16 @@ pub enum Outcome {
     },
     /// Captured recording bytes were erased.
     RecordingDiscarded,
+    /// An action completed and left a JavaScript dialog open on its page.
+    ///
+    /// The action happened, so its own sentence stands; the dialog is the page's answer to it and
+    /// blocks the page until it is handled.
+    DialogOpened {
+        /// The completed action, in its own words.
+        action: Box<Outcome>,
+        /// The kind of dialog it left open.
+        dialog: DialogKind,
+    },
 }
 
 impl Outcome {
@@ -603,6 +669,17 @@ impl Outcome {
                 ),
                 None => format!("Pressed a key on {}.", place(host, "the page")),
             },
+            // Both ends landing on one named control is a drag inside it, such as a slider or a
+            // canvas, and "onto itself" would misdescribe it.
+            Self::Dragged {
+                host,
+                source: Some(source),
+                destination: Some(destination),
+            } if source == destination && source.label.is_some() => format!(
+                "Dragged across {} on {}.",
+                source.noun_phrase(),
+                place(host, "the page")
+            ),
             Self::Dragged {
                 host,
                 source: Some(source),
@@ -704,6 +781,43 @@ impl Outcome {
                 }
             }
             Self::RecordingDiscarded => "Erased the recording.".into(),
+            Self::DialogOpened { action, dialog } => {
+                format!("{} {}", action.summary(), dialog.sentence())
+            }
+        }
+    }
+
+    /// Whether this completed action can leave a dialog open on its page.
+    ///
+    /// Reading, listing, waiting and the dialog and recording tools never open one; the actions
+    /// that drive the page do.
+    #[must_use]
+    pub const fn can_open_dialog(&self) -> bool {
+        matches!(
+            self,
+            Self::TargetClicked { .. }
+                | Self::PointClicked { .. }
+                | Self::PageScrolled { .. }
+                | Self::TargetRevealed { .. }
+                | Self::Hovered { .. }
+                | Self::FormFilled { .. }
+                | Self::TextTyped { .. }
+                | Self::KeyboardSent { .. }
+                | Self::Dragged { .. }
+                | Self::FilesUploaded { .. }
+                | Self::ScriptEvaluated { .. }
+                | Self::PageNavigated { .. }
+                | Self::PageReloaded { .. }
+                | Self::HistoryTraversed { .. }
+        )
+    }
+
+    /// Say that this action left a dialog open.
+    #[must_use]
+    pub fn with_open_dialog(self, dialog: DialogKind) -> Self {
+        Self::DialogOpened {
+            action: Box::new(self),
+            dialog,
         }
     }
 
@@ -737,9 +851,13 @@ impl Outcome {
                 "Read or inspect the page to see its current state before choosing another action."
                     .into(),
             ],
-            Self::DialogObserved { present: true, .. } => vec![
-                "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.".into(),
-            ],
+            Self::DialogObserved { present: true, .. } => vec![HANDLE_DIALOG_FIRST.into()],
+            Self::DialogOpened { action, .. } => {
+                let mut steps = vec![HANDLE_DIALOG_FIRST.to_owned()];
+                steps.extend(action.next_steps());
+                steps.truncate(2);
+                steps
+            }
             Self::DiagnosticsRead {
                 count: 0,
                 capture_started: true,
@@ -862,6 +980,7 @@ impl Outcome {
                 host: host.clone(),
                 ..Observed::default()
             },
+            Self::DialogOpened { action, .. } => action.observed(),
             Self::TabClosed
             | Self::TabAlreadyClosed
             | Self::DialogHandled { .. }
@@ -1056,9 +1175,9 @@ pub enum Refusal {
     DeadlineExpired {
         /// True when the deadline fired before any dispatch could happen.
         before_dispatch: bool,
-        /// True when the call that set this deadline accepts `timeout_ms` and is still below the
-        /// maximum, so raising it is advice the decoder will take. Read, inspect, find, other
-        /// fixed-deadline tools, and calls already at the maximum never get that advice.
+        /// True when the call's own `timeout_ms` set this deadline and is still below the
+        /// maximum, so raising it is advice the decoder will take. A call already at the maximum,
+        /// and one whose deadline an edge supplied, never get that advice.
         timeout_adjustable: bool,
     },
     /// The browser answered the job with its own bounded refusal.
@@ -1101,8 +1220,10 @@ pub enum Refusal {
     CaptureTooLarge,
     /// No JavaScript dialog was visible.
     NoDialogVisible,
-    /// A recording handle was absent, ambiguous, or in a conflicting transition.
+    /// This session has no recording to act on.
     RecordingUnavailable,
+    /// This session already holds a recording, so another cannot start.
+    RecordingHeld,
     /// Retained recording frames could not produce a bounded GIF.
     RecordingExportFailed,
     /// The action was applied, but the condition the caller asked to check was not confirmed.
@@ -1214,7 +1335,8 @@ impl Refusal {
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
             Self::CaptureTooLarge => "The screenshot was too large to return.",
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
-            Self::RecordingUnavailable => "That recording is no longer available.",
+            Self::RecordingUnavailable => "This session has no recording.",
+            Self::RecordingHeld => "This session already has a recording.",
             Self::RecordingExportFailed => "The recording could not be turned into a replay.",
             Self::ActionUnconfirmed { action, cause } => {
                 return unconfirmed_summary(action, *cause);
@@ -1283,8 +1405,8 @@ impl Refusal {
                     .into(),
             ],
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
-            // Only advice the decoder will take: timeout_ms exists on some tools and not others,
-            // and never grows past its maximum. After dispatch the first job is learning whether
+            // Only advice the decoder will take: timeout_ms never grows past its maximum, and an
+            // edge-supplied deadline ignores it. After dispatch the first job is learning whether
             // the action already happened.
             Self::DeadlineExpired {
                 before_dispatch: false,
@@ -1347,7 +1469,10 @@ impl Refusal {
                 "Capture the viewport or a smaller region instead of the full page.".into(),
             ],
             Self::RecordingUnavailable => vec![
-                "Use browser_record with action status and an explicit recording handle when more than one exists."
+                "Call browser_record with action start to begin a recording.".into(),
+            ],
+            Self::RecordingHeld => vec![
+                "Call browser_record with action save or discard to finish the current recording, then start again."
                     .into(),
             ],
             Self::RecordingExportFailed => vec![
@@ -1648,7 +1773,7 @@ fn waited(condition: &str, elapsed_ms: u64, satisfied: bool, host: &Option<Strin
             "matched a control",
             "matched no control",
         ),
-        "visual_settle" | "layout_stable" => (
+        "visual_settle" => (
             Some("The view"),
             "settled visually",
             "never settled visually",
@@ -1782,7 +1907,7 @@ mod tests {
 
     use super::{
         ActionSubject, BlockedReason, BrowserUnavailableReason, CaptureKind, CheckFailure,
-        Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
+        DialogKind, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
         HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::workspace::WorkspaceError;
@@ -2047,6 +2172,23 @@ mod tests {
             (
                 Outcome::Dragged {
                     host: Some("example.com".into()),
+                    source: Some(ActionSubject::from_page("slider", "Volume", true)),
+                    destination: Some(ActionSubject::from_page("slider", "Volume", true)),
+                },
+                "Dragged across the \"Volume\" slider on example.com.",
+            ),
+            (
+                // Without names there is no telling one control from another of its kind.
+                Outcome::Dragged {
+                    host: Some("example.com".into()),
+                    source: Some(ActionSubject::unnamed(TargetRole::Control)),
+                    destination: Some(ActionSubject::unnamed(TargetRole::Control)),
+                },
+                "Dragged a control onto a control on example.com.",
+            ),
+            (
+                Outcome::Dragged {
+                    host: Some("example.com".into()),
                     source: None,
                     destination: None,
                 },
@@ -2085,6 +2227,21 @@ mod tests {
                     host: Some("example.com".into()),
                 },
                 "Text never appeared on example.com within 8 seconds.",
+            ),
+            (
+                Outcome::TargetClicked {
+                    host: Some("example.com".into()),
+                    subject: ActionSubject::from_page("button", "Delete", true),
+                }
+                .with_open_dialog(DialogKind::Confirm),
+                "Clicked the \"Delete\" button on example.com. A confirm dialog is now open.",
+            ),
+            (
+                Outcome::ScriptEvaluated {
+                    host: Some("example.com".into()),
+                }
+                .with_open_dialog(DialogKind::classify("a kind from the future")),
+                "Executed JavaScript on example.com. A JavaScript dialog is now open.",
             ),
             (
                 Outcome::DialogHandled { accepted: true },
@@ -2660,7 +2817,11 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::RecordingUnavailable,
-                "That recording is no longer available.",
+                "This session has no recording.",
+            ),
+            (
+                Refusal::RecordingHeld,
+                "This session already has a recording.",
             ),
             (
                 Refusal::RecordingExportFailed,
@@ -2780,9 +2941,9 @@ Changes are \"unsaved\".".into()),
         );
     }
 
-    /// A deadline suggests only what the call can actually change: more `timeout_ms` where the
-    /// tool takes it, a narrower request where it does not, and a look at the page when the
-    /// action may already have happened.
+    /// A deadline suggests only what the call can actually change: more `timeout_ms` below the
+    /// maximum, a narrower request at it, and a look at the page when the action may already have
+    /// happened.
     #[test]
     fn deadline_advice_follows_what_the_call_can_change() {
         assert_eq!(
@@ -2947,6 +3108,16 @@ Changes are \"unsaved\".".into()),
             Outcome::TabAlreadyClosed.next_steps(),
             vec!["Call browser_tabs with action list to see remaining open tabs."]
         );
+        let opened = Outcome::PageScrolled {
+            host: None,
+            direction: "down".into(),
+        }
+        .with_open_dialog(DialogKind::Prompt);
+        assert_eq!(
+            opened.next_steps(),
+            vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
+        );
+        assert_eq!(opened.observed(), Observed::default());
         assert_eq!(
             Outcome::TargetsListed {
                 noun: TargetNoun::Control,
