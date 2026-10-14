@@ -74,25 +74,30 @@ fn is_ghostlight(name: &str) -> bool {
 /// that started after its child cannot be that child's real parent (equal times are allowed), so
 /// the walk treats it as unknown and stops before it, for the hop skip and the fold alike.
 ///
+/// `start` is the first parent to read and `started_at` is when the process below it began, so the
+/// first link is held to the same rule as every later one. The walk does not begin at the starting
+/// process itself, which may not be named like Ghostlight and would become its own caller.
+///
 /// `lookup` answers one process by pid. The whole climb reads at most `MAX_ANCESTORS_READ`
 /// ancestors. Returns `None` when the chain ends, turns untrustworthy, or the budget is spent
 /// before any foreign ancestor is found; once one is found, any of those settles on the outermost
 /// member reached.
 fn nearest_foreign_ancestor(
     start: u32,
+    started_at: u64,
     mut lookup: impl FnMut(u32) -> Option<Ancestor>,
 ) -> Option<Ancestor> {
     let mut next = start;
     let mut caller: Option<Ancestor> = None;
-    let mut child_started_at: Option<u64> = None;
+    let mut child_started_at = started_at;
     for _ in 0..MAX_ANCESTORS_READ {
         let Some(process) = lookup(next) else {
             return caller;
         };
-        if child_started_at.is_some_and(|child| process.started_at > child) {
+        if process.started_at > child_started_at {
             return caller;
         }
-        child_started_at = Some(process.started_at);
+        child_started_at = process.started_at;
         let parent = process.parent;
         match &caller {
             None if is_ghostlight(&process.name) => {}
@@ -120,8 +125,9 @@ fn caller() -> Option<SessionMarker> {
         true,
         ProcessRefreshKind::nothing(),
     );
-    let parent = system.process(me)?.parent()?;
-    let found = nearest_foreign_ancestor(parent.as_u32(), |pid| {
+    let own = system.process(me)?;
+    let parent = own.parent()?;
+    let found = nearest_foreign_ancestor(parent.as_u32(), own.start_time(), |pid| {
         let pid = Pid::from_u32(pid);
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[pid]),
@@ -160,9 +166,17 @@ mod tests {
         }
     }
 
+    /// Walk from `start` as a process that began after everything in the chain.
     fn walk(chain: &[Ancestor], start: u32) -> Option<u32> {
-        nearest_foreign_ancestor(start, |pid| chain.iter().find(|p| p.pid == pid).cloned())
-            .map(|p| p.pid)
+        walk_after(chain, start, u64::MAX)
+    }
+
+    /// Walk from `start` as the parent of a process that began at `started_at`.
+    fn walk_after(chain: &[Ancestor], start: u32, started_at: u64) -> Option<u32> {
+        nearest_foreign_ancestor(start, started_at, |pid| {
+            chain.iter().find(|p| p.pid == pid).cloned()
+        })
+        .map(|p| p.pid)
     }
 
     #[test]
@@ -262,6 +276,27 @@ mod tests {
             started(20, "bash.exe", None, 400),
         ];
         assert_eq!(walk(&equal, 40), Some(20), "equal start times are allowed");
+    }
+
+    #[test]
+    fn a_first_parent_that_started_after_this_process_is_a_recycled_pid() {
+        // The spawning stub exited and its pid now names an unrelated, newer shell.
+        let chain = [started(20, "pwsh.exe", Some(10), 900)];
+        assert_eq!(walk_after(&chain, 20, 400), None);
+        assert_eq!(
+            walk_after(&chain, 20, 900),
+            Some(20),
+            "equal times are allowed"
+        );
+        let hop = [
+            started(20, SERVICE_EXECUTABLE_NAME, Some(10), 900),
+            started(10, "pwsh.exe", None, 100),
+        ];
+        assert_eq!(
+            walk_after(&hop, 20, 400),
+            None,
+            "a Ghostlight first parent is held to the rule too"
+        );
     }
 
     #[test]
