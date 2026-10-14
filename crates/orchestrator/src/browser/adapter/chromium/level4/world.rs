@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-use super::wire::{CallAnswer, Point};
+use super::wire::{CallAnswer, Point, Readiness};
 use crate::browser::adapter::{
     BrowserOutcome, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
 };
@@ -883,6 +883,8 @@ pub struct Observed {
     pub satisfied: bool,
     /// How long the asset waited.
     pub elapsed_ms: u64,
+    /// How far the document had loaded when the wait ended.
+    pub readiness: Readiness,
 }
 
 #[cfg(test)]

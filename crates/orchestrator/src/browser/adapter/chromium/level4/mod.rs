@@ -24,24 +24,83 @@ pub mod wire;
 pub mod world;
 
 use self::link::Link;
-use self::translate::{present, records, tabs, untranslated};
+use self::scope::Scope;
+use self::translate::observe::{self, Subjects, Wait};
+use self::translate::records::{self, DiagnosticsRead};
+use self::translate::{present, read, tabs, untranslated};
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
 /// The failure of a page-runtime install sent to a protocol-4 connection, which receives its
 /// page assets in `hello_accepted`.
 const INSTALL_IS_LEVEL_THREE: &str = "page runtime installs are level 3 only";
+/// The failure of document-scoped work inside document-scoped work, or of a document
+/// description inside a scope.
+const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
 
 /// Carry one unit of browser work over a protocol-4 connection.
 ///
-/// Work this service does not translate yet answers that the extension lacks the capability,
-/// so no unit of work is ever sent half-translated.
+/// Work inside a document scope runs with that scope admitted, and answers with what it read
+/// alongside what the scope reached. Work this service does not translate yet answers that the
+/// extension lacks the capability, so no unit of work is ever sent half-translated.
 ///
 /// # Errors
 ///
 /// Returns the failure of the first primitive that failed, as the [`Link`] maps it.
 pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
     match command {
+        BrowserCommand::InDocuments { scope, primitive } => {
+            if matches!(
+                *primitive,
+                BrowserCommand::InDocuments { .. } | BrowserCommand::DescribeDocuments { .. }
+            ) {
+                return Err(nested());
+            }
+            let mut scope = Scope::admit(&scope)?;
+            let result = translate(*primitive, l, Some(&mut scope))?;
+            Ok(BrowserOutcome::InDocuments {
+                observation: scope.observation(&result),
+                result: Box::new(result),
+            })
+        }
+        other => translate(other, l, None),
+    }
+}
+
+/// The failure of document-scoped work that nests.
+fn nested() -> BrowserError {
+    BrowserError::Protocol(NESTED_DOCUMENTS.into())
+}
+
+/// Carry one unit of work, inside the admitted scope when there is one.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per unit of work keeps the whole vocabulary in one exhaustive match"
+)]
+fn translate(
+    command: BrowserCommand,
+    l: &mut Link<'_>,
+    scope: Option<&mut Scope>,
+) -> Result<BrowserOutcome, BrowserError> {
+    match command {
+        BrowserCommand::InDocuments { .. } => Err(nested()),
+        BrowserCommand::DescribeDocuments { .. } if scope.is_some() => Err(nested()),
+        BrowserCommand::DescribeDocuments {
+            tab_id,
+            locators,
+            points,
+            focused,
+            settle_ms,
+        } => observe::describe_documents(
+            l,
+            tab_id,
+            Subjects {
+                locators: &locators,
+                points: &points,
+                focused,
+            },
+            settle_ms,
+        ),
         BrowserCommand::InstallPageRuntime { .. } => {
             Err(BrowserError::Protocol(INSTALL_IS_LEVEL_THREE.into()))
         }
@@ -72,6 +131,70 @@ pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, 
         BrowserCommand::NavigateDiscardingBeforeUnload { tab_id, url } => {
             tabs::navigate(l, tab_id, wire::NavigationTarget::Url { url }, true)
         }
+        BrowserCommand::ReadText {
+            tab_id,
+            locator,
+            max_chars,
+        } => read::read_text(l, scope, tab_id, locator.as_deref(), max_chars),
+        BrowserCommand::Inspect {
+            tab_id,
+            kind,
+            max_items,
+        } => read::inspect(l, scope, tab_id, &kind, max_items),
+        BrowserCommand::ReadDocument {
+            tab_id,
+            mode,
+            max_chars,
+        } => read::read_document(l, scope, tab_id, &mode, max_chars),
+        BrowserCommand::InspectTree {
+            tab_id,
+            locator,
+            max_depth,
+        } => read::inspect_tree(l, scope, tab_id, locator.as_deref(), max_depth),
+        BrowserCommand::Find {
+            tab_id,
+            text,
+            kind,
+            max_results,
+        } => read::find(l, scope, tab_id, &text, &kind, max_results),
+        BrowserCommand::DescribeTargets { tab_id, locators } => {
+            read::describe_targets(l, scope, tab_id, &locators)
+        }
+        BrowserCommand::QuerySemantic {
+            tab_id,
+            name,
+            role,
+            exact,
+            form_scope,
+        } => read::query_semantic(
+            l,
+            scope,
+            tab_id,
+            &read::Semantic {
+                name: &name,
+                role: role.as_deref(),
+                exact,
+                form_scope,
+            },
+        ),
+        BrowserCommand::DescribeFocused { tab_id } => read::describe_focused(l, scope, tab_id),
+        BrowserCommand::Observe {
+            tab_id,
+            condition,
+            value,
+            locator,
+            timeout_ms,
+        } => observe::observe(
+            l,
+            scope,
+            tab_id,
+            Wait {
+                condition: &condition,
+                value: value.as_deref(),
+                locator: locator.as_deref(),
+                timeout_ms,
+            },
+        ),
         BrowserCommand::SetZoom { tab_id, zoom } => tabs::set_zoom(l, tab_id, zoom),
         BrowserCommand::ResizeWindow {
             tab_id,
@@ -84,7 +207,27 @@ pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, 
             accept,
             text,
         } => tabs::handle_dialog(l, tab_id, accept, text),
+        BrowserCommand::ReadDiagnostics {
+            tab_id,
+            source,
+            detail,
+            match_text,
+            after,
+            limit,
+        } => records::read_diagnostics(
+            l,
+            scope.as_deref(),
+            DiagnosticsRead {
+                tab_id,
+                source,
+                detail,
+                match_text,
+                after,
+                limit,
+            },
+        ),
         BrowserCommand::ClearDiagnostics { tab_ids } => records::clear_diagnostics(l, tab_ids),
+        BrowserCommand::StartRecording { tab_id } => records::start(l, scope.as_deref(), tab_id),
         BrowserCommand::StatusRecording { recording_id } => records::status(l, recording_id),
         BrowserCommand::StopRecording { recording_id } => records::stop(l, recording_id),
         BrowserCommand::ExportRecording {
@@ -110,17 +253,8 @@ pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, 
         BrowserCommand::DiscardRecording { recording_id } => records::discard(l, recording_id),
         BrowserCommand::Cancel { correlation } => Ok(present::cancel(l, &correlation)),
         BrowserCommand::Present { signal } => present::present(l, signal),
-        BrowserCommand::DescribeDocuments { .. }
-        | BrowserCommand::InDocuments { .. }
-        | BrowserCommand::ReadText { .. }
-        | BrowserCommand::Inspect { .. }
-        | BrowserCommand::ReadDocument { .. }
-        | BrowserCommand::InspectTree { .. }
-        | BrowserCommand::Find { .. }
-        | BrowserCommand::Screenshot { .. }
+        BrowserCommand::Screenshot { .. }
         | BrowserCommand::ScreenshotRegion { .. }
-        | BrowserCommand::DescribeTargets { .. }
-        | BrowserCommand::QuerySemantic { .. }
         | BrowserCommand::Activate { .. }
         | BrowserCommand::ActivatePoint { .. }
         | BrowserCommand::ActivateModified { .. }
@@ -131,7 +265,6 @@ pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, 
         | BrowserCommand::HoverPoint { .. }
         | BrowserCommand::Fill { .. }
         | BrowserCommand::TypeText { .. }
-        | BrowserCommand::DescribeFocused { .. }
         | BrowserCommand::TypeFocused { .. }
         | BrowserCommand::PressKey { .. }
         | BrowserCommand::Drag { .. }
@@ -139,9 +272,6 @@ pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, 
         | BrowserCommand::UploadFiles { .. }
         | BrowserCommand::DropImageAt { .. }
         | BrowserCommand::EvaluateScript { .. }
-        | BrowserCommand::Observe { .. }
-        | BrowserCommand::ReadDiagnostics { .. }
-        | BrowserCommand::StartRecording { .. }
         | BrowserCommand::ExportRecording {
             destination: RecordingDestination::Target { .. },
             ..

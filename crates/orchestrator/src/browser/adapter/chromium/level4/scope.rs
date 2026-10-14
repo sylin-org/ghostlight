@@ -90,6 +90,7 @@ pub struct Scope {
     subjects: Vec<FrameRef>,
     input_subjects: Vec<FrameRef>,
     strict: bool,
+    watch: bool,
     settle_until: Instant,
     observation: Observation,
 }
@@ -123,9 +124,31 @@ impl Scope {
             subjects,
             input_subjects: Vec::new(),
             strict: scope.strict_tree,
+            watch: scope.watch_changes,
             settle_until: Instant::now() + settle,
             observation: Observation::default(),
         })
+    }
+
+    /// The scope of work the authority sent without one: every addressable document of the
+    /// tree, no subjects, no preparation budget and no recording watch.
+    #[must_use]
+    pub fn open(tree: FrameTree) -> Self {
+        let allowed = tree
+            .real_documents()
+            .filter(|document| document.supported)
+            .map(|document| document.doc.clone())
+            .collect();
+        Self {
+            tree,
+            allowed,
+            subjects: Vec::new(),
+            input_subjects: Vec::new(),
+            strict: false,
+            watch: false,
+            settle_until: Instant::now(),
+            observation: Observation::default(),
+        }
     }
 
     /// The tree the scope was admitted against.
@@ -138,6 +161,28 @@ impl Scope {
     #[must_use]
     pub fn top(&self) -> FrameRef {
         self.tree.top().clone()
+    }
+
+    /// The documents the authority routed the request's locators, points or focus to.
+    #[must_use]
+    pub fn subjects(&self) -> &[FrameRef] {
+        &self.subjects
+    }
+
+    /// The names of the allowed documents, sorted, so equal admitted sets name equally.
+    #[must_use]
+    pub fn allowed_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.allowed.iter().map(document_id).collect();
+        ids.sort();
+        ids
+    }
+
+    /// The documents a recording must stop at when they change: every real document of the
+    /// tree, or `None` when the authority did not ask to watch them.
+    #[must_use]
+    pub fn watch(&self) -> Option<Vec<GuardDoc>> {
+        self.watch
+            .then(|| self.tree.real_documents().map(GuardDoc::from).collect())
     }
 
     /// The documents content may be read from, in tree order with the top first.

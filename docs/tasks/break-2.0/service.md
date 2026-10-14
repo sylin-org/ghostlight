@@ -15,11 +15,13 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-6`. `call_inner` runs protocol-4 connections through `level4::run` and the
-Link. The browser-native rows (2, 4-11, 27-28, 42-43, 45, 47-52) are translated; every other
-command, `InDocuments`, `ReadDiagnostics`, `StartRecording` and a recording export into a page
-answer `CapabilityVersion { capability, 1, 0 }` until services 6-9 translate them. Nothing sets the
-page assets yet (switch-2 wires them), so a running service still refuses protocol 4.
+Next slice: `service-7`. `level4::run` admits an `InDocuments` scope and runs its inner work
+inside it; a nested scope or a document description inside one is a protocol failure. Rows 1, 3,
+12-16, 19-20, 33, 41, 44 and 46 are translated (`translate/{read,observe}.rs`, diagnostics reads
+and recording starts in `translate/records.rs`), as are the browser-native rows. Pointer input,
+keyboard, forms, capture, script evaluation and a recording export into a page still answer
+`CapabilityVersion { capability, 1, 0 }` until services 7-9 translate them. Nothing sets the page
+assets yet (switch-2 wires them), so a running service still refuses protocol 4.
 
 ## Landed
 
@@ -30,6 +32,7 @@ page assets yet (switch-2 wires them), so a running service still refuses protoc
 | service-3-p4-world-scope | `level4/world.rs` (one typed constructor per world kind with its scope and effect class, `AssetErrorCode` with `is_pre_effect`, envelope decoding, typed answer values), `locator.rs` (`{frame}:{loader}:{local}` codec), `tree.rs` (`FrameTree` from an inventory or from the admitted documents, depth-first, placeholders, owner-box chains), `scope.rs` (`Scope`, `PlannedCall`: admission, guards, settle budget, observation). Ported from `documents.test.js`; all 32 payloads equal `tests/golden/protocol4/world`. | see `git log` |
 | service-4-p4-merge-keys-geometry | `level4/{merge,keys,geometry}.rs`: per-document merges, key and click steps, owner offsets, routing reducer, view tolerance and capture budgets. | 6a89f7cf, 65ce2a19 |
 | service-5-p4-link-native | `level4/link.rs` (`Link`, `Spec` per primitive, `RecordingIndex`, `Line`; cancel grace, deadline, effect ledger, failure mapping), `level4::run`, `translate/{tabs,records,present}.rs`; `OpenTab.focus_window` (skipped on the level-3 wire) set when the workspace holds no tab; `Dialog.message` rendered in the dialog status sentence; protocol-4 notice tab choice in `BrowserPresentation`. | see `git log` |
+| service-6-p4-documents-reading | `translate/{read,observe}.rs` and `translate/mod.rs` (`Reach`, answer decoding, point routing); `run` admits `InDocuments`; `Scope::open` for work sent without a scope; diagnostics reads bound to `hex(sha256(sorted allowed ids))`; recording starts watch the scope's real documents; `world::Observed.readiness`. | see `git log` |
 
 ## Notes
 
@@ -68,3 +71,12 @@ page assets yet (switch-2 wires them), so a running service still refuses protoc
   carries no ids) and picks the active one among the workspace's.
 - `Scope::doc_of` decodes a locator and does not check the tree: `Scope::call` refuses a document
   that is not admitted, so a replaced document fails there, before anything is sent.
+- Work sent without a scope reads every addressable document of one `frames` inventory
+  (`Scope::open`) and carries no guard. The executor wraps every content command in
+  `InDocuments`, so this path costs one extra round trip only outside the executor.
+- A first routing hop in page coordinates asks `hit_point` alone and probes owners afterwards at
+  the viewport point it reports, because `owner_probe` reads viewport coordinates. Deeper hops
+  ask both in one call.
+- A describe inventory is `incomplete` when the extension says its frame snapshot was not
+  complete; unseen frames are reported as unsupported `unseen.{n}` documents, which is what makes
+  the authority refuse restricted unbounded work over them.

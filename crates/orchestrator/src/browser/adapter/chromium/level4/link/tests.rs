@@ -775,14 +775,13 @@ fn work_not_yet_translated_answers_that_the_extension_lacks_it() {
     assert_eq!(
         call(
             &port,
-            BrowserCommand::ReadText {
+            BrowserCommand::Hover {
                 tab_id: 12,
-                locator: None,
-                max_chars: 100
+                locator: "T:t1:locator_a1_1".into(),
             }
         ),
         Err(BrowserError::CapabilityVersion {
-            capability: "read_text".into(),
+            capability: "hover".into(),
             required: 1,
             advertised: 0,
         })
