@@ -257,8 +257,9 @@ pub struct NavigateRequest {
     pub browser: Option<String>,
     #[serde(default)]
     pub new_tab: bool,
-    /// Whether a fresh open may adopt an unbound same-host tab (ADR-0137). Defaults to domain
-    /// reuse; `new_tab` always creates fresh regardless of this field.
+    /// Whether a fresh open may reuse a same-host tab Ghostlight opened and a released session of
+    /// the same client left open (ADR-0196 Decision 9). Defaults to domain reuse; `new_tab` always
+    /// creates fresh, so `domain` beside it is refused and `never` beside it changes nothing.
     #[serde(default)]
     pub reuse: Option<String>,
     /// Explicitly discard a blocking unsaved-change prompt from this navigation.
@@ -292,11 +293,15 @@ pub struct ActivateTab {
     pub tab: String,
 }
 
-/// Whether opening a page may adopt an existing unbound same-host tab (ADR-0137).
+/// Whether opening a page may reuse a tab instead of creating one (ADR-0137, ADR-0196).
+///
+/// The service makes the choice. Only a same-host tab Ghostlight opened and a released session of
+/// the same client left open is ever a candidate; a tab the person opened never is.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReusePolicy {
-    /// Adopt the nearest unbound same-host tab, exact URL preferred; create only when none.
+    /// Reuse a released Ghostlight tab of the same client on the same host, exact URL preferred;
+    /// create only when none is left.
     #[default]
     Domain,
     /// Always create a fresh tab.
@@ -304,7 +309,8 @@ pub enum ReusePolicy {
 }
 
 impl ReusePolicy {
-    /// The wire token sent to the browser adapter.
+    /// The wire token for the adapter's `reuse` field. The service always sends `never`, because
+    /// the adapter never chooses a tab to reuse.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -327,7 +333,8 @@ pub struct OpenPage {
     pub browser: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
-    /// Whether the open may adopt an unbound same-host tab instead of creating one.
+    /// Whether the open may reuse a released Ghostlight tab of the same client on the same host
+    /// instead of creating one.
     #[serde(default)]
     pub reuse: ReusePolicy,
 }

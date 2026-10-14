@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session's internal workspace id.
 - Each connection keeps one workspace for its life. A switch could leave the original
   workspace and its tabs open until the service restarted; that path is gone.
+- Default reuse no longer takes over a tab you opened. A plain open reuses only a tab Ghostlight
+  opened on that host and a released session of the same client left open, after checking the
+  live browser, and the browser is always told not to pick a tab itself. A tab another client
+  released stays in that client's group and is not reused. A released tab is reusable only after the
+  preserve-tabs setting kept it open, so the old session's cleanup can never touch the new
+  session's tab. This holds with the published adapter (ADR-0196).
+- Chrome and Edge tabs with the same id no longer refuse each other.
+- A refusal found after the browser already opened, navigated, focused, or closed a tab reports
+  the applied effect and is no longer marked safe to repeat.
+- Anchor links and `history.pushState` routes no longer expire target handles. The tab follows
+  the new address, and landing governance still checks it.
 
 ## [1.3.15] - 2026-10-05
 

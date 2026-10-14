@@ -25,7 +25,9 @@ use ghostlight_bridge::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT}
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
-use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
+use crate::browser::{
+    AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, RelayBrowserPort,
+};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
@@ -798,7 +800,7 @@ fn serve_session(
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
     if !workspaces.is_owned(&workspace) {
         let released = workspaces.release(&workspace);
-        cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
+        cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref(), &workspaces);
     }
     diagnostics.sink().emit(
         ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
@@ -812,15 +814,24 @@ fn serve_session(
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     for released in workspaces.reap(&owner_alive) {
-        cleanup_released_tabs("reaped", &released, browser);
+        cleanup_released_tabs("reaped", &released, browser, workspaces);
     }
 }
 
-/// Erase service-owned browser diagnostics before released tabs are offered to the close interlock.
+/// Erase service-owned browser diagnostics before released tabs are offered to the close interlock,
+/// then settle each tab's place in the released pool from its close answer.
 ///
 /// Cleanup goes to the browser that holds the tabs and nowhere else. A workspace that never opened
-/// a browser has nothing to clean up.
-fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn BrowserPort) {
+/// a browser has nothing to clean up. A tab becomes reusable only when the person's preserve-tabs
+/// setting refused its close: the browser then already dropped the dead workspace's binding and
+/// debugger hold and keeps the tab open. Until its close answers, no other session can claim it,
+/// so this close can never act on a tab another session took (ADR-0196 Decisions 8 and 9).
+fn cleanup_released_tabs(
+    workspace: &str,
+    released: &ReleasedTabs,
+    browser: &dyn BrowserPort,
+    workspaces: &WorkspaceStore,
+) {
     let Some(target) = released.browser.as_deref() else {
         return;
     };
@@ -837,7 +848,7 @@ fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn
         );
     }
     for &tab_id in &released.physical_ids {
-        let _ = browser.call(
+        let closed = browser.call(
             target,
             workspace,
             BrowserCommand::CloseTab {
@@ -847,6 +858,8 @@ fn cleanup_released_tabs(workspace: &str, released: &ReleasedTabs, browser: &dyn
             Instant::now() + Duration::from_secs(2),
             &cancelled,
         );
+        let kept_open = matches!(closed, Err(BrowserError::LocalInterlock(_)));
+        workspaces.settle_released(target, tab_id, kept_open);
     }
 }
 
@@ -940,9 +953,12 @@ impl BrowserEventSink for ServiceBrowserEvents {
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id)
             }
+            // A browser that comes back may have restarted and reused its tab ids, so nothing it
+            // left behind stays reusable.
+            BrowserEvent::Disconnected => self.workspaces.apply_browser_disconnect(browser),
             // Attention never reaches this sink: it is browser routing state, and the port that
             // knows which connection reported it is the only thing that needs it.
-            BrowserEvent::Attended | BrowserEvent::Disconnected => {}
+            BrowserEvent::Attended => {}
             BrowserEvent::DialogChanged { .. } => {}
         }
     }
@@ -1138,6 +1154,149 @@ mod tests {
         assert!(!bytes.contains("browser_landing"));
         assert!(!bytes.contains("secret"));
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// The client label of the session whose tabs the release cleanup tests leave behind.
+    const RELEASED_CLIENT: &str = "released";
+
+    /// Admit a workspace in the fake browser, land one example.com tab per id, and release it.
+    fn release_example_tabs(
+        workspaces: &crate::workspace::WorkspaceStore,
+        ids: &[u64],
+    ) -> ReleasedTabs {
+        use ghostlight_bridge::browser::{BrowserReadiness, PhysicalTab};
+
+        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp, None);
+        workspaces
+            .pin_browser(workspace.as_str(), FAKE_BROWSER)
+            .unwrap();
+        let lease = workspaces.acquire(&workspace).unwrap();
+        for &tab_id in ids {
+            let tab = PhysicalTab {
+                tab_id,
+                url: "https://example.com/".into(),
+                title: "Example".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            };
+            let added = lease.add_tab(&tab).unwrap();
+            lease.apply_landing(&added.handle, &tab).unwrap();
+        }
+        drop(lease);
+        workspaces.release(&workspace)
+    }
+
+    /// Run release cleanup against a browser whose preserve-tabs setting keeps every tab open.
+    fn clean_up_kept_open(workspaces: &crate::workspace::WorkspaceStore, released: &ReleasedTabs) {
+        use crate::browser::BrowserError;
+        use ghostlight_bridge::browser::BrowserOutcome;
+
+        let browser = FakeBrowser::default();
+        browser.push(Ok(BrowserOutcome::DiagnosticsCleared {
+            cleared_count: released.physical_ids.len(),
+        }));
+        for _ in &released.physical_ids {
+            browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
+        }
+        cleanup_released_tabs("released", released, &browser, workspaces);
+    }
+
+    /// The tab a later session of the same client opening example.com would reuse, if any.
+    fn reusable_example_tab(workspaces: &crate::workspace::WorkspaceStore) -> Option<u64> {
+        workspaces
+            .claim_released(FAKE_BROWSER, RELEASED_CLIENT, "https://example.com/")
+            .map(|released| released.physical_id)
+    }
+
+    #[test]
+    fn only_a_tab_the_browser_kept_open_after_release_cleanup_is_reusable() {
+        use crate::browser::BrowserError;
+        use crate::workspace::WorkspaceStore;
+        use ghostlight_bridge::browser::BrowserOutcome;
+
+        let workspaces = WorkspaceStore::default();
+        let mut released = release_example_tabs(&workspaces, &[1, 2, 3]);
+        // The fake answers in call order, so close the tabs in a known order.
+        released.physical_ids.sort_unstable();
+        // Until its close answers, the browser may still bind each tab to the dead session, and
+        // that close could still act on whoever took it, so nothing is claimable yet.
+        assert_eq!(reusable_example_tab(&workspaces), None);
+
+        let browser = FakeBrowser::default();
+        browser.push(Ok(BrowserOutcome::DiagnosticsCleared { cleared_count: 3 }));
+        // The browser closes tab 1, keeps tab 2 open by the person's preserve-tabs setting, and
+        // never answers for tab 3 in time.
+        browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 1 }));
+        browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
+        browser.push(Err(BrowserError::DeadlineAfterDispatch));
+        cleanup_released_tabs("released", &released, &browser, &workspaces);
+
+        assert_eq!(
+            browser.calls(),
+            vec![
+                BrowserCommand::ClearDiagnostics {
+                    tab_ids: vec![1, 2, 3]
+                },
+                BrowserCommand::CloseTab {
+                    tab_id: 1,
+                    released: true
+                },
+                BrowserCommand::CloseTab {
+                    tab_id: 2,
+                    released: true
+                },
+                BrowserCommand::CloseTab {
+                    tab_id: 3,
+                    released: true
+                },
+            ]
+        );
+        assert_eq!(reusable_example_tab(&workspaces), Some(2));
+        assert_eq!(reusable_example_tab(&workspaces), None);
+    }
+
+    #[test]
+    fn browser_events_take_released_tabs_out_of_reuse() {
+        use crate::browser::BrowserEventSink;
+        use crate::governance::GovernanceFacade;
+        use crate::workspace::WorkspaceStore;
+        use ghostlight_bridge::browser::BrowserEvent;
+
+        let workspaces = WorkspaceStore::default();
+        let sink = super::ServiceBrowserEvents {
+            governance: GovernanceFacade::new(None, None),
+            workspaces: workspaces.clone(),
+            browser: Arc::new(FakeBrowser::default()),
+            diagnostics: crate::diagnostics::DiagnosticsHub::for_tests(),
+        };
+        let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
+        // The person loaded a page in a tab Ghostlight left open: it is theirs again.
+        let committed = |tab_id| BrowserEvent::DocumentCommitted {
+            tab_id,
+            url: "https://example.com/mine".into(),
+            correlation: None,
+        };
+
+        let released = release_example_tabs(&workspaces, &[1, 2, 3]);
+        clean_up_kept_open(&workspaces, &released);
+        sink.on_event(FAKE_BROWSER, closed(1));
+        sink.on_event(FAKE_BROWSER, committed(2));
+        assert_eq!(reusable_example_tab(&workspaces), Some(3));
+        assert_eq!(reusable_example_tab(&workspaces), None);
+
+        // A close or a commit while cleanup is still running counts the same way: the cleanup
+        // answer that follows does not bring the tab back.
+        let released = release_example_tabs(&workspaces, &[5, 6]);
+        sink.on_event(FAKE_BROWSER, closed(5));
+        sink.on_event(FAKE_BROWSER, committed(6));
+        clean_up_kept_open(&workspaces, &released);
+        assert_eq!(reusable_example_tab(&workspaces), None);
+
+        // A browser that reconnects may have restarted and handed its tab ids out again.
+        let released = release_example_tabs(&workspaces, &[4]);
+        clean_up_kept_open(&workspaces, &released);
+        sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected);
+        assert_eq!(reusable_example_tab(&workspaces), None);
     }
 
     #[test]
@@ -1340,7 +1499,12 @@ mod tests {
             physical_ids: (1..=257).collect(),
         };
 
-        cleanup_released_tabs("workspace-1", &released, &browser);
+        cleanup_released_tabs(
+            "workspace-1",
+            &released,
+            &browser,
+            &crate::workspace::WorkspaceStore::default(),
+        );
 
         let calls = browser.calls();
         assert_eq!(

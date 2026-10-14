@@ -81,8 +81,9 @@ service you run afterward is native Rust.
 
 A sky-blue Ghostlight group should appear in your browser. The agent opens the page, reads it, and
 names the exact tab it used. That one prompt proves the whole connection without authorizing a
-click or write. Next time, it reuses that group and the nearest tab it already owns on that site,
-so repeated work stops littering your tab strip.
+click or write. Next time, the same client reuses that group and a tab Ghostlight itself opened
+for it on that site and left open, so repeated work stops littering your tab strip. It never takes
+over a tab you opened, or a tab in another client's group.
 
 If a step needs attention, run:
 
@@ -120,7 +121,8 @@ has an explanation.
 
 Pause the workspace, take over for a delicate step, or stop it. Move its tabs where you want them;
 Ghostlight follows the workspace instead of snapping it back. Ordinary tabs remain outside the
-agent's owned set.
+agent's owned set: a tab you opened is never reused, regrouped, or navigated, even on the same
+site, and loading a page yourself in a tab Ghostlight left open takes that tab back.
 
 Closing a tab needs two independent yes votes: the orchestrator's authority, and the browser's own
 preserve-tabs setting, which ships on. That keeps the evidence of what happened in front of you.

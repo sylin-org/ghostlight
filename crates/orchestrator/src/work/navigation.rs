@@ -7,6 +7,7 @@ use crate::browser::BrowserError;
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet, Decision};
 use crate::language::outcome::{Outcome, Refusal};
+use crate::language::ReusePolicy;
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
@@ -19,10 +20,20 @@ use super::{
 enum OpenedTabKind {
     /// Created fresh by this open.
     Created,
-    /// Adopted from an existing unbound same-host tab.
+    /// Reused: a same-host tab Ghostlight opened and a released session of the same client left
+    /// open (ADR-0196 Decision 9).
     Adopted,
     /// Recreated fresh under a recovered stale handle.
     Recovered,
+}
+
+/// The browser group every controlled tab of one client sits in: `Ghostlight - <client label>`.
+///
+/// The title depends on the client label alone (ADR-0066). Default reuse relies on that: it hands
+/// a released tab only to a session of the client that released it, so the tab already sits in
+/// the caller's group and is never regrouped (ADR-0196 Decision 9).
+fn group_title(client_label: &str) -> String {
+    format!("Ghostlight - {}", bounded(client_label, 80))
 }
 
 impl ApplicationExecutor {
@@ -132,7 +143,7 @@ impl ApplicationExecutor {
                 window_focused,
             }) if tab_id == selected.physical_id => {
                 if let Err(error) = lease.mark_active(&selected.handle) {
-                    return self.workspace_failure(context, error);
+                    return self.workspace_failure_after_effect(context, error, tab_id);
                 }
                 self.succeeded(
                     context,
@@ -159,7 +170,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         url: &str,
-        reuse: crate::language::ReusePolicy,
+        reuse: ReusePolicy,
     ) -> Terminal {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
@@ -177,13 +188,22 @@ impl ApplicationExecutor {
             Ok(label) => label,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let group_title = format!("Ghostlight - {}", bounded(&client_label, 80));
+        if reuse == ReusePolicy::Domain {
+            if let Some(terminal) =
+                self.reuse_released_tab(context, lease, decision, &client_label, url)
+            {
+                return terminal;
+            }
+        }
         let (tab, commits, reused) = match self.dispatch(
             context,
             BrowserCommand::OpenTab {
                 url: url.into(),
-                group_title,
-                reuse: reuse.as_str().into(),
+                group_title: group_title(&client_label),
+                // The service alone chooses which tab to reuse (ADR-0196 Decision 9). An adapter
+                // told `never` runs no reuse ladder of its own, so even an adapter that still has
+                // one can never adopt a tab the person opened.
+                reuse: ReusePolicy::Never.as_str().into(),
             },
         ) {
             Ok(BrowserOutcome::TabOpened {
@@ -196,7 +216,8 @@ impl ApplicationExecutor {
         };
         let controlled = match lease.add_tab(&tab) {
             Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
+            // The browser already opened the page, so the refusal must not claim nothing happened.
+            Err(error) => return self.workspace_failure_after_effect(context, error, tab.tab_id),
         };
         self.settle_opened_tab(
             context,
@@ -208,6 +229,79 @@ impl ApplicationExecutor {
                 OpenedTabKind::Adopted
             } else {
                 OpenedTabKind::Created
+            },
+        )
+    }
+
+    /// Reuse a tab Ghostlight opened and a released session of the same client left open, when
+    /// one fits this open.
+    ///
+    /// The service makes the whole choice and sends the adapter an exact tab id (ADR-0196
+    /// Decision 9). Candidates come only from the released pool, in the browser this session
+    /// works in, on the requested host, so a tab the person opened is never one. They were also
+    /// released by a session with this session's `client_label`, so a reused tab already sits in
+    /// this client's group: `Navigate` does not move it, and another client's tab would stay
+    /// under that client's group title. A candidate is used only while the live browser still
+    /// shows it at its release address; one that closed or moved on is dropped and the next is
+    /// tried. Returns None when nothing fits, and the open then creates a fresh tab.
+    fn reuse_released_tab(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        decision: Decision,
+        client_label: &str,
+        url: &str,
+    ) -> Option<Terminal> {
+        let browser = match self.admitted_browser(context) {
+            Ok(browser) => browser,
+            Err(error) => return Some(self.browser_failure(context, decision, error, None)),
+        };
+        let mut candidate = self
+            .workspaces
+            .claim_released(&browser, client_label, url)?;
+        let live = match self.dispatch(context, BrowserCommand::ListTabs) {
+            Ok(BrowserOutcome::Tabs { tabs }) => tabs,
+            Ok(_) => return Some(self.protocol_failure(context, decision, None)),
+            Err(error) => return Some(self.browser_failure(context, decision, error, None)),
+        };
+        let released = loop {
+            if let Some(tab) = live
+                .iter()
+                .find(|tab| tab.tab_id == candidate.physical_id && tab.url == candidate.url)
+            {
+                break tab.clone();
+            }
+            candidate = self
+                .workspaces
+                .claim_released(&browser, client_label, url)?;
+        };
+        let controlled = match lease.add_tab(&released) {
+            Ok(controlled) => controlled,
+            // Another session already took this tab; nothing happened yet, so open a fresh one.
+            Err(WorkspaceError::PhysicalTabOwned) => return None,
+            Err(error) => return Some(self.workspace_failure(context, error)),
+        };
+        Some(
+            match self.dispatch(
+                context,
+                BrowserCommand::Navigate {
+                    tab_id: released.tab_id,
+                    url: url.into(),
+                },
+            ) {
+                Ok(BrowserOutcome::Navigated {
+                    tab,
+                    committed_urls,
+                }) if tab.tab_id == released.tab_id => self.settle_opened_tab(
+                    context,
+                    lease,
+                    tab,
+                    controlled,
+                    committed_urls,
+                    OpenedTabKind::Adopted,
+                ),
+                Ok(_) => self.protocol_failure(context, decision, Some(released.tab_id)),
+                Err(error) => self.browser_failure(context, decision, error, Some(released.tab_id)),
             },
         )
     }
@@ -262,7 +356,9 @@ impl ApplicationExecutor {
         }
         let governed = match lease.apply_landing(&controlled.handle, &tab) {
             Ok(tab) => tab,
-            Err(error) => return self.workspace_failure(context, error),
+            Err(error) => {
+                return self.workspace_failure_after_effect(context, error, controlled.physical_id)
+            }
         };
         self.emit(DomainEvent::DocumentCommitted {
             invocation: context.invocation.into(),
@@ -291,7 +387,7 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         url: &str,
         discard_beforeunload: bool,
-        reuse: crate::language::ReusePolicy,
+        reuse: ReusePolicy,
     ) -> Terminal {
         let decision = self.authorize(context, Capability::Read, Some(url));
         if !decision.allowed {
@@ -318,7 +414,6 @@ impl ApplicationExecutor {
                     Ok(label) => label,
                     Err(error) => return self.workspace_failure(context, error),
                 };
-                let group_title = format!("Ghostlight - {}", bounded(&client_label, 80));
                 let decision = self.authorize(context, Capability::Read, Some(url));
                 if !decision.allowed {
                     return self.blocked_at(
@@ -335,10 +430,10 @@ impl ApplicationExecutor {
                     context,
                     BrowserCommand::OpenTab {
                         url: url.into(),
-                        group_title,
+                        group_title: group_title(&client_label),
                         // A recovered stale handle must be a fresh tab under that handle, not
                         // an adoption of an unrelated same-host tab.
-                        reuse: crate::language::ReusePolicy::Never.as_str().into(),
+                        reuse: ReusePolicy::Never.as_str().into(),
                     },
                 ) {
                     Ok(BrowserOutcome::TabOpened {
@@ -350,8 +445,10 @@ impl ApplicationExecutor {
                     Err(error) => return self.browser_failure(context, decision, error, None),
                 };
                 let controlled = match lease.restore_tab(handle, &tab) {
-                    Ok(tab) => tab,
-                    Err(error) => return self.workspace_failure(context, error),
+                    Ok(controlled) => controlled,
+                    Err(error) => {
+                        return self.workspace_failure_after_effect(context, error, tab.tab_id)
+                    }
                 };
                 let mut terminal = self.settle_opened_tab(
                     context,
@@ -405,7 +502,13 @@ impl ApplicationExecutor {
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,
-                    Err(error) => return self.workspace_failure(context, error),
+                    Err(error) => {
+                        return self.workspace_failure_after_effect(
+                            context,
+                            error,
+                            selected.physical_id,
+                        )
+                    }
                 };
                 self.emit(DomainEvent::DocumentCommitted {
                     invocation: context.invocation.into(),
@@ -531,7 +634,13 @@ impl ApplicationExecutor {
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,
-                    Err(error) => return self.workspace_failure(context, error),
+                    Err(error) => {
+                        return self.workspace_failure_after_effect(
+                            context,
+                            error,
+                            selected.physical_id,
+                        )
+                    }
                 };
                 let outcome = make_outcome(observed_host(&governed.url));
                 if let Some(object) = facts.as_object_mut() {
@@ -627,7 +736,7 @@ impl ApplicationExecutor {
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == selected.physical_id => {
                 if let Err(error) = lease.confirm_tab_closed(&selected.handle) {
-                    return self.workspace_failure(context, error);
+                    return self.workspace_failure_after_effect(context, error, tab_id);
                 }
                 self.succeeded(
                     context,

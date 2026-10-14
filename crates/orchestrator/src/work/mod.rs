@@ -582,10 +582,9 @@ impl ApplicationExecutor {
             });
             return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), observed_host(&physical.url));
         }
-        let navigated =
-            !commits.is_empty() || (!physical.url.is_empty() && physical.url != selected.url);
-        let resulting = if navigated {
-            match lease.apply_landing(&selected.handle, physical) {
+        let change = DocumentChange::between(&selected.url, physical, commits);
+        let resulting = match change {
+            DocumentChange::NewDocument => match lease.apply_landing(&selected.handle, physical) {
                 Ok(tab) => {
                     self.emit(DomainEvent::DocumentCommitted {
                         invocation: context.invocation.into(),
@@ -595,14 +594,34 @@ impl ApplicationExecutor {
                     });
                     tab
                 }
-                Err(error) => return self.workspace_failure(context, error),
+                Err(error) => {
+                    return self.workspace_failure_after_effect(
+                        context,
+                        error,
+                        selected.physical_id,
+                    )
+                }
+            },
+            // The destination was governed above like any landing; only the handles survive.
+            DocumentChange::SameDocument => {
+                match lease.apply_same_document(&selected.handle, physical) {
+                    Ok(tab) => tab,
+                    Err(error) => {
+                        return self.workspace_failure_after_effect(
+                            context,
+                            error,
+                            selected.physical_id,
+                        )
+                    }
+                }
             }
-        } else {
-            let _ = lease.update_readiness(&selected.handle, physical.readiness);
-            selected.clone()
+            DocumentChange::Unchanged => {
+                let _ = lease.update_readiness(&selected.handle, physical.readiness);
+                selected.clone()
+            }
         };
         if let Some(object) = facts.as_object_mut() {
-            if navigated {
+            if change != DocumentChange::Unchanged {
                 object.insert("landing".into(), json!({"url":resulting.url,"title":resulting.title,"document_generation":resulting.generation}));
             }
         }
@@ -1210,8 +1229,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.admit_dispatch(context)?;
-        let browser = self.target_browser(context)?;
+        let browser = self.admitted_browser(context)?;
         self.presentation
             .bind_command(context.workspace.as_str(), context.invocation, &command);
         let admit = || self.admit_dispatch(context);
@@ -1234,6 +1252,15 @@ impl ApplicationExecutor {
             }
             outcome => outcome,
         }
+    }
+
+    /// Admit this invocation's next browser crossing and name the browser it goes to.
+    ///
+    /// Runtime control and audit health are checked first, so a paused session never starts
+    /// browser recovery just to learn where it would have gone.
+    fn admitted_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
+        self.admit_dispatch(context)?;
+        self.target_browser(context)
     }
 
     /// Decide which browser this invocation belongs to, and bind the workspace to it.
@@ -1700,6 +1727,28 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         error: WorkspaceError,
     ) -> Terminal {
+        self.workspace_refusal(context, error, None)
+    }
+
+    /// A workspace failure discovered after the browser already acted on `physical_id`.
+    ///
+    /// The tab was opened, navigated, focused, or closed before the aggregate refused to record
+    /// it, so the result says the effect was applied and is not safe to repeat.
+    fn workspace_failure_after_effect(
+        &self,
+        context: &InvocationContext<'_>,
+        error: WorkspaceError,
+        physical_id: u64,
+    ) -> Terminal {
+        self.workspace_refusal(context, error, Some(physical_id))
+    }
+
+    fn workspace_refusal(
+        &self,
+        context: &InvocationContext<'_>,
+        error: WorkspaceError,
+        acted_on: Option<u64>,
+    ) -> Terminal {
         let owner = match error {
             WorkspaceError::NotOwnedTab => context
                 .requested_tab
@@ -1733,13 +1782,18 @@ impl ApplicationExecutor {
         if let Some(candidates) = self.take_stale_candidates(context.invocation) {
             facts["recovery_candidates"] = Value::Array(candidates);
         }
+        let effect = if acted_on.is_some() {
+            Effect::Applied
+        } else {
+            Effect::None
+        };
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
                 status,
-                Effect::None,
+                effect,
                 Readiness::Unknown,
-                status == Status::Failed,
+                status == Status::Failed && effect == Effect::None,
                 &summary,
                 facts,
                 refusal.next_steps(),
@@ -1749,7 +1803,7 @@ impl ApplicationExecutor {
             } else {
                 Decision::permitted()
             },
-            physical_id: None,
+            physical_id: acted_on,
             observed: Observed::default(),
             audit: refusal.audit(),
         }
@@ -2426,6 +2480,49 @@ fn observed_host(url: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
+/// What an action's receipt says happened to its tab's document.
+///
+/// Only a new document starts a new generation. A same-document change, an anchor link or a
+/// `history.pushState` route inside the same origin, keeps every handle valid; single-page apps
+/// make one on most clicks (ADR-0195 Decision 3).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DocumentChange {
+    /// The tab still shows the same document at the same address.
+    Unchanged,
+    /// The address moved within the same origin and no document committed.
+    SameDocument,
+    /// A document committed, or the address moved to another origin.
+    NewDocument,
+}
+
+impl DocumentChange {
+    /// Classify a receipt against the tab's last governed address.
+    ///
+    /// The browser reports commits for new documents only, so a changed address with no commit
+    /// is a same-document change. A change into another origin cannot be one, and an address
+    /// that does not parse is never assumed to be.
+    fn between(previous: &str, physical: &PhysicalTab, commits: &[String]) -> Self {
+        if !commits.is_empty() {
+            return Self::NewDocument;
+        }
+        if physical.url.is_empty() || physical.url == previous {
+            return Self::Unchanged;
+        }
+        let same_origin = match (Url::parse(previous), Url::parse(&physical.url)) {
+            (Ok(previous), Ok(current)) => {
+                let origin = previous.origin();
+                origin.is_tuple() && origin == current.origin()
+            }
+            _ => false,
+        };
+        if same_origin {
+            Self::SameDocument
+        } else {
+            Self::NewDocument
+        }
+    }
+}
+
 /// How many words of text a page returned. The words themselves do not enter outcome language.
 fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
@@ -2464,6 +2561,7 @@ mod tests {
     mod execution;
     mod presentation;
     mod provenance;
+    mod tabs;
     use std::fs;
     use std::io;
     use std::path::PathBuf;

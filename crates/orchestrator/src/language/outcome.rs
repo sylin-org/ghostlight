@@ -237,7 +237,8 @@ pub enum Outcome {
     TabActivated { host: Option<String> },
     /// A requested page was opened.
     PageOpened { host: Option<String> },
-    /// An existing unbound same-host tab was adopted for the requested page (ADR-0137).
+    /// A same-host tab Ghostlight opened and a released session of the same client left open was
+    /// reused for the requested page (ADR-0137, ADR-0196 Decision 9).
     PageReused { host: Option<String> },
     /// A manually closed page was restored in a new controlled tab.
     PageRecovered { host: Option<String> },

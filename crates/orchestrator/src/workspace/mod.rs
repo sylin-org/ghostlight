@@ -13,6 +13,7 @@ use crate::language::outcome::TargetRole;
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 use thiserror::Error;
+use url::Url;
 use uuid::Uuid;
 
 /// Immutable user-facing summary of one admitted workspace.
@@ -229,6 +230,19 @@ pub struct ReleasedTabs {
     pub physical_ids: Vec<u64>,
 }
 
+/// One tab a released workspace left open, claimed by the next open on its host from a session of
+/// the same client.
+///
+/// Only Ghostlight's own released tabs become these. A tab the person opened never does, so
+/// default reuse cannot take it over (ADR-0196 Decision 9).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReleasedTab {
+    /// Physical tab id inside the browser the claim named.
+    pub physical_id: u64,
+    /// The governed URL the tab held when its workspace released it.
+    pub url: String,
+}
+
 impl ReleasedTabs {
     fn from_state(state: WorkspaceState) -> Self {
         Self {
@@ -303,6 +317,117 @@ struct WorkspaceState {
 #[derive(Debug, Default)]
 struct AggregateState {
     workspaces: HashMap<WorkspaceId, WorkspaceState>,
+    /// Tabs released workspaces left behind, per browser, keyed by physical id.
+    ///
+    /// This is the only pool default reuse adopts from. A tab enters it at release but can be
+    /// claimed only after its release close answered that the person's preserve-tabs setting kept
+    /// it open, and only by a session of the client that released it. An entry leaves it when the
+    /// tab closes, when any page commits in it (the person or the page took it back), when a
+    /// workspace takes it, when its release close did anything but keep it, and when its browser
+    /// disconnects, because a restarted browser reuses tab ids.
+    released: HashMap<String, HashMap<u64, PooledTab>>,
+}
+
+/// One tab in the released pool.
+#[derive(Debug)]
+struct PooledTab {
+    /// The governed URL the tab held when its workspace released it.
+    url: String,
+    /// The client label of the workspace that released the tab.
+    ///
+    /// Every controlled tab sits in the browser group named for its workspace's client label, and
+    /// a reused tab is navigated where it is, never regrouped. So only a session of the same
+    /// client may claim it; any other session would control a tab shown under another client's
+    /// group (ADR-0066).
+    client_label: String,
+    /// Whether the release close answered that the browser keeps the tab open.
+    ///
+    /// Until it does, the browser may still bind the tab to the dead workspace, and that pending
+    /// close could still forget, unretain, or close the tab under whoever took it. So a tab whose
+    /// cleanup has not answered is never claimed (ADR-0196 Decision 8).
+    kept_open: bool,
+}
+
+impl AggregateState {
+    /// Record the tabs a leaving workspace still holds as waiting for their release cleanup.
+    ///
+    /// None of them is reusable yet: only a cleanup answer that the browser kept a tab open
+    /// (`settle_released`) offers it to the next open on its host from a session of the same
+    /// client. A held tab sits on a destination governance refused, and a tab with no governed URL
+    /// never landed, so neither is recorded at all.
+    fn remember_released(&mut self, workspace: &WorkspaceState) {
+        let Some(browser) = workspace.browser.as_ref() else {
+            return;
+        };
+        let tabs: Vec<_> = workspace
+            .tabs
+            .values()
+            .filter(|tab| !tab.held && !tab.url.is_empty())
+            .map(|tab| {
+                (
+                    tab.physical_id,
+                    PooledTab {
+                        url: tab.url.clone(),
+                        client_label: workspace.client_label.clone(),
+                        kept_open: false,
+                    },
+                )
+            })
+            .collect();
+        if !tabs.is_empty() {
+            self.released
+                .entry(browser.clone())
+                .or_default()
+                .extend(tabs);
+        }
+    }
+
+    /// Drop one tab from the released pool of its browser.
+    fn forget_released(&mut self, browser: &str, physical_id: u64) {
+        if let Some(pool) = self.released.get_mut(browser) {
+            pool.remove(&physical_id);
+            if pool.is_empty() {
+                self.released.remove(browser);
+            }
+        }
+    }
+
+    /// Whether a workspace other than `current`, working in the same browser, controls the tab.
+    ///
+    /// Physical tab ids are unique inside one browser and nowhere else: Chrome's tab 5 and Edge's
+    /// tab 5 are different tabs and must not refuse each other.
+    fn controlled_elsewhere(&self, current: &WorkspaceId, physical_id: u64) -> bool {
+        let browser = self
+            .workspaces
+            .get(current)
+            .and_then(|workspace| workspace.browser.as_deref());
+        self.workspaces.iter().any(|(id, workspace)| {
+            id != current
+                && workspace.browser.as_deref() == browser
+                && workspace
+                    .tabs
+                    .values()
+                    .any(|known| known.physical_id == physical_id)
+        })
+    }
+
+    /// The browser a workspace works in, if its first work chose one.
+    fn browser_of(&self, workspace: &WorkspaceId) -> Option<String> {
+        self.workspaces
+            .get(workspace)
+            .and_then(|state| state.browser.clone())
+    }
+}
+
+/// The part of an ordinary web address that default reuse compares: host and explicit port.
+///
+/// Only `http` and `https` pages are reuse candidates; anything else has no comparable site.
+fn reusable_site(url: &str) -> Option<(String, Option<u16>)> {
+    let parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    Some((parsed.host_str()?.to_ascii_lowercase(), parsed.port()))
 }
 
 /// Thread-safe entry to the single workspace aggregate.
@@ -458,6 +583,7 @@ impl WorkspaceStore {
         let mut released = Vec::new();
         for id in dead {
             if let Some(workspace) = state.workspaces.remove(&id) {
+                state.remember_released(&workspace);
                 released.push(ReleasedTabs::from_state(workspace));
             }
         }
@@ -485,11 +611,85 @@ impl WorkspaceStore {
     }
 
     /// Release an MCP workspace and return the physical tabs it owned.
+    ///
+    /// The tabs wait in the released pool for their cleanup. A tab becomes reusable by the next
+    /// open on its host from a session of the same client only once `settle_released` reports
+    /// that the browser kept it open (the person's preserve-tabs choice).
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
-        self.lock()
-            .workspaces
-            .remove(workspace)
-            .map_or_else(ReleasedTabs::default, ReleasedTabs::from_state)
+        let mut state = self.lock();
+        let Some(removed) = state.workspaces.remove(workspace) else {
+            return ReleasedTabs::default();
+        };
+        state.remember_released(&removed);
+        ReleasedTabs::from_state(removed)
+    }
+
+    /// Settle one released tab once its release close in `browser` has answered.
+    ///
+    /// `kept_open` is true only when the person's preserve-tabs setting refused the close. The
+    /// browser has then dropped the dead workspace's binding and debugger hold and left the tab
+    /// open, so the tab becomes reusable. Any other answer, a close that worked, a failure, or no
+    /// answer in time, removes the tab, so a tab that closed or may still be closing is never
+    /// claimed. A tab that already left the pool, because it closed or a page committed in it
+    /// while its cleanup ran, stays out.
+    pub fn settle_released(&self, browser: &str, physical_id: u64, kept_open: bool) {
+        let mut state = self.lock();
+        if !kept_open {
+            state.forget_released(browser, physical_id);
+            return;
+        }
+        if let Some(tab) = state
+            .released
+            .get_mut(browser)
+            .and_then(|pool| pool.get_mut(&physical_id))
+        {
+            tab.kept_open = true;
+        }
+    }
+
+    /// Take the released tab an open of `url` in `browser` by a session of `client_label` should
+    /// reuse, if there is one.
+    ///
+    /// Candidates are tabs Ghostlight opened, a released workspace of the same client label left
+    /// behind, and the browser kept open when that workspace's cleanup asked to close them, in
+    /// this browser, on the same host and port. The label must match because a reused tab stays in
+    /// the group it already sits in, and that group is named for the client that released it. An
+    /// exact URL wins, then the lowest tab id. The claim removes the tab from the pool under the
+    /// aggregate lock, so two sessions can never claim the same tab, and leaves another client's
+    /// tabs in the pool. The caller still checks the live browser before using it.
+    #[must_use]
+    pub fn claim_released(
+        &self,
+        browser: &str,
+        client_label: &str,
+        url: &str,
+    ) -> Option<ReleasedTab> {
+        let site = reusable_site(url)?;
+        let mut state = self.lock();
+        let claimed = state
+            .released
+            .get(browser)?
+            .iter()
+            .filter(|(_, released)| {
+                released.kept_open
+                    && released.client_label == client_label
+                    && reusable_site(&released.url).as_ref() == Some(&site)
+            })
+            .min_by_key(|(physical_id, released)| (released.url != url, **physical_id))
+            .map(|(physical_id, released)| ReleasedTab {
+                physical_id: *physical_id,
+                url: released.url.clone(),
+            })?;
+        state.forget_released(browser, claimed.physical_id);
+        Some(claimed)
+    }
+
+    /// Forget every released tab of a browser that disconnected.
+    ///
+    /// A browser that comes back may be a restarted one, and a restarted browser hands out tab ids
+    /// again, so a remembered id could name a tab the person just opened.
+    pub fn apply_browser_disconnect(&self, browser: &str) {
+        self.lock().released.remove(browser);
     }
 
     /// Acquire exclusive mutation ownership for one invocation.
@@ -643,6 +843,9 @@ impl WorkspaceStore {
     }
 
     /// Invalidate agent references after an unrelated page change, without governing browsing.
+    ///
+    /// A commit in a released tab means the person or the page took it back, since no Ghostlight
+    /// work runs there, so the tab also leaves the released pool and is never reused.
     pub fn note_browser_landing(
         &self,
         browser: &str,
@@ -650,6 +853,7 @@ impl WorkspaceStore {
         url: &str,
     ) -> Option<(WorkspaceId, TabHandle)> {
         let mut state = self.lock();
+        state.forget_released(browser, physical_id);
         for (workspace_id, workspace) in state
             .workspaces
             .iter_mut()
@@ -716,9 +920,10 @@ impl WorkspaceStore {
         }
     }
 
-    /// Remove a tab closed outside an invocation.
+    /// Remove a tab closed outside an invocation, including from the released pool.
     pub fn apply_browser_close(&self, browser: &str, physical_id: u64) {
         let mut state = self.lock();
+        state.forget_released(browser, physical_id);
         for workspace in state
             .workspaces
             .values_mut()
@@ -829,16 +1034,16 @@ impl WorkspaceLease {
     }
 
     /// Add a physical tab under a new opaque handle.
+    ///
+    /// The tab is refused when another workspace in the same browser already controls it. Once
+    /// added it is this workspace's tab, so it leaves the released pool.
     pub fn add_tab(&self, tab: &PhysicalTab) -> Result<SelectedTab, WorkspaceError> {
         let mut state = self.store.lock();
-        if state.workspaces.iter().any(|(id, workspace)| {
-            id != &self.workspace
-                && workspace
-                    .tabs
-                    .values()
-                    .any(|known| known.physical_id == tab.tab_id)
-        }) {
+        if state.controlled_elsewhere(&self.workspace, tab.tab_id) {
             return Err(WorkspaceError::PhysicalTabOwned);
+        }
+        if let Some(browser) = state.browser_of(&self.workspace) {
+            state.forget_released(&browser, tab.tab_id);
         }
         let workspace = state
             .workspaces
@@ -902,6 +1107,37 @@ impl WorkspaceLease {
         known.active = tab.active;
         known.held = false;
         Ok(selected(handle, known))
+    }
+
+    /// Follow a governed same-document address change without starting a new document.
+    ///
+    /// An anchor link or a `history.pushState` route keeps the document, so the generation and
+    /// every target handle stay valid (ADR-0195 Decision 3). The tab's URL and title follow the
+    /// page. Views expire, because the rendered page may have moved under their coordinates.
+    pub fn apply_same_document(
+        &self,
+        handle: &TabHandle,
+        tab: &PhysicalTab,
+    ) -> Result<SelectedTab, WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let known = workspace
+            .tabs
+            .get_mut(handle)
+            .ok_or(WorkspaceError::StaleTab)?;
+        if known.physical_id != tab.tab_id {
+            return Err(WorkspaceError::StaleTab);
+        }
+        known.url.clone_from(&tab.url);
+        known.title = bounded(&tab.title, 500);
+        known.readiness = tab.readiness;
+        known.active = tab.active;
+        let current = selected(handle, known);
+        workspace.views.retain(|_, view| &view.tab != handle);
+        Ok(current)
     }
 
     /// Update readiness without accepting new page content.
@@ -1083,31 +1319,26 @@ impl WorkspaceLease {
         tab: &PhysicalTab,
     ) -> Result<SelectedTab, WorkspaceError> {
         let handle = TabHandle(handle.into());
-        let held = {
-            let state = self.store.lock();
-            let held = state
-                .workspaces
-                .get(&self.workspace)
-                .and_then(|workspace| workspace.tabs.get(&handle))
-                .map(|dead| dead.held)
-                .unwrap_or(false);
-            if state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace
-                    && candidate
-                        .tabs
-                        .values()
-                        .any(|known| known.physical_id == tab.tab_id)
-            }) {
-                return Err(WorkspaceError::PhysicalTabOwned);
-            }
-            if state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.tabs.contains_key(&handle)
-            }) {
-                return Err(WorkspaceError::NotOwnedTab);
-            }
-            held
-        };
         let mut state = self.store.lock();
+        let held = state
+            .workspaces
+            .get(&self.workspace)
+            .and_then(|workspace| workspace.tabs.get(&handle))
+            .map(|dead| dead.held)
+            .unwrap_or(false);
+        if state.controlled_elsewhere(&self.workspace, tab.tab_id) {
+            return Err(WorkspaceError::PhysicalTabOwned);
+        }
+        if state
+            .workspaces
+            .iter()
+            .any(|(id, candidate)| id != &self.workspace && candidate.tabs.contains_key(&handle))
+        {
+            return Err(WorkspaceError::NotOwnedTab);
+        }
+        if let Some(browser) = state.browser_of(&self.workspace) {
+            state.forget_released(&browser, tab.tab_id);
+        }
         let workspace = state
             .workspaces
             .get_mut(&self.workspace)
@@ -1675,6 +1906,312 @@ mod tests {
         drop(lease);
         assert_eq!(store.reap(&|_| false).len(), 0);
         assert!(!store.is_owned(&owned));
+    }
+
+    /// The client label the pool tests release and claim under unless a test names another.
+    const TEST_CLIENT: &str = "test";
+
+    /// Admit a workspace of `TEST_CLIENT` in `browser` and land one tab per `(id, url)` in it.
+    fn workspace_with_tabs(
+        store: &WorkspaceStore,
+        browser: &str,
+        tabs: &[(u64, &str)],
+    ) -> WorkspaceId {
+        client_workspace_with_tabs(store, TEST_CLIENT, browser, tabs)
+    }
+
+    /// Admit a workspace of `client` in `browser` and land one tab per `(id, url)` in it.
+    fn client_workspace_with_tabs(
+        store: &WorkspaceStore,
+        client: &str,
+        browser: &str,
+        tabs: &[(u64, &str)],
+    ) -> WorkspaceId {
+        let workspace = store.admit(client.into(), IntakeChannel::Mcp, None);
+        store.pin_browser(workspace.as_str(), browser).unwrap();
+        let lease = store.acquire(&workspace).unwrap();
+        for (id, url) in tabs {
+            let tab = lease.add_tab(&physical(*id, url)).unwrap();
+            lease
+                .apply_landing(&tab.handle, &physical(*id, url))
+                .unwrap();
+        }
+        workspace
+    }
+
+    /// The tab a `TEST_CLIENT` session opening `url` in `browser` claims, if any.
+    fn claimed(store: &WorkspaceStore, browser: &str, url: &str) -> Option<u64> {
+        claimed_by(store, browser, TEST_CLIENT, url)
+    }
+
+    /// The tab a session of `client` opening `url` in `browser` claims, if any.
+    fn claimed_by(store: &WorkspaceStore, browser: &str, client: &str, url: &str) -> Option<u64> {
+        store
+            .claim_released(browser, client, url)
+            .map(|released| released.physical_id)
+    }
+
+    /// Answer every release close as the person's preserve-tabs setting would: kept open.
+    fn kept_open(store: &WorkspaceStore, released: &ReleasedTabs) {
+        let browser = released.browser.as_deref().unwrap();
+        for &physical_id in &released.physical_ids {
+            store.settle_released(browser, physical_id, true);
+        }
+    }
+
+    #[test]
+    fn a_released_tab_is_claimable_only_after_its_close_kept_it_open() {
+        let url = "https://example.com/";
+        let store = WorkspaceStore::default();
+        let workspace = workspace_with_tabs(
+            &store,
+            TEST_BROWSER,
+            &[(1, url), (2, url), (3, url), (4, url)],
+        );
+        store.release(&workspace);
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, url),
+            None,
+            "a tab whose release close has not answered is never claimed"
+        );
+
+        // Tab 1 closed. Tab 2 closed and tab 3 loaded a page while their cleanup ran, so a later
+        // kept-open answer does not bring them back. An answer from another browser names
+        // another tab 4.
+        store.settle_released(TEST_BROWSER, 1, false);
+        store.apply_browser_close(TEST_BROWSER, 2);
+        store.settle_released(TEST_BROWSER, 2, true);
+        store.note_browser_landing(TEST_BROWSER, 3, "https://example.com/mine");
+        store.settle_released(TEST_BROWSER, 3, true);
+        store.settle_released("browser_other", 4, true);
+        assert_eq!(claimed(&store, TEST_BROWSER, url), None);
+
+        store.settle_released(TEST_BROWSER, 4, true);
+        assert_eq!(claimed(&store, TEST_BROWSER, url), Some(4));
+        assert_eq!(claimed(&store, TEST_BROWSER, url), None);
+    }
+
+    #[test]
+    fn released_tabs_are_claimed_by_host_exact_url_first_then_lowest_id() {
+        let store = WorkspaceStore::default();
+        let workspace = workspace_with_tabs(
+            &store,
+            TEST_BROWSER,
+            &[
+                (9, "https://example.com/a"),
+                (4, "https://example.com/b"),
+                (6, "https://example.com:8443/c"),
+                (2, "https://other.test/"),
+            ],
+        );
+        kept_open(&store, &store.release(&workspace));
+
+        assert_eq!(
+            claimed(&store, "browser_other", "https://example.com/a"),
+            None
+        );
+        assert_eq!(claimed(&store, TEST_BROWSER, "file:///C:/a"), None);
+        assert_eq!(
+            store.claim_released(TEST_BROWSER, TEST_CLIENT, "https://example.com/a"),
+            Some(super::ReleasedTab {
+                physical_id: 9,
+                url: "https://example.com/a".into(),
+            }),
+            "an exact URL wins over a lower id"
+        );
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, "https://example.com/a"),
+            Some(4)
+        );
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, "https://example.com/a"),
+            None,
+            "a different port is a different site"
+        );
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, "https://example.com:8443/"),
+            Some(6)
+        );
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, "https://OTHER.test/x"),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn a_released_tab_is_claimed_only_by_a_session_of_the_client_that_released_it() {
+        const SCRIPTS: &str = "ghostlight call";
+        const AGENT: &str = "Claude Code";
+        let store = WorkspaceStore::default();
+        let scripts = client_workspace_with_tabs(
+            &store,
+            SCRIPTS,
+            TEST_BROWSER,
+            &[(3, "https://example.com/")],
+        );
+        kept_open(&store, &store.release(&scripts));
+        let agent = client_workspace_with_tabs(
+            &store,
+            AGENT,
+            TEST_BROWSER,
+            &[(7, "https://example.com/other")],
+        );
+        kept_open(&store, &store.release(&agent));
+
+        // Tab 3 sits in the "Ghostlight - ghostlight call" group. An exact URL and a lower id do
+        // not make it the agent's: the agent gets the tab its own client released.
+        assert_eq!(
+            claimed_by(&store, TEST_BROWSER, AGENT, "https://example.com/"),
+            Some(7)
+        );
+        assert_eq!(
+            claimed_by(&store, TEST_BROWSER, AGENT, "https://example.com/"),
+            None,
+            "another client's tab is never the agent's to reuse"
+        );
+        // Asking left the scripts' tab in the pool for their next session.
+        assert_eq!(
+            claimed_by(&store, TEST_BROWSER, SCRIPTS, "https://example.com/"),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn released_tabs_leave_the_pool_when_closed_committed_taken_or_disconnected() {
+        const SHELL: &str = "shell";
+        let store = WorkspaceStore::default();
+        let owned =
+            store.resume_or_admit(SHELL.into(), IntakeChannel::Cli, marker(4312, 100), None);
+        store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
+        let lease = store.acquire(&owned).unwrap();
+        for id in [1, 2, 3, 4, 5] {
+            let tab = lease
+                .add_tab(&physical(id, "https://example.com/"))
+                .unwrap();
+            lease
+                .apply_landing(&tab.handle, &physical(id, "https://example.com/"))
+                .unwrap();
+        }
+        // A held tab sits on a refused destination and is never offered.
+        let held = lease
+            .tabs()
+            .unwrap()
+            .into_iter()
+            .find(|tab| tab.physical_id == 5)
+            .unwrap();
+        lease.hold_tab(&held.handle).unwrap();
+        drop(lease);
+        // The reaper releases the workspace of a caller that is gone, and the browser keeps every
+        // tab open. The held tab still never joins the pool.
+        let reaped = store.reap(&|_| false);
+        assert_eq!(reaped.len(), 1);
+        kept_open(&store, &reaped[0]);
+
+        store.apply_browser_close(TEST_BROWSER, 1);
+        store.note_browser_landing(TEST_BROWSER, 2, "https://example.com/next");
+        let taker = workspace_with_tabs(&store, TEST_BROWSER, &[]);
+        store
+            .acquire(&taker)
+            .unwrap()
+            .add_tab(&physical(3, "https://example.com/"))
+            .unwrap();
+        assert_eq!(
+            claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
+            Some(4)
+        );
+        assert_eq!(
+            claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
+            None
+        );
+
+        let other = workspace_with_tabs(&store, TEST_BROWSER, &[(8, "https://example.com/")]);
+        kept_open(&store, &store.release(&other));
+        store.apply_browser_disconnect(TEST_BROWSER);
+        assert_eq!(
+            claimed(&store, TEST_BROWSER, "https://example.com/"),
+            None,
+            "a reconnected browser may have reused the id"
+        );
+    }
+
+    #[test]
+    fn the_same_tab_id_in_two_browsers_is_two_tabs() {
+        let store = WorkspaceStore::default();
+        let _chrome = workspace_with_tabs(&store, "browser_chrome", &[(5, "https://a.test/")]);
+        let edge = workspace_with_tabs(&store, "browser_edge", &[]);
+        let edge_lease = store.acquire(&edge).unwrap();
+        assert!(edge_lease.add_tab(&physical(5, "https://b.test/")).is_ok());
+        drop(edge_lease);
+
+        let second_chrome = workspace_with_tabs(&store, "browser_chrome", &[]);
+        let lease = store.acquire(&second_chrome).unwrap();
+        assert_eq!(
+            lease.add_tab(&physical(5, "https://a.test/")).unwrap_err(),
+            WorkspaceError::PhysicalTabOwned
+        );
+        assert_eq!(
+            lease
+                .restore_tab("tab_restored_too", &physical(5, "https://a.test/"))
+                .unwrap_err(),
+            WorkspaceError::PhysicalTabOwned
+        );
+    }
+
+    #[test]
+    fn a_same_document_change_keeps_targets_and_expires_views() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(7, "https://example.com/"))
+            .unwrap();
+        let targets = lease
+            .register_targets(
+                &tab,
+                &[ObservedTarget {
+                    locator: "l1".into(),
+                    role: "button".into(),
+                    name: "Go".into(),
+                    state: vec![],
+                    credential_class: false,
+                }],
+            )
+            .unwrap();
+        let geometry = ViewportGeometry {
+            scope: CaptureScope::Viewport,
+            page_x: 0.0,
+            page_y: 0.0,
+            css_width: 800.0,
+            css_height: 600.0,
+            visual_page_x: 0.0,
+            visual_page_y: 0.0,
+            visual_css_width: 800.0,
+            visual_css_height: 600.0,
+            device_scale: 1.0,
+            zoom: 1.0,
+            output_scale: 1.0,
+        };
+        let view = lease.register_view(&tab, geometry, 800, 600).unwrap();
+
+        let routed = lease
+            .apply_same_document(&tab.handle, &physical(7, "https://example.com/#next"))
+            .unwrap();
+        assert_eq!(routed.generation, tab.generation);
+        assert_eq!(routed.url, "https://example.com/#next");
+        assert!(lease.resolve_target(targets[0].0.as_str(), None).is_ok());
+        assert_eq!(
+            lease
+                .resolve_view_point(view.as_str(), None, 1.0, 1.0)
+                .unwrap_err(),
+            WorkspaceError::StaleView
+        );
+        assert_eq!(
+            lease
+                .apply_same_document(&tab.handle, &physical(8, "https://example.com/"))
+                .unwrap_err(),
+            WorkspaceError::StaleTab
+        );
     }
 
     #[test]

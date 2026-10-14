@@ -648,6 +648,17 @@ Every one of these cost something to learn.
 - **Sessions are contained.** ADR-0196 removed `browser_workspace` and its live rebinding: each
   connection keeps one workspace, and a handle from another session is refused with a pointer to
   the session's own tabs.
+- **The service chooses which tab to reuse.** Default reuse adopts only a tab Ghostlight opened
+  and a released session of the same client label left open, from the service's released-tab
+  pool, and names it exactly. Reuse never regroups, and the group title is
+  `Ghostlight - <client label>`, so a tab from another client would stay under that client's
+  group.
+  The adapter is always sent `reuse:"never"`. Its own map is cleared on extension reload and
+  cannot tell a released tab from the person's, which is how person-opened tabs used to be taken
+  over (ADR-0196 Decision 9). A released tab becomes claimable only after its release close comes
+  back refused by preserve-tabs. Claiming it earlier lets the dead session's pending close forget,
+  unretain, or close the new owner's tab, because the extension does not check whose tab a close
+  names.
 - **Windows session shutdown messages require a top-level window, not a message-only window.**
   Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
   not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)

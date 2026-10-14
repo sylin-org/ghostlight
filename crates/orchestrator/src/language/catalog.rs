@@ -388,7 +388,7 @@ fn navigate_schema() -> Value {
                         enumeration(
                             &["domain", "never"],
                             Some("domain"),
-                            "domain adopts an existing unbound same-host tab (exact URL preferred) instead of creating another one; never always creates. Ignored when new_tab is true.",
+                            "domain reuses a tab an earlier session of this client opened for this host and released (exact URL preferred); it never takes over a tab the person opened. never always creates. new_tab always creates, so domain cannot be combined with it.",
                         ),
                     ),
                     ("timeout_ms", timeout()),

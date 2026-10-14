@@ -169,8 +169,11 @@ The unpacked extension is a complete local product surface, not an invisible rel
 - Controlled tabs use one browser-wide blue exact-title group named
   `Ghostlight - <client label>`. New work reuses that group wherever the user placed it. When no
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of
-  inserting work into the user's active window. Moves between windows preserve ownership, and
-  unambiguous child tabs are adopted by the parent workspace.
+  inserting work into the user's active window. Moves between windows preserve ownership. An
+  opener never makes a tab Ghostlight's: child tabs and popups stay the person's (ADR-0164). A
+  plain open reuses only a tab Ghostlight opened and a released session of the same client left
+  open, so the tab is already in that client's group, and never a tab the person opened (ADR-0196
+  Decision 9).
 - Presentation preserves Ghostlight's luminous sky-blue visual language: controlled-tab border,
   phantom cursor, target and field treatments, click ripple, drag trail, scroll cue, read scan,
   action signatures, screenshot frame, denial, attention, and optional captions. It survives

@@ -231,12 +231,40 @@ unit-of-work state, uncertainty, and the single completion path.
 ### Workspace
 
 Owns MCP sessions, controlled tabs, opaque tab and target handles, document generations,
-view handles and viewport transforms, selection, ownership, leases, child-tab adoption, stale
+view handles and viewport transforms, selection, ownership, leases, the released-tab pool, stale
 detection, and release on disconnect.
 
 A connection binds to one workspace when it is admitted and keeps it until it closes. Nothing
 moves a session into another workspace, and a handle from another session is refused before any
 browser work (ADR-0196 Decision 8).
+
+Physical tab ids are unique inside one browser only. Ownership checks compare a tab id within the
+browser its workspace works in, so Chrome's tab 5 and Edge's tab 5 never refuse each other.
+
+When a workspace is released, the tabs it still holds enter a released-tab pool keyed by browser,
+with the governed URL each held at release and the releasing workspace's client label. A held tab,
+or one that never landed, does not enter. Release cleanup then asks the browser to close each tab. A
+tab becomes reusable only when the person's preserve-tabs setting refuses that close: the extension
+has then already dropped the dead workspace's binding and debugger hold, and the tab stays open.
+Until the close answers, no session can claim the tab, so a cleanup close never acts on a tab
+another session took (ADR-0196 Decision 8). A close that worked, failed, or did not answer in time
+removes the tab, so with preserve-tabs off nothing is reused. A tab also leaves the pool when it
+closes, when any page commits in it, when a workspace takes it, and when its browser disconnects,
+because a restarted browser hands out tab ids again. A close or commit that arrives while cleanup
+runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only from this pool (ADR-0196
+Decision 9). The executor claims the best same-host candidate released by a session of the same
+client, under the aggregate lock, exact URL first and then lowest id, checks it against the live tab
+list, adds it to the workspace, and sends `Navigate` with that exact tab id. The client label must
+match because reuse never regroups a tab and the group title is `Ghostlight - <client label>`: a tab
+another client released would stay under that client's group, so it is left in the pool and the open
+creates a fresh tab. The label only narrows reuse and never grants authority. The pool is in memory
+and does not survive a service restart. A person can still type into a preserved released tab
+without loading a page, and a later reuse would then replace that page.
+
+A same-document change keeps the document generation. When an action receipt reports an address
+in the same origin and no committed document, the workspace updates the tab's URL and title and
+expires its views, but target handles stay valid (ADR-0195 Decision 3). A committed document or an
+address in another origin starts a new generation.
 
 ### Recording
 
@@ -552,6 +580,13 @@ hints and exact-title discovery repairs stale hints. The label never routes or g
 newly opened tab is not adopted through its opener: that relationship cannot distinguish an
 agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
 group or tab between windows does not change ownership or trigger automatic regrouping.
+
+The adapter never chooses a tab to reuse. The executor sends every `OpenTab` with `reuse` set to
+`never`, so an adapter that still carries its own same-host reuse ladder never runs it, and a
+reused tab arrives as an ordinary `Navigate` naming the exact tab the service chose. A reused tab
+is not regrouped, and it does not need to be: only a session of the client that released it can
+reuse it, so it already sits in that client's `Ghostlight - <client label>` group, or wherever the
+person moved it.
 
 Document-commit events silently update cached destinations and invalidate agent references. They
 never authorize browsing, hold tabs, write action history, or produce presentation. Even a

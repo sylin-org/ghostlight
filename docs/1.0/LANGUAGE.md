@@ -60,6 +60,13 @@ so in the summary. Closing a handle whose tab is already gone succeeds without t
 browser. Target handles are different by design -- they are perception, not identity. A target
 handle is tied to one tab and document generation, a committed navigation makes prior target
 handles stale, and acting on one forces re-inspection of a page the model has actually seen.
+A same-document change is not a committed navigation. When an action moves the address within the
+same origin and no document commits, as an anchor link or a `history.pushState` route does, the
+generation and target handles stay valid. The tab's governed URL follows the page, landing
+governance still checks the new address, the action's `landing` fact carries the new `url` with
+the unchanged `document_generation`, and view handles expire because the rendered page may have
+moved. An address in another origin always starts a new generation. An explicit
+`browser_navigate` or `browser_history` call always starts one too.
 Typed semantic selectors (name, optional role, optional exact match) are accepted wherever target
 handles are, including `selector_present` waits, so drivers can prefer what a control is called
 over stashing handles.
@@ -158,6 +165,9 @@ Refusals say what is true, and their next steps suggest only what the caller can
   and an unreadable policy keep no next step.
 - The preserve-tabs veto says the tab stays open because the user chose to keep Ghostlight's
   tabs, and to continue without closing it.
+- A workspace refusal found after the browser already acted, such as a tab the browser opened
+  that another session in the same browser controls, keeps its reason but reports
+  `effect: applied` and `repeat_safe: false`, because repeating it would act again.
 
 The same language owner supplies a separate typed audit projection. Readable explanations,
 measurements, and governed target names survive; arbitrary browser details and result facts do
@@ -204,15 +214,23 @@ Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
 Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional `reuse` of
 `domain` or `never`, default `domain`; optional `beforeunload` whose only value is `discard`,
-accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`. `tab` and `new_tab:true` cannot be combined, and `reuse` cannot be combined with
-`new_tab`. Without `beforeunload`, a blocking prompt stops the navigation and is reported, never
-accepted.
+accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`. `tab` and
+`new_tab:true` cannot be combined. `new_tab:true` always creates a tab, so `reuse:"domain"` beside
+it is refused and `reuse:"never"` beside it changes nothing. Without `beforeunload`, a blocking
+prompt stops the navigation and is reported, never accepted.
 
-With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it
-navigates that exact tab. With neither, it uses the unambiguous controlled tab, and when none
-exists it opens one -- adopting an existing unbound same-host tab (exact URL preferred) unless
-`reuse:"never"` asks for a strictly fresh tab (ADR-0137). A reused open says so: the summary
-reads "Reused the example.com tab." rather than "Opened example.com." Capability: `read`.
+With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it navigates
+that exact tab. With neither, it uses the unambiguous controlled tab, and when none exists it opens
+one. With `reuse:"domain"`, the open first reuses a tab Ghostlight opened on the same host and port
+and a released session of the same client left open, in the same browser, with no page loaded in it
+since the release. Same client means the same client label, so the tab already sits in the caller's
+`Ghostlight - <client label>` group; a tab another client released is never reused, and the open
+creates a fresh tab. A released tab stays open only when the person's preserve-tabs setting kept it,
+so with that setting off nothing is reused. An exact URL wins, then the lowest tab id. The service
+makes that choice, checks that the browser still shows the tab at its release address, and navigates
+that exact tab. A tab the person opened is never reused, and the browser is never asked to pick one
+(ADR-0196 Decision 9). `reuse:"never"` always creates a fresh tab. A reused open says so: the
+summary reads "Reused the example.com tab." rather than "Opened example.com." Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `document_generation`.
 

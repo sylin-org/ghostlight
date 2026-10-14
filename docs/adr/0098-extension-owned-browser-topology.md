@@ -5,6 +5,10 @@ Status: Accepted
 Amended by ADR-0186 for request-scoped background placement, no unowned adoption or duplicate
 group movement, and explicit operator foreground opt-out. The original decision remains below.
 
+Correction, 2026-10-13: that ADR-0186 amendment is an unpublished trial and is not in this tree.
+Tab reuse is decided by the service from released Ghostlight tabs only (ADR-0196 Decision 9); the
+extension never picks a tab to adopt.
+
 Date: 2026-08-05
 
 Supersedes: ADR-0085 Decisions 2-4, ADR-0090's stale native-window recovery, and

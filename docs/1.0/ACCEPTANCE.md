@@ -188,7 +188,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    result identifies the governed landing and one terminal outcome per call. Opening uses one
    physical primitive and never creates a blank tab before navigation.
 2. List tabs, navigate one, inspect controls, find a target, activate it, and recover from the old
-   target becoming stale after a document commit.
+   target becoming stale after a document commit. An anchor link or a `history.pushState` route in
+   the same origin keeps the target valid, still checks the new address against landing
+   governance, and expires views; an address in another origin stales the target.
 3. Capture a screenshot only through `browser_screenshot`, verify bounded dimensions and one
    MCP image content block, and verify base64 image data is absent from structured facts. Capture
    and magnify one bounded view region, then repeat against the returned view.
@@ -281,6 +283,19 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     carries a workspace id. The caller's own tab list never shows the other session's tab, and a
     retired `browser_workspace` call, direct or inside `browser_flow`, fails without dispatch
     (ADR-0196).
+25. Default reuse never takes a person's tab. With a person-opened tab on the same host, a plain
+    `browser_navigate` asks the browser only for a fresh tab with `reuse` set to `never`, and the
+    person's tab is not regrouped, navigated, or attached. A tab Ghostlight opened and a released
+    session of the same client left open is reused by the next open on its host in the same
+    browser, after a live check that it still shows its release address, and the summary says it
+    was reused. A released tab becomes reusable only once its release close is refused by the
+    preserve-tabs setting. Before that answer, or after a close that worked, the next open creates
+    a fresh tab. A page commit, a close, or a browser disconnect since the release removes it from
+    reuse. A tab released by a `ghostlight call` session is not reused by a Claude Code session,
+    which gets a fresh tab in its own `Ghostlight - Claude Code` group, while the next
+    `ghostlight call` session still reuses it. Chrome's tab 5 and Edge's tab 5 are different tabs,
+    and a workspace refusal found after the browser opened a tab reports an applied effect
+    (ADR-0196 Decision 9).
 
 ## Presentation gates
 

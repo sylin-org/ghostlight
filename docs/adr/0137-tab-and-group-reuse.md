@@ -6,6 +6,14 @@ Amended by ADR-0186: same-host unbound adoption and duplicate-group movement app
 operator-selected foreground attention. Background preserves unowned tabs and existing placement.
 The original decision remains below as its historical rationale.
 
+Correction, 2026-10-13: the ADR-0186 amendment above describes an unpublished trial; it never
+reached this tree. Decision 2 is amended by ADR-0196 Decision 9 instead. The service chooses the
+tab to reuse and names it exactly. Only a same-host tab Ghostlight opened and a released session
+of the same client left open, in the same browser and with no page loaded in it since the release,
+is a candidate, so the tab already sits in the caller's client-scoped group (ADR-0066). A tab the
+person opened, which the rejected alternatives below call never-bound, is never one. The adapter
+is always sent `reuse:"never"`, so its own reuse ladder never runs.
+
 ## Context
 
 Running the sample scripts repeatedly produced ever-accumulating tabs, and the browser showed
