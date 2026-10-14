@@ -66,6 +66,11 @@ export function normalizeTree(text) {
   return [...lines].sort().join("\n") + "\n";
 }
 
+/** The skip message for a `cargoTree` result of the `{ offline }` shape. */
+export function offlineSkipMessage(crate, target, result) {
+  return `cargo cannot resolve ${crate} for ${target} offline: ${result.offline.split("\n")[0]}`;
+}
+
 /** Runs `cargo tree` offline; returns `{ offline }` when the registry is unreachable and throws on any other failure. */
 function cargoTree(crate, target) {
   try {
@@ -102,7 +107,7 @@ for (const crate of CONNECTORS) {
       const file = join(TREE_DIR, `${crate}.${target}.txt`);
       const tree = cargoTree(crate, target);
       if (typeof tree !== "string") {
-        t.skip(`cargo cannot resolve ${crate} for ${target} offline: ${tree.error.split("\n")[0]}`);
+        t.skip(offlineSkipMessage(crate, target, tree));
         return;
       }
       if (UPDATE) {
@@ -120,6 +125,11 @@ for (const crate of CONNECTORS) {
     });
   }
 }
+
+test("the offline skip message is built from the field cargoTree returns", () => {
+  const message = offlineSkipMessage("crate-a", "target-b", { offline: "failed to download x\nmore" });
+  assert.equal(message, "cargo cannot resolve crate-a for target-b offline: failed to download x");
+});
 
 test("frozen sources match tests/golden/frozen-hashes.json", () => {
   const revision = relayRevision();
