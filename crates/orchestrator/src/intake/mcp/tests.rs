@@ -327,6 +327,42 @@ fn a_tool_result_carries_the_envelope_once_with_images_and_the_error_flag() {
 }
 
 #[test]
+fn a_service_result_loses_its_defaults_in_structured_content() {
+    let mut session = ready_session();
+    let id = invoke_id(&session.accept(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_dialog"}}"#,
+    ));
+    let lines = session.render(ServiceResponse::Result {
+        id,
+        text: "Accepted the browser dialog.".into(),
+        result: json!({
+            "status": "succeeded", "effect": "applied", "repeat_safe": false,
+            "summary": "Accepted the browser dialog.", "facts": {"tab": "tab_q3k7"},
+            "history_storage": "saved", "readiness": "not_applicable", "next_steps": [],
+        }),
+        is_error: false,
+        content: Vec::new(),
+    });
+    assert_eq!(
+        lines[0]["result"]["structuredContent"],
+        json!({
+            "status": "succeeded", "effect": "applied", "repeat_safe": false,
+            "summary": "Accepted the browser dialog.", "facts": {"tab": "tab_q3k7"},
+        })
+    );
+}
+
+#[test]
+fn every_failure_template_says_history_was_not_confirmed_and_is_already_lean() {
+    let templates = failure_templates();
+    for failure in ["cut_off", "expired"] {
+        let envelope = &templates[failure]["tools/call"]["result"]["structuredContent"];
+        assert_eq!(envelope["history_storage"], "unconfirmed");
+        assert_eq!(&super::lean::project(envelope), envelope);
+    }
+}
+
+#[test]
 fn a_service_error_for_a_call_is_an_internal_error_naming_its_code() {
     let mut session = ready_session();
     let id = invoke_id(&session.accept(

@@ -33,6 +33,15 @@ facts:
 ghostlight call browser_read '{"tab":"tab_a1b2"}' --json | jq -r .facts.text
 ```
 
+`--json` prints the result as the model sees it: a field at its default is left out
+(`history_storage` `saved`, `readiness` `not_applicable`, `next_steps` empty). Read an absent field
+as its default:
+
+```sh
+ghostlight call browser_navigate '{"url":"https://example.com"}' --json \
+  | jq -r '.history_storage // "saved"'
+```
+
 `--output <file>` writes bounded content, which today means a screenshot's image bytes. Without it
 a capture reports that its content was omitted, since a megabyte of base64 in a terminal helps
 nobody. In a batch, later captures gain an index rather than overwriting the first.

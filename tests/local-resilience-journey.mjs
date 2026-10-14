@@ -199,7 +199,7 @@ try {
     const result = await a.result(id, 2000);
     assert.equal(result.status, "blocked"); assert.equal(result.effect, "none");
     assert.equal(result.summary, "The user asked to interrupt the process. Wait for further instructions.");
-    assert.deepEqual(result.next_steps, [], "Stop never suggests automatic retry");
+    assert.deepEqual(result.next_steps ?? [], [], "Stop never suggests automatic retry");
   }
   assert.equal(held.length, 3, "Stop prevents every queued browser dispatch");
   assert.equal((await a.result(a.invoke("policy_explain"), 2000)).status, "succeeded", "diagnostics remain available after Stop");

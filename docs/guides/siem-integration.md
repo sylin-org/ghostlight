@@ -141,6 +141,9 @@ A terminal result's `history_storage` is `saved` or `unconfirmed`, independently
 unconfirmed means it did not, even if some bytes reached the file. Browser effects are not rolled
 back. The current workbench can hold receipts whose durable storage was not confirmed.
 
+The audit record is unchanged. The result an MCP client receives omits `history_storage` when it
+is `saved`; read an absent field as `saved`.
+
 When saving recovers, a separate JSONL entry has this shape:
 
 ```json

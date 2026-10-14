@@ -1185,12 +1185,12 @@ try {
     recoveredHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
   } while (recoveredHealth.facts.audit_health.failure !== null && Date.now() < recoveryDeadline);
   assert.equal(recoveredHealth.facts.audit_health.failure, null);
-  assert.equal(recoveredHealth.history_storage, "saved");
+  assert.equal(recoveredHealth.history_storage ?? "saved", "saved");
   assert.ok(recoveredHealth.facts.audit_health.unconfirmed_receipts >= 4);
   assert.equal(physicalCommands.slice(commandsBeforeAuditBlock).filter((command) => command !== "present").length, 0, "repair must never repeat browser work");
   const afterRepair = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
   assert.equal(afterRepair.status, "succeeded");
-  assert.equal(afterRepair.history_storage, "saved");
+  assert.equal(afterRepair.history_storage ?? "saved", "saved");
   const repairedRecords = readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse);
   assert.ok(repairedRecords.some((record) => record.audit_gap?.unconfirmed_receipts >= 4));
   assert.equal(repairedRecords.some((record) => record.invocation === unrecorded.invocation), false, "no delayed receipt backfill");
@@ -1231,7 +1231,7 @@ try {
   assert.equal(readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse)
     .some(record => record.invocation === strictFlow.invocation), false, "no parent or child receipt is backfilled");
   const newWork = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: strictFlow.facts.steps[0].result.facts.tab } }));
-  assert.equal(newWork.status, "succeeded"); assert.equal(newWork.history_storage, "saved");
+  assert.equal(newWork.status, "succeeded"); assert.equal(newWork.history_storage ?? "saved", "saved");
   await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: strictFlow.facts.steps[0].result.facts.tab } });
   console.log("audit composition ok: an acknowledged effect survives failed child history; Continue stops; parent and children stay unconfirmed; repair admits only new work");
 

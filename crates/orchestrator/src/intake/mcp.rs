@@ -6,9 +6,9 @@
 //! The engine negotiates the protocol revision, echoes every client id with its JSON type, maps
 //! client ids to service ids for cancellation, and keeps the replies to one batch together.
 //!
-//! A tool result carries the envelope once, in `structuredContent`; its text block is the
-//! service's summary and next steps, and tool definitions carry no `outputSchema` (ADR-0197
-//! Decision 17). [`ResumeState`] is what lets a session continue across a service restart
+//! A tool result carries the envelope once, in `structuredContent`, as the lean model view with
+//! fields at their default omitted (ADR-0198 Decision 21); its text block is the service's summary
+//! and next steps, and tool definitions carry no `outputSchema` (ADR-0197 Decision 17). [`ResumeState`] is what lets a session continue across a service restart
 //! (Decision 12), and [`failure_templates`] holds the answers a connector gives when it cannot
 //! reach the service (Decision 2).
 
@@ -27,8 +27,11 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::server_profile;
+use crate::language::audit_health::Storage;
 use crate::language::intake::{ConnectorFailure, ProtocolRefusal};
 use crate::work::result::{Effect, Readiness, Status};
+
+mod lean;
 
 /// The newest MCP revision this engine serves, offered when a client asks for an unknown one.
 pub const LATEST_REVISION: &str = "2025-11-25";
@@ -714,6 +717,7 @@ fn failure_call_result(failure: ConnectorFailure) -> Value {
         "readiness": readiness,
         "repeat_safe": repeat_safe,
         "summary": summary,
+        "history_storage": Storage::Unconfirmed,
         "facts": {"reason": cause},
         "next_steps": next_steps,
     });
@@ -734,7 +738,7 @@ fn call_tool_result(
             }
         }
     }
-    json!({"content": blocks, "structuredContent": envelope, "isError": is_error})
+    json!({"content": blocks, "structuredContent": lean::project(&envelope), "isError": is_error})
 }
 
 fn success(id: Value, result: Value) -> Value {

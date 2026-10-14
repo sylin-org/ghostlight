@@ -75,7 +75,7 @@ async function exercise(executable, name, expectedUnreadable) {
       assert.equal(outcome.facts.audit_health.unreadable_entries, expectedUnreadable);
       assert.equal(outcome.facts.audit_health.history_unavailable, false);
       assert.equal(outcome.facts.audit_health.failure, null);
-      assert.equal(outcome.history_storage, "saved");
+      assert.equal(outcome.history_storage ?? "saved", "saved");
     }
     const after = readFileSync(audit);
     assert.deepEqual(after.subarray(0, before.length), before, "Reading or saving changed original history");
