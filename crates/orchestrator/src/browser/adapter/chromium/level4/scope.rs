@@ -1,10 +1,10 @@
 //! Document scope for one protocol 4 request.
 //!
 //! The authority decides which documents a request may touch and hands the adapter a
-//! [`DocumentScope`]. This module enforces that decision on the service side of the wire, where
-//! the extension used to. It admits the scope against a frame tree, turns every world message
-//! into a call only if its target document is admitted, builds the currency guard that rides with
-//! the first primitive and every input, and records what the request actually reached.
+//! [`DocumentScope`]. This module enforces that decision on the service side of the wire. It
+//! admits the scope against a frame tree, turns every world message into a call only if its
+//! target document is admitted, builds the currency guard that rides with the first primitive and
+//! every input, and records what the request actually reached.
 //!
 //! Nothing here decides policy. A content call to a document outside `allowed` fails before
 //! anything is sent.
