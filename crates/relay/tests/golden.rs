@@ -182,6 +182,17 @@ fn tolerance_fixtures_decode() {
         }
     ));
 
+    let unknown_reply: Reply = assert_decodes("tolerance/reply.unknown_kind.json");
+    assert_eq!(unknown_reply, Reply::Unknown);
+    let unknown_code: Reply = assert_decodes("tolerance/reply.refused.unknown_code.json");
+    assert!(matches!(
+        unknown_code,
+        Reply::Refused {
+            code: RefusalCode::Unknown,
+            ..
+        }
+    ));
+
     let unknown_frame: McpFrame = assert_decodes("tolerance/mcp.unknown_kind.json");
     assert_eq!(unknown_frame, McpFrame::Unknown);
     let message: McpFrame = assert_decodes("tolerance/mcp.message.extra_fields.json");

@@ -94,6 +94,9 @@ pub enum Reply {
         /// The service's own words for the person, when it has any.
         message: String,
     },
+    /// A reply kind this revision does not know. The connector treats it as a refusal.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Why a service refused an opening.
@@ -110,6 +113,9 @@ pub enum RefusalCode {
     ShuttingDown,
     /// The opening could not be read.
     Malformed,
+    /// A refusal code this revision does not know. The connector treats it as a refusal.
+    #[serde(other)]
+    Unknown,
 }
 
 /// A frame on an accepted `mcp` stream.
@@ -177,5 +183,9 @@ mod tests {
         assert_eq!(op, ControlOp::Unknown);
         let frame: McpFrame = serde_json::from_value(json!({"kind": "ping"})).unwrap();
         assert_eq!(frame, McpFrame::Unknown);
+        let reply: Reply = serde_json::from_value(json!({"kind": "queued"})).unwrap();
+        assert_eq!(reply, Reply::Unknown);
+        let code: RefusalCode = serde_json::from_value(json!("installing")).unwrap();
+        assert_eq!(code, RefusalCode::Unknown);
     }
 }
