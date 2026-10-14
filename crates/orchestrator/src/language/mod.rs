@@ -33,7 +33,16 @@ pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
-pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. Use the advertised short calls and inspect current handles after navigation.";
+///
+/// A client that defers loading tool schemas chooses its first calls from this text alone, so it
+/// teaches the whole working loop in six short sentences: open, read, collect handles, act, renew
+/// stale handles, and trust what each result says about its effect.
+pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. \
+Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs. \
+Read a page with browser_read, and get handles for its controls from browser_find or browser_inspect. \
+Act with those handles, for example with browser_click or browser_fill_form. \
+Handles expire when the page changes, so fetch fresh ones after navigation. \
+Every result states its effect and whether repeating it is safe.";
 /// Closed role vocabulary a semantic selector may filter on.
 const SEMANTIC_ROLES: &[&str] = &[
     "button",
@@ -165,6 +174,56 @@ impl Operation {
             Self::ManageWorkspace(_) => "browser_workspace",
             Self::ExplainPolicy(_) => "policy_explain",
         }
+    }
+
+    /// Return the caller's `timeout_ms`, or `None` when this operation's tool has no such field.
+    ///
+    /// This is the one record of which calls the caller may give more time. The executor derives
+    /// the invocation deadline from it, and [`Operation::timeout_can_grow`] decides from it
+    /// whether a deadline refusal may suggest a longer `timeout_ms`.
+    #[must_use]
+    pub const fn timeout_ms(&self) -> Option<u64> {
+        match self {
+            Self::OpenPage(value) => Some(value.timeout_ms),
+            Self::NavigatePage(value) => Some(value.timeout_ms),
+            Self::NavigateHistory(value) => Some(value.timeout_ms),
+            Self::ReloadPage(value) => Some(value.timeout_ms),
+            Self::TakeScreenshot(value) => Some(value.timeout_ms),
+            Self::Click(value) => Some(value.timeout_ms),
+            Self::ScrollPage(value) => Some(value.timeout_ms),
+            Self::Hover(value) => Some(value.timeout_ms),
+            Self::FillForm(value) => Some(value.timeout_ms),
+            Self::TypeText(value) => Some(value.timeout_ms),
+            Self::Drag(value) => Some(value.timeout_ms),
+            Self::UploadFiles(value) => Some(value.timeout_ms),
+            Self::RunScript(value) => Some(value.timeout_ms),
+            Self::Wait(value) => Some(value.timeout_ms),
+            Self::RunFlow(value) => Some(value.timeout_ms),
+            Self::ListTabs(_)
+            | Self::ActivateTab(_)
+            | Self::CloseTab(_)
+            | Self::ReadPage(_)
+            | Self::InspectPage(_)
+            | Self::Find(_)
+            | Self::SetZoom(_)
+            | Self::ResizeWindow(_)
+            | Self::PressKey(_)
+            | Self::HandleDialog(_)
+            | Self::Record(_)
+            | Self::Diagnose(_)
+            | Self::ManageWorkspace(_)
+            | Self::ExplainPolicy(_) => None,
+        }
+    }
+
+    /// Whether repeating this call with a longer `timeout_ms` is a call the decoder accepts.
+    ///
+    /// True only when the tool takes `timeout_ms` and the value in force is below the maximum.
+    /// A call already at the maximum, such as `browser_fill_form` with its default, cannot be
+    /// given more time, so a deadline refusal must not suggest it.
+    #[must_use]
+    pub fn timeout_can_grow(&self) -> bool {
+        self.timeout_ms().is_some_and(|ms| ms < MAX_TIMEOUT_MS)
     }
 }
 
@@ -2366,7 +2425,114 @@ mod tests {
 
     use super::{
         catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy, CATALOG_TOOL_COUNT,
+        DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS,
+        MIN_TIMEOUT_MS, SERVER_INSTRUCTIONS,
     };
+
+    /// The operation's own `timeout_ms` record agrees with the advertised schema, so a deadline
+    /// refusal that suggests a longer `timeout_ms` always describes a call the decoder accepts,
+    /// and one that does not names no field the tool lacks.
+    #[test]
+    fn timeout_support_matches_the_advertised_schema_and_decodes() {
+        for tool in catalog() {
+            let example = tool.input_schema["examples"][0].clone();
+            let operation = decode(&tool.name, example.clone())
+                .unwrap_or_else(|error| panic!("{} example: {error}", tool.name));
+            let advertised = tool.input_schema["properties"].get("timeout_ms").is_some();
+            assert_eq!(
+                operation.timeout_ms().is_some(),
+                advertised,
+                "{} timeout_ms support drifted from its schema",
+                tool.name
+            );
+            let mut longer = example;
+            longer["timeout_ms"] = json!(MAX_TIMEOUT_MS);
+            match decode(&tool.name, longer) {
+                Ok(operation) => assert_eq!(
+                    operation.timeout_ms(),
+                    Some(MAX_TIMEOUT_MS),
+                    "{} accepted timeout_ms without using it",
+                    tool.name
+                ),
+                Err(_) => assert!(!advertised, "{} rejects its own timeout_ms", tool.name),
+            }
+        }
+    }
+
+    /// A call may be told to raise `timeout_ms` exactly when a call with a longer value decodes:
+    /// never for a tool without the field, and never once the value is at the maximum. Filling a
+    /// form starts at the maximum, so its default call cannot grow.
+    #[test]
+    fn timeout_can_grow_exactly_when_a_longer_call_decodes() {
+        for tool in catalog() {
+            let mut bare = tool.input_schema["examples"][0].clone();
+            bare.as_object_mut().unwrap().remove("timeout_ms");
+            let mut inputs = vec![bare.clone()];
+            for ms in [
+                MIN_TIMEOUT_MS,
+                DEFAULT_TIMEOUT_MS,
+                MAX_TIMEOUT_MS - 1,
+                MAX_TIMEOUT_MS,
+            ] {
+                let mut input = bare.clone();
+                input["timeout_ms"] = json!(ms);
+                inputs.push(input);
+            }
+            for input in inputs {
+                let Ok(operation) = decode(&tool.name, input.clone()) else {
+                    continue;
+                };
+                let longer_decodes = operation.timeout_ms().is_some_and(|ms| {
+                    let mut longer = input.clone();
+                    longer["timeout_ms"] = json!(ms + 1);
+                    decode(&tool.name, longer).is_ok()
+                });
+                assert_eq!(
+                    operation.timeout_can_grow(),
+                    longer_decodes,
+                    "{} with {input}",
+                    tool.name
+                );
+            }
+        }
+        let mut fill = catalog()
+            .into_iter()
+            .find(|tool| tool.name == "browser_fill_form")
+            .unwrap()
+            .input_schema["examples"][0]
+            .clone();
+        fill.as_object_mut().unwrap().remove("timeout_ms");
+        let operation = decode("browser_fill_form", fill).unwrap();
+        assert_eq!(operation.timeout_ms(), Some(DEFAULT_FILL_TIMEOUT_MS));
+        assert!(!operation.timeout_can_grow());
+    }
+
+    /// The instructions a deferred-loading client reads first stay short and name only tools
+    /// the catalog actually offers.
+    #[test]
+    fn server_instructions_teach_the_loop_with_real_tools() {
+        assert!(SERVER_INSTRUCTIONS.is_ascii());
+        let sentences = SERVER_INSTRUCTIONS
+            .split(". ")
+            .filter(|sentence| !sentence.trim().is_empty())
+            .count();
+        assert!(sentences <= 6, "{sentences} sentences");
+        let named: Vec<&str> = SERVER_INSTRUCTIONS
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .filter(|word| word.starts_with("browser_") || word.starts_with("policy_"))
+            .collect();
+        for tool in [
+            "browser_navigate",
+            "browser_read",
+            "browser_find",
+            "browser_inspect",
+        ] {
+            assert!(named.contains(&tool), "instructions never name {tool}");
+        }
+        for tool in named {
+            assert!(EXPECTED_TOOL_NAMES.contains(&tool), "{tool} is not a tool");
+        }
+    }
 
     #[test]
     fn catalog_has_unique_exact_tools_and_typo_closed_schemas() {

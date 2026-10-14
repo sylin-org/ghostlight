@@ -1028,6 +1028,7 @@ fn typed_audit_failures_round_trip_with_policy_and_measurements() {
         "unknown",
         &Refusal::DeadlineExpired {
             before_dispatch: false,
+            timeout_adjustable: true,
         }
         .audit(),
         123,

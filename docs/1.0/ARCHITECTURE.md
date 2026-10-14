@@ -215,6 +215,10 @@ Owns the one 24-tool catalog, JSON schemas, descriptions, examples, MCP annotati
 defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
 facts. Nothing outside this context defines a tool or an alternate client dialect. Conditional
 requirements are present in the advertised schema rather than left only to runtime validation.
+It also owns the server instructions every edge sends at initialization, and the record of which
+operations accept `timeout_ms`. Work derives each invocation deadline from that record, and a
+deadline refusal suggests a longer `timeout_ms` only where it exists and is still below its
+maximum.
 
 ### Work
 
@@ -497,7 +501,8 @@ historical file or claiming to sanitize its old summary text (ADR-0103 H1 amendm
 ## Failure and recovery
 
 Disconnect before a physical request has no effect. Disconnect after dispatch without a decisive
-receipt yields `unknown`, never failure or success. Cancellation follows the same boundary.
+receipt yields `unknown`, never failure or success. Cancellation follows the same boundary, and
+before dispatch it is reported as a cancellation, never as a disconnection.
 Stale tabs and targets fail before dispatch. Sequence failure reports completed step count and
 never replays completed steps. Recovery suggestions come from typed reason codes and effect class,
 not page content.

@@ -25,8 +25,16 @@ with catalog-refresh guidance; nothing retries automatically. Existing history r
 See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md).
 
 An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
-the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected and
-points to `browser_tabs`. Tab handles are durable correlation slots: navigating by a handle whose
+the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected
+before any browser work, and the refusal says which case it hit:
+
+| Case | Summary | `reason` | Next step |
+| --- | --- | --- | --- |
+| No tab yet | `This session has no open tab yet.` | `no_tab` | `browser_navigate` with `url` |
+| Several tabs could be meant | `More than one tab is open in this session, so the call must name one.` | `ambiguous_tab` | `browser_tabs` list, then repeat with `tab` |
+| Named tab is gone | `That tab is no longer open.` | `tab_unavailable` | `browser_tabs` list |
+
+Tab handles are durable correlation slots: navigating by a handle whose
 tab has closed recreates that tab through the governed open path under the same handle and says
 so in the summary. Closing a handle whose tab is already gone succeeds without touching the
 browser. Target handles are different by design -- they are perception, not identity. A target
@@ -60,6 +68,19 @@ its own preference within the parent deadline. Actual targets and permissions st
 Composite waits keep a met primary condition when optional settlement expires and report
 `visual_settled` separately. Explicit visual/layout-stability waits retain their condition.
 See [ADR-0195](../adr/0195-bounded-settlement-and-subject-scoped-page-work.md).
+
+## Server instructions
+
+Every protocol edge sends the same service-owned instructions at initialization. A client that
+loads tool schemas lazily picks its first calls from this text alone, so it teaches the working
+loop in six short sentences and names only catalog tools:
+
+> Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
+> browser_navigate, or list this session's tabs with browser_tabs. Read a page with browser_read,
+> and get handles for its controls from browser_find or browser_inspect. Act with those handles,
+> for example with browser_click or browser_fill_form. Handles expire when the page changes, so
+> fetch fresh ones after navigation. Every result states its effect and whether repeating it is
+> safe.
 
 ## Result envelope
 
@@ -98,6 +119,26 @@ say `Clicked the "Save" button on example.com.` Governance may remove all target
 never name sources. A result with `effect` equal to `partial` or `unknown`, or with a committed effect
 unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
+Refusals say what is true, and their next steps suggest only what the caller can do:
+
+- A cancellation that wins before any browser command answers `Cancelled before anything reached
+  the browser.` with status `cancelled`, no effect, and no next step. It never says the browser
+  disconnected.
+- A deadline before dispatch suggests a longer `timeout_ms` only when the call that set the
+  deadline accepts that field, its value is below the 30000 ms maximum, and no edge deadline
+  overrides it. Tools with a fixed deadline (read, inspect, find, press key, dialog, diagnose,
+  tabs, window, record), and calls already at the maximum (such as `browser_fill_form` with its
+  default), are told to repeat the call and narrow a very large page first. A deadline after
+  dispatch has an unknown effect, so it says to check the page with `browser_read` or
+  `browser_screenshot` before repeating.
+  Which operations accept `timeout_ms` is recorded once, on the decoded operation, and the
+  deadline itself is derived from the same record.
+- A policy denial (host, protected host, capability, tab close, screenshot, client kind, or an
+  unspecified policy reason) points to `policy_explain`. Pause, Stop, a required-history outage,
+  and an unreadable policy keep no next step.
+- The preserve-tabs veto says the tab stays open because the user chose to keep Ghostlight's
+  tabs, and to continue without closing it.
+
 The same language owner supplies a separate typed audit projection. Readable explanations,
 measurements, and governed target names survive; arbitrary browser details and result facts do
 not enter retained history. A permitted client result may still contain those details. Expanding
@@ -127,8 +168,9 @@ only to stale details within the running installation's own directory (ADR-0149 
 List, focus, or close controlled tabs. Actions are:
 
 - `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. The list is read live
-  from the connected browser on every call and names only this workspace's bound tabs, so it
-  requires a connected browser and refuses without one.
+  from the connected browser on every call and names only this session's own tabs, so it
+  requires a connected browser and refuses without one. The summary reads `Listed 2 tabs in this
+  session.`; an empty list points to `browser_navigate` with `url`.
 - `focus`: required `tab`; no RAWX capability.
 - `close`: required exact `tab`; capability `action` and the tab-close policy constraint.
 
@@ -380,7 +422,9 @@ Inspect or resolve the current JavaScript dialog.
 
 All branches accept optional `tab`. `text` is required only for `respond` and is
 invalid for every other action. Facts: `tab`, `dialog_type`, `present`, `accepted`, and `handled`
-as applicable. Dialog text is never audited.
+as applicable. Dialog text is never audited. When status finds a dialog, its next step is `Call
+browser_dialog with action accept or dismiss (or respond with text for a prompt) before
+continuing.`
 
 ### `browser_upload`
 
@@ -508,6 +552,12 @@ restart state. Save can be repeated until retention expires; a target or downloa
 real effect each time and is not thereby repeat-safe. A save after retention expires is a refusal,
 not an empty result. Discard is destructive.
 
+A recording also stops on its own when the page, or any frame inside it, loads new content or
+goes away: a navigation or reload in any frame, or a frame added or removed. Status then reads
+`Recording stopped after 12 seconds because the page, or a frame inside it, loaded new content or
+went away. The captured portion is available.` with `stop_reason` `document_boundary`. It never
+claims the tab itself moved, because often it did not.
+
 A saved replay's sentence says how long it plays and where it went, because that is what someone
 who asked for a recording wants to know. How many frames survived, how many were captured, and how
 many bytes they became are real and stay in the facts, alongside `recording`, state, deadlines,
@@ -566,7 +616,8 @@ the ordinary completion/audit path still apply.
 
 The result carries the orchestrator's compiled projection -- the same compilation the workbench
 Policy destination renders -- with layer document texts and filesystem paths withheld from model
-results. The summary names its measurement: capability areas explained over layers in force.
+results. The summary names its measurements in plain words, for example `Explained what agents
+may do: 4 capability areas, no policy layers.`
 
 ## Explicit human control and request guidance (ADR-0185)
 

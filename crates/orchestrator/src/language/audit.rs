@@ -97,6 +97,7 @@ pub enum AuditRefusal {
     DeadlineExpired { before_dispatch: bool },
     BrowserPrimitiveFailed,
     DocumentUnavailable,
+    CancelledBeforeDispatch,
     BrowserStopped { reconnect: bool },
     BrowserAmbiguous,
     BrowserUnknown,
@@ -150,11 +151,14 @@ impl Refusal {
             Self::CredentialAuthorization => AuditRefusal::CredentialAuthorization,
             Self::IncompatibleReceipt => AuditRefusal::IncompatibleReceipt,
             Self::BrowserAdapterOutdated => AuditRefusal::BrowserAdapterOutdated,
-            Self::DeadlineExpired { before_dispatch } => AuditRefusal::DeadlineExpired {
+            Self::DeadlineExpired {
+                before_dispatch, ..
+            } => AuditRefusal::DeadlineExpired {
                 before_dispatch: *before_dispatch,
             },
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
+            Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
             Self::BrowserStopped { reconnect } => AuditRefusal::BrowserStopped {
                 reconnect: *reconnect,
             },

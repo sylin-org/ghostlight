@@ -665,6 +665,10 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
                 result.summary,
                 "Blocked: this session may not take that kind of action."
             );
+            assert_eq!(
+                result.next_steps,
+                vec!["Call policy_explain to see what this session may do."]
+            );
             let records = audit.0.lock().unwrap();
             assert_eq!(records.last().unwrap().summary, result.summary);
             assert!(!serde_json::to_string(&*records)

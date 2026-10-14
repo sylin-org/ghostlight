@@ -87,13 +87,21 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    same lease and snapshot. Preparation failures and unconfirmed receipts never fabricate execution.
 2. One invocation can commit only one terminal outcome.
 3. Deadline or cancellation before dispatch reports no effect and is repeat-safe when the job is.
+   Cancellation says it was cancelled, never that the browser disconnected, and suggests nothing.
+   A deadline suggests a longer `timeout_ms` only for a call that accepts that field and is below
+   its 30000 ms maximum; every other call, including `browser_fill_form` at its default, is told
+   to repeat the call and narrow a very large page.
 4. Disconnect or cancellation after uncertain dispatch reports unknown effect and no replay advice.
+   A deadline after dispatch says to check the page before repeating.
 5. Flows count successful steps as completed. Mixed Continue remains non-success.
    Known partial effects stay partial; later uncertainty preserves prior known effect counts.
    Unable-to-start and never-run steps remain distinct. Result omission preserves status/effect
    metadata. Recovery respects completed work; human directives and invocation limits beat Continue.
    Safe repetition requires every step to succeed without effects and permit repetition.
 6. Stale tab and target handles fail before browser dispatch and suggest obtaining current handles.
+   A call with no `tab` in a session without tabs says no tab is open yet and points to
+   `browser_navigate`; with several plausible tabs it says the call must name one. A policy
+   denial points to `policy_explain`.
 7. Lower-capability-model fixtures succeed with every documented shortest call, choose the correct
    sibling among related tools, and recover from deliberately stale and ambiguous handles.
    The shortest `browser_read` call returns visible text from the composed page: top document, open

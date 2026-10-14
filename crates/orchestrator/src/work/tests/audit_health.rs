@@ -169,6 +169,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         snapshot: &snapshot,
         requirements: CapabilitySet::READ,
         deadline: Instant::now() + Duration::from_secs(1),
+        deadline_adjustable: false,
         cancellation: &cancellation,
     };
     assert!(executor.admit_dispatch(&context).is_ok());

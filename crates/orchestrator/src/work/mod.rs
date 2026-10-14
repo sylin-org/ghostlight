@@ -87,6 +87,9 @@ pub(crate) struct PreparedInvocation {
     provenance: Option<Arc<ConnectionEvidence>>,
     started: Instant,
     deadline: Instant,
+    /// Whether a longer `timeout_ms` would give this call more time: the tool takes the field,
+    /// its value is below the maximum, and no edge-supplied deadline overrides it.
+    deadline_adjustable: bool,
     decoded: Result<Operation, language::LanguageError>,
     stage: Mutex<InvocationStage>,
 }
@@ -115,12 +118,17 @@ impl PreparedInvocation {
         let timeout = caller_deadline_ms
             .unwrap_or_else(|| decoded.as_ref().map(operation_timeout).unwrap_or(8_000))
             .clamp(100, 30_000);
+        // An edge-supplied deadline overrides the input field, so only an input-set deadline
+        // below the maximum is one the caller can raise by changing the call.
+        let deadline_adjustable =
+            caller_deadline_ms.is_none() && decoded.as_ref().is_ok_and(Operation::timeout_can_grow);
         Self {
             invocation: format!("invocation_{}", Uuid::new_v4().simple()),
             tool: tool.into(),
             provenance,
             started,
             deadline: started + Duration::from_millis(timeout),
+            deadline_adjustable,
             decoded,
             stage: Mutex::default(),
         }
@@ -316,6 +324,7 @@ impl ApplicationExecutor {
             requested_target: operation_target(operation),
             snapshot: &snapshot,
             deadline,
+            deadline_adjustable: prepared.deadline_adjustable,
             cancellation,
         };
         let terminal = if capacity_refused {
@@ -1614,6 +1623,7 @@ impl ApplicationExecutor {
                 BrowserError::DeadlineAfterDispatch => (
                     Refusal::DeadlineExpired {
                         before_dispatch: false,
+                        timeout_adjustable: context.deadline_adjustable,
                     },
                     json!({"reason":"deadline","phase":"after_dispatch"}),
                 ),
@@ -1639,6 +1649,7 @@ impl ApplicationExecutor {
                 physical_id,
                 Refusal::DeadlineExpired {
                     before_dispatch: true,
+                    timeout_adjustable: context.deadline_adjustable,
                 },
                 json!({"reason":"deadline","phase":"before_dispatch"}),
             );
@@ -1652,13 +1663,16 @@ impl ApplicationExecutor {
                 json!({"reason":browser_reason(&error)}),
             );
         }
-        let status = if matches!(error, BrowserError::CancelledBeforeDispatch) {
-            Status::Cancelled
+        // A cancellation the caller asked for is not a browser problem and never says it was.
+        let (status, refusal) = if matches!(error, BrowserError::CancelledBeforeDispatch) {
+            (Status::Cancelled, Refusal::CancelledBeforeDispatch)
         } else {
-            Status::Failed
-        };
-        let refusal = Refusal::BrowserStopped {
-            reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
+            (
+                Status::Failed,
+                Refusal::BrowserStopped {
+                    reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
+                },
+            )
         };
         let summary = refusal.summary();
         Terminal {
@@ -1819,6 +1833,12 @@ struct InvocationContext<'a> {
     requested_target: Option<&'a str>,
     snapshot: &'a AuthoritySnapshot,
     deadline: Instant,
+    /// Whether the top-level call that set `deadline` could be repeated with a longer
+    /// `timeout_ms`.
+    ///
+    /// Flow children inherit it with the deadline, because the flow's own `timeout_ms` is the
+    /// field that would give them more time.
+    deadline_adjustable: bool,
     cancellation: &'a CancellationToken,
 }
 
@@ -2072,26 +2092,12 @@ fn operation_target(operation: &Operation) -> Option<&str> {
     }
 }
 
+/// The invocation deadline: the caller's `timeout_ms` where the tool takes one, else a fixed budget.
 fn operation_timeout(operation: &Operation) -> u64 {
-    match operation {
-        Operation::OpenPage(value) => value.timeout_ms,
-        Operation::NavigatePage(value) => value.timeout_ms,
-        Operation::NavigateHistory(value) => value.timeout_ms,
-        Operation::ReloadPage(value) => value.timeout_ms,
-        Operation::TakeScreenshot(value) => value.timeout_ms,
-        Operation::Click(value) => value.timeout_ms,
-        Operation::ScrollPage(value) => value.timeout_ms,
-        Operation::Hover(value) => value.timeout_ms,
-        Operation::FillForm(value) => value.timeout_ms,
-        Operation::TypeText(value) => value.timeout_ms,
-        Operation::Drag(value) => value.timeout_ms,
-        Operation::UploadFiles(value) => value.timeout_ms,
-        Operation::RunScript(value) => value.timeout_ms,
-        Operation::Wait(value) => value.timeout_ms,
-        Operation::RunFlow(value) => value.timeout_ms,
+    operation.timeout_ms().unwrap_or(match operation {
         Operation::Record(_) => 30_000,
         _ => 8_000,
-    }
+    })
 }
 
 /// What a click landed on, so the completed sentence can say which it was.

@@ -272,6 +272,11 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
     assert!(!before.summary.contains("disconnected"));
     assert_eq!(before.facts["reason"], "deadline");
     assert_eq!(before.facts["phase"], "before_dispatch");
+    // Navigation takes timeout_ms, so more time is advice the decoder will accept.
+    assert_eq!(
+        before.next_steps,
+        vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
+    );
 
     browser.push(Err(BrowserError::DeadlineAfterDispatch));
     let after = executor.execute(
@@ -288,6 +293,202 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
     assert!(!after.summary.contains("disconnected"));
     assert_eq!(after.facts["reason"], "deadline");
     assert_eq!(after.facts["phase"], "after_dispatch");
+    assert_eq!(
+        after.next_steps,
+        vec!["Check the page with browser_read or browser_screenshot before repeating; the action may already have happened."]
+    );
+}
+
+/// A tool with a fixed deadline is never told to raise a `timeout_ms` it does not have, and the
+/// call that advice would describe really is rejected.
+#[test]
+fn fixed_deadline_tools_get_advice_they_can_follow() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(read.status, Status::Failed);
+    assert_eq!(read.facts["phase"], "before_dispatch");
+    assert_eq!(
+        read.next_steps,
+        vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
+    );
+    assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_000})).is_err());
+
+    // An edge-supplied deadline overrides timeout_ms, so it is not advice either.
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let edge = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        Some(5_000),
+        &CancellationToken::default(),
+    );
+    assert_eq!(edge.status, Status::Failed);
+    assert!(!edge.next_steps.join(" ").contains("timeout_ms"));
+}
+
+/// A call already at the longest `timeout_ms` is never told to raise it, because the decoder
+/// rejects anything longer. `browser_fill_form` starts there by default; a shorter explicit value
+/// still gets the advice.
+#[test]
+fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    browser.push(Ok(BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "name-1".into(),
+            role: "textbox".into(),
+            name: "Name".into(),
+            state: vec![],
+            credential_class: false,
+        }],
+    }));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    let target = inspected.facts["items"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fields = json!([{"target":target,"value":"Ada"}]);
+
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let default_fill = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":tab_handle,"fields":fields}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(default_fill.status, Status::Failed, "{default_fill:?}");
+    assert_eq!(default_fill.facts["reason"], "deadline");
+    assert_eq!(default_fill.facts["phase"], "before_dispatch");
+    assert!(!default_fill.next_steps.is_empty());
+    assert!(
+        !default_fill.next_steps.join(" ").contains("timeout_ms"),
+        "{:?}",
+        default_fill.next_steps
+    );
+
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let longest_navigation = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","timeout_ms":30_000}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(longest_navigation.facts["phase"], "before_dispatch");
+    assert!(!longest_navigation
+        .next_steps
+        .join(" ")
+        .contains("timeout_ms"));
+
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let shorter_fill = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":tab_handle,"fields":fields,"timeout_ms":20_000}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(shorter_fill.facts["phase"], "before_dispatch");
+    assert_eq!(
+        shorter_fill.next_steps,
+        vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
+    );
+}
+
+/// A cancellation the caller asked for says so. It never blames the browser and suggests
+/// nothing, because the caller chose to stop.
+#[test]
+fn cancellation_before_dispatch_says_cancelled_not_disconnected() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Err(BrowserError::CancelledBeforeDispatch));
+    let result = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Cancelled);
+    assert_eq!(result.effect, Effect::None);
+    assert!(result.repeat_safe);
+    assert_eq!(
+        result.summary,
+        "Cancelled before anything reached the browser."
+    );
+    assert!(result.next_steps.is_empty());
+    assert_eq!(result.facts["reason"], "cancelled");
+    let records = audit.0.lock().unwrap();
+    assert_eq!(
+        records.last().unwrap().refusal_facts,
+        Some(crate::language::audit::AuditRefusal::CancelledBeforeDispatch)
+    );
+}
+
+/// A call that names no tab in a session with none is told how to open one, not that a tab
+/// it never had is gone.
+#[test]
+fn an_empty_session_says_no_tab_yet_and_how_to_open_one() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    let result = executor.execute(
+        &workspace,
+        "browser_diagnose",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert_eq!(result.summary, "This session has no open tab yet.");
+    assert_eq!(result.facts["reason"], "no_tab");
+    assert_eq!(
+        result.next_steps,
+        vec!["Call browser_navigate with url to open a page."]
+    );
+    assert!(browser.calls().is_empty());
 }
 
 /// Navigating by a durable tab handle that points at a closed tab recreates it through

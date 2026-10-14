@@ -18,6 +18,9 @@ pub const HUMAN_PAUSE_DIRECTIVE: &str =
 pub const HUMAN_STOP_DIRECTIVE: &str =
     "The user asked to interrupt the process. Wait for further instructions.";
 
+/// The one way to give an empty session its first page, shared by every result that finds none.
+const OPEN_FIRST_TAB: &str = "Call browser_navigate with url to open a page.";
+
 fn browser_choices(browsers: &[String]) -> String {
     match browsers {
         [] => "a supported Chromium".into(),
@@ -357,6 +360,10 @@ pub enum Outcome {
     /// An active memory-only recording stopped.
     RecordingStopped { duration_ms: u64 },
     /// Recording ended when its admitted document scope could no longer be verified.
+    ///
+    /// The adapter stops for any frame, not only the top page: a navigation or reload in any
+    /// frame, a frame added or removed, or a document set it cannot list. The sentence says
+    /// exactly that much and never claims the tab itself moved.
     RecordingBoundary { duration_ms: u64 },
     /// A recording was encoded as an animated GIF and delivered.
     RecordingSaved {
@@ -403,12 +410,12 @@ impl Outcome {
                 }
             }
             Self::TabsListed { count } => {
-                format!("Listed {}.", counted(*count, "bound tab", "bound tabs"))
+                format!("Listed {} in this session.", counted(*count, "tab", "tabs"))
             }
             Self::WorkspacesListed { count } => {
                 format!(
                     "Listed {}.",
-                    counted(*count, "admitted workspace", "admitted workspaces")
+                    counted(*count, "Ghostlight session", "Ghostlight sessions")
                 )
             }
             Self::WorkspaceSwitched { workspace } => {
@@ -418,9 +425,9 @@ impl Outcome {
                 capabilities,
                 layers,
             } => format!(
-                "Explained current authority across {} over {}.",
+                "Explained what agents may do: {}, {}.",
                 counted(*capabilities, "capability area", "capability areas"),
-                counted(*layers, "layer", "layers")
+                counted_or_none(*layers, "policy layer", "policy layers")
             ),
             Self::TabActivated { host } => {
                 format!("Brought {} into view.", place(host, "the controlled tab"))
@@ -670,7 +677,7 @@ impl Outcome {
                 format!("Stopped recording after {}.", spanned(*duration_ms))
             }
             Self::RecordingBoundary { duration_ms } => format!(
-                "Recording stopped at the document boundary after {}. The captured portion is available.",
+                "Recording stopped after {} because the page, or a frame inside it, loaded new content or went away. The captured portion is available.",
                 spanned(*duration_ms)
             ),
             Self::RecordingSaved {
@@ -692,9 +699,7 @@ impl Outcome {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
-            Self::TabsListed { count: 0 } => vec![
-                "Call browser_navigate with url (and optional new_tab: true) to open a page in this workspace.".into(),
-            ],
+            Self::TabsListed { count: 0 } => vec![OPEN_FIRST_TAB.into()],
             Self::TabAlreadyClosed => vec![
                 "Call browser_tabs with action list to see remaining open tabs.".into(),
             ],
@@ -721,7 +726,7 @@ impl Outcome {
                     .into(),
             ],
             Self::DialogObserved { present: true } => vec![
-                "Call browser_dialog with accept: true or accept: false to resolve the dialog before continuing.".into(),
+                "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.".into(),
             ],
             Self::DiagnosticsRead {
                 count: 0,
@@ -923,11 +928,17 @@ pub enum Refusal {
     DeadlineExpired {
         /// True when the deadline fired before any dispatch could happen.
         before_dispatch: bool,
+        /// True when the call that set this deadline accepts `timeout_ms` and is still below the
+        /// maximum, so raising it is advice the decoder will take. Read, inspect, find, other
+        /// fixed-deadline tools, and calls already at the maximum never get that advice.
+        timeout_adjustable: bool,
     },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
     /// A required browser document could not be bound to current authority.
     DocumentUnavailable,
+    /// The caller cancelled after the job started but before any browser command was sent.
+    CancelledBeforeDispatch,
     /// The browser stopped before a physical effect.
     BrowserStopped { reconnect: bool },
     /// Several browsers are connected and the call did not say which one it meant.
@@ -990,13 +1001,16 @@ impl Refusal {
                 return format!("The browser refused this job: {detail}.");
             }
             Self::DocumentUnavailable => "Document access could not be verified.",
-            Self::DeadlineExpired { before_dispatch } => {
+            Self::DeadlineExpired {
+                before_dispatch, ..
+            } => {
                 if *before_dispatch {
                     "The job ran out of time before reaching the browser."
                 } else {
                     "Sent, but the job ran out of time before the browser confirmed."
                 }
             }
+            Self::CancelledBeforeDispatch => "Cancelled before anything reached the browser.",
             Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
             Self::BrowserAmbiguous => {
                 "More than one browser is connected, so there is no single place to open this."
@@ -1061,8 +1075,26 @@ impl Refusal {
             Self::Capacity | Self::DeadlineBeforeStart => vec![
                 "Repeat the call when the current Ghostlight action has finished.".into(),
             ],
+            Self::AuthorityBlocked { reason, .. } => match reason {
+                // Policy is the one thing the caller can ask about. The human controls are
+                // pinned step-free by ADR-0126, a storage outage recovers by itself, and an
+                // unreadable policy has nothing to explain.
+                BlockedReason::Host
+                | BlockedReason::ProtectedHost
+                | BlockedReason::Capability
+                | BlockedReason::TabClose
+                | BlockedReason::Screenshot
+                | BlockedReason::Channel
+                | BlockedReason::Unspecified => {
+                    vec!["Call policy_explain to see what this session may do.".into()]
+                }
+                BlockedReason::AuditUnavailable
+                | BlockedReason::InvalidAuthority
+                | BlockedReason::Hold
+                | BlockedReason::SessionEnded => vec![],
+            },
             Self::LocalInterlock => vec![
-                "The user can change the relevant Ghostlight extension setting or perform the action directly."
+                "The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."
                     .into(),
             ],
             Self::CredentialAuthorization => vec![
@@ -1085,8 +1117,28 @@ impl Refusal {
                     .into(),
             ],
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
-            Self::DeadlineExpired { .. } => vec![
+            // Only advice the decoder will take: timeout_ms exists on some tools and not others,
+            // and never grows past its maximum. After dispatch the first job is learning whether
+            // the action already happened.
+            Self::DeadlineExpired {
+                before_dispatch: false,
+                ..
+            } => vec![
+                "Check the page with browser_read or browser_screenshot before repeating; the action may already have happened."
+                    .into(),
+            ],
+            Self::DeadlineExpired {
+                before_dispatch: true,
+                timeout_adjustable: true,
+            } => vec![
                 "Repeat with a longer timeout_ms when the page genuinely needs more time."
+                    .into(),
+            ],
+            Self::DeadlineExpired {
+                before_dispatch: true,
+                timeout_adjustable: false,
+            } => vec![
+                "Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."
                     .into(),
             ],
             Self::BrowserAmbiguous | Self::BrowserUnknown => vec![
@@ -1167,7 +1219,11 @@ impl Refusal {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceReason {
-    /// No current unambiguous controlled tab matched.
+    /// The call named no tab and this session has none yet.
+    NoTab,
+    /// The call named no tab and several of this session's tabs could be meant.
+    AmbiguousTab,
+    /// The named tab handle is closed or no longer known.
     TabUnavailable,
     /// The target belongs to an old or unknown document.
     StaleTarget,
@@ -1188,6 +1244,10 @@ impl WorkspaceReason {
     #[must_use]
     pub fn summary(&self) -> String {
         match self {
+            Self::NoTab => "This session has no open tab yet.".into(),
+            Self::AmbiguousTab => {
+                "More than one tab is open in this session, so the call must name one.".into()
+            }
             Self::TabUnavailable => "That tab is no longer open.".into(),
             Self::StaleTarget => "That target belongs to an older version of the page.".into(),
             Self::StaleView => "The page has moved since that screenshot was taken.".into(),
@@ -1209,6 +1269,8 @@ impl WorkspaceReason {
     #[must_use]
     pub const fn as_fact(&self) -> &'static str {
         match self {
+            Self::NoTab => "no_tab",
+            Self::AmbiguousTab => "ambiguous_tab",
             Self::TabUnavailable => "tab_unavailable",
             Self::StaleTarget => "stale_target",
             Self::StaleView => "stale_view",
@@ -1223,6 +1285,11 @@ impl WorkspaceReason {
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
+            Self::NoTab => vec![OPEN_FIRST_TAB.into()],
+            Self::AmbiguousTab => vec![
+                "Call browser_tabs with action list, then repeat the call with tab set to the handle you want."
+                    .into(),
+            ],
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
             }
@@ -1256,9 +1323,9 @@ impl WorkspaceReason {
 impl From<WorkspaceError> for WorkspaceReason {
     fn from(error: WorkspaceError) -> Self {
         match error {
-            WorkspaceError::StaleTab | WorkspaceError::NoTab | WorkspaceError::AmbiguousTab => {
-                Self::TabUnavailable
-            }
+            WorkspaceError::NoTab => Self::NoTab,
+            WorkspaceError::AmbiguousTab => Self::AmbiguousTab,
+            WorkspaceError::StaleTab => Self::TabUnavailable,
             WorkspaceError::StaleTarget => Self::StaleTarget,
             WorkspaceError::StaleView
             | WorkspaceError::ViewPointOutOfBounds
@@ -1373,7 +1440,9 @@ fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
         // and 5. Pause is reversible and says so by not being terminal; stop ends the session.
         (BlockedReason::Hold, _) => HUMAN_PAUSE_DIRECTIVE.into(),
         (BlockedReason::SessionEnded, _) => HUMAN_STOP_DIRECTIVE.into(),
-        (BlockedReason::Channel, _) => "Blocked: this intake channel is disabled.".into(),
+        (BlockedReason::Channel, _) => {
+            "Blocked: policy does not accept calls from this kind of client.".into()
+        }
         (BlockedReason::Unspecified, Some(host)) => format!("Blocked by policy on {host}."),
         (BlockedReason::Unspecified, None) => "Blocked by Ghostlight policy.".into(),
     }
@@ -1477,6 +1546,15 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
     format!("{} {noun}", grouped(count))
 }
 
+/// "no policy layers" rather than "0 policy layers", where an absence is the usual case.
+fn counted_or_none(count: usize, singular: &str, plural: &str) -> String {
+    if count == 0 {
+        format!("no {plural}")
+    } else {
+        counted(count, singular, plural)
+    }
+}
+
 fn grouped(value: usize) -> String {
     let digits = value.to_string();
     let mut rendered = String::with_capacity(digits.len() + digits.len() / 3);
@@ -1527,21 +1605,48 @@ mod tests {
     #[test]
     fn outcome_summaries_transcribe_the_product_oracles() {
         let examples = vec![
-            (Outcome::TabsListed { count: 4 }, "Listed 4 bound tabs."),
-            (Outcome::TabsListed { count: 1 }, "Listed 1 bound tab."),
+            (
+                Outcome::TabsListed { count: 4 },
+                "Listed 4 tabs in this session.",
+            ),
+            (
+                Outcome::TabsListed { count: 1 },
+                "Listed 1 tab in this session.",
+            ),
+            (
+                Outcome::TabsListed { count: 0 },
+                "Listed 0 tabs in this session.",
+            ),
+            (
+                Outcome::WorkspacesListed { count: 2 },
+                "Listed 2 Ghostlight sessions.",
+            ),
             (
                 Outcome::PolicyExplained {
                     capabilities: 8,
                     layers: 2,
                 },
-                "Explained current authority across 8 capability areas over 2 layers.",
+                "Explained what agents may do: 8 capability areas, 2 policy layers.",
             ),
             (
                 Outcome::PolicyExplained {
                     capabilities: 1,
                     layers: 1,
                 },
-                "Explained current authority across 1 capability area over 1 layer.",
+                "Explained what agents may do: 1 capability area, 1 policy layer.",
+            ),
+            (
+                Outcome::PolicyExplained {
+                    capabilities: 4,
+                    layers: 0,
+                },
+                "Explained what agents may do: 4 capability areas, no policy layers.",
+            ),
+            (
+                Outcome::RecordingBoundary {
+                    duration_ms: 12_000,
+                },
+                "Recording stopped after 12 seconds because the page, or a frame inside it, loaded new content or went away. The captured portion is available.",
             ),
             (
                 Outcome::TabActivated {
@@ -2160,6 +2265,17 @@ mod tests {
                 "The browser disconnected before anything happened.",
             ),
             (
+                Refusal::CancelledBeforeDispatch,
+                "Cancelled before anything reached the browser.",
+            ),
+            (
+                Refusal::AuthorityBlocked {
+                    reason: BlockedReason::Channel,
+                    host: None,
+                },
+                "Blocked: policy does not accept calls from this kind of client.",
+            ),
+            (
                 Refusal::EffectUnknown,
                 "Sent, but the browser never confirmed what happened.",
             ),
@@ -2172,6 +2288,18 @@ mod tests {
                     reason: WorkspaceReason::TabUnavailable,
                 },
                 "That tab is no longer open.",
+            ),
+            (
+                Refusal::WorkspaceUnusable {
+                    reason: WorkspaceReason::NoTab,
+                },
+                "This session has no open tab yet.",
+            ),
+            (
+                Refusal::WorkspaceUnusable {
+                    reason: WorkspaceReason::AmbiguousTab,
+                },
+                "More than one tab is open in this session, so the call must name one.",
             ),
             (
                 Refusal::FilesUnreadable,
@@ -2196,12 +2324,14 @@ mod tests {
             (
                 Refusal::DeadlineExpired {
                     before_dispatch: true,
+                    timeout_adjustable: true,
                 },
                 "The job ran out of time before reaching the browser.",
             ),
             (
                 Refusal::DeadlineExpired {
                     before_dispatch: false,
+                    timeout_adjustable: true,
                 },
                 "Sent, but the job ran out of time before the browser confirmed.",
             ),
@@ -2239,11 +2369,12 @@ mod tests {
         );
         assert_eq!(
             Refusal::LocalInterlock.next_steps(),
-            vec!["The user can change the relevant Ghostlight extension setting or perform the action directly."]
+            vec!["The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."]
         );
         assert!(Refusal::BrowserStopped { reconnect: false }
             .next_steps()
             .is_empty());
+        assert!(Refusal::CancelledBeforeDispatch.next_steps().is_empty());
         assert_eq!(
             Refusal::BrowserStopped { reconnect: true }.next_steps(),
             vec!["Reconnect the Ghostlight browser adapter."]
@@ -2285,9 +2416,118 @@ mod tests {
         );
     }
 
+    /// A deadline suggests only what the call can actually change: more `timeout_ms` where the
+    /// tool takes it, a narrower request where it does not, and a look at the page when the
+    /// action may already have happened.
+    #[test]
+    fn deadline_advice_follows_what_the_call_can_change() {
+        assert_eq!(
+            Refusal::DeadlineExpired {
+                before_dispatch: true,
+                timeout_adjustable: true,
+            }
+            .next_steps(),
+            vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
+        );
+        let fixed = Refusal::DeadlineExpired {
+            before_dispatch: true,
+            timeout_adjustable: false,
+        }
+        .next_steps();
+        assert_eq!(
+            fixed,
+            vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
+        );
+        assert!(!fixed.join(" ").contains("timeout_ms"));
+        for timeout_adjustable in [true, false] {
+            let after = Refusal::DeadlineExpired {
+                before_dispatch: false,
+                timeout_adjustable,
+            }
+            .next_steps();
+            assert_eq!(
+                after,
+                vec!["Check the page with browser_read or browser_screenshot before repeating; the action may already have happened."]
+            );
+        }
+    }
+
+    /// A policy denial points to the one tool that explains policy. The human controls stay
+    /// step-free (ADR-0126), and so do the outages Ghostlight resolves without the caller.
+    #[test]
+    fn policy_denials_point_to_policy_explain() {
+        let explain = vec!["Call policy_explain to see what this session may do.".to_string()];
+        for reason in [
+            BlockedReason::Host,
+            BlockedReason::ProtectedHost,
+            BlockedReason::Capability,
+            BlockedReason::TabClose,
+            BlockedReason::Screenshot,
+            BlockedReason::Channel,
+            BlockedReason::Unspecified,
+        ] {
+            let refusal = Refusal::AuthorityBlocked {
+                reason,
+                host: Some("example.com".into()),
+            };
+            assert_eq!(refusal.next_steps(), explain, "{reason:?}");
+        }
+        for reason in [
+            BlockedReason::AuditUnavailable,
+            BlockedReason::InvalidAuthority,
+            BlockedReason::Hold,
+            BlockedReason::SessionEnded,
+        ] {
+            let refusal = Refusal::AuthorityBlocked { reason, host: None };
+            assert!(refusal.next_steps().is_empty(), "{reason:?}");
+        }
+    }
+
+    /// Governance vocabulary stays out of what the model reads.
+    #[test]
+    fn model_facing_sentences_use_plain_words() {
+        let sentences = [
+            Outcome::TabsListed { count: 3 }.summary(),
+            Outcome::WorkspacesListed { count: 3 }.summary(),
+            Outcome::PolicyExplained {
+                capabilities: 3,
+                layers: 2,
+            }
+            .summary(),
+            Outcome::RecordingBoundary { duration_ms: 3_000 }.summary(),
+            Refusal::AuthorityBlocked {
+                reason: BlockedReason::Channel,
+                host: None,
+            }
+            .summary(),
+        ];
+        for sentence in sentences {
+            let lower = sentence.to_lowercase();
+            for jargon in [
+                "authority",
+                "admitted",
+                "bound",
+                "custody",
+                "document scope",
+                "document boundary",
+                "intake",
+            ] {
+                assert!(!lower.contains(jargon), "{sentence:?} says {jargon:?}");
+            }
+        }
+    }
+
     /// Every workspace reason names its own way back, or deliberately none.
     #[test]
     fn workspace_reasons_teach_their_own_recovery() {
+        assert_eq!(
+            WorkspaceReason::NoTab.next_steps(),
+            vec!["Call browser_navigate with url to open a page."]
+        );
+        assert_eq!(
+            WorkspaceReason::AmbiguousTab.next_steps(),
+            vec!["Call browser_tabs with action list, then repeat the call with tab set to the handle you want."]
+        );
         assert_eq!(
             WorkspaceReason::TabUnavailable.next_steps(),
             vec!["Call browser_tabs with action list to obtain current tab handles."]
@@ -2337,7 +2577,7 @@ mod tests {
     fn outcome_next_steps_teach_the_fix() {
         assert_eq!(
             Outcome::TabsListed { count: 0 }.next_steps(),
-            vec!["Call browser_navigate with url (and optional new_tab: true) to open a page in this workspace."]
+            vec!["Call browser_navigate with url to open a page."]
         );
         assert!(Outcome::TabsListed { count: 2 }.next_steps().is_empty());
         assert_eq!(
@@ -2376,7 +2616,7 @@ mod tests {
         .is_empty());
         assert_eq!(
             Outcome::DialogObserved { present: true }.next_steps(),
-            vec!["Call browser_dialog with accept: true or accept: false to resolve the dialog before continuing."]
+            vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
         );
         assert!(Outcome::DialogObserved { present: false }
             .next_steps()
@@ -2452,11 +2692,8 @@ mod tests {
     fn workspace_errors_map_to_the_language_reason_oracle() {
         let examples = [
             (WorkspaceError::StaleTab, WorkspaceReason::TabUnavailable),
-            (WorkspaceError::NoTab, WorkspaceReason::TabUnavailable),
-            (
-                WorkspaceError::AmbiguousTab,
-                WorkspaceReason::TabUnavailable,
-            ),
+            (WorkspaceError::NoTab, WorkspaceReason::NoTab),
+            (WorkspaceError::AmbiguousTab, WorkspaceReason::AmbiguousTab),
             (WorkspaceError::StaleTarget, WorkspaceReason::StaleTarget),
             (WorkspaceError::StaleView, WorkspaceReason::StaleView),
             (
@@ -2498,6 +2735,16 @@ mod tests {
             assert_eq!(WorkspaceReason::from(error), expected);
         }
         assert_eq!(WorkspaceReason::TabUnavailable.as_fact(), "tab_unavailable");
+        assert_eq!(WorkspaceReason::NoTab.as_fact(), "no_tab");
+        assert_eq!(WorkspaceReason::AmbiguousTab.as_fact(), "ambiguous_tab");
+        // History stores the same names the facts use.
+        for reason in [
+            WorkspaceReason::NoTab,
+            WorkspaceReason::AmbiguousTab,
+            WorkspaceReason::TabUnavailable,
+        ] {
+            assert_eq!(serde_json::to_value(&reason).unwrap(), reason.as_fact());
+        }
     }
 
     #[test]

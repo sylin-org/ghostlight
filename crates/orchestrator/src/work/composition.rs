@@ -225,7 +225,9 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
         Some(A::CredentialHandoff | A::CredentialAuthorization) => StepCause::Failed,
         Some(A::AttentionRequired | A::LocalInterlock) => StepCause::AttentionRequired,
         Some(A::DeadlineBeforeStart | A::DeadlineExpired { .. }) => StepCause::Deadline,
-        Some(A::CancelledBeforeStart | A::CancelledAfterDispatch) => StepCause::Cancelled,
+        Some(A::CancelledBeforeStart | A::CancelledBeforeDispatch | A::CancelledAfterDispatch) => {
+            StepCause::Cancelled
+        }
         Some(A::ConnectionLost | A::BrowserStopped { reconnect: true }) => {
             StepCause::ConnectionLost
         }
@@ -424,6 +426,7 @@ mod tests {
                 requested_target: None,
                 snapshot: &snapshot,
                 deadline: Instant::now(),
+                deadline_adjustable: false,
                 cancellation: &token,
             };
             let mut composition =
