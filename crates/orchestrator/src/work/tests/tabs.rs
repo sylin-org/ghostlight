@@ -369,6 +369,7 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         name: "Save".into(),
         state: vec![],
         credential_class: false,
+        ..Default::default()
     };
     browser.push(Ok(BrowserOutcome::Targets {
         tab_id: 7,
@@ -485,6 +486,7 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
             name: "Next".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(

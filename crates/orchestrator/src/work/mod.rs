@@ -5,6 +5,7 @@ mod documents;
 mod flow;
 mod forms;
 mod interaction;
+mod item;
 mod navigation;
 mod pointer;
 mod policy;
@@ -2624,6 +2625,7 @@ mod tests {
     mod catalog_authority;
     mod configured_authority;
     mod control;
+    mod controls;
     mod credentials;
     mod documents;
     mod execution;

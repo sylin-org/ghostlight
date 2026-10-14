@@ -7,6 +7,7 @@ fn target(locator: &str) -> ObservedTarget {
         name: String::new(),
         state: Vec::new(),
         credential_class: false,
+        ..Default::default()
     }
 }
 

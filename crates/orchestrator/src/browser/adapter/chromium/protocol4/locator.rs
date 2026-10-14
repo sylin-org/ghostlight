@@ -156,6 +156,7 @@ mod tests {
             name: "Save".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         };
         let scoped = rescope(
             &doc("F1", "L1"),
@@ -169,5 +170,22 @@ mod tests {
             ["F1:L1:locator_a1b2c3d4_1", "F1:L1:locator_a1b2c3d4_2"]
         );
         assert!(scoped.iter().all(|t| t.name == "Save"));
+    }
+
+    #[test]
+    fn rescoping_keeps_what_a_control_holds_and_accepts() {
+        let select = ObservedTarget {
+            locator: "locator_a1b2c3d4_1".into(),
+            role: "combobox".into(),
+            name: "Role".into(),
+            value: Some(serde_json::json!("Other")),
+            options: Some(serde_json::json!(["Developer", "Other"])),
+            hint: Some("Choose one...".into()),
+            ..Default::default()
+        };
+        let scoped = rescope(&doc("F1", "L1"), vec![select.clone()]);
+        assert_eq!(scoped[0].value, select.value);
+        assert_eq!(scoped[0].options, select.options);
+        assert_eq!(scoped[0].hint, select.hint);
     }
 }

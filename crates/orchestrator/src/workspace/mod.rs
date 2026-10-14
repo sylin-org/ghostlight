@@ -2400,6 +2400,7 @@ mod tests {
                     name: "Go".into(),
                     state: vec![],
                     credential_class: false,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -2446,6 +2447,7 @@ mod tests {
             name: name.into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }
     }
 
@@ -2598,6 +2600,7 @@ mod tests {
                 name: format!("Button {index}"),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             })
             .collect();
         let targets = lease.register_targets(&tab, &observed).unwrap();
@@ -2690,6 +2693,7 @@ mod tests {
                     name: "Go".into(),
                     state: vec![],
                     credential_class: false,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -2731,6 +2735,7 @@ mod tests {
                         name: "Go".into(),
                         state: vec![],
                         credential_class: false,
+                        ..Default::default()
                     }],
                 )
                 .unwrap();
@@ -2773,6 +2778,7 @@ mod tests {
                     name: "untrusted name".into(),
                     state: vec![],
                     credential_class: false,
+                    ..Default::default()
                 }],
             )
             .unwrap();

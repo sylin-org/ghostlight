@@ -123,6 +123,7 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
             name: "Save".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     browser.push(Err(BrowserError::Protocol(
@@ -185,6 +186,7 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
             name: "Save".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -229,6 +231,7 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
             name: "Save".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let clicked = executor.execute(
@@ -280,6 +283,7 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
             name: "Ready".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let waited = executor.execute(
@@ -451,6 +455,7 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
             name: "Name".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -1293,6 +1298,7 @@ fn focused_typing_names_the_control_it_described_and_settles() {
             name: "Ledger project".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     browser.push(Ok(BrowserOutcome::Typed {
@@ -2471,6 +2477,7 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
             name: "private patient action".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -2544,6 +2551,7 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
             name: "Save patient record".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -2659,6 +2667,7 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
             name: "Go".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -2798,6 +2807,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         name: "Password".into(),
         state: vec![],
         credential_class: true,
+        ..Default::default()
     };
     browser.push(Ok(BrowserOutcome::Targets {
         tab_id: 7,
@@ -2985,6 +2995,7 @@ fn stale_target_fails_before_browser_dispatch() {
             name: "Old".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -3020,6 +3031,7 @@ fn stale_target_fails_before_browser_dispatch() {
             name: "Old".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let stale = executor.execute(
@@ -3387,6 +3399,7 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
                 name: "Save".into(),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             }],
         }));
         let inspected = executor.execute(
@@ -3716,6 +3729,7 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
             name: "Submit".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
 
@@ -3889,6 +3903,7 @@ fn typed_with_expectation(
             name: "Message".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     browser.push(Ok(BrowserOutcome::Typed {
@@ -4018,6 +4033,7 @@ fn workspace_with_a_target() -> (
             name: "Delete".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let found = executor.execute(

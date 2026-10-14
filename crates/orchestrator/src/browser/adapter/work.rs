@@ -43,7 +43,11 @@ pub struct PhysicalTab {
 }
 
 /// One semantic target observed by the browser adapter.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// The five identity keys are always present. The rest describe a control and appear only when
+/// they apply, so an absent key means the page offered nothing of that kind. A credential-class
+/// control carries `value` (masked) and none of the others.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservedTarget {
     /// Browser-local locator, never exposed to the model.
@@ -57,6 +61,33 @@ pub struct ObservedTarget {
     pub state: Vec<String>,
     /// Whether the browser classifies this as a credential field.
     pub credential_class: bool,
+    /// What the control holds: a string, or an array of strings for a multiple select.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+    /// The full length of `value` when the page cut it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_chars: Option<usize>,
+    /// The options of a native select, in document order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<serde_json::Value>,
+    /// The full option count when the page cut the list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_total: Option<usize>,
+    /// The input type, when it is one a role does not imply.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,
+    /// The constraints the page declared, keyed by attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<serde_json::Value>,
+    /// Page text that tells what the control expects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// The fieldset or labelled group a radio or checkbox belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Why the control is invalid, when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// The browser-observed identity of the element an action actually used.

@@ -41,6 +41,7 @@ fn credential_guidance_finishes_visuals_without_a_denial_or_attention_notice() {
                 name: "Password".into(),
                 state: vec![],
                 credential_class: true,
+                ..Default::default()
             }],
         }));
         let input = json!({"tab":opened.facts["tab"],"focused":true,"text":"PRIVATE_SECRET"});

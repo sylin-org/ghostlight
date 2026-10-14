@@ -301,7 +301,11 @@ includes visible top-document text, open shadow trees, and http(s) embedded fram
 order. Visible form values are included, checkboxes and radios read as checked or unchecked, and
 placeholders are never values. Every credential-class field, as the write path classifies it, is
 masked: its value reads as the short marker `[hidden]`. Closed shadow roots and hidden content remain absent. Use
-`browser_inspect` or `browser_find` when an action target is needed. Shortest call: `{}`.
+`browser_inspect` or `browser_find` when an action target is needed. A read of one native select
+returns its chosen text and then a last line, `Options: ` followed by every option in order and
+separated by semicolons, bounded only by `max_chars`; a disabled option reads `(disabled)`. This is
+the way to see an option list that an item cut at 25. A credential-class select reads `[hidden]`
+and lists nothing. Shortest call: `{}`.
 
 Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
 the default; explicit `article` prefers a useful article in the top document and falls back to the
@@ -321,11 +325,29 @@ Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `
 default 6; optional `max_items` from 1 to 200, default 80; optional `timeout_ms`. Capability: `read`.
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, an accessibility
-role, bounded accessible name, state, and credential-class flag. An element with no role of its
+role, bounded accessible name, state, and credential-class flag, and a control adds the keys in
+the table below when they apply. An element with no role of its
 own reads as `generic`, never as a tag name. A field with no label, `aria-label` or title is named
 by its placeholder, as browsers do, so `browser_find` and semantic selectors reach it by that
 text. Selectors are not exposed. It answers once the page has been quiet for 300 ms, within the
 settle budget.
+
+Item keys beyond the five above appear only when they apply, so an absent key means the page
+offered nothing of that kind:
+
+| Key | Meaning |
+|---|---|
+| `value` | What the field holds, at most 80 characters, with `value_chars` (the full length) when longer. Empty when the field is empty or a select shows its empty placeholder option. A multiple select gives an array of at most 25 chosen texts. Covers text fields, textareas, native selects, rich editors, range and number. |
+| `options` | A native select only, in document order, at most 25 entries of 60 characters, with `options_total` when cut. An entry is the bare text, `{"text","value"}` when the text is not unique, `{"text","disabled":true}` when the option or its optgroup is disabled, or `{"group","options"}` for an optgroup. The empty placeholder option is left out and shown as `hint`. |
+| `type` | The input type, only for `date`, `time`, `datetime-local`, `month`, `week`, `number`, `range`, `color`, `file`, `email`, `url` and `tel`. |
+| `limits` | The constraints the page declared, among `min`, `max`, `step`, `minlength`, `maxlength`, `pattern`, `accept`, and `multiple:true`. |
+| `hint` | A placeholder that says something other than the name, else the text `aria-describedby` points to, else the select's placeholder option. At most 120 characters. |
+| `group` | For a radio or checkbox, the fieldset legend or the nearest labelled group. At most 80 characters. |
+| `error` | Present when the control is invalid after the person touched it, or the page says `aria-invalid`. The page's own error text when it names one; otherwise a phrase such as `is required`, `is not a valid email address` or `is too short (at least 8 characters)`. The browser's validation message is never used except for a custom error. |
+
+State words gain `required`, `readonly` and `invalid`. A credential-class control carries `value`
+as `[hidden]` when set and empty when empty, and none of the other keys. Option text, hints and
+errors are page content and follow read authorization on the document, like `browser_read`.
 
 A `document` scope returns no target handles. Its facts are `tab`, `document_generation`,
 `tree`, `nodes`, `truncated`, `snapshot`, and sometimes `diff`. `tree` is one bounded
@@ -359,7 +381,7 @@ default `any`; optional `max_results` from 1 to 50, default 20. Capability:
 `read`.
 
 Facts: `tab`, `document_generation`, and bounded ranked `matches` with target, role, name, and
-state. It answers once the page has been quiet for 300 ms, within the settle budget.
+state, and the same optional control keys as `browser_inspect` items. It answers once the page has been quiet for 300 ms, within the settle budget.
 
 ### `browser_screenshot`
 

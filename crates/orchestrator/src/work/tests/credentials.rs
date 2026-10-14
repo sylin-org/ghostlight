@@ -9,6 +9,7 @@ fn credential() -> ObservedTarget {
         name: "Password".into(),
         state: vec![],
         credential_class: true,
+        ..Default::default()
     }
 }
 

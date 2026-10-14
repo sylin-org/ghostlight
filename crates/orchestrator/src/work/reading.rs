@@ -9,6 +9,7 @@ use crate::language::outcome::{CaptureKind, Outcome, Refusal, TargetNoun};
 use crate::language::{ReadMode, DEFAULT_DOCUMENT_DEPTH};
 use crate::workspace::{SnapshotScope, WorkspaceLease};
 
+use super::item::control_item;
 use super::{
     bounded, observed_host, readiness, word_count, ApplicationExecutor, Effect, InvocationContext,
     TakeScreenshot, Terminal,
@@ -273,42 +274,48 @@ impl ApplicationExecutor {
                     _ => unreachable!("target operations are closed"),
                 };
                 match self.dispatch(context, command) {
-            Ok(BrowserOutcome::Targets { tab_id, targets }) if tab_id == selected.physical_id => {
-                let mapped = match lease.register_targets(selected, &targets) {
-                    Ok(mapped) => mapped,
-                    Err(error) => return self.workspace_failure(context, error),
-                };
-                let items: Vec<_> = mapped.into_iter().map(|(handle, target)| json!({"target":handle.as_str(),"role":bounded(&target.role,100),"name":bounded(&target.name,500),"state":target.state,"credential_class":target.credential_class})).collect();
-                let outcome = Outcome::TargetsListed {
-                    noun,
-                    count: items.len(),
-                    host: observed_host(&selected.url),
-                };
-                let fact_key = match noun {
-                    TargetNoun::Match => "matches",
-                    TargetNoun::Control | TargetNoun::Item => "items",
-                };
-                let mut facts = serde_json::Map::new();
-                facts.insert("tab".into(), json!(selected.handle.as_str()));
-                facts.insert("document_generation".into(), json!(selected.generation));
-                facts.insert(fact_key.into(), json!(items));
-                self.succeeded(
-                    context,
-                    decision,
-                    Some(tab_id),
-                    Effect::None,
-                    readiness(selected.readiness),
-                    true,
-                    outcome,
-                    Value::Object(facts),
-                )
-            }
-            Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-            Err(error) => {
-                self.browser_failure(context, decision, error, Some(selected.physical_id))
-            }
-        }
-    })
+                    Ok(BrowserOutcome::Targets { tab_id, targets })
+                        if tab_id == selected.physical_id =>
+                    {
+                        let mapped = match lease.register_targets(selected, &targets) {
+                            Ok(mapped) => mapped,
+                            Err(error) => return self.workspace_failure(context, error),
+                        };
+                        let items: Vec<_> = mapped
+                            .into_iter()
+                            .map(|(handle, target)| control_item(handle.as_str(), &target))
+                            .collect();
+                        let outcome = Outcome::TargetsListed {
+                            noun,
+                            count: items.len(),
+                            host: observed_host(&selected.url),
+                        };
+                        let fact_key = match noun {
+                            TargetNoun::Match => "matches",
+                            TargetNoun::Control | TargetNoun::Item => "items",
+                        };
+                        let mut facts = serde_json::Map::new();
+                        facts.insert("tab".into(), json!(selected.handle.as_str()));
+                        facts.insert("document_generation".into(), json!(selected.generation));
+                        facts.insert(fact_key.into(), json!(items));
+                        self.succeeded(
+                            context,
+                            decision,
+                            Some(tab_id),
+                            Effect::None,
+                            readiness(selected.readiness),
+                            true,
+                            outcome,
+                            Value::Object(facts),
+                        )
+                    }
+                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                    Err(error) => {
+                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    }
+                }
+            },
+        )
     }
 
     pub(super) fn screenshot(

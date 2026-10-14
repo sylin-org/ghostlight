@@ -1696,6 +1696,25 @@ Every kind is built only by a typed constructor in `world.rs`.
 | `drop_files{x, y, files}` | Content | Effect | | today |
 | `attach_file{locator, file_name}` | Content | Effect | | **new**: the file bytes come from `ctx.attachment` (recording export) |
 
+**Observed targets (ADR-0198 decision 7).** `inspect`, `find`, `query_semantic`, `describe` and
+`describe_focused` answer `{targets, truncated}`. Each target always has `locator`, `role`, `name`,
+`state` and `credential_class`. A control adds these keys only when they apply:
+
+| Key | Holds |
+|---|---|
+| `value` | What a text field, textarea, native select, rich editor, range or number holds: at most 80 characters, with `value_chars` when longer. A multiple select gives an array of at most 25 chosen texts. Empty when nothing is chosen or the empty placeholder option is. |
+| `options`, `options_total` | A native select only: at most 25 entries of 60 characters in document order, with `options_total` when cut. An entry is the bare text, `{text, value}` when the text is not unique, `{text, disabled:true}` when the option or its optgroup is disabled, or `{group, options}` for an optgroup. The empty placeholder option is left out. |
+| `type` | `date`, `time`, `datetime-local`, `month`, `week`, `number`, `range`, `color`, `file`, `email`, `url` or `tel`. |
+| `limits` | Only the declared attributes among `min`, `max`, `step`, `minlength`, `maxlength`, `pattern` and `accept`, as strings, and `multiple:true`. |
+| `hint` | A placeholder that differs from the name, else the `aria-describedby` text, else the select's placeholder option text. At most 120 characters. |
+| `group` | For a radio or checkbox, the fieldset legend or the nearest `radiogroup` or `group` name. At most 80 characters. |
+| `error` | Present when `:user-invalid` matches or `aria-invalid` is `true`: the `aria-errormessage` text, else a Ghostlight phrase from the validity flags, else `is invalid`. The browser's own message is read only for a custom error. At most 120 characters. |
+
+State words gain `required`, `readonly` and `invalid`. A credential-class control carries `value`
+(`[hidden]` when set, empty when empty) and none of the other keys. The service bounds every key
+again and drops what it does not know. `read_text` with a `locator` that names a native select
+ends its text with a line `Options: ` and every option in order, bounded only by `max_chars`.
+
 Removed:
 - `fill`, `prepare_text_fill`, `verify_text_fill_focus`, `verify_fill_values`;
 - `frame_boxes`, `point_context`, `document_route`;

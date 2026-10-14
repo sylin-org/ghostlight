@@ -70,6 +70,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 name: "Visible draft".into(),
                 state: vec![],
                 credential_class: credential,
+                ..Default::default()
             };
             let button = ObservedTarget {
                 locator: "explicit-submit".into(),
@@ -77,6 +78,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 name: "Submit".into(),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             };
             let mut arguments = json!({"tab":opened.facts["tab"],"fields":[{
                 "selector":{"name":"Visible draft","role":"textbox","exact":true},
@@ -226,6 +228,7 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
                 name: "Attachment".into(),
                 state: vec![],
                 credential_class: credential,
+                ..Default::default()
             };
             browser.push(Ok(BrowserOutcome::Targets {
                 tab_id: 7,
@@ -331,6 +334,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                 name: "Draft".into(),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             };
             let mut input = json!({"tab":handle,"text":"PRIVATE_DRAFT"});
             if location == "focused" {
@@ -459,6 +463,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 name: "Draft".into(),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             };
             let mut arguments = json!({"tab":opened.facts["tab"],"text":"PRIVATE_DRAFT","expect":{"condition":"load_ready"}});
             if location == "target" {
@@ -611,6 +616,7 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             name: "Draft".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         };
         browser.push(Ok(BrowserOutcome::Targets {
             tab_id: 7,

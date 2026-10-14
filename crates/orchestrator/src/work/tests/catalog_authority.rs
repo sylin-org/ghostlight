@@ -23,6 +23,7 @@ fn field(locator: &str, role: &str) -> ObservedTarget {
         name: "Ordinary control".into(),
         state: vec![],
         credential_class: false,
+        ..Default::default()
     }
 }
 

@@ -25,6 +25,34 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const DOCUMENT_TREE_NODE_LIMIT = 400;
   // What a masked credential value reads as. One short marker keeps masking cheap to read.
   const MASKED_VALUE = "[hidden]";
+  // Caps on what an observed control carries. The service bounds the same keys again.
+  const VALUE_MAX = 80;
+  const VALUE_LIST_MAX = 25;
+  const OPTIONS_MAX = 25;
+  const OPTION_TEXT_MAX = 60;
+  const HINT_MAX = 120;
+  const GROUP_MAX = 80;
+  const ERROR_MAX = 120;
+  const LIMIT_MAX = 120;
+  // How much of a rich editor's text is read to size it.
+  const RICH_VALUE_READ_MAX = 10000;
+  // Input types whose kind an agent cannot guess from the role, so the item says it.
+  const TYPED_INPUT_TYPES = new Set([
+    "date", "time", "datetime-local", "month", "week", "number", "range", "color", "file",
+    "email", "url", "tel"
+  ]);
+  // Input types that hold no typed value of their own: buttons name themselves, checkables
+  // report their state, a file input would only echo a local path, and hidden is not a control.
+  const VALUELESS_INPUT_TYPES = new Set([
+    "button", "submit", "reset", "image", "checkbox", "radio", "file", "hidden"
+  ]);
+  // The constraint attributes a control reports when the page declares them.
+  const LIMIT_ATTRIBUTES = ["min", "max", "step", "minlength", "maxlength", "pattern", "accept"];
+  // Roles that name a place where the person enters or picks something.
+  const FIELD_ROLES = new Set([
+    "textbox", "combobox", "searchbox", "checkbox", "radio", "switch", "spinbutton", "slider", "listbox"
+  ]);
+  const GROUP_ROLES = new Set(["radiogroup", "group"]);
   // The accessibility role an element has by its tag alone, beyond the control roles roleFor
   // names. A tag that is not in this table has no role of its own and reads as generic.
   const IMPLICIT_ROLES = new Map([
@@ -168,7 +196,21 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     if (element.getAttribute("aria-expanded") === "false") state.push("collapsed");
     if (element.selected) state.push("selected");
     if (!isComposedVisible(element)) state.push("hidden");
+    if (element.required === true || element.getAttribute("aria-required") === "true") state.push("required");
+    if (element.readOnly === true || element.getAttribute("aria-readonly") === "true") state.push("readonly");
+    if (isInvalid(element)) state.push("invalid");
     return state.slice(0, 8);
+  }
+
+  // Whether the page or the browser calls the control invalid: after the person touched it, or
+  // by the page's own aria-invalid. A browser without :user-invalid reports only the page's word.
+  function isInvalid(element) {
+    try {
+      if (element.matches(":user-invalid")) return true;
+    } catch {
+      // An engine that does not know the pseudo-class falls back to aria-invalid.
+    }
+    return element.getAttribute("aria-invalid") === "true";
   }
 
   function credentialClass(element) {
@@ -187,13 +229,257 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   }
 
   function observation(element) {
-    return {
+    const observed = {
       locator: locatorFor(element),
       role: roleFor(element),
       name: accessibleName(element),
       state: stateFor(element),
       credential_class: credentialClass(element)
     };
+    return Object.assign(observed, controlFacts(element, observed.role, observed.name));
+  }
+
+  function oneLine(value) {
+    return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  function tagOf(element) {
+    return String(element.tagName ?? "").toLowerCase();
+  }
+
+  function inputType(element) {
+    return tagOf(element) === "input" ? String(element.getAttribute("type") ?? "").toLowerCase() : "";
+  }
+
+  // What kind of value a control holds: typed text, a chosen option, or rich text. Null when the
+  // element holds none, such as a button, a link or a checkbox.
+  function valueKind(element, readable) {
+    const tag = tagOf(element);
+    if (tag === "input") return !readable && VALUELESS_INPUT_TYPES.has(inputType(element)) ? null : "text";
+    if (tag === "textarea") return "text";
+    if (tag === "select") return "select";
+    const declared = element.getAttribute("contenteditable");
+    if (element.isContentEditable && declared !== null && declared !== "false") return "rich";
+    return null;
+  }
+
+  // The one reader of a control's value, selected text and options for output. A credential-class
+  // control shows the masked marker when set and nothing when empty, never its length, options or
+  // placeholder. `listing` asks for the options too: "item" bounded as item keys, "read" as the
+  // full line a targeted read ends with. A read (`readable`) also shows the value of a button or
+  // a file input, which an item does not carry. Null when the element holds no value.
+  function outwardValue(element, { limit = VALUE_MAX, listing = null, readable = false } = {}) {
+    const kind = valueKind(element, readable);
+    if (!kind) return null;
+    const secret = credentialClass(element);
+    if (kind === "select") return selectValue(element, secret, limit, secret ? null : listing);
+    let full;
+    if (kind === "rich") {
+      full = secret ? oneLine(element.textContent) : composedVisibleText(element, RICH_VALUE_READ_MAX).text;
+    } else {
+      full = String(element.value ?? "");
+    }
+    if (secret) return { value: full ? MASKED_VALUE : "" };
+    if (full.length <= limit) return { value: full };
+    // A rich editor read up to its cap has no known full length, so it reports none.
+    const sized = kind !== "rich" || full.length < RICH_VALUE_READ_MAX;
+    return { value: full.slice(0, limit), chars: sized ? full.length : 0 };
+  }
+
+  function selectValue(element, secret, limit, listing) {
+    const texts = Array.from(element.selectedOptions ?? [])
+      .filter((option) => option.value !== "")
+      .map((option) => oneLine(option.text));
+    const answer = {};
+    if (secret) {
+      answer.value = texts.length ? MASKED_VALUE : "";
+    } else if (element.multiple === true) {
+      answer.value = texts.slice(0, VALUE_LIST_MAX).map((text) => shared.bounded(text, limit));
+    } else {
+      const text = texts[0] ?? "";
+      answer.value = shared.bounded(text, limit);
+      if (text.length > limit) answer.chars = text.length;
+    }
+    if (listing) Object.assign(answer, selectChoices(element, listing));
+    return answer;
+  }
+
+  // The options of a native select in document order, the placeholder (a first option whose
+  // value is empty) set apart. A disabled optgroup disables its options.
+  function selectChoices(select, listing) {
+    const all = Array.from(select.options ?? []);
+    const placeholder = all.length > 0 && all[0].value === "" ? all[0] : null;
+    const choices = all.filter((option) => option !== placeholder).map((option) => {
+      const parent = option.parentNode;
+      const group = parent && tagOf(parent) === "optgroup" ? parent : null;
+      return {
+        text: oneLine(option.text),
+        value: String(option.value ?? ""),
+        disabled: option.disabled === true || group?.disabled === true,
+        group
+      };
+    });
+    const found = { placeholder: placeholder ? oneLine(placeholder.text) : "" };
+    if (listing === "read") {
+      const names = choices.map((choice) => (choice.disabled ? `${choice.text} (disabled)` : choice.text));
+      found.line = names.length ? `Options: ${names.join("; ")}` : "";
+      return found;
+    }
+    const counts = new Map();
+    for (const choice of choices) counts.set(choice.text, (counts.get(choice.text) ?? 0) + 1);
+    const options = [];
+    let open = null;
+    for (const choice of choices.slice(0, OPTIONS_MAX)) {
+      const entry = choiceEntry(choice, counts.get(choice.text) > 1);
+      if (!choice.group) {
+        open = null;
+        options.push(entry);
+        continue;
+      }
+      if (!open || open.node !== choice.group) {
+        const label = choice.group.label ?? choice.group.getAttribute?.("label") ?? "";
+        open = { node: choice.group, listing: { group: shared.bounded(oneLine(label), OPTION_TEXT_MAX), options: [] } };
+        options.push(open.listing);
+      }
+      open.listing.options.push(entry);
+    }
+    found.options = options;
+    if (choices.length > OPTIONS_MAX) found.optionsTotal = choices.length;
+    return found;
+  }
+
+  // An option is its bare text unless that text alone would not pick it out or would be refused.
+  function choiceEntry(choice, duplicated) {
+    const text = shared.bounded(choice.text, OPTION_TEXT_MAX);
+    if (!duplicated && !choice.disabled) return text;
+    const entry = { text };
+    if (duplicated) entry.value = shared.bounded(choice.value, OPTION_TEXT_MAX);
+    if (choice.disabled) entry.disabled = true;
+    return entry;
+  }
+
+  // The keys an observed control carries beyond its identity. A key appears only when it applies.
+  // A credential-class control carries its masked value and nothing else.
+  function controlFacts(element, role, name) {
+    const secret = credentialClass(element);
+    const out = outwardValue(element, { listing: "item" });
+    const facts = {};
+    if (out) {
+      facts.value = out.value;
+      if (out.chars) facts.value_chars = out.chars;
+    }
+    if (secret) return facts;
+    if (out?.options) {
+      facts.options = out.options;
+      if (out.optionsTotal) facts.options_total = out.optionsTotal;
+    }
+    const type = inputType(element);
+    if (TYPED_INPUT_TYPES.has(type)) facts.type = type;
+    const limits = controlLimits(element);
+    if (Object.keys(limits).length) facts.limits = limits;
+    if (FIELD_ROLES.has(role) || valueKind(element) === "rich") {
+      const hint = controlHint(element, name, out?.placeholder);
+      if (hint) facts.hint = hint;
+    }
+    if (role === "radio" || role === "checkbox") {
+      const group = controlGroup(element);
+      if (group) facts.group = group;
+    }
+    if (isInvalid(element)) facts.error = controlError(element);
+    return facts;
+  }
+
+  function controlLimits(element) {
+    const tag = tagOf(element);
+    const limits = {};
+    if (tag !== "input" && tag !== "textarea" && tag !== "select") return limits;
+    for (const attribute of LIMIT_ATTRIBUTES) {
+      const declared = element.getAttribute(attribute);
+      if (declared !== null && declared !== "") limits[attribute] = shared.bounded(oneLine(declared), LIMIT_MAX);
+    }
+    if (element.multiple === true || element.getAttribute("multiple") !== null) limits.multiple = true;
+    return limits;
+  }
+
+  // Text the page gives for a field beyond its name: a placeholder that says something else, the
+  // description it points to, or the empty first option of a select.
+  function controlHint(element, name, placeholderOption) {
+    const placeholder = oneLine(element.getAttribute("placeholder"));
+    if (placeholder && placeholder !== oneLine(name)) return shared.bounded(placeholder, HINT_MAX);
+    const described = describedText(element);
+    if (described) return described;
+    return shared.bounded(placeholderOption ?? "", HINT_MAX);
+  }
+
+  function describedText(element) {
+    const ids = String(element.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+    if (!ids.length) return "";
+    const root = element.getRootNode();
+    const text = ids
+      .map((id) => root.getElementById?.(id))
+      .filter(Boolean)
+      .map((described) => oneLine(plainText(described, HINT_MAX).text))
+      .join(" ")
+      .trim();
+    return shared.bounded(text, HINT_MAX);
+  }
+
+  // The name of the fieldset or labelled group a radio or checkbox belongs to.
+  function controlGroup(element) {
+    for (let node = composedParent(element); node; node = composedParent(node)) {
+      if (node.nodeType !== 1) continue;
+      let name = "";
+      if (tagOf(node) === "fieldset") {
+        const legend = Array.from(node.children ?? []).find((child) => tagOf(child) === "legend");
+        name = legend ? oneLine(plainText(legend, GROUP_MAX).text) : "";
+      } else if (GROUP_ROLES.has(node.getAttribute("role"))) {
+        name = oneLine(declaredName(node));
+      }
+      if (name) return shared.bounded(name, GROUP_MAX);
+    }
+    return "";
+  }
+
+  // Why the control is invalid, in words Ghostlight chooses. The browser's own message is read
+  // only for a custom error, because it can quote the value or its length.
+  function controlError(element) {
+    const messageId = element.getAttribute("aria-errormessage");
+    if (messageId) {
+      const target = element.getRootNode().getElementById?.(messageId);
+      const text = target ? oneLine(plainText(target, ERROR_MAX).text) : "";
+      if (text) return shared.bounded(text, ERROR_MAX);
+    }
+    return validityPhrase(element) || "is invalid";
+  }
+
+  function validityPhrase(element) {
+    const validity = element.validity;
+    if (!validity || validity.valid) return "";
+    const type = inputType(element);
+    const declared = (attribute) => shared.bounded(oneLine(element.getAttribute(attribute)), 40);
+    if (validity.valueMissing) return "is required";
+    if (validity.typeMismatch) {
+      if (type === "email") return "is not a valid email address";
+      return type === "url" ? "is not a valid URL" : "is not valid";
+    }
+    if (validity.tooShort) {
+      const least = declared("minlength");
+      return /^\d+$/.test(least) ? `is too short (at least ${least} characters)` : "is too short";
+    }
+    if (validity.tooLong) return "is too long";
+    if (validity.rangeUnderflow) {
+      const least = declared("min");
+      return least ? `is below the minimum (min ${least})` : "is below the minimum";
+    }
+    if (validity.rangeOverflow) {
+      const most = declared("max");
+      return most ? `is above the maximum (max ${most})` : "is above the maximum";
+    }
+    if (validity.stepMismatch) return "does not match the allowed step";
+    if (validity.patternMismatch) return "does not match the required format";
+    if (validity.badInput) return `is not a valid ${type || "value"}`;
+    if (validity.customError) return shared.bounded(oneLine(element.validationMessage), ERROR_MAX);
+    return "";
   }
 
   function actionSubject(element) {
@@ -327,11 +613,12 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
             append(node.checked ? "checked" : "unchecked");
           } else if (type !== "hidden") {
             // A placeholder is a hint, never a value. Every credential-class field is masked.
-            if (node.value) append(credentialClass(node) ? MASKED_VALUE : node.value);
+            const held = outwardValue(node, { limit: Number.MAX_SAFE_INTEGER, readable: true });
+            if (held?.value) append(held.value);
           }
         } else if (values && tag === "select") {
-          const selectedText = Array.from(node.selectedOptions ?? []).map((opt) => opt.text).join(", ");
-          if (selectedText) append(credentialClass(node) ? MASKED_VALUE : selectedText);
+          const held = outwardValue(node, { limit: Number.MAX_SAFE_INTEGER });
+          if (held?.value) append(Array.isArray(held.value) ? held.value.join(", ") : held.value);
         }
         if (TEXT_OMIT_TAGS.has(tag)) return;
         if (tag === "br") {
@@ -348,6 +635,16 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     visit(root);
     const text = output.trim();
     return { text: text.slice(0, maxChars), truncated: truncated || text.length > maxChars };
+  }
+
+  // A targeted read: the control's text, and for a native select a last line naming every option.
+  function readTarget(element, maxChars) {
+    const read = composedVisibleText(element, maxChars);
+    const line = tagOf(element) === "select" ? outwardValue(element, { listing: "read" })?.line : "";
+    if (!line) return read;
+    const text = read.text ? `${read.text}
+${line}` : line;
+    return { text: text.slice(0, maxChars), truncated: read.truncated || text.length > maxChars };
   }
 
   // The page's own text: composedVisibleText without any field value or editable content.
@@ -909,7 +1206,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     }
     if (message.kind === "read_text") {
       const extract = () => message.locator
-        ? composedVisibleText(resolve(message.locator), message.max_chars)
+        ? readTarget(resolve(message.locator), message.max_chars)
         : message.mode === "article"
           ? extractArticle(message.max_chars)
           : composedVisibleText(document.body || document.documentElement, message.max_chars);

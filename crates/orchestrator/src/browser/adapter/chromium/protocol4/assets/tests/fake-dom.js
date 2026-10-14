@@ -14,6 +14,7 @@ function selectorMatches(element, selector) {
   const tag = String(element.tagName ?? "").toLowerCase();
   return selector.split(",").map((part) => part.trim()).some((part) => {
     if (part === "*") return true;
+    if (part === ":user-invalid") return element.userInvalid === true;
     if (part.startsWith("#")) return element.id === part.slice(1);
     if (part === tag || part.startsWith(`${tag}[`)) return true;
     const attribute = /^\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\]$/.exec(part);
@@ -162,6 +163,7 @@ function createFakeDom({ top = true } = {}) {
       return node;
     }
     matches(selector) { return selectorMatches(this, selector); }
+    getElementById(id) { return descendantsOf(this, "*").find((element) => element.id === id) ?? null; }
     closest(selector) { return this.matches(selector) ? this : null; }
     contains(other) {
       for (let node = other; node; node = node.parentNode) if (node === this) return true;
@@ -197,7 +199,7 @@ function createFakeDom({ top = true } = {}) {
     getRootNode() { return document; }
     getBoundingClientRect() { return { left: 0, top: 0, width: this.hidden ? 0 : 100, height: this.hidden ? 0 : 30 }; }
     closest() { return null; }
-    matches() { return true; }
+    matches(selector) { return selector === ":user-invalid" ? this.userInvalid === true : true; }
     click() { this.events.push("click"); }
     select() { selectedRange = { selected: this }; }
   }
@@ -277,7 +279,9 @@ function createFakeDom({ top = true } = {}) {
       element.events.push("input");
       return true;
     },
-    getElementById() { return null; }
+    getElementById(id) {
+      return descendantsOf(this.body, "*").find((element) => element.id === id) ?? null;
+    }
   };
   input.getRootNode = () => document;
 
@@ -370,11 +374,29 @@ function createFakeDom({ top = true } = {}) {
     HTMLTextAreaElement,
     HTMLSelectElement,
     element(tagName) { return new HTMLElement(tagName); },
-    /** A select holding `options` (objects with value and text); the first is selected. */
+    /**
+     * A select holding `options` (objects with value and text, and optionally `disabled`,
+     * `selected` and `group`, an optgroup `{label, disabled}` shared by its options). The first is
+     * selected unless a test sets `multiple` and marks options `selected`.
+     */
     select(options) {
       const element = new HTMLSelectElement("SELECT");
-      element.options = options;
+      const groups = new Map();
+      element.options = options.map((option) => {
+        let parent = element;
+        if (option.group) {
+          if (!groups.has(option.group)) groups.set(option.group, { tagName: "OPTGROUP", nodeType: 1, ...option.group, parentNode: element });
+          parent = groups.get(option.group);
+        }
+        return { tagName: "OPTION", nodeType: 1, ...option, group: undefined, parentNode: parent };
+      });
       element.value = options[0].value;
+      Object.defineProperty(element, "selectedOptions", {
+        configurable: true,
+        get: () => element.multiple === true
+          ? element.options.filter((option) => option.selected === true)
+          : element.options.filter((option) => option.value === element.value).slice(0, 1)
+      });
       return element;
     },
     text(value) { return new TextNode(value); },

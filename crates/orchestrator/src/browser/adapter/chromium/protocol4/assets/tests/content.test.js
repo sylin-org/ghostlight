@@ -2182,3 +2182,358 @@ test("present renders only target-anchored signals in a frame other than the top
   assert.equal(harness.runtime.present({ signal: "target", activity: "click", locator, invocation: "i-2" }, local), true);
   assert.equal(harness.runtime.present({ signal: "target", activity: "click", locator: "locator_ffffffff_1", invocation: "i-2" }, local), false);
 });
+
+// Controls carry their value and what they accept (ADR-0198 decisions 2 and 7). A key appears
+// only when it applies, and a credential-class control carries its masked value and nothing else.
+
+const IDENTITY_KEYS = ["credential_class", "locator", "name", "role", "state"];
+
+async function controlNamed(harness, name) {
+  return (await harness.targets()).find((target) => target.name === name);
+}
+
+/** A labelled select in the body. */
+function labelledSelect(harness, label, options, props = {}) {
+  const select = harness.select(options);
+  select.setAttribute("aria-label", label);
+  for (const [name, value] of Object.entries(props)) select[name] = value;
+  harness.document.body.append(select);
+  return select;
+}
+
+test("a select carries its chosen text, its options in order and its placeholder as a hint", async () => {
+  const harness = contentHarness();
+  const select = labelledSelect(harness, "Role", [
+    { value: "", text: "Choose one..." },
+    { value: "dev", text: "Developer" },
+    { value: "adm", text: "Administrator" },
+    { value: "oth", text: "Other" }
+  ]);
+  select.required = true;
+
+  const placeholder = await controlNamed(harness, "Role");
+  assert.equal(placeholder.value, "");
+  assert.equal(placeholder.hint, "Choose one...");
+  assert.deepEqual(placeholder.options, ["Developer", "Administrator", "Other"]);
+  assert.deepEqual(placeholder.state, ["required"]);
+  assert.equal("options_total" in placeholder, false);
+
+  select.value = "adm";
+  const chosen = await controlNamed(harness, "Role");
+  assert.equal(chosen.value, "Administrator");
+});
+
+test("a select names an option by its value only when its text is not unique, and marks disabled ones", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Plan", [
+    { value: "a1", text: "Team" },
+    { value: "a2", text: "Team" },
+    { value: "solo", text: "Solo", disabled: true },
+    { value: "pro", text: "Pro" }
+  ]);
+
+  const plan = await controlNamed(harness, "Plan");
+  assert.deepEqual(plan.options, [
+    { text: "Team", value: "a1" },
+    { text: "Team", value: "a2" },
+    { text: "Solo", disabled: true },
+    "Pro"
+  ]);
+});
+
+test("a select lists an optgroup as a group and a disabled optgroup disables its options", async () => {
+  const harness = contentHarness();
+  const staff = { label: "Staff" };
+  const retired = { label: "Retired", disabled: true };
+  labelledSelect(harness, "Team", [
+    { value: "all", text: "Everyone" },
+    { value: "eng", text: "Engineering", group: staff },
+    { value: "ops", text: "Operations", group: staff },
+    { value: "old", text: "Archive", group: retired },
+    { value: "end", text: "None" }
+  ]);
+
+  const team = await controlNamed(harness, "Team");
+  assert.deepEqual(team.options, [
+    "Everyone",
+    { group: "Staff", options: ["Engineering", "Operations"] },
+    { group: "Retired", options: [{ text: "Archive", disabled: true }] },
+    "None"
+  ]);
+});
+
+test("a select lists at most 25 options of 60 characters and reports the full count", async () => {
+  const harness = contentHarness();
+  const options = Array.from({ length: 30 }, (_, index) => ({ value: `v${index}`, text: `Option ${index} ${"x".repeat(80)}` }));
+  labelledSelect(harness, "Many", options);
+
+  const many = await controlNamed(harness, "Many");
+  assert.equal(many.options.length, 25);
+  assert.ok(many.options.every((text) => text.length === 60));
+  assert.equal(many.options_total, 30);
+  assert.equal(many.value.length, 80);
+  assert.equal(many.value_chars, options[0].text.length);
+});
+
+test("a multiple select gives an array of its chosen texts and declares multiple", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Tags", [
+    { value: "a", text: "Alpha", selected: true },
+    { value: "b", text: "Beta" },
+    { value: "c", text: "Gamma", selected: true }
+  ], { multiple: true });
+
+  const tags = await controlNamed(harness, "Tags");
+  assert.deepEqual(tags.value, ["Alpha", "Gamma"]);
+  assert.deepEqual(tags.limits, { multiple: true });
+});
+
+test("a field reports a long value cut to 80 characters with its length", async () => {
+  const harness = contentHarness();
+  harness.newInput("Bio", { value: "b".repeat(200) });
+  harness.newInput("Nick", { value: "ok" });
+  harness.newInput("Blank");
+
+  const bio = await controlNamed(harness, "Bio");
+  assert.equal(bio.value, "b".repeat(80));
+  assert.equal(bio.value_chars, 200);
+  const nick = await controlNamed(harness, "Nick");
+  assert.equal(nick.value, "ok");
+  assert.equal("value_chars" in nick, false);
+  assert.equal((await controlNamed(harness, "Blank")).value, "");
+});
+
+test("a rich editor reports its text as a value and a link reports none", async () => {
+  const harness = contentHarness();
+  richEditor(harness, { label: "Reply", content: "Hello there" }).append(harness.text("Hello there"));
+  const link = harness.element("a");
+  link.setAttribute("href", "/x");
+  link.setAttribute("aria-label", "Home");
+  harness.document.body.append(link);
+
+  assert.equal((await controlNamed(harness, "Reply")).value, "Hello there");
+  assert.equal("value" in (await controlNamed(harness, "Home")), false);
+});
+
+test("typed inputs say their type and declare only the limits the page declares", async () => {
+  const harness = contentHarness();
+  const date = harness.newInput("Start", { type: "date" });
+  date.setAttribute("min", "2026-01-01");
+  date.setAttribute("max", "2026-12-31");
+  const range = harness.newInput("Volume", { type: "range", value: "5" });
+  range.setAttribute("min", "0");
+  range.setAttribute("max", "10");
+  range.setAttribute("step", "1");
+  const code = harness.newInput("Code", { type: "text" });
+  code.setAttribute("minlength", "3");
+  code.setAttribute("maxlength", "8");
+  code.setAttribute("pattern", "[A-Z]+");
+  harness.newInput("Plain");
+
+  const start = await controlNamed(harness, "Start");
+  assert.equal(start.type, "date");
+  assert.deepEqual(start.limits, { min: "2026-01-01", max: "2026-12-31" });
+  const volume = await controlNamed(harness, "Volume");
+  assert.equal(volume.type, "range");
+  assert.equal(volume.value, "5");
+  assert.deepEqual(volume.limits, { min: "0", max: "10", step: "1" });
+  const entered = await controlNamed(harness, "Code");
+  assert.equal("type" in entered, false);
+  assert.deepEqual(entered.limits, { minlength: "3", maxlength: "8", pattern: "[A-Z]+" });
+  const plain = await controlNamed(harness, "Plain");
+  assert.equal("limits" in plain, false);
+  assert.equal("type" in plain, false);
+});
+
+test("a hint is a placeholder that adds to the name, else the description, else the select placeholder", async () => {
+  const harness = contentHarness();
+  const email = harness.newInput("Email");
+  email.setAttribute("placeholder", "you@example.com");
+  const unlabeled = harness.element("input");
+  unlabeled.type = "text";
+  unlabeled.setAttribute("placeholder", "Search the docs");
+  harness.document.body.append(unlabeled);
+  const described = harness.newInput("Username");
+  described.setAttribute("aria-describedby", "rules");
+  const rules = harness.element("p");
+  rules.id = "rules";
+  rules.append(harness.text("Letters and digits only"));
+  harness.document.body.append(rules);
+  const both = harness.newInput("Both");
+  both.setAttribute("placeholder", "from the placeholder");
+  both.setAttribute("aria-describedby", "rules");
+  harness.newInput("Neither");
+
+  assert.equal((await controlNamed(harness, "Email")).hint, "you@example.com");
+  assert.equal("hint" in (await controlNamed(harness, "Search the docs")), false);
+  assert.equal((await controlNamed(harness, "Username")).hint, "Letters and digits only");
+  assert.equal((await controlNamed(harness, "Both")).hint, "from the placeholder");
+  assert.equal("hint" in (await controlNamed(harness, "Neither")), false);
+});
+
+test("a radio or checkbox names its fieldset legend or labelled group", async () => {
+  const harness = contentHarness();
+  const fieldset = harness.element("fieldset");
+  const legend = harness.element("legend");
+  legend.append(harness.text("Shipping speed"));
+  const fast = harness.element("input");
+  fast.type = "radio";
+  fast.setAttribute("type", "radio");
+  fast.setAttribute("aria-label", "Express");
+  fieldset.append(legend, fast);
+  const group = harness.element("div");
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", "Gift wrap");
+  const wrap = harness.element("input");
+  wrap.type = "checkbox";
+  wrap.setAttribute("type", "checkbox");
+  wrap.setAttribute("aria-label", "Ribbon");
+  group.append(wrap);
+  const lone = harness.element("input");
+  lone.type = "checkbox";
+  lone.setAttribute("type", "checkbox");
+  lone.setAttribute("aria-label", "Newsletter");
+  harness.document.body.append(fieldset, group, lone);
+
+  assert.equal((await controlNamed(harness, "Express")).group, "Shipping speed");
+  assert.equal((await controlNamed(harness, "Ribbon")).group, "Gift wrap");
+  assert.equal("group" in (await controlNamed(harness, "Newsletter")), false);
+});
+
+test("an invalid control says why in Ghostlight's words, never the browser's message", async () => {
+  const harness = contentHarness();
+  const cases = [
+    ["Missing", { valueMissing: true }, {}, "is required"],
+    ["Mail", { typeMismatch: true }, { type: "email" }, "is not a valid email address"],
+    ["Link", { typeMismatch: true }, { type: "url" }, "is not a valid URL"],
+    ["Phone", { typeMismatch: true }, { type: "tel" }, "is not valid"],
+    ["Short", { tooShort: true }, { minlength: "5" }, "is too short (at least 5 characters)"],
+    ["ShortBare", { tooShort: true }, {}, "is too short"],
+    ["Long", { tooLong: true }, {}, "is too long"],
+    ["Low", { rangeUnderflow: true }, { min: "18" }, "is below the minimum (min 18)"],
+    ["High", { rangeOverflow: true }, { max: "99" }, "is above the maximum (max 99)"],
+    ["Step", { stepMismatch: true }, {}, "does not match the allowed step"],
+    ["Format", { patternMismatch: true }, {}, "does not match the required format"],
+    ["Bad", { badInput: true }, { type: "number" }, "is not a valid number"],
+    ["Custom", { customError: true }, {}, "Pick an unused handle"]
+  ];
+  for (const [label, flags, attributes] of cases) {
+    const element = harness.newInput(label, { type: attributes.type ?? "text" });
+    for (const [name, value] of Object.entries(attributes)) if (name !== "type") element.setAttribute(name, value);
+    element.userInvalid = true;
+    element.validity = { valid: false, ...flags };
+    element.validationMessage = "Pick an unused handle";
+  }
+  const quoting = harness.newInput("Quoting", { value: "Ada" });
+  quoting.userInvalid = true;
+  quoting.validity = { valid: false, valueMissing: true };
+  quoting.validationMessage = "Please fill out this field, Ada";
+
+  for (const [label, , , expected] of cases) {
+    const found = await controlNamed(harness, label);
+    assert.equal(found.error, expected, label);
+    assert.ok(found.state.includes("invalid"), label);
+  }
+  assert.equal((await controlNamed(harness, "Quoting")).error, "is required");
+});
+
+test("an error comes from aria-errormessage first, and aria-invalid alone reads 'is invalid'", async () => {
+  const harness = contentHarness();
+  const email = harness.newInput("Email");
+  email.setAttribute("aria-invalid", "true");
+  email.setAttribute("aria-errormessage", "email-error");
+  email.validity = { valid: false, valueMissing: true };
+  const message = harness.element("span");
+  message.id = "email-error";
+  message.append(harness.text("Enter the address we should write to"));
+  harness.document.body.append(message);
+  const bare = harness.newInput("Bare");
+  bare.setAttribute("aria-invalid", "true");
+  const fine = harness.newInput("Fine");
+  fine.setAttribute("aria-invalid", "false");
+
+  assert.equal((await controlNamed(harness, "Email")).error, "Enter the address we should write to");
+  const bareFound = await controlNamed(harness, "Bare");
+  assert.equal(bareFound.error, "is invalid");
+  assert.deepEqual(bareFound.state, ["invalid"]);
+  const fineFound = await controlNamed(harness, "Fine");
+  assert.equal("error" in fineFound, false);
+  assert.deepEqual(fineFound.state, []);
+});
+
+test("required and read-only controls say so in their state", async () => {
+  const harness = contentHarness();
+  harness.newInput("Must", { required: true });
+  harness.newInput("Fixed", { readOnly: true });
+  const aria = harness.newInput("Aria");
+  aria.setAttribute("aria-required", "true");
+
+  assert.deepEqual((await controlNamed(harness, "Must")).state, ["required"]);
+  assert.deepEqual((await controlNamed(harness, "Fixed")).state, ["readonly"]);
+  assert.deepEqual((await controlNamed(harness, "Aria")).state, ["required"]);
+});
+
+test("a credential-class control carries its masked value and no other new key", async () => {
+  const harness = contentHarness();
+  const filled = harness.newInput("Password", { type: "password", value: "hunter2hunter2" });
+  filled.setAttribute("placeholder", "your secret");
+  filled.setAttribute("maxlength", "20");
+  filled.setAttribute("aria-describedby", "why");
+  filled.userInvalid = true;
+  filled.validity = { valid: false, tooShort: true, customError: true };
+  filled.validationMessage = "hunter2hunter2 is wrong";
+  harness.newInput("Code", { type: "password", value: "" });
+  const why = harness.element("p");
+  why.id = "why";
+  why.append(harness.text("Use a strong one"));
+  harness.document.body.append(why);
+  const secretSelect = labelledSelect(harness, "Token kind", [
+    { value: "", text: "Pick..." },
+    { value: "a", text: "Alpha" },
+    { value: "b", text: "Beta" }
+  ]);
+  secretSelect.setAttribute("name", "access_token");
+  secretSelect.value = "b";
+  const emptySelect = labelledSelect(harness, "Secret kind", [
+    { value: "", text: "Pick..." },
+    { value: "a", text: "Alpha" }
+  ]);
+  emptySelect.setAttribute("name", "secret_kind");
+
+  const targets = await harness.targets();
+  const byName = (name) => targets.find((target) => target.name === name);
+  const allowed = [...IDENTITY_KEYS, "value"].sort();
+  for (const name of ["Password", "Code", "Token kind", "Secret kind"]) {
+    assert.deepEqual(Object.keys(byName(name)).sort(), allowed, name);
+  }
+  assert.equal(byName("Password").value, "[hidden]");
+  assert.ok(byName("Password").state.includes("invalid"));
+  assert.equal(byName("Code").value, "");
+  assert.equal(byName("Token kind").value, "[hidden]");
+  assert.equal(byName("Secret kind").value, "");
+  assert.doesNotMatch(JSON.stringify(targets), /hunter2|Alpha|Beta|your secret|strong one|Pick/);
+});
+
+test("reading a select ends with a line naming every option and skips a credential select", async () => {
+  const harness = contentHarness();
+  const select = labelledSelect(harness, "Role", [
+    { value: "", text: "Choose one..." },
+    { value: "dev", text: "Developer" },
+    { value: "adm", text: "Administrator", disabled: true },
+    { value: "res", text: "Researcher" }
+  ]);
+  const locator = await harness.locatorOf("Role");
+  const read = (target, maxChars = 500) => harness.send({ kind: "read_text", mode: "visible", locator: target, max_chars: maxChars, visual_settle: false });
+
+  assert.equal((await read(locator)).value.text, "Options: Developer; Administrator (disabled); Researcher");
+
+  select.value = "res";
+  assert.equal((await read(locator)).value.text, "Researcher\nOptions: Developer; Administrator (disabled); Researcher");
+  const cut = await read(locator, 21);
+  assert.equal(cut.value.text, "Researcher\nOptions: D");
+  assert.equal(cut.value.truncated, true);
+
+  const secret = labelledSelect(harness, "Key kind", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta" }]);
+  secret.setAttribute("name", "api_token");
+  assert.equal((await read(await harness.locatorOf("Key kind"))).value.text, "[hidden]");
+});

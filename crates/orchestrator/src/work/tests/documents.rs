@@ -39,6 +39,7 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
                 name: "Save".into(),
                 state: vec![],
                 credential_class: false,
+                ..Default::default()
             }],
         }));
         browser.push(Ok(BrowserOutcome::Activated {
@@ -179,6 +180,7 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
             name: "Page".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let inspected = executor.execute(
@@ -319,6 +321,7 @@ fn permitted_target_survives_unrelated_exclusion_except_under_complete_page() {
                     name: "Continue".into(),
                     state: vec![],
                     credential_class: false,
+                    ..Default::default()
                 }],
             }));
             let observed = executor.execute(
@@ -385,6 +388,7 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
             name: "Name".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     let observed = executor.execute(

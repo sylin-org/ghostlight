@@ -386,6 +386,7 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
                         name: "Message".into(),
                         state: vec![],
                         credential_class: false,
+                        ..Default::default()
                     }],
                 }));
                 let arguments = json!({"text":"not sent","focused":true});
@@ -490,6 +491,7 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
             name: "Message".into(),
             state: vec![],
             credential_class: false,
+            ..Default::default()
         }],
     }));
     browser.push(Ok(BrowserOutcome::Typed {
