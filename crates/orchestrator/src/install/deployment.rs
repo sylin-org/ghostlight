@@ -176,9 +176,7 @@ impl ProcessControl for SystemProcessControl {
     }
 
     fn start_serve(&self, layout: &Layout) -> io::Result<()> {
-        ghostlight_relay::spawn::build_command(&layout.service_executable(), layout.home())
-            .spawn()
-            .map(drop)
+        ghostlight_relay::spawn::spawn_serve(&layout.service_executable(), layout.home()).map(drop)
     }
 
     fn wait_published(&self, layout: &Layout, stale: Option<&str>) -> bool {

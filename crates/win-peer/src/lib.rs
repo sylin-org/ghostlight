@@ -20,7 +20,9 @@
 //! Non-Windows targets compile the same surface returning `None`. ADR-0160 adds Windows-only
 //! creation of owner-private runtime files in `private_file`, keeping creation-time security
 //! attributes inside this same FFI boundary. ADR-0197 adds the shell's item identifier list of a
-//! file in `item_id_list`, which the installer's Start-menu shortcut names its target by.
+//! file in `item_id_list`, which the installer's Start-menu shortcut names its target by. ADR-0197
+//! adds `clear_standard_handle_inheritance` in `standard_handles`, which keeps a detached child from
+//! holding its starter's standard pipes open.
 
 /// The process observed to own the remote endpoint of a local connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,6 +52,8 @@ mod private_file;
 mod process;
 #[cfg(target_os = "windows")]
 mod shutdown;
+#[cfg(target_os = "windows")]
+mod standard_handles;
 #[cfg(target_os = "windows")]
 mod table;
 
@@ -115,6 +119,14 @@ pub fn process_is_alive(process: ProcessIdentity) -> bool {
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
+}
+
+/// Clear the inherit flag on this process's standard input, output and error handles, so a child
+/// created afterwards does not inherit them (for a detached service, its starter's pipes).
+/// `Stdio::inherit` still forwards them: it duplicates a fresh inheritable copy for each child.
+#[cfg(target_os = "windows")]
+pub fn clear_standard_handle_inheritance() {
+    standard_handles::clear_inheritance();
 }
 
 /// The shell's serialized item identifier list for the existing file at `path`, terminator

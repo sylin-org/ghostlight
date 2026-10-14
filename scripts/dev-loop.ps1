@@ -31,32 +31,12 @@ function Invoke-Ghostlight {
     $info.RedirectStandardError = $true
     $info.UseShellExecute = $false
     $process = [System.Diagnostics.Process]::Start($info)
-    # Stream each line as it arrives. A detached service started by the
-    # installer can inherit the pipe ends and keep them open, so end of file
-    # may never arrive: after the process exits, drain for a short bounded time
-    # and then stop reading.
-    $readers = @(
-        @{ Reader = $process.StandardOutput; Sink = [Console]::Out; Pending = $null; Done = $false },
-        @{ Reader = $process.StandardError; Sink = [Console]::Error; Pending = $null; Done = $false }
-    )
-    $deadline = $null
-    while ($true) {
-        foreach ($entry in $readers) {
-            if ($null -eq $entry.Pending -and -not $entry.Done) { $entry.Pending = $entry.Reader.ReadLineAsync() }
-        }
-        $open = @($readers | Where-Object { -not $_.Done })
-        if ($open.Count -eq 0) { break }
-        if ($null -eq $deadline -and $process.HasExited) { $deadline = [DateTime]::UtcNow.AddMilliseconds(2000) }
-        if ($null -ne $deadline -and [DateTime]::UtcNow -ge $deadline) { break }
-        [void][System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]@($open | ForEach-Object { $_.Pending }), 100)
-        foreach ($entry in $open) {
-            if ($entry.Pending.IsCompleted) {
-                $line = $entry.Pending.GetAwaiter().GetResult()
-                $entry.Pending = $null
-                if ($null -eq $line) { $entry.Done = $true } else { $entry.Sink.WriteLine($line) }
-            }
-        }
-    }
+    # Standard error is collected on a task so neither pipe can fill and block the process;
+    # standard output streams line by line. Both reach end of file when the process exits,
+    # because a service the installer starts never holds these pipes.
+    $errors = $process.StandardError.ReadToEndAsync()
+    while ($null -ne ($line = $process.StandardOutput.ReadLine())) { [Console]::Out.WriteLine($line) }
+    [Console]::Error.Write($errors.GetAwaiter().GetResult())
     $process.WaitForExit()
     exit $process.ExitCode
 }

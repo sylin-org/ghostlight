@@ -4,10 +4,19 @@
 //! service publishes its runtime file when it is ready, and the connector keeps trying to
 //! connect on the [`Backoff`] schedule. The child is detached so it outlives the connector that
 //! started it.
+//!
+//! [`spawn_serve`] is the one place the service is started; the connectors, the installer and
+//! `ghostlight start` all use it. A detached service must not hold its starter's pipes. On
+//! Windows the child would inherit them (see `ghostlight_win_peer::clear_standard_handle_inheritance`),
+//! so a caller that captures output never sees end of output, and a connector's MCP or
+//! native-messaging pipes would stay open as long as the service runs. [`spawn_serve`] clears
+//! inheritance on the starter's standard handles first. On Unix the child's descriptors 0-2 are
+//! replaced by null and Rust opens every other descriptor close-on-exec, so nothing leaks and
+//! nothing needs clearing.
 
 use std::io;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -77,9 +86,9 @@ impl Default for Backoff {
 /// The service outlives the client that started it, and a running process holds its working
 /// directory open on Windows. `directory` must therefore be one the service owns, never the
 /// connector's own (usually the user's project folder). Building the command does not start
-/// anything; [`start_service`] does.
+/// anything; [`spawn_serve`] does.
 #[must_use]
-pub fn build_command(executable: &Path, directory: &Path) -> Command {
+fn build_command(executable: &Path, directory: &Path) -> Command {
     let mut command = Command::new(executable);
     command
         .arg(SERVE_ARGUMENT)
@@ -91,13 +100,25 @@ pub fn build_command(executable: &Path, directory: &Path) -> Command {
     command
 }
 
+/// Start `executable serve` detached, with `directory` as its working directory, and return the
+/// child without waiting for it.
+///
+/// The child holds none of this process's standard handles: on Windows their inheritance is
+/// cleared before the child is created. Success means the process was created, not that the
+/// service is ready. The service is ready when the runtime file names a listener that accepts an
+/// opening.
+pub fn spawn_serve(executable: &Path, directory: &Path) -> io::Result<Child> {
+    #[cfg(windows)]
+    ghostlight_win_peer::clear_standard_handle_inheritance();
+    build_command(executable, directory).spawn()
+}
+
 /// Start the installed service (`home/bin/ghostlight serve`, working directory `home`) and
 /// return without waiting for it.
 ///
-/// Success means the process was created, not that the service is ready. The service is ready
-/// when the runtime file names a listener that accepts an opening.
+/// Success means the process was created, not that the service is ready. See [`spawn_serve`].
 pub fn start_service() -> io::Result<()> {
-    let mut child = build_command(&home::service_executable()?, &home::home()?).spawn()?;
+    let mut child = spawn_serve(&home::service_executable()?, &home::home()?)?;
     // The caller does not wait. A thread collects the exit status so a service that exits early
     // (for example one that lost the lease race) does not linger as a zombie.
     thread::spawn(move || {

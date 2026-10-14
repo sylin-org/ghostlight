@@ -1,7 +1,7 @@
 {
   "crates/relay": {
     "revision": 3,
-    "sha256": "9d2893a123a72e886f9278a7feb97644b69524259e027e1e11743643fc002b9d"
+    "sha256": "40ff628234aa88248809d29f32431b1ca5e323f9c31dd7ce964b126ac03c2892"
   },
   "crates/mcp-connector": {
     "revision": 3,
