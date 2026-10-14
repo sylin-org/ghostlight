@@ -1,306 +1,70 @@
 #Requires -Version 7
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
+# Builds the workspace in an isolated target directory and hands the result to
+# `ghostlight deployment install --development`. The installer owns locking,
+# stopping running images, and copying. -Restore runs the installed binary's
+# `deployment install --restore` instead and builds nothing.
 param(
-    [ValidateSet("Plan", "Deploy", "Restore")]
-    [string]$Action = "Plan",
-    [ValidateSet("orchestrator", "mcp-connector", "browser-connector")]
-    [string[]]$Component = @("orchestrator"),
-    [ValidateSet("debug", "release")]
+    [switch]$Restore,
+    [switch]$Plan,
+    [ValidateSet("release", "debug")]
     [string]$Profile = "release",
-    [string]$TargetDirectory = ".target-dev-loop",
-    [string]$LiveDirectory = "target/release",
-    [switch]$RegisterNativeHost,
-    [switch]$NoStart
+    [string]$TargetDirectory = ".target-dev-loop"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repo = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-function Resolve-RepositoryPath {
-    param([string]$Path)
+$exe = if ($IsWindows) { "ghostlight.exe" } else { "ghostlight" }
 
-    if ([System.IO.Path]::IsPathFullyQualified($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
-    }
-    return [System.IO.Path]::GetFullPath((Join-Path $repo $Path))
+# The binary is GUI-subsystem on Windows, so its output is captured through a
+# redirected process rather than the console.
+function Invoke-Ghostlight {
+    param([string]$Binary, [string[]]$Arguments)
+
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Binary)
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($info)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    [Console]::Out.Write($stdout.GetAwaiter().GetResult())
+    [Console]::Error.Write($stderr.GetAwaiter().GetResult())
+    exit $process.ExitCode
 }
 
-$TargetDirectory = Resolve-RepositoryPath -Path $TargetDirectory
-$LiveDirectory = Resolve-RepositoryPath -Path $LiveDirectory
-$comparison = if ($IsWindows) {
-    [System.StringComparison]::OrdinalIgnoreCase
-}
-else {
-    [System.StringComparison]::Ordinal
+if ($Restore) {
+    $installed = Join-Path (Join-Path (Join-Path $HOME ".ghostlight") "bin") $exe
+    Invoke-Ghostlight -Binary $installed -Arguments @("deployment", "install", "--restore")
 }
 
-function Assert-RepositoryPath {
-    param([string]$Path, [string]$Name)
-
-    $root = $repo.TrimEnd(
-        [System.IO.Path]::DirectorySeparatorChar,
-        [System.IO.Path]::AltDirectorySeparatorChar
-    ) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $Path.StartsWith($root, $comparison)) {
-        throw "$Name must remain inside the repository: $Path"
-    }
-}
-
-function Get-ExactImageProcesses {
-    param([string[]]$ImagePaths)
-
-    function Comparable-ImagePath([string]$Path) {
-        $full = [System.IO.Path]::GetFullPath($Path)
-        if ($full.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) {
-            return '\\' + $full.Substring(8)
-        }
-        if ($full.StartsWith('\\?\', [System.StringComparison]::Ordinal)) { return $full.Substring(4) }
-        return $full
-    }
-    $resolved = @($ImagePaths | ForEach-Object { Comparable-ImagePath $_ })
-    return @(Get-Process | ForEach-Object {
-        $process = $_
-        try {
-            if ([string]::IsNullOrWhiteSpace($process.Path)) {
-                return
-            }
-            $processPath = Comparable-ImagePath $process.Path
-            if (@($resolved | Where-Object { $processPath.Equals($_, $comparison) }).Count -gt 0) {
-                $process
-            }
-        }
-        catch {
-            # Some system processes deny image-path access. They cannot match a repository path.
-        }
-    })
-}
-
-function Copy-WithRetry {
-    param([string]$Source, [string]$Destination)
-
-    $attempt = 0
-    while ($true) {
-        try {
-            Copy-Item -LiteralPath $Source -Destination $Destination -Force
-            return
-        }
-        catch {
-            $attempt += 1
-            if ($attempt -ge 30) {
-                throw
-            }
-            # A client or Chromium may respawn its connector while the deployment lock keeps
-            # authority startup quiesced. Retrying a copy alone can never replace that live image.
-            # Re-check only this selected destination, then retry immediately after its exit.
-            $respawned = @(Get-ExactImageProcesses -ImagePaths @($Destination))
-            foreach ($process in $respawned) {
-                Write-Output "Stopping respawned exact live process: pid=$($process.Id) path=$($process.Path)"
-                Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
-                Wait-Process -Id $process.Id -Timeout 2 -ErrorAction SilentlyContinue
-            }
-            if ($respawned.Count -eq 0) {
-                Start-Sleep -Milliseconds 200
-            }
-        }
-    }
-}
-
-Assert-RepositoryPath -Path $TargetDirectory -Name "TargetDirectory"
-Assert-RepositoryPath -Path $LiveDirectory -Name "LiveDirectory"
-
-$extension = if ($IsWindows) { ".exe" } else { "" }
-$definitions = [ordered]@{
-    "orchestrator" = [ordered]@{
-        package = "ghostlight"
-        binary = "ghostlight$extension"
-    }
-    "mcp-connector" = [ordered]@{
-        package = "ghostlight-mcp-connector"
-        binary = "ghostlight-mcp-connector$extension"
-    }
-    "browser-connector" = [ordered]@{
-        package = "ghostlight-browser-connector"
-        binary = "ghostlight-browser-connector$extension"
-    }
-}
-$controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
-$selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
-$adoptingDevelopment = -not (Test-Path -LiteralPath $selectionFile)
-if (-not $adoptingDevelopment) {
-    $existingSelection = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
-    $existingDirectory = ([string]$existingSelection.serving_directory) -replace '^\\\\\?\\', ''
-    $adoptingDevelopment = -not $existingDirectory.Equals($LiveDirectory, $comparison)
-}
-if ($adoptingDevelopment) {
-    # A first adoption or a directory change cannot leave legacy shores on their old election.
-    $Component = @($definitions.Keys)
-    $RegisterNativeHost = $true
-}
-$selected = @($Component | Select-Object -Unique)
-$sourceRoot = Join-Path $TargetDirectory $Profile
-$transfers = @($selected | ForEach-Object {
-    $definition = $definitions[$_]
-    [pscustomobject]@{
-        component = $_
-        package = $definition.package
-        source = Join-Path $sourceRoot $definition.binary
-        destination = Join-Path $LiveDirectory $definition.binary
-    }
-})
-
-Write-Output "Ghostlight development loop: $Action"
-Write-Output "Profile: $Profile"
-Write-Output "Build root: $TargetDirectory"
-Write-Output "Live root: $LiveDirectory"
-foreach ($transfer in $transfers) {
-    Write-Output "Component: $($transfer.component)"
-    Write-Output "  source: $($transfer.source)"
-    Write-Output "  destination: $($transfer.destination)"
-}
-
-$running = @(Get-ExactImageProcesses -ImagePaths @($transfers.destination))
-if ($running.Count -eq 0) {
-    Write-Output "Matching live processes: none"
+$target = if ([System.IO.Path]::IsPathFullyQualified($TargetDirectory)) {
+    [System.IO.Path]::GetFullPath($TargetDirectory)
 }
 else {
-    foreach ($process in $running) {
-        Write-Output "Matching live process: pid=$($process.Id) path=$($process.Path)"
-    }
+    [System.IO.Path]::GetFullPath((Join-Path $repo $TargetDirectory))
+}
+$comparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+$root = $repo.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $target.StartsWith($root, $comparison)) {
+    throw "TargetDirectory must remain inside the repository: $target"
 }
 
-if ($Action -eq "Plan") {
-    Write-Output "No build, process stop, copy, registration, or launch was performed."
-    return
-}
-
-if ($env:GHOSTLIGHT_RUNTIME_FILE) {
-    throw "The development loop selects the production installation. Remove the isolated GHOSTLIGHT_RUNTIME_FILE override first."
-}
-
-if ($Action -eq "Restore") {
-    $controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
-    $selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
-    $record = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
-    if (-not $record.release_directory) { throw "No packaged release is available to restore." }
-    $currentAuthority = Join-Path $record.serving_directory "ghostlight$extension"
-    $releaseAuthority = Join-Path $record.release_directory "ghostlight$extension"
-    foreach ($name in $definitions.Keys) {
-        $path = Join-Path $record.release_directory $definitions[$name].binary
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Release is incomplete: $path" }
-    }
-    $marker = Join-Path $controlDirectory "deploy.lock"
-    $markerStream = [System.IO.File]::Open($marker, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-    try {
-        foreach ($process in @(Get-ExactImageProcesses -ImagePaths @($currentAuthority))) {
-            Stop-Process -Id $process.Id
-            Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
-        }
-        & $currentAuthority deployment restore
-        if ($LASTEXITCODE -ne 0) { throw "Release restore failed with exit code $LASTEXITCODE" }
-        & $releaseAuthority native-host install
-        if ($LASTEXITCODE -ne 0) { throw "Release native-host registration failed with exit code $LASTEXITCODE" }
-    } finally {
-        $markerStream.Dispose()
-        Remove-Item -LiteralPath $marker -Force
-    }
-    if (-not $NoStart) {
-        if ($IsWindows) { Start-Process -FilePath $releaseAuthority -WindowStyle Hidden }
-        else { Start-Process -FilePath $releaseAuthority }
-    }
-    Write-Output "Restored packaged authority: $releaseAuthority"
-    return
-}
-
-$cargoArguments = @("build", "--locked", "--target-dir", $TargetDirectory)
-foreach ($name in $selected) {
-    $cargoArguments += @("-p", $definitions[$name].package)
-}
-if ($Profile -eq "release") {
-    $cargoArguments += "--release"
-}
-
+$env:CARGO_TARGET_DIR = $target
+$build = @("build", "--workspace", "--locked")
+if ($Profile -eq "release") { $build += "--release" }
 Push-Location $repo
 try {
-    & cargo @cargoArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Cargo build failed with exit code $LASTEXITCODE"
-    }
+    & cargo @build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
-finally {
-    Pop-Location
-}
-foreach ($transfer in $transfers) {
-    if (-not (Test-Path -LiteralPath $transfer.source -PathType Leaf)) {
-        throw "Build did not produce $($transfer.source)"
-    }
-}
+finally { Pop-Location }
 
-[System.IO.Directory]::CreateDirectory($LiveDirectory) | Out-Null
-$controlDirectory = Join-Path $(if ($IsWindows) { $env:USERPROFILE } else { $env:HOME }) ".ghostlight"
-[System.IO.Directory]::CreateDirectory($controlDirectory) | Out-Null
-$controlDeploymentLock = Join-Path $controlDirectory "deploy.lock"
-$selectionFile = Join-Path $controlDirectory "ghostlight-runtime.installation.json"
-$selectedAuthority = if (Test-Path -LiteralPath $selectionFile) {
-    $record = Get-Content -LiteralPath $selectionFile -Raw | ConvertFrom-Json
-    Join-Path $record.serving_directory "ghostlight$extension"
-} else { Join-Path $LiveDirectory "ghostlight$extension" }
-$deploymentLock = Join-Path $LiveDirectory "deploy.lock"
-$controlMarkerStream = [System.IO.File]::Open($controlDeploymentLock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-try {
-    [System.IO.File]::WriteAllText($deploymentLock, "dev-loop`n")
-    $running = @(Get-ExactImageProcesses -ImagePaths (@($transfers.destination) + @($selectedAuthority)))
-    foreach ($process in $running) {
-        Write-Output "Stopping exact live process: pid=$($process.Id) path=$($process.Path)"
-        Stop-Process -Id $process.Id
-    }
-    foreach ($process in $running) {
-        Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
-    }
-
-    foreach ($transfer in $transfers) {
-        Copy-WithRetry -Source $transfer.source -Destination $transfer.destination
-        Write-Output "Replaced: $($transfer.destination)"
-    }
-
-    $orchestrator = Join-Path $LiveDirectory "ghostlight$extension"
-    & $orchestrator deployment development
-    if ($LASTEXITCODE -ne 0) {
-        throw "Development selection failed with exit code $LASTEXITCODE"
-    }
-
-    if ($RegisterNativeHost) {
-        $orchestrator = Join-Path $LiveDirectory "ghostlight$extension"
-        if (-not (Test-Path -LiteralPath $orchestrator -PathType Leaf)) {
-            throw "Native-host registration requires the live orchestrator: $orchestrator"
-        }
-        & $orchestrator native-host install
-        if ($LASTEXITCODE -ne 0) {
-            throw "Native-host registration failed with exit code $LASTEXITCODE"
-        }
-    }
-}
-finally {
-    $controlMarkerStream.Dispose()
-    if (Test-Path -LiteralPath $deploymentLock -PathType Leaf) {
-        Remove-Item -LiteralPath $deploymentLock -Force
-    }
-    if (Test-Path -LiteralPath $controlDeploymentLock -PathType Leaf) {
-        Remove-Item -LiteralPath $controlDeploymentLock -Force
-    }
-}
-
-if (-not $NoStart -and $selected -contains "orchestrator") {
-    $orchestrator = Join-Path $LiveDirectory "ghostlight$extension"
-    if ($IsWindows) {
-        Start-Process -FilePath $orchestrator -WorkingDirectory $LiveDirectory -WindowStyle Hidden
-    } else {
-        Start-Process -FilePath $orchestrator -WorkingDirectory $LiveDirectory
-    }
-    Write-Output "Started: $orchestrator"
-}
-if ($selected -contains "browser-connector") {
-    Write-Output "Reload the unpacked extension at chrome://extensions before browser validation."
-}
-Write-Output "Development deployment completed."
+$install = @("deployment", "install", "--development")
+if ($Plan) { $install += "--plan" }
+Invoke-Ghostlight -Binary (Join-Path (Join-Path $target $Profile) $exe) -Arguments $install
