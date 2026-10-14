@@ -32,8 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not only `type=password`, reports checkboxes and radios as checked or unchecked instead of
   their value attribute, and never shows a placeholder as a value (EXT-7, HM-7). `browser_find`
   matches visible text in `div` containers and in `[draggable]`, `[aria-label]` and `[tabindex]`
-  elements, and prefers the deepest match (LU-6). Only the returned matches get handles, so a broad
-  search no longer pins hundreds of page elements.
+  elements, and prefers the deepest match (LU-6). Only the returned matches get handles.
 - A tab handle from another session now points the model to its own `browser_tabs` list
   instead of suggesting a switch.
 - A refusal for another session's handle names that session only by its client label. When the
