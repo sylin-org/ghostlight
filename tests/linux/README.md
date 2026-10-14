@@ -36,15 +36,13 @@ Run the moved helpers through this runner, rather than invoking them without con
 | `GHOSTLIGHT_LINUX_AREA` | `.tmp/linux-local`; dedicated local fixture and report root |
 | `GHOSTLIGHT_LINUX_INSTALLED_AREA` | `.tmp/linux-installed`; installed desktop/worker fixture and new `recovery/` reports |
 | `GHOSTLIGHT_LINUX_VERSION` | Workspace version in `Cargo.toml`; expected candidate version |
-| `GHOSTLIGHT_LINUX_PREVIOUS_VERSION` | `1.3.4`; recorded public npm and upgrade predecessor |
+| `GHOSTLIGHT_LINUX_PREVIOUS_VERSION` | `1.3.4`; recorded public npm predecessor |
 | `GHOSTLIGHT_LINUX_BIN_DIR` | `$AREA/portable-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu`; extracted siblings for setup |
 | `GHOSTLIGHT_LINUX_PORTABLE_ARCHIVE` | `$AREA/portable-fixed-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu.tar.gz` |
 | `GHOSTLIGHT_LINUX_CHROMIUM` | `/usr/lib/chromium/chromium`; native Chromium executable |
 | `GHOSTLIGHT_LINUX_BRAVE` | `$AREA/brave/opt/brave.com/brave/brave`; native Brave executable |
 | `GHOSTLIGHT_LINUX_EXTENSION` | Repository `extension/`; unchanged unpacked development adapter |
 | `GHOSTLIGHT_LINUX_GUEST_AREA` | `$AREA/guest`; disposable guest roots and build tree |
-| `GHOSTLIGHT_LINUX_DEB` | `$GUEST_AREA/build/target/x86_64-unknown-linux-gnu/release/bundle/deb/Ghostlight_$VERSION_amd64.deb` |
-| `GHOSTLIGHT_LINUX_PREVIOUS_DEB` | `$GUEST_AREA/build/public/ghostlight-v$PREVIOUS_VERSION-x86_64-unknown-linux-gnu.deb` |
 | `GHOSTLIGHT_LINUX_POWERSHELL_DIR` | `.tmp/linux-tools/powershell-7.6.5`; extracted guest build tool |
 | `GHOSTLIGHT_LINUX_RUST_TOOLCHAIN_DIR` | Active `rustup which rustc` toolchain; used only by the build guest |
 | `GHOSTLIGHT_LINUX_CARGO_HOME` | Existing `CARGO_HOME` or `$HOME/.cargo`; guest dependency-cache source |
@@ -82,8 +80,6 @@ by the runner.
 | `acceptance/cleanup.py` | Quit authorities inside `$AREA` through their tray; exact no-tray fallback only. Close dedicated browsers first; unrelated authority/connector identities must remain unchanged. |
 | `acceptance/guest/get-rootfs.py` | Download and digest-check official `debian` or `ubuntu` image layers; arguments are image and tag. Writes only under `$GUEST_AREA`. |
 | `acceptance/guest/enter.sh` | Enter a prepared build root at `$GUEST_AREA/root`; mount the prepared source/build tree at `$GUEST_AREA/build` and configured build tools. Remaining arguments are the guest command. |
-| `acceptance/guest/consumer.sh` | Enter a prepared `debian` or `ubuntu` consumer root; mount candidate packages and these tracked upgrade scripts read-only. First argument selects the image; remaining arguments are the guest command. |
-| `acceptance/guest/upgrade.sh` | Forward package upgrade with retained initialized MCP; run only inside `consumer.sh`. Uses `upgrade-user.py` beside it. |
 
 The prepared rootfs/build directories are not bundled with the tests.
 
@@ -97,12 +93,7 @@ bash tests/linux/run.sh installed-journey.mjs \
 
 # Keep this private-bus setup running while the no-tray drivers use its saved context.
 dbus-run-session -- bash tests/linux/run.sh acceptance/no-tray/check.py
-
-# Only inside a disposable consumer; each run needs a fresh scenario id/user state.
-bash tests/linux/run.sh acceptance/guest/consumer.sh debian \
-  bash /linux-tests/upgrade.sh candidate-check-1
 ```
 
-Use a new area or fresh profile state when a driver requires cold startup. Package upgrade
-does not prove rollback with newer audit history. The source adapter and development desktop
+Use a new area or fresh profile state when a driver requires cold startup. The source adapter and development desktop
 results do not establish store-adapter, provenance-bound package, or GNOME acceptance.
