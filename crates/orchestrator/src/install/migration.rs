@@ -22,6 +22,7 @@ use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::entry;
 use super::layout::{
     Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, INSTALL_RECORD_NAME, MCP_CONNECTOR_EXECUTABLE_NAME,
 };
@@ -506,6 +507,10 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     ];
     for (name, sources, destination) in placements {
         if let Some(directory) = holding(sources, name) {
+            if same_location(directory, &destination) {
+                // The file already sits where 2.0 keeps it: 1.x recorded the 2.0 directory.
+                continue;
+            }
             note_virtualized(&mut virtualized, directory);
             plan.moves.push(Move {
                 from: directory.join(name),
@@ -600,7 +605,7 @@ pub fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
 
 /// Make the destination directory and refuse a destination that holds something else.
 fn prepare(transfer: &Move) -> Result<(), MigrationError> {
-    if !transfer.from.is_file() {
+    if !transfer.from.is_file() || same_location(&transfer.from, &transfer.to) {
         return Ok(());
     }
     if let Some(parent) = transfer.to.parent() {
@@ -621,7 +626,7 @@ fn prepare(transfer: &Move) -> Result<(), MigrationError> {
 /// Move one file: rename it, or copy it, verify the copy and delete the original.
 fn relocate(transfer: &Move) -> Result<(), MigrationError> {
     let Move { from, to } = transfer;
-    if !from.is_file() {
+    if !from.is_file() || same_location(from, to) {
         return Ok(());
     }
     if to.exists() {
@@ -738,6 +743,13 @@ fn comparable_text(text: &str) -> String {
 /// Whether two paths name the same location, by spelling.
 fn same_path(left: &Path, right: &Path) -> bool {
     comparable(left) == comparable(right)
+}
+
+/// Whether two paths name the same location: the same spelling, or the same place once links, case
+/// and the Windows verbatim prefix are resolved.
+fn same_location(left: &Path, right: &Path) -> bool {
+    same_path(left, right)
+        || entry::same_path(&entry::canonical_path(left), &entry::canonical_path(right))
 }
 
 /// Whether `path` is `directory` or lies below it, by spelling.
@@ -1146,6 +1158,61 @@ mod tests {
         let policy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
         assert_eq!(fs::read_to_string(&policy).unwrap(), "policy");
         assert!(!is_virtualized(&policy));
+    }
+
+    /// Put the policy files in `home/policy`, record `spell(home/policy)` as the 1.x policy
+    /// directory, and check that nothing moves and nothing is lost.
+    fn assert_policy_already_home(spell: impl Fn(&Path) -> PathBuf) {
+        let fixture = Fixture::new(true);
+        let policy = fixture.home.join("policy");
+        let names = [
+            USER_POLICY_FILE_NAME,
+            MANAGED_CACHE_FILE_NAME,
+            MANAGED_STATUS_FILE_NAME,
+        ];
+        for name in names {
+            fixture.write(&policy.join(name), name);
+        }
+        fixture.record(&json!({
+            "schema": 1,
+            "serving_directory": fixture.home.join("bin"),
+            "state_directory": fixture.home,
+            "policy_directory": spell(&policy),
+        }));
+        let plan = fixture.plan();
+        assert!(plan.moves.is_empty(), "{:?}", plan.moves);
+        execute(&plan).unwrap();
+        for name in names {
+            assert_eq!(fs::read_to_string(policy.join(name)).unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn a_policy_directory_that_is_already_the_new_home_keeps_its_files() {
+        assert_policy_already_home(Path::to_path_buf);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_or_recased_spelling_of_the_new_policy_directory_keeps_its_files() {
+        assert_policy_already_home(|policy| PathBuf::from(format!(r"\?\{}", policy.display())));
+        assert_policy_already_home(|policy| PathBuf::from(policy.to_string_lossy().to_uppercase()));
+    }
+
+    #[test]
+    fn a_move_from_a_file_to_itself_leaves_the_file() {
+        let fixture = Fixture::new(true);
+        let file = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+        fixture.write(&file, "policy");
+        let plan = MigrationPlan {
+            moves: vec![Move {
+                from: file.clone(),
+                to: file.clone(),
+            }],
+            ..MigrationPlan::default()
+        };
+        execute(&plan).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "policy");
     }
 
     #[test]

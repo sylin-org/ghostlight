@@ -13,7 +13,7 @@ scripts, and `scripts/check-repository-integrity.ps1`. No journeys and no binari
 
 ## RESUME HERE
 
-Next: switch-6, the one 2.0 break migration.
+Next: switch-7, the installer rewrite that wires the break migration.
 
 Later slices adopt `install::record::atomic_replace` for every installer writer, and gather the
 entry rule's facts through `install::entry::canonical_path`.
@@ -30,6 +30,7 @@ entry rule's facts through `install::entry::canonical_path`.
 | switch-4 | The 2.0 install root as typed seams, nothing wired but one cleanup. `install/layout.rs` names every path under the home; `record.rs` holds `install.json`, `decide` (versions are compared before the image is looked at, so an older payload is refused even over a damaged image and damage only repairs the same version), `atomic_replace` and the semver order; `swap.rs` renames a running image aside under `.old-<n>` and `ServiceHost::start` removes what is left beside its own executable once it holds the lease; `marker.rs` reads and writes the development marker; `entry.rs` is the pure entry rule over canonical paths (`canonical_path` resolves links and the Windows verbatim prefix, and a target that names the running executable runs instead of forwarding). | see `git log` |
 | switch-5, commit 1 | One fixed home. Every path derives from `relay::home::home()`: the audit log in `home/state` (unless `GHOSTLIGHT_AUDIT_FILE`), MCP client locations and the handoff marker in `home/state`, user policy and the managed cache in `home/policy`, diagnostics in `home/diagnostics` and `home/diagnostics.on`; registrations name `home/bin`. The installation record and selection, `LaunchMode::Deployment`, `deployment::select` and `owns_registration`, `verify_serving_executable`, the deploy lock and the bridge `lifecycle` and `parent_process` modules are gone. `deployment install` copies changed executables into `bin` under `home/install.lock` until switch-7 rewrites it. `doctor` reports the home, `install.json` and the development marker. | see `git log` |
 | switch-5, commit 2 | The entry rule runs in `main` through `cli/start.rs` before dispatch: development forwarding (same arguments and inherited stdio, the child's exit code; `serve` detached and the parent exits 0), carrier install (`deployment install` logic into `bin`, then the installed service runs the command), refusal of `serve` from any other path; `doctor`, `status`, `help` and `--version` never install, and a command that does not parse never installs. A `Launcher` trait holds every process start, so the tests drive the real helper on temp homes. | see `git log` |
+| switch-6 | The one 2.0 break migration as a typed seam, not yet wired. `install/migration.rs` reads the 1.x installation record and the profile roots into a `Legacy`, `plan` says what will move, be archived, be deleted, be stopped and be re-registered (reading the disk, changing nothing), and `execute` carries it out: destinations are checked first, old images are stopped, each file is renamed or copied, verified and deleted, and the record is deleted last, so a second run continues from a failed one. The policy cache and the rollback-protection status move with the user policy; they are never deleted. A file already in its 2.0 place (a 1.x record whose policy directory was `home/policy`, in any spelling) is left alone, and a move from a file to itself is a no-op. | see `git log` |
 
 ## Notes
 
@@ -50,3 +51,6 @@ entry rule's facts through `install::entry::canonical_path`.
   level-3 page assets; switch-18 rewrites the journeys.
 - `tests/delight-journey.mjs`, `tests/frame-browser-journey.mjs`, `tests/keyboard-browser-journey.mjs`
   and `tests/linux/acceptance/cold.mjs` still name `service-worker.js`; switch-18 rewrites them.
+- switch-7: compute the migration plan before `execute`. `execute` deletes the 1.x record, and
+  `registrations_to_reclaim` is derived from the registrations found while that record still
+  exists, so a plan made afterwards would be empty.
