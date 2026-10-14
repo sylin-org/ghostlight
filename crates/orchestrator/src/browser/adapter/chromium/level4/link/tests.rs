@@ -470,6 +470,46 @@ fn a_receipt_with_both_an_outcome_and_a_failure_is_a_protocol_failure() {
     ));
 }
 
+#[test]
+fn an_unreadable_receipt_counts_an_effect_primitive_as_dispatched() {
+    let (port, fake) = port(Box::new(|_, _| Reply::Never));
+    for (command, effectful) in [
+        (
+            BrowserCommand::Navigate {
+                tab_id: 12,
+                url: "https://example.com/".into(),
+            },
+            true,
+        ),
+        (BrowserCommand::ListTabs, false),
+    ] {
+        let asked = fake.wait(|_| true).requests.len();
+        let result = thread::scope(|scope| {
+            let waiting = scope.spawn(|| call(&port, command));
+            let correlation = fake
+                .wait(|seen| seen.requests.len() > asked)
+                .requests
+                .last()
+                .map(|(id, _)| id.clone())
+                .unwrap();
+            fake.send(&json!({"kind": "receipt", "correlation": correlation,
+                              "ok": {}, "dispatched": true, "committed_urls": 7}));
+            waiting.join().unwrap()
+        });
+        let error = result.unwrap_err();
+        assert_eq!(
+            matches!(error, BrowserError::EffectUnknown(_)),
+            effectful,
+            "{error:?}"
+        );
+        assert_eq!(
+            matches!(error, BrowserError::Protocol(_)),
+            !effectful,
+            "{error:?}"
+        );
+    }
+}
+
 /// Navigate under a cancellation raised once the fake holds the request, with the fake
 /// answering the cancel with `dispatched`.
 fn cancelled_navigate(dispatched: bool) -> (Result<BrowserOutcome, BrowserError>, Vec<String>) {

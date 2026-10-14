@@ -600,7 +600,10 @@ impl<'a> Link<'a> {
             }
             match receiver.recv_timeout(POLL.min(self.dispatch.deadline - now)) {
                 Ok(Ok(receipt)) => return self.finish::<P>(receipt, effectful),
-                Ok(Err(error)) => return Err(self.settle(error)),
+                Ok(Err(error)) => {
+                    self.effect_started |= effectful;
+                    return Err(self.settle(error));
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(BrowserError::DisconnectedAfterDispatch)
