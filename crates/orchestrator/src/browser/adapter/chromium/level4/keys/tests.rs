@@ -293,6 +293,22 @@ fn a_click_moves_presses_and_releases() {
 }
 
 #[test]
+fn a_hover_is_one_move_with_no_button() {
+    let point = Point { x: 3.0, y: 9.5 };
+    assert_eq!(
+        hover(point),
+        [mouse(
+            MouseAction::Moved,
+            point,
+            MouseButton::None,
+            0,
+            0,
+            0.0
+        )]
+    );
+}
+
+#[test]
 fn a_double_click_raises_the_count_with_each_click() {
     let point = Point { x: 1.0, y: 2.0 };
     let counts: Vec<_> = click(point, MouseButton::Right, 2, SHIFT)

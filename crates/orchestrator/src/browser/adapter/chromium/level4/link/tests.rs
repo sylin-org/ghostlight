@@ -815,13 +815,16 @@ fn work_not_yet_translated_answers_that_the_extension_lacks_it() {
     assert_eq!(
         call(
             &port,
-            BrowserCommand::Hover {
+            BrowserCommand::Fill {
                 tab_id: 12,
-                locator: "T:t1:locator_a1_1".into(),
+                fields: vec![],
+                submit_locator: None,
+                timeout_ms: 1_000,
+                allow_credentials: false,
             }
         ),
         Err(BrowserError::CapabilityVersion {
-            capability: "hover".into(),
+            capability: "fill".into(),
             required: 1,
             advertised: 0,
         })

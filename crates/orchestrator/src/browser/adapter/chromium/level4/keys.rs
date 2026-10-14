@@ -347,6 +347,19 @@ pub fn click(point: Point, button: MouseButton, clicks: u8, modifiers: u8) -> Ve
         .collect()
 }
 
+/// The step that moves the pointer to a point, with no button down and no modifier held.
+#[must_use]
+pub fn hover(point: Point) -> Vec<InputStep> {
+    vec![mouse(
+        MouseAction::Moved,
+        point,
+        MouseButton::None,
+        0,
+        0,
+        0.0,
+    )]
+}
+
 /// Which way the wheel turns.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WheelDirection {

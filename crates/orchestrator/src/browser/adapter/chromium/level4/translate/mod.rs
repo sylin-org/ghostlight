@@ -4,22 +4,31 @@
 //! needs through the [`Link`] and turns their outcomes into the one
 //! [`BrowserOutcome`](crate::browser::adapter::BrowserOutcome) the rest of the service reads.
 //! This module holds what the families share: the documents a unit of work may reach, the
-//! reading of one world call's answer, and the routing of a point to the document it lands in.
+//! reading of one world call's answer, the sending of input and the reading of how it ended, and
+//! the routing of a point to the document it lands in.
 
+pub mod capture;
+pub mod keyboard;
 pub mod observe;
+pub mod pointer;
 pub mod present;
 pub mod read;
 pub mod records;
+pub mod script;
 pub mod tabs;
 
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use super::geometry::{self, RouteStep, MAX_ROUTE_DEPTH};
 use super::link::{Link, UNSUPPORTED_ADVERTISED, UNSUPPORTED_REQUIRED};
 use super::locator::Locator;
 use super::scope::{PlannedCall, Scope};
 use super::tree::FrameTree;
-use super::wire::{CallAnswer, CallFailure, CallMode, DocumentGuard, FrameRef, Point};
+use super::wire::{
+    CallAnswer, CallFailure, CallMode, DocumentGuard, FrameRef, Input, InputDone, InputStep,
+    InputStop, Point, WorldCall,
+};
 use super::world::{self, Hit, OwnerProbe};
 use crate::browser::adapter::{BrowserCommand, PhysicalActionSubject};
 use crate::browser::BrowserError;
@@ -30,6 +39,12 @@ const WORK_TAG: &str = "command";
 const CALL_SKIPPED: &str = "a page call was skipped";
 /// The protocol failure of a world call status this service does not know.
 const CALL_UNKNOWN: &str = "a page call answered with a status this service does not know";
+/// The unknown effect of input that a dialog interrupted.
+const DIALOG_DURING_INPUT: &str = "a dialog opened while input was being sent";
+/// The unknown effect of input that stopped short of its last step.
+const INPUT_INCOMPLETE: &str = "input stopped before its last step";
+/// The protocol failure of input whose precondition went unanswered.
+const PRECONDITION_UNANSWERED: &str = "input did not answer its precondition";
 
 /// The refusal for work this service does not yet translate into primitives: the work needs a
 /// first revision, and the connection advertises none.
@@ -82,6 +97,27 @@ impl Reach<'_> {
         match self {
             Self::Admitted(scope) => Some(scope.guard()),
             Self::Open(_) => None,
+        }
+    }
+
+    /// Admit the document input will reach as a subject of the scope, so the guard that rides
+    /// on the input pins it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError::DocumentUnavailable`] when the scope does not allow the document.
+    pub fn admit_input(&mut self, doc: &FrameRef) -> Result<(), BrowserError> {
+        self.scope().admit_input_subject(doc)
+    }
+
+    /// Whether a point must be placed in its document before input is sent to it. Only an
+    /// admitted scope that leaves some document unreadable needs it; work sent without a scope
+    /// has no document policy to keep.
+    #[must_use]
+    pub fn point_check_needed(&self) -> bool {
+        match self {
+            Self::Admitted(scope) => scope.needs_point_check(),
+            Self::Open(_) => false,
         }
     }
 
@@ -172,6 +208,92 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
         }
         CallAnswer::Skipped => Err(BrowserError::Primitive(CALL_SKIPPED.into())),
         CallAnswer::Unknown => Err(BrowserError::Protocol(CALL_UNKNOWN.into())),
+    }
+}
+
+/// Read one world call's answer as the value its kind returns, restating a failure as an unknown
+/// effect once the command has acted.
+///
+/// # Errors
+///
+/// Returns what [`value`] returns, settled by the link.
+pub fn settled<T: DeserializeOwned>(l: &Link<'_>, answer: &CallAnswer) -> Result<T, BrowserError> {
+    value(answer).map_err(|error| l.settle(error))
+}
+
+/// What input that a dialog interrupted means to the work that sent it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OnDialog {
+    /// The input landed: a dialog is the page's answer to a click.
+    Succeeded,
+    /// The input may have landed only in part: a dialog is not an answer to typing.
+    EffectUnknown,
+}
+
+/// The input for `steps` on a tab, bounded by what the deadline leaves.
+#[must_use]
+pub fn input_for(
+    l: &Link<'_>,
+    tab_id: u64,
+    precondition: Option<WorldCall>,
+    steps: Vec<InputStep>,
+    guard: Option<DocumentGuard>,
+    settle_ms: u64,
+) -> Input {
+    Input {
+        tab_id,
+        precondition,
+        steps,
+        guard,
+        settle_ms,
+        timeout_ms: l.budget_ms(),
+    }
+}
+
+/// Send input and read how it ended.
+///
+/// A precondition the page refused sends nothing, and fails as the page's own failure. An input
+/// that stopped for a dialog is [`OnDialog`]'s to judge, one that was cancelled is a cancellation
+/// whether or not it had begun, and one that stopped short for any other reason has an unknown
+/// effect. The precondition's answer is returned for the caller to read facts from.
+///
+/// # Errors
+///
+/// Returns the failure of the `input` primitive, and the failures above.
+pub fn send_input(
+    l: &mut Link<'_>,
+    input: Input,
+    on_dialog: OnDialog,
+) -> Result<Option<CallAnswer>, BrowserError> {
+    let steps = input.steps.len();
+    let preconditioned = input.precondition.is_some();
+    let done = l.input(input)?;
+    let InputDone {
+        precondition,
+        completed_steps,
+        stopped,
+        ..
+    } = done;
+    if preconditioned {
+        let answer = precondition
+            .as_ref()
+            .ok_or_else(|| l.settle(BrowserError::Protocol(PRECONDITION_UNANSWERED.into())))?;
+        settled::<Value>(l, answer)?;
+    }
+    match stopped {
+        None if usize::try_from(completed_steps).is_ok_and(|completed| completed >= steps) => {
+            Ok(precondition)
+        }
+        None | Some(InputStop::Other) => Err(BrowserError::EffectUnknown(INPUT_INCOMPLETE.into())),
+        Some(InputStop::Dialog { .. }) => match on_dialog {
+            OnDialog::Succeeded => Ok(precondition),
+            OnDialog::EffectUnknown => Err(BrowserError::EffectUnknown(DIALOG_DURING_INPUT.into())),
+        },
+        Some(InputStop::Cancelled) => Err(if l.effect_started() {
+            BrowserError::CancelledAfterDispatch
+        } else {
+            BrowserError::CancelledBeforeDispatch
+        }),
     }
 }
 

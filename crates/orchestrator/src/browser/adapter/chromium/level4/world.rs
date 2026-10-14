@@ -844,6 +844,55 @@ pub struct Submitted {
     pub submitted: bool,
 }
 
+/// Where a scroll left a document, and the target it revealed.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Scrolled {
+    /// The document's horizontal scroll offset.
+    pub x: f64,
+    /// The document's vertical scroll offset.
+    pub y: f64,
+    /// The role and name of the target brought into view, when the scroll named one.
+    #[serde(default)]
+    pub subject: Option<PhysicalActionSubject>,
+}
+
+/// A document's scroll offset.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+pub struct ScrollOffset {
+    /// The horizontal offset.
+    pub x: f64,
+    /// The vertical offset.
+    pub y: f64,
+}
+
+/// The answer to typing into a control.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Typed {
+    /// The role and name of the control that took the text.
+    #[serde(default)]
+    pub subject: Option<PhysicalActionSubject>,
+}
+
+/// The answer to focusing a control, or to requiring that one holds the focus.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Focused {
+    /// The role and name of the focused control, when the call named one.
+    #[serde(default)]
+    pub subject: Option<PhysicalActionSubject>,
+}
+
+/// The answer to attaching files to a control.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Uploaded {
+    /// How many files the control now holds.
+    pub uploaded_count: usize,
+    /// How many bytes those files hold.
+    pub uploaded_bytes: u64,
+    /// The role and name of the control that took the files.
+    #[serde(default)]
+    pub subject: Option<PhysicalActionSubject>,
+}
+
 /// What lies under a point.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Hit {

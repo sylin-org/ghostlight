@@ -351,17 +351,7 @@ pub fn describe_focused(
     tab_id: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
     let mut reach = reach(l, scope, tab_id)?;
-    let readable = reach.content_docs();
-    let subjects: Vec<FrameRef> = readable
-        .iter()
-        .filter(|doc| reach.get().subjects().contains(doc))
-        .cloned()
-        .collect();
-    let docs = if subjects.is_empty() {
-        readable
-    } else {
-        subjects
-    };
+    let docs = focus_candidates(&reach);
     let plans = plan_each(&reach, &docs, |_| world::describe_focused())?;
     let answers = all(l, &mut reach, tab_id, &plans, true)?;
     let mut failure = None;
@@ -381,8 +371,24 @@ pub fn describe_focused(
     Err(failure.unwrap_or(BrowserError::DocumentUnavailable))
 }
 
+/// The documents that may hold the page's focus: the request's subject documents that are
+/// readable, or every readable document when the request bound none.
+pub(super) fn focus_candidates(reach: &Reach<'_>) -> Vec<FrameRef> {
+    let readable = reach.content_docs();
+    let subjects: Vec<FrameRef> = readable
+        .iter()
+        .filter(|doc| reach.get().subjects().contains(doc))
+        .cloned()
+        .collect();
+    if subjects.is_empty() {
+        readable
+    } else {
+        subjects
+    }
+}
+
 /// Plan one message for each document. Every call goes through the scope.
-fn plan_each(
+pub(super) fn plan_each(
     reach: &Reach<'_>,
     docs: &[FrameRef],
     message: impl Fn(&FrameRef) -> Message,
@@ -392,8 +398,8 @@ fn plan_each(
         .collect()
 }
 
-/// Send one planned call with the scope's guard, as the first primitive of a read.
-fn one(
+/// Send one planned call with the scope's guard, as the first primitive of a command.
+pub(super) fn one(
     l: &mut Link<'_>,
     reach: &mut Reach<'_>,
     tab_id: u64,
@@ -414,7 +420,7 @@ fn one(
 
 /// Send planned calls together, with the scope's guard when `guarded`. No calls is no
 /// readable document.
-fn all(
+pub(super) fn all(
     l: &mut Link<'_>,
     reach: &mut Reach<'_>,
     tab_id: u64,

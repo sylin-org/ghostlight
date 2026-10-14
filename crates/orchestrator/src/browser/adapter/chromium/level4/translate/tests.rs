@@ -786,3 +786,5 @@ fn describing_documents_binds_locators_points_and_focus_to_current_documents() {
     assert_eq!(calls[3].calls[0].message["page"], false);
     assert_eq!(frames_of(&calls[4]), ["T", "C", "D"]);
 }
+
+mod interaction;

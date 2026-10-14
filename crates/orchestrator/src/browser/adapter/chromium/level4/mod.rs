@@ -25,9 +25,11 @@ pub mod world;
 
 use self::link::Link;
 use self::scope::Scope;
+use self::translate::keyboard::{PressKey, TypeFocused, TypeText};
 use self::translate::observe::{self, Subjects, Wait};
+use self::translate::pointer::{Click, Scroll};
 use self::translate::records::{self, DiagnosticsRead};
-use self::translate::{present, read, tabs, untranslated};
+use self::translate::{capture, keyboard, pointer, present, read, script, tabs, untranslated};
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
@@ -253,25 +255,132 @@ fn translate(
         BrowserCommand::DiscardRecording { recording_id } => records::discard(l, recording_id),
         BrowserCommand::Cancel { correlation } => Ok(present::cancel(l, &correlation)),
         BrowserCommand::Present { signal } => present::present(l, signal),
-        BrowserCommand::Screenshot { .. }
-        | BrowserCommand::ScreenshotRegion { .. }
-        | BrowserCommand::Activate { .. }
-        | BrowserCommand::ActivatePoint { .. }
-        | BrowserCommand::ActivateModified { .. }
+        BrowserCommand::Screenshot {
+            tab_id,
+            locator,
+            full_page,
+            visual_settle,
+        } => capture::screenshot(l, tab_id, locator.as_deref(), full_page, visual_settle),
+        BrowserCommand::ScreenshotRegion {
+            tab_id,
+            region,
+            expected_viewport,
+            visual_settle,
+        } => capture::screenshot_region(l, tab_id, &region, &expected_viewport, visual_settle),
+        BrowserCommand::Activate {
+            tab_id,
+            locator,
+            button,
+            click_count,
+        } => pointer::activate(
+            l,
+            scope,
+            Click {
+                tab_id,
+                locator: &locator,
+                button: &button,
+                click_count,
+                modifiers: &[],
+            },
+        ),
+        BrowserCommand::ActivateModified {
+            tab_id,
+            locator,
+            button,
+            click_count,
+            modifiers,
+        } => pointer::activate(
+            l,
+            scope,
+            Click {
+                tab_id,
+                locator: &locator,
+                button: &button,
+                click_count,
+                modifiers: &modifiers,
+            },
+        ),
+        BrowserCommand::Hover { tab_id, locator } => pointer::hover(l, scope, tab_id, &locator),
+        BrowserCommand::Scroll {
+            tab_id,
+            locator,
+            direction,
+            amount,
+        } => pointer::scroll(
+            l,
+            scope,
+            Scroll {
+                tab_id,
+                locator: locator.as_deref(),
+                direction: direction.as_deref(),
+                amount: amount.as_deref(),
+            },
+        ),
+        BrowserCommand::TypeText {
+            tab_id,
+            locator,
+            text,
+            clear_first,
+            allow_credentials,
+        } => keyboard::type_text(
+            l,
+            scope,
+            TypeText {
+                tab_id,
+                locator: &locator,
+                text: &text,
+                clear_first,
+                allow_credentials,
+            },
+        ),
+        BrowserCommand::TypeFocused {
+            tab_id,
+            text,
+            clear_first,
+            allow_credentials,
+        } => keyboard::type_focused(
+            l,
+            scope,
+            TypeFocused {
+                tab_id,
+                text: &text,
+                clear_first,
+                allow_credentials,
+            },
+        ),
+        BrowserCommand::PressKey {
+            tab_id,
+            locator,
+            key,
+            modifiers,
+        } => keyboard::press_key(
+            l,
+            scope,
+            PressKey {
+                tab_id,
+                locator: locator.as_deref(),
+                key: &key,
+                modifiers: &modifiers,
+            },
+        ),
+        BrowserCommand::UploadFiles {
+            tab_id,
+            locator,
+            files,
+        } => keyboard::upload_files(l, scope, tab_id, &locator, &files),
+        BrowserCommand::EvaluateScript {
+            tab_id,
+            script,
+            max_result_chars,
+        } => script::evaluate(l, scope, tab_id, &script, max_result_chars),
+        BrowserCommand::ActivatePoint { .. }
         | BrowserCommand::ActivatePointModified { .. }
         | BrowserCommand::WheelAt { .. }
-        | BrowserCommand::Scroll { .. }
-        | BrowserCommand::Hover { .. }
         | BrowserCommand::HoverPoint { .. }
         | BrowserCommand::Fill { .. }
-        | BrowserCommand::TypeText { .. }
-        | BrowserCommand::TypeFocused { .. }
-        | BrowserCommand::PressKey { .. }
         | BrowserCommand::Drag { .. }
         | BrowserCommand::DragPoints { .. }
-        | BrowserCommand::UploadFiles { .. }
         | BrowserCommand::DropImageAt { .. }
-        | BrowserCommand::EvaluateScript { .. }
         | BrowserCommand::ExportRecording {
             destination: RecordingDestination::Target { .. },
             ..

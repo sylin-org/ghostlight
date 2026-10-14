@@ -672,8 +672,9 @@ impl<'a> Link<'a> {
     }
 
     /// Restate an error once the command may have acted: an interruption becomes its after
-    /// variant, and any other failure an unknown effect.
-    fn settle(&self, error: BrowserError) -> BrowserError {
+    /// variant, and any other failure an unknown effect. Before any effect the error stands.
+    #[must_use]
+    pub fn settle(&self, error: BrowserError) -> BrowserError {
         if !self.effect_started || error.effect_unknown() {
             return error;
         }
