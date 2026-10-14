@@ -151,7 +151,7 @@ fn a_fill_across_documents_groups_fields_by_document_and_submits_last() {
 
     let calls = calls_seen(&fake);
     assert_eq!(calls.len(), 5);
-    assert_eq!(calls[0].mode, wire::CallMode::Sequence);
+    assert_eq!(calls[0].mode, wire::CallMode::Parallel);
     assert_eq!(kinds(&calls[0]), ["prepare_fill", "prepare_fill"]);
     assert_eq!(frames_of(&calls[0]), ["T", "C"], "first appearance order");
     assert!(calls[0].guard.is_some());
@@ -233,6 +233,44 @@ fn every_document_prepares_before_any_field_is_edited() {
     .unwrap_err();
     assert_eq!(error, BrowserError::Primitive("read_only".into()));
     assert_eq!(primitives_order(&fake), ["call"], "no field was edited");
+}
+
+#[test]
+fn documents_prepare_together_inside_one_settle_budget() {
+    const BUDGET_MS: u64 = 400;
+    let (port, fake) = rig(answer);
+    let mut open = all_open();
+    open.settle_ms = BUDGET_MS;
+    call(
+        &port,
+        scoped(
+            open,
+            fill(
+                vec![
+                    field("T:t1:locator_a1_1", LOCAL_VALUE),
+                    field("C:c1:locator_a1_2", LOCAL_VALUE),
+                    field("D:d1:locator_a1_3", LOCAL_VALUE),
+                ],
+                None,
+                10_000,
+            ),
+        ),
+    )
+    .unwrap();
+    let prepare = &calls_seen(&fake)[0];
+    assert_eq!(kinds(prepare), ["prepare_fill"; 3]);
+    assert_eq!(
+        prepare.mode,
+        wire::CallMode::Parallel,
+        "waits that run one after another would add up past the budget"
+    );
+    for world in &prepare.calls {
+        let settle = world.message["settle_ms"].as_u64().unwrap();
+        assert!(
+            settle > 0 && settle <= BUDGET_MS,
+            "each document waits at most the one shared budget"
+        );
+    }
 }
 
 #[test]

@@ -154,13 +154,15 @@ pub fn fill(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let guard = reach.guard();
+    // Preparing edits nothing and every call carries the same remaining settle budget, so the
+    // documents prepare together: in sequence their waits would add up past that budget.
     let plans = send(
         l,
         &mut reach,
         Batch {
             tab_id,
             plans: &prepare,
-            mode: CallMode::Sequence,
+            mode: CallMode::Parallel,
             guard,
             settle_ms: 0,
             budget,

@@ -2046,10 +2046,11 @@ fn fill(l: &mut Link, s: &mut Scope, tab: u64, fields: &[PhysicalField], submit:
     if submit.as_ref().is_some_and(|x| !groups.iter().any(|g| g.doc == x.doc)) {
         return Err(BrowserError::Primitive("submit control is not contained in the resolved form".into()));
     }
-    // RT 1: every document validates (and waits for a stable form) before any edit.
+    // RT 1: every document validates (and waits for a stable form) before any edit. Parallel:
+    // each call carries the same remaining settle budget, so their waits overlap inside it.
     let prepare = groups.iter().map(|g| plan(s, &g.doc, world::prepare_fill(&g.fields, creds,
         submit.as_ref().filter(|x| x.doc == g.doc).map(|x| &x.local)))).collect::<Result<Vec<_>, _>>()?;
-    let plans = l.call(tab, CallMode::Sequence, prepare, Some(s.guard()), 0, budget, Some(s))?;
+    let plans = l.call(tab, CallMode::Parallel, prepare, Some(s.guard()), 0, budget, Some(s))?;
     let kinds = forms::field_kinds(&plans, &groups)?;         // "content primitive returned an invalid fill plan"
     let mut filled = 0;
     for (g, kinds) in groups.iter().zip(kinds) {
