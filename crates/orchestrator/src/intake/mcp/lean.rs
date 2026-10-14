@@ -1,7 +1,7 @@
 //! The model view of a result: the canonical envelope with every field at its default left out.
 //!
 //! The service keeps the full envelope for audit, history and flow references. This module only
-//! renders what the MCP edge hands to a client (ADR-0198 Decision 21). It never adds a field and
+//! renders what the MCP edge hands to a client (ADR-0198 Decisions 21 and 22). It never adds a field and
 //! never changes a value; a reader treats an absent field as its default. `status`, `effect`,
 //! `repeat_safe`, `summary`, `invocation` and `facts.tab` are not in any rule, so they always stay.
 
@@ -52,6 +52,19 @@ const ROW_OMISSIONS: [Omission; 1] = [Omission {
     default: Default::Text("saved"),
 }];
 
+/// The `facts` key that holds a result's coverage block.
+const COVERAGE: &str = "coverage";
+
+/// The coverage fields that signal a limitation. A count above zero or a true flag keeps the
+/// whole block; `inspected_documents` and `targeted` describe scope, not a limit.
+const COVERAGE_LIMITATIONS: [&str; 5] = [
+    "excluded_documents",
+    "page_excluded_documents",
+    "unavailable_documents",
+    "limited_by_size",
+    "masked_regions",
+];
+
 /// The envelope key that holds a flow's or composition's step rows, inside `facts`.
 const FACTS: &str = "facts";
 const STEPS: &str = "steps";
@@ -72,6 +85,11 @@ fn lean_envelope(envelope: &mut Value) {
         return;
     };
     omit(fields, &ENVELOPE_OMISSIONS);
+    if let Some(facts) = fields.get_mut(FACTS).and_then(Value::as_object_mut) {
+        if facts.get(COVERAGE).is_some_and(shows_no_limitation) {
+            facts.remove(COVERAGE);
+        }
+    }
     let rows = fields
         .get_mut(FACTS)
         .and_then(|facts| facts.get_mut(STEPS))
@@ -83,6 +101,23 @@ fn lean_envelope(envelope: &mut Value) {
         if let Some(result) = row.get_mut(STEP_RESULT) {
             lean_envelope(result);
         }
+    }
+}
+
+/// Whether `coverage` is a block with every limitation field clear. Any other shape stays.
+fn shows_no_limitation(coverage: &Value) -> bool {
+    coverage.as_object().is_some_and(|block| {
+        COVERAGE_LIMITATIONS
+            .iter()
+            .all(|key| block.get(*key).is_none_or(is_clear))
+    })
+}
+
+fn is_clear(value: &Value) -> bool {
+    match value {
+        Value::Bool(flag) => !flag,
+        Value::Number(count) => count.as_u64() == Some(0),
+        _ => false,
     }
 }
 
@@ -163,6 +198,67 @@ mod tests {
                 ]},
             })
         );
+    }
+
+    fn coverage(overrides: Value) -> Value {
+        let mut block = json!({
+            "targeted": false, "inspected_documents": 2, "excluded_documents": 0,
+            "page_excluded_documents": 0, "unavailable_documents": 0,
+            "limited_by_size": false, "masked_regions": 0,
+        });
+        for (key, value) in overrides.as_object().into_iter().flatten() {
+            block[key] = value.clone();
+        }
+        block
+    }
+
+    #[test]
+    fn an_unlimited_coverage_block_is_dropped() {
+        for scope in [
+            json!({}),
+            json!({"targeted": true, "inspected_documents": 0}),
+        ] {
+            let view = project(&json!({"facts": {"tab": "t", "coverage": coverage(scope)}}));
+            assert_eq!(view, json!({"facts": {"tab": "t"}}));
+        }
+    }
+
+    #[test]
+    fn each_limitation_keeps_the_full_block() {
+        for limit in [
+            json!({"excluded_documents": 1}),
+            json!({"page_excluded_documents": 3}),
+            json!({"unavailable_documents": 1}),
+            json!({"limited_by_size": true}),
+            json!({"masked_regions": 2}),
+        ] {
+            let envelope = json!({"facts": {"coverage": coverage(limit)}});
+            assert_eq!(project(&envelope), envelope);
+        }
+    }
+
+    #[test]
+    fn coverage_recurses_into_flow_step_results() {
+        let limited = coverage(json!({"excluded_documents": 1}));
+        let envelope = json!({"facts": {"steps": [
+            {"position": 1, "result": {"facts": {"coverage": coverage(json!({}))}}},
+            {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
+            {"position": 3, "omitted": true, "coverage": limited.clone()},
+        ]}});
+        assert_eq!(
+            project(&envelope),
+            json!({"facts": {"steps": [
+                {"position": 1, "result": {"facts": {}}},
+                {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
+                {"position": 3, "omitted": true, "coverage": limited},
+            ]}})
+        );
+    }
+
+    #[test]
+    fn a_coverage_value_that_is_not_a_block_stays() {
+        let envelope = json!({"facts": {"coverage": "none"}});
+        assert_eq!(project(&envelope), envelope);
     }
 
     #[test]

@@ -197,7 +197,7 @@ try {
   assert.equal(live.status, "succeeded", JSON.stringify(live));
   let result = await call("browser_read", { tab: live.facts.tab, mode: "visible", max_chars: 20000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
-  assert.ok(result.facts.coverage.inspected_documents >= 2, JSON.stringify(result));
+  assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0, JSON.stringify(result));
   assert.match(JSON.stringify(result), /Project name/); check(`${liveSylin ? "live" : "snapshot"} Sylin composed document read`);
   const opened = await call("browser_navigate", { url: `http://localhost:${port}/`, new_tab: true });
   assert.equal(opened.status, "succeeded", JSON.stringify(opened)); let tab = opened.facts.tab;
@@ -281,9 +281,8 @@ try {
       policy(mode, "all", notice);
       result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
       assert.equal(result.status, "succeeded", JSON.stringify(result));
-      assert.equal(result.facts.coverage.excluded_documents, 0);
-      assert.equal(result.facts.coverage.unavailable_documents, 0);
-      assert.ok(result.facts.coverage.inspected_documents >= 2);
+      assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0);
+      assert.equal(result.facts.coverage?.unavailable_documents ?? 0, 0);
       assert.match(JSON.stringify(result), /Project name/);
       check(`${mode}/${notice}: fully permitted content remains available`);
     }
@@ -321,7 +320,7 @@ try {
     policy(mode);
     result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: mode }] });
     assert.equal(result.status, "succeeded", JSON.stringify(result));
-    assert.equal(result.facts.coverage.excluded_documents, 0); check(`${mode}: unrelated parent target remains usable`);
+    assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0); check(`${mode}: unrelated parent target remains usable`);
   }
   policy();
   result = await call("browser_fill_form", { tab, fields: [

@@ -8,12 +8,16 @@ use serde_json::{json, Value};
 use crate::governance::Decision;
 use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
+use crate::language::coverage::{qualify, Coverage};
 use crate::language::outcome::{
     BlockedReason, BrowserUnavailableReason, CheckFailure, Outcome, WorkspaceReason,
 };
 
 use super::result::Readiness;
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
+
+/// The key inside a result's `facts` that holds its coverage.
+const COVERAGE: &str = "coverage";
 
 /// A step without an invocation must not masquerade as a failed child operation.
 #[derive(Clone, Copy, Serialize)]
@@ -30,6 +34,8 @@ pub(super) struct Composition {
     physical_id: Option<u64>,
     all_repeat_safe: bool,
     unconfirmed_history_steps: u32,
+    /// What limited any child, kept even when the child's result is cut from the parent.
+    coverage: Option<Coverage>,
 }
 
 impl Composition {
@@ -54,6 +60,7 @@ impl Composition {
             physical_id,
             all_repeat_safe: true,
             unconfirmed_history_steps: 0,
+            coverage: None,
         }
     }
 
@@ -110,6 +117,12 @@ impl Composition {
             Effect::Unknown => self.progress.effects.unknown += 1,
         }
         self.all_repeat_safe &= result.repeat_safe;
+        if let Some(limited) = limited_coverage(terminal) {
+            match &mut self.coverage {
+                Some(aggregate) => aggregate.include(&limited),
+                None => self.coverage = Some(limited),
+            }
+        }
         self.readiness = result.readiness;
         self.physical_id = terminal.physical_id.or(self.physical_id);
         // Retain a deciding denial even if Continue later admits an independent step.
@@ -175,6 +188,13 @@ impl Composition {
         facts["progress"] = json!(self.progress);
         facts["unconfirmed_history_steps"] = json!(self.unconfirmed_history_steps);
         let outcome = Outcome::CompositionRan(self.progress);
+        let summary = match &self.coverage {
+            Some(coverage) => {
+                facts["coverage"] = json!(coverage);
+                qualify(&outcome.summary(), coverage)
+            }
+            None => outcome.summary(),
+        };
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
@@ -182,7 +202,7 @@ impl Composition {
                 effect,
                 self.readiness,
                 status == Status::Succeeded && effect == Effect::None && self.all_repeat_safe,
-                &outcome.summary(),
+                &summary,
                 facts,
                 outcome.next_steps(),
             ),
@@ -196,10 +216,29 @@ impl Composition {
     }
 }
 
+/// The child's coverage when something limited it, read from the canonical child envelope.
+///
+/// A limitation is any exclusion, unavailable document, size ceiling or masked region. A child
+/// that inspected everything it was asked to contributes nothing.
+fn limited_coverage(terminal: &Terminal) -> Option<Coverage> {
+    let coverage: Coverage =
+        serde_json::from_value(terminal.result.facts.get(COVERAGE)?.clone()).ok()?;
+    let limited =
+        coverage.limited() || coverage.page_excluded_documents > 0 || coverage.masked_regions > 0;
+    limited.then_some(coverage)
+}
+
 /// Keep recovery metadata outside the optional, budgeted child result payload.
+///
+/// A limited child's coverage rides on its row, so a child cut from the parent's budget still
+/// shows what was withheld from it.
 pub(super) fn terminal_row(step: usize, terminal: &Terminal, cause: Option<StepCause>) -> Value {
-    json!({"step":step,"status":terminal.result.status,"effect":terminal.result.effect,
-        "repeat_safe":terminal.result.repeat_safe,"cause":cause,"history_storage":terminal.result.history_storage})
+    let mut row = json!({"step":step,"status":terminal.result.status,"effect":terminal.result.effect,
+        "repeat_safe":terminal.result.repeat_safe,"cause":cause,"history_storage":terminal.result.history_storage});
+    if let Some(coverage) = limited_coverage(terminal) {
+        row[COVERAGE] = json!(coverage);
+    }
+    row
 }
 
 /// Identify an unexecuted step without assigning it an invocation or a terminal status.
@@ -476,5 +515,84 @@ mod tests {
             assert_eq!(result.facts["progress"]["counts"]["cancelled"], 0);
             assert_eq!(result.facts["progress"]["counts"]["failed"], 0);
         }
+    }
+
+    fn read_with(coverage: Coverage) -> Terminal {
+        let mut terminal = child(Status::Succeeded, Effect::None, None);
+        terminal.result.facts["coverage"] = json!(coverage);
+        terminal
+    }
+
+    fn excluded() -> Coverage {
+        Coverage {
+            inspected_documents: 1,
+            excluded_documents: 1,
+            ..Coverage::default()
+        }
+    }
+
+    #[test]
+    fn a_limited_child_row_carries_its_coverage_and_an_unlimited_one_adds_nothing() {
+        let limited = terminal_row(1, &read_with(excluded()), None);
+        assert_eq!(limited["coverage"]["excluded_documents"], 1);
+        let complete = Coverage {
+            inspected_documents: 2,
+            ..Coverage::default()
+        };
+        assert!(terminal_row(2, &read_with(complete), None)
+            .get("coverage")
+            .is_none());
+        let none = child(Status::Succeeded, Effect::None, None);
+        assert!(terminal_row(3, &none, None).get("coverage").is_none());
+    }
+
+    #[test]
+    fn the_parent_aggregates_limited_children_and_qualifies_its_summary() {
+        let store = WorkspaceStore::default();
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let snapshot = GovernanceFacade::new(None, None).snapshot();
+        let token = super::super::CancellationToken::default();
+        let context = InvocationContext {
+            settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+            provenance: None,
+            requirements: crate::governance::CapabilitySet::READ,
+            invocation: "parent",
+            workspace: &workspace,
+            requested_browser: None,
+            requested_tab: None,
+            requested_target: None,
+            snapshot: &snapshot,
+            deadline: Instant::now(),
+            deadline_adjustable: false,
+            cancellation: &token,
+        };
+        let finish = |children: Vec<Terminal>| {
+            let mut composition = Composition::new(
+                children.len(),
+                Decision::permitted(),
+                Readiness::NotApplicable,
+                None,
+            );
+            for (index, terminal) in children.iter().enumerate() {
+                composition.record(index + 1, terminal);
+            }
+            composition.finish(&context, json!({})).result
+        };
+        let unlimited = finish(vec![
+            read_with(Coverage::default()),
+            child(Status::Succeeded, Effect::None, None),
+        ]);
+        assert!(unlimited.facts.get("coverage").is_none());
+        assert!(!unlimited.summary.contains("excluded by policy"));
+        let size = Coverage {
+            limited_by_size: true,
+            ..Coverage::default()
+        };
+        let limited = finish(vec![read_with(excluded()), read_with(size)]);
+        assert_eq!(limited.facts["coverage"]["excluded_documents"], 1);
+        assert_eq!(limited.facts["coverage"]["limited_by_size"], true);
+        assert!(limited
+            .summary
+            .ends_with("Content excluded by policy. The result reached its size limit."));
     }
 }
