@@ -4,6 +4,8 @@
 //! renders what the MCP edge hands to a client (ADR-0198 Decisions 21 and 22). It never adds a field and
 //! never changes a value; a reader treats an absent field as its default. `status`, `effect`,
 //! `repeat_safe`, `summary`, `invocation` and `facts.tab` are not in any rule, so they always stay.
+//! Inside `facts`, an item (any object with a string `target`) drops an empty `state` and a false
+//! `credential_class`, and a `facts.tree` node drops an empty `label` and an empty `children`.
 
 use serde_json::{Map, Value};
 
@@ -13,6 +15,8 @@ enum Default {
     Text(&'static str),
     /// An empty JSON array.
     EmptyList,
+    /// The boolean `false`.
+    False,
 }
 
 impl Default {
@@ -20,6 +24,7 @@ impl Default {
         match self {
             Self::Text(text) => value.as_str() == Some(text),
             Self::EmptyList => value.as_array().is_some_and(Vec::is_empty),
+            Self::False => value.as_bool() == Some(false),
         }
     }
 }
@@ -65,6 +70,37 @@ const COVERAGE_LIMITATIONS: [&str; 5] = [
     "masked_regions",
 ];
 
+/// The key that marks an object as an addressable item, such as an inspect or find result, a form
+/// field, a submit control or a radio option.
+const ITEM_HANDLE: &str = "target";
+
+/// Fields of an item omitted at their default. A present `value` of `""` is a fact and stays.
+const ITEM_OMISSIONS: [Omission; 2] = [
+    Omission {
+        key: "state",
+        default: Default::EmptyList,
+    },
+    Omission {
+        key: "credential_class",
+        default: Default::False,
+    },
+];
+
+/// The `facts` key that holds a document tree.
+const TREE: &str = "tree";
+
+/// Fields of a document-tree node omitted at their default.
+const NODE_OMISSIONS: [Omission; 2] = [
+    Omission {
+        key: "label",
+        default: Default::Text(""),
+    },
+    Omission {
+        key: "children",
+        default: Default::EmptyList,
+    },
+];
+
 /// The envelope key that holds a flow's or composition's step rows, inside `facts`.
 const FACTS: &str = "facts";
 const STEPS: &str = "steps";
@@ -89,6 +125,10 @@ fn lean_envelope(envelope: &mut Value) {
         if facts.get(COVERAGE).is_some_and(shows_no_limitation) {
             facts.remove(COVERAGE);
         }
+        if let Some(tree) = facts.get_mut(TREE) {
+            lean_tree(tree);
+        }
+        facts.values_mut().for_each(lean_items);
     }
     let rows = fields
         .get_mut(FACTS)
@@ -101,6 +141,31 @@ fn lean_envelope(envelope: &mut Value) {
         if let Some(result) = row.get_mut(STEP_RESULT) {
             lean_envelope(result);
         }
+    }
+}
+
+/// Drop the defaults from every item at any depth in `value`, through arrays and objects.
+fn lean_items(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if fields.get(ITEM_HANDLE).is_some_and(Value::is_string) {
+                omit(fields, &ITEM_OMISSIONS);
+            }
+            fields.values_mut().for_each(lean_items);
+        }
+        Value::Array(entries) => entries.iter_mut().for_each(lean_items),
+        _ => {}
+    }
+}
+
+/// Drop the defaults from a document-tree node and, recursively, from its children.
+fn lean_tree(node: &mut Value) {
+    let Some(fields) = node.as_object_mut() else {
+        return;
+    };
+    omit(fields, &NODE_OMISSIONS);
+    if let Some(children) = fields.get_mut("children").and_then(Value::as_array_mut) {
+        children.iter_mut().for_each(lean_tree);
     }
 }
 
@@ -262,12 +327,88 @@ mod tests {
     }
 
     #[test]
+    fn item_defaults_are_dropped_from_items_and_matches() {
+        let item = json!({"credential_class": false, "name": "Email", "role": "textbox",
+            "state": [], "target": "target_h4n2"});
+        let view = project(&json!({"facts": {"items": [item.clone()], "matches": [item]}}));
+        let lean = json!({"name": "Email", "role": "textbox", "target": "target_h4n2"});
+        assert_eq!(
+            view,
+            json!({"facts": {"items": [lean.clone()], "matches": [lean]}})
+        );
+    }
+
+    #[test]
+    fn item_facts_stay() {
+        let envelope = json!({"facts": {"items": [
+            {"target": "t1", "credential_class": true, "state": ["disabled"], "value": ""},
+            {"target": "t2", "value": "[hidden]"},
+        ]}});
+        assert_eq!(project(&envelope), envelope);
+    }
+
+    #[test]
+    fn nested_items_are_dropped_too() {
+        let view = project(&json!({"facts": {"forms": [{"name": "login", "fields": [
+            {"target": "t1", "state": [], "credential_class": false, "value": ""},
+        ], "submit": [{"target": "t2", "state": [], "credential_class": false}]}]}}));
+        assert_eq!(
+            view,
+            json!({"facts": {"forms": [{"name": "login", "fields": [
+                {"target": "t1", "value": ""}], "submit": [{"target": "t2"}]}]}})
+        );
+    }
+
+    #[test]
+    fn an_object_without_a_string_target_keeps_its_fields() {
+        let envelope = json!({"facts": {"other": {"state": [], "credential_class": false},
+            "numeric": {"target": 3, "state": []}}});
+        assert_eq!(project(&envelope), envelope);
+    }
+
+    #[test]
+    fn tree_nodes_are_pruned_at_every_depth() {
+        let view = project(
+            &json!({"facts": {"tree": {"kind": "document", "label": "", "children": [
+                {"kind": "heading", "label": "Title", "children": []},
+                {"kind": "group", "label": "", "children": [
+                    {"kind": "link", "label": "", "children": []}]},
+            ]}}}),
+        );
+        assert_eq!(
+            view,
+            json!({"facts": {"tree": {"kind": "document", "children": [
+                {"kind": "heading", "label": "Title"},
+                {"kind": "group", "children": [{"kind": "link"}]},
+            ]}}})
+        );
+    }
+
+    #[test]
+    fn item_and_tree_defaults_recurse_into_flow_steps() {
+        let view = project(&json!({"facts": {"steps": [
+            {"position": 1, "result": {"facts": {
+                "items": [{"target": "t", "state": [], "credential_class": false}],
+                "tree": {"kind": "document", "label": "", "children": []}}}},
+        ]}}));
+        assert_eq!(
+            view,
+            json!({"facts": {"steps": [{"position": 1, "result": {"facts": {
+                "items": [{"target": "t"}], "tree": {"kind": "document"}}}}]}})
+        );
+    }
+
+    #[test]
     fn projection_is_idempotent() {
         let envelope = json!({
             "history_storage": "saved", "readiness": "not_applicable", "next_steps": [],
             "facts": {"steps": [{"history_storage": "saved",
                 "result": {"history_storage": "saved", "next_steps": []}}]},
         });
+        let once = project(&envelope);
+        assert_eq!(project(&once), once);
+        let envelope = json!({"facts": {"items": [{"target": "t", "state": []}],
+            "tree": {"kind": "document", "label": "", "children": []}}});
         let once = project(&envelope);
         assert_eq!(project(&once), once);
     }

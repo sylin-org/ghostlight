@@ -37,7 +37,9 @@ ghostlight call browser_read '{"tab":"tab_a1b2"}' --json | jq -r .facts.text
 (`history_storage` `saved`, `readiness` `not_applicable`, `next_steps` empty). Read an absent field
 as its default. An absent `facts.coverage` means nothing limited the result; when a policy exclusion,
 an unavailable document or a size ceiling did, the full block is present, and a `browser_flow` row
-carries it even when the step's result was cut for size:
+carries it even when the step's result was cut for size. An item's `state` (empty) and
+`credential_class` (false) are left out at their default, as are a document-tree node's `label`
+(empty) and `children` (empty); an item's `value` of `""` stays, since an empty field is a fact:
 
 ```sh
 ghostlight call browser_navigate '{"url":"https://example.com"}' --json \
