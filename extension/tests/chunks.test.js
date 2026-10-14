@@ -239,3 +239,21 @@ test("a cancelled verifier cannot erase a later transfer with the same id", asyn
   assert.deepEqual(h.delivered, [newRequest]);
   assert.deepEqual(h.rejected, []);
 });
+
+test("a caller that names where the correlation lives receives requests of that shape", async () => {
+  const h = harness({ correlationOf: (request) => request.correlation });
+  const request = { kind: "request", correlation: "p4_flat", primitive: { name: "list_tabs", args: {} } };
+  const frames = framesFor({ ...request, request: { correlation: request.correlation } }, 1000);
+  const flat = Buffer.from(JSON.stringify(request));
+  for (const frame of frames) h.accept({ ...frame, total_bytes: flat.length, sha256: digest(flat), data: flat.toString("base64") });
+  await settle();
+  assert.deepEqual(h.delivered, [request]);
+  assert.deepEqual(h.rejected, []);
+
+  const nested = harness({ correlationOf: (value) => value.correlation });
+  const wrong = { kind: "request", request: { correlation: "physical_6", command: {} } };
+  nested.accept(framesFor(wrong, 1000)[0]);
+  await settle();
+  assert.deepEqual(nested.delivered, []);
+  assert.equal(nested.rejected.length, 1);
+});

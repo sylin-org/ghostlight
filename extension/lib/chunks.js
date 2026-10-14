@@ -14,10 +14,15 @@
   const DEFAULT_TTL_MS = 15_000;
   const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
+  // Where a reassembled request frame names its correlation. Adapter protocol 3 nests the request
+  // in the frame; a caller that speaks another request shape passes its own `correlationOf`.
+  const nestedCorrelation = (request) => request.request?.correlation;
+
   function create({
     decodeBase64,
     decodeUtf8,
     sha256Hex,
+    correlationOf = nestedCorrelation,
     now = Date.now,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
@@ -233,7 +238,7 @@
           return;
         }
         joined.fill(0);
-        if (request?.kind !== "request" || request.request?.correlation !== transfer.correlation) {
+        if (request?.kind !== "request" || correlationOf(request) !== transfer.correlation) {
           fail(frame, "command transfer correlation mismatch", reject, transfer);
           return;
         }
