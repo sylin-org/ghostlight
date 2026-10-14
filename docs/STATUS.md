@@ -1,6 +1,6 @@
 # STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-05 (1.3.15 release integration in progress).
+Last updated: 2026-10-14 (2.0 break set in flight on dev).
 
 ## In flight: the 2.0 break set (2026-10-14)
 
@@ -10,6 +10,20 @@ Dev carries the unreleased 2.0 break set of
 the three lanes, and `switch.md` for the switch that wires them. `deployment install` now
 carries the break migration, `--development`, `--restore` and `--plan`. Nothing from the break
 set is published.
+
+The break kit is deployed on the owner's machine. The live findings from its first integration
+test are fixed and verified live: a deploy no longer hangs its caller, browser registration
+precedes stopping old programs, installs inside an app container say so and finish from a
+regular terminal (manifests now live in `~/.ghostlight/manifests`), `ghostlight call` keeps one
+session per terminal (PowerShell and Git Bash), and dialogs can be handled while open.
+
+In progress: the [ADR-0198](adr/0198-agent-experience.md) agent-experience batch, an audit of
+low-value process rules, and the design of one installation journey in the sylin.org visual
+language (Chrome first). Still to do from ADR-0197: the switch slices for removals, governance,
+typed next steps, guards and the 2.0.0 version, the pristine pass and the docs.
+
+Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
+journey offers an Add step for Chrome only.
 
 ## Only main and dev (2026-10-05)
 
