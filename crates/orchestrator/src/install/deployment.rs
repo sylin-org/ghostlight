@@ -3,15 +3,22 @@
 //! A package, the npm launcher, the get scripts and the development loop all run a `ghostlight`
 //! with this command (ADR-0197 Decisions 13 to 15). Under the install lock it:
 //!
-//! 1. carries out the 2.0 break migration when a 1.x layout is found, before anything is swapped;
+//! 1. checks the 2.0 break migration's destinations when a 1.x layout is found, so a conflict
+//!    changes nothing;
 //! 2. reads `bin/install.json` and decides what to replace: a release refuses an older payload,
 //!    does nothing for the same intact version, rename-swaps the service image into `bin`, and
 //!    replaces the connectors only when the relay revision changes; `--development` swaps the
 //!    service into `dev` and writes the development marker (installing into `bin` as well when
 //!    `bin` speaks another relay revision); `--restore` removes the marker;
-//! 3. asks the running service to quit, stops that exact image if it has not exited, starts
-//!    `bin/ghostlight serve` and writes `install.json` only once the new service publishes;
-//! 4. reconciles every registration to name `bin`.
+//! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
+//!    before anything old is stopped, so a browser or client that relaunches a connector the
+//!    moment the old one stops starts the new one;
+//! 4. stops the 1.x images, looks again for a few rounds for any that respawned, and moves the
+//!    1.x state into the home;
+//! 5. asks the running service to quit and stops that exact image if it has not exited, then
+//!    removes the 1.x lifecycle files, the installation record last;
+//! 6. starts `bin/ghostlight serve` and writes `install.json` only once the new service
+//!    publishes.
 //!
 //! There is no rollback: a service that does not start is reported, `install.json` stays as it
 //! was, and the next launch installs again. `--plan` prints what would happen and changes
@@ -24,6 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use ghostlight_relay::home::{
     LEASE_FILE_NAME, RUNTIME_FILE_NAME, SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE,
 };
@@ -50,8 +58,13 @@ const CONNECTORS: [&str; 2] = [
 /// quit wait and the publish wait.
 const INSTALL_LOCK_WAIT: Duration = Duration::from_secs(60);
 
-/// Pause between attempts to take the install lock and between checks of a quitting service.
+/// Pause between attempts to take the install lock, between checks of a quitting service and
+/// between looks for a 1.x program that respawned.
 const POLL: Duration = Duration::from_millis(25);
+
+/// How many times, after the 1.x images are stopped, the installer looks again for a program that
+/// was started from one of them in the meantime.
+const LEGACY_RESPAWN_ROUNDS: u32 = 3;
 
 /// How long the running service has to finish in-flight work and exit after `quit`.
 const QUIT_WAIT: Duration = Duration::from_secs(10);
@@ -126,6 +139,8 @@ pub trait ProcessControl {
     fn quit(&self, layout: &Layout) -> bool;
     /// Stop every process running one of `images` and wait for it to exit.
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
+    /// Whether any process runs one of `images`.
+    fn is_running(&self, images: &[PathBuf]) -> bool;
     /// Start `bin/ghostlight serve` in `layout`'s home, detached, without waiting for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
     /// Wait up to 30 s for a service to publish a runtime file whose token is not `stale`.
@@ -163,16 +178,11 @@ impl ProcessControl for SystemProcessControl {
     }
 
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
-        let own = env::current_exe().map(|path| canonical_path(&path)).ok();
-        let others: Vec<PathBuf> = images
-            .iter()
-            .filter(|image| {
-                own.as_ref()
-                    .is_none_or(|own| !same_path(&canonical_path(image), own))
-            })
-            .cloned()
-            .collect();
-        migration::stop_legacy_images(&others)
+        migration::stop_legacy_images(&other_than_running_installer(images))
+    }
+
+    fn is_running(&self, images: &[PathBuf]) -> bool {
+        migration::any_running_from(&other_than_running_installer(images))
     }
 
     fn start_serve(&self, layout: &Layout) -> io::Result<()> {
@@ -191,6 +201,19 @@ impl ProcessControl for SystemProcessControl {
             std::thread::sleep(PUBLISH_POLL);
         }
     }
+}
+
+/// `images` without the running installer's own executable, which cannot be stopped.
+fn other_than_running_installer(images: &[PathBuf]) -> Vec<PathBuf> {
+    let own = env::current_exe().map(|path| canonical_path(&path)).ok();
+    images
+        .iter()
+        .filter(|image| {
+            own.as_ref()
+                .is_none_or(|own| !same_path(&canonical_path(image), own))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Whether nothing holds the service lease at `path`. Taking it for a moment is the test; it is
@@ -243,7 +266,7 @@ pub struct InstallPlan {
     pub mode: Mode,
     /// The version the payload carries.
     pub version: String,
-    /// The 2.0 break migration, carried out first.
+    /// The 2.0 break migration, carried out around the swap.
     pub migration: MigrationPlan,
     /// The same version is installed and intact: nothing else happens.
     pub unchanged: bool,
@@ -484,18 +507,24 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 
 /// Carry out `plan`.
 ///
-/// The migration runs before any swap, so a failed move leaves every executable as it was.
+/// The migration's destinations are checked before any swap, so a conflict leaves every
+/// executable as it was. The registrations are written as soon as `bin` holds the new
+/// executables and before any old program is stopped: an old connector that a browser relaunches
+/// from a registration that still named it would write the 1.x installation record again. The
+/// 1.x state moves only after those programs have stopped, because they hold it open, and the
+/// 1.x lifecycle files are deleted after the last stop.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
-    if !plan.migration.is_empty() {
-        migration::execute(&plan.migration)?;
-    }
     if plan.unchanged {
         return Ok(Outcome {
             plan,
             service_started: None,
             registrations: None,
         });
+    }
+    let migrating = !plan.migration.is_empty();
+    if migrating {
+        migration::prepare(&plan.migration)?;
     }
     for placed in plan.swaps.iter().chain(&plan.connector_replacements) {
         swap::rename_swap(&placed.directory, &placed.name, &placed.source)?;
@@ -508,30 +537,87 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         Some(MarkerChange::Remove) => DevelopmentMarker::remove(&layout.development_marker())?,
         None => {}
     }
-    let service_started = plan.restart.then(|| {
+    let registrations = context
+        .registrations
+        .reconcile(layout, &context.build.version);
+    stop_legacy(context.control, &legacy_images(&plan))?;
+    if migrating {
+        migration::relocate(&plan.migration)?;
+    }
+    let service_started = if plan.restart {
         let stale = runtime_token(layout);
         if !context.control.quit(layout) {
             context.control.stop_image(&running_images(layout))?;
         }
-        Ok::<bool, anyhow::Error>(
+        if migrating {
+            migration::finish(&plan.migration)?;
+        }
+        Some(
             context.control.start_serve(layout).is_ok()
                 && context.control.wait_published(layout, stale.as_deref()),
         )
-    });
-    let service_started = service_started.transpose()?;
+    } else {
+        None
+    };
     if service_started == Some(true) {
         if let Some(record) = &plan.record {
             record.write(&layout.install_record())?;
         }
     }
-    let registrations = context
-        .registrations
-        .reconcile(layout, &context.build.version);
     Ok(Outcome {
         plan,
         service_started,
         registrations: Some(registrations),
     })
+}
+
+/// The 1.x images to stop once this install has placed its own executables.
+///
+/// A 1.x installation may have served from `bin` itself. The swap moved those images aside, so
+/// the programs still running them are found under their `.old-<n>` names; the executables at
+/// the `bin` paths are now this install's and must not be stopped.
+fn legacy_images(plan: &InstallPlan) -> Vec<PathBuf> {
+    let placed: Vec<&Swap> = plan
+        .swaps
+        .iter()
+        .chain(&plan.connector_replacements)
+        .collect();
+    let mut images = Vec::new();
+    for image in &plan.migration.images_to_stop {
+        let displaced = placed
+            .iter()
+            .find(|swap| same_path(image, &swap.directory.join(&swap.name)));
+        match displaced {
+            Some(swap) => images.extend(
+                swap::images(&swap.directory, &swap.name)
+                    .into_iter()
+                    .filter(|moved| !same_path(moved, image)),
+            ),
+            None => images.push(image.clone()),
+        }
+    }
+    images
+}
+
+/// Stop the 1.x programs running `images`, then look again for a few rounds for any that were
+/// started from them in the meantime and stop those too.
+fn stop_legacy(control: &dyn ProcessControl, images: &[PathBuf]) -> anyhow::Result<()> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let stop = || {
+        control
+            .stop_image(images)
+            .context("Could not stop the old Ghostlight programs")
+    };
+    stop()?;
+    for _ in 0..LEGACY_RESPAWN_ROUNDS {
+        std::thread::sleep(POLL);
+        if control.is_running(images) {
+            stop()?;
+        }
+    }
+    Ok(())
 }
 
 /// The swap placing the payload's service in `directory`.
@@ -638,9 +724,9 @@ fn hold_install_lock(path: &Path) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
-    use super::super::migration::{LegacyInstallation, USER_POLICY_FILE_NAME};
+    use super::super::migration::{LegacyInstallation, LEGACY_RECORD_NAME, USER_POLICY_FILE_NAME};
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
     use super::super::HarnessRegistry;
@@ -657,15 +743,31 @@ mod tests {
     enum Call {
         Quit,
         Stop(Vec<PathBuf>),
+        Running,
         Start,
         Wait,
+    }
+
+    /// What the disk showed at the moment of one request.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct Sighting {
+        /// A native-host manifest already names the installed browser connector.
+        registered: bool,
+        /// The 1.x installation record still exists.
+        record_present: bool,
     }
 
     /// Process control that records every request and starts nothing.
     struct FakeControl {
         quits: bool,
         publishes: bool,
+        /// How many looks for a respawned 1.x program find one.
+        respawns: Cell<u32>,
+        /// The manifest, the connector it must name and the 1.x record to look at on every
+        /// request.
+        witness: Option<(PathBuf, PathBuf, PathBuf)>,
         calls: RefCell<Vec<Call>>,
+        sightings: RefCell<Vec<Sighting>>,
     }
 
     impl FakeControl {
@@ -673,33 +775,64 @@ mod tests {
             Self {
                 quits: true,
                 publishes: true,
+                respawns: Cell::new(0),
+                witness: None,
                 calls: RefCell::new(Vec::new()),
+                sightings: RefCell::new(Vec::new()),
             }
         }
 
         fn calls(&self) -> Vec<Call> {
             self.calls.borrow().clone()
         }
+
+        fn sightings(&self) -> Vec<Sighting> {
+            self.sightings.borrow().clone()
+        }
+
+        /// Record `call` and what the disk shows now.
+        fn note(&self, call: Call) {
+            if let Some((manifest, connector, record)) = &self.witness {
+                self.sightings.borrow_mut().push(Sighting {
+                    registered: fs::read_to_string(manifest).is_ok_and(|text| {
+                        serde_json::from_str::<serde_json::Value>(&text)
+                            .ok()
+                            .and_then(|value| value["path"].as_str().map(PathBuf::from))
+                            .and_then(|path| fs::canonicalize(path).ok())
+                            .is_some_and(|path| Some(path) == fs::canonicalize(connector).ok())
+                    }),
+                    record_present: record.is_file(),
+                });
+            }
+            self.calls.borrow_mut().push(call);
+        }
     }
 
     impl ProcessControl for FakeControl {
         fn quit(&self, _layout: &Layout) -> bool {
-            self.calls.borrow_mut().push(Call::Quit);
+            self.note(Call::Quit);
             self.quits
         }
 
         fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
-            self.calls.borrow_mut().push(Call::Stop(images.to_vec()));
+            self.note(Call::Stop(images.to_vec()));
             Ok(())
         }
 
+        fn is_running(&self, _images: &[PathBuf]) -> bool {
+            self.note(Call::Running);
+            let remaining = self.respawns.get();
+            self.respawns.set(remaining.saturating_sub(1));
+            remaining > 0
+        }
+
         fn start_serve(&self, _layout: &Layout) -> io::Result<()> {
-            self.calls.borrow_mut().push(Call::Start);
+            self.note(Call::Start);
             Ok(())
         }
 
         fn wait_published(&self, _layout: &Layout, _stale: Option<&str>) -> bool {
-            self.calls.borrow_mut().push(Call::Wait);
+            self.note(Call::Wait);
             self.publishes
         }
     }
@@ -711,6 +844,10 @@ mod tests {
         payload: PathBuf,
         registrations: Registrations,
         legacy_policy: Option<PathBuf>,
+        /// The directory a 1.x installation served from, holding its three executables.
+        legacy_serving: Option<PathBuf>,
+        /// The directory that holds the browser manifests the registrations write.
+        hosts: PathBuf,
     }
 
     impl Fixture {
@@ -721,8 +858,9 @@ mod tests {
             let payload = root.join("payload");
             fs::create_dir_all(&payload).unwrap();
             Self::write_payload(&payload, "service");
+            let hosts = root.join("hosts");
             let registrations = Registrations::isolated(
-                NativeHostRegistry::isolated(&root.join("hosts"), &layout.browser_connector()),
+                NativeHostRegistry::isolated(&hosts, &layout.browser_connector()),
                 HarnessRegistry::isolated(&root.join("clients"), &layout.mcp_connector()),
             );
             Self {
@@ -731,6 +869,8 @@ mod tests {
                 payload,
                 registrations,
                 legacy_policy: None,
+                legacy_serving: None,
+                hosts,
             }
         }
 
@@ -750,15 +890,44 @@ mod tests {
             }
         }
 
+        /// Put a 1.x installation record in the home and its executables in `serving`.
+        fn plant_legacy_installation(&mut self, serving: &Path) {
+            fs::create_dir_all(serving).unwrap();
+            for name in std::iter::once(SERVICE_EXECUTABLE_NAME).chain(CONNECTORS) {
+                fs::write(serving.join(name), format!("1.x {name}")).unwrap();
+            }
+            fs::create_dir_all(self.layout.home()).unwrap();
+            fs::write(self.legacy_record(), "{}").unwrap();
+            self.legacy_serving = Some(serving.to_owned());
+        }
+
+        fn legacy_record(&self) -> PathBuf {
+            self.layout.home().join(LEGACY_RECORD_NAME)
+        }
+
+        /// A control that looks at the manifest and the 1.x record on every request.
+        fn watching_control(&self) -> FakeControl {
+            let manifest =
+                NativeHostRegistry::isolated(&self.hosts, &self.layout.browser_connector())
+                    .isolated_manifest("chrome");
+            let mut control = FakeControl::new();
+            control.witness = Some((
+                manifest,
+                self.layout.browser_connector(),
+                self.legacy_record(),
+            ));
+            control
+        }
+
         fn legacy(&self) -> Legacy {
             Legacy {
-                installation: self
-                    .legacy_policy
-                    .as_ref()
-                    .map(|policy| LegacyInstallation {
-                        policy_directory: Some(policy.clone()),
+                installation: (self.legacy_policy.is_some() || self.legacy_serving.is_some()).then(
+                    || LegacyInstallation {
+                        policy_directory: self.legacy_policy.clone(),
+                        serving_directory: self.legacy_serving.clone(),
                         ..LegacyInstallation::default()
-                    }),
+                    },
+                ),
                 roots: LegacyRoots::within(&self.scratch.path().join("profile")),
                 registrations: Vec::new(),
             }
@@ -784,6 +953,17 @@ mod tests {
                     plan_only: false,
                 },
             )
+        }
+
+        /// Whether the manifest the registrations wrote names the installed browser connector.
+        fn manifest_names_bin_connector(&self) -> bool {
+            let manifest =
+                NativeHostRegistry::isolated(&self.hosts, &self.layout.browser_connector())
+                    .isolated_manifest("chrome");
+            let value: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(manifest).unwrap()).unwrap();
+            fs::canonicalize(value["path"].as_str().unwrap()).unwrap()
+                == fs::canonicalize(self.layout.browser_connector()).unwrap()
         }
 
         fn read(&self, path: PathBuf) -> String {
@@ -1015,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_layout_migrates_before_anything_is_swapped() {
+    fn a_legacy_layout_moves_its_state_into_the_home() {
         let mut fixture = Fixture::new();
         let policy = fixture.scratch.path().join("old-policy");
         fs::create_dir_all(&policy).unwrap();
@@ -1031,6 +1211,93 @@ mod tests {
         );
         assert!(!policy.join(USER_POLICY_FILE_NAME).exists());
         assert!(fixture.layout.service_executable().is_file());
+    }
+
+    #[test]
+    fn registrations_name_bin_before_any_old_program_is_stopped() {
+        let mut fixture = Fixture::new();
+        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+        let control = fixture.watching_control();
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        let calls = control.calls();
+        let sightings = control.sightings();
+        assert_eq!(calls.len(), sightings.len());
+        let stops: Vec<usize> = (0..calls.len())
+            .filter(|&index| matches!(calls[index], Call::Stop(_) | Call::Quit))
+            .collect();
+        assert!(!stops.is_empty(), "{calls:?}");
+        for index in stops {
+            assert!(sightings[index].registered, "{calls:?} at {index}");
+        }
+        assert!(fixture.manifest_names_bin_connector());
+    }
+
+    #[test]
+    fn a_respawned_legacy_program_is_stopped_again() {
+        let mut fixture = Fixture::new();
+        let serving = fixture.scratch.path().join("old-1x");
+        fixture.plant_legacy_installation(&serving);
+        let control = FakeControl::new();
+        control.respawns.set(1);
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        let images = vec![
+            serving.join(SERVICE_EXECUTABLE_NAME),
+            serving.join(MCP_CONNECTOR_EXECUTABLE_NAME),
+            serving.join(BROWSER_CONNECTOR_EXECUTABLE_NAME),
+        ];
+        let mut expected = vec![Call::Stop(images.clone())];
+        expected.extend([
+            Call::Running,
+            Call::Stop(images),
+            Call::Running,
+            Call::Running,
+        ]);
+        expected.extend([Call::Quit, Call::Start, Call::Wait]);
+        assert_eq!(control.calls(), expected);
+    }
+
+    #[test]
+    fn the_legacy_record_is_gone_after_the_last_stop() {
+        let mut fixture = Fixture::new();
+        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+        let control = fixture.watching_control();
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(!fixture.legacy_record().exists());
+        let calls = control.calls();
+        let sightings = control.sightings();
+        let start = calls.iter().position(|call| *call == Call::Start).unwrap();
+        for (call, sighting) in calls.iter().zip(&sightings).take(start) {
+            assert!(sighting.record_present, "{call:?}");
+        }
+        assert!(!sightings[start].record_present);
+    }
+
+    #[test]
+    fn a_legacy_service_that_served_from_bin_is_stopped_by_its_moved_image() {
+        let mut fixture = Fixture::new();
+        fixture.plant_legacy_installation(&fixture.layout.bin());
+        let control = FakeControl::new();
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        let calls = control.calls();
+        let Call::Stop(images) = &calls[0] else {
+            panic!("{calls:?}");
+        };
+        let moved = |name: &str| fixture.layout.bin().join(format!("{name}.old-1"));
+        assert!(
+            images.contains(&moved(SERVICE_EXECUTABLE_NAME)),
+            "{images:?}"
+        );
+        for name in CONNECTORS {
+            assert!(images.contains(&moved(name)), "{images:?}");
+        }
+        for installed in [
+            fixture.layout.service_executable(),
+            fixture.layout.mcp_connector(),
+            fixture.layout.browser_connector(),
+        ] {
+            assert!(!images.contains(&installed), "{images:?}");
+        }
     }
 
     #[test]

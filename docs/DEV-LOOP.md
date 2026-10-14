@@ -29,16 +29,20 @@ pwsh scripts/dev-loop.ps1 -Restore   # go back to the installed service; builds 
 
 The script builds in `.target-dev-loop` (`-Profile debug` for a debug build) and runs
 `<build>/ghostlight deployment install --development`. The installer takes
-`~/.ghostlight/install.lock` and migrates a 1.x layout first when it finds one. It then
-rename-swaps the service into `~/.ghostlight/dev` and writes the marker
+`~/.ghostlight/install.lock` and checks the destinations of a 1.x migration first when it finds
+one. It then rename-swaps the service into `~/.ghostlight/dev` and writes the marker
 `~/.ghostlight/development`. While the marker names an existing build, every other `ghostlight`
 forwards to it, and `bin/ghostlight serve` hands over to it. Connectors live in `bin`. They are
 replaced only when the build speaks another relay revision than `bin/install.json` records; at
 the 2.0 break the whole build goes into `bin` as well.
 
-The installer then asks the running service to quit, which gives in-flight calls 10 s. If it is
-still running, that exact image is stopped. It starts `bin/ghostlight serve`, waits up to 30 s for
-the runtime file, and reconciles every registration to name `bin`. Nothing needs stopping by
+As soon as `bin` holds the executables, and before anything old is stopped, the installer
+reconciles every registration to name `bin`, so a browser or client that relaunches a connector
+when the old one stops starts the new one. At the 2.0 break it then stops the 1.x images, looks
+again for a few rounds for any that respawned, and moves the 1.x state into the home. It asks the
+running service to quit, which gives in-flight calls 10 s. If it is still running, that exact
+image is stopped. It then deletes the 1.x lifecycle files, the installation record last, starts
+`bin/ghostlight serve`, and waits up to 30 s for the runtime file. Nothing needs stopping by
 hand. A connector that was not replaced keeps running and reconnects.
 
 `-Restore` runs `~/.ghostlight/bin/ghostlight deployment install --restore`. It is offline. It

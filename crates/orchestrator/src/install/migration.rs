@@ -4,13 +4,21 @@
 //! lived, and each of those could sit in a different place on each platform. 2.0 keeps
 //! everything under the Ghostlight home (ADR-0197 Decisions 10, 16 and 22). This module reads
 //! the old layout, says in a [`MigrationPlan`] what will move, be archived, be deleted, be
-//! stopped and be re-registered, and [`execute`]s that plan.
+//! stopped and be re-registered, and carries that plan out in three steps the installer
+//! interleaves with its own:
 //!
-//! The plan is data: `deployment install --plan` prints it. Executing it stops the old images
-//! first, then moves each file by rename (or copy, verify and delete across volumes), and deletes
-//! the old record last. Any failure stops before the new executables are swapped in and leaves
-//! the source file where it was. A second run continues from whatever a failed run completed,
-//! and a run after success has nothing to do.
+//! 1. [`prepare`] makes every destination and refuses a destination that holds other content, so
+//!    a conflict is found before anything has changed;
+//! 2. [`relocate`] moves each file by rename (or copy, verify and delete across volumes), after
+//!    the installer has stopped the old programs that hold those files open;
+//! 3. [`finish`] deletes the old lifecycle files, the installation record last, once the last
+//!    old program has stopped and cannot write them again.
+//!
+//! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
+//! installer's step, not this module's: it must happen after the registrations name the new
+//! executables, or a browser relaunches an old connector from an old registration. A failure
+//! leaves the source file where it was, a second run continues from whatever a failed run
+//! completed, and a run after success has nothing to do.
 
 use std::env;
 use std::fs::{self, File};
@@ -20,6 +28,7 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
 use serde::{Deserialize, Serialize};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::entry;
@@ -37,7 +46,7 @@ const LEGACY_RECORD_LIMIT: u64 = 64 * 1024;
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
 /// File name of the 1.x installation record, beside the runtime file in the home.
-const LEGACY_RECORD_NAME: &str = "ghostlight-runtime.installation.json";
+pub(super) const LEGACY_RECORD_NAME: &str = "ghostlight-runtime.installation.json";
 
 /// File name of the 1.x startup admission file in the home.
 const LEGACY_STARTUP_NAME: &str = "ghostlight-runtime.startup";
@@ -141,9 +150,6 @@ pub enum MigrationError {
         #[source]
         source: io::Error,
     },
-    /// An old Ghostlight program would not stop.
-    #[error("Could not stop the old Ghostlight programs: {0}. Nothing was changed")]
-    Stop(String),
 }
 
 /// The 1.x installation record, read without the crate that wrote it.
@@ -448,7 +454,7 @@ pub struct MigrationPlan {
     pub audit_archive: Option<Move>,
     /// Old lifecycle files deleted, the installation record last.
     pub deletions: Vec<PathBuf>,
-    /// Old executables stopped before anything moves.
+    /// Old executables stopped before their files move.
     pub images_to_stop: Vec<PathBuf>,
     /// Registrations to rewrite to the fixed paths.
     pub registrations_to_reclaim: Vec<Registration>,
@@ -583,21 +589,28 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     Ok(plan)
 }
 
-/// Carry out `plan`.
+/// Make every destination directory and refuse a destination that holds something else.
 ///
-/// Everything that can fail before a file is touched is checked first: destinations are made
-/// and none may hold different content. Then the old programs are stopped, each file is moved,
-/// and the deletions run. A failure returns an error naming the path and leaves the file it was
-/// moving in place, and running the same plan again continues from there.
-pub fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
-    for transfer in plan.transfers() {
-        prepare(transfer)?;
-    }
-    stop_legacy_images(&plan.images_to_stop)
-        .map_err(|error| MigrationError::Stop(error.to_string()))?;
-    for transfer in plan.transfers() {
-        relocate(transfer)?;
-    }
+/// Everything that can fail before a file is touched is checked here, so the installer calls it
+/// before it changes anything.
+pub fn prepare(plan: &MigrationPlan) -> Result<(), MigrationError> {
+    plan.transfers().try_for_each(prepare_transfer)
+}
+
+/// Move every file of `plan`.
+///
+/// The old programs that hold these files open must already be stopped. A failure returns an
+/// error naming the path and leaves the file it was moving in place, and running the same plan
+/// again continues from there.
+pub fn relocate(plan: &MigrationPlan) -> Result<(), MigrationError> {
+    plan.transfers().try_for_each(relocate_transfer)
+}
+
+/// Delete the old lifecycle files of `plan`, the installation record last.
+///
+/// Called once the last old program has stopped: a program that is still running, or one a
+/// browser relaunches from an old registration, writes the record again.
+pub fn finish(plan: &MigrationPlan) -> Result<(), MigrationError> {
     for path in &plan.deletions {
         match fs::remove_file(path) {
             Ok(()) => {}
@@ -614,7 +627,7 @@ pub fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
 }
 
 /// Make the destination directory and refuse a destination that holds something else.
-fn prepare(transfer: &Move) -> Result<(), MigrationError> {
+fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
     if !transfer.from.is_file() || same_location(&transfer.from, &transfer.to) {
         return Ok(());
     }
@@ -634,7 +647,7 @@ fn prepare(transfer: &Move) -> Result<(), MigrationError> {
 }
 
 /// Move one file: rename it, or copy it, verify the copy and delete the original.
-fn relocate(transfer: &Move) -> Result<(), MigrationError> {
+fn relocate_transfer(transfer: &Move) -> Result<(), MigrationError> {
     let Move { from, to } = transfer;
     if !from.is_file() || same_location(from, to) {
         return Ok(());
@@ -838,38 +851,19 @@ fn find_registrations(old_directories: &[PathBuf]) -> Vec<Registration> {
 /// migration quiesces the old installation: an old connector must not start an old service while
 /// the files move. It refuses to stop the running installer.
 pub fn stop_legacy_images(images: &[PathBuf]) -> anyhow::Result<()> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     if images.is_empty() {
         return Ok(());
     }
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing()
-            .without_tasks()
-            .with_exe(UpdateKind::Always),
-    );
+    let mut system = process_table();
     let mut stopped = Vec::new();
-    for process in system.processes().values() {
-        let Some(executable) = process.exe().and_then(|path| fs::canonicalize(path).ok()) else {
-            continue;
-        };
-        if images
-            .iter()
-            .any(|image| fs::canonicalize(image).is_ok_and(|path| path == executable))
-        {
-            anyhow::ensure!(
-                process.pid().as_u32() != std::process::id(),
-                "Cannot replace the running installer"
-            );
-            anyhow::ensure!(
-                process.kill(),
-                "Could not stop Ghostlight process {}",
-                process.pid()
-            );
-            stopped.push(process.pid());
-        }
+    for pid in running_from(&system, images) {
+        anyhow::ensure!(
+            pid.as_u32() != std::process::id(),
+            "Cannot replace the running installer"
+        );
+        let killed = system.process(pid).is_some_and(|process| process.kill());
+        anyhow::ensure!(killed, "Could not stop Ghostlight process {pid}");
+        stopped.push(pid);
     }
     let deadline = Instant::now() + STOP_WAIT;
     while !stopped.is_empty() {
@@ -894,6 +888,47 @@ pub fn stop_legacy_images(images: &[PathBuf]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether any process other than the running installer is running one of `images`.
+#[must_use]
+pub fn any_running_from(images: &[PathBuf]) -> bool {
+    !images.is_empty()
+        && running_from(&process_table(), images)
+            .iter()
+            .any(|pid| pid.as_u32() != std::process::id())
+}
+
+/// The processes of this machine, with their executable paths.
+fn process_table() -> System {
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .without_tasks()
+            .with_exe(UpdateKind::Always),
+    );
+    system
+}
+
+/// The processes of `system` whose executable is one of `images`.
+fn running_from(system: &System, images: &[PathBuf]) -> Vec<Pid> {
+    let images: Vec<PathBuf> = images
+        .iter()
+        .filter_map(|image| fs::canonicalize(image).ok())
+        .collect();
+    system
+        .processes()
+        .values()
+        .filter(|process| {
+            process
+                .exe()
+                .and_then(|path| fs::canonicalize(path).ok())
+                .is_some_and(|executable| images.contains(&executable))
+        })
+        .map(sysinfo::Process::pid)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -903,6 +938,13 @@ mod tests {
 
     /// Bytes of the audit log the fake 1.x installation holds.
     const AUDIT: &str = "{\"event\":\"old\"}\n";
+
+    /// Carry out all three steps of `plan` with nothing to stop.
+    fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
+        prepare(plan)?;
+        relocate(plan)?;
+        finish(plan)
+    }
 
     /// A fake 1.x user: a home, a repo build, a policy directory and the profile roots.
     struct Fixture {

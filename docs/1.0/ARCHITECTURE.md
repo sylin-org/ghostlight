@@ -58,17 +58,22 @@ older or damaged, then runs the installed one. `doctor`, `status`, `help` and `-
 install.
 
 `deployment install` (`install/deployment.rs`) is the only writer of `bin` and `dev`
-(ADR-0197 Decisions 14 and 15). Under the install lock it carries out the break migration
-(`install/migration.rs`) before anything is swapped, then compares `bin/install.json` with the
+(ADR-0197 Decisions 14 and 15). Under the install lock it checks the break migration's destinations
+(`install/migration.rs`) so a conflict changes nothing, then compares `bin/install.json` with the
 payload: an older payload is refused, the same intact version is left alone, the service image is
 rename-swapped (`install/swap.rs`), and the connectors are replaced only when the relay revision
 changes. `--development` swaps the service into `dev` and writes the marker; `--restore` removes
-it. The installer asks the running service to quit, stops that exact image if it has not exited,
-starts `bin/ghostlight serve`, and writes `install.json` only once the new service publishes.
-Then `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
+it. As soon as `bin` holds the executables, and before anything old is stopped,
+`install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
 A client entry Ghostlight does not own, such as an `npx` launcher, is reported and left alone.
+Only then does the installer stop the 1.x images (and look again for a few rounds for any that
+respawned), move the 1.x state into the home, ask the running service to quit and stop that exact
+image if it has not exited, delete the 1.x lifecycle files with the installation record last,
+start `bin/ghostlight serve`, and write `install.json` only once the new service publishes.
+Registering first matters: a browser relaunches its connector from the registration the moment
+the old connector stops, and an old registration would start the 1.x connector again.
 When the service starts from `bin` or the marked build, it registers any browser that has no
 registration yet.
 
