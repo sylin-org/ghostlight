@@ -68,7 +68,11 @@ pub enum TargetRole {
     Radio,
     Textbox,
     Combobox,
+    /// An always-open list of options, such as a multi-select.
+    ListBox,
     Slider,
+    /// A numeric input, which the page reports as a spin button.
+    NumberField,
     Tab,
     MenuItem,
     Option,
@@ -88,8 +92,10 @@ impl TargetRole {
             "checkbox" | "switch" => Self::Checkbox,
             "radio" => Self::Radio,
             "textbox" | "searchbox" => Self::Textbox,
-            "combobox" | "listbox" => Self::Combobox,
-            "slider" | "spinbutton" => Self::Slider,
+            "combobox" => Self::Combobox,
+            "listbox" => Self::ListBox,
+            "slider" => Self::Slider,
+            "spinbutton" => Self::NumberField,
             "tab" => Self::Tab,
             "menuitem" | "menuitemcheckbox" | "menuitemradio" => Self::MenuItem,
             "option" => Self::Option,
@@ -109,7 +115,9 @@ impl TargetRole {
             Self::Radio => "radio button",
             Self::Textbox => "text field",
             Self::Combobox => "dropdown",
+            Self::ListBox => "list box",
             Self::Slider => "slider",
+            Self::NumberField => "number field",
             Self::Tab => "tab control",
             Self::MenuItem => "menu item",
             Self::Option => "option",
@@ -1887,6 +1895,17 @@ fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn number_fields_and_list_boxes_keep_their_own_nouns() {
+        assert_eq!(TargetRole::classify("spinbutton"), TargetRole::NumberField);
+        assert_eq!(TargetRole::NumberField.noun(), "number field");
+        assert_eq!(TargetRole::classify("slider"), TargetRole::Slider);
+        assert_eq!(TargetRole::classify("listbox"), TargetRole::ListBox);
+        assert_eq!(TargetRole::ListBox.noun(), "list box");
+        assert_eq!(TargetRole::classify("combobox"), TargetRole::Combobox);
+        assert_ne!(TargetRole::classify("spinbutton").noun(), "slider");
+    }
+
     fn composition(completed: usize, total: usize) -> super::Outcome {
         use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
         let incomplete = completed < total;
