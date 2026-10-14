@@ -5,6 +5,7 @@
 
 pub mod assets;
 pub mod level3;
+pub mod level4;
 
 use super::Level;
 
