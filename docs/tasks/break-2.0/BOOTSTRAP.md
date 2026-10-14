@@ -15,10 +15,10 @@ No file is edited by two lanes.
 
 | Lane | Owns |
 | --- | --- |
-| service | `crates/orchestrator/src/**` except the page assets under `browser/adapter/chromium/level4/assets/` and `chromium/assets/`; its ledger |
+| service | `crates/orchestrator/src/**` except the page assets under `browser/adapter/chromium/level4/assets/` and `chromium/assets/`; its ledger. The browser vocabulary it extends is `chromium/level3/mod.rs` |
 | extension | New files under `extension/` only; `tests/golden/protocol4/**`; the level 4 page assets; `scripts/lint-js*.mjs`; its ledger |
 | connectors | `crates/relay/**`, both connector crates, root `Cargo.toml` and `Cargo.lock`, `tests/golden/relay3/**`, `tests/golden/cargo-tree/**`, `tests/golden/frozen-hashes.json`, `tests/guards/connectors.test.mjs`, `tests/lib/cdp-pipe*.mjs`, `tests/installed-journey.mjs`, `scripts/dev-loop.ps1`, `scripts/get.*`, `packaging/**`, retired-channel scripts and tests, `.github/workflows/release.yml`, `scripts/check-public-surfaces.ps1`, `scripts/release-preflight.ps1`, ADR header notes and README status cells, this file, its ledger |
-| nobody until the switch | `crates/bridge/**`, `crates/win-peer/**`, the orchestrator manifest and packaging, `.github/workflows/ci.yml`, `AGENTS.md`, `CONTRIBUTING.md`, other docs, every existing `extension/` file, the `tests/*.mjs` journeys |
+| nobody until the switch | `crates/bridge/**`, `crates/win-peer/**`, `crates/orchestrator/{Cargo.toml, tauri.conf.json, packaging/**, ui/**}`, `.github/workflows/ci.yml`, `AGENTS.md`, `CONTRIBUTING.md`, other docs, every existing `extension/` file, the `tests/*.mjs` journeys |
 
 Ownership also covers compilation:
 

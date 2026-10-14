@@ -1,6 +1,6 @@
 # ADR-0145: A shared process diagnostics log
 
-Decision 2 popup diagnostics route superseded by ADR-0197 Decision 22 (the workbench and CLI keep the toggle).
+Decision 8 popup diagnostics toggle superseded by ADR-0197 Decision 22 (which calls it the Decision 2 popup route); the workbench and CLI keep the toggle.
 
 - Status: Accepted
 - Date: 2026-08-29
