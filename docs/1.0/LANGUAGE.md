@@ -283,7 +283,9 @@ action, requested dimensions or zoom, and observed geometry.
 
 Read useful bounded visible text from the full composed page or one target. A full-page read
 includes visible top-document text, open shadow trees, and http(s) embedded frames in stable frame
-order. Closed shadow roots, hidden content, and editable values remain absent. Use
+order. Visible form values are included, checkboxes and radios read as checked or unchecked, and
+placeholders are never values. Every credential-class field, as the write path classifies it, is
+masked. Closed shadow roots and hidden content remain absent. Use
 `browser_inspect` or `browser_find` when an action target is needed. Shortest call: `{}`.
 
 Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
@@ -311,8 +313,8 @@ A `document` scope returns no target handles. Its facts are `tab`, `document_gen
 structure-only composed tree. Each node has a `kind` of `control`, `heading`, or `container`, a
 `label` of at most 120 characters, and a `children` array. Without a root, the tree includes open
 shadow roots, assigned slots, and http(s) embedded frames in stable order under one 400-node
-ceiling. A root limits it to that target's composed subtree. Editable values, hidden content,
-closed roots, and frame identity are never returned. A summary reads, for example:
+ceiling. A root limits it to that target's composed subtree. Editable values, hidden
+content, closed roots, and frame identity are never returned. A summary reads, for example:
 `Returned the document tree: 283 nodes.`
 
 The tree is also recorded under a `snapshot` handle, superseded per tab. When the previous
@@ -327,6 +329,8 @@ new node, a node whose kind or label changed, or a node that lost children.
 
 Find current semantic targets by visible or accessible text across the composed page, including
 open shadow roots and http(s) embedded frames. Use it when the desired label or text is known.
+Text search also matches `div`, `[draggable]`, `[aria-label]`, and `[tabindex]` elements, and
+prefers the deepest match over a container that only holds it.
 Shortest call: `{"text":"Submit"}`.
 
 Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,
@@ -510,7 +514,8 @@ default for `url_contains`, `text_present`, `text_absent`, and `target_absent` a
 other conditions, so the schema declares no single default for it. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
-slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.
+slots, and http(s) embedded frames. Hidden content and closed roots remain absent; form values follow
+the `browser_read` contract.
 
 Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 

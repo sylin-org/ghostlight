@@ -19,13 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The page code the service installs into browser pages now lives in the service's browser
   adapter, under `crates/orchestrator/src/browser/adapter/chromium/assets`, instead of being
   split between the service and `extension/lib`. The service picks the adapter's browser family
-  and wire level from the extension's hello. The installed page bundle is byte-identical, so
-  published extensions see no change (ADR-0196 Decision 3, ADR-0197 Decision 5).
+  and wire level from the extension's hello. The move itself changed no bytes of the
+  installed page bundle (ADR-0196 Decision 3, ADR-0197 Decision 5).
 - The Chromium page-asset tests run with `npm test --prefix` that directory and need no
   `npm install`. CI runs them beside the extension tests.
 
 ### Fixed
 
+- Page-asset fixes reach the installed extension at once, because the service supplies the page
+  bundle (the level 3 bundle hash changed on purpose). Choosing a select option by its visible
+  label is now confirmed as retained (LU-2). `browser_read` masks every credential-class field,
+  not only `type=password`, reports checkboxes and radios as checked or unchecked instead of
+  their value attribute, and never shows a placeholder as a value (EXT-7, HM-7). `browser_find`
+  matches visible text in `div` containers and in `[draggable]`, `[aria-label]` and `[tabindex]`
+  elements, and prefers the deepest match (LU-6). Only the returned matches get handles, so a broad
+  search no longer pins hundreds of page elements.
 - A tab handle from another session now points the model to its own `browser_tabs` list
   instead of suggesting a switch.
 - A refusal for another session's handle names that session only by its client label. When the

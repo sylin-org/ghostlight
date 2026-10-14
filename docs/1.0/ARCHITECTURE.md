@@ -452,7 +452,9 @@ change requires a new physical browser capability or a bridge protocol requireme
 
 The composed semantic layer is the physical page-observation boundary. Inside each injected
 http(s) frame, the extension walks rendered elements and text through open shadow roots and assigned
-slots while excluding hidden content and editable values. Read, inspect, find, fallback accessible
+slots while excluding hidden content. Visible form values are included; credential-class fields (as
+classified by the write path) are masked, checkboxes and radios read as checked or unchecked, and
+placeholders are never values. Read, inspect, find, fallback accessible
 names, and text waits share that model. The service worker joins text and rootless trees in stable
 frame order under one page-wide character or node ceiling. Explicit article mode probes only the
 top document first and uses the composed full-page read when no useful article exists. Closed

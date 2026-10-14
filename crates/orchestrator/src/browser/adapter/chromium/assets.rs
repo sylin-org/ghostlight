@@ -119,7 +119,7 @@ mod tests {
     /// The level 3 bundle as published extensions receive it. Moving or reformatting an asset
     /// must not change a byte of it; change this value only when the bundle changes on purpose.
     const LEVEL3_BUNDLE_SHA256: &str =
-        "d83fe8b2dea702d44efda16f945d88bce6f5078bf6984f345768b4fe1be78f3c";
+        "9eb521d0cab493adeda19cef6091c6513de27e06c59d509dcf2c3869ac79d8b4";
 
     #[test]
     fn level3_bundle_sha256_is_pinned() {

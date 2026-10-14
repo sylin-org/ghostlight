@@ -8,6 +8,7 @@
   // their element lives, because that is what the person should see.
   const IS_TOP = window.self === window.top;
   const ACTIONABLE_SELECTOR = "a[href],button,input,textarea,select,summary,[role],[contenteditable='true']";
+  const TEXT_FIND_SELECTOR = "a,button,input,textarea,select,[role],p,span,li,h1,h2,h3,h4,h5,h6,label,div,[draggable],[aria-label],[tabindex]";
   const TEXT_INPUT_TYPES = new Set(["text", "search", "tel", "url", "email", "number", "password"]);
   const TEXT_BLOCK_TAGS = new Set([
     "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figcaption",
@@ -311,14 +312,15 @@
         if (!isComposedVisible(node)) return;
         if (tag === "input" || tag === "textarea") {
           const type = String(node.type ?? "").toLowerCase();
-          if (type === "password") {
-            append(node.value ? "*".repeat(64) : (node.placeholder || ""));
+          if (type === "checkbox" || type === "radio") {
+            append(node.checked ? "checked" : "unchecked");
           } else if (type !== "hidden") {
-            append(node.value || node.placeholder || "");
+            // A placeholder is a hint, never a value. Every credential-class field is masked.
+            if (node.value) append(credentialClass(node) ? "*".repeat(64) : node.value);
           }
         } else if (tag === "select") {
           const selectedText = Array.from(node.selectedOptions ?? []).map((opt) => opt.text).join(", ");
-          if (selectedText) append(selectedText);
+          if (selectedText) append(credentialClass(node) ? "*".repeat(64) : selectedText);
         }
         if (TEXT_OMIT_TAGS.has(tag)) return;
         if (tag === "br") {
@@ -349,19 +351,39 @@
     return { targets: pool.slice(0, maximum).map(observation), truncated: pool.length > maximum };
   }
 
+  // The parent in the composed tree: a slotted node's slot, else its parent, and a shadow
+  // root's host, so an ancestor walk crosses open shadow boundaries instead of stopping there.
+  function composedParent(node) {
+    return node.assignedSlot ?? node.parentNode ?? node.host ?? null;
+  }
+
   function findTargets(text, kind, maximum) {
     const needle = text.toLocaleLowerCase();
-    const pool = kind === "control" ? candidates("controls") : queryAll("a,button,input,textarea,select,[role],p,span,li,h1,h2,h3,h4,h5,h6,label");
-    const matches = [];
+    const pool = kind === "control" ? candidates("controls") : queryAll(TEXT_FIND_SELECTOR);
+    const hits = [];
     for (const element of pool.slice(0, 3000)) {
       const haystack = `${accessibleName(element)} ${composedVisibleText(element, 2000).text}`.toLocaleLowerCase();
       const isControl = element.matches("a[href],button,input,textarea,select,summary,[role],[contenteditable='true']");
       if (haystack.includes(needle) && (kind !== "control" || isControl) && (kind !== "text" || !isControl)) {
-        matches.push(observation(element));
-        if (matches.length > maximum) break;
+        hits.push({ element, isControl });
       }
     }
-    return { targets: matches.slice(0, maximum), truncated: matches.length > maximum || pool.length > 3000 };
+    // A container's text includes its descendants', so a plain container that holds another
+    // match is dropped in favor of the deepest one. Controls are always kept. Containers are
+    // found by walking each hit's composed ancestors once, which is O(hits * depth).
+    const hitElements = new Set(hits.map((hit) => hit.element));
+    const containers = new Set();
+    for (const hit of hits) {
+      for (let node = composedParent(hit.element); node; node = composedParent(node)) {
+        if (hitElements.has(node)) containers.add(node);
+      }
+    }
+    const kept = hits.filter((hit) => hit.isControl || !containers.has(hit.element));
+    // Only the returned targets are observed, so only they get locators.
+    return {
+      targets: kept.slice(0, maximum).map((hit) => observation(hit.element)),
+      truncated: kept.length > maximum || pool.length > 3000,
+    };
   }
 
   function matchesSemanticSelector(element, message) {
@@ -513,11 +535,15 @@
     return { typed: true, subject: prepared.subject };
   }
 
+  function selectOption(element, value) {
+    return Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
+  }
+
   function validateFillElement(element, value, allowCredentials = false) {
     requireActionable(element, "fill");
     if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (element instanceof HTMLSelectElement) {
-      const option = Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
+      const option = selectOption(element, value);
       if (!option) throw new Error("select option not found");
       return option;
     }
@@ -559,6 +585,8 @@
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
       return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
     }
+    // A select reports the resolved option's value, so a label the caller used still matches.
+    if (element instanceof HTMLSelectElement) return selectOption(element, value)?.value ?? String(value);
     // The textarea API and contenteditable innerText normalize both CRLF and lone CR to LF.
     return (element instanceof HTMLTextAreaElement || element.isContentEditable)
       ? String(value).replace(/\r\n?/g, "\n")

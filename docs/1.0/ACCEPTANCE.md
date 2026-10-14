@@ -126,7 +126,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    sibling among related tools, and recover from deliberately stale and ambiguous handles.
    The shortest `browser_read` call returns visible text from the composed page: top document, open
    shadow roots, and http(s) embedded frames in stable order under one global character ceiling.
-   It excludes hidden content, editable values, and closed shadow roots. Explicit article mode
+   It includes visible form values, reports checkboxes and radios as checked or unchecked, never
+   reports placeholders as values, and masks every credential-class field. It excludes hidden
+   content and closed shadow roots. Explicit article mode
    returns a useful top-document article or falls back to that same composed page read.
    Inspect, find, accessible-name fallback, and text wait use the same composed semantics. A
    rootless document tree includes embedded frames under one 400-node ceiling. A document-scope

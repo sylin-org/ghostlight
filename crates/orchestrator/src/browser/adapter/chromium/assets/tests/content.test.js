@@ -102,6 +102,10 @@ function contentHarness() {
     }
     matches(selector) { return selectorMatches(this, selector); }
     closest(selector) { return this.matches(selector) ? this : null; }
+    contains(other) {
+      for (let node = other; node; node = node.parentNode) if (node === this) return true;
+      return false;
+    }
     querySelectorAll(selector) { return descendantsOf(this, selector); }
     focus() { document.activeElement = this; }
     scrollIntoView() {}
@@ -294,6 +298,12 @@ function contentHarness() {
     document,
     send,
     element(tagName) { return new HTMLElement(tagName); },
+    select(options) {
+      const element = new HTMLSelectElement("SELECT");
+      element.options = options;
+      element.value = options[0].value;
+      return element;
+    },
     fragment() { return new DocumentFragment(); },
     text(value) { return new TextNode(value); },
     setBody(value) { document.body = value; },
@@ -375,6 +385,7 @@ test("composed reads include form values and editable text while masking passwor
   
   const passInput = harness.element("input");
   passInput.type = "password";
+  passInput.setAttribute("type", "password");
   passInput.value = "secret123";
   
   const selectNode = harness.element("select");
@@ -391,7 +402,7 @@ test("composed reads include form values and editable text while masking passwor
   
   assert.equal(read.ok, true);
   assert.match(read.result.text, /John Doe/);
-  assert.match(read.result.text, /Enter email/);
+  assert.doesNotMatch(read.result.text, /Enter email/);
   assert.match(read.result.text, /\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*/);
   assert.doesNotMatch(read.result.text, /secret123/);
   assert.match(read.result.text, /Option B/);
@@ -1176,4 +1187,137 @@ test("point subjects cross the shadow boundary to the nearest actionable host", 
   harness.document.elementFromPoint = () => orphan;
   const plain = await harness.send({ kind: "scroll_point", x: 30, y: 30 });
   assert.equal(plain.result.subject.role, "span");
+});
+
+test("reads mask every credential-class field, not only type password", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const pin = harness.element("input");
+  pin.setAttribute("type", "text");
+  pin.setAttribute("autocomplete", "one-time-code");
+  pin.value = "482913";
+  const token = harness.element("input");
+  token.setAttribute("type", "text");
+  token.setAttribute("name", "api_token");
+  token.value = "tok-live-77";
+  body.append(pin, token);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
+
+  assert.doesNotMatch(read.result.text, /482913|tok-live-77/);
+  assert.match(read.result.text, /\*{64}/);
+});
+
+test("reads report checkboxes and radios by state and never show a placeholder as a value", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const box = harness.element("input");
+  box.type = "checkbox"; box.value = "on"; box.checked = true;
+  const radio = harness.element("input");
+  radio.type = "radio"; radio.value = "express"; radio.checked = false;
+  const empty = harness.element("input");
+  empty.type = "text"; empty.value = ""; empty.placeholder = "name@example.com";
+  body.append(box, radio, empty);
+  harness.setBody(body);
+
+  const read = await harness.send({ kind: "read_text", mode: "visible", max_chars: 500 });
+
+  assert.match(read.result.text, /checked/);
+  assert.match(read.result.text, /unchecked/);
+  assert.doesNotMatch(read.result.text, /express|on|name@example/);
+});
+
+test("a select filled by its visible label is confirmed as retained", async () => {
+  const harness = contentHarness();
+  const select = harness.select([{ value: "us", text: "United States" }, { value: "de", text: "Germany" }]);
+  select.setAttribute("aria-label", "Country");
+  harness.document.body.append(select);
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 10 });
+  const locator = inspected.result.targets.find((target) => target.name === "Country").locator;
+
+  for (const value of ["Germany", "de"]) {
+    select.value = "us";
+    const fields = [{ locator, value }];
+    const filled = await harness.send({ kind: "fill", fields });
+    assert.equal(filled.ok, true);
+    assert.equal(select.value, "de");
+    const verified = await harness.send({ kind: "verify_fill_values", fields });
+    assert.equal(verified.result.retained, true);
+  }
+  select.value = "us";
+  const lost = await harness.send({ kind: "verify_fill_values", fields: [{ locator, value: "Germany" }] });
+  assert.equal(lost.result.retained, false);
+});
+
+test("text find reaches div containers and draggable, labelled and focusable elements, deepest first", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const outer = harness.element("div");
+  const card = harness.element("div");
+  card.setAttribute("draggable", "true");
+  card.append(harness.text("Move the blue card"));
+  outer.append(card);
+  const labelled = harness.element("section");
+  labelled.setAttribute("aria-label", "Blue panel");
+  const focusable = harness.element("section");
+  focusable.setAttribute("tabindex", "0");
+  focusable.append(harness.text("Blue focus ring"));
+  body.append(outer, labelled, focusable);
+  harness.setBody(body);
+
+  const found = await harness.send({ kind: "find", text: "blue", find_kind: "any", max_results: 10 });
+
+  assert.equal(found.ok, true);
+  assert.equal(found.result.targets.length, 3);
+  const names = found.result.targets.map((target) => target.name);
+  assert.ok(names.includes("Blue panel"));
+  assert.equal(names.filter((name) => name === "").length, 0);
+});
+
+test("text find prefers a shadow-root descendant over light wrappers around its host", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const outer = harness.element("div");
+  const inner = harness.element("div");
+  const host = harness.element("my-card");
+  const shadow = harness.fragment();
+  shadow.host = host;
+  const label = harness.element("span");
+  label.append(harness.text("Drag me"));
+  shadow.append(label);
+  host.shadowRoot = shadow;
+  inner.append(host);
+  outer.append(inner);
+  body.append(outer);
+  harness.setBody(body);
+
+  const found = await harness.send({ kind: "find", text: "drag me", find_kind: "any", max_results: 1 });
+
+  assert.equal(found.ok, true);
+  assert.equal(found.result.targets.length, 1);
+  assert.equal(found.result.targets[0].role, "span");
+  assert.equal(found.result.truncated, false);
+});
+
+test("text find gives locators only to the returned targets", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  for (let index = 0; index < 6; index += 1) {
+    const item = harness.element("div");
+    item.append(harness.text(`item ${index}`));
+    body.append(item);
+  }
+  const marker = harness.element("div");
+  marker.append(harness.text("unique marker"));
+  body.append(marker);
+  harness.setBody(body);
+
+  const first = await harness.send({ kind: "find", text: "item", find_kind: "any", max_results: 1 });
+  const second = await harness.send({ kind: "find", text: "unique marker", find_kind: "any", max_results: 1 });
+
+  assert.equal(first.result.targets.length, 1);
+  assert.equal(first.result.truncated, true);
+  const number = (target) => Number(target.locator.split("_")[1]);
+  assert.equal(number(second.result.targets[0]), number(first.result.targets[0]) + 1);
 });

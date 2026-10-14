@@ -108,6 +108,16 @@ The original decision to omit form values and editable content (rejected alterna
 
 To align `browser_read` with the true visual state of the page, the content extractor now includes form values (`<input>`, `<textarea>`, `<select>`) and `contenteditable` node text. To maintain the boundary around true secrets, password fields (`<input type="password">`) remain explicitly masked (e.g., returning `********` or their placeholder).
 
+## Amendment 2026-10-14 (masking and find; EXT-7, HM-7)
+
+This amendment supersedes the masking sentence of the 2026-09-18 amendment. Masking is not limited
+to `type=password` and no placeholder is returned. The page bundle masks every credential-class
+field, using the same classifier as the write path, including selects. Checkboxes and radios read
+as checked or unchecked. A placeholder is a hint, never a value, so it is never reported.
+
+`browser_find` text search also matches `div`, `[draggable]`, `[aria-label]` and `[tabindex]`
+elements and prefers the deepest match over a container that merely holds it.
+
 ## Consequences
 
 - The shortest read matches what a person means by the page, including ordinary web-component and
