@@ -43,7 +43,8 @@ $expectedCoordinates = @(
     "sbom|ghostlight-bridge",
     "sbom|ghostlight-browser-connector",
     "sbom|ghostlight-mcp-connector",
-    "sbom|ghostlight-win-peer"
+    "sbom|ghostlight-win-peer",
+    "winget-archive|x86_64-pc-windows-msvc"
 )
 $artifacts = @($candidate.artifacts | Sort-Object name)
 if ($artifacts.Count -ne $expectedCoordinates.Count) {

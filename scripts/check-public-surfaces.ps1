@@ -46,6 +46,9 @@ $distribution = Get-Content -LiteralPath (Join-Path $repo "docs/business/DISTRIB
 $directorySubmissions = Get-Content -LiteralPath (
     Join-Path $repo "docs/business/DIRECTORY-SUBMISSIONS.md"
 ) -Raw
+$wingetTemplate = Get-Content -LiteralPath (
+    Join-Path $repo "packaging/winget/Sylin.Ghostlight.yaml"
+) -Raw
 $siteFiles = Get-ChildItem -LiteralPath (Join-Path $repo "site") -File -Recurse
 $siteText = ($siteFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
 
@@ -87,6 +90,8 @@ Assert-Contains -Text $trustFaq -Needle "adapter serves $adapter" -Label "trust 
 Assert-Contains -Text $distribution -Needle "ghostlight@$release" -Label "distribution runbook"
 Assert-Contains -Text $distribution -Needle "v$release is active" -Label "distribution runbook"
 Assert-Contains -Text $directorySubmissions -Needle "org.sylin/ghostlight`` $release" -Label "directory submissions"
+Assert-Contains -Text $wingetTemplate -Needle "/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip" -Label "WinGet template archive URL"
+Assert-Contains -Text $wingetTemplate -Needle "an older copy never replaces a newer one" -Label "WinGet template carrier notes"
 if ($siteText -notmatch [regex]::Escape("https://sylin.org/ghostlight/")) {
     throw "site sources do not point at the canonical Ghostlight page"
 }

@@ -208,9 +208,11 @@ The one-command install is the primary journey:
 npx -y ghostlight install
 ```
 
-Signed-checksum native packages, portable archives, and a self-contained Claude Desktop MCPB are
-equivalent release routes. Every route uses the matching store adapter and the same three native
-executables.
+On Windows, WinGet is an equivalent route: `winget install Sylin.Ghostlight`, then run
+`ghostlight install` once. The self-contained Claude Desktop MCPB is another. Every route uses the
+matching store adapter and the same three native executables. WinGet only delivers them;
+`ghostlight install` copies them into `~/.ghostlight/bin`, and after `winget upgrade` the next
+`ghostlight install` carries the newer version there. An older copy never replaces a newer one.
 
 <details>
 <summary><strong>Current release and compatibility</strong></summary>

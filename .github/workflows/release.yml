@@ -137,10 +137,16 @@ jobs:
           foreach ($name in @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')) {
             Copy-Item -LiteralPath "target/${{ matrix.target }}/release/$name$extension" -Destination "$output/$name-${{ matrix.target }}$extension"
           }
+      - name: Build the WinGet archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/package-winget-archive.ps1 -BinaryDirectory target/${{ matrix.target }}/release -OutputDirectory dist/winget-${{ matrix.target }}
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
-          path: dist/raw-${{ matrix.target }}/
+          path: |
+            dist/raw-${{ matrix.target }}/
+            dist/winget-${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 7
 
@@ -222,6 +228,9 @@ jobs:
             dist/release-candidate/assets/*
             dist/release-candidate/release-candidate.json
             dist/release-candidate/SHA256SUMS
+      - name: Prepare the WinGet manifest from candidate hashes
+        shell: pwsh
+        run: ./scripts/prepare-winget-manifest.ps1 -CandidateDirectory dist/release-candidate
       - uses: actions/upload-artifact@v7
         with:
           name: release-candidate
@@ -238,5 +247,11 @@ jobs:
         with:
           name: claude-desktop-mcpb
           path: dist/release-candidate/assets/*.mcpb
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: winget-manifest
+          path: dist/winget-manifest/
           if-no-files-found: error
           retention-days: 14

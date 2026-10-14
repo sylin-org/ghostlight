@@ -44,9 +44,9 @@ One Ghostlight version comprises:
 - sibling `ghostlight-browser-connector`;
 - the mandatory checksum-bound `ghostlight` npm launcher, whose bare command remains an MCP stdio
   edge and whose subcommands reach the native orchestrator;
-- a platform-native package that installs and removes the browser native-messaging registration;
-- two portable archives, one-line installers, a self-contained Windows Claude Desktop MCPB, and
-  candidate-derived Scoop and WinGet metadata;
+- one Windows WinGet archive, one-line installers, a self-contained Windows Claude Desktop MCPB,
+  and candidate-derived WinGet manifests (WinGet is a carrier for `ghostlight install`, which
+  installs into `~/.ghostlight/bin` and never replaces a newer copy with an older one);
 - the independently delivered but contract-matched `Ghostlight in Browser` Chromium adapter from
   the Chrome Web Store; and
 - checksums, GitHub build-provenance attestations, SBOM, license notices, source archive, and
@@ -139,22 +139,19 @@ Windows release binaries statically link the Microsoft Visual C++ runtime throug
 machine without a separately installed Visual C++ Redistributable; the build flag is a prevention,
 not a substitute for the journey.
 
-The manual `Build release candidate` workflow builds Windows NSIS and Linux Debian candidates from
-one locked workspace build. It stages the two connectors as Tauri sidecars,
-inspects every native package for the exact three-executable sibling
-set, builds deterministic portable archives, prepares the checksum-bound npm tarball and
+The manual `Build release candidate` workflow builds the three executables for Windows and Linux
+from one locked workspace build, builds the deterministic WinGet archive, prepares the checksum-bound npm tarball and
 self-contained MCPB, builds the deterministic extension archive and one pinned CycloneDX SBOM for
-each of the five workspace components, then assembles one 18-artifact candidate unit:
+each of the five workspace components, then assembles one 15-artifact candidate unit:
 
-- two native packages;
-- two portable archives;
+- one WinGet archive;
 - six versioned raw binaries;
 - the Chromium adapter;
 - five component SBOMs, including the audited Windows peer crate;
 - the npm launcher tarball; and
 - the Claude Desktop MCPB.
 
-`release-candidate.json` binds 18 normalized artifact coordinates, exact byte lengths, SHA-256
+`release-candidate.json` binds 15 normalized artifact coordinates, exact byte lengths, SHA-256
 values, the version, the full source revision, and release status. `SHA256SUMS` is independently
 recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
 attestations for every file in the candidate unit. The workflow uploads the unit for fourteen days.
@@ -200,8 +197,8 @@ at a time:
 3. Publish the matching browser adapter through deferred store publication if the store supports
    it.
 4. Publish provenance-attested platform packages and immutable source/binary release assets.
-5. Publish the exact candidate-bound npm tarball. Then publish candidate-derived Scoop and
-   WinGet metadata only after their referenced portable assets are observable.
+5. Publish the exact candidate-bound npm tarball. Then publish candidate-derived WinGet
+   manifests only after the referenced WinGet archive is observable.
 6. Publish MCP Registry metadata only after the exact npm coordinate is observable.
 7. Reconcile store feeds and public compatibility from independently downloaded artifacts.
 8. Update `docs/public-status.json`, README release language, trust review stamps, website copy,

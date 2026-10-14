@@ -143,6 +143,15 @@ foreach ($rawTarget in $rawTargets) {
     }
 }
 
+$wingetName = "ghostlight-v$Version-x86_64-pc-windows-msvc.zip"
+$specifications += [ordered]@{
+    kind = "winget-archive"
+    target = "x86_64-pc-windows-msvc"
+    directory = "native-x86_64-pc-windows-msvc"
+    pattern = $wingetName
+    name = $wingetName
+}
+
 $artifacts = [System.Collections.Generic.List[object]]::new()
 foreach ($specification in $specifications) {
     $isOptional = $specification.Contains("optional") -and [bool]$specification.optional

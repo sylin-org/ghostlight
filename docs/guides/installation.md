@@ -15,8 +15,12 @@ do not require an extension update or reload.
 1. Run `npx -y ghostlight@1.3.14 install`. The checksum-bound launcher downloads one exact sibling
    set, registers detected native browsers for the current user, creates the Linux Applications
    entry, and connects detected MCP clients.
-   A native package, the Scoop direct manifest, the one-line installer, or the Claude Desktop
-   MCPB may provide the same binaries instead.
+   WinGet (`winget install Sylin.Ghostlight`), the one-line installer, or the Claude Desktop
+   MCPB may provide the same binaries instead. With WinGet, run `ghostlight install` once
+   through the WinGet alias: it installs into `~/.ghostlight/bin` and registers browsers and
+   clients. After `winget upgrade`, running `ghostlight install` again (or any launch through
+   the alias) carries the newer version into `~/.ghostlight/bin`. An older copy never replaces
+   a newer one.
 2. Install the compatible `Ghostlight in Browser` 1.3.12 extension from its store listing.
 3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
    Open Ghostlight from Applications whenever you want the workbench.

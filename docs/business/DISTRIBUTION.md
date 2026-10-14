@@ -19,8 +19,8 @@ in the session record and docs/research/14 (P1 was "ship the distribution alread
   the extension opens `https://sylin.org/ghostlight/chromium-extension/post-install/` on first
   install.
 - README quick-install block with Cursor/VS Code deeplink buttons and the npx snippet.
-- `server.json` (MCP registry descriptor), plus `packaging/winget/` and `packaging/scoop/`
-  templates whose hashes come from release assets.
+- `server.json` (MCP registry descriptor), plus the `packaging/winget/`
+  template whose archive hash comes from the release candidate.
 - `packaging/homebrew/ghostlight.rb` is retained as the historical 0.8.0 template. The current 1.x
   line has no macOS artifact, so that formula is not a current publication target.
 
@@ -30,7 +30,7 @@ Every post-cutover release ships three executables side by side: `ghostlight-mcp
 edge), `ghostlight` (the CLI and persistent protocol-neutral service), and `ghostlight-browser-connector` (the
 browser-only native-messaging host). Each platform archive carries all three, and release.yml
 uploads all three as raw per-target binaries too. The install scripts, npm launcher, MCPB, and
-winget/scoop templates place them together in one directory. MCP-client entries launch
+WinGet template place them together in one directory. MCP-client entries launch
 `ghostlight-mcp-connector`; the Chromium native-host manifest independently launches `ghostlight-browser-connector`.
 
 ## Founder: accounts and publishes (order matters)
@@ -78,10 +78,6 @@ winget/scoop templates place them together in one directory. MCP-client entries 
 - [x] **Winget.** v1.3.13 is publicly accepted after
       [PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923) merged on 2026-10-02.
       Version 1.3.14 is submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987), pending checks/review.
-- [x] **Scoop direct manifest.** `packaging/scoop/ghostlight.json` carries v1.3.14 and can be
-      installed directly by URL. The central Extras package-request template currently requires
-      at least 100 GitHub stars or 50 forks; Ghostlight has neither, so an Extras request would
-      require a false attestation and was not opened.
 - [x] **Canonical website.** `https://sylin.org/ghostlight/` is live. The old GitHub Pages paths
       are redirect fallbacks, and extension/install entry points use the canonical domain.
 - [x] **GitHub front doors.** The repository About description and Sylin organization profile

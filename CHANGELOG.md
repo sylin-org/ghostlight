@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- WinGet stays as a supported route (ADR-0197 Decision 16, owner review). Its Windows archive is
+  built by `scripts/package-winget-archive.ps1` and is a carrier for `ghostlight install`, which
+  installs into `~/.ghostlight/bin`; after `winget upgrade` the next install carries the newer
+  version there, and an older copy never replaces a newer one. It is not offered as a separate
+  portable download.
 - The page code the service installs into browser pages now lives in the service's browser
   adapter, under `crates/orchestrator/src/browser/adapter/chromium/assets`, instead of being
   split between the service and `extension/lib`. The service picks the adapter's browser family
