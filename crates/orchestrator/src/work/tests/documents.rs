@@ -535,3 +535,65 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
         fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch() {
+    for supported in [false, true] {
+        let path = policy_file("permitted_content", "on_demand", false);
+        let (executor, browser, _, workspace, audit) =
+            fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        open(&executor, &browser, &workspace);
+        browser.set_documents(
+            7,
+            DocumentInventory {
+                documents: vec![
+                    PhysicalDocument {
+                        id: "T.t1".into(),
+                        url: "https://example.com/".into(),
+                        parent: None,
+                        supported: true,
+                    },
+                    PhysicalDocument {
+                        id: "unseen.0".into(),
+                        url: "https://example.com/embedded".into(),
+                        parent: Some("T.t1".into()),
+                        supported,
+                    },
+                ],
+                ..DocumentInventory::default()
+            },
+        );
+        if supported {
+            browser.push(Ok(BrowserOutcome::ScriptEvaluated {
+                tab: tab(7, "https://example.com/"),
+                value: "2".into(),
+                truncated: false,
+                committed_urls: vec![],
+            }));
+        }
+        let result = executor.execute(
+            &workspace,
+            "browser_execute",
+            json!({"script":"1+1"}),
+            None,
+            &CancellationToken::default(),
+        );
+        if supported {
+            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+            let scopes = browser.scopes();
+            assert_eq!(scopes.len(), 1);
+            assert!(scopes[0].strict_tree);
+        } else {
+            assert_eq!(result.status, Status::Failed, "{}", result.summary);
+            assert_eq!(result.effect, Effect::None);
+            assert_eq!(result.facts["coverage"]["unavailable_documents"], 1);
+            assert!(browser.scopes().is_empty(), "no scoped work is sent");
+            assert_eq!(browser.calls().len(), 1, "only the navigation ran");
+            assert_eq!(
+                audit.0.lock().unwrap().last().unwrap().refusal_facts,
+                Some(crate::language::audit::AuditRefusal::DocumentUnavailable)
+            );
+        }
+        fs::remove_file(path).unwrap();
+    }
+}

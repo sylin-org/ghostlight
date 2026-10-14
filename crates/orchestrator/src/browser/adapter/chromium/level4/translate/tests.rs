@@ -285,8 +285,6 @@ fn an_unseen_frame_is_an_unsupported_document_that_a_strict_guard_pins() {
     let BrowserOutcome::Documents { inventory, .. } = described else {
         panic!("documents");
     };
-    // The authority refuses restricted unbounded work over any unsupported document, so the
-    // placeholder alone keeps such work from running.
     assert_eq!(
         inventory.documents[1],
         PhysicalDocument {
