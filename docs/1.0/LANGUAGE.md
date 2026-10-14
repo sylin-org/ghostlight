@@ -9,6 +9,15 @@ Schema forms. Conditional inputs advertise one portable teaching envelope; the t
 enforces the exact branch before governance or browser dispatch. Omitted optional fields use the
 defaults stated here.
 
+A field that several branches share is advertised as one schema that admits every value any
+branch admits. Constants join one `enum`, length and numeric bounds widen, and each value of a
+discriminator such as `action` or `condition` keeps its own description. `anyOf` appears only
+inside a field whose alternatives are different JSON types. The only `oneOf`, a key name in
+`browser_press_key`, has alternatives no value can match twice. A strict JSON Schema validator therefore accepts every
+ordinary call. Tests validate every example and a list of ordinary calls against the advertised
+schemas, decode them, and check that every next step naming a tool names only fields that tool
+advertises (ADR-0196).
+
 Each declaration includes concise field descriptions, one shortest valid example, a truthful
 output schema, and standard MCP annotations. The implementation owns bounds and defaults as named
 constants shared by schema rendering and decoding.
@@ -281,9 +290,9 @@ Capture the viewport, full page, one target, or a magnified region from a curren
 capture returns a view handle for later coordinate actions or another region capture. Shortest
 call: `{}`.
 
-Inputs use one of four schema branches: optional `tab` only for viewport capture; optional `tab`
-plus required `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
-required `view`, `x`, `y`, `width`, and `height`. Region coordinates are image pixels and must form
+The decoder accepts one of four branches: optional `tab` only for viewport capture; optional `tab`
+plus `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
+required `view`, `x`, `y`, `width`, and `height`. `full_page` is a boolean, default `false`. Region coordinates are image pixels and must form
 a positive rectangle wholly inside the current view. Optional `timeout_ms` apply
 to every branch. Target, full-page, and region capture cannot be combined. Capability: `read`.
 
@@ -387,8 +396,10 @@ Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 Inputs: exactly one of required `key` as one character or one named key from the closed list, or
 required `strokes`, an ordered sequence of 1 to 20 of the same items, with optional `repeat` from 1
 to 100 defaulting to 1; optional `tab`; optional `target`; optional unique `modifiers` from `Alt`,
-`Control`, `Meta`, and `Shift`; optional `expect` postcondition.
-Capabilities: `action`, plus `read` when `expect` is supplied.
+`Control`, `Meta`, and `Shift`; optional `expect` postcondition. Modifiers are held for every
+stroke, so a shortcut is a key with modifiers: `{"key":"a","modifiers":["Control"]}`, or
+`{"strokes":["a","c"],"modifiers":["Control"]}` to select all and copy. A modifier is never a
+stroke. Capabilities: `action`, plus `read` when `expect` is supplied.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 
@@ -439,8 +450,12 @@ Inputs use one condition-specific branch: `load_ready` accepts neither value nor
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
 live page until a control matching it exists; `duration` requires a decimal string `value`
-of whole milliseconds from 0 to 10000 (for example, `"1200"`) and waits executor-side.
-Every branch accepts optional `tab`, `timeout_ms`. Capability: `read`.
+of whole milliseconds from 0 to 10000 (for example, `"1200"`) and waits executor-side;
+`visual_settle` and `layout_stable` are one condition, met when the page, or an optional
+`target`, stops moving and repainting. Every branch accepts optional `tab`, `timeout_ms`.
+Optional `visual_settle` adds a short layout settle after the condition holds. It is off by
+default for `url_contains`, `text_present`, `text_absent`, and `target_absent` and on for the
+other conditions, so the schema declares no single default for it. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
 slots, and http(s) embedded frames. Hidden content, editable values, and closed roots remain absent.

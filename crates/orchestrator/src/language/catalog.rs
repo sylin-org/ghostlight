@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use ghostlight_bridge::service::{ToolAnnotations, ToolDefinition};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::governance::AuthoritySnapshot;
 
@@ -141,7 +141,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_press_key",
             "Press key",
-            "Send one named key or one literal character, optionally aimed at a current target_. Requires action; an expect check also requires read. Use strokes for shortcuts such as Control-a.",
+            "Send one named key or one literal character, optionally aimed at a current target_. Requires action; an expect check also requires read. For a shortcut such as Control+A, send key a with modifiers Control; strokes sends keys in order.",
             with_expect(key_schema()),
             Hints::browser_action(true),
         ),
@@ -277,6 +277,12 @@ impl Hints {
     }
 }
 
+/// The one sentence every ordinary page tool carries for its settlement preference (ADR-0195).
+///
+/// Thirteen tools repeat it, so it stays one short sentence: what the default does and how to
+/// skip it. LANGUAGE.md carries the budget and the busy-page behavior.
+const VISUAL_SETTLE: &str = "False skips the brief wait for the page to settle.";
+
 fn tool(
     name: &str,
     title: &str,
@@ -285,16 +291,12 @@ fn tool(
     hints: Hints,
 ) -> ToolDefinition {
     let mut input_schema = input_schema;
-    let mut description = description.to_owned();
     if super::settlement::PAGE_TOOLS.contains(&name) {
-        input_schema["properties"]["visual_settle"] = boolean(true,
-            "Wait briefly for page settlement, then proceed even if it remains busy. False skips waiting. The wait shares the command deadline.");
-        description
-            .push_str(" Page settlement is best effort and bounded; visual_settle:false skips it.");
+        input_schema["properties"]["visual_settle"] = boolean(true, VISUAL_SETTLE);
     }
     ToolDefinition {
         name: name.into(),
-        description,
+        description: description.into(),
         input_schema,
         output_schema: Some(outcome_schema()),
         annotations: Some(ToolAnnotations {
@@ -388,7 +390,7 @@ fn navigate_schema() -> Value {
                             "Explicitly discard a blocking unsaved-change prompt produced by this navigation. Default stops and reports it.",
                         ),
                     ),
-                    ("new_tab", constant_bool(false, "Create one new controlled tab. Omit this field for the normal call.")),
+                    ("new_tab", new_tab()),
                     (
                         "reuse",
                         enumeration(
@@ -404,7 +406,7 @@ fn navigate_schema() -> Value {
             object(
                 vec![
                     ("url", url()),
-                    ("new_tab", constant_bool(true, "Create a new controlled tab.")),
+                    ("new_tab", new_tab()),
                     (
                         "browser",
                         handle(
@@ -424,11 +426,18 @@ fn navigate_schema() -> Value {
     )
 }
 
+fn new_tab() -> Value {
+    boolean(
+        false,
+        "True opens the page in a new controlled tab. Omit it for the normal call.",
+    )
+}
+
 fn history_schema() -> Value {
     union(
         vec![
-            history_branch("back"),
-            history_branch("forward"),
+            history_branch("back", "Go back one page in this tab's history."),
+            history_branch("forward", "Go forward one page in this tab's history."),
             object(
                 vec![
                     ("action", constant("reload", "Reload the selected page.")),
@@ -449,10 +458,10 @@ fn history_schema() -> Value {
     )
 }
 
-fn history_branch(action: &str) -> Value {
+fn history_branch(action: &str, description: &str) -> Value {
     object(
         vec![
-            ("action", constant(action, "Traverse browser history.")),
+            ("action", constant(action, description)),
             ("tab", tab()),
             ("timeout_ms", timeout()),
         ],
@@ -605,31 +614,16 @@ fn find_schema() -> Value {
 fn screenshot_schema() -> Value {
     union(
         vec![
+            object(vec![("tab", tab()), ("timeout_ms", timeout())], vec![]),
             object(
                 vec![
                     ("tab", tab()),
                     (
                         "full_page",
-                        constant_bool(false, "Capture the visible viewport. Usually omit."),
-                    ),
-                    (
-                        "visual_settle",
-                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
-                    ),
-                    ("timeout_ms", timeout()),
-                ],
-                vec![],
-            ),
-            object(
-                vec![
-                    ("tab", tab()),
-                    (
-                        "full_page",
-                        constant_bool(true, "Capture the full document."),
-                    ),
-                    (
-                        "visual_settle",
-                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
+                        boolean(
+                            false,
+                            "True captures the whole document instead of the viewport. Not with target or a region.",
+                        ),
                     ),
                     ("timeout_ms", timeout()),
                 ],
@@ -641,14 +635,6 @@ fn screenshot_schema() -> Value {
                     (
                         "target",
                         handle("target_", "Current semantic target to capture."),
-                    ),
-                    (
-                        "full_page",
-                        constant_bool(false, "Target capture is never full-page."),
-                    ),
-                    (
-                        "visual_settle",
-                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
                     ),
                     ("timeout_ms", timeout()),
                 ],
@@ -671,10 +657,6 @@ fn screenshot_schema() -> Value {
                     ("y", coordinate("Vertical image coordinate of the region.")),
                     ("width", extent("Region width in image pixels.")),
                     ("height", extent("Region height in image pixels.")),
-                    (
-                        "visual_settle",
-                        boolean(true, "Wait for visual stability before capture (defaults to true; set to false to capture immediately)."),
-                    ),
                     ("timeout_ms", timeout()),
                 ],
                 vec!["view", "x", "y", "width", "height"],
@@ -784,7 +766,7 @@ fn scroll_schema() -> Value {
                         enumeration(
                             &["up", "down", "left", "right"],
                             Some("down"),
-                            "Scroll direction.",
+                            SCROLL_DIRECTION,
                         ),
                     ),
                     (
@@ -804,7 +786,7 @@ fn scroll_schema() -> Value {
                     ("tab", tab()),
                     (
                         "direction",
-                        enumeration(&["up", "down"], Some("down"), "Wheel direction."),
+                        enumeration(&["up", "down"], Some("down"), SCROLL_DIRECTION),
                     ),
                     (
                         "view",
@@ -829,6 +811,10 @@ fn scroll_schema() -> Value {
         ],
     )
 }
+
+/// One direction description for page and wheel scrolling, so the merged field reads once.
+const SCROLL_DIRECTION: &str =
+    "Scroll direction. Wheel scrolling at a view point takes only up or down.";
 
 fn hover_schema() -> Value {
     union(
@@ -889,82 +875,50 @@ fn fill_schema() -> Value {
 }
 
 fn type_schema() -> Value {
+    // Every location shares one text and one clear_first field. Empty text is legal only as an
+    // explicit clear; that pairing is a cross-field rule the decoder enforces and the
+    // description teaches, because one portable property cannot express it.
     let common = vec![
+        (
+            "text",
+            text(
+                0,
+                8_000,
+                "Literal text to type. Empty text only clears, and needs clear_first true.",
+            ),
+        ),
+        (
+            "clear_first",
+            boolean(false, "Clear the current value before typing."),
+        ),
         credential_authorization(),
-        ("target", handle("target_", "Current editable target.")),
         ("tab", tab()),
         ("timeout_ms", timeout()),
     ];
     union(
         vec![
             object(
-                with_many(
+                with(
                     common.clone(),
-                    vec![
-                        ("text", text(1, 8_000, "Literal text to type.")),
-                        (
-                            "clear_first",
-                            boolean(false, "Clear the current value before typing."),
-                        ),
-                    ],
+                    ("target", handle("target_", "Current editable target.")),
                 ),
                 vec!["target", "text"],
             ),
             object(
-                with_many(
-                    common,
-                    vec![
-                        (
-                            "text",
-                            constant("", "Empty text is valid only for an explicit clear."),
-                        ),
-                        (
-                            "clear_first",
-                            constant_bool(true, "Clear the current value."),
-                        ),
-                    ],
-                ),
-                vec!["target", "text", "clear_first"],
-            ),
-            object(
-                vec![
+                with(
+                    common.clone(),
                     (
                         "focused",
-                        constant_bool(
-                            true,
-                            "Type into the currently focused editable control instead of `target`.",
+                        boolean(
+                            false,
+                            "True types into the currently focused editable control instead of `target`.",
                         ),
                     ),
-                    credential_authorization(),
-                    (
-                        "text",
-                        text(0, 8_000, "Literal text to type; empty text only clears."),
-                    ),
-                    (
-                        "clear_first",
-                        boolean(false, "Clear the current value before typing."),
-                    ),
-                    ("tab", tab()),
-                    ("timeout_ms", timeout()),
-                ],
+                ),
                 vec!["focused", "text"],
             ),
             object(
-                with_many(
-                    vec![
-                        ("tab", tab()),
-                        ("timeout_ms", timeout()),
-                        credential_authorization(),
-                    ],
-                    vec![
-                        ("selector", semantic_selector()),
-                        ("text", text(1, 8_000, "Literal text to type.")),
-                        (
-                            "clear_first",
-                            boolean(false, "Clear the current value before typing."),
-                        ),
-                    ],
-                ),
+                with(common, ("selector", semantic_selector())),
                 vec!["selector", "text"],
             ),
         ],
@@ -988,17 +942,12 @@ fn key_schema() -> Value {
         ),
         modifiers,
     ];
+    // Exclusive by construction: every named key is longer than one character.
     let stroke_item = json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
     union(
         vec![
             object(
-                with(
-                    shared.clone(),
-                    (
-                        "key",
-                        json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]}),
-                    ),
-                ),
+                with(shared.clone(), ("key", stroke_item.clone())),
                 vec!["key"],
             ),
             object(
@@ -1021,7 +970,7 @@ fn key_schema() -> Value {
         vec![
             json!({"key":"Enter"}),
             json!({"key":"a","modifiers":["Control"]}),
-            json!({"strokes":["Control","a","c"]}),
+            json!({"strokes":["a","c"],"modifiers":["Control"]}),
             json!({"strokes":["ArrowDown"],"repeat":5}),
         ],
     )
@@ -1063,58 +1012,42 @@ fn drag_schema() -> Value {
 }
 
 fn wait_schema() -> Value {
+    use WaitInput::{OptionalTarget, Selector, Target, Text};
     union(
         vec![
-            wait_branch("load_ready", None, None),
-            wait_branch("url_contains", Some("Literal URL fragment."), None),
-            wait_branch("text_present", Some("Literal text that must appear."), None),
+            wait_branch("load_ready", "The page finished loading.", None),
+            wait_branch("url_contains", "The page URL contains value.", Some(Text)),
+            wait_branch(
+                "text_present",
+                "value appears in the visible page text.",
+                Some(Text),
+            ),
             wait_branch(
                 "text_absent",
-                Some("Literal text that must disappear."),
-                None,
+                "value is gone from the visible page text.",
+                Some(Text),
             ),
-            wait_branch(
-                "target_present",
-                None,
-                Some("Current target that must be present."),
-            ),
-            wait_branch(
-                "target_absent",
-                None,
-                Some("Current target that must disappear."),
-            ),
-            wait_branch("visual_settle", None, None),
+            wait_branch("target_present", "target is present.", Some(Target)),
+            wait_branch("target_absent", "target is gone.", Some(Target)),
             wait_branch(
                 "visual_settle",
-                None,
-                Some("Current target whose layout stability is observed."),
+                "The page, or target when given, stopped moving and repainting.",
+                Some(OptionalTarget),
             ),
-            wait_branch("layout_stable", None, None),
             wait_branch(
                 "layout_stable",
-                None,
-                Some("Current target whose layout stability is observed."),
+                "Same as visual_settle.",
+                Some(OptionalTarget),
             ),
-            object(
-                vec![
-                    (
-                        "condition",
-                        constant("selector_present", "Observable condition."),
-                    ),
-                    ("tab", tab()),
-                    ("timeout_ms", timeout()),
-                    ("selector", semantic_selector()),
-                    (
-                        "visual_settle",
-                        boolean(true, "Optional layout-stability check before completing (defaults to true; set false to bypass)."),
-                    ),
-                ],
-                vec!["condition", "selector"],
+            wait_branch(
+                "selector_present",
+                "A control matching selector exists.",
+                Some(Selector),
             ),
             wait_branch(
                 "duration",
-                Some("Whole milliseconds, zero through ten thousand."),
-                None,
+                "Waits value milliseconds, then succeeds.",
+                Some(Text),
             ),
         ],
         vec![
@@ -1125,30 +1058,46 @@ fn wait_schema() -> Value {
     )
 }
 
-fn wait_branch(
-    condition: &str,
-    value_description: Option<&str>,
-    target_description: Option<&str>,
-) -> Value {
+/// The one condition-specific input a wait branch takes besides its shared fields.
+#[derive(Clone, Copy)]
+enum WaitInput {
+    /// Required text, URL fragment, or duration.
+    Text,
+    /// Required current target.
+    Target,
+    /// Optional current target.
+    OptionalTarget,
+    /// Required typed semantic selector.
+    Selector,
+}
+
+fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> Value {
     let mut fields = vec![
-        ("condition", constant(condition, "Observable condition.")),
+        ("condition", constant(condition, description)),
         ("tab", tab()),
         ("timeout_ms", timeout()),
-    ];
-    if condition != "visual_settle" && condition != "layout_stable" {
-        fields.push((
+        (
             "visual_settle",
-            boolean(true, "Optional layout-stability check before completing (defaults to true; set false to bypass)."),
-        ));
-    }
+            json!({"type":"boolean","description":"Also wait briefly for the layout to settle once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest."}),
+        ),
+    ];
     let mut required = vec!["condition"];
-    if let Some(description) = value_description {
-        fields.push(("value", text(1, 2_000, description)));
-        required.push("value");
-    }
-    if let Some(description) = target_description {
-        fields.push(("target", handle("target_", description)));
-        required.push("target");
+    match input {
+        None => {}
+        Some(WaitInput::Text) => {
+            fields.push(("value", text(1, 2_000, "Text or URL fragment for url_contains, text_present, and text_absent. For duration, whole milliseconds from 0 to 10000, written as a string.")));
+            required.push("value");
+        }
+        Some(kind @ (WaitInput::Target | WaitInput::OptionalTarget)) => {
+            fields.push(("target", handle("target_", "Current target for target_present and target_absent, or the optional subject of visual_settle and layout_stable.")));
+            if matches!(kind, WaitInput::Target) {
+                required.push("target");
+            }
+        }
+        Some(WaitInput::Selector) => {
+            fields.push(("selector", semantic_selector()));
+            required.push("selector");
+        }
     }
     object(fields, required)
 }
@@ -1217,12 +1166,21 @@ fn upload_schema() -> Value {
             vec![],
         ),
         vec![
-            json!({"target":"target_...","paths":["C:\\absolute\\file.txt"]}),
+            json!({"target":"target_...","paths":[EXAMPLE_UPLOAD_PATH]}),
             json!({"target":"target_...","files":[{"name":"notes.txt","media_type":"text/plain","data_base64":"SGk="}]}),
             json!({"source_image":"image_...","view":"view_...","x":120,"y":80}),
         ],
     )
 }
+
+/// An absolute path in the form the service's own platform accepts, so the advertised upload
+/// example is a call the decoder takes wherever Ghostlight runs.
+#[cfg(windows)]
+const EXAMPLE_UPLOAD_PATH: &str = "C:\\Users\\me\\notes.txt";
+/// An absolute path in the form the service's own platform accepts, so the advertised upload
+/// example is a call the decoder takes wherever Ghostlight runs.
+#[cfg(not(windows))]
+const EXAMPLE_UPLOAD_PATH: &str = "/home/me/notes.txt";
 
 fn evaluate_schema() -> Value {
     examples(
@@ -1415,6 +1373,13 @@ fn raw_object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
 }
 
+/// Advertise a conditional call's branches as one portable object schema.
+///
+/// Some model APIs reject composition at the root (ADR-0125), so the typed decoder owns which
+/// fields belong together. The envelope lists every field any branch accepts and requires only
+/// the fields every branch requires. Each field becomes one schema that admits every value some
+/// branch admits (`merge_property`). A field `oneOf` of overlapping branch variants would make
+/// ordinary values match twice, which JSON Schema treats as invalid.
 fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
     let mut properties: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut required: Option<Vec<String>> = None;
@@ -1450,12 +1415,8 @@ fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
 
     let properties: BTreeMap<String, Value> = properties
         .into_iter()
-        .map(|(name, mut variants)| {
-            let schema = if variants.len() == 1 {
-                variants.pop().expect("one property variant")
-            } else {
-                json!({"oneOf":variants})
-            };
+        .map(|(name, variants)| {
+            let schema = merge_property(&name, variants);
             (name, schema)
         })
         .collect();
@@ -1467,6 +1428,253 @@ fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
         "required":required.unwrap_or_default(),
         "examples":examples
     })
+}
+
+/// Keywords `merge_same_type` combines across variants instead of requiring them to agree.
+const MERGED_KEYWORDS: &[&str] = &[
+    "type",
+    "const",
+    "enum",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "pattern",
+    "format",
+    "default",
+    "description",
+];
+
+/// One field schema that admits every value any of the field's branch variants admits.
+///
+/// Variants of one JSON type merge into one schema. Only variants of genuinely different types
+/// stay apart, under `anyOf`, where no value can match twice.
+fn merge_property(name: &str, variants: Vec<Value>) -> Value {
+    if variants.len() == 1 {
+        return variants.into_iter().next().expect("one variant");
+    }
+    let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+    for variant in variants {
+        let kind = variant
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("union field `{name}` has a variant without a type"))
+            .to_owned();
+        match groups.iter_mut().find(|(group, _)| *group == kind) {
+            Some((_, members)) => members.push(variant),
+            None => groups.push((kind, vec![variant])),
+        }
+    }
+    let mut merged: Vec<Value> = groups
+        .into_iter()
+        .map(|(kind, members)| merge_same_type(name, &kind, members))
+        .collect();
+    if merged.len() == 1 {
+        return merged.pop().expect("one merged type");
+    }
+    let descriptions: Vec<String> = merged
+        .iter_mut()
+        .filter_map(|schema| schema.as_object_mut()?.remove("description"))
+        .filter_map(|description| description.as_str().map(str::to_owned))
+        .collect();
+    json!({"description":joined(descriptions.iter().map(String::as_str)),"anyOf":merged})
+}
+
+/// Merge same-typed variants into one schema that admits each of them.
+///
+/// Closed values (`const` or `enum`) join one enum, or stay one const. Once any variant is open,
+/// length or numeric bounds widen to cover every variant, closed values included. A pattern,
+/// format, or default survives only when no variant disagrees. Every other keyword must already
+/// agree; a difference there is a catalog authoring error and fails the catalog build.
+fn merge_same_type(name: &str, kind: &str, variants: Vec<Value>) -> Value {
+    if variants.len() == 1 {
+        return variants.into_iter().next().expect("one variant");
+    }
+    let variants: Vec<Map<String, Value>> = variants
+        .into_iter()
+        .map(|variant| match variant {
+            Value::Object(schema) => schema,
+            _ => panic!("union field `{name}` has a variant that is not a schema object"),
+        })
+        .collect();
+    let mut merged = Map::new();
+    merged.insert("type".into(), json!(kind));
+    match closed_values(kind, &variants) {
+        Some(mut values) if values.len() == 1 => {
+            merged.insert("const".into(), values.remove(0));
+        }
+        Some(values) => {
+            merged.insert("enum".into(), Value::Array(values));
+        }
+        None => {
+            for &(keyword, lower) in bound_keywords(kind) {
+                if let Some(bound) = widened_bound(&variants, keyword, lower) {
+                    merged.insert(keyword.into(), bound);
+                }
+            }
+            for keyword in ["pattern", "format"] {
+                if let Some(shared) = shared_keyword(&variants, keyword) {
+                    merged.insert(keyword.into(), shared);
+                }
+            }
+        }
+    }
+    if let Some(default) = agreed_default(&variants) {
+        merged.insert("default".into(), default);
+    }
+    let description = merged_description(kind, &variants);
+    if !description.is_empty() {
+        merged.insert("description".into(), json!(description));
+    }
+    for variant in &variants {
+        for (key, value) in variant {
+            if MERGED_KEYWORDS.contains(&key.as_str()) {
+                continue;
+            }
+            assert!(
+                variants.iter().all(|other| other.get(key) == Some(value)),
+                "union field `{name}` has variants that differ in `{key}`; give them one schema"
+            );
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
+/// The values a variant admits when it is closed: its `const`, or its `enum` list.
+fn closed_list(variant: &Map<String, Value>) -> Option<Vec<Value>> {
+    if let Some(value) = variant.get("const") {
+        return Some(vec![value.clone()]);
+    }
+    variant.get("enum").and_then(Value::as_array).cloned()
+}
+
+/// Every value the variants admit, in first-seen order, when all of them are closed.
+///
+/// Booleans that admit both values are simply open booleans.
+fn closed_values(kind: &str, variants: &[Map<String, Value>]) -> Option<Vec<Value>> {
+    let mut values: Vec<Value> = Vec::new();
+    for variant in variants {
+        for value in closed_list(variant)? {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+    }
+    if kind == "boolean" && values.len() == 2 {
+        return None;
+    }
+    Some(values)
+}
+
+/// The lower and upper bound keywords that apply to one JSON type.
+fn bound_keywords(kind: &str) -> &'static [(&'static str, bool)] {
+    match kind {
+        "string" => &[("minLength", true), ("maxLength", false)],
+        "integer" | "number" => &[("minimum", true), ("maximum", false)],
+        _ => &[],
+    }
+}
+
+/// The widest bound covering every variant, or none when any variant is unbounded there.
+///
+/// A closed variant contributes its own values: their lengths for a string, the values
+/// themselves for a number.
+fn widened_bound(variants: &[Map<String, Value>], keyword: &str, lower: bool) -> Option<Value> {
+    let mut widest: Option<Value> = None;
+    for variant in variants {
+        let candidates: Vec<Value> = match closed_list(variant) {
+            Some(values) => values
+                .iter()
+                .filter_map(|value| match value {
+                    Value::String(text) => Some(json!(text.chars().count())),
+                    Value::Number(_) => Some(value.clone()),
+                    _ => None,
+                })
+                .collect(),
+            None => vec![variant.get(keyword)?.clone()],
+        };
+        for candidate in candidates {
+            let wider = match (&widest, candidate.as_f64()) {
+                (None, _) => true,
+                (Some(current), Some(next)) => {
+                    let current = current.as_f64().expect("bounds are numbers");
+                    if lower {
+                        next < current
+                    } else {
+                        next > current
+                    }
+                }
+                (Some(_), None) => panic!("bound `{keyword}` is not a number"),
+            };
+            if wider {
+                widest = Some(candidate);
+            }
+        }
+    }
+    widest
+}
+
+/// A keyword's value when every variant declares the same one.
+fn shared_keyword(variants: &[Map<String, Value>], keyword: &str) -> Option<Value> {
+    let first = variants.first()?.get(keyword)?;
+    variants
+        .iter()
+        .all(|variant| variant.get(keyword) == Some(first))
+        .then(|| first.clone())
+}
+
+/// The default every declaring variant agrees on, if any.
+fn agreed_default(variants: &[Map<String, Value>]) -> Option<Value> {
+    let mut declared = variants.iter().filter_map(|variant| variant.get("default"));
+    let first = declared.next()?;
+    declared
+        .all(|default| default == first)
+        .then(|| first.clone())
+}
+
+/// One description for a merged field.
+///
+/// A string field whose variants are all single constants is a discriminator such as `action`
+/// or `condition`, so each value keeps its own meaning: `list: ... focus: ...`. Values that share
+/// a description share one entry. Any other field joins its distinct descriptions in order.
+fn merged_description(kind: &str, variants: &[Map<String, Value>]) -> String {
+    fn description(variant: &Map<String, Value>) -> Option<&str> {
+        variant.get("description").and_then(Value::as_str)
+    }
+    let discriminator = kind == "string" && variants.iter().all(|v| v.contains_key("const"));
+    if !discriminator {
+        return joined(variants.iter().filter_map(description));
+    }
+    let mut entries: Vec<(Vec<&str>, &str)> = Vec::new();
+    for variant in variants {
+        let value = variant["const"].as_str().expect("string constants");
+        let meaning = description(variant).unwrap_or_default();
+        match entries
+            .iter_mut()
+            .find(|(_, existing)| *existing == meaning)
+        {
+            Some((values, _)) if values.contains(&value) => {}
+            Some((values, _)) => values.push(value),
+            None => entries.push((vec![value], meaning)),
+        }
+    }
+    entries
+        .iter()
+        .map(|(values, meaning)| format!("{}: {meaning}", values.join(", ")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Distinct descriptions in first-seen order, as one text.
+fn joined<'a>(descriptions: impl Iterator<Item = &'a str>) -> String {
+    let mut distinct: Vec<&str> = Vec::new();
+    for description in descriptions {
+        if !distinct.contains(&description) {
+            distinct.push(description);
+        }
+    }
+    distinct.join(" ")
 }
 
 fn examples(mut schema: Value, values: Vec<Value>) -> Value {
@@ -1506,10 +1714,6 @@ fn with_many<'a>(
 
 fn constant(value: &str, description: &str) -> Value {
     json!({"type":"string","const":value,"description":description})
-}
-
-fn constant_bool(value: bool, description: &str) -> Value {
-    json!({"type":"boolean","const":value,"description":description})
 }
 
 fn boolean(default: bool, description: &str) -> Value {
@@ -1594,7 +1798,10 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use super::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
+    use super::{
+        boolean, catalog, catalog_for, constant, enumeration, handle, integer, object, text, union,
+        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES,
+    };
     use crate::governance::GovernanceFacade;
 
     #[test]
@@ -1886,18 +2093,137 @@ mod tests {
             }
         }
 
+        // Overlapping branches become one field schema, never a field oneOf a value can match
+        // twice (MSURF-1).
         let screenshot = tool_schema("browser_screenshot");
         let full_page = property(&screenshot, "full_page").expect("full_page property");
-        let variants = full_page
-            .get("oneOf")
-            .and_then(Value::as_array)
-            .expect("nested full_page alternatives");
-        assert!(variants
-            .iter()
-            .any(|variant| variant.get("const") == Some(&Value::Bool(false))));
-        assert!(variants
-            .iter()
-            .any(|variant| variant.get("const") == Some(&Value::Bool(true))));
+        assert_eq!(full_page["type"], "boolean");
+        assert!(full_page.get("const").is_none() && full_page.get("oneOf").is_none());
+
+        let typing = tool_schema("browser_type_text");
+        let text = property(&typing, "text").expect("text property");
+        assert_eq!(
+            (&text["type"], &text["minLength"], &text["maxLength"]),
+            (&json!("string"), &json!(0), &json!(8_000))
+        );
+
+        let wait = tool_schema("browser_wait");
+        let condition = property(&wait, "condition").expect("condition property");
+        assert_eq!(condition["enum"].as_array().map(Vec::len), Some(10));
+        let meaning = condition["description"]
+            .as_str()
+            .expect("condition meaning");
+        for value in condition["enum"].as_array().expect("condition values") {
+            let value = value.as_str().expect("string condition");
+            assert!(
+                meaning.contains(&format!("{value}: ")),
+                "{value} lacks a meaning"
+            );
+        }
+    }
+
+    #[test]
+    fn union_merges_overlapping_branch_fields_into_one_schema() {
+        let merged = union(
+            vec![
+                object(
+                    vec![
+                        ("action", constant("list", "List them.")),
+                        ("text", text(1, 10, "Words.")),
+                        ("clear", boolean(false, "Clear first.")),
+                        (
+                            "direction",
+                            enumeration(&["up", "down", "left"], Some("down"), "Way."),
+                        ),
+                        ("target", handle("target_", "First meaning.")),
+                        ("count", integer(1, 5, None, "How many.")),
+                    ],
+                    vec!["action", "text"],
+                ),
+                object(
+                    vec![
+                        ("action", constant("show", "Show one.")),
+                        ("text", constant("", "Empty.")),
+                        ("clear", json!({"type":"boolean","const":true})),
+                        (
+                            "direction",
+                            enumeration(&["up", "down"], Some("down"), "Way."),
+                        ),
+                        ("target", handle("target_", "Second meaning.")),
+                        ("count", integer(3, 9, None, "How many.")),
+                    ],
+                    vec!["action"],
+                ),
+                object(
+                    vec![("action", constant("hide", "List them."))],
+                    vec!["action"],
+                ),
+            ],
+            vec![],
+        );
+        let field = |name: &str| merged["properties"][name].clone();
+        assert_eq!(merged["required"], json!(["action"]));
+        assert_eq!(
+            field("action"),
+            json!({"type":"string","enum":["list","show","hide"],"description":"list, hide: List them. show: Show one."})
+        );
+        assert_eq!(
+            field("text"),
+            json!({"type":"string","minLength":0,"maxLength":10,"description":"Words. Empty."})
+        );
+        assert_eq!(
+            field("clear"),
+            json!({"type":"boolean","default":false,"description":"Clear first."})
+        );
+        assert_eq!(
+            field("direction"),
+            json!({"type":"string","enum":["up","down","left"],"default":"down","description":"Way."})
+        );
+        assert_eq!(field("target")["pattern"], "^target_.+$");
+        assert_eq!(
+            field("target")["description"],
+            "First meaning. Second meaning."
+        );
+        assert_eq!(
+            (
+                field("count")["minimum"].clone(),
+                field("count")["maximum"].clone()
+            ),
+            (json!(1), json!(9))
+        );
+
+        let mixed = union(
+            vec![
+                object(vec![("value", text(0, 5, "Text."))], vec![]),
+                object(vec![("value", boolean(false, "Flag."))], vec![]),
+            ],
+            vec![],
+        );
+        assert_eq!(
+            mixed["properties"]["value"],
+            json!({"description":"Text. Flag.","anyOf":[
+                {"type":"string","minLength":0,"maxLength":5},
+                {"type":"boolean","default":false}
+            ]})
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "differ in `items`")]
+    fn union_refuses_variants_it_cannot_merge_honestly() {
+        union(
+            vec![
+                object(
+                    vec![("list", json!({"type":"array","items":{"type":"string"}}))],
+                    vec![],
+                ),
+                object(
+                    vec![("list", json!({"type":"array","items":{"type":"integer"}}))],
+                    vec![],
+                ),
+            ],
+            vec![],
+        );
     }
 
     #[test]

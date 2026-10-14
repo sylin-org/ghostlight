@@ -13,7 +13,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
 2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
    conditional branch, bound, and default in `LANGUAGE.md`. Every declaration has field guidance,
-   a shortest valid example, a truthful output schema, and standard MCP annotations.
+   a shortest valid example, a truthful output schema, and standard MCP annotations. Under a
+   strict JSON Schema check, every example and at least two ordinary calls for each tool that
+   takes input satisfy the advertised input schema, match no `oneOf` more than once, and decode. Every next step that
+   names a tool names only fields that tool advertises, and only values a closed field accepts.
 3. The MCP edge retrieves the catalog and generically forwards every tool without per-tool code.
 4. The browser connector relays every primitive without model-facing names or product defaults.
 5. Incompatible service or browser bridge majors fail before work is accepted.

@@ -11,6 +11,8 @@ pub mod history;
 pub mod outcome;
 pub mod provenance;
 pub mod readiness;
+#[cfg(test)]
+mod self_check;
 pub(crate) mod settlement;
 #[path = "catalog.rs"]
 mod tool_catalog;

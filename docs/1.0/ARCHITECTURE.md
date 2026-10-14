@@ -213,9 +213,12 @@ whose heartbeat was acknowledged does not. The browser connector remains unaware
 
 Owns the one 24-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
 defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
-facts. Nothing outside this context defines a tool or an alternate client dialect. Conditional
-requirements are present in the advertised schema rather than left only to runtime validation.
-It also owns the server instructions every edge sends at initialization, and the record of which
+facts. Nothing outside this context defines a tool or an alternate client dialect. Each tool
+advertises one portable object schema: every field any branch accepts, each as one schema that
+admits every value some branch admits. Cross-field rules, such as which fields belong together,
+are taught in descriptions and enforced by the decoder. Test-only self-checks validate every
+example and a list of ordinary calls against the advertised schemas, and check that every next
+step naming a tool names only fields that tool advertises. It also owns the server instructions every edge sends at initialization, and the record of which
 operations accept `timeout_ms`. Work derives each invocation deadline from that record, and a
 deadline refusal suggests a longer `timeout_ms` only where it exists and is still below its
 maximum.
