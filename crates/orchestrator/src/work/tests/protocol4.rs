@@ -137,6 +137,21 @@ fn opened_under(
     FakeExtension,
     crate::workspace::WorkspaceId,
 ) {
+    let (executor, fake, workspace, _) = opened_audited(fault, governance);
+    (executor, fake, workspace)
+}
+
+/// Like [`opened_under`], and also returns the audit the executor records into.
+fn opened_audited(
+    fault: Fault,
+    governance: GovernanceFacade,
+) -> (
+    ApplicationExecutor,
+    FakeExtension,
+    crate::workspace::WorkspaceId,
+    Arc<MemoryAudit>,
+) {
+    let audit = Arc::new(MemoryAudit::default());
     let port = Arc::new(RelayBrowserPort::new(
         "service_protocol4".into(),
         Arc::new(wire::Assets {
@@ -164,7 +179,7 @@ fn opened_under(
         PresentationReactor::new(Arc::new(NoPresentation)),
         WorkbenchProjection::default(),
         Arc::new(crate::audit::AuditRecorder::new(
-            Arc::new(MemoryAudit::default()),
+            audit.clone(),
             WorkbenchProjection::default(),
         )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
@@ -186,7 +201,7 @@ fn opened_under(
         json!({"url": URL, "new_tab": true}),
     );
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
-    (executor, fake, workspace)
+    (executor, fake, workspace, audit)
 }
 
 fn execute(
@@ -436,7 +451,7 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
         .unwrap(),
     )
     .unwrap();
-    let (executor, fake, workspace) = opened_under(
+    let (executor, fake, workspace, audit) = opened_audited(
         dialog_fault(Some(DIALOG_FRAME)),
         GovernanceFacade::new(Some(policy.clone()), None),
     );
@@ -455,6 +470,20 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
     assert!(
         !sent_since(&fake, before).contains(&"dialog:handle".to_owned()),
         "a refused dialog is never handled"
+    );
+    let audited = serde_json::to_string(
+        &audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|record| record.permissions.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert!(
+        !audited.contains("private-frame.invalid"),
+        "an embedded document's host never enters the durable audit: {audited}"
     );
     fs::remove_file(policy).unwrap();
 }
