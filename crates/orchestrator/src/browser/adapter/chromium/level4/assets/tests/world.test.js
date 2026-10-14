@@ -148,8 +148,12 @@ test("call returns an envelope and never rejects", async () => {
 
   const thrown = plain(await runtime.call({ kind: "describe", locators: ["locator_missing"] }, {}));
   assert.equal(thrown.ok, false);
-  assert.equal(thrown.error.code, "page_exception");
+  assert.equal(thrown.error.code, "stale_locator");
   assert.ok(thrown.error.message.length > 0 && thrown.error.message.length <= 500);
+
+  const uncoded = plain(await runtime.call({ kind: "describe", get locators() { throw new Error("boom"); } }, {}));
+  assert.equal(uncoded.error.code, "page_exception");
+  assert.equal(uncoded.error.message, "boom");
 
   const long = plain(await runtime.call({ kind: "describe", get locators() { throw "x".repeat(900); } }, {}));
   assert.equal(long.ok, false);

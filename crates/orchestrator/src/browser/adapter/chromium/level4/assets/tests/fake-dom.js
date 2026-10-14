@@ -367,7 +367,16 @@ function createFakeDom({ top = true } = {}) {
     svgNamespacesCreated: () => created.namespaces.filter((namespace) => namespace === SVG_NAMESPACE).length,
     HTMLElement,
     HTMLInputElement,
+    HTMLTextAreaElement,
+    HTMLSelectElement,
     element(tagName) { return new HTMLElement(tagName); },
+    /** A select holding `options` (objects with value and text); the first is selected. */
+    select(options) {
+      const element = new HTMLSelectElement("SELECT");
+      element.options = options;
+      element.value = options[0].value;
+      return element;
+    },
     text(value) { return new TextNode(value); },
     fragment() { return new DocumentFragment(); },
     setBody(value) { document.body = value; },
