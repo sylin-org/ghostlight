@@ -4,19 +4,26 @@
 //! lived, and each of those could sit in a different place on each platform. 2.0 keeps
 //! everything under the Ghostlight home (ADR-0197 Decisions 10, 16 and 22). This module reads
 //! the old layout, says in a [`MigrationPlan`] what will move, be archived, be deleted, be
-//! stopped and be re-registered, and carries that plan out in four steps the installer
-//! interleaves with its own:
+//! stopped and be re-registered, and carries that plan out in steps the installer interleaves
+//! with its own:
 //!
 //! 1. [`prepare`] makes every destination and refuses a destination that holds other content, so
 //!    a conflict is found before anything has changed;
-//! 2. [`relocate`] moves the policy, the managed-policy files, the walkthrough marker and the
-//!    client locations by rename (or copy, verify and delete across volumes), before the new
-//!    executables are swapped in and registered: no 1.x program holds those files open, and a
-//!    2.0 service that a browser or client starts the moment the registrations change must find
-//!    the user's policy where 2.0 keeps it, and the clients the user located already known;
+//! 2. [`copy_state`] copies the policy, the managed-policy files, the walkthrough marker and the
+//!    client locations to where 2.0 keeps them, before the new executables are swapped in and
+//!    registered, and leaves every original in place: a 1.x service is still running and reads
+//!    the user's policy from its original on every decision, and a 2.0 service that a browser or
+//!    client starts the moment the registrations change must find the same files at their new
+//!    place;
 //! 3. [`archive_audit`] moves the old audit log aside once the programs that write it have
 //!    stopped;
-//! 4. [`finish`] deletes the old lifecycle files, the installation record last, once the last
+//! 4. [`retire_state`] removes those originals once the last 1.x program has stopped and cannot
+//!    write them again. A 1.x program may have rewritten an original in the meantime (its policy
+//!    workbench saves the user policy, its managed-policy refresh rewrites the status and cache),
+//!    so an original that changed after the copy is published over the copy, and one that
+//!    diverged from a changed copy is set aside under a name no plan reads, so the next install
+//!    is never blocked by it;
+//! 5. [`finish`] deletes the old lifecycle files, the installation record last, once the last
 //!    old program has stopped and cannot write them again.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
@@ -24,7 +31,8 @@
 //! executables, or a browser relaunches an old connector from an old registration. A failure
 //! leaves the source file where it was, a second run continues from whatever a failed run
 //! completed, and a run after success has nothing to do. A destination that holds other content
-//! than the file being moved is never overwritten, and its original is never deleted.
+//! than the file being copied is never overwritten, and an original is deleted only when its
+//! content is at the destination.
 
 use std::env;
 use std::fs::{self, File};
@@ -55,16 +63,16 @@ const STOP_WAIT: Duration = Duration::from_secs(10);
 pub(super) const LEGACY_RECORD_NAME: &str = "ghostlight-runtime.installation.json";
 
 /// File name of the 1.x startup admission file in the home.
-const LEGACY_STARTUP_NAME: &str = "ghostlight-runtime.startup";
+pub(super) const LEGACY_STARTUP_NAME: &str = "ghostlight-runtime.startup";
 
 /// File name of the 1.x installation lock in the home.
 const LEGACY_INSTALLATION_LOCK_NAME: &str = "ghostlight-runtime.installation.lock";
 
 /// File name of the 1.x deployment lock, kept in the home and in the serving directory.
-const LEGACY_DEPLOY_LOCK_NAME: &str = "deploy.lock";
+pub(super) const LEGACY_DEPLOY_LOCK_NAME: &str = "deploy.lock";
 
 /// The audit log, in the 1.x state directory and again in `home/state`.
-const AUDIT_FILE_NAME: &str = "audit.jsonl";
+pub(super) const AUDIT_FILE_NAME: &str = "audit.jsonl";
 
 /// The user policy file, in the 1.x policy directory and again in `home/policy`.
 pub(super) const USER_POLICY_FILE_NAME: &str = "user-policy.json";
@@ -92,6 +100,9 @@ const LEGACY_LINUX_POLICY_DIRECTORY_NAME: &str = "ghostlight";
 
 /// Directory below the Linux cache root that held state beside a `/usr/bin` install.
 const LEGACY_CACHE_DIRECTORY_NAME: &str = "ghostlight";
+
+/// Suffix of the name an original takes when it and its copy both changed.
+const SET_ASIDE_SUFFIX: &str = "pre-2.0";
 
 /// Label used in the archived audit file name when the old version cannot be read.
 const UNKNOWN_VERSION_LABEL: &str = "pre-2.0";
@@ -125,16 +136,18 @@ pub enum MigrationError {
         #[source]
         source: io::Error,
     },
-    /// A destination already holds something other than the file being moved.
+    /// A destination holds something other than the file being moved.
     #[error(
-        "{destination} already holds different content than {source_path}. Nothing was changed; \
-         keep the one you want and remove the other"
+        "{destination} holds different content than {source_path}. {disposition}; keep the one \
+         you want and remove the other"
     )]
     Conflict {
         /// The file that would have moved.
         source_path: PathBuf,
-        /// The destination that is already occupied.
+        /// The destination that is occupied.
         destination: PathBuf,
+        /// What became of the original.
+        disposition: Disposition,
     },
     /// A file could not be moved. The source is intact.
     #[error("Could not move {from} to {to}: {source}. The original is still in place")]
@@ -156,6 +169,28 @@ pub enum MigrationError {
         #[source]
         source: io::Error,
     },
+}
+
+/// What became of the original when a destination held other content.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Disposition {
+    /// The original stays where it was and nothing was changed.
+    Untouched,
+    /// The original was renamed, so no later plan finds it and no later install is blocked.
+    SetAside(PathBuf),
+}
+
+impl std::fmt::Display for Disposition {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Untouched => formatter.write_str("Nothing was changed"),
+            Self::SetAside(kept) => write!(
+                formatter,
+                "The original was set aside as {}, so the next install is not blocked",
+                kept.display()
+            ),
+        }
+    }
 }
 
 /// The 1.x installation record, read without the crate that wrote it.
@@ -603,22 +638,59 @@ pub fn prepare(plan: &MigrationPlan) -> Result<(), MigrationError> {
     plan.transfers().try_for_each(prepare_transfer)
 }
 
-/// Move the policy, managed-policy, marker and client-location files of `plan` to where 2.0 keeps
-/// them.
+/// A file copied to where 2.0 keeps it, and the content that was copied.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Copied {
+    /// The original and its new place.
+    transfer: Move,
+    /// SHA-256 of the content at the new place when the copy was made.
+    sha256: String,
+}
+
+/// Copy the policy, managed-policy, marker and client-location files of `plan` to where 2.0
+/// keeps them, and leave every original in place.
 ///
-/// No 1.x program holds these files open, so this runs before anything is swapped, registered or
-/// stopped. A failure returns an error naming the path and leaves the file it was moving in
-/// place, and running the same plan again continues from there.
-pub fn relocate(plan: &MigrationPlan) -> Result<(), MigrationError> {
-    plan.moves.iter().try_for_each(relocate_transfer)
+/// A 1.x service is still running and reads the user policy from its original on every decision,
+/// so the originals stay until [`retire_state`] runs after the last 1.x program has stopped. A
+/// failure returns an error naming the path, and running the same plan again continues from
+/// there.
+pub fn copy_state(plan: &MigrationPlan) -> Result<Vec<Copied>, MigrationError> {
+    let mut copied = Vec::new();
+    for transfer in &plan.moves {
+        if let Some(done) = copy_transfer(transfer)? {
+            copied.push(done);
+        }
+    }
+    Ok(copied)
+}
+
+/// Remove the originals of the files [`copy_state`] copied.
+///
+/// Called once the last 1.x program has stopped. An original that still holds the copied content
+/// is deleted. One that a 1.x program rewrote since is published over the copy and then deleted,
+/// unless the copy changed too: then the original is set aside beside where it was and a
+/// [`MigrationError::Conflict`] names both. Every file is handled before the first conflict is
+/// returned.
+pub fn retire_state(copied: &[Copied]) -> Result<(), MigrationError> {
+    let mut first_conflict = None;
+    for done in copied {
+        match retire_transfer(done) {
+            Ok(()) => {}
+            Err(error @ MigrationError::Conflict { .. }) => {
+                first_conflict.get_or_insert(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    first_conflict.map_or(Ok(()), Err)
 }
 
 /// Move the old audit log of `plan` aside, to the archive file that gives 2.0 a new log.
 ///
-/// The old programs that write the log must already be stopped. Failures behave as in
-/// [`relocate`].
+/// The old programs that write the log must already be stopped. A failure leaves the log where
+/// it was, and running the same plan again continues from there.
 pub fn archive_audit(plan: &MigrationPlan) -> Result<(), MigrationError> {
-    plan.audit_archive.iter().try_for_each(relocate_transfer)
+    plan.audit_archive.iter().try_for_each(archive_transfer)
 }
 
 /// Delete the old lifecycle files of `plan`, the installation record last.
@@ -656,24 +728,102 @@ fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
         return Err(MigrationError::Conflict {
             source_path: transfer.from.clone(),
             destination: transfer.to.clone(),
+            disposition: Disposition::Untouched,
         });
     }
     Ok(())
 }
 
-/// Move one file: rename it, or copy it, verify the copy and delete the original.
-fn relocate_transfer(transfer: &Move) -> Result<(), MigrationError> {
+/// Copy one file to its destination and report what was copied.
+///
+/// A file that is gone, or that already sits at its destination, has nothing to copy. A
+/// destination that already holds the same content was copied by an earlier run.
+fn copy_transfer(transfer: &Move) -> Result<Option<Copied>, MigrationError> {
+    let Move { from, to } = transfer;
+    if !from.is_file() || same_location(from, to) {
+        return Ok(None);
+    }
+    let failed = |source| MigrationError::Move {
+        from: from.clone(),
+        to: to.clone(),
+        source,
+    };
+    if to.exists() {
+        // Any other content was written there since `prepare` looked, and the original stays.
+        if !same_content(from, to) {
+            return Err(MigrationError::Conflict {
+                source_path: from.clone(),
+                destination: to.clone(),
+                disposition: Disposition::Untouched,
+            });
+        }
+    } else {
+        copy_verified(from, to).map_err(failed)?;
+    }
+    let sha256 = record::sha256_file(to).map_err(failed)?;
+    Ok(Some(Copied {
+        transfer: transfer.clone(),
+        sha256,
+    }))
+}
+
+/// Retire one original after its copy was made.
+fn retire_transfer(done: &Copied) -> Result<(), MigrationError> {
+    let Move { from, to } = &done.transfer;
+    if !from.is_file() {
+        return Ok(());
+    }
+    let failed = |source| MigrationError::Move {
+        from: from.clone(),
+        to: to.clone(),
+        source,
+    };
+    let original = record::sha256_file(from).map_err(failed)?;
+    if original == done.sha256 {
+        // Nothing wrote to the original since the copy. Whatever 2.0 has done to the copy since
+        // is newer than this file.
+        return remove_original(from);
+    }
+    match record::sha256_file(to) {
+        Ok(current) if current == original => remove_original(from),
+        Ok(current) if current != done.sha256 => {
+            let kept = set_aside(from).map_err(failed)?;
+            Err(MigrationError::Conflict {
+                source_path: from.clone(),
+                destination: to.clone(),
+                disposition: Disposition::SetAside(kept),
+            })
+        }
+        Ok(_) => publish_original(from, to),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => publish_original(from, to),
+        Err(error) => Err(failed(error)),
+    }
+}
+
+/// Publish an original that a 1.x program rewrote after its copy over the copy, then delete it.
+fn publish_original(from: &Path, to: &Path) -> Result<(), MigrationError> {
+    copy_verified(from, to).map_err(|source| MigrationError::Move {
+        from: from.to_owned(),
+        to: to.to_owned(),
+        source,
+    })?;
+    remove_original(from)
+}
+
+/// Move the old audit log to its archive file, or finish a move an earlier run began.
+fn archive_transfer(transfer: &Move) -> Result<(), MigrationError> {
     let Move { from, to } = transfer;
     if !from.is_file() || same_location(from, to) {
         return Ok(());
     }
     if to.exists() {
-        // A previous run copied the file and stopped before deleting the original. Any other
+        // A previous run copied the log and stopped before deleting the original. Any other
         // content was written there since `prepare` looked, and the original stays.
         if !same_content(from, to) {
             return Err(MigrationError::Conflict {
                 source_path: from.clone(),
                 destination: to.clone(),
+                disposition: Disposition::Untouched,
             });
         }
         return remove_original(from);
@@ -687,6 +837,23 @@ fn relocate_transfer(transfer: &Move) -> Result<(), MigrationError> {
         source,
     })?;
     remove_original(from)
+}
+
+/// Rename `path` beside itself to a name no plan reads, and return the new name.
+fn set_aside(path: &Path) -> io::Result<PathBuf> {
+    for number in 1_u32.. {
+        let mut name = path.as_os_str().to_owned();
+        name.push(match number {
+            1 => format!(".{SET_ASIDE_SUFFIX}"),
+            _ => format!(".{SET_ASIDE_SUFFIX}-{number}"),
+        });
+        let kept = PathBuf::from(name);
+        if !kept.exists() {
+            fs::rename(path, &kept)?;
+            return Ok(kept);
+        }
+    }
+    unreachable!("an unbounded range of names ends only by returning")
 }
 
 /// Delete an original whose content is already at its destination.
@@ -961,10 +1128,11 @@ mod tests {
     /// Bytes of the audit log the fake 1.x installation holds.
     const AUDIT: &str = "{\"event\":\"old\"}\n";
 
-    /// Carry out all three steps of `plan` with nothing to stop.
+    /// Carry out every step of `plan` with nothing to stop.
     fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
         prepare(plan)?;
-        relocate(plan)?;
+        let copied = copy_state(plan)?;
+        retire_state(&copied)?;
         archive_audit(plan)?;
         finish(plan)
     }
@@ -1434,7 +1602,7 @@ mod tests {
         let policy = fixture.path("user/AppData/Local/Ghostlight");
         let cache = fixture.home.join("policy").join(MANAGED_CACHE_FILE_NAME);
         fixture.write(&cache, "a bundle written by a 2.0 service");
-        let error = relocate(&plan).unwrap_err();
+        let error = copy_state(&plan).unwrap_err();
         assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
         assert!(error.to_string().contains(&cache.display().to_string()));
         assert_eq!(
@@ -1448,17 +1616,136 @@ mod tests {
     }
 
     #[test]
-    fn the_audit_log_is_archived_apart_from_the_early_moves() {
+    fn the_audit_log_is_archived_apart_from_the_early_copies() {
         let fixture = development_custody();
         let plan = fixture.plan();
         let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
         prepare(&plan).unwrap();
-        relocate(&plan).unwrap();
+        copy_state(&plan).unwrap();
         assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
         assert!(!archive.exists());
         archive_audit(&plan).unwrap();
         assert!(!fixture.home.join(AUDIT_FILE_NAME).exists());
         assert_eq!(fs::read_to_string(archive).unwrap(), AUDIT);
+    }
+
+    /// The 1.x user policy of `development_custody`.
+    fn legacy_user_policy(fixture: &Fixture) -> PathBuf {
+        fixture
+            .path("user/AppData/Local/Ghostlight")
+            .join(USER_POLICY_FILE_NAME)
+    }
+
+    #[test]
+    fn copying_leaves_every_original_for_the_service_that_still_runs() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let copied = copy_state(&plan).unwrap();
+        assert_eq!(copied.len(), plan.moves.len());
+        for transfer in &plan.moves {
+            assert!(transfer.from.is_file(), "{}", transfer.from.display());
+            assert_eq!(
+                fs::read(&transfer.from).unwrap(),
+                fs::read(&transfer.to).unwrap()
+            );
+        }
+        retire_state(&copied).unwrap();
+        for transfer in &plan.moves {
+            assert!(!transfer.from.exists(), "{}", transfer.from.display());
+            assert!(transfer.to.is_file());
+        }
+    }
+
+    #[test]
+    fn an_original_rewritten_between_the_copy_and_the_retire_wins() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let copied = copy_state(&plan).unwrap();
+        let original = legacy_user_policy(&fixture);
+        fs::write(&original, "saved by the 1.x workbench").unwrap();
+        retire_state(&copied).unwrap();
+        assert!(!original.exists());
+        assert_eq!(
+            fs::read_to_string(fixture.home.join("policy").join(USER_POLICY_FILE_NAME)).unwrap(),
+            "saved by the 1.x workbench"
+        );
+        assert!(fixture.plan().moves.is_empty());
+    }
+
+    #[test]
+    fn a_copy_that_a_2_0_service_changed_is_kept_when_the_original_did_not_change() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let copied = copy_state(&plan).unwrap();
+        let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
+        fs::write(&status, "written by a 2.0 service").unwrap();
+        retire_state(&copied).unwrap();
+        assert_eq!(
+            fs::read_to_string(&status).unwrap(),
+            "written by a 2.0 service"
+        );
+        assert!(!fixture
+            .path("user/AppData/Local/Ghostlight")
+            .join(MANAGED_STATUS_FILE_NAME)
+            .exists());
+    }
+
+    #[test]
+    fn an_original_and_a_copy_that_both_changed_keep_both_and_never_block_the_next_run() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let copied = copy_state(&plan).unwrap();
+        let original = legacy_user_policy(&fixture);
+        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+        fs::write(&original, "edited in the 1.x workbench").unwrap();
+        fs::write(&copy, "edited by a 2.0 service").unwrap();
+        let error = retire_state(&copied).unwrap_err();
+        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+        assert!(
+            matches!(
+                &error,
+                MigrationError::Conflict {
+                    disposition: Disposition::SetAside(kept),
+                    ..
+                } if *kept == aside
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains(&aside.display().to_string()));
+        assert!(!original.exists());
+        assert_eq!(
+            fs::read_to_string(&aside).unwrap(),
+            "edited in the 1.x workbench"
+        );
+        assert_eq!(
+            fs::read_to_string(&copy).unwrap(),
+            "edited by a 2.0 service"
+        );
+        // Every other original was still retired, and the next install has nothing to refuse.
+        let again = fixture.plan();
+        assert!(again.moves.is_empty(), "{:?}", again.moves);
+        execute(&again).unwrap();
+        assert_eq!(
+            fs::read_to_string(&copy).unwrap(),
+            "edited by a 2.0 service"
+        );
+    }
+
+    #[test]
+    fn set_aside_names_never_overwrite_an_earlier_one() {
+        let scratch = Scratch::new();
+        let file = scratch.path().join("user-policy.json");
+        fs::write(&file, "first").unwrap();
+        let first = set_aside(&file).unwrap();
+        fs::write(&file, "second").unwrap();
+        let second = set_aside(&file).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read_to_string(first).unwrap(), "first");
+        assert_eq!(fs::read_to_string(second).unwrap(), "second");
     }
 
     #[test]

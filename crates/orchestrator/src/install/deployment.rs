@@ -509,14 +509,17 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// Carry out `plan`.
 ///
 /// The migration's destinations are checked before any swap, so a conflict leaves every
-/// executable as it was, and the files no 1.x program holds open (policy, managed policy, client
-/// locations) move before anything is swapped: the registrations that follow let a 2.0 service
-/// or a client start, and they must find the user's policy and located clients in place. The
-/// registrations are written as soon as `bin` holds the new executables and before any old
+/// executable as it was. The 1.x policy, managed-policy and client-location files are copied
+/// before anything is swapped, and their originals stay: the registrations that follow let a 2.0
+/// service or a client start, and they must find the user's policy and located clients in place,
+/// while the 1.x service that is still running keeps reading its own policy from the original.
+/// The registrations are written as soon as `bin` holds the new executables and before any old
 /// program is stopped: an old connector that a browser relaunches from a registration that still
-/// named it would write the 1.x installation record again. The 1.x audit log, which an old
-/// service writes, moves after the stops, and the 1.x lifecycle files are deleted after the last
-/// one.
+/// named it would write the 1.x installation record again. Once the last old program has stopped
+/// and cannot write them again, the originals are retired (a file a 1.x program rewrote after
+/// the copy is published over the copy first), the 1.x audit log, which an old service writes,
+/// is archived, and the 1.x lifecycle files are deleted. A migrating plan always restarts: a
+/// plan with nothing to place and a migration to run never reaches the unchanged shortcut.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
@@ -527,9 +530,14 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         });
     }
     let migrating = !plan.migration.is_empty();
+    debug_assert!(
+        plan.restart || !migrating,
+        "a migration is finished only by the restart"
+    );
+    let mut copied = Vec::new();
     if migrating {
         migration::prepare(&plan.migration)?;
-        migration::relocate(&plan.migration)?;
+        copied = migration::copy_state(&plan.migration)?;
     }
     for placed in plan.swaps.iter().chain(&plan.connector_replacements) {
         swap::rename_swap(&placed.directory, &placed.name, &placed.source)?;
@@ -552,6 +560,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             context.control.stop_image(&running_images(layout))?;
         }
         if migrating {
+            migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
             migration::finish(&plan.migration)?;
         }
@@ -730,7 +739,8 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::super::migration::{
-        LegacyInstallation, HARNESS_LOCATIONS_NAME, LEGACY_RECORD_NAME, USER_POLICY_FILE_NAME,
+        LegacyInstallation, MigrationError, AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME,
+        LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME, LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
@@ -760,6 +770,10 @@ mod tests {
         registered: bool,
         /// The 1.x installation record still exists.
         record_present: bool,
+        /// The 1.x user policy still exists where the 1.x service reads it.
+        policy_original_present: bool,
+        /// The user policy already exists where 2.0 keeps it.
+        policy_copy_present: bool,
     }
 
     /// Process control that records every request and starts nothing.
@@ -771,6 +785,10 @@ mod tests {
         /// The manifest, the connector it must name and the 1.x record to look at on every
         /// request.
         witness: Option<(PathBuf, PathBuf, PathBuf)>,
+        /// The 1.x user policy and its 2.0 place, to look at on every request.
+        policy_witness: Option<(PathBuf, PathBuf)>,
+        /// Files a 1.x program writes while it is being stopped.
+        writes_on_stop: Vec<(PathBuf, String)>,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -782,6 +800,8 @@ mod tests {
                 publishes: true,
                 respawns: Cell::new(0),
                 witness: None,
+                policy_witness: None,
+                writes_on_stop: Vec::new(),
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -807,6 +827,14 @@ mod tests {
                             .is_some_and(|path| Some(path) == fs::canonicalize(connector).ok())
                     }),
                     record_present: record.is_file(),
+                    policy_original_present: self
+                        .policy_witness
+                        .as_ref()
+                        .is_some_and(|(original, _)| original.is_file()),
+                    policy_copy_present: self
+                        .policy_witness
+                        .as_ref()
+                        .is_some_and(|(_, copy)| copy.is_file()),
                 });
             }
             self.calls.borrow_mut().push(call);
@@ -821,6 +849,9 @@ mod tests {
 
         fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
             self.note(Call::Stop(images.to_vec()));
+            for (path, text) in &self.writes_on_stop {
+                fs::write(path, text).unwrap();
+            }
             Ok(())
         }
 
@@ -1275,7 +1306,8 @@ mod tests {
         fixture
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap();
-        let written: serde_json::Value = serde_json::from_str(&fixture.read(located)).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&fixture.read(located.clone())).unwrap();
         let command = PathBuf::from(
             written["mcpServers"]["ghostlight"]["command"]
                 .as_str()
@@ -1286,6 +1318,126 @@ mod tests {
             fs::canonicalize(fixture.layout.mcp_connector()).unwrap()
         );
         assert!(!locations.exists());
+        let kept: serde_json::Value = serde_json::from_str(
+            &fixture.read(fixture.layout.state().join(HARNESS_LOCATIONS_NAME)),
+        )
+        .unwrap();
+        assert_eq!(
+            PathBuf::from(kept["claude-desktop"]["config"].as_str().unwrap()),
+            located
+        );
+    }
+
+    /// A 1.x installation that served from `old-1x` and kept its policy in `old-policy`, and the
+    /// place its user policy is read from.
+    fn plant_legacy_policy(fixture: &mut Fixture) -> PathBuf {
+        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+        let policy = fixture.scratch.path().join("old-policy");
+        fs::create_dir_all(&policy).unwrap();
+        fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
+        fixture.legacy_policy = Some(policy.clone());
+        policy.join(USER_POLICY_FILE_NAME)
+    }
+
+    #[test]
+    fn the_1x_user_policy_stays_where_the_1x_service_reads_it_until_the_last_stop() {
+        let mut fixture = Fixture::new();
+        let original = plant_legacy_policy(&mut fixture);
+        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+        let mut control = fixture.watching_control();
+        control.policy_witness = Some((original.clone(), copy.clone()));
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        let calls = control.calls();
+        let sightings = control.sightings();
+        let start = calls.iter().position(|call| *call == Call::Start).unwrap();
+        assert!(start > 0, "{calls:?}");
+        // Through the swaps, the reconcile and every stop, the 1.x service has its policy and
+        // a 2.0 service would find the copy.
+        for (call, sighting) in calls.iter().zip(&sightings).take(start) {
+            assert!(sighting.policy_original_present, "{call:?}");
+            assert!(sighting.policy_copy_present, "{call:?}");
+        }
+        assert!(!sightings[start].policy_original_present);
+        assert_eq!(fixture.read(copy), "user policy");
+        assert!(!original.exists());
+    }
+
+    #[test]
+    fn a_policy_saved_by_the_1x_service_while_it_stops_is_not_lost() {
+        let mut fixture = Fixture::new();
+        let original = plant_legacy_policy(&mut fixture);
+        let mut control = FakeControl::new();
+        control.writes_on_stop = vec![(original.clone(), "saved while stopping".to_owned())];
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert!(!original.exists());
+        assert_eq!(
+            fixture.read(fixture.layout.policy().join(USER_POLICY_FILE_NAME)),
+            "saved while stopping"
+        );
+    }
+
+    #[test]
+    fn a_policy_that_diverged_is_reported_and_the_next_install_is_not_blocked() {
+        let mut fixture = Fixture::new();
+        let original = plant_legacy_policy(&mut fixture);
+        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+        let mut control = FakeControl::new();
+        control.writes_on_stop = vec![
+            (original.clone(), "saved by the 1.x service".to_owned()),
+            (copy.clone(), "saved by a 2.0 service".to_owned()),
+        ];
+        let error = fixture.run(Mode::Release, VERSION, &control).unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<MigrationError>(),
+                Some(MigrationError::Conflict { .. })
+            ),
+            "{error}"
+        );
+        assert_eq!(fixture.record(), None);
+        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+        assert_eq!(fixture.read(aside), "saved by the 1.x service");
+        assert!(!original.exists());
+
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(fixture.read(copy), "saved by a 2.0 service");
+        assert!(!fixture.legacy_record().exists());
+    }
+
+    #[test]
+    fn every_migrating_run_restarts_archives_the_audit_log_and_removes_the_lifecycle_files() {
+        let mut fixture = Fixture::new();
+        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+        let home = fixture.layout.home().to_owned();
+        fs::write(home.join(AUDIT_FILE_NAME), "old audit").unwrap();
+        fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
+        fs::write(home.join(LEGACY_DEPLOY_LOCK_NAME), "").unwrap();
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(outcome.plan.restart);
+        let archive = fixture.layout.state().join("audit-pre-2.0.jsonl");
+        assert_eq!(fixture.read(archive), "old audit");
+        for gone in [
+            AUDIT_FILE_NAME,
+            LEGACY_STARTUP_NAME,
+            LEGACY_DEPLOY_LOCK_NAME,
+        ] {
+            assert!(!home.join(gone).exists(), "{gone}");
+        }
+
+        // The same version is already installed, and a 1.x leftover still forces the full run.
+        fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
+        let control = FakeControl::new();
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert!(!outcome.plan.unchanged);
+        assert!(outcome.plan.restart);
+        assert!(!home.join(LEGACY_STARTUP_NAME).exists());
+        assert!(control.calls().contains(&Call::Start));
     }
 
     #[test]

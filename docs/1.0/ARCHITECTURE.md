@@ -60,9 +60,10 @@ install.
 
 `deployment install` (`install/deployment.rs`) is the only writer of `bin` and `dev`
 (ADR-0197 Decisions 14 and 15). Under the install lock it checks the break migration's destinations
-(`install/migration.rs`) so a conflict changes nothing, moves the 1.x policy, managed-policy and
-client-location files into the home (no 1.x program holds them open, and a service or client
-started by the next steps must find them in place), then compares `bin/install.json` with the
+(`install/migration.rs`) so a conflict changes nothing, copies the 1.x policy, managed-policy and
+client-location files into the home and leaves the originals in place (the 1.x service that is
+still running keeps reading its policy from them, and a service or client started by the next
+steps must find the copies), then compares `bin/install.json` with the
 payload: an older payload is refused, the same intact version is left alone, the service image is
 rename-swapped (`install/swap.rs`), and the connectors are replaced only when the relay revision
 changes. `--development` swaps the service into `dev` and writes the marker; `--restore` removes
@@ -83,6 +84,9 @@ outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\N
 and removes that directory when it is empty.
 Only then does the installer stop the 1.x images (and look again for a few rounds for any that
 respawned), ask the running service to quit and stop that exact image if it has not exited,
+retire the copied originals (one a 1.x program rewrote after the copy is published over the copy
+first; an original and a copy that both changed are kept, the original set aside as
+`<name>.pre-2.0`, and the install reports it, so the next install is never blocked),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
 start `bin/ghostlight serve`, and write `install.json` only once the new service publishes.
 Registering first matters: a browser relaunches its connector from the registration the moment
