@@ -4,7 +4,7 @@ Ghostlight drives a person's real browser, and the person is allowed to watch. E
 effect exists for one reason: to answer, at a glance, "what is the agent doing to my page right
 now?" The effects are a product surface with a designed vocabulary, not decoration. This document
 is the normative reference for that vocabulary; the implementation lives in
-`extension/lib/presentation.js`.
+`crates/orchestrator/src/browser/adapter/chromium/assets/presentation.js`.
 
 The principle behind all of it: **show, never surprise.** The agent's presence should feel like a
 courteous guest who narrates what they touch -- visible enough to trust, quiet enough to ignore.

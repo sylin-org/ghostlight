@@ -45,8 +45,8 @@ sign off your commits (`git commit -s`). Inbound = outbound, everywhere, includi
 `crates/orchestrator/src/governance/`.
 
 Practical expectations for PRs: `cargo fmt --all -- --check`,
-`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and
-`npm test --prefix extension` green; ASCII source and
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
+`npm test --prefix extension`, and `npm test --prefix crates/orchestrator/src/browser/adapter/chromium/assets` green; ASCII source and
 documentation; match the surrounding code's
 style; and protect each distinct contract once at its narrowest seam. For anything larger than a
 small fix, open a Discussion or Issue first so nobody builds the wrong thing.
@@ -65,6 +65,8 @@ The suite has three useful layers:
 
 - **In-process Rust contracts:** `cargo test --workspace`.
 - **Policy-free extension mechanisms:** `npm test --prefix extension`.
+- **Chromium page assets** (the JavaScript the service installs into pages):
+  `npm test --prefix crates/orchestrator/src/browser/adapter/chromium/assets`. It has no dependencies, so it needs no `npm install`.
 - **Real process topology:** build into `.target-ghostlight-1.0`, then run
   `node tests/process-journey.mjs`. It keeps both relay processes alive through an orchestrator
   interruption and proves they renegotiate without replaying the interrupted effect. The journey

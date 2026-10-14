@@ -12,7 +12,6 @@ pub mod events;
 pub mod governance;
 pub mod install;
 pub mod language;
-mod page_runtime;
 pub mod presentation;
 pub mod provenance;
 pub mod service;

@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A call to the old tool fails before any browser work and points to `browser_tabs` list
   (ADR-0196).
 
+### Changed
+
+- The page code the service installs into browser pages now lives in the service's browser
+  adapter, under `crates/orchestrator/src/browser/adapter/chromium/assets`, instead of being
+  split between the service and `extension/lib`. The service picks the adapter's browser family
+  and wire level from the extension's hello. The installed page bundle is byte-identical, so
+  published extensions see no change (ADR-0196 Decision 3, ADR-0197 Decision 5).
+- The Chromium page-asset tests run with `npm test --prefix` that directory and need no
+  `npm install`. CI runs them beside the extension tests.
+
 ### Fixed
 
 - A tab handle from another session now points the model to its own `browser_tabs` list

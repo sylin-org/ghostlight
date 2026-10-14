@@ -15,10 +15,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::browser::adapter::{
-    adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-    BrowserOutcome, BrowserPlatform, BrowserRequest, DiagnosticsState, RuntimeControlState,
-    ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
-    COMMAND_TRANSFER_MAX_CHUNKS,
+    adapter_capability, Adapter, AdapterCapability, BrowserEvent, BrowserFrame, BrowserOutcome,
+    BrowserPlatform, BrowserRequest, DiagnosticsState, RuntimeControlState, UnsupportedHello, Work,
+    COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES, COMMAND_TRANSFER_MAX_CHUNKS,
 };
 use crate::browser::transport::{SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT};
 use base64::Engine as _;
@@ -119,7 +118,7 @@ pub trait BrowserPort: Send + Sync {
         &self,
         browser: &str,
         workspace: &str,
-        command: BrowserCommand,
+        command: Work,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError>;
@@ -129,7 +128,7 @@ pub trait BrowserPort: Send + Sync {
         &self,
         browser: &str,
         workspace: &str,
-        command: BrowserCommand,
+        command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         (dispatch.admit)()?;
@@ -286,7 +285,7 @@ struct Connection {
     writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     adapter_version: String,
-    platform: BrowserPlatform,
+    adapter: Adapter,
     browser_id: String,
     browser_name: Option<String>,
     capabilities: HashMap<String, u16>,
@@ -464,7 +463,7 @@ impl AdapterRegistry {
                 id: connection.browser_id.clone(),
                 name: connection.browser_name.clone(),
                 adapter_version: connection.adapter_version.clone(),
-                platform: connection.platform,
+                platform: connection.adapter.platform(),
                 attended: attended.as_deref() == Some(connection.browser_id.as_str()),
             })
             .collect();
@@ -826,12 +825,12 @@ impl RelayBrowserPort {
         else {
             return Err(BrowserError::Authentication);
         };
-        if major != ADAPTER_PROTOCOL_MAJOR {
-            return Err(BrowserError::Incompatible {
-                offered: major,
-                required: ADAPTER_PROTOCOL_MAJOR,
-            });
-        }
+        let adapter = Adapter::negotiate(platform, major).map_err(
+            |UnsupportedHello { offered, required }| BrowserError::Incompatible {
+                offered,
+                required,
+            },
+        )?;
         if !browser_id.starts_with("browser_")
             || browser_id.len() <= "browser_".len()
             || browser_id.len() > 80
@@ -846,7 +845,6 @@ impl RelayBrowserPort {
         }
         let capabilities = validated_capabilities(capabilities)?;
         let browser_name = validated_browser_name(browser_name)?;
-        let platform = platform.unwrap_or_default();
         let reports_attention = capabilities
             .get(adapter_capability::ADAPTER_ATTENTION)
             .copied()
@@ -876,7 +874,7 @@ impl RelayBrowserPort {
             writer: Arc::clone(&writer),
             pending: Arc::clone(&pending),
             adapter_version,
-            platform,
+            adapter,
             browser_id: browser_id.clone(),
             browser_name,
             capabilities,
@@ -903,7 +901,7 @@ impl RelayBrowserPort {
             previous.is_some()
         };
         if let Err(error) = writer.native(&BrowserFrame::HelloAccepted {
-            major: ADAPTER_PROTOCOL_MAJOR,
+            major: adapter.level().major(),
             service_version: env!("CARGO_PKG_VERSION").into(),
             service_epoch: self.service_epoch.clone(),
             control_state: *lock(&self.control_state),
@@ -954,32 +952,26 @@ impl RelayBrowserPort {
             return Err(BrowserError::Protocol(error.to_string()));
         }
 
-        let installs_page_runtime = {
+        let installing = {
             let adapters = lock(&self.adapters);
             adapters
                 .connections
                 .get(&tag.browser_id)
                 .filter(|connection| connection.id == tag.connection_id)
-                .and_then(|connection| {
-                    connection
-                        .capabilities
-                        .get(adapter_capability::PAGE_RUNTIME)
-                })
-                .copied()
-                .unwrap_or_default()
-                >= crate::page_runtime::REVISION
+                .filter(|connection| connection.adapter.installs_assets(&connection.capabilities))
+                .map(|connection| connection.adapter)
         };
-        if installs_page_runtime {
+        if let Some(adapter) = installing {
             let cancelled = AtomicBool::new(false);
             let installed = self.call(
                 &tag.browser_id,
                 "system",
-                crate::page_runtime::install_command(),
+                adapter.install_command(),
                 Instant::now() + EXCHANGE_TIMEOUT,
                 &cancelled,
             );
             match installed {
-                Ok(outcome) if crate::page_runtime::acknowledged(&outcome) => {}
+                Ok(outcome) if adapter.acknowledged(&outcome) => {}
                 Ok(_) => {
                     self.detach_registered(&tag.browser_id, &tag.connection_id);
                     return Err(BrowserError::Protocol(
@@ -1067,7 +1059,7 @@ impl RelayBrowserPort {
         &self,
         browser: &str,
         workspace: &str,
-        command: BrowserCommand,
+        command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         let BrowserDispatch {
@@ -1089,7 +1081,7 @@ impl RelayBrowserPort {
             let Some(connection) = adapters.connections.get(browser) else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             };
-            if !connection.ready && !matches!(&command, BrowserCommand::InstallPageRuntime { .. }) {
+            if !connection.ready && !matches!(&command, Work::InstallPageRuntime { .. }) {
                 return Err(BrowserError::NotAnsweringBeforeDispatch);
             }
             if connection.liveness.as_ref().is_some_and(|liveness| {
@@ -1111,10 +1103,10 @@ impl RelayBrowserPort {
                     advertised,
                 });
             }
-            if let BrowserCommand::InDocuments { primitive, .. } = &command {
+            if let Work::InDocuments { primitive, .. } = &command {
                 if matches!(
                     **primitive,
-                    BrowserCommand::InDocuments { .. } | BrowserCommand::DescribeDocuments { .. }
+                    Work::InDocuments { .. } | Work::DescribeDocuments { .. }
                 ) {
                     return Err(BrowserError::Protocol(
                         "nested document execution is invalid".into(),
@@ -1309,7 +1301,7 @@ impl BrowserPort for RelayBrowserPort {
         &self,
         browser: &str,
         workspace: &str,
-        command: BrowserCommand,
+        command: Work,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
@@ -1329,7 +1321,7 @@ impl BrowserPort for RelayBrowserPort {
         &self,
         browser: &str,
         workspace: &str,
-        command: BrowserCommand,
+        command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         self.call_inner(browser, workspace, command, dispatch)
@@ -1488,7 +1480,7 @@ fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
         request: BrowserRequest {
             correlation: format!("cancel_{}", Uuid::new_v4().simple()),
             workspace: "system".into(),
-            command: BrowserCommand::Cancel {
+            command: Work::Cancel {
                 correlation: correlation.into(),
             },
         },
@@ -1909,9 +1901,7 @@ pub(crate) mod testing {
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
 
-    use crate::browser::adapter::{
-        BrowserCommand, BrowserOutcome, BrowserPlatform, RuntimeControlState,
-    };
+    use crate::browser::adapter::{BrowserOutcome, BrowserPlatform, RuntimeControlState, Work};
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
 
@@ -1925,7 +1915,7 @@ pub(crate) mod testing {
             std::collections::HashMap<u64, crate::browser::adapter::documents::DocumentInventory>,
         >,
         scopes: Mutex<Vec<crate::browser::adapter::documents::DocumentScope>>,
-        calls: Mutex<Vec<BrowserCommand>>,
+        calls: Mutex<Vec<Work>>,
         routed: Mutex<Vec<String>>,
         outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
         control_states: Mutex<Vec<RuntimeControlState>>,
@@ -1975,7 +1965,7 @@ pub(crate) mod testing {
         pub fn push(&self, outcome: Result<BrowserOutcome, BrowserError>) {
             lock(&self.outcomes).push_back(outcome);
         }
-        pub fn calls(&self) -> Vec<BrowserCommand> {
+        pub fn calls(&self) -> Vec<Work> {
             lock(&self.calls).clone()
         }
         pub fn control_states(&self) -> Vec<RuntimeControlState> {
@@ -2001,14 +1991,14 @@ pub(crate) mod testing {
             &self,
             browser: &str,
             _workspace: &str,
-            command: BrowserCommand,
+            command: Work,
             _deadline: Instant,
             _cancelled: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
             use crate::browser::adapter::documents::{
                 DocumentInventory, DocumentObservation, PhysicalDocument,
             };
-            if let BrowserCommand::DescribeDocuments {
+            if let Work::DescribeDocuments {
                 tab_id,
                 locators,
                 points,
@@ -2034,7 +2024,7 @@ pub(crate) mod testing {
                     inventory,
                 });
             }
-            if let BrowserCommand::InDocuments { scope, primitive } = command {
+            if let Work::InDocuments { scope, primitive } = command {
                 lock(&self.scopes).push(scope.clone());
                 return self
                     .call(browser, _workspace, *primitive, _deadline, _cancelled)
@@ -2046,10 +2036,9 @@ pub(crate) mod testing {
                         result: Box::new(result),
                     });
             }
-            if matches!(&command, BrowserCommand::Observe { condition, .. } if condition == "visual_settle")
-            {
+            if matches!(&command, Work::Observe { condition, .. } if condition == "visual_settle") {
                 let tab_id = match &command {
-                    BrowserCommand::Observe { tab_id, .. } => *tab_id,
+                    Work::Observe { tab_id, .. } => *tab_id,
                     _ => unreachable!(),
                 };
                 lock(&self.routed).push(browser.into());

@@ -1,23 +1,31 @@
-//! Service-owned page runtime installed by capable browser adapters.
+//! The Chromium page assets and the bundle that installs them.
 //!
-//! The runtime contains page-local observation and presentation behavior. The adapter only
-//! verifies and installs this versioned bundle; product semantics remain in the orchestrator.
+//! Every file under `assets/` runs in a Chromium page: page-local observation and presentation
+//! behavior. This module assembles them into one immutable, hashed bundle. The extension only
+//! verifies and installs that bundle; product semantics remain in the orchestrator.
+//!
+//! Level 3 injects the bundle into the page's own JavaScript world. The bundle bytes are pinned
+//! by test so a move or an edit of an asset can never change what a published extension runs
+//! without the change being deliberate.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
+use crate::browser::adapter::chromium::level3::{
+    adapter_capability, BrowserCommand, BrowserOutcome,
+};
 use sha2::{Digest, Sha256};
 
 /// Current page-runtime contract revision.
-pub(crate) const REVISION: u16 = 1;
+const REVISION: u16 = 1;
 
-const SENSOR_SCRIPT: &str = include_str!("sensor.js");
-const CONTENT_SCRIPT: &str = include_str!("content.js");
-const PRESENTATION_SCRIPT: &str = include_str!("../../../../extension/lib/presentation.js");
-const PRESENTATION_CSS_SCRIPT: &str = include_str!("../../../../extension/lib/presentation-css.js");
-const SHARED_SCRIPT: &str = include_str!("../../../../extension/lib/shared.js");
-const FORM_DIAGNOSTICS_SCRIPT: &str = include_str!("../../../../extension/lib/form-diagnostics.js");
+const SENSOR_SCRIPT: &str = include_str!("assets/sensor.js");
+const CONTENT_SCRIPT: &str = include_str!("assets/content.js");
+const PRESENTATION_SCRIPT: &str = include_str!("assets/presentation.js");
+const PRESENTATION_CSS_SCRIPT: &str = include_str!("assets/presentation-css.js");
+const SHARED_SCRIPT: &str = include_str!("assets/shared.js");
+const FORM_DIAGNOSTICS_SCRIPT: &str = include_str!("assets/form-diagnostics.js");
 
 /// One immutable runtime payload reused for every compatible adapter connection.
 #[derive(Debug)]
@@ -54,6 +62,16 @@ fn bundle() -> &'static PageRuntimeBundle {
             script,
         }
     })
+}
+
+/// Whether an adapter that advertised these capabilities must receive the bundle.
+#[must_use]
+pub(crate) fn installs(capabilities: &HashMap<String, u16>) -> bool {
+    capabilities
+        .get(adapter_capability::PAGE_RUNTIME)
+        .copied()
+        .unwrap_or_default()
+        >= REVISION
 }
 
 /// Build the closed browser mechanism that installs the shared runtime.
@@ -96,6 +114,16 @@ mod tests {
         assert_eq!(bundle().revision, REVISION);
         assert_eq!(bundle().sha256, sha256(&bundle().script));
         assert_eq!(bundle().sha256.len(), 64);
+    }
+
+    /// The level 3 bundle as published extensions receive it. Moving or reformatting an asset
+    /// must not change a byte of it; change this value only when the bundle changes on purpose.
+    const LEVEL3_BUNDLE_SHA256: &str =
+        "d83fe8b2dea702d44efda16f945d88bce6f5078bf6984f345768b4fe1be78f3c";
+
+    #[test]
+    fn level3_bundle_sha256_is_pinned() {
+        assert_eq!(bundle().sha256, LEVEL3_BUNDLE_SHA256);
     }
 
     #[test]

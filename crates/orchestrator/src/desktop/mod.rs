@@ -981,7 +981,7 @@ mod tests {
     #[test]
     fn the_surface_and_the_page_share_one_motion_curve() {
         let styles = include_str!("../../ui/styles.css");
-        let renderer = include_str!("../../../../extension/lib/presentation.js");
+        let renderer = include_str!("../browser/adapter/chromium/assets/presentation.js");
         assert!(styles.contains("cubic-bezier(.22, 1, .36, 1)"));
         assert!(renderer.contains("cubic-bezier(.22,1,.36,1)"));
     }

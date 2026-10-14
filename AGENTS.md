@@ -101,7 +101,10 @@ in Chrome extension: we harvest its observable interface and technique, never it
 The tree is a Rust workspace with four process/trust concerns:
 
 - `crates/orchestrator/` -- the product authority: language, workspace aggregate, governance,
-  browser coordination, presentation decisions, execution, and completion.
+  browser coordination, presentation decisions, execution, and completion. Its
+  `src/browser/adapter/` is the browser adapter component: one module per browser family
+  (`chromium/`), holding the wire levels the extension can speak and every page asset, JavaScript
+  and CSS, that runs in a page.
 - `crates/bridge/` -- small typed service contracts plus framing, and the one
   shared local service-lifecycle seam both connectors use to demand-start the sibling authority.
 - `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
@@ -155,7 +158,8 @@ Gate before every commit:
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
 - `npm test` from `extension/`
-- `node --check` on changed extension JavaScript
+- `npm test --prefix crates/orchestrator/src/browser/adapter/chromium/assets` (the Chromium page assets; no `npm install` needed)
+- `node --check` on changed extension and page-asset JavaScript
 
 The process and live browser journeys in `tests/` exercise the real executable boundaries. Run
 them when changes touch process startup, relay reconnect, installation state, or live browser

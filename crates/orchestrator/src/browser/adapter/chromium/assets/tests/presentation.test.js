@@ -76,7 +76,7 @@ function renderer() {
   };
   const context = vm.createContext({
     document,
-    GhostlightShared: require("../lib/shared.js"),
+    GhostlightShared: require("../shared.js"),
     setTimeout(callback, delay) {
       const id = ++nextTimer;
       timers.set(id, { callback, deadline: now + delay });
@@ -85,14 +85,14 @@ function renderer() {
     clearTimeout(id) { timers.delete(id); }
   });
   for (const file of ["presentation-css.js", "presentation.js"]) {
-    vm.runInContext(readFileSync(join(__dirname, "..", "lib", file), "utf8"), context);
+    vm.runInContext(readFileSync(join(__dirname, "..", file), "utf8"), context);
   }
   return {
     get api() { return context.GhostlightPresentation; },
     document,
     nodes,
     reinstall() {
-      vm.runInContext(readFileSync(join(__dirname, "..", "lib", "presentation.js"), "utf8"), context);
+      vm.runInContext(readFileSync(join(__dirname, "..", "presentation.js"), "utf8"), context);
     },
     byClass(name) { return nodes.find((node) => node.className === name); },
     advance(milliseconds) {

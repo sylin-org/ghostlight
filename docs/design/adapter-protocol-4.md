@@ -15,8 +15,8 @@ Sources, in order of authority:
 2. `arch/SYNTHESIS.md` section 2 (S3, S4, S5, S6) and section 8 (M4c).
 3. `arch/CRITIQUE.md` corrections.
 4. `design/FINAL.md`, used as the base wherever 1 to 3 do not override it.
-5. The current code: `extension/`, `crates/orchestrator/src/browser/adapter/mod.rs`, `crates/orchestrator/src/browser/`,
-   `crates/orchestrator/src/page_runtime/`, `crates/orchestrator/src/work/`.
+5. The current code: `extension/`, `crates/orchestrator/src/browser/adapter/`, `crates/orchestrator/src/browser/`,
+   `crates/orchestrator/src/browser/adapter/chromium/assets/`, `crates/orchestrator/src/work/`.
 
 Line references such as `service-worker.js:1472` point at dev `95a7e646`.
 
@@ -2299,7 +2299,7 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
 
 **Starting point.** dev, with ADR-0196 step 1. Nothing else is required.
 - M1, M2, M4a and M4b may land before, after or in between.
-- If M2 has already moved the level-3 assets into `adapter/chromium/level3/assets/` and pinned them, skip C1.
+- M2 moved the level-3 assets into `adapter/chromium/assets/` and pinned the bundle, so C1 is done.
 - The plan touches level-3 code only in C1, C4 and C6. Each of those adds a byte golden.
 
 **Gate on every commit:**

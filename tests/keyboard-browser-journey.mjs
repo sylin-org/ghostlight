@@ -64,7 +64,7 @@ try {
   const end = worker.indexOf("async function fill(", start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(worker.slice(start, end), sandbox);
-  const content = readFileSync(join(root, "crates/orchestrator/src/page_runtime/content.js"), "utf8");
+  const content = readFileSync(join(root, "crates/orchestrator/src/browser/adapter/chromium/assets", "content.js"), "utf8");
   const expectedStart = content.indexOf("  function expectedFillValue(");
   const expectedEnd = content.indexOf("  function fillValuesRetained(", expectedStart);
   assert.ok(expectedStart >= 0 && expectedEnd > expectedStart);
@@ -95,9 +95,9 @@ try {
       if (message.kind === 'form_diagnostics') window.diagnosticMessages.push(message.row);
       return {ok:true,value:{enabled:true}};
     } } };`);
-  for (const relative of ["extension/lib/shared.js", "extension/lib/form-diagnostics.js",
-    "crates/orchestrator/src/page_runtime/sensor.js", "extension/lib/presentation-css.js",
-    "extension/lib/presentation.js", "crates/orchestrator/src/page_runtime/content.js"]) {
+  const assets = "crates/orchestrator/src/browser/adapter/chromium/assets";
+  for (const relative of ["shared.js", "form-diagnostics.js", "sensor.js", "presentation-css.js",
+    "presentation.js", "content.js"].map(name => `${assets}/${name}`)) {
     await evaluate(readFileSync(join(root, relative), "utf8"));
   }
   const runtime = async message => {

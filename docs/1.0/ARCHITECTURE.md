@@ -22,8 +22,10 @@ local human
 ```
 
 - `crates/bridge` defines the small versioned service wire vocabulary, framing, and the one
-  shared local service-lifecycle seam. The typed browser adapter vocabulary lives in
-  `crates/orchestrator/src/browser/adapter`, because only the service reads it.
+  shared local service-lifecycle seam. The browser adapter component lives in
+  `crates/orchestrator/src/browser/adapter`, because only the service reads it: one module per
+  browser family, holding the typed wire vocabulary of each level the extension can speak and
+  every page asset that runs in a page.
 - `crates/orchestrator` is the domain-driven modular monolith and service process.
 - `crates/mcp-connector` is the hand-rolled JSON-RPC MCP stdio edge.
 - `crates/browser-connector` is a frame relay between native messaging and the service.
@@ -129,8 +131,18 @@ from that table and its passive frame handlers, never maintained as a second dec
 is identity and presentation information; executor dispatch is capability-based. A vendor protocol
 such as CDP is private adapter technique, not a second bridge vocabulary.
 
-Page-local observation and presentation ship as one service-owned immutable `PageRuntimeBundle`.
-The process assembles and hashes it once. A runtime-capable adapter verifies and installs the exact
+The browser adapter is a service component. `browser/adapter/mod.rs` names a closed `Family`
+(Chromium) and the wire `Level` of that family; the hello's platform field chooses the family
+(Chromium when absent) and its protocol major chooses the level, so a connection carries one
+`Adapter` for its life. Chromium has one level, level 3, whose typed messages live in
+`adapter/chromium/level3` and are the published extension's protocol unchanged. The service's
+internal browser work vocabulary is `Work`; at level 3 it is the level 3 command set.
+
+Page-local observation and presentation ship as one service-owned immutable bundle assembled in
+`adapter/chromium/assets.rs` from the JavaScript and CSS files under `adapter/chromium/assets/`.
+Node tests for those files sit beside them and run with `npm test --prefix` that directory. A
+service test pins the bundle's SHA-256, so moving or editing an asset cannot change what a
+published extension runs by accident. The process assembles and hashes the bundle once. A runtime-capable adapter verifies and installs the exact
 revision and SHA-256 through the ordinary correlated request/receipt path. Such a connection stays
 private until that receipt arrives; browser discovery and `adapter_attached` publish only the ready
 connection. An adapter without the page-runtime capability remains usable only for independent

@@ -76,7 +76,7 @@ pub struct DocumentObservation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browser::adapter::{
+    use crate::browser::adapter::chromium::level3::{
         adapter_capability as capability, BrowserCommand, BrowserOutcome,
     };
 

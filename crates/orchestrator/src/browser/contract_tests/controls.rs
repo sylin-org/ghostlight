@@ -1,9 +1,8 @@
 //! Prove runtime admission occurs after queued writer access and before transmission.
 
-use crate::browser::adapter::BrowserPlatform;
-
 use super::super::{lock, BrowserDispatch, Connection};
 use super::*;
+use crate::browser::adapter::Adapter;
 use crate::governance::ReasonCode;
 use std::collections::HashMap;
 use std::io::Read;
@@ -30,7 +29,7 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
                 adapter_version: "test".into(),
                 browser_id: TEST_BROWSER.into(),
                 browser_name: None,
-                platform: BrowserPlatform::Chromium,
+                adapter: Adapter::negotiate(None, ADAPTER_PROTOCOL_MAJOR).unwrap(),
                 capabilities: HashMap::from([(adapter_capability::TABS.into(), 1)]),
                 liveness: None,
                 ready: true,

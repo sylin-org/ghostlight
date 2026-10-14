@@ -78,6 +78,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm test --prefix extension
+      - run: npm test --prefix crates/orchestrator/src/browser/adapter/chromium/assets
       - run: npm test --prefix packaging/npm
       - run: node --test packaging/mcpb/test/launcher.test.js
       - name: Check shell script syntax
@@ -95,13 +96,16 @@ jobs:
           node --check extension/lib/engine.js
           node --check extension/lib/gif.js
           node --check extension/lib/presentation-queue.js
-          node --check extension/lib/presentation.js
           node --check extension/lib/recording.js
           node --check extension/lib/shared.js
           node --check extension/lib/state.js
           node --check extension/lib/topology.js
-          node --check crates/orchestrator/src/page_runtime/content.js
-          node --check crates/orchestrator/src/page_runtime/sensor.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/content.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/form-diagnostics.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/presentation-css.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/presentation.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/sensor.js
+          node --check crates/orchestrator/src/browser/adapter/chromium/assets/shared.js
       - name: Build the store extension artifact
         shell: pwsh
         run: ./scripts/package-extension.ps1 -OutputPath dist/ghostlight-extension.zip

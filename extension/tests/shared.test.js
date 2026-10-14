@@ -247,7 +247,7 @@ test("adapter protocol three wires the closed physical mechanisms at the Chrome 
 
 test("browser actions return the subject in the effect receipt without a describe round trip", () => {
   const root = join(__dirname, "..");
-  const content = readFileSync(join(root, "../crates/orchestrator/src/page_runtime/content.js"), "utf8");
+  const content = readFileSync(join(root, "../crates/orchestrator/src/browser/adapter/chromium/assets/content.js"), "utf8");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");
 
   assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject, rectangle: viewportRectangle\(element\) \} \}\)/);

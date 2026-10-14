@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
-const sharedModule = require("../lib/shared.js");
+const sharedModule = require("../shared.js");
 
 function contentHarness() {
   let clock = 0;
@@ -260,8 +260,8 @@ function contentHarness() {
       ...sharedModule,
       bounded(value, maximum) { return String(value ?? "").slice(0, maximum); }
     },
-    GhostlightFormDiagnostics: require("../lib/form-diagnostics.js"),
-    GhostlightSensor: require("../../crates/orchestrator/src/page_runtime/sensor.js"),
+    GhostlightFormDiagnostics: require("../form-diagnostics.js"),
+    GhostlightSensor: require("../sensor.js"),
     GhostlightPresentation: {
       render() { return false; },
       setManaged() {},
@@ -272,7 +272,7 @@ function contentHarness() {
   };
   context.globalThis = context;
   vm.runInNewContext(
-    readFileSync(join(__dirname, "../../crates/orchestrator/src/page_runtime", "content.js"), "utf8"),
+    readFileSync(join(__dirname, "..", "content.js"), "utf8"),
     context,
     { filename: "content.js" }
   );

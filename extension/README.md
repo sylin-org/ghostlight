@@ -11,8 +11,6 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 
 ## Files
 - `manifest.json`: MV3 manifest (permissions, native-messaging host, background SW, content script).
-- `lib/presentation.js`: bounded document-aware state/effect delivery, exact acknowledgements,
-  navigation replay, and content-free visual rendering.
 - `service-worker.js`: native messaging, CDP primitive execution, tab-group management, and
   keepalive/recovery.
 - `lib/chunks.js`: bounded SHA-256-verified reassembly for large service-to-extension commands.
