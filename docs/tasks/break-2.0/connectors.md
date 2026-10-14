@@ -4,7 +4,7 @@ Lane rules are in [BOOTSTRAP.md](BOOTSTRAP.md). Target: ADR-0197 Decisions 1-4, 
 
 ## RESUME HERE
 
-Next slice: connectors-8 onward, per the lane plan. No blockers.
+Next slice: connectors-9 onward, per the lane plan. No blockers.
 
 ## Landed
 
@@ -89,6 +89,15 @@ Next slice: connectors-8 onward, per the lane plan. No blockers.
   any download or install. Follow-ups outside this lane: `tests/linux/acceptance/npm/native.mjs`
   still sets `GHOSTLIGHT_HOME`, and `tests/fixed-installation-journey.mjs` still passes a
   directory to `deployment install`; both are switch-time work.
+
+- connectors-8: the NSIS, deb, Scoop, WinGet, portable and Homebrew channels are retired
+  (ADR-0197 D16). Their release.yml jobs, scripts and manifests are deleted, along with
+  `crates/orchestrator/tauri.release.conf.json` and the Debian-only `packaging/linux/changelog`
+  and `packaging/linux/copyright`, which only that config referenced. Kept because install still
+  embeds them: `packaging/linux/ghostlight.desktop.hbs`, `man/` and `completions/`. Left for
+  switch-19: `crates/orchestrator/tauri.conf.json` and `packaging/windows/hooks.nsh` (the two
+  allowed exceptions, in the orchestrator crate). Left for switch-20: documents that still
+  describe the retired channels (CHANGELOG, STATUS, release notes, task ledgers).
 
 ## Blockers
 
