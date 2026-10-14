@@ -60,13 +60,30 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
     unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
     becomes unavailable, while a silent browser operation stays available when its independent
-    heartbeat is acknowledged. An unanswered post-dispatch probe leaves that call unknown and makes
-    the next call stop before dispatch.
+    heartbeat is acknowledged. An unanswered post-dispatch probe leaves that call unknown. It
+    makes new calls stop before dispatch only when it went unanswered for at least five seconds:
+    a 500 ms presentation deadline with a late acknowledgement leaves the connection available.
+    No single call's deadline fails another call in flight; only the heartbeat timeout and a real
+    end-of-stream do. A call waiting for a silent adapter sends it one probe at once, and its
+    acknowledgement makes the adapter available again. Each lost and resumed acknowledgement is
+    a `heartbeat_lost` or `heartbeat_resumed` process-diagnostics record.
 18. Two browser identities stay connected at once and each answers its own requests. A second
     connection carrying an identity that is already registered replaces it and closes the replaced
     stream, so the retired connection reaches end-of-stream instead of silently discarding work.
 19. A workspace binds to one browser for its life. Physical tab ids resolve only within their
     browser, and a bound browser that disconnects is waited for rather than replaced by another.
+    The wait lasts up to about seven seconds, capped by the call's deadline, and the same browser
+    reconnecting while it installs its page runtime takes the call. A bound session never reaches
+    browser startup. If the browser does not return, the refusal says it is not answering, not
+    connected, or not connected while a different browser is (`browser_wrong_profile`). A session
+    with no browser yet waits before browser startup only while a browser is evidently returning,
+    and the evidence is read again on every poll: a registered connection still initializing or
+    silent, a connection that ended less than the grace ago, or a service endpoint published less
+    than 1.5 seconds ago, while relays from before a restart reconnect. A call right after a
+    service start therefore attaches to the reconnecting browser instead of launching one. A
+    browser closed longer ago than the grace earns no wait at all, even if it once reported
+    attention, and a start with no relay stops waiting after 1.5 seconds, so browser startup keeps
+    the rest of the deadline to launch a browser.
 20. A crossing with no binding uses an explicit browser selection, then reported attention, then the
     sole connected browser. Two connected browsers with no evidence produce a refusal naming both
     candidates, with no dispatch and no binding. Listing a workspace's tabs succeeds with no browser

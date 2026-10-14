@@ -34,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the applied effect and is no longer marked safe to repeat.
 - Anchor links and `history.pushState` routes no longer expire target handles. The tab follows
   the new address, and landing governance still checks it.
+- A call no longer fails while its browser is briefly away. When the browser is reconnecting,
+  still starting up, or the service has just restarted, the call waits up to about seven seconds
+  and then goes ahead. A session's own browser reconnecting is no longer reported as "a browser
+  profile that is not connected", and a service update no longer opens a new browser window
+  (ADR-0196). A browser closed longer ago than that is not waited for, so Ghostlight still starts
+  it at once where browser startup is allowed.
+- One slow answer no longer cuts off a healthy browser. A short deadline, such as the 500 ms
+  status signal, no longer marks the browser unavailable or fails other calls in flight.
+- Browser refusals say what is true: the browser stopped answering, is not connected, is not
+  connected while a different browser is, or the connection was busy. "Reconnect the Ghostlight
+  browser adapter" is gone, and a bridge contract failure no longer says "disconnected".
+- Process diagnostics log when a connected browser stops answering and when it answers again
+  (`heartbeat_lost`, `heartbeat_resumed`).
 
 ## [1.3.15] - 2026-10-05
 

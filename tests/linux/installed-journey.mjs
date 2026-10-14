@@ -236,14 +236,15 @@ try {
     await until(() => versions.get(version.versionId)?.runningStatus === "stopped", "worker actually stopped", 10000);
     await until(() => doctor().readiness?.state === "not_connected", "service observed stopped worker");
     // This initialized workspace is pinned to its original browser identity. ADR-0114 and
-    // recovery::decide deliberately refuse to select a replacement profile while it is absent.
-    // Prove that refusal, then wake this same browser with an ordinary new-tab event. No
-    // extension reload, explicit worker start, or browser restart is used.
+    // ADR-0196 Decision 12 wait a bounded grace for that same browser, never select a replacement
+    // profile, and never start browser recovery for it. Prove the honest not-connected refusal,
+    // then wake this same browser with an ordinary new-tab event. No extension reload, explicit
+    // worker start, or browser restart is used.
     const recovery = await request("tools/call", { name: "browser_tabs", arguments: { action: "list" } });
     assert.equal(recovery.error, undefined);
     const result = recovery.result.structuredContent;
     assert.equal(result.status, "failed"); assert.equal(result.effect, "none");
-    assert.equal(result.facts.reason, "browser_wrong_profile"); assert.equal(result.repeat_safe, true);
+    assert.equal(result.facts.reason, "browser_disconnected"); assert.equal(result.repeat_safe, true);
     report.invocations.push({ tool: "browser_tabs", status: result.status, effect: result.effect, reason: result.facts.reason });
     const wakeTab = (await send("Target.createTarget", { url: "about:blank" })).targetId;
     await until(async () => (await send("Target.getTargets")).targetInfos.some(item => item.type === "service_worker" && item.url === worker.url && item.targetId !== worker.targetId), "worker recovery on browser activity");

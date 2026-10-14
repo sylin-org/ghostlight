@@ -49,6 +49,7 @@ pub struct ServiceHost {
     pub workbench: WorkbenchFacade,
     /// The process-diagnostics hub this authority owns.
     pub diagnostics: Arc<DiagnosticsHub>,
+    browser: Arc<RelayBrowserPort>,
     audit: Arc<AuditRecorder>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
@@ -185,13 +186,14 @@ impl ServiceHost {
         let browser_thread = spawn_browser_listener(
             browser_listener,
             Arc::clone(&stop),
-            browser,
+            Arc::clone(&browser),
             endpoint.token.clone(),
         );
         Ok(Self {
             endpoint,
             workbench,
             diagnostics,
+            browser,
             audit,
             stop,
             threads: vec![service_thread, browser_thread, audit_thread],
@@ -202,6 +204,9 @@ impl ServiceHost {
 
     /// Publish discovery after the desktop event loop has established an interaction route.
     pub fn publish_ready(&self) -> Result<()> {
+        // Relays that served an earlier service find this one from here on, so a call with no
+        // browser waits for them from this moment, not from construction.
+        self.browser.endpoint_published();
         write_runtime(&self.runtime_path, &self.endpoint)
             .context("publish desktop-ready endpoint")?;
         self.diagnostics.sink().emit(

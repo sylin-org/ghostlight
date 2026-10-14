@@ -11,6 +11,12 @@ Implements a 1.0-scoped subset of: ADR-0084 (browser-window attention routing)
 Builds on: ADR-0061 (extension-owned browser identity), ADR-0096 (`WorkspaceId` as the browser
 routing identity), ADR-0098 (extension-owned browser topology)
 
+Amendment, 2026-10-14: the waiting rule in D2 is amended by ADR-0196 Decision 12. Work waits for
+the browser it belongs to for a bounded grace of about seven seconds, capped by the call's
+deadline, and is never handed to browser recovery. If the browser does not return, the refusal
+says it is not answering, not connected, or not connected while a different browser is. Only that
+last case names another profile.
+
 ## Context
 
 The 1.0 service held exactly one browser adapter, in one slot:

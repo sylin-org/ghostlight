@@ -4,7 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::composition::CompositionProgress;
 use super::outcome::{
-    BlockedReason, BrowserRecoveryReason, CheckFailure, Outcome, Refusal, WorkspaceReason,
+    BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome, Refusal,
+    WorkspaceReason,
 };
 
 /// The explicitly permitted language projection of one terminal result.
@@ -100,7 +101,8 @@ pub enum AuditRefusal {
     BrowserPrimitiveFailed,
     DocumentUnavailable,
     CancelledBeforeDispatch,
-    BrowserStopped { reconnect: bool },
+    BrowserUnavailable { cause: BrowserUnavailableReason },
+    BrowserContract,
     BrowserAmbiguous,
     BrowserUnknown,
     BrowserPinned,
@@ -162,9 +164,10 @@ impl Refusal {
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
             Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
-            Self::BrowserStopped { reconnect } => AuditRefusal::BrowserStopped {
-                reconnect: *reconnect,
-            },
+            Self::BrowserUnavailable { reason } => {
+                AuditRefusal::BrowserUnavailable { cause: *reason }
+            }
+            Self::BrowserContract => AuditRefusal::BrowserContract,
             Self::BrowserAmbiguous => AuditRefusal::BrowserAmbiguous,
             Self::BrowserUnknown => AuditRefusal::BrowserUnknown,
             Self::BrowserPinned => AuditRefusal::BrowserPinned,

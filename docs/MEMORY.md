@@ -659,6 +659,17 @@ Every one of these cost something to learn.
   back refused by preserve-tabs. Claiming it earlier lets the dead session's pending close forget,
   unretain, or close the new owner's tab, because the extension does not check whose tab a close
   names.
+- **One call's deadline is not evidence about the connection.** A dispatch probe's
+  acknowledgement shares one ordered stream with every receipt, so it can sit behind a large
+  screenshot or recording transfer. Quarantining the adapter on a 500 ms presentation deadline, and
+  failing every other pending call with it, turned healthy browsers into false disconnects that
+  then read as "wrong profile". ADR-0196 Decision 12: a probe must be unanswered for five seconds
+  before it marks the adapter unavailable, only the heartbeat timeout or end-of-stream fails
+  pending calls, a waiting call probes a silent adapter at once, and a bound session waits a
+  bounded grace for its own browser instead of entering recovery. A busy writer is never closed
+  over a best-effort frame such as a cancel or probe. Evidence that earns an unbound call that
+  wait must lapse with time and be read again on every poll: "some browser once reported
+  attention" never lapses, and it spent the deadline browser startup needed to launch a browser.
 - **Windows session shutdown messages require a top-level window, not a message-only window.**
   Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
   not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)

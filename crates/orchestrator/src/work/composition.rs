@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 use crate::governance::Decision;
 use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
-use crate::language::outcome::{BlockedReason, CheckFailure, Outcome, WorkspaceReason};
+use crate::language::outcome::{
+    BlockedReason, BrowserUnavailableReason, CheckFailure, Outcome, WorkspaceReason,
+};
 
 use super::result::Readiness;
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
@@ -228,9 +230,13 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
         Some(A::CancelledBeforeStart | A::CancelledBeforeDispatch | A::CancelledAfterDispatch) => {
             StepCause::Cancelled
         }
-        Some(A::ConnectionLost | A::BrowserStopped { reconnect: true }) => {
-            StepCause::ConnectionLost
-        }
+        Some(
+            A::ConnectionLost
+            | A::BrowserUnavailable {
+                cause:
+                    BrowserUnavailableReason::NotConnected | BrowserUnavailableReason::NotAnswering,
+            },
+        ) => StepCause::ConnectionLost,
         Some(A::ActionUnconfirmed { cause }) => unconfirmed_cause(*cause),
         _ => match terminal.result.status {
             Status::Succeeded => return None,

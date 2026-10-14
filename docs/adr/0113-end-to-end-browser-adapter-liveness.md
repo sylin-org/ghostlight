@@ -4,6 +4,14 @@ Date: 2026-08-13
 Status: Accepted
 Builds on: ADR-0003, ADR-0062, ADR-0093, ADR-0096, and ADR-0098
 
+Amendment, 2026-10-14: Decision 3 is amended by ADR-0196 Decision 12. A dispatch probe marks the
+adapter unavailable at its call's deadline only when it has gone unanswered for at least five
+seconds; a shorter deadline, such as a 500 ms presentation signal, proves nothing, because the
+acknowledgement may be queued behind another call's large receipt. The verdict never fails other
+pending calls. Only the Decision 2 timeout and a real end-of-stream end a connection's work. The
+next invocation does not fail at once with a disconnected result: it sends the silent adapter one
+probe, waits a bounded grace, and then says the browser is not answering.
+
 ## Context
 
 The service treated an attached browser-relay socket as proof that Chrome was available. That is

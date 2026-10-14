@@ -7,15 +7,18 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
+
 use ghostlight_bridge::browser::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
-    BrowserPlatform, BrowserReadiness, BrowserReceipt, PhysicalTab, ADAPTER_PROTOCOL_MAJOR,
+    BrowserPlatform, BrowserReadiness, BrowserReceipt, PhysicalTab, PresentationActivity,
+    PresentationKind, PresentationSignal, ADAPTER_PROTOCOL_MAJOR,
 };
 use ghostlight_bridge::framing::{read_native, write_native};
 
 use super::super::{
     adapter_error, choose_browser, testing, AdapterLifecycleObserver, AdapterRegistry,
-    BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort,
+    Availability, BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort,
 };
 use super::{announce_adapter, announce_browser, capability, short_heartbeat, TEST_BROWSER};
 
@@ -27,6 +30,60 @@ impl AdapterLifecycleObserver for AttachedFlag {
     }
 
     fn adapter_detached(&self, _browser_id: &str) {}
+}
+
+/// Records each answering transition the port reports, in order.
+#[derive(Default)]
+struct Transitions(Mutex<Vec<String>>);
+
+impl Transitions {
+    fn seen(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl AdapterLifecycleObserver for Transitions {
+    fn adapter_attached(&self, _browser_id: &str, _replaced: bool) {}
+
+    fn adapter_detached(&self, _browser_id: &str) {}
+
+    fn adapter_unanswered(&self, browser_id: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("unanswered {browser_id}"));
+    }
+
+    fn adapter_answering(&self, browser_id: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("answering {browser_id}"));
+    }
+}
+
+fn present() -> BrowserCommand {
+    BrowserCommand::Present {
+        signal: PresentationSignal {
+            invocation: "invocation_test".into(),
+            signal: PresentationKind::Progress,
+            activity: PresentationActivity::Quiet,
+            phase: "Working".into(),
+            detail: None,
+            tab_id: None,
+            locator: None,
+            click: None,
+        },
+    }
+}
+
+fn tabs_receipt(correlation: String) -> BrowserFrame {
+    BrowserFrame::Receipt {
+        receipt: BrowserReceipt {
+            correlation,
+            result: BrowserOutcome::Tabs { tabs: vec![] },
+        },
+    }
 }
 
 #[test]
@@ -192,7 +249,8 @@ fn attachment_without_adapter_acknowledgement_becomes_unavailable() {
             Instant::now() + Duration::from_millis(100),
             &AtomicBool::new(false),
         ),
-        Err(BrowserError::DisconnectedBeforeDispatch)
+        Err(BrowserError::NotAnsweringBeforeDispatch),
+        "an attached adapter that stopped answering is not a disconnected one"
     );
     release.send(()).unwrap();
     client.join().unwrap();
@@ -219,10 +277,14 @@ fn an_adapter_without_liveness_keeps_its_compatible_attachment_semantics() {
     client.join().unwrap();
 }
 
+/// A probe unanswered for the whole verdict window stops new dispatch, but it is one call's
+/// verdict: another call already in flight keeps waiting for its own receipt and gets it.
 #[test]
-fn an_unanswered_dispatch_probe_quarantines_the_adapter_at_deadline() {
+fn a_probe_unanswered_past_the_verdict_stops_new_dispatch_but_not_calls_in_flight() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    let (first_arrived, first_seen) = mpsc::channel();
+    let (answer_first, answer) = mpsc::channel::<()>();
     let (release, hold) = mpsc::channel();
     let client = thread::spawn(move || {
         let mut stream = TcpStream::connect(address).unwrap();
@@ -233,24 +295,56 @@ fn an_unanswered_dispatch_probe_quarantines_the_adapter_at_deadline() {
                 capability(adapter_capability::ADAPTER_LIVENESS),
             ],
         );
+        // Never acknowledge a probe. Answer the first request only when told to, after the
+        // second request's deadline has passed.
+        let mut requests = Vec::new();
+        while requests.len() < 2 {
+            if let Some(BrowserFrame::Request { request }) =
+                read_native::<BrowserFrame>(&mut stream).unwrap()
+            {
+                if matches!(request.command, BrowserCommand::ListTabs) {
+                    requests.push(request.correlation);
+                    first_arrived.send(()).unwrap();
+                }
+            }
+        }
+        answer.recv().unwrap();
+        write_native(&mut stream, &tabs_receipt(requests.remove(0))).unwrap();
         hold.recv().unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::with_heartbeat_settings(
+    let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
         HeartbeatSettings {
-            interval: Duration::from_secs(1),
-            timeout: Duration::from_secs(2),
+            interval: Duration::from_secs(10),
+            timeout: Duration::from_secs(30),
+            verdict: Duration::from_millis(50),
         },
-    );
+    ));
+    let transitions = Arc::new(Transitions::default());
+    port.set_lifecycle_observer(Arc::clone(&transitions) as Arc<dyn AdapterLifecycleObserver>);
     port.attach(stream).unwrap();
+
+    let in_flight = {
+        let port = Arc::clone(&port);
+        thread::spawn(move || {
+            port.call(
+                TEST_BROWSER,
+                "workspace_test",
+                BrowserCommand::ListTabs,
+                Instant::now() + Duration::from_secs(5),
+                &AtomicBool::new(false),
+            )
+        })
+    };
+    first_seen.recv().unwrap();
 
     assert_eq!(
         port.call(
             TEST_BROWSER,
             "workspace_test",
             BrowserCommand::ListTabs,
-            Instant::now() + Duration::from_millis(75),
+            Instant::now() + Duration::from_millis(150),
             &AtomicBool::new(false),
         ),
         Err(BrowserError::DeadlineAfterDispatch)
@@ -260,6 +354,290 @@ fn an_unanswered_dispatch_probe_quarantines_the_adapter_at_deadline() {
         port.is_registered(TEST_BROWSER),
         "the relay socket is still attached"
     );
+    assert_eq!(
+        transitions.seen(),
+        vec![format!("unanswered {TEST_BROWSER}")]
+    );
+    assert_eq!(
+        port.call(
+            TEST_BROWSER,
+            "workspace_test",
+            BrowserCommand::ListTabs,
+            Instant::now() + Duration::from_millis(100),
+            &AtomicBool::new(false),
+        ),
+        Err(BrowserError::NotAnsweringBeforeDispatch),
+        "new work stops before dispatch"
+    );
+
+    answer_first.send(()).unwrap();
+    assert_eq!(
+        in_flight.join().unwrap(),
+        Ok(BrowserOutcome::Tabs { tabs: vec![] }),
+        "the call already in flight was not failed by the other call's deadline"
+    );
+    release.send(()).unwrap();
+    client.join().unwrap();
+}
+
+/// A presentation signal has a 500 ms deadline. Its probe's acknowledgement can arrive after
+/// that, queued behind other traffic; the adapter is still healthy, and nothing else may fail.
+#[test]
+fn a_short_deadline_with_a_late_acknowledgement_leaves_the_connection_and_other_calls_alone() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (first_arrived, first_seen) = mpsc::channel();
+    let (release, hold) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        announce_adapter(
+            &mut stream,
+            vec![
+                capability(adapter_capability::TABS),
+                capability(adapter_capability::PRESENTATION),
+                capability(adapter_capability::ADAPTER_LIVENESS),
+            ],
+        );
+        let mut pending = None;
+        let mut presented = false;
+        loop {
+            match read_native::<BrowserFrame>(&mut stream).unwrap().unwrap() {
+                BrowserFrame::Request { request } => match request.command {
+                    BrowserCommand::ListTabs => {
+                        pending = Some(request.correlation);
+                        first_arrived.send(()).unwrap();
+                    }
+                    BrowserCommand::Present { .. } => presented = true,
+                    _ => {}
+                },
+                BrowserFrame::Heartbeat { sequence } if presented => {
+                    // The presentation probe's acknowledgement is late, then the earlier
+                    // call's receipt follows it.
+                    thread::sleep(Duration::from_millis(800));
+                    write_native(&mut stream, &BrowserFrame::HeartbeatAck { sequence }).unwrap();
+                    write_native(&mut stream, &tabs_receipt(pending.take().unwrap())).unwrap();
+                    break;
+                }
+                BrowserFrame::Heartbeat { sequence } => {
+                    write_native(&mut stream, &BrowserFrame::HeartbeatAck { sequence }).unwrap();
+                }
+                _ => {}
+            }
+        }
+        hold.recv().unwrap();
+    });
+    let (stream, _) = listener.accept().unwrap();
+    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let transitions = Arc::new(Transitions::default());
+    port.set_lifecycle_observer(Arc::clone(&transitions) as Arc<dyn AdapterLifecycleObserver>);
+    port.attach(stream).unwrap();
+
+    let in_flight = {
+        let port = Arc::clone(&port);
+        thread::spawn(move || {
+            port.call(
+                TEST_BROWSER,
+                "workspace_test",
+                BrowserCommand::ListTabs,
+                Instant::now() + Duration::from_secs(5),
+                &AtomicBool::new(false),
+            )
+        })
+    };
+    first_seen.recv().unwrap();
+
+    assert_eq!(
+        port.call(
+            TEST_BROWSER,
+            "workspace_test",
+            present(),
+            Instant::now() + Duration::from_millis(500),
+            &AtomicBool::new(false),
+        ),
+        Err(BrowserError::DeadlineAfterDispatch)
+    );
+    assert!(
+        port.is_connected(),
+        "one short deadline does not quarantine a healthy connection"
+    );
+    assert_eq!(
+        in_flight.join().unwrap(),
+        Ok(BrowserOutcome::Tabs { tabs: vec![] }),
+        "the other call in flight still gets its receipt"
+    );
+    assert!(port.is_connected());
+    assert!(transitions.seen().is_empty(), "{:?}", transitions.seen());
+    release.send(()).unwrap();
+    client.join().unwrap();
+}
+
+/// A silent connection is probed at once when work waits for it, rather than at the next timer
+/// heartbeat, and both transitions reach the lifecycle observer.
+#[test]
+fn a_silent_connection_answers_an_immediate_probe_while_work_waits_for_it() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (quiet, quiet_seen) = mpsc::channel();
+    let (release, hold) = mpsc::channel::<()>();
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        announce_adapter(
+            &mut stream,
+            vec![
+                capability(adapter_capability::TABS),
+                capability(adapter_capability::ADAPTER_LIVENESS),
+            ],
+        );
+        // Silent through the request, its probe, and its cancellation. Then the worker comes
+        // back and answers the next probe, whoever sends it.
+        loop {
+            if let Some(BrowserFrame::Request { request }) =
+                read_native::<BrowserFrame>(&mut stream).unwrap()
+            {
+                if matches!(request.command, BrowserCommand::Cancel { .. }) {
+                    break;
+                }
+            }
+        }
+        quiet.send(()).unwrap();
+        loop {
+            if let Some(BrowserFrame::Heartbeat { sequence }) =
+                read_native::<BrowserFrame>(&mut stream).unwrap()
+            {
+                write_native(&mut stream, &BrowserFrame::HeartbeatAck { sequence }).unwrap();
+                break;
+            }
+        }
+        hold.recv().unwrap();
+    });
+    let (stream, _) = listener.accept().unwrap();
+    let port = RelayBrowserPort::with_heartbeat_settings(
+        "service_test".into(),
+        HeartbeatSettings {
+            interval: Duration::from_secs(10),
+            timeout: Duration::from_secs(30),
+            verdict: Duration::from_millis(50),
+        },
+    );
+    let transitions = Arc::new(Transitions::default());
+    port.set_lifecycle_observer(Arc::clone(&transitions) as Arc<dyn AdapterLifecycleObserver>);
+    port.attach(stream).unwrap();
+    assert_eq!(
+        port.call(
+            TEST_BROWSER,
+            "workspace_test",
+            BrowserCommand::ListTabs,
+            Instant::now() + Duration::from_millis(150),
+            &AtomicBool::new(false),
+        ),
+        Err(BrowserError::DeadlineAfterDispatch)
+    );
+    assert!(!port.is_connected());
+    quiet_seen.recv().unwrap();
+
+    let started = Instant::now();
+    assert_eq!(
+        port.await_available(
+            TEST_BROWSER,
+            Instant::now() + Duration::from_secs(3),
+            &AtomicBool::new(false),
+        ),
+        Availability::Available
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the probe was sent at once, not at the 10 s timer"
+    );
+    assert!(port.is_connected());
+    assert_eq!(
+        transitions.seen(),
+        vec![
+            format!("unanswered {TEST_BROWSER}"),
+            format!("answering {TEST_BROWSER}"),
+        ]
+    );
+    release.send(()).unwrap();
+    client.join().unwrap();
+}
+
+/// A connection still installing its page runtime is waited on, and one that never registers
+/// is reported absent rather than not answering.
+#[test]
+fn waiting_for_a_browser_tells_an_initializing_connection_from_an_absent_one() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (install_seen, install_arrived) = mpsc::channel();
+    let (release, hold) = mpsc::channel::<()>();
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        announce_adapter(
+            &mut stream,
+            vec![
+                capability(adapter_capability::PAGE_RUNTIME),
+                capability(adapter_capability::TABS),
+            ],
+        );
+        let BrowserFrame::Request { request } =
+            read_native::<BrowserFrame>(&mut stream).unwrap().unwrap()
+        else {
+            panic!("page runtime installation request");
+        };
+        let BrowserCommand::InstallPageRuntime {
+            revision, sha256, ..
+        } = request.command
+        else {
+            panic!("closed page runtime mechanism");
+        };
+        install_seen.send(()).unwrap();
+        thread::sleep(Duration::from_millis(400));
+        write_native(
+            &mut stream,
+            &BrowserFrame::Receipt {
+                receipt: BrowserReceipt {
+                    correlation: request.correlation,
+                    result: BrowserOutcome::PageRuntimeInstalled { revision, sha256 },
+                },
+            },
+        )
+        .unwrap();
+        let _ = hold.recv();
+    });
+    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    assert_eq!(
+        port.await_available(
+            TEST_BROWSER,
+            Instant::now() + Duration::from_millis(100),
+            &AtomicBool::new(false),
+        ),
+        Availability::Absent
+    );
+    let attaching = {
+        let port = Arc::clone(&port);
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            port.attach(stream)
+        })
+    };
+    install_arrived.recv().unwrap();
+    assert!(port.is_registered(TEST_BROWSER) && !port.is_connected());
+    assert_eq!(
+        port.await_available(
+            TEST_BROWSER,
+            Instant::now() + Duration::from_millis(100),
+            &AtomicBool::new(false),
+        ),
+        Availability::NotAnswering,
+        "a registered connection still initializing is not absent"
+    );
+    assert_eq!(
+        port.await_available(
+            TEST_BROWSER,
+            Instant::now() + Duration::from_secs(3),
+            &AtomicBool::new(false),
+        ),
+        Availability::Available
+    );
+    attaching.join().unwrap().unwrap();
     release.send(()).unwrap();
     client.join().unwrap();
 }
@@ -318,6 +696,7 @@ fn heartbeat_acknowledgements_keep_a_silent_operation_available() {
         HeartbeatSettings {
             interval: Duration::from_millis(100),
             timeout: Duration::from_secs(1),
+            verdict: Duration::from_secs(1),
         },
     );
     port.attach(stream).unwrap();

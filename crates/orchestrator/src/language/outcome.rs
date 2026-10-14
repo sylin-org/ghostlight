@@ -873,10 +873,24 @@ pub enum BrowserRecoveryReason {
     NativeHostUnavailable,
     /// Another Ghostlight installation owns the native messaging registration.
     OwnedElsewhere,
-    /// The opened browser is not the profile this session belongs to.
-    WrongProfile,
     /// The selected adapter did not arrive within the bounded wait.
     HandshakeTimeout,
+}
+
+/// Closed product-language reason the browser a call needed could not take it. In every case
+/// nothing was sent, and the call waited first when there was evidence the browser was returning
+/// (ADR-0196 Decision 12).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserUnavailableReason {
+    /// The browser still holds a connection but did not answer within the wait.
+    NotAnswering,
+    /// The browser is not connected, and no other browser is.
+    NotConnected,
+    /// The browser is not connected, but a different browser is.
+    WrongProfile,
+    /// The browser connection stayed busy with other work.
+    Busy,
 }
 
 /// Why the condition a caller asked Ghostlight to check after an applied action was not
@@ -906,6 +920,10 @@ pub enum CheckFailure {
     /// The browser could not run the check or answered outside the contract.
     BrowserRefused,
 }
+
+/// The one recovery step when the extension and the service disagree about the bridge contract.
+const UPDATE_EXTENSION_THEN_REPEAT: &str =
+    "Reload or update the Ghostlight extension in that browser, then repeat the call.";
 
 /// The one recovery step after an action whose check did not confirm it.
 ///
@@ -1033,8 +1051,13 @@ pub enum Refusal {
     DocumentUnavailable,
     /// The caller cancelled after the job started but before any browser command was sent.
     CancelledBeforeDispatch,
-    /// The browser stopped before a physical effect.
-    BrowserStopped { reconnect: bool },
+    /// The browser this session works in could not take the call, so nothing was sent.
+    BrowserUnavailable { reason: BrowserUnavailableReason },
+    /// Ghostlight and the browser extension disagree about the bridge contract: a protocol,
+    /// authentication, or incompatible-version failure. The disagreement can surface in the
+    /// browser's answer to a request it already received, so this says nothing about whether the
+    /// request was sent.
+    BrowserContract,
     /// Several browsers are connected and the call did not say which one it meant.
     BrowserAmbiguous,
     /// The named browser is not connected.
@@ -1115,7 +1138,23 @@ impl Refusal {
                 }
             }
             Self::CancelledBeforeDispatch => "Cancelled before anything reached the browser.",
-            Self::BrowserStopped { .. } => "The browser disconnected before anything happened.",
+            Self::BrowserUnavailable { reason } => match reason {
+                BrowserUnavailableReason::NotAnswering => {
+                    "The browser this session works in stopped answering. Nothing was sent."
+                }
+                BrowserUnavailableReason::NotConnected => {
+                    "The browser this session works in is not connected. Nothing was sent."
+                }
+                BrowserUnavailableReason::WrongProfile => {
+                    "This session works in a browser that is not connected; a different browser is."
+                }
+                BrowserUnavailableReason::Busy => {
+                    "The browser connection was busy, so nothing was sent."
+                }
+            },
+            Self::BrowserContract => {
+                "Ghostlight and the browser extension do not agree on this request."
+            }
             Self::BrowserAmbiguous => {
                 "More than one browser is connected, so there is no single place to open this."
             }
@@ -1145,9 +1184,6 @@ impl Refusal {
                 }
                 BrowserRecoveryReason::OwnedElsewhere => {
                     "Another Ghostlight installation owns the browser registration."
-                }
-                BrowserRecoveryReason::WrongProfile => {
-                    "This session belongs to a browser profile that is not connected."
                 }
                 BrowserRecoveryReason::HandshakeTimeout => {
                     "The browser started, but its Ghostlight adapter did not connect in time."
@@ -1208,17 +1244,24 @@ impl Refusal {
                 "If the user has explicitly authorized credential entry, repeat this request with user_authorized_credentials set to true. Otherwise ask for that instruction or let the user enter it directly."
                     .into(),
             ],
-            Self::IncompatibleReceipt => vec![
-                "Reload or update the Ghostlight extension in that browser, then repeat the call."
-                    .into(),
-            ],
-            Self::BrowserAdapterOutdated => vec![
-                "Reload or update the Ghostlight extension in that browser, then repeat the call."
-                    .into(),
-            ],
-            Self::BrowserStopped { reconnect: true } => {
-                vec!["Reconnect the Ghostlight browser adapter.".into()]
+            // The extension and the service disagree about the bridge contract, whichever side
+            // noticed it; only the person can reload or update the extension.
+            Self::IncompatibleReceipt | Self::BrowserAdapterOutdated | Self::BrowserContract => {
+                vec![UPDATE_EXTENSION_THEN_REPEAT.into()]
             }
+            Self::BrowserUnavailable { reason } => vec![match reason {
+                BrowserUnavailableReason::NotAnswering => {
+                    "Check that the browser window is open and responsive, then repeat the call."
+                }
+                BrowserUnavailableReason::NotConnected => {
+                    "Ask the user to reopen that browser, then repeat the call."
+                }
+                BrowserUnavailableReason::WrongProfile => {
+                    "Ask the user to reopen the browser profile this session started in, then repeat the call."
+                }
+                BrowserUnavailableReason::Busy => "Repeat the call.",
+            }
+            .into()],
             Self::BrowserPrimitive { .. } => vec![
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
@@ -1274,10 +1317,6 @@ impl Refusal {
                 ],
                 BrowserRecoveryReason::ExtensionAbsent => vec![
                     "Install Ghostlight in the selected browser profile, then repeat the call."
-                        .into(),
-                ],
-                BrowserRecoveryReason::WrongProfile => vec![
-                    "Open the browser profile this Ghostlight session already uses, then repeat the call."
                         .into(),
                 ],
                 BrowserRecoveryReason::LaunchFailed | BrowserRecoveryReason::HandshakeTimeout => {
@@ -1706,9 +1745,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, CaptureKind, CheckFailure, Observed, Outcome, Refusal,
-        SavedTo, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
-        HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        ActionSubject, BlockedReason, BrowserUnavailableReason, CaptureKind, CheckFailure,
+        Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
+        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::workspace::WorkspaceError;
 
@@ -2493,8 +2532,32 @@ mod tests {
                 "The Ghostlight extension is older than this browser command.",
             ),
             (
-                Refusal::BrowserStopped { reconnect: false },
-                "The browser disconnected before anything happened.",
+                Refusal::BrowserUnavailable {
+                    reason: BrowserUnavailableReason::NotAnswering,
+                },
+                "The browser this session works in stopped answering. Nothing was sent.",
+            ),
+            (
+                Refusal::BrowserUnavailable {
+                    reason: BrowserUnavailableReason::NotConnected,
+                },
+                "The browser this session works in is not connected. Nothing was sent.",
+            ),
+            (
+                Refusal::BrowserUnavailable {
+                    reason: BrowserUnavailableReason::WrongProfile,
+                },
+                "This session works in a browser that is not connected; a different browser is.",
+            ),
+            (
+                Refusal::BrowserUnavailable {
+                    reason: BrowserUnavailableReason::Busy,
+                },
+                "The browser connection was busy, so nothing was sent.",
+            ),
+            (
+                Refusal::BrowserContract,
+                "Ghostlight and the browser extension do not agree on this request.",
             ),
             (
                 Refusal::CancelledBeforeDispatch,
@@ -2603,13 +2666,32 @@ mod tests {
             Refusal::LocalInterlock.next_steps(),
             vec!["The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."]
         );
-        assert!(Refusal::BrowserStopped { reconnect: false }
-            .next_steps()
-            .is_empty());
         assert!(Refusal::CancelledBeforeDispatch.next_steps().is_empty());
+        for (reason, step) in [
+            (
+                BrowserUnavailableReason::NotAnswering,
+                "Check that the browser window is open and responsive, then repeat the call.",
+            ),
+            (
+                BrowserUnavailableReason::NotConnected,
+                "Ask the user to reopen that browser, then repeat the call.",
+            ),
+            (
+                BrowserUnavailableReason::WrongProfile,
+                "Ask the user to reopen the browser profile this session started in, then repeat the call.",
+            ),
+            (BrowserUnavailableReason::Busy, "Repeat the call."),
+        ] {
+            assert_eq!(
+                Refusal::BrowserUnavailable { reason }.next_steps(),
+                vec![step]
+            );
+        }
         assert_eq!(
-            Refusal::BrowserStopped { reconnect: true }.next_steps(),
-            vec!["Reconnect the Ghostlight browser adapter."]
+            Refusal::BrowserContract.next_steps(),
+            vec![
+                "Reload or update the Ghostlight extension in that browser, then repeat the call."
+            ]
         );
         assert_eq!(
             Refusal::EffectUnknown.next_steps(),

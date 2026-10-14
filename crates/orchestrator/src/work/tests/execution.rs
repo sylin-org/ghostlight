@@ -26,6 +26,9 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
     use crate::browser::recovery::RecoveryFailure;
     let cases: Vec<(&str, BrowserError)> = vec![
         ("before_dispatch", BrowserError::DisconnectedBeforeDispatch),
+        ("not_answering", BrowserError::NotAnsweringBeforeDispatch),
+        ("busy", BrowserError::BusyBeforeDispatch),
+        ("wrong_profile", BrowserError::WrongProfile),
         ("after_dispatch", BrowserError::DisconnectedAfterDispatch),
         ("cancelled_before", BrowserError::CancelledBeforeDispatch),
         ("cancelled_after", BrowserError::CancelledAfterDispatch),
@@ -93,6 +96,65 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
             "{name} effect-unknown classification drifted"
         );
     }
+}
+
+/// A receipt in the wrong shape arrives after the browser already received the command, so the
+/// contract refusal names the disagreement and never claims that nothing was sent.
+#[test]
+fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    browser.push(Ok(BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "0:doc_top:locator_button".into(),
+            role: "button".into(),
+            name: "Save".into(),
+            state: vec![],
+            credential_class: false,
+        }],
+    }));
+    browser.push(Err(BrowserError::Protocol(
+        "expected document-bound receipt".into(),
+    )));
+
+    let clicked = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"selector":{"name":"Save","exact":true},"visual_settle":false}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert!(
+        browser
+            .calls()
+            .iter()
+            .any(|call| matches!(call, BrowserCommand::Activate { .. })),
+        "the click reached the browser before its receipt failed the contract"
+    );
+    let contract = crate::language::outcome::Refusal::BrowserContract;
+    assert_eq!(clicked.status, Status::Failed);
+    assert_eq!(clicked.facts["reason"], "browser_contract_failed");
+    assert_eq!(clicked.summary, contract.summary());
+    assert!(
+        !clicked.summary.to_lowercase().contains("nothing was sent"),
+        "{}",
+        clicked.summary
+    );
+    assert_eq!(clicked.next_steps, contract.next_steps());
 }
 
 /// A stale target handle arrives pre-recovered: fresh candidates matching what the dead
@@ -1415,6 +1477,7 @@ fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
 fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![]);
+    browser.set_returning(true);
     browser.push(Ok(BrowserOutcome::Tabs {
         tabs: vec![tab(7, "https://example.com/")],
     }));
@@ -1441,8 +1504,8 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
         json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
     );
 
-    // With nothing reattaching inside the wake budget, the read refuses honestly instead
-    // of answering from remembered state.
+    // With no evidence that a browser is coming back, the read does not wait at all: it
+    // refuses honestly through recovery instead of answering from remembered state.
     let policy = temporary_policy("manual-browser-startup");
     fs::write(
         &policy,
@@ -1452,6 +1515,7 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.connect(vec![]);
+    let started = std::time::Instant::now();
     let absent = executor.execute(
         &workspace,
         "browser_tabs",
@@ -1461,6 +1525,10 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
     );
     assert_eq!(absent.status, Status::Failed);
     assert_eq!(absent.facts["reason"], "browser_startup_manual");
+    assert!(
+        started.elapsed() < crate::browser::RETURN_GRACE,
+        "no evidence of a returning browser, no wait"
+    );
     let _ = fs::remove_file(policy);
 }
 

@@ -1,9 +1,12 @@
 //! Pre-effect browser-readiness recovery decisions.
 //!
-//! The executor asks this service only when the ordinary plural-browser resolver proves that no
-//! usable adapter exists. This module inspects local installation facts and never presents a
-//! browser choice: unique connectable evidence acts under the configured posture, plural
-//! evidence repairs what Ghostlight already owns and leaves startup to the person, and no
+//! The executor asks this service only for a session that works in no browser yet, when the
+//! ordinary plural-browser resolver proves that no usable adapter exists and no browser is on its
+//! way back. A session already working in a browser waits for that browser instead and is never
+//! sent here, because recovery chooses or starts a browser and that session's browser is already
+//! chosen (ADR-0196 Decision 12). This module inspects local installation facts and never
+//! presents a browser choice: unique connectable evidence acts under the configured posture,
+//! plural evidence repairs what Ghostlight already owns and leaves startup to the person, and no
 //! refusal spends its words declining to choose. Where the selected platform and policy permit
 //! it, the same flight performs one ordinary-profile launch and waits within the invocation
 //! deadline for an inbound adapter.
@@ -54,22 +57,19 @@ pub enum RecoveryFailure {
     NativeHostUnavailable,
     /// A different Ghostlight installation owns the native-host registration.
     OwnedElsewhere,
-    /// A browser opened, but not the profile the workspace belongs to.
-    WrongProfile,
     /// No adapter handshake arrived within the bounded wait.
     HandshakeTimeout,
 }
 
 impl RecoveryFailure {
     /// Every closed failure in stable order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::BrowserAbsent,
         Self::LaunchFailed,
         Self::SandboxedPackage,
         Self::ExtensionAbsent,
         Self::NativeHostUnavailable,
         Self::OwnedElsewhere,
-        Self::WrongProfile,
         Self::HandshakeTimeout,
     ];
 
@@ -83,7 +83,6 @@ impl RecoveryFailure {
             Self::ExtensionAbsent => "browser_extension_absent",
             Self::NativeHostUnavailable => "native_host_unavailable",
             Self::OwnedElsewhere => "native_host_owned_elsewhere",
-            Self::WrongProfile => "browser_wrong_profile",
             Self::HandshakeTimeout => "browser_handshake_timeout",
         }
     }
@@ -355,6 +354,9 @@ impl RecoveryFlight {
     }
 }
 
+/// The one flight scope: recovery serves only sessions that work in no browser yet.
+const UNBOUND_SCOPE: &str = "unbound";
+
 #[derive(Debug, Default)]
 struct Flights {
     scopes: HashMap<String, Arc<RecoveryFlight>>,
@@ -389,19 +391,16 @@ impl BrowserRecovery {
         self.inventory = Arc::new(FixedBrowserInventory { candidates });
     }
 
-    /// Decide one missing-browser recovery request, joining an overlapping request in the same
-    /// owning scope.
+    /// Decide one missing-browser recovery request for a session that works in no browser yet,
+    /// joining an overlapping request.
     pub fn request(
         &self,
-        requested: Option<&str>,
-        pinned: Option<&str>,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<RecoveryDecision, RecoveryWaitError> {
-        let scope = requested.or(pinned).unwrap_or("unbound").to_owned();
-        let flight = self.join_flight(&scope);
-        let result = self.participate(&flight, requested, pinned, deadline, cancelled);
-        self.leave_flight(&scope, &flight);
+        let flight = self.join_flight(UNBOUND_SCOPE);
+        let result = self.participate(&flight, deadline, cancelled);
+        self.leave_flight(UNBOUND_SCOPE, &flight);
         result
     }
 
@@ -439,8 +438,6 @@ impl BrowserRecovery {
     fn participate(
         &self,
         flight: &RecoveryFlight,
-        requested: Option<&str>,
-        pinned: Option<&str>,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> RecoveryResult {
@@ -465,7 +462,7 @@ impl BrowserRecovery {
                 let phase = state.phase.clone();
                 drop(state);
 
-                let next = self.advance(phase.clone(), requested, pinned, deadline, cancelled);
+                let next = self.advance(phase.clone(), deadline, cancelled);
 
                 let mut state = lock(&flight.state);
                 state.owner = false;
@@ -494,8 +491,6 @@ impl BrowserRecovery {
     fn advance(
         &self,
         phase: FlightPhase,
-        requested: Option<&str>,
-        pinned: Option<&str>,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<FlightPhase, RecoveryWaitError> {
@@ -508,12 +503,7 @@ impl BrowserRecovery {
                     })
                 },
                 |candidates| {
-                    phase_from_plan(decide(
-                        self.governance.browser_startup(),
-                        requested,
-                        pinned,
-                        &candidates,
-                    ))
+                    phase_from_plan(decide(self.governance.browser_startup(), &candidates))
                 },
             )),
             FlightPhase::Repairing {
@@ -598,23 +588,7 @@ impl BrowserRecovery {
     }
 }
 
-fn decide(
-    mode: BrowserStartup,
-    requested: Option<&str>,
-    pinned: Option<&str>,
-    candidates: &[RecoveryCandidate],
-) -> RecoveryPlan {
-    if requested.is_some() || pinned.is_some() {
-        return RecoveryPlan::Complete(RecoveryDecision::Failed {
-            reason: RecoveryFailure::WrongProfile,
-            details: requested
-                .or(pinned)
-                .map(str::to_owned)
-                .into_iter()
-                .collect(),
-        });
-    }
-
+fn decide(mode: BrowserStartup, candidates: &[RecoveryCandidate]) -> RecoveryPlan {
     let installed: Vec<_> = candidates
         .iter()
         .filter(|candidate| {
@@ -898,7 +872,7 @@ mod tests {
                 let flights = lock(&recovery.flights);
                 flights
                     .scopes
-                    .get("unbound")
+                    .get(UNBOUND_SCOPE)
                     .map(|flight| lock(&flight.state).participants)
                     .unwrap_or(0)
             };
@@ -936,8 +910,6 @@ mod tests {
         let first = recovery.clone();
         let first_thread = thread::spawn(move || {
             first.request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(2),
                 &AtomicBool::new(false),
             )
@@ -946,8 +918,6 @@ mod tests {
         let second = recovery.clone();
         let second_thread = thread::spawn(move || {
             second.request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(2),
                 &AtomicBool::new(false),
             )
@@ -984,20 +954,13 @@ mod tests {
         let creator = recovery.clone();
         let creator_token = Arc::clone(&creator_cancelled);
         let creator_thread = thread::spawn(move || {
-            creator.request(
-                None,
-                None,
-                Instant::now() + Duration::from_secs(2),
-                &creator_token,
-            )
+            creator.request(Instant::now() + Duration::from_secs(2), &creator_token)
         });
         entered_rx.recv().unwrap();
 
         let joiner = recovery.clone();
         let joiner_thread = thread::spawn(move || {
             joiner.request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(2),
                 &AtomicBool::new(false),
             )
@@ -1043,8 +1006,6 @@ mod tests {
         let creator = recovery.clone();
         let creator_thread = thread::spawn(move || {
             creator.request(
-                None,
-                None,
                 Instant::now() + Duration::from_millis(50),
                 &AtomicBool::new(false),
             )
@@ -1054,8 +1015,6 @@ mod tests {
         let joiner = recovery.clone();
         let joiner_thread = thread::spawn(move || {
             joiner.request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(2),
                 &AtomicBool::new(false),
             )
@@ -1098,12 +1057,7 @@ mod tests {
         let active = recovery.clone();
         let active_cancelled = Arc::clone(&cancelled);
         let active_thread = thread::spawn(move || {
-            active.request(
-                None,
-                None,
-                Instant::now() + Duration::from_secs(2),
-                &active_cancelled,
-            )
+            active.request(Instant::now() + Duration::from_secs(2), &active_cancelled)
         });
 
         entered_rx.recv().unwrap();
@@ -1128,24 +1082,24 @@ mod tests {
             release: Mutex::new(None),
         });
         let recovery = coordinator(Some("manual"), inventory);
-        let first = recovery.join_flight("unbound");
-        let joined = recovery.join_flight("unbound");
+        let first = recovery.join_flight(UNBOUND_SCOPE);
+        let joined = recovery.join_flight(UNBOUND_SCOPE);
         assert!(Arc::ptr_eq(&first, &joined));
         lock(&first.state).phase = FlightPhase::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::BrowserAbsent,
             details: Vec::new(),
         });
 
-        recovery.leave_flight("unbound", &first);
-        let late_joiner = recovery.join_flight("unbound");
+        recovery.leave_flight(UNBOUND_SCOPE, &first);
+        let late_joiner = recovery.join_flight(UNBOUND_SCOPE);
         assert!(Arc::ptr_eq(&joined, &late_joiner));
-        recovery.leave_flight("unbound", &joined);
-        recovery.leave_flight("unbound", &late_joiner);
+        recovery.leave_flight(UNBOUND_SCOPE, &joined);
+        recovery.leave_flight(UNBOUND_SCOPE, &late_joiner);
         assert!(lock(&recovery.flights).scopes.is_empty());
 
-        let next_generation = recovery.join_flight("unbound");
+        let next_generation = recovery.join_flight(UNBOUND_SCOPE);
         assert!(!Arc::ptr_eq(&first, &next_generation));
-        recovery.leave_flight("unbound", &next_generation);
+        recovery.leave_flight(UNBOUND_SCOPE, &next_generation);
     }
 
     #[test]
@@ -1165,8 +1119,6 @@ mod tests {
         recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
         let decision = recovery
             .request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(1),
                 &AtomicBool::new(false),
             )
@@ -1186,8 +1138,6 @@ mod tests {
     fn four_current_windows_registrations_with_one_executable_select_that_browser() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1226,8 +1176,6 @@ mod tests {
     fn current_registration_without_an_executable_is_not_a_candidate() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[candidate_without_executable(
                 "Microsoft Edge",
                 BrowserPackage::NotChecked,
@@ -1248,8 +1196,6 @@ mod tests {
     fn two_verified_candidates_leave_startup_to_the_person() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1276,8 +1222,6 @@ mod tests {
     fn manual_mode_names_every_current_registered_browser() {
         let decision = decide(
             BrowserStartup::Manual,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1304,8 +1248,6 @@ mod tests {
     fn manual_diagnoses_missing_registration_before_asking_for_startup() {
         let decision = decide(
             BrowserStartup::Manual,
-            None,
-            None,
             &[candidate(
                 "Microsoft Edge",
                 BrowserPackage::NotChecked,
@@ -1340,8 +1282,6 @@ mod tests {
 
         let decision = recovery
             .request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(1),
                 &AtomicBool::new(false),
             )
@@ -1356,8 +1296,6 @@ mod tests {
     fn a_sandboxed_browser_package_is_diagnosed_not_launched() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[candidate(
                 "Chromium",
                 BrowserPackage::Snap,
@@ -1377,8 +1315,6 @@ mod tests {
     fn installed_browsers_without_usable_registrations_name_the_remedy() {
         let decision = decide(
             BrowserStartup::Manual,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1401,8 +1337,6 @@ mod tests {
     fn a_registration_owned_elsewhere_names_the_deliberate_remedy() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[candidate(
                 "Google Chrome",
                 BrowserPackage::Native,
@@ -1422,8 +1356,6 @@ mod tests {
     fn plural_ownership_mixed_states_ask_only_for_current_browsers() {
         let decision = decide(
             BrowserStartup::Manual,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1449,8 +1381,6 @@ mod tests {
     fn plural_ownership_all_elsewhere_explains_the_whole_machine() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1477,8 +1407,6 @@ mod tests {
     fn plural_evidence_names_only_the_connectable_browsers() {
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[
                 candidate(
                     "Google Chrome",
@@ -1525,8 +1453,6 @@ mod tests {
 
         let decision = recovery
             .request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(1),
                 &AtomicBool::new(false),
             )
@@ -1567,8 +1493,6 @@ mod tests {
 
         let decision = recovery
             .request(
-                None,
-                None,
                 Instant::now() + Duration::from_secs(1),
                 &AtomicBool::new(false),
             )
@@ -1610,12 +1534,7 @@ mod tests {
         let active = recovery.clone();
         let active_cancelled = Arc::clone(&cancelled);
         let active_thread = thread::spawn(move || {
-            active.request(
-                None,
-                None,
-                Instant::now() + Duration::from_secs(2),
-                &active_cancelled,
-            )
+            active.request(Instant::now() + Duration::from_secs(2), &active_cancelled)
         });
         let deadline = Instant::now() + Duration::from_secs(1);
         while mechanism.launches.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
@@ -1642,8 +1561,6 @@ mod tests {
         let before = std::fs::read(&foreign).unwrap();
         let decision = decide(
             BrowserStartup::OnDemand,
-            None,
-            None,
             &[candidate(
                 "Chromium",
                 BrowserPackage::Native,
@@ -1686,8 +1603,6 @@ mod tests {
         assert_eq!(
             recovery
                 .request(
-                    None,
-                    None,
                     Instant::now() + Duration::from_millis(20),
                     &AtomicBool::new(false),
                 )

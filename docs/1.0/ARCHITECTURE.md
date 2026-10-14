@@ -200,12 +200,37 @@ naming the candidates rather than choosing between two signed-in contexts. Atten
 adapters that advertise it, never inferred from connection order, and a bound browser that
 disconnects is waited for rather than replaced.
 
+Waiting is bounded and lives at the one browser seam (ADR-0196 Decision 12). The port answers
+`await_available` for one browser with available, not answering (a registered connection still
+installing its page runtime, or one whose liveness lapsed), or absent. A bound workspace waits up
+to `RETURN_GRACE`, about seven seconds and capped by the invocation deadline less the adapter
+receipt reserve, and is never handed to browser recovery: recovery chooses or starts a browser,
+and that workspace's browser is already chosen. A workspace with no binding waits within the
+same grace before recovery only while the port reports evidence that a browser is returning, and
+`await_any` reads that evidence again on every poll. Each piece lapses on its own: a registered
+connection that is not available lasts as long as the connection, an initialized connection that
+ended lasts `RETURN_GRACE` from its departure, and a freshly published endpoint lasts
+`RELAY_RETURN_WINDOW` (1.5 seconds, two relay retries and the hello) from the publication, which
+covers relays reconnecting after a service update. A relay that does reconnect registers inside
+that window, and its registration then carries the wait through the page-runtime installation.
+Reported attention is not evidence, because it never lapses. Once no evidence remains, recovery
+runs at once, so a browser closed long ago or a cold start with no relay keeps nearly the whole
+deadline for a launch.
+
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are
 separate facts: a missed liveness window stops new dispatch while leaving the opaque connector and
 socket available for a later acknowledgement. Every physical dispatch is followed by its own
-probe, so a deadline with no acknowledgement quarantines that adapter while a silent operation
-whose heartbeat was acknowledged does not. The browser connector remains unaware of both frames.
+probe. At a call's deadline, a probe that has gone unanswered for at least five seconds marks the
+adapter not answering, while a shorter deadline proves nothing: the acknowledgement may be queued
+behind another call's large receipt on the same ordered stream. Either way the verdict changes
+availability for new dispatch only. Calls already in flight keep waiting for their own receipts,
+and only the 45-second heartbeat timeout or a real end-of-stream fails a connection's pending
+calls. A best-effort cancel that finds the writer busy is skipped rather than closing the
+connection. Work waiting for a silent adapter sends it one probe at once instead of waiting up to
+20 seconds for the timer. Each lost and resumed acknowledgement is logged to process diagnostics
+as `heartbeat_lost` and `heartbeat_resumed`. The browser connector remains unaware of both
+frames.
 
 ## Orchestrator contexts
 
@@ -545,14 +570,20 @@ historical file or claiming to sanitize its old summary text (ADR-0103 H1 amendm
 
 Disconnect before a physical request has no effect. Disconnect after dispatch without a decisive
 receipt yields `unknown`, never failure or success. Cancellation follows the same boundary, and
-before dispatch it is reported as a cancellation, never as a disconnection.
+before dispatch it is reported as a cancellation, never as a disconnection. The other
+before-dispatch facts keep their own names: a browser that is attached but not answering, a
+browser that is not connected, a bound browser that is gone while a different one is connected,
+and a connection busy with other work. A bridge contract failure has its own name too, but it
+is not a before-dispatch fact: a receipt in the wrong shape arrives after dispatch, so its
+sentence makes no claim about what was sent.
 Stale tabs and targets fail before dispatch. Sequence failure reports completed step count and
 never replays completed steps. Recovery suggestions come from typed reason codes and effect class,
 not page content.
 
-An unanswered post-dispatch liveness probe does not revise that invocation's unknown effect. It
-changes only the availability fact used by later invocations, which then stop before dispatch until
-the extension acknowledges a new probe or reconnects.
+An unanswered post-dispatch liveness probe does not revise that invocation's unknown effect. Once
+it has gone unanswered for the verdict window, it changes only the availability fact used by later
+invocations. They wait the return grace, probing once, and stop before dispatch only if the
+extension neither acknowledges nor reconnects within it.
 
 ## Extension product architecture
 

@@ -27,8 +27,8 @@ use crate::language::composition::{
     CompositionProgress, EffectCounts, StepCause, StepCounts, StepIssue,
 };
 use crate::language::outcome::{
-    ActionSubject, BlockedReason, BrowserRecoveryReason, CaptureKind, CheckFailure, Outcome,
-    Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
+    ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
+    CheckFailure, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
 };
 
 /// Words a hint may put between `with` and the field it names.
@@ -339,7 +339,8 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
         Refusal::DocumentUnavailable => "DocumentUnavailable",
         Refusal::CancelledBeforeDispatch => "CancelledBeforeDispatch",
-        Refusal::BrowserStopped { .. } => "BrowserStopped",
+        Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
+        Refusal::BrowserContract => "BrowserContract",
         Refusal::BrowserAmbiguous => "BrowserAmbiguous",
         Refusal::BrowserUnknown => "BrowserUnknown",
         Refusal::BrowserPinned => "BrowserPinned",
@@ -375,7 +376,8 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "BrowserPrimitive",
     "DocumentUnavailable",
     "CancelledBeforeDispatch",
-    "BrowserStopped",
+    "BrowserUnavailable",
+    "BrowserContract",
     "BrowserAmbiguous",
     "BrowserUnknown",
     "BrowserPinned",
@@ -436,7 +438,6 @@ fn recovery_reasons() -> Vec<BrowserRecoveryReason> {
         BrowserRecoveryReason::ExtensionAbsent,
         BrowserRecoveryReason::NativeHostUnavailable,
         BrowserRecoveryReason::OwnedElsewhere,
-        BrowserRecoveryReason::WrongProfile,
         BrowserRecoveryReason::HandshakeTimeout,
     ];
     for reason in &all {
@@ -447,8 +448,26 @@ fn recovery_reasons() -> Vec<BrowserRecoveryReason> {
             | BrowserRecoveryReason::ExtensionAbsent
             | BrowserRecoveryReason::NativeHostUnavailable
             | BrowserRecoveryReason::OwnedElsewhere
-            | BrowserRecoveryReason::WrongProfile
             | BrowserRecoveryReason::HandshakeTimeout => {}
+        }
+    }
+    all
+}
+
+/// Every browser availability reason, with the same compile-time tripwire.
+fn unavailable_reasons() -> Vec<BrowserUnavailableReason> {
+    let all = vec![
+        BrowserUnavailableReason::NotAnswering,
+        BrowserUnavailableReason::NotConnected,
+        BrowserUnavailableReason::WrongProfile,
+        BrowserUnavailableReason::Busy,
+    ];
+    for reason in &all {
+        match reason {
+            BrowserUnavailableReason::NotAnswering
+            | BrowserUnavailableReason::NotConnected
+            | BrowserUnavailableReason::WrongProfile
+            | BrowserUnavailableReason::Busy => {}
         }
     }
     all
@@ -771,8 +790,7 @@ fn refusal_samples() -> Vec<Refusal> {
         },
         Refusal::DocumentUnavailable,
         Refusal::CancelledBeforeDispatch,
-        Refusal::BrowserStopped { reconnect: true },
-        Refusal::BrowserStopped { reconnect: false },
+        Refusal::BrowserContract,
         Refusal::BrowserAmbiguous,
         Refusal::BrowserUnknown,
         Refusal::BrowserPinned,
@@ -805,6 +823,9 @@ fn refusal_samples() -> Vec<Refusal> {
     }
     for reason in recovery_reasons() {
         samples.push(Refusal::BrowserRecoveryFailed { reason });
+    }
+    for reason in unavailable_reasons() {
+        samples.push(Refusal::BrowserUnavailable { reason });
     }
     for reason in workspace_reasons() {
         samples.push(Refusal::WorkspaceUnusable { reason });

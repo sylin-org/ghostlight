@@ -180,4 +180,24 @@ impl AdapterLifecycleObserver for DiagnosticsHub {
             &format!("{browser_id} disconnected"),
         );
     }
+
+    /// An attached adapter that stops answering is not a disconnect, and new work stops before
+    /// dispatch while it lasts, so the transition is logged on its own.
+    fn adapter_unanswered(&self, browser_id: &str) {
+        self.sink.emit(
+            event::HEARTBEAT_LOST,
+            Level::Warn,
+            None,
+            &format!("{browser_id} stopped answering liveness probes"),
+        );
+    }
+
+    fn adapter_answering(&self, browser_id: &str) {
+        self.sink.emit(
+            event::HEARTBEAT_RESUMED,
+            Level::Info,
+            None,
+            &format!("{browser_id} answering again"),
+        );
+    }
 }

@@ -35,7 +35,7 @@ use uuid::Uuid;
 use crate::browser::recovery::{
     BrowserRecovery, RecoveryDecision, RecoveryFailure, RecoveryWaitError,
 };
-use crate::browser::{choose_browser, BrowserError, BrowserPort};
+use crate::browser::{choose_browser, Availability, BrowserError, BrowserPort, RETURN_GRACE};
 use crate::events::{DenialPresentation, DomainEvent};
 
 use crate::governance::{
@@ -46,8 +46,8 @@ use crate::language::{
     self,
     audit::AuditProjection,
     outcome::{
-        ActionSubject, BlockedReason, BrowserRecoveryReason, CheckFailure, Observed, Outcome,
-        Refusal, TargetRole, WorkspaceReason,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
+        CheckFailure, Observed, Outcome, Refusal, TargetRole, WorkspaceReason,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -1279,33 +1279,10 @@ impl ApplicationExecutor {
             &self.browser.browsers(),
         ) {
             Ok(chosen) => chosen,
-            Err(BrowserError::DisconnectedBeforeDispatch) => {
-                match self.recovery.request(
-                    context.requested_browser,
-                    pinned.as_deref(),
-                    context.deadline,
-                    context.cancellation.flag(),
-                ) {
-                    Ok(RecoveryDecision::Manual { browsers }) => {
-                        return Err(BrowserError::RecoveryManual {
-                            browsers: browsers.into_iter().map(|browser| browser.name).collect(),
-                        });
-                    }
-                    Ok(RecoveryDecision::Failed { reason, details }) => {
-                        return Err(BrowserError::RecoveryFailed { reason, details });
-                    }
-                    Ok(RecoveryDecision::Ready { browser }) => browser,
-                    Ok(RecoveryDecision::Launch { .. }) => {
-                        unreachable!("the recovery service consumes its internal launch plan")
-                    }
-                    Err(RecoveryWaitError::Cancelled) => {
-                        return Err(BrowserError::CancelledBeforeDispatch);
-                    }
-                    Err(RecoveryWaitError::Deadline) => {
-                        return Err(BrowserError::DeadlineBeforeDispatch);
-                    }
-                }
-            }
+            Err(BrowserError::DisconnectedBeforeDispatch) => match pinned.as_deref() {
+                Some(pinned) => self.await_pinned_browser(context, pinned)?,
+                None => self.await_or_recover_browser(context)?,
+            },
             Err(error) => return Err(error),
         };
         match self
@@ -1317,6 +1294,70 @@ impl ApplicationExecutor {
             // The workspace vanished between admission and dispatch. Nothing physical should
             // happen for a workspace that no longer exists.
             Err(_) => Err(BrowserError::CancelledBeforeDispatch),
+        }
+    }
+
+    /// Wait a bounded grace for the browser this session already works in, then say what is
+    /// true.
+    ///
+    /// A pinned session is never sent to recovery. Recovery chooses or starts a browser, and this
+    /// session's browser is already chosen; the same browser reconnecting, or still installing
+    /// its page runtime, is exactly what the grace is for (ADR-0196 Decision 12).
+    fn await_pinned_browser(
+        &self,
+        context: &InvocationContext<'_>,
+        pinned: &str,
+    ) -> Result<String, BrowserError> {
+        let cancelled = context.cancellation.flag();
+        let availability =
+            self.browser
+                .await_available(pinned, return_grace_end(context.deadline), cancelled);
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(BrowserError::CancelledBeforeDispatch);
+        }
+        match availability {
+            Availability::Available => Ok(pinned.into()),
+            Availability::NotAnswering => Err(BrowserError::NotAnsweringBeforeDispatch),
+            Availability::Absent if self.browser.browsers().is_empty() => {
+                Err(BrowserError::DisconnectedBeforeDispatch)
+            }
+            Availability::Absent => Err(BrowserError::WrongProfile),
+        }
+    }
+
+    /// Find a browser for a session that works in none yet.
+    ///
+    /// While a browser is evidently on its way back -- a relay reconnecting right after the
+    /// service published its endpoint, a connection still initializing or silent, or a
+    /// connection that ended moments ago -- the call waits within the same bounded grace before
+    /// recovery, so a service update never launches a browser the person already has open. The
+    /// port reads that evidence again on every poll and ends the wait once it lapses, so a
+    /// browser closed long ago, or a cold start with no browser, leaves recovery its launch
+    /// budget.
+    fn await_or_recover_browser(
+        &self,
+        context: &InvocationContext<'_>,
+    ) -> Result<String, BrowserError> {
+        let cancelled = context.cancellation.flag();
+        let returned = self
+            .browser
+            .await_any(return_grace_end(context.deadline), cancelled);
+        if !returned.is_empty() {
+            return choose_browser(context.requested_browser, None, &returned);
+        }
+        match self.recovery.request(context.deadline, cancelled) {
+            Ok(RecoveryDecision::Manual { browsers }) => Err(BrowserError::RecoveryManual {
+                browsers: browsers.into_iter().map(|browser| browser.name).collect(),
+            }),
+            Ok(RecoveryDecision::Failed { reason, details }) => {
+                Err(BrowserError::RecoveryFailed { reason, details })
+            }
+            Ok(RecoveryDecision::Ready { browser }) => Ok(browser),
+            Ok(RecoveryDecision::Launch { .. }) => {
+                unreachable!("the recovery service consumes its internal launch plan")
+            }
+            Err(RecoveryWaitError::Cancelled) => Err(BrowserError::CancelledBeforeDispatch),
+            Err(RecoveryWaitError::Deadline) => Err(BrowserError::DeadlineBeforeDispatch),
         }
     }
 
@@ -1692,16 +1733,27 @@ impl ApplicationExecutor {
                 json!({"reason":browser_reason(&error)}),
             );
         }
-        // A cancellation the caller asked for is not a browser problem and never says it was.
-        let (status, refusal) = if matches!(error, BrowserError::CancelledBeforeDispatch) {
-            (Status::Cancelled, Refusal::CancelledBeforeDispatch)
-        } else {
-            (
-                Status::Failed,
-                Refusal::BrowserStopped {
-                    reconnect: matches!(error, BrowserError::DisconnectedBeforeDispatch),
-                },
-            )
+        // Each case says which fact stopped the call. Every availability reason and the
+        // cancellation stop before dispatch, so they say nothing was sent. A cancellation the
+        // caller asked for is not a browser problem and never says it was. A contract failure is
+        // not a disconnection, and it makes no dispatch claim: a receipt in the wrong shape
+        // arrives after the browser already received the request.
+        let unavailable = |reason| (Status::Failed, Refusal::BrowserUnavailable { reason });
+        let (status, refusal) = match &error {
+            BrowserError::CancelledBeforeDispatch => {
+                (Status::Cancelled, Refusal::CancelledBeforeDispatch)
+            }
+            BrowserError::DisconnectedBeforeDispatch => {
+                unavailable(BrowserUnavailableReason::NotConnected)
+            }
+            BrowserError::NotAnsweringBeforeDispatch => {
+                unavailable(BrowserUnavailableReason::NotAnswering)
+            }
+            BrowserError::WrongProfile => unavailable(BrowserUnavailableReason::WrongProfile),
+            BrowserError::BusyBeforeDispatch => unavailable(BrowserUnavailableReason::Busy),
+            // Protocol, authentication, and incompatible-major failures, including a receipt
+            // that arrived in the wrong shape after dispatch. Every other class returned above.
+            _ => (Status::Failed, Refusal::BrowserContract),
         };
         let summary = refusal.summary();
         Terminal {
@@ -1806,33 +1858,6 @@ impl ApplicationExecutor {
             physical_id: acted_on,
             observed: Observed::default(),
             audit: refusal.audit(),
-        }
-    }
-
-    /// One bounded window for a waking adapter to reattach, used by reads that must touch
-    /// real state. Deliberately local: no launch, no installed-browser discovery, hard
-    /// ceiling.
-    fn wait_for_any_browser(&self, context: &InvocationContext<'_>) -> bool {
-        // One bounded window for a waking adapter to reattach. This is deliberately local:
-        // no launch, no installed-browser discovery, and a hard ceiling well under any
-        // caller's patience.
-        const WAKE_BUDGET: Duration = Duration::from_secs(2);
-        let started = Instant::now();
-        loop {
-            if !self.browser.browsers().is_empty() {
-                return true;
-            }
-            if context
-                .cancellation
-                .flag()
-                .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                return false;
-            }
-            if started.elapsed() >= WAKE_BUDGET || Instant::now() >= context.deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(40));
         }
     }
 
@@ -2084,7 +2109,6 @@ const fn recovery_reason(reason: RecoveryFailure) -> BrowserRecoveryReason {
         RecoveryFailure::ExtensionAbsent => BrowserRecoveryReason::ExtensionAbsent,
         RecoveryFailure::NativeHostUnavailable => BrowserRecoveryReason::NativeHostUnavailable,
         RecoveryFailure::OwnedElsewhere => BrowserRecoveryReason::OwnedElsewhere,
-        RecoveryFailure::WrongProfile => BrowserRecoveryReason::WrongProfile,
         RecoveryFailure::HandshakeTimeout => BrowserRecoveryReason::HandshakeTimeout,
     }
 }
@@ -2243,7 +2267,10 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         BrowserError::DisconnectedBeforeDispatch | BrowserError::DisconnectedAfterDispatch => {
             (CheckFailure::Disconnected, admitted)
         }
-        BrowserError::UnknownBrowser(_)
+        BrowserError::NotAnsweringBeforeDispatch
+        | BrowserError::BusyBeforeDispatch
+        | BrowserError::WrongProfile
+        | BrowserError::UnknownBrowser(_)
         | BrowserError::BrowserPinned
         | BrowserError::AmbiguousBrowser(_)
         | BrowserError::RecoveryManual { .. }
@@ -2301,6 +2328,17 @@ const fn unconfirmed_reason(cause: CheckFailure, governed: ReasonCode) -> &'stat
 // and MCP edge to return one decisive receipt. A quarter second was too narrow on a live
 // cache-bypassing reload and turned a normal timeout into an uncertain after-dispatch deadline.
 const ADAPTER_RECEIPT_RESERVE_MS: u64 = 750;
+
+/// When a call stops waiting for its browser to come back: after the return grace, and early
+/// enough that a browser returning at the last moment still leaves the adapter receipt reserve
+/// for the work itself.
+fn return_grace_end(deadline: Instant) -> Instant {
+    let now = Instant::now();
+    let latest = deadline
+        .checked_sub(Duration::from_millis(ADAPTER_RECEIPT_RESERVE_MS))
+        .unwrap_or(now);
+    (now + RETURN_GRACE).min(latest).max(now)
+}
 
 fn adapter_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
     let available = remaining.saturating_sub(Duration::from_millis(ADAPTER_RECEIPT_RESERVE_MS));
@@ -2538,6 +2576,9 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::DocumentUnavailable => "document_unavailable",
         BrowserError::RuntimeControl(reason) => reason.as_str(),
         BrowserError::DisconnectedBeforeDispatch => "browser_disconnected",
+        BrowserError::NotAnsweringBeforeDispatch => "browser_not_answering",
+        BrowserError::BusyBeforeDispatch => "browser_busy",
+        BrowserError::WrongProfile => "browser_wrong_profile",
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
@@ -2553,6 +2594,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
 #[cfg(test)]
 mod tests {
     mod audit_health;
+    mod availability;
     mod catalog_authority;
     mod configured_authority;
     mod control;

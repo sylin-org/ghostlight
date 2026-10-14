@@ -33,16 +33,45 @@ const DIRECT_NATIVE_MESSAGE_BYTES: usize = 768 * 1024;
 // observable without conflating a silent browser operation with a dead adapter.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
+// A dispatch probe's acknowledgement travels behind every earlier frame on the same ordered
+// stream, including a large chunked screenshot or recording receipt. A probe unanswered for less
+// than this proves nothing about the adapter, so a short deadline never quarantines it.
+const PROBE_VERDICT_MIN: Duration = Duration::from_secs(5);
+// How often a call waiting for its browser looks again.
+const AVAILABILITY_POLL: Duration = Duration::from_millis(40);
 // A product name is a label a person reads next to a browser they already recognize, not a
 // place for an adapter to write prose.
 const BROWSER_NAME_MAX_CHARS: usize = 40;
 const MAX_BROWSER_CONNECTIONS: usize = 16;
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// How long a call waits for a browser that is on its way back before it says what is true.
+///
+/// It covers one relay reconnect attempt (500 ms), the page-runtime installation that keeps a new
+/// connection private (the 5 s exchange budget), and a margin. Callers cap it by their own
+/// invocation deadline.
+pub const RETURN_GRACE: Duration = Duration::from_secs(7);
+
+/// How long after the service publishes its endpoint a call with no browser still waits for the
+/// relays that served an earlier service.
+///
+/// A waiting relay retries every 500 ms. This covers two retries and the hello. A relay that does
+/// reconnect registers inside it, and its registered connection then carries the wait through the
+/// page-runtime installation. A cold start with no browser loses only this much of its browser
+/// startup budget.
+pub(crate) const RELAY_RETURN_WINDOW: Duration = Duration::from_millis(1_500);
+
+/// Liveness timing for one relay port. Production uses the defaults; tests shorten them.
 #[derive(Clone, Copy, Debug)]
-struct HeartbeatSettings {
-    interval: Duration,
-    timeout: Duration,
+pub(crate) struct HeartbeatSettings {
+    /// Time between timer heartbeats on an otherwise quiet connection.
+    pub(crate) interval: Duration,
+    /// Time without any acknowledgement after which the heartbeat thread ends the connection's
+    /// availability and fails its pending calls.
+    pub(crate) timeout: Duration,
+    /// Minimum time a dispatch probe must go unanswered before a call's deadline may mark the
+    /// adapter as not answering.
+    pub(crate) verdict: Duration,
 }
 
 impl Default for HeartbeatSettings {
@@ -50,8 +79,21 @@ impl Default for HeartbeatSettings {
         Self {
             interval: HEARTBEAT_INTERVAL,
             timeout: HEARTBEAT_TIMEOUT,
+            verdict: PROBE_VERDICT_MIN,
         }
     }
+}
+
+/// Whether one browser can take work, as learned by waiting for it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Availability {
+    /// The browser is connected and answering.
+    Available,
+    /// The browser holds a registered connection that is still initializing or stopped
+    /// answering liveness probes.
+    NotAnswering,
+    /// No connection is registered for the browser.
+    Absent,
 }
 
 /// A live application-owned admission check used at the actual transmission boundary.
@@ -101,6 +143,67 @@ pub trait BrowserPort: Send + Sync {
 
     /// Every connected browser, most recently attended first.
     fn browsers(&self) -> Vec<BrowserSummary>;
+
+    /// Wait until one exact browser can take work, `until` passes, or the call is cancelled.
+    ///
+    /// The default reads `browsers()`, so a port that cannot tell a silent connection from an
+    /// absent one reports every miss as absent.
+    fn await_available(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &AtomicBool,
+    ) -> Availability {
+        loop {
+            if self
+                .browsers()
+                .iter()
+                .any(|connected| connected.id == browser)
+            {
+                return Availability::Available;
+            }
+            if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
+                return Availability::Absent;
+            }
+            thread::sleep(
+                until
+                    .saturating_duration_since(Instant::now())
+                    .min(AVAILABILITY_POLL),
+            );
+        }
+    }
+
+    /// Wait while a browser is evidently returning: until any browser can take work, the
+    /// evidence lapses, `until` passes, or the call is cancelled. Return the connected browsers,
+    /// none when the wait ended without one.
+    ///
+    /// The evidence is read again on every poll. Without it the wait ends at once, so a call
+    /// that goes on to browser startup keeps that startup's budget.
+    fn await_any(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
+        loop {
+            let connected = self.browsers();
+            if !connected.is_empty()
+                || cancelled.load(Ordering::SeqCst)
+                || Instant::now() >= until
+                || !self.browser_returning()
+            {
+                return connected;
+            }
+            thread::sleep(
+                until
+                    .saturating_duration_since(Instant::now())
+                    .min(AVAILABILITY_POLL),
+            );
+        }
+    }
+
+    /// Whether there is evidence, right now, that a browser is about to connect. That evidence
+    /// is what earns a call with no browser a bounded wait instead of an immediate recovery,
+    /// and it must lapse with time: a browser that was merely seen at some point is not
+    /// returning.
+    fn browser_returning(&self) -> bool {
+        false
+    }
 
     /// Publish authoritative content-free runtime state to every browser without awaiting a
     /// receipt.
@@ -186,8 +289,35 @@ struct Connection {
     browser_id: String,
     browser_name: Option<String>,
     capabilities: HashMap<String, u16>,
-    liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
+    liveness: Option<Arc<Liveness>>,
     ready: bool,
+}
+
+impl Connection {
+    /// Whether this connection can take work now: initialized, and answering when it
+    /// negotiated liveness.
+    fn available(&self, now: Instant, timeout: Duration) -> bool {
+        self.ready
+            && self
+                .liveness
+                .as_ref()
+                .is_none_or(|liveness| liveness.state().is_available(now, timeout))
+    }
+}
+
+/// What one browser's registered connection can do right now.
+enum Reachability {
+    /// No connection is registered for the browser.
+    Absent,
+    /// A connection is registered but has not finished initializing.
+    Initializing,
+    /// The connection is initialized but its liveness has lapsed.
+    Silent {
+        writer: Arc<SocketWriter>,
+        liveness: Arc<Liveness>,
+    },
+    /// The connection can take work.
+    Available,
 }
 
 /// One connected browser as the orchestrator, the workbench, and the model see it.
@@ -226,9 +356,49 @@ struct AdapterRegistry {
     /// reconnects keeps the place its last reported attention earned. Connection order never
     /// enters this list (ADR-0084 D2).
     attention: Vec<String>,
+    /// When the last initialized connection ended without a successor.
+    ///
+    /// A browser that left moments ago, such as an extension worker restarting its native port,
+    /// is likely to come back. One that left longer ago than the return grace is evidence of
+    /// nothing.
+    departed: Option<Instant>,
 }
 
 impl AdapterRegistry {
+    /// Remove exactly the named connection, never one that has since replaced it, and remember
+    /// when an initialized connection left.
+    fn remove_exact(&mut self, browser: &str, connection_id: &str) -> Option<Connection> {
+        if self
+            .connections
+            .get(browser)
+            .is_none_or(|connection| connection.id != connection_id)
+        {
+            return None;
+        }
+        let removed = self.connections.remove(browser)?;
+        if removed.ready {
+            self.departed = Some(Instant::now());
+        }
+        Some(removed)
+    }
+
+    /// Whether a browser is evidently on its way back at `now` (ADR-0196 Decision 12).
+    ///
+    /// Each piece of evidence lapses on its own: a registered connection that is still
+    /// initializing or silent lasts as long as the connection, a departure lasts the return
+    /// grace, and a freshly opened port lasts the relay return window.
+    fn returning(&self, now: Instant, opened: Instant, timeout: Duration) -> bool {
+        let initializing_or_silent = self
+            .connections
+            .values()
+            .any(|connection| !connection.available(now, timeout));
+        let departed_recently = self
+            .departed
+            .is_some_and(|departed| now.saturating_duration_since(departed) < RETURN_GRACE);
+        let relays_reconnecting = now.saturating_duration_since(opened) < RELAY_RETURN_WINDOW;
+        initializing_or_silent || departed_recently || relays_reconnecting
+    }
+
     /// Record that one browser was attended most recently.
     fn attend(&mut self, browser: &str) {
         self.attention.retain(|known| known != browser);
@@ -243,6 +413,44 @@ impl AdapterRegistry {
             .map(String::as_str)
     }
 
+    /// What one browser's connection can do right now.
+    fn reachability(&self, browser: &str, now: Instant, timeout: Duration) -> Reachability {
+        let Some(connection) = self.connections.get(browser) else {
+            return Reachability::Absent;
+        };
+        if !connection.ready {
+            return Reachability::Initializing;
+        }
+        match &connection.liveness {
+            Some(liveness) if !connection.available(now, timeout) => Reachability::Silent {
+                writer: Arc::clone(&connection.writer),
+                liveness: Arc::clone(liveness),
+            },
+            _ => Reachability::Available,
+        }
+    }
+
+    /// Every initialized connection whose liveness has lapsed, with what a probe needs.
+    fn silent(
+        &self,
+        now: Instant,
+        timeout: Duration,
+    ) -> Vec<(String, Arc<SocketWriter>, Arc<Liveness>)> {
+        self.connections
+            .values()
+            .filter(|connection| connection.ready && !connection.available(now, timeout))
+            .filter_map(|connection| {
+                connection.liveness.as_ref().map(|liveness| {
+                    (
+                        connection.browser_id.clone(),
+                        Arc::clone(&connection.writer),
+                        Arc::clone(liveness),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// Content-free inventory of connected browsers, most recently attended first.
     fn summaries(&self, timeout: Duration) -> Vec<BrowserSummary> {
         let now = Instant::now();
@@ -250,13 +458,7 @@ impl AdapterRegistry {
         let mut summaries: Vec<_> = self
             .connections
             .values()
-            .filter(|connection| {
-                connection.ready
-                    && connection
-                        .liveness
-                        .as_ref()
-                        .is_none_or(|liveness| lock(liveness).is_available(now, timeout))
-            })
+            .filter(|connection| connection.available(now, timeout))
             .map(|connection| BrowserSummary {
                 id: connection.browser_id.clone(),
                 name: connection.browser_name.clone(),
@@ -281,6 +483,8 @@ struct ConnectionLiveness {
     next_sequence: u32,
     last_acknowledged_sequence: u32,
     stale: bool,
+    /// Whether the heartbeat timeout already ran out during the current silence.
+    timed_out: bool,
 }
 
 impl ConnectionLiveness {
@@ -290,6 +494,7 @@ impl ConnectionLiveness {
             next_sequence: 0,
             last_acknowledged_sequence: 0,
             stale: false,
+            timed_out: false,
         }
     }
 
@@ -298,13 +503,15 @@ impl ConnectionLiveness {
         self.next_sequence
     }
 
-    fn acknowledge(&mut self, sequence: u32, now: Instant) {
+    /// Record one acknowledgement. Returns whether it ended a stale period.
+    fn acknowledge(&mut self, sequence: u32, now: Instant) -> bool {
         if sequence == 0 || sequence > self.next_sequence {
-            return;
+            return false;
         }
         self.last_acknowledged_at = now;
         self.last_acknowledged_sequence = self.last_acknowledged_sequence.max(sequence);
-        self.stale = false;
+        self.timed_out = false;
+        std::mem::replace(&mut self.stale, false)
     }
 
     fn acknowledged(&self, sequence: u32) -> bool {
@@ -315,18 +522,139 @@ impl ConnectionLiveness {
         !self.stale && now.saturating_duration_since(self.last_acknowledged_at) < timeout
     }
 
+    /// Mark the adapter as not answering. Returns whether it was answering before.
     fn mark_stale(&mut self) -> bool {
         let changed = !self.stale;
         self.stale = true;
         changed
     }
+
+    /// Apply the heartbeat timeout: when nothing was acknowledged for `timeout`, the adapter is
+    /// not answering. Returns whether this call is the first to see the timeout run out during
+    /// the current silence, and whether it made the adapter stale.
+    ///
+    /// The two differ when a dispatch probe already marked the adapter stale: the timeout still
+    /// runs out once, and that is still the moment the connection's pending calls end.
+    fn expire(&mut self, now: Instant, timeout: Duration) -> (bool, bool) {
+        if self.timed_out || now.saturating_duration_since(self.last_acknowledged_at) < timeout {
+            return (false, false);
+        }
+        self.timed_out = true;
+        (true, self.mark_stale())
+    }
+}
+
+/// One connection's liveness record, and the observer told when the adapter stops or resumes
+/// answering.
+///
+/// Every stale transition goes through here, so the diagnostics log sees each one exactly once,
+/// whichever thread noticed it.
+struct Liveness {
+    state: Mutex<ConnectionLiveness>,
+    browser_id: String,
+    lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
+}
+
+impl std::fmt::Debug for Liveness {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Liveness")
+            .field("state", &*self.state())
+            .field("browser_id", &self.browser_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Liveness {
+    fn new(
+        browser_id: String,
+        lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
+        now: Instant,
+    ) -> Self {
+        Self {
+            state: Mutex::new(ConnectionLiveness::new(now)),
+            browser_id,
+            lifecycle,
+        }
+    }
+
+    fn state(&self) -> MutexGuard<'_, ConnectionLiveness> {
+        lock(&self.state)
+    }
+
+    /// Record one acknowledgement, reporting the adapter answering again after a stale period.
+    fn acknowledge(&self, sequence: u32, now: Instant) {
+        let recovered = self.state().acknowledge(sequence, now);
+        if recovered {
+            if let Some(observer) = &self.lifecycle {
+                observer.adapter_answering(&self.browser_id);
+            }
+        }
+    }
+
+    /// Mark the adapter as not answering, reporting the transition. Returns whether it changed.
+    fn mark_stale(&self) -> bool {
+        let changed = self.state().mark_stale();
+        self.report_stale(changed);
+        changed
+    }
+
+    /// Apply the heartbeat timeout, reporting a stale transition. Returns whether the timeout
+    /// ran out for the first time during the current silence.
+    fn expire(&self, now: Instant, timeout: Duration) -> bool {
+        let (timed_out, changed) = self.state().expire(now, timeout);
+        self.report_stale(changed);
+        timed_out
+    }
+
+    fn report_stale(&self, changed: bool) {
+        if changed {
+            if let Some(observer) = &self.lifecycle {
+                observer.adapter_unanswered(&self.browser_id);
+            }
+        }
+    }
+}
+
+/// The liveness probe written right after one dispatched request.
+struct DispatchProbe {
+    liveness: Arc<Liveness>,
+    sequence: u32,
+    sent: Instant,
+    verdict: Duration,
+}
+
+impl DispatchProbe {
+    /// Judge the adapter at this call's deadline.
+    ///
+    /// Only a probe unanswered for the whole verdict window marks the adapter as not answering.
+    /// A shorter deadline proves nothing, because the acknowledgement may still be queued behind
+    /// another call's large receipt. Either way the judgement changes availability for new
+    /// dispatch only: other calls in flight keep waiting for their own receipts, and ending the
+    /// whole connection stays with the heartbeat thread and a real end-of-stream.
+    fn judge(&self, now: Instant) {
+        let unanswered = !self.liveness.state().acknowledged(self.sequence);
+        if unanswered && now.saturating_duration_since(self.sent) >= self.verdict {
+            self.liveness.mark_stale();
+        }
+    }
 }
 
 /// Observes adapter connection lifecycle at the physical port boundary. The port calls this
-/// where connections are registered, replaced, and lost; observers log or publish.
+/// where connections are registered, replaced, and lost, and where an attached adapter stops or
+/// resumes answering; observers log or publish.
 pub trait AdapterLifecycleObserver: Send + Sync + 'static {
+    /// A browser's connection finished initializing and can take work.
     fn adapter_attached(&self, browser_id: &str, replaced: bool);
+
+    /// A browser's announced connection ended.
     fn adapter_detached(&self, browser_id: &str);
+
+    /// A browser's connection is still attached but stopped acknowledging liveness probes.
+    fn adapter_unanswered(&self, _browser_id: &str) {}
+
+    /// A browser's connection that had stopped answering acknowledged a probe again.
+    fn adapter_answering(&self, _browser_id: &str) {}
 }
 
 /// Authenticated loopback implementation of the physical browser port.
@@ -338,6 +666,10 @@ pub struct RelayBrowserPort {
     diagnostics: Mutex<Option<DiagnosticsState>>,
     lifecycle: Mutex<Option<Arc<dyn AdapterLifecycleObserver>>>,
     heartbeat: HeartbeatSettings,
+    /// When relays could last begin reconnecting to this port: its construction, then the moment
+    /// the service published the endpoint relays find it by. Right after that, relays that served
+    /// an earlier service are still on their way back.
+    opened: Mutex<Instant>,
 }
 
 impl std::fmt::Debug for RelayBrowserPort {
@@ -353,20 +685,20 @@ impl RelayBrowserPort {
     /// Construct a disconnected relay port for one restart-local service epoch.
     #[must_use]
     pub fn new(service_epoch: String) -> Self {
-        Self {
-            service_epoch,
-            adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
-            event_sink: Mutex::new(None),
-            control_state: Mutex::new(RuntimeControlState::Active),
-            diagnostics: Mutex::new(None),
-            lifecycle: Mutex::new(None),
-            heartbeat: HeartbeatSettings::default(),
-        }
+        Self::with_settings(service_epoch, HeartbeatSettings::default())
     }
 
+    /// Construct a relay port with shortened liveness timing for tests.
     #[cfg(test)]
-    fn with_heartbeat_settings(service_epoch: String, heartbeat: HeartbeatSettings) -> Self {
+    pub(crate) fn with_heartbeat_settings(
+        service_epoch: String,
+        heartbeat: HeartbeatSettings,
+    ) -> Self {
         debug_assert!(heartbeat.interval < heartbeat.timeout);
+        Self::with_settings(service_epoch, heartbeat)
+    }
+
+    fn with_settings(service_epoch: String, heartbeat: HeartbeatSettings) -> Self {
         Self {
             service_epoch,
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
@@ -375,7 +707,34 @@ impl RelayBrowserPort {
             diagnostics: Mutex::new(None),
             lifecycle: Mutex::new(None),
             heartbeat,
+            opened: Mutex::new(Instant::now()),
         }
+    }
+
+    /// Record that the service is publishing the endpoint relays find it by.
+    ///
+    /// Relays that served an earlier service reconnect within a retry or two of this moment, so
+    /// it starts the short window in which a call with no browser waits for them. Construction
+    /// is too early a start: the desktop may take a second or more to publish.
+    pub fn endpoint_published(&self) {
+        *lock(&self.opened) = Instant::now();
+    }
+
+    /// Move this port's evidence clock back, as if `elapsed` had passed since it opened and
+    /// since its last browser left.
+    #[cfg(test)]
+    pub(crate) fn backdate(&self, elapsed: Duration) {
+        let earlier = |instant: Instant| {
+            instant
+                .checked_sub(elapsed)
+                .expect("the monotonic clock has run longer than the backdate")
+        };
+        {
+            let mut opened = lock(&self.opened);
+            *opened = earlier(*opened);
+        }
+        let mut adapters = lock(&self.adapters);
+        adapters.departed = adapters.departed.map(earlier);
     }
 
     /// Install the direct typed event reaction target.
@@ -406,7 +765,7 @@ impl RelayBrowserPort {
     /// and it may answer again. That is a different fact from being connected, and the difference
     /// is what stops a quarantined adapter from being mistaken for a departed one.
     #[cfg(test)]
-    fn is_registered(&self, browser: &str) -> bool {
+    pub(crate) fn is_registered(&self, browser: &str) -> bool {
         lock(&self.adapters).connections.contains_key(browser)
     }
 
@@ -492,12 +851,19 @@ impl RelayBrowserPort {
             .copied()
             .unwrap_or_default()
             >= 1;
+        let lifecycle = lock(&self.lifecycle).clone();
         let liveness = (capabilities
             .get(adapter_capability::ADAPTER_LIVENESS)
             .copied()
             .unwrap_or_default()
             >= 1)
-            .then(|| Arc::new(Mutex::new(ConnectionLiveness::new(Instant::now()))));
+            .then(|| {
+                Arc::new(Liveness::new(
+                    browser_id.clone(),
+                    lifecycle.clone(),
+                    Instant::now(),
+                ))
+            });
 
         let writer = Arc::new(
             SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
@@ -556,7 +922,7 @@ impl RelayBrowserPort {
         let reader_liveness = liveness.clone();
         let reader_notifications = AdapterNotifications {
             sink,
-            lifecycle: lock(&self.lifecycle).clone(),
+            lifecycle,
             announced: Arc::clone(&announced),
         };
         let heartbeat_writer = Arc::clone(&writer);
@@ -684,15 +1050,7 @@ impl RelayBrowserPort {
     /// nothing else: a concurrent `attach` for the same `browser_id` may already have replaced it
     /// with a newer, healthy connection by the time this runs, and that one must be left alone.
     fn detach_registered(&self, browser_id: &str, connection_id: &str) {
-        let removed = {
-            let mut adapters = lock(&self.adapters);
-            match adapters.connections.get(browser_id) {
-                Some(connection) if connection.id == connection_id => {
-                    adapters.connections.remove(browser_id)
-                }
-                _ => None,
-            }
-        };
+        let removed = lock(&self.adapters).remove_exact(browser_id, connection_id);
         if let Some(connection) = removed {
             let was_ready = connection.ready;
             retire(&connection);
@@ -731,12 +1089,14 @@ impl RelayBrowserPort {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             };
             if !connection.ready && !matches!(&command, BrowserCommand::InstallPageRuntime { .. }) {
-                return Err(BrowserError::DisconnectedBeforeDispatch);
+                return Err(BrowserError::NotAnsweringBeforeDispatch);
             }
             if connection.liveness.as_ref().is_some_and(|liveness| {
-                !lock(liveness).is_available(Instant::now(), self.heartbeat.timeout)
+                !liveness
+                    .state()
+                    .is_available(Instant::now(), self.heartbeat.timeout)
             }) {
-                return Err(BrowserError::DisconnectedBeforeDispatch);
+                return Err(BrowserError::NotAnsweringBeforeDispatch);
             }
             let advertised = connection
                 .capabilities
@@ -814,7 +1174,9 @@ impl RelayBrowserPort {
                 } else if Instant::now() >= deadline {
                     BrowserError::DeadlineBeforeDispatch
                 } else {
-                    BrowserError::DisconnectedBeforeDispatch
+                    // Another call held the writer for the whole delivery budget. The connection
+                    // is busy, not gone, and nothing of this call was written.
+                    BrowserError::BusyBeforeDispatch
                 }
             })?;
         if cancelled.load(Ordering::SeqCst) {
@@ -827,7 +1189,7 @@ impl RelayBrowserPort {
         lock(&pending).insert(correlation.clone(), sender);
         let probe = liveness
             .as_ref()
-            .map(|liveness| lock(liveness).begin_probe());
+            .map(|liveness| liveness.state().begin_probe());
         if write_request_payload(&mut output, &payload, &correlation).is_err() {
             lock(&pending).remove(&correlation);
             mark_stale(&liveness);
@@ -841,6 +1203,15 @@ impl RelayBrowserPort {
             }
         }
         drop(output);
+        let sent = Instant::now();
+        let probe = liveness
+            .zip(probe)
+            .map(|(liveness, sequence)| DispatchProbe {
+                liveness,
+                sequence,
+                sent,
+                verdict: self.heartbeat.verdict,
+            });
         await_receipt(
             receiver,
             &correlation,
@@ -848,9 +1219,88 @@ impl RelayBrowserPort {
             &pending,
             deadline,
             cancelled,
-            liveness.zip(probe),
+            probe,
         )
     }
+
+    /// Wait for one browser's connection, sending a silent connection one immediate probe.
+    fn await_registered(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &AtomicBool,
+    ) -> Availability {
+        let mut probed = false;
+        loop {
+            let reachability =
+                lock(&self.adapters).reachability(browser, Instant::now(), self.heartbeat.timeout);
+            let availability = match reachability {
+                Reachability::Available => return Availability::Available,
+                Reachability::Absent => Availability::Absent,
+                Reachability::Initializing => Availability::NotAnswering,
+                Reachability::Silent { writer, liveness } => {
+                    if !probed {
+                        probed = true;
+                        probe_now(&writer, &liveness, until, cancelled);
+                    }
+                    Availability::NotAnswering
+                }
+            };
+            if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
+                return availability;
+            }
+            thread::sleep(
+                until
+                    .saturating_duration_since(Instant::now())
+                    .min(AVAILABILITY_POLL),
+            );
+        }
+    }
+
+    /// Wait for any browser while one is evidently returning, sending each silent connection
+    /// one immediate probe. The evidence is read again on every poll, so the wait ends as soon
+    /// as it lapses.
+    fn await_first(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
+        let mut probed = Vec::new();
+        loop {
+            let connected = self.connected_browsers();
+            if !connected.is_empty() {
+                return connected;
+            }
+            let silent = lock(&self.adapters).silent(Instant::now(), self.heartbeat.timeout);
+            for (browser, writer, liveness) in silent {
+                if !probed.contains(&browser) {
+                    probe_now(&writer, &liveness, until, cancelled);
+                    probed.push(browser);
+                }
+            }
+            if cancelled.load(Ordering::SeqCst)
+                || Instant::now() >= until
+                || !self.browser_returning()
+            {
+                return connected;
+            }
+            thread::sleep(
+                until
+                    .saturating_duration_since(Instant::now())
+                    .min(AVAILABILITY_POLL),
+            );
+        }
+    }
+}
+
+/// Send one liveness probe now instead of waiting up to a full heartbeat interval for the
+/// timer. An acknowledgement makes a silent connection available again at once.
+///
+/// A writer busy with another call's transfer is left alone. Closing it over a probe would end
+/// every call on the connection.
+fn probe_now(writer: &SocketWriter, liveness: &Liveness, until: Instant, cancelled: &AtomicBool) {
+    let delivery = until.min(Instant::now() + DELIVERY_TIMEOUT);
+    let Ok(mut output) = writer.until_unless(delivery, || cancelled.load(Ordering::SeqCst)) else {
+        return;
+    };
+    let sequence = liveness.state().begin_probe();
+    let _ = write_native(&mut output, &BrowserFrame::Heartbeat { sequence });
 }
 
 impl BrowserPort for RelayBrowserPort {
@@ -886,6 +1336,32 @@ impl BrowserPort for RelayBrowserPort {
 
     fn browsers(&self) -> Vec<BrowserSummary> {
         self.connected_browsers()
+    }
+
+    /// A connection still installing its page runtime is waited on until it is ready. A silent
+    /// one gets one immediate probe rather than the next timer heartbeat, up to 20 s away.
+    fn await_available(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &AtomicBool,
+    ) -> Availability {
+        self.await_registered(browser, until, cancelled)
+    }
+
+    fn await_any(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
+        self.await_first(until, cancelled)
+    }
+
+    /// The evidence is any of: a registered connection that is still initializing or silent;
+    /// an initialized connection that ended less than the return grace ago, as when an
+    /// extension worker restarts its native port; or an endpoint published less than the relay
+    /// return window ago, while relays that served an earlier service reconnect. Attention a
+    /// browser reported at some point is not evidence: it never lapses, and a browser closed long
+    /// ago would then spend the whole wait that browser startup needs.
+    fn browser_returning(&self) -> bool {
+        let opened = *lock(&self.opened);
+        lock(&self.adapters).returning(Instant::now(), opened, self.heartbeat.timeout)
     }
 
     /// Runtime control is a property of Ghostlight, not of one browser, so every connected
@@ -972,7 +1448,7 @@ fn await_receipt(
     pending: &Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
     deadline: Instant,
     cancelled: &AtomicBool,
-    liveness_probe: Option<(Arc<Mutex<ConnectionLiveness>>, u32)>,
+    probe: Option<DispatchProbe>,
 ) -> PendingResult {
     loop {
         if cancelled.load(Ordering::SeqCst) {
@@ -984,12 +1460,8 @@ fn await_receipt(
         if now >= deadline {
             send_cancel(writer, correlation);
             lock(pending).remove(correlation);
-            if let Some((liveness, sequence)) = &liveness_probe {
-                let unanswered = !lock(liveness).acknowledged(*sequence);
-                if unanswered {
-                    lock(liveness).mark_stale();
-                    fail_pending(pending, BrowserError::DisconnectedAfterDispatch);
-                }
+            if let Some(probe) = &probe {
+                probe.judge(now);
             }
             return Err(BrowserError::DeadlineAfterDispatch);
         }
@@ -1006,6 +1478,10 @@ fn await_receipt(
     }
 }
 
+/// Ask the adapter to stop one call's work. Best effort.
+///
+/// A writer busy with another call's transfer is skipped rather than closed: one call's deadline
+/// must never end the connection every other call on it is using.
 fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
     let frame = BrowserFrame::Request {
         request: BrowserRequest {
@@ -1016,7 +1492,9 @@ fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
             },
         },
     };
-    let _ = writer.native_until(&frame, Instant::now() + CONTROL_DELIVERY_TIMEOUT);
+    if let Ok(mut output) = writer.until(Instant::now() + CONTROL_DELIVERY_TIMEOUT) {
+        let _ = write_native(&mut output, &frame);
+    }
 }
 
 /// The notification targets one adapter reader reports to: the typed event sink and the
@@ -1034,7 +1512,7 @@ fn read_adapter(
     notifications: AdapterNotifications,
     adapters: Arc<Mutex<AdapterRegistry>>,
     tag: ConnectionTag,
-    liveness: Option<Arc<Mutex<ConnectionLiveness>>>,
+    liveness: Option<Arc<Liveness>>,
 ) {
     let ConnectionTag { browser_id, .. } = &tag;
     loop {
@@ -1072,7 +1550,7 @@ fn read_adapter(
             }
             Ok(Some(BrowserFrame::HeartbeatAck { sequence })) => {
                 if let Some(liveness) = &liveness {
-                    lock(liveness).acknowledge(sequence, Instant::now());
+                    liveness.acknowledge(sequence, Instant::now());
                 }
             }
             Ok(Some(_)) => {}
@@ -1082,17 +1560,9 @@ fn read_adapter(
                 // A replaced connection must not evict the connection that replaced it. Its
                 // attention place survives, so the same browser reconnecting resumes where it
                 // was rather than starting behind every other browser.
-                let was_current = {
-                    let mut adapters = lock(&adapters);
-                    let current = adapters
-                        .connections
-                        .get(browser_id)
-                        .is_some_and(|connection| connection.id == tag.connection_id);
-                    if current {
-                        adapters.connections.remove(browser_id);
-                    }
-                    current
-                };
+                let was_current = lock(&adapters)
+                    .remove_exact(browser_id, &tag.connection_id)
+                    .is_some();
                 if was_current {
                     if let Some(sink) = &notifications.sink {
                         sink.on_event(browser_id, BrowserEvent::Disconnected);
@@ -1109,10 +1579,13 @@ fn read_adapter(
     }
 }
 
+/// The timer side of liveness, and the one owner of whole-connection failure short of a real
+/// end-of-stream: only a full heartbeat timeout without any acknowledgement fails the
+/// connection's pending calls.
 fn heartbeat_adapter(
     writer: Arc<SocketWriter>,
     pending: Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
-    liveness: Arc<Mutex<ConnectionLiveness>>,
+    liveness: Arc<Liveness>,
     adapters: Arc<Mutex<AdapterRegistry>>,
     tag: ConnectionTag,
     settings: HeartbeatSettings,
@@ -1125,25 +1598,15 @@ fn heartbeat_adapter(
             return;
         }
 
-        let now = Instant::now();
-        let (sequence, became_stale) = {
-            let mut state = lock(&liveness);
-            let became_stale =
-                if now.saturating_duration_since(state.last_acknowledged_at) >= settings.timeout {
-                    state.mark_stale()
-                } else {
-                    false
-                };
-            (state.begin_probe(), became_stale)
-        };
-        if became_stale {
+        if liveness.expire(Instant::now(), settings.timeout) {
             fail_pending(&pending, BrowserError::DisconnectedAfterDispatch);
         }
+        let sequence = liveness.state().begin_probe();
         if writer
             .native(&BrowserFrame::Heartbeat { sequence })
             .is_err()
         {
-            lock(&liveness).mark_stale();
+            liveness.mark_stale();
             return;
         }
     }
@@ -1193,9 +1656,9 @@ fn validated_browser_name(name: Option<String>) -> Result<Option<String>, Browse
     Ok(Some(name))
 }
 
-fn mark_stale(liveness: &Option<Arc<Mutex<ConnectionLiveness>>>) {
+fn mark_stale(liveness: &Option<Arc<Liveness>>) {
     if let Some(liveness) = liveness {
-        lock(liveness).mark_stale();
+        liveness.mark_stale();
     }
 }
 
@@ -1276,6 +1739,17 @@ pub enum BrowserError {
     /// No adapter existed before dispatch.
     #[error("browser adapter is disconnected before dispatch")]
     DisconnectedBeforeDispatch,
+    /// The browser holds a registered connection that could not take work before dispatch: it
+    /// is still initializing, or it stopped acknowledging liveness probes.
+    #[error("browser adapter is not answering before dispatch")]
+    NotAnsweringBeforeDispatch,
+    /// Other work held the connection's writer for the whole delivery budget, so nothing of this
+    /// request was written. The connection is busy, not gone.
+    #[error("browser connection was busy before dispatch")]
+    BusyBeforeDispatch,
+    /// The browser this workspace works in is not connected, while a different browser is.
+    #[error("the workspace's browser is not connected, but a different browser is")]
+    WrongProfile,
     /// The connection ended after a request could have reached the adapter.
     #[error("browser adapter disconnected after dispatch")]
     DisconnectedAfterDispatch,
@@ -1422,6 +1896,7 @@ mod contract_tests {
         HeartbeatSettings {
             interval: Duration::from_millis(10),
             timeout: Duration::from_millis(50),
+            verdict: Duration::from_millis(50),
         }
     }
 }
@@ -1457,6 +1932,7 @@ pub(crate) mod testing {
         outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
         control_states: Mutex<Vec<RuntimeControlState>>,
         connected: Mutex<Vec<BrowserSummary>>,
+        returning: Mutex<bool>,
     }
 
     impl Default for FakeBrowser {
@@ -1469,6 +1945,7 @@ pub(crate) mod testing {
                 outcomes: Mutex::default(),
                 control_states: Mutex::default(),
                 connected: Mutex::new(vec![summary(FAKE_BROWSER, true)]),
+                returning: Mutex::new(false),
             }
         }
     }
@@ -1513,6 +1990,11 @@ pub(crate) mod testing {
         /// Replace the connected inventory this port reports.
         pub fn connect(&self, browsers: Vec<BrowserSummary>) {
             *lock(&self.connected) = browsers;
+        }
+        /// Report evidence that a browser is about to connect, as a relay does after a service
+        /// start or while a connection initializes.
+        pub fn set_returning(&self, returning: bool) {
+            *lock(&self.returning) = returning;
         }
     }
 
@@ -1613,6 +2095,10 @@ pub(crate) mod testing {
 
         fn browsers(&self) -> Vec<BrowserSummary> {
             lock(&self.connected).clone()
+        }
+
+        fn browser_returning(&self) -> bool {
+            *lock(&self.returning)
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

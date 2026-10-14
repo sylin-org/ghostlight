@@ -151,6 +151,29 @@ Refusals say what is true, and their next steps suggest only what the caller can
 - A cancellation that wins before any browser command answers `Cancelled before anything reached
   the browser.` with status `cancelled`, no effect, and no next step. It never says the browser
   disconnected.
+- A browser that cannot take a call is waited for first when there is evidence it is coming
+  back. A session that already works in a browser always waits for that browser. A session with
+  no browser yet waits only while a connection is registered but initializing or silent, a
+  browser connection ended less than the wait ago, or the service published its endpoint in the
+  last 1.5 seconds. It stops waiting as soon as none of these holds, so a browser closed long ago
+  goes straight to browser startup with the whole deadline to launch it. The wait lasts up to
+  about seven seconds and ends early enough to leave the call time to run.
+  A silent browser gets one liveness probe at once. A session that already works in a browser is
+  never sent to browser startup. Then the refusal says which fact stopped the call, with
+  `failed`, no effect, and `repeat_safe: true`:
+
+  | Fact | `reason` | Summary | Next step |
+  | --- | --- | --- | --- |
+  | Connected but not answering | `browser_not_answering` | `The browser this session works in stopped answering. Nothing was sent.` | `Check that the browser window is open and responsive, then repeat the call.` |
+  | Not connected, no other browser is | `browser_disconnected` | `The browser this session works in is not connected. Nothing was sent.` | `Ask the user to reopen that browser, then repeat the call.` |
+  | Not connected, a different browser is | `browser_wrong_profile` | `This session works in a browser that is not connected; a different browser is.` | `Ask the user to reopen the browser profile this session started in, then repeat the call.` |
+  | Connection busy with other work | `browser_busy` | `The browser connection was busy, so nothing was sent.` | `Repeat the call.` |
+  | Bridge contract failure | `browser_contract_failed` | `Ghostlight and the browser extension do not agree on this request.` | `Reload or update the Ghostlight extension in that browser, then repeat the call.` |
+
+  None of these says "disconnected" for a browser that is still attached, and none tells the
+  model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). The contract summary
+  does not say whether anything was sent. A receipt in the wrong shape arrives after the
+  browser already received the request.
 - A deadline before dispatch suggests a longer `timeout_ms` only when the call that set the
   deadline accepts that field, its value is below the 30000 ms maximum, and no edge deadline
   overrides it. Tools with a fixed deadline (read, inspect, find, press key, dialog, diagnose,

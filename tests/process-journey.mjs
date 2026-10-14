@@ -1236,8 +1236,10 @@ try {
   console.log("audit composition ok: an acknowledged effect survives failed child history; Continue stops; parent and children stay unconfirmed; repair admits only new work");
 
   // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
-  // disconnects, recovery must preserve the profile binding and stop before repair, launch, or
-  // adapter dispatch. Injected Rust tests own the exact unpinned startup behavior matrix.
+  // disconnects, the call waits a bounded grace for that same browser (capped here by a short
+  // timeout_ms), never reaches recovery, repair, launch, or adapter dispatch, and then says the
+  // session's browser is not connected (ADR-0196 Decision 12). Injected Rust tests own the exact
+  // availability and unpinned startup behavior matrix.
   const physicalCommandCountBeforeRecovery = physicalCommands.length;
   browserConnector.kill();
   await waitForExit(browserConnector);
@@ -1246,16 +1248,16 @@ try {
     name: "browser_navigate",
     arguments: {
       url: "https://example.com",
-      new_tab: true
+      new_tab: true,
+      timeout_ms: 2000
     }
   }));
   assert.equal(disconnected.status, "failed");
   assert.equal(disconnected.effect, "none");
   assert.equal(disconnected.repeat_safe, true);
-  assert.equal(disconnected.facts.reason, "browser_wrong_profile");
-  assert.deepEqual(disconnected.facts.details, [PROCESS_BROWSER]);
+  assert.equal(disconnected.facts.reason, "browser_disconnected");
   assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
-  assert.equal(disconnected.next_steps.length, 1);
+  assert.deepEqual(disconnected.next_steps, ["Ask the user to reopen that browser, then repeat the call."]);
 
 
   // A cold audit failure must not prevent service startup or access to human/diagnostic controls.
