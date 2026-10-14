@@ -721,6 +721,72 @@ fn a_second_recording_is_held_until_the_first_is_finished() {
 }
 
 #[test]
+fn a_saved_recording_is_replaced_by_the_next_start_and_an_unsaved_one_is_not() {
+    let script: Script = Box::new(|correlation, primitive| {
+        let facts = match primitive {
+            wire::Primitive::Recording(wire::RecordingOp::Status { .. }) => {
+                json!({"result": "status", "summary": summary()})
+            }
+            wire::Primitive::Recording(wire::RecordingOp::Export { .. }) => {
+                json!({"result": "exported", "summary": summary(),
+                    "encoded": {"frame_count": 3, "captured_frame_count": 3, "duration_ms": 900,
+                                "width": 640, "height": 400, "byte_count": 2048},
+                    "delivery": {"delivery": "downloaded"}})
+            }
+            wire::Primitive::Recording(wire::RecordingOp::Discard { .. }) => {
+                json!({"result": "discarded", "recording_id": "recording_1", "released_bytes": 10})
+            }
+            _ => json!({"result": "started", "summary": {
+                "recording_id": "recording_2", "tab_id": 13, "state": "recording",
+                "frame_count": 0, "bytes_held": 0, "duration_ms": 0, "source_urls": []},
+                "existing": false}),
+        };
+        Reply::Now(wire::Receipt {
+            correlation: correlation.into(),
+            ..answer(facts)
+        })
+    });
+    let (port, fake) = port(script);
+    let index = recordings(&port);
+    index.learn(WORKSPACE, "recording_1");
+
+    // Stopped and never saved: held.
+    assert_eq!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        Ok(BrowserOutcome::RecordingHeld)
+    );
+    // A save delivers it; it can be saved again.
+    for _ in 0..2 {
+        assert!(matches!(
+            call(
+                &port,
+                BrowserCommand::ExportRecording {
+                    destination: RecordingDestination::Download {
+                        file_name: "flow.gif".into()
+                    },
+                    max_output_bytes: 4096,
+                }
+            ),
+            Ok(BrowserOutcome::RecordingExported { .. })
+        ));
+    }
+    // The next start, on another tab, discards the saved recording and begins a new one.
+    assert!(matches!(
+        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        Ok(BrowserOutcome::RecordingStarted {
+            existing: false,
+            ..
+        })
+    ));
+    assert_eq!(index.id(WORKSPACE).as_deref(), Some("recording_2"));
+    assert!(!index.is_saved(WORKSPACE), "the new recording is unsaved");
+    assert_eq!(
+        recording_ops(&fake, 6),
+        ["status", "export", "export", "status", "discard", "start"]
+    );
+}
+
+#[test]
 fn a_held_recording_the_extension_lost_is_forgotten_and_the_start_goes_ahead() {
     let script: Script = Box::new(|correlation, primitive| {
         let facts = match primitive {

@@ -271,7 +271,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     download. Prove each returns no content block and that no recording frame ever crosses out of
     the browser.
 18. Prove a session holds one recording that no call names, that a second start is refused until
-    the first is saved or discarded, and that sessions are isolated from each other; hard timeout, frozen retention,
+    the first is saved or discarded, that a start after a save replaces the saved recording, and that sessions are isolated from each other; hard timeout, frozen retention,
     browser-loss, service disconnect, runtime hold, memory-limit, oversized-frame, discard, and MV3
     worker-loss paths stop or erase as ADR-0108 requires, without persistent pixel bytes. Prove
     ten byte-identical samples at 100-millisecond intervals retain one frame with a 1,000-millisecond

@@ -102,9 +102,11 @@ pub fn binding(scope: &Scope) -> String {
 /// recording stops when they change. The workspace learns the recording's id.
 ///
 /// A workspace holds one recording. Asking again for the tab it is still capturing answers with
-/// that recording. Any other recording it holds, stopped or not, answers
+/// that recording. A stopped recording that was never saved answers
 /// [`BrowserOutcome::RecordingHeld`] until it is saved or discarded, and nothing is started. A
-/// held recording the extension no longer has is forgotten, and the start goes ahead.
+/// stopped recording that was saved is discarded in the browser and replaced, so a save releases
+/// the slot at the next start while it can still be repeated until then. A held recording the
+/// extension no longer has is forgotten, and the start goes ahead.
 ///
 /// # Errors
 ///
@@ -115,7 +117,9 @@ pub fn start(
     tab_id: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
     if let Some(held) = l.recordings().id(l.workspace()) {
-        match l.send(wire::RecordingOp::Status { recording_id: held })? {
+        match l.send(wire::RecordingOp::Status {
+            recording_id: held.clone(),
+        })? {
             wire::RecordingFacts::NotFound => l.recordings().forget(l.workspace()),
             wire::RecordingFacts::Status { summary }
                 if summary.state == wire::RecordingState::Recording && summary.tab_id == tab_id =>
@@ -126,6 +130,15 @@ pub fn start(
                         .map_err(|_| BrowserError::Protocol(UNREADABLE_RECORDING.into()))?,
                     existing: true,
                 });
+            }
+            wire::RecordingFacts::Status { summary }
+                if matches!(
+                    summary.state,
+                    wire::RecordingState::Frozen | wire::RecordingState::Interrupted
+                ) && l.recordings().is_saved(l.workspace()) =>
+            {
+                l.send(wire::RecordingOp::Discard { recording_id: held })?;
+                l.recordings().forget(l.workspace());
             }
             _ => return Ok(BrowserOutcome::RecordingHeld),
         }
@@ -256,7 +269,7 @@ fn with_recording(
 }
 
 /// The outcome a recording operation reported, keeping the workspace's index current: a started
-/// recording is learned, and a discarded or missing one is forgotten.
+/// recording is learned, a saved one is marked, and a discarded or missing one is forgotten.
 ///
 /// # Errors
 ///
@@ -282,11 +295,14 @@ pub fn recorded(l: &Link<'_>, facts: wire::RecordingFacts) -> Result<BrowserOutc
             summary,
             encoded,
             delivery,
-        } => BrowserOutcome::RecordingExported {
-            summary: summary.try_into().map_err(unknown)?,
-            encoded: encoded.into(),
-            delivery: delivery.try_into().map_err(unknown)?,
-        },
+        } => {
+            l.recordings().mark_saved(l.workspace());
+            BrowserOutcome::RecordingExported {
+                summary: summary.try_into().map_err(unknown)?,
+                encoded: encoded.into(),
+                delivery: delivery.try_into().map_err(unknown)?,
+            }
+        }
         wire::RecordingFacts::ExportFailed { reason } => {
             BrowserOutcome::RecordingExportFailed { reason }
         }

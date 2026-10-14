@@ -659,8 +659,9 @@ Actions are:
 
 - `start`: optional `tab`; ask the extension to start the session's recording; capability `read`.
   A session holds one recording. Starting again on the tab it is still capturing answers with that
-  recording. Any other recording the session holds, stopped or not, refuses the start with
-  `This session already has a recording.` and the next step to save or discard it.
+  recording. A stopped recording that was never saved refuses the start with
+  `This session already has a recording.` and the next step to save or discard it. A recording
+  that was saved is replaced: the start discards it and begins the new one.
 - `status`: report state and deadlines; no new capability.
 - `stop`: capture a final frame, stop, and freeze; no new capability.
 - `save`: auto-stop if active. One replay goes to one place: with `target`,
@@ -678,9 +679,9 @@ with none answers `This session has no recording.` `target` and `download` are v
 save. The extension owns recording identity, frames, bounds,
 deadlines, stop, retention, erase, and the encode. Frames never leave the browser, and neither
 frames nor encoded bytes are written to Ghostlight storage, extension storage, logs, audit, or
-restart state. Save can be repeated until retention expires; a target or download delivery is a
-real effect each time and is not thereby repeat-safe. A save after retention expires is a refusal,
-not an empty result. Discard is destructive.
+restart state. Save can be repeated until retention expires or the next start replaces the
+recording; a target or download delivery is a real effect each time and is not thereby
+repeat-safe. A save after retention expires is a refusal, not an empty result. Discard is destructive.
 
 A recording also stops on its own when the page, or any frame inside it, loads new content or
 goes away: a navigation or reload in any frame, or a frame added or removed. Status then reads

@@ -275,16 +275,37 @@ pub type Answers = Vec<wire::CallAnswer>;
 ///
 /// The extension keeps recordings without knowing workspaces, and a workspace holds at most one.
 /// The service remembers which recording is whose, so a workspace reaches only its own and never
-/// has to name it.
+/// has to name it. It also remembers whether the recording has been saved, because a saved
+/// recording may be replaced by the next start while a recording never saved may not.
 #[derive(Debug, Default)]
 pub struct RecordingIndex {
-    by_workspace: Mutex<HashMap<String, String>>,
+    by_workspace: Mutex<HashMap<String, HeldRecording>>,
+}
+
+/// One workspace's recording and whether a save has delivered it.
+#[derive(Debug)]
+struct HeldRecording {
+    id: String,
+    saved: bool,
 }
 
 impl RecordingIndex {
-    /// Remember that `workspace` holds `recording_id`.
+    /// Remember that `workspace` holds `recording_id`, not yet saved.
     pub fn learn(&self, workspace: &str, recording_id: &str) {
-        lock(&self.by_workspace).insert(workspace.to_owned(), recording_id.to_owned());
+        lock(&self.by_workspace).insert(
+            workspace.to_owned(),
+            HeldRecording {
+                id: recording_id.to_owned(),
+                saved: false,
+            },
+        );
+    }
+
+    /// Remember that a save delivered the recording `workspace` holds.
+    pub fn mark_saved(&self, workspace: &str) {
+        if let Some(held) = lock(&self.by_workspace).get_mut(workspace) {
+            held.saved = true;
+        }
     }
 
     /// Forget the recording `workspace` held.
@@ -295,7 +316,17 @@ impl RecordingIndex {
     /// The recording `workspace` holds, if any.
     #[must_use]
     pub fn id(&self, workspace: &str) -> Option<String> {
-        lock(&self.by_workspace).get(workspace).cloned()
+        lock(&self.by_workspace)
+            .get(workspace)
+            .map(|held| held.id.clone())
+    }
+
+    /// Whether a save has delivered the recording `workspace` holds.
+    #[must_use]
+    pub fn is_saved(&self, workspace: &str) -> bool {
+        lock(&self.by_workspace)
+            .get(workspace)
+            .is_some_and(|held| held.saved)
     }
 }
 

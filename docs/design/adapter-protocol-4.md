@@ -1884,7 +1884,7 @@ Abbreviations:
 | 43 | HandleDialog | `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when `handled:false` | 1 |
 | 44 | ReadDiagnostics | `diagnostics{read{binding: hex(sha256(sorted scope ids)), guard}}` | 1 |
 | 45 | ClearDiagnostics | `diagnostics{clear}` | 1 |
-| 46 | StartRecording | a held recording is checked with `recording{status}` first (still capturing the same tab: answer it; gone: forget it; otherwise `RecordingHeld`); then `recording{start{tab_id, watch: scope.watch_changes then the real scope docs as GuardDoc}}`; record the id in RecordingIndex | 1-2 |
+| 46 | StartRecording | a held recording is checked with `recording{status}` first (still capturing the same tab: answer it; gone: forget it; stopped and already saved: `recording{discard}` then go ahead; otherwise `RecordingHeld`); then `recording{start{tab_id, watch: scope.watch_changes then the real scope docs as GuardDoc}}`; record the id in RecordingIndex | 1-2 |
 | 47-50 | Status, Stop, Export, Discard Recording | take the workspace's id from RecordingIndex (none: `RecordingNotFound`), then `recording{op}`; a Target export becomes `page{tab_id, call: attach_file at F (Scope::call), guard}` | 0-1 |
 | 51 | Cancel | write the `cancel` frame for that correlation; `Cancelled` | 0 |
 | 52 | Present | section 4.7; write `notice`; `Presented{rendered:false}` at once | 0 |

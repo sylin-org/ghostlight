@@ -4179,6 +4179,58 @@ fn a_session_holds_one_recording_and_never_names_it() {
     );
 }
 
+/// Start, save and start again is one journey: the save does not leave the session holding a
+/// recording it cannot replace, so the second start begins a new recording.
+#[test]
+fn a_session_starts_a_new_recording_after_saving_one() {
+    let (executor, browser, _, workspace, tab_handle, _) = workspace_with_a_target();
+    let url = "https://example.com/";
+    let started = |executor: &ApplicationExecutor| {
+        browser.push(Ok(BrowserOutcome::RecordingStarted {
+            summary: recording_summary(RecordingState::Recording, url),
+            existing: false,
+        }));
+        executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"start","tab":tab_handle}),
+            None,
+            &CancellationToken::default(),
+        )
+    };
+
+    assert_eq!(started(&executor).status, Status::Succeeded);
+
+    browser.push(Ok(BrowserOutcome::RecordingStopped {
+        summary: recording_summary(RecordingState::Frozen, url),
+        changed: true,
+    }));
+    browser.push(Ok(BrowserOutcome::RecordingExported {
+        summary: recording_summary(RecordingState::Frozen, url),
+        encoded: EncodedRecording {
+            frame_count: 3,
+            captured_frame_count: 3,
+            duration_ms: 900,
+            width: 640,
+            height: 400,
+            byte_count: 2_048,
+        },
+        delivery: RecordingDelivery::Downloaded,
+    }));
+    let saved = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"save","download":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(saved.status, Status::Succeeded);
+
+    let again = started(&executor);
+    assert_eq!(again.status, Status::Succeeded);
+    assert_eq!(again.effect, Effect::Applied);
+}
+
 /// What the browser says in answer to a dialog call corrects the record of the tab's dialog, so
 /// a missed event never leaves a later result claiming a dialog that is gone.
 #[test]
