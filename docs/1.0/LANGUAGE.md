@@ -60,6 +60,7 @@ so in the summary. Closing a handle whose tab is already gone succeeds without t
 browser. Target handles are different by design -- they are perception, not identity. A target
 handle is tied to one tab and document generation, a committed navigation makes prior target
 handles stale, and acting on one forces re-inspection of a page the model has actually seen.
+Reading the same control again in the same document returns the same handle.
 A same-document change is not a committed navigation. When an action moves the address within the
 same origin and no document commits, as an anchor link or a `history.pushState` route does, the
 generation and target handles stay valid. The tab's governed URL follows the page, landing

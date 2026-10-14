@@ -26,6 +26,19 @@ const HANDLE_SUFFIX_CHARS: usize = 8;
 /// The characters a handle's random part is drawn from: lowercase RFC 4648 base32.
 const HANDLE_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
+/// How many document generations of target records a tab keeps behind its current one.
+///
+/// A handle from one of these still resolves to the stale-target refusal with its last-known
+/// context, so the agent is told what replaced it. Older records add memory and no information.
+const TARGET_GENERATIONS_KEPT_BEHIND: u64 = 2;
+
+/// The most target records one workspace holds.
+///
+/// Reads mint records as fast as pages show controls, so memory needs a hard bound. Records of
+/// earlier generations go first, oldest first; current-generation records are what the agent can
+/// act on and are never evicted, so a page with more controls than this still works.
+const TARGET_RECORD_LIMIT: usize = 2000;
+
 /// Mint a short handle with `prefix` that `taken` does not already name.
 fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
     loop {
@@ -297,6 +310,108 @@ struct TargetState {
     name: String,
 }
 
+/// A workspace's target records, with an index so a control keeps one handle per document.
+///
+/// The index maps a tab, a document generation and a locator to the handle that names that
+/// control. Every insert and removal goes through this type, so the two maps cannot disagree.
+#[derive(Debug, Default)]
+struct TargetBook {
+    records: HashMap<TargetHandle, TargetState>,
+    index: HashMap<(TabHandle, u64, String), TargetHandle>,
+}
+
+impl TargetBook {
+    fn contains(&self, handle: &TargetHandle) -> bool {
+        self.records.contains_key(handle)
+    }
+
+    fn get(&self, handle: &TargetHandle) -> Option<&TargetState> {
+        self.records.get(handle)
+    }
+
+    /// Record one observed control and return its handle.
+    ///
+    /// A control already recorded for the same tab, generation and locator keeps its handle and
+    /// takes the new observation's role, name and credential class. Otherwise a fresh handle is
+    /// minted.
+    fn register(&mut self, tab: &SelectedTab, target: &ObservedTarget) -> TargetHandle {
+        let key = (tab.handle.clone(), tab.generation, target.locator.clone());
+        // A page authors its own role attribute, so it is narrowed here, at the one door
+        // observed targets come through. The page's own string is never stored in the narrowed
+        // role and so can never reach a sentence written to the audit.
+        let role = TargetRole::classify(&target.role);
+        if let Some(handle) = self.index.get(&key) {
+            if let Some(record) = self.records.get_mut(handle) {
+                record.credential_class = target.credential_class;
+                record.role = role;
+                record.role_page.clone_from(&target.role);
+                record.name.clone_from(&target.name);
+                return handle.clone();
+            }
+        }
+        let handle = TargetHandle(short_handle("target_", |candidate| {
+            self.records.contains_key(&TargetHandle(candidate.into()))
+        }));
+        self.records.insert(
+            handle.clone(),
+            TargetState {
+                tab: tab.handle.clone(),
+                generation: tab.generation,
+                locator: target.locator.clone(),
+                credential_class: target.credential_class,
+                role,
+                role_page: target.role.clone(),
+                name: target.name.clone(),
+            },
+        );
+        self.index.insert(key, handle.clone());
+        handle
+    }
+
+    /// Remove every record that `doomed` selects, keeping the index in step.
+    fn remove_where(&mut self, doomed: impl Fn(&TargetHandle, &TargetState) -> bool) {
+        self.records
+            .retain(|handle, record| !doomed(handle, record));
+        let records = &self.records;
+        self.index.retain(|_, handle| records.contains_key(handle));
+    }
+
+    /// Drop all records of one tab.
+    fn remove_tab(&mut self, tab: &TabHandle) {
+        self.remove_where(|_, record| &record.tab == tab);
+    }
+
+    /// Drop a tab's records older than the generations kept behind its current one.
+    fn prune_tab(&mut self, tab: &TabHandle, current: u64) {
+        let oldest_kept = current.saturating_sub(TARGET_GENERATIONS_KEPT_BEHIND);
+        self.remove_where(|_, record| &record.tab == tab && record.generation < oldest_kept);
+    }
+
+    /// Bring the book under the record limit by evicting non-current records, oldest first.
+    ///
+    /// A record is current when its generation is its tab's present generation. If only current
+    /// records remain, the limit is exceeded rather than break a handle the agent can use.
+    fn enforce_limit(&mut self, tabs: &HashMap<TabHandle, TabState>) {
+        let Some(excess) = self.records.len().checked_sub(TARGET_RECORD_LIMIT) else {
+            return;
+        };
+        let mut evictable: Vec<(u64, TargetHandle)> = self
+            .records
+            .iter()
+            .filter(|(_, record)| {
+                tabs.get(&record.tab)
+                    .is_some_and(|tab| record.generation != tab.generation)
+            })
+            .map(|(handle, record)| (record.generation, handle.clone()))
+            .collect();
+        evictable.sort_unstable_by_key(|(generation, _)| *generation);
+        evictable.truncate(excess);
+        let evicted: std::collections::HashSet<TargetHandle> =
+            evictable.into_iter().map(|(_, handle)| handle).collect();
+        self.remove_where(|handle, _| evicted.contains(handle));
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ViewState {
     tab: TabHandle,
@@ -337,7 +452,7 @@ struct WorkspaceState {
     browser: Option<String>,
     leased: bool,
     tabs: HashMap<TabHandle, TabState>,
-    targets: HashMap<TargetHandle, TargetState>,
+    targets: TargetBook,
     views: HashMap<ViewHandle, ViewState>,
     snapshots: HashMap<SnapshotHandle, SnapshotState>,
     images: HashMap<ImageHandle, ImageState>,
@@ -533,7 +648,7 @@ impl WorkspaceStore {
                 browser: None,
                 leased: false,
                 tabs: HashMap::new(),
-                targets: HashMap::new(),
+                targets: TargetBook::default(),
                 views: HashMap::new(),
                 snapshots: HashMap::new(),
                 images: HashMap::new(),
@@ -813,7 +928,7 @@ impl WorkspaceStore {
     #[must_use]
     pub fn target_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
         let handle = TargetHandle(requested.into());
-        self.labeled_owner(current, |workspace| workspace.targets.contains_key(&handle))
+        self.labeled_owner(current, |workspace| workspace.targets.contains(&handle))
     }
 
     /// Name the other workspace that holds a handle, by its client label only.
@@ -932,6 +1047,7 @@ impl WorkspaceStore {
                 tab.held = false;
                 tab.url = url.into();
                 tab.title.clear();
+                workspace.targets.prune_tab(handle, tab.generation);
                 return Some((workspace_id.clone(), handle.clone()));
             }
         }
@@ -1037,7 +1153,7 @@ impl WorkspaceStore {
                 .find_map(|(handle, tab)| (tab.physical_id == physical_id).then(|| handle.clone()));
             if let Some(handle) = handle {
                 workspace.tabs.remove(&handle);
-                workspace.targets.retain(|_, target| target.tab != handle);
+                workspace.targets.remove_tab(&handle);
                 workspace.views.retain(|_, view| view.tab != handle);
                 return;
             }
@@ -1211,7 +1327,9 @@ impl WorkspaceLease {
         known.readiness = tab.readiness;
         known.active = tab.active;
         known.held = false;
-        Ok(selected(handle, known))
+        let current = selected(handle, known);
+        workspace.targets.prune_tab(handle, current.generation);
+        Ok(current)
     }
 
     /// Follow a governed same-document address change without starting a new document.
@@ -1413,7 +1531,7 @@ impl WorkspaceLease {
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
         workspace.tabs.remove(handle);
-        workspace.targets.retain(|_, target| &target.tab != handle);
+        workspace.targets.remove_tab(handle);
         workspace.views.retain(|_, view| &view.tab != handle);
         workspace
             .snapshots
@@ -1473,7 +1591,9 @@ impl WorkspaceLease {
         Ok(selected(&handle, &value))
     }
 
-    /// Map observed browser targets to fresh opaque generation-bound handles.
+    /// Map observed browser targets to opaque generation-bound handles.
+    ///
+    /// A control seen again in the same document keeps its handle.
     pub fn register_targets(
         &self,
         tab: &SelectedTab,
@@ -1491,30 +1611,11 @@ impl WorkspaceLease {
         if known.generation != tab.generation {
             return Err(WorkspaceError::StaleTab);
         }
-        let mut mapped = Vec::with_capacity(targets.len());
-        for target in targets {
-            let handle = TargetHandle(short_handle("target_", |candidate| {
-                workspace
-                    .targets
-                    .contains_key(&TargetHandle(candidate.into()))
-            }));
-            workspace.targets.insert(
-                handle.clone(),
-                TargetState {
-                    tab: tab.handle.clone(),
-                    generation: tab.generation,
-                    locator: target.locator.clone(),
-                    credential_class: target.credential_class,
-                    // A page authors its own role attribute, so it is narrowed here, at the one
-                    // door observed targets come through. The page's own string is never stored
-                    // and so can never reach a sentence written to the audit.
-                    role: TargetRole::classify(&target.role),
-                    role_page: target.role.clone(),
-                    name: target.name.clone(),
-                },
-            );
-            mapped.push((handle, target.clone()));
-        }
+        let mapped = targets
+            .iter()
+            .map(|target| (workspace.targets.register(tab, target), target.clone()))
+            .collect();
+        workspace.targets.enforce_limit(&workspace.tabs);
         Ok(mapped)
     }
 
@@ -1532,7 +1633,7 @@ impl WorkspaceLease {
         let handle = TargetHandle(requested.into());
         let Some(target) = workspace.targets.get(&handle) else {
             let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.targets.contains_key(&handle)
+                id != &self.workspace && candidate.targets.contains(&handle)
             });
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedTarget
@@ -2336,6 +2437,137 @@ mod tests {
                 .unwrap_err(),
             WorkspaceError::StaleTab
         );
+    }
+
+    fn control(locator: &str, name: &str) -> ObservedTarget {
+        ObservedTarget {
+            locator: locator.into(),
+            role: "button".into(),
+            name: name.into(),
+            state: vec![],
+            credential_class: false,
+        }
+    }
+
+    fn controls(count: usize) -> Vec<ObservedTarget> {
+        (0..count)
+            .map(|index| control(&format!("locator_{index}"), "Button"))
+            .collect()
+    }
+
+    /// Reading the same control again in the same document returns the same handle, and the
+    /// record takes the newer observation's name.
+    #[test]
+    fn a_control_keeps_its_handle_within_a_document() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let first = lease
+            .register_targets(&tab, &[control("#email", "Email")])
+            .unwrap();
+        let second = lease
+            .register_targets(
+                &tab,
+                &[
+                    control("#email", "Work email"),
+                    control("#email", "Work email"),
+                ],
+            )
+            .unwrap();
+        assert_eq!(first[0].0, second[0].0);
+        assert_eq!(second[0].0, second[1].0);
+        let context = lease
+            .stale_target_context(first[0].0.as_str())
+            .expect("the record is kept");
+        assert_eq!(context.name, "Work email");
+        assert_eq!(store.lock().workspaces[&workspace].targets.records.len(), 1);
+        assert!(lease.resolve_target(first[0].0.as_str(), None).is_ok());
+    }
+
+    /// A new document generation mints a new handle, and records more than two generations
+    /// behind the current one are forgotten, so their handles are unknown and refuse as stale.
+    #[test]
+    fn a_new_generation_mints_new_handles_and_old_ones_are_forgotten() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let mut current = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/0"))
+            .unwrap();
+        let mut handles = Vec::new();
+        for generation in 0..4 {
+            let registered = lease
+                .register_targets(&current, &[control("#email", "Email")])
+                .unwrap();
+            handles.push(registered[0].0.clone());
+            if generation < 3 {
+                current = lease
+                    .apply_landing(
+                        &tab.handle,
+                        &physical(1, &format!("https://example.com/{}", generation + 1)),
+                    )
+                    .unwrap();
+            }
+        }
+        let distinct: std::collections::HashSet<_> = handles.iter().collect();
+        assert_eq!(distinct.len(), 4);
+        // Three advances later the first generation's record is gone; the two before the
+        // current one are still known.
+        assert_eq!(store.lock().workspaces[&workspace].targets.records.len(), 3);
+        assert!(lease.stale_target_context(handles[0].as_str()).is_none());
+        assert!(lease.stale_target_context(handles[1].as_str()).is_some());
+        for old in &handles[..3] {
+            assert_eq!(
+                lease.resolve_target(old.as_str(), None).unwrap_err(),
+                WorkspaceError::StaleTarget
+            );
+        }
+        assert!(lease.resolve_target(handles[3].as_str(), None).is_ok());
+    }
+
+    /// Past the record limit, earlier generations are evicted oldest first and the current
+    /// generation is never touched, even when it alone exceeds the limit.
+    #[test]
+    fn the_record_limit_evicts_earlier_generations_and_never_the_current_one() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let first = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/1"))
+            .unwrap();
+        let earlier = lease.register_targets(&first, &controls(1500)).unwrap();
+        let second = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/2"))
+            .unwrap();
+        let current = lease.register_targets(&second, &controls(1500)).unwrap();
+        let records =
+            |store: &WorkspaceStore| store.lock().workspaces[&workspace].targets.records.len();
+        assert_eq!(records(&store), super::TARGET_RECORD_LIMIT);
+        assert!(current
+            .iter()
+            .all(|(handle, _)| lease.resolve_target(handle.as_str(), None).is_ok()));
+        let survivors = earlier
+            .iter()
+            .filter(|(handle, _)| lease.stale_target_context(handle.as_str()).is_some())
+            .count();
+        assert_eq!(survivors, super::TARGET_RECORD_LIMIT - 1500);
+        let index_len = store.lock().workspaces[&workspace].targets.index.len();
+        assert_eq!(index_len, super::TARGET_RECORD_LIMIT);
+
+        let third = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/3"))
+            .unwrap();
+        let crowded = lease.register_targets(&third, &controls(2500)).unwrap();
+        assert_eq!(records(&store), 2500);
+        assert!(crowded
+            .iter()
+            .all(|(handle, _)| lease.resolve_target(handle.as_str(), None).is_ok()));
     }
 
     /// Every handle Ghostlight issues is its prefix and eight base32 characters, however many a
