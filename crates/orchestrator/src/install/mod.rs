@@ -4,11 +4,18 @@ pub mod browser_package;
 pub mod command_path;
 pub mod deployment;
 pub mod desktop_entry;
+pub mod entry;
 #[cfg(target_os = "linux")]
 pub mod flatpak;
 pub mod handoff;
+pub mod layout;
+pub mod marker;
 pub mod migration;
 pub mod native_host;
+pub mod record;
+#[cfg(test)]
+mod scratch;
+pub mod swap;
 pub mod user_assets;
 
 use std::collections::BTreeMap;
