@@ -4,7 +4,7 @@ Lane rules are in [BOOTSTRAP.md](BOOTSTRAP.md). Target: ADR-0197 Decisions 1-4, 
 
 ## RESUME HERE
 
-Next slice: connectors-4 onward, per the lane plan. No blockers.
+Next slice: connectors-5 onward, per the lane plan. No blockers.
 
 ## Landed
 
@@ -32,6 +32,17 @@ Next slice: connectors-4 onward, per the lane plan. No blockers.
   Known interim break: the bridge test
   `both_connectors_recover_through_the_shared_lifecycle_seam` reads the deleted
   `service_session.rs`; it goes with the bridge in the switch.
+
+- connectors-4: `ghostlight-browser-connector` 3.0.0 rebuilt on `ghostlight-relay` (`main.rs`,
+  `port.rs`); it depends on the relay crate and `anyhow` only. It holds the extension's hello,
+  drops later Chrome frames until a service accepts a `browser` stream, starts the service on
+  the backoff schedule only before that first connection, then pumps raw frames both ways on two
+  threads without parsing. When the stream ends it writes `backend_unavailable` once, drops
+  Chrome's frames, never starts the service, and probes with a read-only control `readiness`
+  opening on the backoff schedule; the first accepted probe ends the run so the extension
+  reconnects with a fresh hello. Gate: 11 connector tests, 19 MCP connector tests, 64 relay unit
+  tests and 9 fixture tests pass. The bridge test that reads `browser-connector/src/main.rs`
+  stays broken until the bridge goes in the switch, like the MCP one.
 
 ## Blockers
 
