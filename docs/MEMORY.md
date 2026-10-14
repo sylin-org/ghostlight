@@ -78,8 +78,7 @@ the owner wants, and what this project learned the hard way.
 - **Keep local work in the ordinary Ghostlight repository.** The owner rejected
   separate fleet folders/worktrees on 2026-09-09. The existing acceptance layout
   may remain for its current run; new work uses the main repository and existing
-  ignored artifact conventions. Flatpak Chromium support takes priority over the
-  remaining native Chromium acceptance until that investigation is resolved.
+  ignored artifact conventions.
 
 - **The four remote machines are dedicated test resources.** The owner grants the coordinator
   and each machine's local agents full control of test-01, test-02, test-03, and leo-desktop-02
@@ -272,6 +271,10 @@ the owner wants, and what this project learned the hard way.
   user put it; create a dedicated window only when none exists; never reclaim an unrelated one.
 - **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
   preserve-tabs setting. Either refusal keeps the tab visible, and manual closure stays the user's.
+- **Ghostlight is always user-space.** It installs and runs per user, under the user's own
+  home. It never depends on system packages, privileged helpers, or tunnels through a browser
+  sandbox; a sandboxed browser such as a Flatpak Chromium is named unsupported instead (owner,
+  2026-10-14; ADR-0197 Decision 22).
 - **Never phone home.** No telemetry, activation, update ping, audit upload, or hidden vendor
   dependency. The owner defines phone home as communication outside the user's or the
   administrator's intent, not HTTP access as such (2026-10-14). An administrator-configured signed

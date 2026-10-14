@@ -243,8 +243,9 @@ differ, this section wins.
   stays. The owner's definition: phone home means communication outside the user's or the
   administrator's intent. An administrator-configured policy fetch is intended communication,
   so it is not phone home. The dependency savings in the Consequences shrink accordingly.
-- **Decision 22, Flatpak.** The Flatpak route stays until the owner decides. ADR-0165 is not
-  superseded yet.
+- **Decision 22, Flatpak.** Confirmed: the Flatpak route is removed and ADR-0165 is superseded.
+  The owner's principle: Ghostlight is always user-space. It installs and runs per user and
+  never tunnels through a browser sandbox or depends on system packages or privileged helpers.
 - **Confirmed as written:** the governance knob removals (Decision 19), MCP in the service
   with connectors that handshake and start the service when it is not up (Decisions 2, 11 and
   17), Quit, child tabs, session continuity, the strict break and the small removals.
