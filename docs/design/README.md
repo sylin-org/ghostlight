@@ -16,6 +16,7 @@ Maintained, and still describing the product as built.
 | [visual-feedback.md](visual-feedback.md) | The feedback vocabulary: what each treatment means. Its rendered companion is [visual-feedback-dictionary.html](visual-feedback-dictionary.html). |
 | [tool-visual-signatures.md](tool-visual-signatures.md) | Which visual signature each tool carries. |
 | [action-observations.md](action-observations.md) | Where per-action facts belong, and the two structural owners that keep the account complete. |
+| [adapter-protocol-4.md](adapter-protocol-4.md) | Adapter protocol 4, the implementation spec behind ADR-0197: frozen primitives, isolated-world assets, and the service-side Chromium translation. |
 
 ## Dated reviews and plans
 
