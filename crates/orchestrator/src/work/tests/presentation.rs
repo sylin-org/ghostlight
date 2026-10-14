@@ -1,7 +1,7 @@
 //! Actual executor dispatch binds read feedback and closes each composition child's visuals.
 
 use super::*;
-use ghostlight_bridge::browser::{PresentationActivity, PresentationKind, PresentationSignal};
+use crate::browser::adapter::{PresentationActivity, PresentationKind, PresentationSignal};
 
 #[derive(Default)]
 struct PageSignals(Mutex<Vec<PresentationSignal>>);

@@ -2,7 +2,7 @@ use crate::audit::AuditRecorder;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use ghostlight_bridge::browser::PresentationActivity;
+use crate::browser::adapter::PresentationActivity;
 
 use crate::events::{DenialPresentation, DomainEvent};
 use crate::governance::{
@@ -405,7 +405,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
 struct ControlledBrowser {
     connected: bool,
     publish_fails: bool,
-    published: Mutex<Vec<ghostlight_bridge::browser::RuntimeControlState>>,
+    published: Mutex<Vec<crate::browser::adapter::RuntimeControlState>>,
 }
 
 impl ControlledBrowser {
@@ -423,10 +423,10 @@ impl crate::browser::BrowserPort for ControlledBrowser {
         &self,
         _: &str,
         _: &str,
-        _: ghostlight_bridge::browser::BrowserCommand,
+        _: crate::browser::adapter::BrowserCommand,
         _: std::time::Instant,
         _: &std::sync::atomic::AtomicBool,
-    ) -> Result<ghostlight_bridge::browser::BrowserOutcome, crate::browser::BrowserError> {
+    ) -> Result<crate::browser::adapter::BrowserOutcome, crate::browser::BrowserError> {
         panic!("a workbench control must not dispatch browser work");
     }
 
@@ -438,14 +438,14 @@ impl crate::browser::BrowserPort for ControlledBrowser {
             id: "browser-1".into(),
             name: Some("Chrome".into()),
             adapter_version: "1.0.0".into(),
-            platform: ghostlight_bridge::browser::BrowserPlatform::Chromium,
+            platform: crate::browser::adapter::BrowserPlatform::Chromium,
             attended: true,
         }]
     }
 
     fn publish_control_state(
         &self,
-        state: ghostlight_bridge::browser::RuntimeControlState,
+        state: crate::browser::adapter::RuntimeControlState,
     ) -> Result<(), crate::browser::BrowserError> {
         self.published.lock().unwrap().push(state);
         if self.publish_fails {
@@ -487,8 +487,8 @@ const READ_ONLY_POLICY: &str = r#"{"schema":3,"name":"read","version":"1","grant
 #[test]
 fn pause_and_resume_apply_while_no_browser_is_connected() {
     use super::WorkbenchRuntimeIntent;
+    use crate::browser::adapter::RuntimeControlState;
     use crate::language::readiness::Readiness;
-    use ghostlight_bridge::browser::RuntimeControlState;
 
     let governance = GovernanceFacade::new(None, None);
     let browser = ControlledBrowser::new(false, false);
@@ -535,7 +535,7 @@ fn pause_and_resume_apply_while_no_browser_is_connected() {
 #[test]
 fn a_control_confirmation_states_the_authority_and_never_browser_delivery() {
     use super::WorkbenchRuntimeIntent;
-    use ghostlight_bridge::browser::RuntimeControlState;
+    use crate::browser::adapter::RuntimeControlState;
 
     let expected = crate::language::control::confirmation(RuntimeControlState::Held);
     // Connected and published, connected but publication failed, and no browser at all: the

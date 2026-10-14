@@ -2,7 +2,7 @@ use super::*;
 use std::fs;
 use std::path::PathBuf;
 
-use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
+use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 
 use super::{
     AuditRecord, AuthoringError, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,

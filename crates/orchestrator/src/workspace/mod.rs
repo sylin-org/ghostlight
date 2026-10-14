@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserReadiness, ObservedTarget, PhysicalPoint, PhysicalRectangle, PhysicalTab,
     ViewportGeometry,
 };
@@ -1758,7 +1758,7 @@ pub enum WorkspaceError {
 
 #[cfg(test)]
 mod tests {
-    use ghostlight_bridge::browser::{
+    use crate::browser::adapter::{
         BrowserReadiness, CaptureScope, ObservedTarget, PhysicalTab, ViewportGeometry,
     };
     use ghostlight_bridge::service::{IntakeChannel, SessionMarker};

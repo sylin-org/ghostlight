@@ -7,7 +7,7 @@
 //! every adapter that connects later, so a confirmation neither claims nor denies that a browser
 //! received it (ADR-0187 Decision 4, ADR-0196).
 
-use ghostlight_bridge::browser::RuntimeControlState;
+use crate::browser::adapter::RuntimeControlState;
 
 /// Confirm the runtime state a person's control left in force.
 #[must_use]

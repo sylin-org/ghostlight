@@ -413,7 +413,7 @@ mod tests {
             invocation: "parent".into(),
             workspace: "workspace".into(),
             tool: "browser_flow".into(),
-            activity: ghostlight_bridge::browser::PresentationActivity::Quiet,
+            activity: crate::browser::adapter::PresentationActivity::Quiet,
             capabilities: CapabilitySet::EMPTY,
         });
         let receipt = child(1);

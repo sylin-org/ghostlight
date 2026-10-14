@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     adapter_capability, AdapterCapability, BrowserFrame, BrowserPlatform, BrowserReceipt,
     ADAPTER_PROTOCOL_MAJOR,
 };

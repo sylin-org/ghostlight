@@ -2819,7 +2819,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
     assert_eq!(result.facts["values_sent"], false);
     assert_eq!(
         browser.control_states().last(),
-        Some(&ghostlight_bridge::browser::RuntimeControlState::Active)
+        Some(&crate::browser::adapter::RuntimeControlState::Active)
     );
     assert!(!browser
         .calls()

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ghostlight_bridge::browser::{DiagnosticsLayer, DiagnosticsState};
+use crate::browser::adapter::{DiagnosticsLayer, DiagnosticsState};
 use ghostlight_bridge::diagnostics::{
     self, event, resolve, set_marker, Activation, Component, Level, Sink,
 };

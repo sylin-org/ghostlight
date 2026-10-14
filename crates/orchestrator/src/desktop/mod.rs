@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn the_surface_handles_every_change_the_orchestrator_can_publish() {
-        use ghostlight_bridge::browser::RuntimeControlState;
+        use crate::browser::adapter::RuntimeControlState;
 
         use crate::governance::{Capability, CapabilitySet};
         use crate::workbench::{HistoryItem, OperationPhase, OperationSummary, WorkbenchChange};

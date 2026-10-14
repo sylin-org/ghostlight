@@ -21,13 +21,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, PhysicalActionSubject, PhysicalFile,
     PhysicalPoint, PhysicalRecordingSummary, PhysicalTab, PresentationActivity, RecordingDelivery,
     RecordingState, RecordingStopReason,
 };
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
@@ -2610,7 +2610,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use ghostlight_bridge::browser::{
+    use crate::browser::adapter::{
         BrowserCommand, BrowserOutcome, BrowserReadiness, CaptureScope, EncodedRecording,
         ObservedTarget, PhysicalActionSubject, PhysicalRecordingSummary, PhysicalTab,
         RecordingDelivery, RecordingDestination, RecordingState, RecordingStopReason,
@@ -2651,7 +2651,7 @@ mod tests {
         fn present(
             &self,
             _workspace: &str,
-            _signal: ghostlight_bridge::browser::PresentationSignal,
+            _signal: crate::browser::adapter::PresentationSignal,
         ) -> Result<(), PresentationError> {
             Ok(())
         }

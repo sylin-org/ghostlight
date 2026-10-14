@@ -76,7 +76,9 @@ pub struct DocumentObservation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browser::{adapter_capability as capability, BrowserCommand, BrowserOutcome};
+    use crate::browser::adapter::{
+        adapter_capability as capability, BrowserCommand, BrowserOutcome,
+    };
 
     #[test]
     fn document_envelopes_round_trip_under_their_own_capability() {

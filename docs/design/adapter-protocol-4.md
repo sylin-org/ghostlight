@@ -15,7 +15,7 @@ Sources, in order of authority:
 2. `arch/SYNTHESIS.md` section 2 (S3, S4, S5, S6) and section 8 (M4c).
 3. `arch/CRITIQUE.md` corrections.
 4. `design/FINAL.md`, used as the base wherever 1 to 3 do not override it.
-5. The current code: `extension/`, `crates/bridge/src/browser.rs`, `crates/orchestrator/src/browser/`,
+5. The current code: `extension/`, `crates/orchestrator/src/browser/adapter/mod.rs`, `crates/orchestrator/src/browser/`,
    `crates/orchestrator/src/page_runtime/`, `crates/orchestrator/src/work/`.
 
 Line references such as `service-worker.js:1472` point at dev `95a7e646`.
@@ -150,7 +150,7 @@ connection is ready at once; no install round trip
    - Validate it with today's rules: the `browser_` id grammar (`browser/mod.rs:475-483`) and the browser
      name bound.
    - `engine_version` is informational. The manifest's `minimum_chrome_version: 125` enforces the floor.
-3. If `major` is 3, decode the same `Value` as `ghostlight_bridge::browser::BrowserFrame` and continue in
+3. If `major` is 3, decode the same `Value` as `crate::browser::adapter::BrowserFrame` and continue in
    today's `attach_reader` body unchanged.
 4. Anything else gets `{kind:"error", code:"adapter_incompatible", message}` and the socket closes. Today the
    socket closes silently.
@@ -529,7 +529,7 @@ pub struct AxNode { pub node_id: String, #[serde(default)] pub parent_id: Option
                     #[serde(default)] pub properties: Vec<(String, String)> }
 // DiagnosticEntry, RecordingSummary, Encoded, Delivery, PresentationKind, PresentationActivity, ClickShape,
 // RuntimeControlState, DiagnosticSource, DiagnosticDetail: field-for-field tolerant mirrors of the
-// bridge types, with From impls into ghostlight_bridge::browser types.
+// bridge types, with From impls into crate::browser::adapter types.
 ```
 
 ### 1.5 Primitive catalogue

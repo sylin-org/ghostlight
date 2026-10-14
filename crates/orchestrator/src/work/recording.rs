@@ -1,6 +1,6 @@
 //! Governed recording lifecycle, export, and delivery execution.
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, EncodedRecording, PhysicalRecordingSummary, RecordingDelivery,
     RecordingDestination, RecordingState, RecordingStopReason, RECORDING_LOCAL_MAX_BYTES,
     RECORDING_TRANSFER_MAX_BYTES,

@@ -1,6 +1,6 @@
 //! Prove runtime admission occurs after queued writer access and before transmission.
 
-use ghostlight_bridge::browser::BrowserPlatform;
+use crate::browser::adapter::BrowserPlatform;
 
 use super::super::{lock, BrowserDispatch, Connection};
 use super::*;

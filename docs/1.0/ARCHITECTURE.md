@@ -21,8 +21,9 @@ local human
   -> the same orchestrator contexts
 ```
 
-- `crates/bridge` defines the small versioned service and browser wire vocabularies plus the one
-  shared local service-lifecycle seam.
+- `crates/bridge` defines the small versioned service wire vocabulary, framing, and the one
+  shared local service-lifecycle seam. The typed browser adapter vocabulary lives in
+  `crates/orchestrator/src/browser/adapter`, because only the service reads it.
 - `crates/orchestrator` is the domain-driven modular monolith and service process.
 - `crates/mcp-connector` is the hand-rolled JSON-RPC MCP stdio edge.
 - `crates/browser-connector` is a frame relay between native messaging and the service.

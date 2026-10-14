@@ -1,6 +1,6 @@
 //! Controlled-tab listing, activation, navigation, and closure execution.
 
-use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome};
+use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
 use serde_json::{json, Value};
 
 use crate::browser::BrowserError;
@@ -310,7 +310,7 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
-        tab: ghostlight_bridge::browser::PhysicalTab,
+        tab: crate::browser::adapter::PhysicalTab,
         controlled: SelectedTab,
         commits: Vec<String>,
         kind: OpenedTabKind,

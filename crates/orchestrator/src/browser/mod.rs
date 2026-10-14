@@ -1,5 +1,6 @@
 //! The physical browser port and authenticated relay-backed adapter implementation.
 
+pub mod adapter;
 pub mod recovery;
 
 use std::collections::HashMap;
@@ -11,13 +12,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
     BrowserOutcome, BrowserPlatform, BrowserRequest, DiagnosticsState, RuntimeControlState,
     ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
     COMMAND_TRANSFER_MAX_CHUNKS,
 };
+use base64::Engine as _;
 use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
 use ghostlight_bridge::transport::{
     SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT,
@@ -1845,7 +1846,7 @@ mod contract_tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use ghostlight_bridge::browser::{
+    use crate::browser::adapter::{
         adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserPlatform,
         ADAPTER_PROTOCOL_MAJOR,
     };
@@ -1908,7 +1909,7 @@ pub(crate) mod testing {
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
 
-    use ghostlight_bridge::browser::{
+    use crate::browser::adapter::{
         BrowserCommand, BrowserOutcome, BrowserPlatform, RuntimeControlState,
     };
 
@@ -1921,12 +1922,9 @@ pub(crate) mod testing {
     #[derive(Debug)]
     pub struct FakeBrowser {
         documents: Mutex<
-            std::collections::HashMap<
-                u64,
-                ghostlight_bridge::browser::documents::DocumentInventory,
-            >,
+            std::collections::HashMap<u64, crate::browser::adapter::documents::DocumentInventory>,
         >,
-        scopes: Mutex<Vec<ghostlight_bridge::browser::documents::DocumentScope>>,
+        scopes: Mutex<Vec<crate::browser::adapter::documents::DocumentScope>>,
         calls: Mutex<Vec<BrowserCommand>>,
         routed: Mutex<Vec<String>>,
         outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
@@ -1966,12 +1964,12 @@ pub(crate) mod testing {
         pub fn set_documents(
             &self,
             tab: u64,
-            inventory: ghostlight_bridge::browser::documents::DocumentInventory,
+            inventory: crate::browser::adapter::documents::DocumentInventory,
         ) {
             lock(&self.documents).insert(tab, inventory);
         }
         /// Document constraints sent to this browser, separate from physical operation calls.
-        pub fn scopes(&self) -> Vec<ghostlight_bridge::browser::documents::DocumentScope> {
+        pub fn scopes(&self) -> Vec<crate::browser::adapter::documents::DocumentScope> {
             lock(&self.scopes).clone()
         }
         pub fn push(&self, outcome: Result<BrowserOutcome, BrowserError>) {
@@ -2007,7 +2005,7 @@ pub(crate) mod testing {
             _deadline: Instant,
             _cancelled: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
-            use ghostlight_bridge::browser::documents::{
+            use crate::browser::adapter::documents::{
                 DocumentInventory, DocumentObservation, PhysicalDocument,
             };
             if let BrowserCommand::DescribeDocuments {
@@ -2063,7 +2061,7 @@ pub(crate) mod testing {
                     tab_id,
                     satisfied: true,
                     elapsed_ms: 0,
-                    readiness: ghostlight_bridge::browser::BrowserReadiness::Complete,
+                    readiness: crate::browser::adapter::BrowserReadiness::Complete,
                 });
             }
             lock(&self.routed).push(browser.into());

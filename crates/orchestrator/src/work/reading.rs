@@ -1,6 +1,6 @@
 //! Reading, inspection, discovery, and screenshot execution.
 
-use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome};
+use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
 use ghostlight_bridge::service::ServiceContent;
 use serde_json::{json, Value};
 

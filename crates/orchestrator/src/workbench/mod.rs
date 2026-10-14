@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ghostlight_bridge::browser::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
+use crate::browser::adapter::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
 use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

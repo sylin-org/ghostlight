@@ -6,7 +6,7 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome};
+use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
 use sha2::{Digest, Sha256};
 
 /// Current page-runtime contract revision.

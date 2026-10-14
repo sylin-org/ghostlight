@@ -1,8 +1,8 @@
 //! Closed in-process domain events for meaningful completed state changes.
 
+use crate::browser::adapter::{ClickShape, PresentationActivity};
 use crate::governance::CapabilitySet;
 use crate::workspace::TabHandle;
-use ghostlight_bridge::browser::{ClickShape, PresentationActivity};
 
 /// Closed user-facing meaning for one blocked browser job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

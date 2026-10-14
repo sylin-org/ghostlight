@@ -1,6 +1,6 @@
 //! Document admission at the executor's common browser boundary, before content extraction.
 
-use ghostlight_bridge::browser::documents::{DocumentInventory, DocumentScope, DOCUMENT_LIMIT};
+use crate::browser::adapter::documents::{DocumentInventory, DocumentScope, DOCUMENT_LIMIT};
 
 use crate::governance::documents::{Handling, Notice};
 use crate::language::coverage::{Coverage, HumanCoverage};
@@ -145,7 +145,7 @@ impl RequestScope {
             BrowserCommand::SetZoom { tab_id, .. } => *tab_id,
             BrowserCommand::ExportRecording {
                 destination:
-                    ghostlight_bridge::browser::RecordingDestination::Target {
+                    crate::browser::adapter::RecordingDestination::Target {
                         tab_id, locator, ..
                     },
                 ..
@@ -480,7 +480,7 @@ fn validate_inventory(inventory: &DocumentInventory) -> Result<(), BrowserError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghostlight_bridge::browser::documents::PhysicalDocument;
+    use crate::browser::adapter::documents::PhysicalDocument;
 
     #[test]
     fn a_disconnected_or_cyclic_graph_cannot_establish_coverage() {

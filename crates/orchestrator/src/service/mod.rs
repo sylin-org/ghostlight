@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::browser::adapter::{BrowserCommand, BrowserEvent};
 use anyhow::{bail, Context, Result};
-use ghostlight_bridge::browser::{BrowserCommand, BrowserEvent};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
@@ -978,7 +978,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use ghostlight_bridge::browser::BrowserCommand;
+    use crate::browser::adapter::BrowserCommand;
     use ghostlight_bridge::framing::{read_json_line, write_json_line};
     use ghostlight_bridge::service::{
         IntakeChannel, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
@@ -1007,6 +1007,7 @@ mod tests {
     #[test]
     fn passive_browsing_never_becomes_work_or_claims_a_child_tab() {
         use crate::audit::{AuditRecorder, JsonlAuditSink};
+        use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
         use crate::browser::BrowserEventSink;
         use crate::governance::GovernanceFacade;
         use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -1014,7 +1015,6 @@ mod tests {
         use crate::work::{ApplicationExecutor, CancellationToken};
         use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
         use crate::workspace::WorkspaceStore;
-        use ghostlight_bridge::browser::{BrowserEvent, BrowserReadiness, PhysicalTab};
         use serde_json::json;
 
         let (directory, _) = runtime_path("passive-browsing");
@@ -1169,7 +1169,7 @@ mod tests {
         workspaces: &crate::workspace::WorkspaceStore,
         ids: &[u64],
     ) -> ReleasedTabs {
-        use ghostlight_bridge::browser::{BrowserReadiness, PhysicalTab};
+        use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
 
         let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp, None);
         workspaces
@@ -1193,8 +1193,8 @@ mod tests {
 
     /// Run release cleanup against a browser whose preserve-tabs setting keeps every tab open.
     fn clean_up_kept_open(workspaces: &crate::workspace::WorkspaceStore, released: &ReleasedTabs) {
+        use crate::browser::adapter::BrowserOutcome;
         use crate::browser::BrowserError;
-        use ghostlight_bridge::browser::BrowserOutcome;
 
         let browser = FakeBrowser::default();
         browser.push(Ok(BrowserOutcome::DiagnosticsCleared {
@@ -1215,9 +1215,9 @@ mod tests {
 
     #[test]
     fn only_a_tab_the_browser_kept_open_after_release_cleanup_is_reusable() {
+        use crate::browser::adapter::BrowserOutcome;
         use crate::browser::BrowserError;
         use crate::workspace::WorkspaceStore;
-        use ghostlight_bridge::browser::BrowserOutcome;
 
         let workspaces = WorkspaceStore::default();
         let mut released = release_example_tabs(&workspaces, &[1, 2, 3]);
@@ -1262,10 +1262,10 @@ mod tests {
 
     #[test]
     fn browser_events_take_released_tabs_out_of_reuse() {
+        use crate::browser::adapter::BrowserEvent;
         use crate::browser::BrowserEventSink;
         use crate::governance::GovernanceFacade;
         use crate::workspace::WorkspaceStore;
-        use ghostlight_bridge::browser::BrowserEvent;
 
         let workspaces = WorkspaceStore::default();
         let sink = super::ServiceBrowserEvents {

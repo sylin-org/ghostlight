@@ -1,6 +1,6 @@
 //! Pointer, viewport, zoom, and window-geometry execution.
 
-use ghostlight_bridge::browser::{BrowserCommand, BrowserOutcome, ClickShape};
+use crate::browser::adapter::{BrowserCommand, BrowserOutcome, ClickShape};
 use serde_json::json;
 
 use crate::events::DomainEvent;

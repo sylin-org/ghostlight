@@ -102,7 +102,7 @@ The tree is a Rust workspace with four process/trust concerns:
 
 - `crates/orchestrator/` -- the product authority: language, workspace aggregate, governance,
   browser coordination, presentation decisions, execution, and completion.
-- `crates/bridge/` -- small typed service and browser relay contracts plus framing, and the one
+- `crates/bridge/` -- small typed service contracts plus framing, and the one
   shared local service-lifecycle seam both connectors use to demand-start the sibling authority.
 - `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
   rendering, never product decisions.

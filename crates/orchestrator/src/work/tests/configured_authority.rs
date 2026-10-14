@@ -168,7 +168,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     );
                     assert_eq!(
                         executor.governance.runtime_state(),
-                        ghostlight_bridge::browser::RuntimeControlState::Active
+                        crate::browser::adapter::RuntimeControlState::Active
                     );
                 } else {
                     assert_eq!(

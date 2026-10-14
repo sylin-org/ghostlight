@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, PhysicalActionSubject, PhysicalField,
 };
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ use super::{
     readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
     Status, Terminal,
 };
-use ghostlight_bridge::browser::PhysicalFile;
+use crate::browser::adapter::PhysicalFile;
 
 impl ApplicationExecutor {
     pub(super) fn perform_fill(

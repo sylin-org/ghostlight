@@ -1,9 +1,9 @@
 //! H6 authority, scope, privacy, and truthful-negative executor regressions.
 
 use super::*;
+use crate::browser::adapter::documents::{DocumentInventory, PhysicalDocument};
 use crate::workbench::WorkbenchFacade;
 use crate::workspace::WorkspaceId;
-use ghostlight_bridge::browser::documents::{DocumentInventory, PhysicalDocument};
 use uuid::Uuid;
 
 fn inventory(child_supported: bool) -> DocumentInventory {

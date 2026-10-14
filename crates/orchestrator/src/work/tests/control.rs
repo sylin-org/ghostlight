@@ -5,8 +5,8 @@ use super::*;
 #[test]
 fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
     for intent in [
-        ghostlight_bridge::browser::RuntimeControlIntent::Hold,
-        ghostlight_bridge::browser::RuntimeControlIntent::EndSession,
+        crate::browser::adapter::RuntimeControlIntent::Hold,
+        crate::browser::adapter::RuntimeControlIntent::EndSession,
     ] {
         let (executor, browser, _, workspace, audit) = fixture();
         let notices = Arc::new(Notices::default());

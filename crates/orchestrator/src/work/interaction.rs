@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, DiagnosticDetail, DiagnosticEntry, DiagnosticSource,
 };
 

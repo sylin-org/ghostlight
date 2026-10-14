@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ghostlight_bridge::browser::{RuntimeControlIntent, RuntimeControlState};
+use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use ghostlight_bridge::service::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

@@ -113,10 +113,10 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
     assert_eq!(explain.facts["audit"]["mode"], "require_audit");
     executor
         .governance
-        .apply_runtime_intent(ghostlight_bridge::browser::RuntimeControlIntent::Hold);
+        .apply_runtime_intent(crate::browser::adapter::RuntimeControlIntent::Hold);
     assert_eq!(
         executor.governance.runtime_state(),
-        ghostlight_bridge::browser::RuntimeControlState::Held
+        crate::browser::adapter::RuntimeControlState::Held
     );
     let explain = executor.execute(
         &workspace,
@@ -135,7 +135,7 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
     assert_eq!(browser.calls().len(), commands);
     assert_eq!(
         executor.governance.runtime_state(),
-        ghostlight_bridge::browser::RuntimeControlState::Held
+        crate::browser::adapter::RuntimeControlState::Held
     );
     fs::remove_file(policy).unwrap();
 }

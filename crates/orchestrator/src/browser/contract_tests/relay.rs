@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use std::sync::Mutex;
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserOutcome,
     BrowserPlatform, BrowserReadiness, BrowserReceipt, PhysicalTab, PresentationActivity,
     PresentationKind, PresentationSignal, ADAPTER_PROTOCOL_MAJOR,

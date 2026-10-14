@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ghostlight_bridge::browser::{
+use crate::browser::adapter::{
     BrowserCommand, PresentationActivity, PresentationKind, PresentationSignal,
 };
 use thiserror::Error;
@@ -399,7 +399,7 @@ pub enum PresentationError {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use ghostlight_bridge::browser::{PresentationActivity, PresentationKind, PresentationSignal};
+    use crate::browser::adapter::{PresentationActivity, PresentationKind, PresentationSignal};
 
     use crate::events::{DenialPresentation, DomainEvent};
     use crate::governance::Capability;
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn a_click_describes_its_shape_and_nothing_else_does() {
-        use ghostlight_bridge::browser::ClickShape;
+        use crate::browser::adapter::ClickShape;
 
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn overlapping_reads_keep_their_page_destination_and_completion_independent() {
-        use ghostlight_bridge::browser::BrowserCommand;
+        use crate::browser::adapter::BrowserCommand;
 
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn composition_phases_bind_fresh_destinations_and_denials_finish_their_origin() {
-        use ghostlight_bridge::browser::BrowserCommand;
+        use crate::browser::adapter::BrowserCommand;
 
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
