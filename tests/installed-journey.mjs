@@ -44,6 +44,10 @@ const CALL_TIMEOUT_MS = 60000;
 const RESTART_TIMEOUT_MS = 120000;
 /** How long a quit must stay quit with nothing calling. */
 const QUIT_HOLD_MS = 30000;
+/** Failure reasons that only mean the extension has not reconnected to the restarted service yet. */
+const BROWSER_RECONNECTING = ["browser_disconnected", "browser_not_answering"];
+/** How long the scratch browser has to connect to the installed service. */
+const CONNECT_TIMEOUT_MS = 120000;
 /** Names of the tools the 2.0 catalog advertises. */
 const EXPECTED_TOOLS = [
   "browser_tabs", "browser_navigate", "browser_history", "browser_window", "browser_read",
@@ -307,8 +311,10 @@ const PAGES = {
    document.getElementById("pad").addEventListener("click", (event) => window.padClicks.push([event.clientX, event.clientY]));`),
   "/dialogs": () => page("Installed dialogs", `
     <h1>Dialogs</h1>
-    <button id="alert">Raise alert</button><button id="confirm">Raise confirm</button><button id="prompt">Raise prompt</button>`,
-  `window.alerts = 0; window.confirmed = "unset"; window.answer = "unset";
+    <button id="alert">Raise alert</button><button id="confirm">Raise confirm</button><button id="prompt">Raise prompt</button>
+    <label>Trap field <input id="trap" aria-label="Trap field"></label>`,
+  `window.alerts = 0; window.confirmed = "unset"; window.answer = "unset"; window.trapAlerts = 0;
+   document.getElementById("trap").addEventListener("input", () => { alert("Raised by the trap field"); window.trapAlerts++; });
    document.getElementById("alert").addEventListener("click", () => { alert("Alert message"); window.alerts++; });
    document.getElementById("confirm").addEventListener("click", () => { window.confirmed = confirm("Confirm message"); });
    document.getElementById("prompt").addEventListener("click", () => { window.answer = prompt("Prompt message", "default answer"); });`),
@@ -681,7 +687,7 @@ check("click", "(5) click by target, by selector and by coordinates", async (t) 
   assert.ok(within(clicks[0][0], pad.cssX, 6) && within(clicks[0][1], pad.cssY, 6), `clicked ${clicks[0]} aimed at ${pad.cssX},${pad.cssY}`);
 });
 
-check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respond; an alert in a world call", async (t) => {
+check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respond; an alert raised by a fill and by an evaluation", async (t) => {
   const tab = await t.openFixture("/dialogs");
   const tag = t.tag;
   const raise = async (name) => {
@@ -713,13 +719,31 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
   await t.succeed("browser_dialog", { tab, action: "dismiss" });
   assert.equal(await t.evalIn(tag, "window.answer"), null);
 
-  const world = await t.call("browser_execute", { tab, script: "alert('Raised in a world call'); return 1;", timeout_ms: 8000 });
-  assert.notEqual(world.status, "failed", JSON.stringify(world));
-  const open = await t.succeed("browser_dialog", { tab, action: "status" });
-  assert.equal(open.facts.present, true, `the world-call alert is not reported: ${JSON.stringify(world)}`);
-  assert.match(JSON.stringify(open.facts), /Raised in a world call/);
+  // A fill is a world call: the field's input listener raises an alert while the call is running.
+  // The call must come back promptly with the dialog named, long before its own deadline.
+  const trap = await t.targetNamed(tab, "Trap field", "textbox");
+  const started = Date.now();
+  const filled = await t.call("browser_fill_form", { tab, fields: [{ target: trap, value: "trigger" }], timeout_ms: 30000 }, { timeoutMs: 60000 });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 15000, `the fill waited ${elapsed} ms instead of answering when the dialog opened: ${JSON.stringify(filled)}`);
+  assert.notEqual(filled.status, "succeeded", `a fill that raised a dialog cannot be reported as done: ${JSON.stringify(filled)}`);
+  assert.doesNotMatch(JSON.stringify(filled), /deadline|timed out/i, `the fill ended on its deadline: ${JSON.stringify(filled)}`);
+  assert.match(JSON.stringify(filled), /dialog/i, `the outcome does not point at the dialog: ${JSON.stringify(filled)}`);
+  const raised = await t.succeed("browser_dialog", { tab, action: "status" });
+  assert.equal(raised.facts.present, true, `the fill's alert is not reported: ${JSON.stringify(raised)}`);
+  assert.match(JSON.stringify(raised.facts), /Raised by the trap field/);
   await t.succeed("browser_dialog", { tab, action: "accept" });
-  return `world-call execute reported ${world.status}`;
+  assert.equal(await t.evalIn(tag, "window.trapAlerts"), 1);
+  assert.equal((await t.succeed("browser_dialog", { tab, action: "status" })).facts.present, false, "the dialog is still reported after accept");
+
+  // An evaluation runs in the main world through its own path; its alert is a separate case.
+  const evaluated = await t.call("browser_execute", { tab, script: "alert('Raised by an evaluation'); return 1;", timeout_ms: 8000 });
+  assert.notEqual(evaluated.status, "failed", JSON.stringify(evaluated));
+  const open = await t.succeed("browser_dialog", { tab, action: "status" });
+  assert.equal(open.facts.present, true, `the evaluation's alert is not reported: ${JSON.stringify(evaluated)}`);
+  assert.match(JSON.stringify(open.facts), /Raised by an evaluation/);
+  await t.succeed("browser_dialog", { tab, action: "accept" });
+  return `fill answered in ${elapsed} ms with ${filled.status}; evaluation reported ${evaluated.status}`;
 });
 
 check("editor", "(7) contenteditable keeps retained values and the submission counter", async (t) => {
@@ -978,6 +1002,7 @@ check("strict-csp", "(21) strict CSP and Trusted Types: overlay and click work w
   await t.succeed("browser_diagnose", { tab, source: "console", detail: "all" });
   await t.succeed("browser_click", { tab, target: await t.targetNamed(tab, "Count", "button") });
   assert.equal(await t.evalIn(tag, "window.clicks"), 1);
+  await until(() => t.evalIn(tag, "Boolean(document.getElementById('ghostlight-presentation-root'))"), "the presentation overlay to mount on the strict page", 15000, 250);
   await t.succeed("browser_screenshot", { tab }, { timeoutMs: 90000 });
   const violations = await t.evalIn(tag, "window.violations");
   assert.deepEqual(violations, [], `the page saw policy violations: ${JSON.stringify(violations)}`);
@@ -1068,20 +1093,23 @@ check("restart-continuity", "(26) a relay-3 quit: the next call is held, the ser
   const tab = await t.openFixture("/home");
   const before = readRuntime();
   await quitService();
+  await until(async () => !(await portOpen(before.port)), "the old listener to close", 30000, 250);
   const started = Date.now();
+  // One call, held by the connector until the service is back. Only a browser that has not yet
+  // reconnected may need a repeat; a cut-off or expired answer is a failure of the hold.
   let outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
   let retries = 0;
-  while (outcome.status !== "succeeded" && Date.now() - started < RESTART_TIMEOUT_MS) {
+  while (outcome.status === "failed" && BROWSER_RECONNECTING.includes(outcome.facts?.reason) && Date.now() - started < RESTART_TIMEOUT_MS) {
     retries++;
     await sleep(2000);
     outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
   }
-  assert.equal(outcome.status, "succeeded", `the earlier tab handle did not survive the restart: ${JSON.stringify(outcome)}`);
+  assert.equal(outcome.status, "succeeded", `the held call did not succeed with the earlier tab handle: ${JSON.stringify(outcome)}`);
   const after = readRuntime();
   assert.notEqual(after.token, before.token, "the runtime file is unchanged, so no restart happened");
   assert.equal(after.service_version, before.service_version);
   await t.popupText();
-  return `restarted in ${Date.now() - started} ms after ${retries} retries`;
+  return `restarted in ${Date.now() - started} ms after ${retries} reconnect retries`;
 });
 
 check("quit-holds", "(27) after a quit with nothing calling, the service stays down; a call starts it", async (t) => {
@@ -1251,23 +1279,39 @@ live("live-foundry", "live /demo/foundry/: the page loads and reads (run scripts
 // Running
 // ---------------------------------------------------------------------------------------------
 
+/** Whether a browser handle is the scratch Chrome: a probe page opened through it shows up there. */
+async function isScratchBrowser(t, handle) {
+  const probe = `${t.A}/blank?probe-${handle}-${Date.now()}`;
+  const outcome = await t.call("browser_navigate", { url: probe, new_tab: true, browser: handle }).catch(() => null);
+  if (outcome?.status !== "succeeded") return false;
+  let mine = false;
+  try {
+    mine = Boolean(await until(async () => {
+      const { targetInfos } = await t.pipe.send("Target.getTargets");
+      return targetInfos.some((target) => target.url === probe);
+    }, "the probe page to appear in the scratch browser", 3000, 250));
+  } catch { /* the probe opened somewhere else */ }
+  await t.call("browser_tabs", { action: "close", tab: outcome.facts.tab }).catch(() => {});
+  return mine;
+}
+
+/** The handle of the scratch browser, proved by a probe even when it is the only browser listed. */
 async function pickScratchBrowser(t) {
-  const listed = await until(async () => {
-    const outcome = await t.call("browser_tabs", { action: "list" }, { timeoutMs: 20000 }).catch(() => null);
-    return outcome?.status === "succeeded" && outcome.facts.browsers?.length > 0 ? outcome : null;
-  }, "the scratch browser to connect to the installed service", 120000, 1000);
-  const handles = listed.facts.browsers.map((browser) => browser.browser);
-  if (handles.length === 1) return handles[0];
-  for (const handle of handles) {
-    const probe = `${t.A}/blank?probe-${handle}`;
-    const outcome = await t.call("browser_navigate", { url: probe, new_tab: true, browser: handle }).catch(() => null);
-    if (outcome?.status !== "succeeded") continue;
-    const { targetInfos } = await t.pipe.send("Target.getTargets");
-    const mine = targetInfos.some((target) => target.url === probe);
-    await t.call("browser_tabs", { action: "close", tab: outcome.facts.tab }).catch(() => {});
-    if (mine) return handle;
+  const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+  const seen = new Set();
+  for (;;) {
+    const listed = await t.call("browser_tabs", { action: "list" }, { timeoutMs: 20000 }).catch(() => null);
+    const handles = listed?.status === "succeeded" ? (listed.facts.browsers ?? []).map((browser) => browser.browser) : [];
+    for (const handle of handles) {
+      seen.add(handle);
+      if (await isScratchBrowser(t, handle)) return handle;
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(1000);
   }
-  throw new Error(`None of the connected browsers (${handles.join(", ")}) is the scratch browser. Remove the 2.0 extension from other profiles for the run.`);
+  throw new Error(seen.size === 0
+    ? "No browser connected to the installed service in time."
+    : `None of the connected browsers (${[...seen].join(", ")}) is the scratch browser. Remove the 2.0 extension from other profiles for the run.`);
 }
 
 async function runChecks(t, selected, run) {
