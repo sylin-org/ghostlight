@@ -12,7 +12,10 @@
 //   node    `*.test.js` files and anything under a `tests` directory: CommonJS under node.
 //   page    the protocol-4 page assets: one shared scope per directory, because the service
 //           concatenates them into a single function body.
-//   worker  every other extension script (service worker, offscreen and options pages, libraries).
+//   extpage the extension's document scripts: the popup, options and offscreen pages and the
+//           scripts their .html files load. They may read the document names and chrome.
+//   worker  every other extension script (service worker, libraries). No document names: a
+//           service worker has no window or document.
 //
 // Allowed without a report: a name that starts with an underscore, an exported binding, a
 // positional parameter before the last used one, a name guarded by `typeof`, and a destructured
@@ -28,6 +31,9 @@ const acorn = require("../extension/vendor/acorn.js");
 
 const IGNORED_PREFIX = "_";
 const PAGE_ASSET_DIR = /chromium\/level4\/assets$/;
+/** The extension scripts that run in a document, not in the service worker. */
+const EXTENSION_PAGE_SCRIPT =
+  /(^|\/)extension\/(offscreen\.js|options\.js|popup\.js|lib\/(state|recording|gif)\.js|vendor\/gifenc\.js)$/;
 
 /** Split a whitespace-separated word list. */
 function words(text) {
@@ -74,7 +80,8 @@ const GLOBALS = {
   module: new Set([...ECMASCRIPT, ...WEB_COMMON, ...NODE].filter((n) => !COMMONJS_ONLY.has(n))),
   node: new Set([...ECMASCRIPT, ...WEB_COMMON, ...NODE]),
   page: new Set([...ECMASCRIPT, ...WEB_COMMON, ...DOCUMENT, ...PAGE_WRAPPER]),
-  worker: new Set([...ECMASCRIPT, ...WEB_COMMON, ...WORKER, ...DOCUMENT])
+  worker: new Set([...ECMASCRIPT, ...WEB_COMMON, ...WORKER]),
+  extpage: new Set([...ECMASCRIPT, ...WEB_COMMON, ...WORKER, ...DOCUMENT])
 };
 
 /** One lexical scope: its bindings and its parent. */
@@ -281,7 +288,7 @@ class Visitor {
         return;
       }
       case "FunctionDeclaration":
-        this.bind(scope, node.id, { exempt: node.exported === true });
+        if (node.id) this.bind(scope, node.id, { exempt: node.exported === true });
         this.fn(node, scope);
         return;
       case "FunctionExpression":
@@ -289,7 +296,7 @@ class Visitor {
         this.fn(node, scope);
         return;
       case "ClassDeclaration":
-        this.bind(scope, node.id, { exempt: node.exported === true });
+        if (node.id) this.bind(scope, node.id, { exempt: node.exported === true });
         this.cls(node, scope);
         return;
       case "ClassExpression":
@@ -436,6 +443,7 @@ export function kindOf(file) {
   if (normalized.endsWith(".mjs")) return "module";
   if (normalized.endsWith(".test.js") || /(^|\/)tests\//.test(normalized)) return "node";
   if (PAGE_ASSET_DIR.test(path.posix.dirname(normalized))) return "page";
+  if (EXTENSION_PAGE_SCRIPT.test(normalized)) return "extpage";
   return "worker";
 }
 

@@ -14,20 +14,27 @@ The lane builds no Rust.
 
 ## RESUME HERE
 
-Next slice: `extension-9-js-lint`, the one after `extension-8-p4-worker` in `lanes-break.json`
-(deferrable; it must land before the 2.0 release, not before the deploy). The worker entry is
-done: `extension/worker.js` speaks protocol 4 and is loaded by nothing until switch-3 points the
-manifest at it. The level-4 page assets are complete for this lane: `content.js` dispatches
-exactly the 32 vocabulary kinds, every throw site is an `AssetError` with its code, and the
-cancel token ends `observe`, `prepare_fill`, `verify_fill_retained` and the sensor waits. Any
-change to the six sources changes the bundle hash, so update `tests/golden/protocol4/assets.sha256`
-deliberately in the same commit (print it with `bundle.sha256(bundle.expand())` from
-`level4/assets/tests/bundle.js`).
+The extension lane's planned slices are landed. `extension-9-js-lint` is done; the switch lane extends it
+in `switch-19-guards-and-version`. The worker entry (`extension/worker.js`) speaks protocol 4 and is
+loaded by nothing until switch-3 points the manifest at it. The level-4 page assets are complete:
+`content.js` dispatches exactly the 32 vocabulary kinds, every throw site is an `AssetError` with
+its code, and the cancel token ends `observe`, `prepare_fill`, `verify_fill_retained` and the sensor
+waits. Any change to the six sources changes the bundle hash, so update
+`tests/golden/protocol4/assets.sha256` deliberately in the same commit (print it with
+`bundle.sha256(bundle.expand())` from `level4/assets/tests/bundle.js`).
+
+Findings left for `switch-19-guards-and-version`, which wires the lint into the gates:
+- `extension/service-worker.js:512` `activeRecording` is unused, and `window` at lines 13, 14,
+  1317 and 1318 sits inside functions injected into the page. The switch deletes this file.
+- `extension/tests/form-diagnostics-routing.test.js:161` unused `listener`.
+- `extension/tests/workbench-preview-server.mjs:151` unused `policyView`.
+- Unused imports in `tests/linux/acceptance/*.mjs` (cold, governance, managed/run, npm/native, plural).
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
+| extension-9-js-lint | `scripts/lint-js.mjs` and `scripts/lint-js.test.mjs` (25 tests): a dependency-free lint over the vendored acorn for unused bindings and undefined names. Kinds by path: `module` (`.mjs`), `node` (tests), `page` (level-4 assets, one shared scope), `extpage` (popup, options, offscreen and the scripts their pages load: document names and chrome), `worker` (every other extension script: chrome, no document names). Anonymous default exports are handled. Clean over `extension/worker.js`, `extension/lib` the extension pages, the level-4 assets and `scripts/`. Two unused test locals removed (`content.test.js`, `tabs.test.js`). | see `git log` |
 | extension-8-p4-worker | `extension/worker.js`, the protocol-4 entry (not yet the manifest's worker). The hello is the first frame (`attended` and the engine version are read before `connectNative`), single flight; no `hello_accepted` in 10 s sets the `service_outdated` link state with "Update Ghostlight on this computer."; the router per spec 2.2 (heartbeat, `hello_accepted`, `command_chunk`, `request`, `cancel`, `notice`, `control_state`, `backend_unavailable`, `error`; unknown kinds ignored); `hello_accepted` checks and registers the assets, settles state only on a new epoch, and a request waits for that work; the controlled-tab set (managed or released, in `storage.session`, restored and re-retained on worker start) with events for controlled tabs only and a released tab reporting one commit; the chrome listener table; AMBIENT on tab complete, control change, preference change and port loss; a closed port cancels in-flight primitives and reconnects at once after `backend_unavailable`, else after 3 s through the alarm; `onInstalled`, `onStartup`, `toggle-hold`; the UI messages (`ui_snapshot`, `get_preferences`, `set_preferences`, `runtime_control`, `release_debugger_sessions`, `connection_diagnostics`; `diagnostics_toggle` answers an error). `lib/chunks.js` gains the `correlationOf` option (default: the protocol 3 nesting) because a protocol 4 request carries its correlation at the top. Tests: `worker.test.js` (38, worker loaded into `node:vm`), one more in `chunks.test.js`. | see `git log` |
 | extension-7-p4-buffers-dispatch | `lib/arguments.js` (`GhostlightArguments`): the argument checks the primitives share (ids, bounded text, whole numbers, document guard, frame reference, world call). `lib/evaluate.js` (`GhostlightEvaluate`): `evaluate_main` over the unchanged `script-evaluator.js`; the debugger attaches only after the script parses, the guard and the dialog are checked right before the send, the deadline calls `Runtime.terminateExecution` and answers `timeout` with `dispatched` true, a page exception is a result. `lib/buffers.js` (`GhostlightBuffers`): `diagnostics` read (binding reset, guard) and clear; `recording` start with a watch, status, stop, discard and export to download, client or page (the page export runs the world call with the GIF as its attachment); the offscreen encoder as the old worker used it; recording namespace `protocol4`; the event hooks the worker feeds. `lib/primitives.js` (`GhostlightPrimitives`): the 17-entry table, `run` with exactly one receipt, `unsupported` for unknown names, `invalid_request` for validator failures, the cancel registry (60 s), per-primitive effect watches in a per-tab set, the `failureCode` table, `dialog` and `accessibility_snapshot`. `capture.js` now exports `decodeImageSize`. Tests: `evaluate-main.test.js` (14), `buffers.test.js` (39), `primitives.test.js` (42). | see `git log` |
 | extension-6-p4-tabs-capture-notice | `lib/tabs.js` (`GhostlightTabs`): `listTabs` with `opener_tab_id`, `openTab` (group by key from `storage.session`, title fallback after reload, duplicate merge, `focus_window`, adopt, ready wait with timeout and cancel), `navigate` (url, back, forward, reload, `discard_beforeunload` with `acceptBeforeUnload`), `focusTab`, `closeTab` (preserve-tabs veto, released marking), `setZoom`, `resizeWindow`. `lib/capture.js` (`GhostlightCapture`): `view` and `capture` (clip kinds, budget scale, quality ladder, `capture_too_large`, measured image size, hide through the world's per-tab hold count inside `finally`). `lib/notice.js` (`GhostlightNotice`): `deliver`, `flush`, `flushWindow`, `activityList`, deferral through `presentation-queue.js` under one namespace, quiet completion, never attaches. Each primitive handler is `{validate, run, addresses, tabOf}`. Tests: `tabs.test.js` (35), `capture.test.js` (20), `notice.test.js` (15), the scripted browser and golden driver in `tests/p4-chrome.js`. | see `git log` |
@@ -44,7 +51,7 @@ deliberately in the same commit (print it with `bundle.sha256(bundle.expand())` 
 - 22 tests in `golden-protocol4.test.js`, 41 in `sessions.test.js`, 22 in `world.test.js`, 11 in
   `inventory.test.js`, 13 in `input.test.js`, 35 in `tabs.test.js`, 20 in `capture.test.js`, 15 in
   `notice.test.js`.
-- 38 tests in `worker.test.js`.
+- 38 tests in `worker.test.js`, 25 in `scripts/lint-js.test.mjs`.
 - 19 tests in `level4/assets/tests/world.test.js`, 85 in `level4/assets/tests/content.test.js`.
 
 ## Fixture conventions

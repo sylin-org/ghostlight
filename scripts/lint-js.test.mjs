@@ -101,6 +101,17 @@ test("imports and exports in a module", () => {
   assert.deepEqual(lint("import fs from 'node:fs';\nexport const a = 1;", "module"), ["1: 'fs' is declared but never read"]);
 });
 
+test("an anonymous default export function or class is not a binding", () => {
+  assert.deepEqual(lint("export default function () {}", "module"), []);
+  assert.deepEqual(lint("export default class {}", "module"), []);
+});
+
+test("document names are undefined in the worker and allowed in an extension page", () => {
+  assert.deepEqual(lint("document.title;", "worker"), ["1: 'document' is not defined"]);
+  assert.deepEqual(lint("window.name;", "worker"), ["1: 'window' is not defined"]);
+  assert.deepEqual(lint("document.title; chrome.runtime.id;", "extpage"), []);
+});
+
 test("page assets share one scope and may return at the top", () => {
   const sources = [
     { file: "dir/chromium/level4/assets/world.js", text: "if (!document) return;\nconsole.log(helper(__ghostlightAssetId));" },
@@ -118,4 +129,8 @@ test("kinds follow the path", () => {
   assert.equal(kindOf("extension/tests/worker.test.js"), "node");
   assert.equal(kindOf("crates/orchestrator/src/browser/adapter/chromium/level4/assets/world.js"), "page");
   assert.equal(kindOf("extension/lib/world.js"), "worker");
+  assert.equal(kindOf("extension/worker.js"), "worker");
+  assert.equal(kindOf("extension/popup.js"), "extpage");
+  assert.equal(kindOf("extension/offscreen.js"), "extpage");
+  assert.equal(kindOf("extension/lib/state.js"), "extpage");
 });
