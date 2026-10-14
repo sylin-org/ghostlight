@@ -19,7 +19,7 @@ use ghostlight_bridge::lifecycle::ServiceLease;
 use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
 use ghostlight_bridge::runtime::{read_runtime, write_runtime, RuntimeEndpoint};
 use ghostlight_bridge::service::{
-    IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
+    IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
     SERVICE_BRIDGE_MAJOR,
 };
 use uuid::Uuid;
@@ -30,7 +30,7 @@ use crate::browser::{
 };
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
-use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
+use crate::language::catalog_for;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
@@ -604,11 +604,7 @@ fn serve_session(
         &ServiceResponse::HelloAccepted {
             major: SERVICE_BRIDGE_MAJOR,
             session: workspace.as_str().into(),
-            server: ServerProfile {
-                name: "ghostlight".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                instructions: SERVER_INSTRUCTIONS.into(),
-            },
+            server: crate::intake::server_profile(),
         },
     );
     diagnostics.sink().emit(

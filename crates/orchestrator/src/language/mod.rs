@@ -9,6 +9,7 @@ pub mod control;
 pub mod coverage;
 pub mod environment;
 pub mod history;
+pub mod intake;
 pub mod outcome;
 pub mod provenance;
 pub mod readiness;

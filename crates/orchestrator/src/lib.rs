@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod events;
 pub mod governance;
 pub mod install;
+pub mod intake;
 pub mod language;
 pub mod presentation;
 pub mod provenance;
