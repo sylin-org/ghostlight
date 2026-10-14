@@ -148,12 +148,12 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
         if harness.private_view {
-            println!("{}", container::client_cannot_see_line(&harness.name));
+            println!("{}", container::client_cannot_see_line(&harness.label));
             continue;
         }
         println!(
             "MCP client: {} -- {} -- {}",
-            harness.name,
+            harness.label,
             harness.state.label(),
             harness.detail
         );

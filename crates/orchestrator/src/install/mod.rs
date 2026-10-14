@@ -141,11 +141,11 @@ impl HarnessRegistry {
         let result = match action {
             HarnessAction::Check => HarnessActionResult {
                 changed: false,
-                summary: inspect(&self.inner.context, &definition),
                 message: format!(
                     "{} was checked without changing configuration.",
-                    definition.name
+                    label(&self.inner.context, &definition)
                 ),
+                summary: inspect(&self.inner.context, &definition),
             },
             HarnessAction::Install => apply_install(&self.inner.context, &definition)?,
             HarnessAction::Fix => apply_fix(&self.inner.context, &definition)?,
@@ -195,7 +195,7 @@ impl HarnessRegistry {
                 Ok(_) => {}
                 Err(error) => failures.push(HarnessSetupFailure {
                     id: definition.id.into(),
-                    name: definition.name.into(),
+                    name: label(&self.inner.context, &definition),
                     detail: bounded_disclosure(&error.to_string())
                         .unwrap_or_else(|| "The target could not be changed.".into()),
                 }),
@@ -260,11 +260,11 @@ impl HarnessRegistry {
             .ok_or_else(|| HarnessError::UnknownHarness(id.into()))?;
         Ok(HarnessActionResult {
             changed: true,
-            summary,
             message: format!(
                 "Ghostlight will use the located {} path after you choose Set up.",
-                definition.name
+                summary.label
             ),
+            summary,
         })
     }
 }
@@ -356,6 +356,9 @@ pub struct HarnessSummary {
     pub product_id: String,
     /// User-facing harness name.
     pub name: String,
+    /// What a person reads for this target: the name, plus the host in parentheses when
+    /// several targets share the name, such as `Cline (Cursor)`.
+    pub label: String,
     /// User-facing concrete target label.
     pub target: String,
     /// Bundled integration artwork file name.
@@ -1016,6 +1019,21 @@ fn row(
     }
 }
 
+/// The name a person reads for a target: the host is named whenever another target of the same
+/// product exists, so coexisting hosts of one client never share a label.
+fn label(context: &HarnessContext, definition: &HarnessDefinition) -> String {
+    let shared = definitions(context)
+        .iter()
+        .filter(|other| other.product_id == definition.product_id)
+        .count()
+        > 1;
+    if shared {
+        format!("{} ({})", definition.name, definition.target)
+    } else {
+        definition.name.to_owned()
+    }
+}
+
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
     let detected = definition.path.exists()
         || product_config_parent_exists(context, &definition.path)
@@ -1089,6 +1107,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         id: definition.id.into(),
         product_id: definition.product_id.into(),
         name: definition.name.into(),
+        label: label(context, definition),
         target: definition.target.into(),
         icon: definition.icon.into(),
         state,
@@ -1327,18 +1346,18 @@ fn apply_install(
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
-        summary,
         message: if changed {
             format!(
                 "Ghostlight was registered with {}. Restart or reconnect it to load the tools.",
-                definition.name
+                summary.label
             )
         } else {
             format!(
                 "{} already has the current Ghostlight registration.",
-                definition.name
+                summary.label
             )
         },
+        summary,
     })
 }
 
@@ -1364,18 +1383,18 @@ fn apply_uninstall(
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
-        summary,
         message: if changed {
             format!(
                 "Ghostlight was removed from {}. Restart or reconnect it to unload the tools.",
-                definition.name
+                summary.label
             )
         } else {
             format!(
                 "{} had no owned Ghostlight registration to remove.",
-                definition.name
+                summary.label
             )
         },
+        summary,
     })
 }
 
@@ -1400,11 +1419,11 @@ fn apply_fix(
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
-        summary,
         message: format!(
             "Ghostlight replaced the incorrect entry for {}. Restart or reconnect it to load the tools.",
-            definition.name
+            summary.label
         ),
+        summary,
     })
 }
 
@@ -3596,6 +3615,30 @@ mod tests {
             .join("Claude/claude_desktop_config.json");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
+    }
+
+    #[test]
+    fn coexisting_hosts_of_one_client_carry_distinct_labels() {
+        let directory = temporary("host-labels");
+        let summaries = HarnessRegistry::with_context(context(&directory))
+            .refresh()
+            .unwrap();
+        let label_of = |id: &str| {
+            summaries
+                .iter()
+                .find(|summary| summary.id == id)
+                .unwrap()
+                .label
+                .clone()
+        };
+        assert_eq!(label_of("cline-cursor"), "Cline (Cursor)");
+        assert_eq!(label_of("cline-cli"), "Cline (CLI)");
+        assert_eq!(label_of("claude-desktop"), "Claude Desktop");
+        let mut labels: Vec<_> = summaries.iter().map(|summary| &summary.label).collect();
+        let total = labels.len();
+        labels.sort();
+        labels.dedup();
+        assert_eq!(labels.len(), total);
     }
 
     #[test]

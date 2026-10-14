@@ -146,7 +146,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         .inspect(|summary| {
             eprintln!(
                 "MCP client needs attention: {} -- {}",
-                summary.name, summary.detail
+                summary.label, summary.detail
             );
         })
         .count();
@@ -165,7 +165,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             println!(
                 "Would {} Ghostlight for {} ({:?}).",
                 if install { "install" } else { "remove" },
-                summary.name,
+                summary.label,
                 summary.state
             );
             continue;
@@ -173,7 +173,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         if install && summary.private_view {
             kept_private
                 .registrations
-                .push(format!("{} MCP client", summary.name));
+                .push(format!("{} MCP client", summary.label));
             continue;
         }
         let action = if install {
@@ -184,8 +184,8 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         match harnesses.apply(&summary.id, action) {
             Ok(result) => println!("{}", result.message),
             Err(error) => {
-                eprintln!("{}: {error}", summary.name);
-                failures.push(summary.name);
+                eprintln!("{}: {error}", summary.label);
+                failures.push(summary.label);
             }
         }
     }
@@ -410,15 +410,19 @@ pub(crate) fn print_command_path_report(report: &crate::install::command_path::C
 }
 
 /// Print the desktop applications entry report to stdout.
+///
+/// A platform without an XDG application entry has nothing to report.
 pub(crate) fn print_desktop_integration_report(
     report: &crate::install::desktop_entry::DesktopIntegrationReport,
 ) {
-    println!(
-        "Applications: {} -- {} -- {}",
-        report.state.label(),
-        report.detail,
-        report.desktop_entry.display()
-    );
+    if let Some(entry) = &report.desktop_entry {
+        println!(
+            "Applications: {} -- {} -- {}",
+            report.state.label(),
+            report.detail,
+            entry.display()
+        );
+    }
 }
 
 /// Execute a native host registration subcommand.

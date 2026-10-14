@@ -243,13 +243,13 @@ fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
         match summary.state {
             HarnessState::Updatable if summary.private_view => report
                 .kept_private
-                .push(format!("{} MCP client", summary.name)),
+                .push(format!("{} MCP client", summary.label)),
             HarnessState::Updatable => match clients.apply(&summary.id, HarnessAction::Install) {
-                Ok(_) => report.clients_rewritten.push(summary.name),
-                Err(error) => report.failures.push(format!("{}: {error}", summary.name)),
+                Ok(_) => report.clients_rewritten.push(summary.label),
+                Err(error) => report.failures.push(format!("{}: {error}", summary.label)),
             },
             HarnessState::NeedsAttention => report.clients_unchanged.push(UnchangedEntry {
-                client: summary.name,
+                client: summary.label,
                 found: summary.evidence,
             }),
             HarnessState::NotDetected | HarnessState::Available | HarnessState::Installed => {}

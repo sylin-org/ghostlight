@@ -51,10 +51,10 @@ pub struct DesktopIntegrationReport {
     pub state: DesktopIntegrationState,
     /// Product-authored explanation of the state.
     pub detail: String,
-    /// Exact desktop-entry location.
-    pub desktop_entry: PathBuf,
-    /// Exact icon location.
-    pub icon: PathBuf,
+    /// Exact desktop-entry location; absent where the platform has no XDG entry.
+    pub desktop_entry: Option<PathBuf>,
+    /// Exact icon location; absent where the platform has no XDG entry.
+    pub icon: Option<PathBuf>,
 }
 
 /// Result of an application-entry install or uninstall request.
@@ -164,9 +164,13 @@ fn inspect(
     };
     Ok(DesktopIntegrationReport {
         state,
-        detail: state_detail(state).into(),
-        desktop_entry,
-        icon,
+        detail: if context.linux {
+            state_detail(state).into()
+        } else {
+            OTHER_PLATFORM_DETAIL.into()
+        },
+        desktop_entry: context.linux.then_some(desktop_entry),
+        icon: context.linux.then_some(icon),
     })
 }
 
@@ -184,13 +188,13 @@ fn apply_install(
     }
     if before.state == DesktopIntegrationState::NeedsAttention {
         return Err(DesktopIntegrationError::ForeignState {
-            desktop_entry: before.desktop_entry,
-            icon: before.icon,
+            desktop_entry: context.desktop_entry(),
+            icon: context.icon(),
         });
     }
-    write_atomic(&before.icon, ICON)?;
+    write_atomic(&context.icon(), ICON)?;
     write_atomic(
-        &before.desktop_entry,
+        &context.desktop_entry(),
         render_desktop_entry(&context.executable).as_bytes(),
     )?;
     let report = inspect(context)?;
@@ -214,16 +218,16 @@ fn apply_uninstall(
         });
     }
     let mut changed = false;
-    if read_optional(&before.desktop_entry)?
+    if read_optional(&context.desktop_entry())?
         .as_deref()
         .is_some_and(desktop_entry_owned)
-        && !symlink(&before.desktop_entry)?
+        && !symlink(&context.desktop_entry())?
     {
-        remove_file(&before.desktop_entry)?;
+        remove_file(&context.desktop_entry())?;
         changed = true;
     }
-    if read_optional(&before.icon)?.as_deref() == Some(ICON) && !symlink(&before.icon)? {
-        remove_file(&before.icon)?;
+    if read_optional(&context.icon())?.as_deref() == Some(ICON) && !symlink(&context.icon())? {
+        remove_file(&context.icon())?;
         changed = true;
     }
     Ok(DesktopIntegrationActionResult {
@@ -263,6 +267,10 @@ fn desktop_entry_owned(bytes: &[u8]) -> bool {
             && source.lines().any(|line| line == "Type=Application")
     })
 }
+
+/// What the report says on a platform that has no XDG application entry.
+const OTHER_PLATFORM_DETAIL: &str =
+    "Linux application-menu integration does not apply on this platform.";
 
 fn state_detail(state: DesktopIntegrationState) -> &'static str {
     match state {
@@ -413,6 +421,16 @@ mod tests {
             executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
             data_home: root.join("share"),
         }
+    }
+
+    #[test]
+    fn other_platforms_name_no_linux_paths() {
+        let mut context = context("elsewhere");
+        context.linux = false;
+        let report = inspect(&context).unwrap();
+        assert_eq!(report.state, DesktopIntegrationState::NotApplicable);
+        assert!(report.desktop_entry.is_none() && report.icon.is_none());
+        assert!(!report.detail.contains("operating system package"));
     }
 
     #[test]
