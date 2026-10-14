@@ -216,6 +216,12 @@ async function boot({
         .filter((call) => call.method === "Runtime.callFunctionOn" && call.params.functionDeclaration === World.SHIMS.AMBIENT)
         .map((call) => wireFrame(call.params.arguments[1].value));
     },
+    /** The signals the page was asked to show, in order. */
+    presented() {
+      return debuggerApi.calls
+        .filter((call) => call.method === "Runtime.callFunctionOn" && call.params.functionDeclaration === World.SHIMS.PRESENT)
+        .map((call) => wireFrame(call.params.arguments[1].value));
+    },
     focusCalls() {
       return debuggerApi.calls.filter((call) => call.method === "Emulation.setFocusEmulationEnabled").map((call) => call.params.enabled);
     },
@@ -561,6 +567,25 @@ test("managed tabs are retained again with their state when the worker starts", 
   } finally { worker.dispose(); }
 });
 
+test("a notice queued for a restored managed tab is shown after the first hello_accepted", async () => {
+  const queued = {
+    workspace: "ws_1",
+    tabId: TAB,
+    signal: { invocation: "inv_1", signal: "denial", activity: "click", phase: "blocked", tab_id: TAB },
+    expiresAt: Date.now() + 60_000
+  };
+  const worker = await boot({ session: { [CONTROLLED_KEY]: [[TAB, "managed"]], [PRESENTATIONS_KEY]: [queued] } });
+  try {
+    assert.equal(worker.presented().length, 0, "no page code exists before the hello is accepted");
+    assert.equal(worker.browser.store.session.get(PRESENTATIONS_KEY).length, 1);
+    await worker.accept();
+    assert.equal(worker.presented().length, 1);
+    assert.equal(worker.presented()[0].invocation, "inv_1");
+    assert.equal(worker.browser.store.session.get(PRESENTATIONS_KEY).length, 0);
+    assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.unseen_denials, 0);
+  } finally { worker.dispose(); }
+});
+
 test("a notice for a tab nobody is looking at waits in the persisted queue", async () => {
   const worker = await boot({ focused: false });
   try {
@@ -622,12 +647,48 @@ test("an answered hello never shows the outdated-service state", async () => {
   } finally { worker.dispose(); }
 });
 
-test("a closed port cancels the hello wait", async () => {
+test("a service that closes on the hello and reports itself unavailable still shows the outdated-service state", async () => {
   const worker = await boot();
   try {
+    await worker.deliver(golden("frames/backend_unavailable"));
+    assert.equal(worker.ports.length, 1, "the connector keeps the port while it retries");
+    assert.equal(worker.timers.pending(10_000).length, 1, "the hello wait survives the unavailable report");
+    const waiting = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(waiting.link_state, "unreachable");
+
+    worker.timers.fire(10_000);
+    const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(snapshot.link_state, "service_outdated");
+    assert.equal(snapshot.last_error, OUTDATED);
+  } finally { worker.dispose(); }
+});
+
+test("the outdated-service wait spans replaced ports and a later hello_accepted heals it", async () => {
+  const worker = await boot();
+  try {
+    await worker.deliver(golden("frames/backend_unavailable"));
     await worker.close("Native host has exited.");
-    assert.equal(worker.timers.pending(10_000).length, 0);
-    assert.notEqual((await worker.ask({ kind: "ui_snapshot" })).value.link_state, "service_outdated");
+    assert.equal(worker.timers.pending(10_000).length, 1, "closing the port does not end the wait");
+    worker.chrome.alarms.onAlarm.emit({ name: "ghostlight-reconnect", scheduledTime: 5 });
+    await flush();
+    assert.equal(worker.ports.length, 2);
+    assert.equal(worker.port.posted[0].kind, "hello");
+    assert.equal(worker.timers.pending(10_000).length, 1, "a new hello does not restart the wait");
+
+    worker.timers.fire(10_000);
+    await worker.close("Native host has exited.");
+    const outdated = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(outdated.link_state, "service_outdated");
+    assert.equal(outdated.last_error, OUTDATED);
+
+    worker.chrome.alarms.onAlarm.emit({ name: "ghostlight-reconnect", scheduledTime: 6 });
+    await flush();
+    assert.equal(worker.ports.length, 3);
+    assert.equal(worker.timers.pending(10_000).length, 0, "an elapsed wait is not armed again");
+    await worker.accept();
+    const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(healed.link_state, "connected");
+    assert.equal(healed.last_error, null);
   } finally { worker.dispose(); }
 });
 

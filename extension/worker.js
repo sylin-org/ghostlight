@@ -113,6 +113,7 @@ let preferences = { ...stateApi.DEFAULT_PREFERENCES };
 let serviceEpoch = null;
 let negotiation = Promise.resolve();
 let helloTimer = null;
+let helloUnanswered = false;
 let retryTimer = null;
 let backendLost = false;
 let persistChain = Promise.resolve();
@@ -338,14 +339,11 @@ async function restoreControlled(stored) {
   }
 }
 
-// A restarted worker keeps its managed tabs: each one is retained again, told its state and given
-// any notice that was waiting.
+// A restarted worker keeps its managed tabs: each one is retained again. Page code exists only once
+// the service has accepted the hello, so telling the tabs their state and showing any waiting notice
+// happens in negotiate().
 async function resumeControlledTabs() {
-  await Promise.allSettled(managedIds().map(async (tabId) => {
-    await lifecycle.retain(tabId);
-    await world.ambientAll(tabId);
-    await notice.flush(tabId);
-  }));
+  await Promise.allSettled(managedIds().map((tabId) => lifecycle.retain(tabId)));
 }
 
 // ---- native connection --------------------------------------------------------------------------
@@ -422,8 +420,7 @@ async function establishNativeConnection() {
     connectionLog.record(connectionEvents.NATIVE_HELLO_SENT, { attempt, browser_id: browserId });
     clearRetryTimer();
     chrome.alarms.clear(RECONNECT_ALARM).catch(() => {});
-    clearHelloTimer();
-    helloTimer = setTimeout(onHelloTimeout, protocol.HELLO_TIMEOUT_MS);
+    awaitHelloAnswer();
   } catch (error) {
     nativePort = null;
     setConnection({ connected: false, service_version: null, last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
@@ -432,13 +429,23 @@ async function establishNativeConnection() {
   }
 }
 
-function clearHelloTimer() {
+// The wait for the service to answer a hello starts with the first hello and ends only when a
+// hello_accepted arrives. The service closing the socket, the connector reporting it unavailable and
+// the port being replaced do not end it: a 1.3.x service answers a protocol 4 hello that way, again
+// and again, and never accepts it.
+function awaitHelloAnswer() {
+  if (helloUnanswered) return;
+  helloUnanswered = true;
+  helloTimer = setTimeout(onHelloTimeout, protocol.HELLO_TIMEOUT_MS);
+}
+
+function endHelloWait() {
+  helloUnanswered = false;
   if (helloTimer) clearTimeout(helloTimer);
   helloTimer = null;
 }
 
-// A service that never answers the hello is one this extension cannot work with: a 1.3.x service closes
-// the socket on a protocol 4 hello, and nothing else is expected to stay silent.
+// A service that has not accepted the hello in time is one this extension cannot work with.
 function onHelloTimeout() {
   helloTimer = null;
   setConnection({ connected: false, compatible: false, service_outdated: true, last_error: OUTDATED_SERVICE });
@@ -468,7 +475,6 @@ function scheduleRetry(attempt) {
 function onPortClosed(port, attempt, reason = chrome.runtime.lastError?.message || NATIVE_ENDED) {
   if (nativePort !== port) return;
   nativePort = null;
-  clearHelloTimer();
   const orderly = backendLost;
   backendLost = false;
   connectionLog.record(connectionEvents.NATIVE_DISCONNECTED, { attempt, error: reason });
@@ -502,7 +508,6 @@ async function settleServiceBoundaryState() {
 async function serviceLost(message) {
   connectionLog.record(connectionEvents.BACKEND_UNAVAILABLE);
   backendLost = true;
-  clearHelloTimer();
   setConnection({ connected: false, service_version: null, last_error: message });
   await settleServiceBoundaryState();
   await broadcastAmbient();
@@ -564,7 +569,7 @@ async function runRequest(frame, port) {
 }
 
 function accept(frame, port) {
-  clearHelloTimer();
+  endHelloWait();
   negotiation = negotiation.then(() => negotiate(frame, port)).catch(recordError);
   return negotiation;
 }
@@ -592,6 +597,7 @@ async function negotiate(frame, port) {
     last_error: null
   });
   await applyRuntimeState(controlStateOf(frame.control_state) ?? RUNTIME.ACTIVE);
+  await Promise.all(managedIds().map((tabId) => notice.flush(tabId).catch(() => false)));
 }
 
 // ---- runtime control ----------------------------------------------------------------------------

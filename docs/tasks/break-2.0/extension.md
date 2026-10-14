@@ -135,8 +135,11 @@ deliberately in the same commit (print it with `bundle.sha256(bundle.expand())` 
     as before and show "Version mismatch" for it until switch-3 edits them.
   - `chunks.js` keeps its protocol 3 default for `correlationOf` only for the legacy worker; switch-3
     deletes the default and the nested-shape tests with `service-worker.js`.
-  - The hello timer starts at the hello and ends at `hello_accepted`, `backend_unavailable` or a closed
-    port, so a service that closes the socket on the hello shows "unreachable", not "outdated".
+  - The hello wait starts at the first hello and ends only at `hello_accepted`. `backend_unavailable`
+    and closed or replaced ports do not end it, so a 1.3.x service that closes the socket on the hello
+    shows "outdated" after 10 s.
+  - Page code exists only after the first `hello_accepted`, so `negotiate()` (not worker start) tells the
+    restored managed tabs their state and flushes their queued notices.
   - `release_debugger_sessions` and a held or ended control state interrupt recordings (`browser_detached`
     and `runtime_held`) and drop diagnostics; a new epoch or a closed port goes through
     `buffers.settleBoundaryState()` (`service_disconnected`).
