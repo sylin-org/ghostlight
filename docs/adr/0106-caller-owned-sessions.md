@@ -137,7 +137,7 @@ close is the browser's setting to decide.
 
 ## Amendment (2026-10-14)
 
-Decision 1 named the parent process as the caller. In practice the parent is often a throwaway.
+Decisions 1 and 3 took the parent process as the caller. In practice the parent is often a throwaway.
 The caller is now the nearest ancestor that is not a Ghostlight executable, so the hops a command
 is forwarded through are skipped. A run of consecutive ancestors sharing one image name folds into
 its outermost member: a Git Bash or Cygwin per-command stub and its shell are one terminal. The
