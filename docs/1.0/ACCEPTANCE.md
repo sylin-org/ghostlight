@@ -130,7 +130,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    reports placeholders as values, and masks every credential-class field. It excludes hidden
    content and closed shadow roots. Explicit article mode
    returns a useful top-document article or falls back to that same composed page read.
-   Inspect, find, accessible-name fallback, and text wait use the same composed semantics. A
+   Inspect, find, accessible-name fallback, and text conditions walk the same composed tree but
+   read page text only: no field values, checked words, credential markers, or editable content. A
    rootless document tree includes embedded frames under one 400-node ceiling. A document-scope
    inspection returns that tree to the caller, and its diff paths are positions in it.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,

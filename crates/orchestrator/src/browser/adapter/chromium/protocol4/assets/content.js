@@ -140,7 +140,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const tag = String(element.tagName ?? "").toLowerCase();
     const editable = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
     if (editable) return "";
-    return shared.bounded(plainText(element, 500).text || renderedText(element), 500);
+    return shared.bounded(plainText(element, 500).text, 500);
   }
 
   function roleFor(element) {

@@ -1348,23 +1348,32 @@ test("submit_fill without a submit locator is an invalid request", async () => {
 
 // ---- plain text: names and text conditions never read field values -----------------------------
 
-/** A form named from its content: a legend and an unrelated paragraph around a typed input. */
+/**
+ * A form named from its content. The legend holds a typed input and a checked checkbox, and the
+ * form holds a textarea, a password field and a select with a chosen option, so every control
+ * sits inside content that a name or a text search reads.
+ */
 function typedForm(harness, { typed = "Ada" } = {}) {
   const body = harness.element("body");
   const form = harness.element("form");
   const legend = harness.element("legend");
-  legend.append(harness.text("Contact details"));
   const field = harness.element("input");
   field.type = "text";
   field.value = typed;
   field.setAttribute("aria-label", "Name");
+  const agreed = harness.element("input");
+  agreed.type = "checkbox";
+  agreed.checked = true;
+  legend.append(harness.text("Contact details"), field, agreed);
   const area = harness.element("textarea");
   area.value = "private note";
   const secret = harness.element("input");
   secret.type = "password";
   secret.setAttribute("type", "password");
   secret.value = "hunter2";
-  form.append(legend, field, area, secret);
+  const choice = harness.element("select");
+  choice.selectedOptions = [{ text: "Gold tier" }];
+  form.append(legend, area, secret, choice);
   body.append(form);
   harness.setBody(body);
   return form;
@@ -1389,7 +1398,7 @@ test("find does not match a typed value through its input or its form", async ()
   const harness = contentHarness();
   typedForm(harness);
 
-  for (const text of ["Ada", "private note", "hunter2", "[hidden]"]) {
+  for (const text of ["Ada", "private note", "hunter2", "[hidden]", "Gold tier", "checked", "unchecked"]) {
     const found = await harness.send({ kind: "find", text, find_kind: "any", max_results: 5 });
     assert.deepEqual(found.value.targets, [], `find ${text}`);
   }
@@ -1405,7 +1414,29 @@ test("a typed value alone never satisfies a text condition", async () => {
   assert.equal(await textCondition(harness, "text_absent", "Ada"), true);
   assert.equal(await textCondition(harness, "text_present", "[hidden]"), false);
   assert.equal(await textCondition(harness, "text_present", "unchecked"), false);
+  assert.equal(await textCondition(harness, "text_present", "checked"), false);
+  assert.equal(await textCondition(harness, "text_present", "Gold tier"), false);
   assert.equal(await textCondition(harness, "text_present", "Contact details"), true);
+});
+
+test("a wrapper whose only text is editable content has no name and is not found by it", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const wrapper = harness.element("section");
+  const editor = harness.element("div");
+  editor.isContentEditable = true;
+  editor.append(harness.text("Ada"));
+  editor.innerText = "Ada";
+  wrapper.innerText = "Ada";
+  wrapper.textContent = "Ada";
+  wrapper.append(editor);
+  body.append(wrapper);
+  harness.setBody(body);
+
+  const structure = await harness.send({ kind: "inspect", inspect_kind: "structure", max_items: 20, visual_settle: false });
+  assert.deepEqual(structure.value.targets.map((target) => target.name), [""]);
+  const found = await harness.send({ kind: "find", text: "Ada", find_kind: "any", max_results: 5 });
+  assert.deepEqual(found.value.targets, []);
 });
 
 test("text conditions skip editable content but still read page text", async () => {
@@ -1448,6 +1479,8 @@ test("browser_read keeps field values while plain text leaves them out", async (
 
   assert.match(read.value.text, /Ada/);
   assert.match(read.value.text, /private note/);
+  assert.match(read.value.text, /Gold tier/);
+  assert.match(read.value.text, /\bchecked\b/);
   assert.match(read.value.text, /\[hidden\]/);
   assert.doesNotMatch(read.value.text, /hunter2/);
 });
