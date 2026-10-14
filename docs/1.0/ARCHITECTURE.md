@@ -45,7 +45,8 @@ orchestrator start initializes this desktop authority; there is no service-only 
 There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
 (ADR-0197 Decision 10): the installed executables in `bin`, the runtime file and lease, the state
 directory `state` (audit log, MCP client locations, the extension handoff marker), the policy
-directory `policy`, and diagnostics in `diagnostics` with the `diagnostics.on` marker.
+directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
+`diagnostics` with the `diagnostics.on` marker.
 `GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
 installs into `bin` (ADR-0197 Decision 13); registrations name the executables there.
 
@@ -70,6 +71,15 @@ it. As soon as `bin` holds the executables, and before anything old is stopped,
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
 A client entry Ghostlight does not own, such as an `npx` launcher, is reported and left alone.
+On Windows the one manifest lives in `manifests`, which no app container redirects, and each
+browser's `HKCU` value names it; a value is written only when it differs from what is read
+(`install/native_host.rs`). A process whose ancestor runs from a `WindowsApps` directory is inside
+that app's container, where registry and `AppData` writes reach only that app. There the install
+(`install/container.rs`) writes the manifest, leaves those redirected registrations unwritten, and
+reports them with the one command that finishes them from a regular terminal,
+`<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see. An install
+outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts`
+and removes that directory when it is empty.
 Only then does the installer stop the 1.x images (and look again for a few rounds for any that
 respawned), ask the running service to quit and stop that exact image if it has not exited,
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,

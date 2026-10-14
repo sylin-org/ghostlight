@@ -168,6 +168,13 @@ package update, use Ghostlight's Quit action, then open Ghostlight from Applicat
 `ghostlight doctor` for the running service version; `ghostlight --version` reports the executable
 on disk and can differ until the old process has exited.
 
+On Windows the browsers' registration names one manifest, `~/.ghostlight/manifests/org.sylin.ghostlight.json`.
+Windows runs the processes of an MSIX-packaged app, Claude desktop and Codex among them, in that
+app's container, where registry and `AppData` writes are visible only to that app. An install run
+from such a terminal writes everything else and says which registrations it left; run
+`~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
+installs from inside the container only rewrite the manifest.
+
 Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to Disconnect
 each registration it owns.
 Then remove the matching browser extension and use the operating system's package uninstall. A

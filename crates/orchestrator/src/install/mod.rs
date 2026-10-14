@@ -2,6 +2,7 @@
 
 pub mod browser_package;
 pub mod command_path;
+pub mod container;
 pub mod deployment;
 pub mod desktop_entry;
 pub mod entry;
@@ -36,6 +37,8 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
+
+use container::{AppContainer, Residence};
 
 const SERVER_NAME: &str = "ghostlight";
 /// File in the state directory recording where each MCP client's configuration was found.
@@ -86,16 +89,24 @@ impl HarnessRegistry {
     /// its located paths in `state`, for tests that must not touch this user's clients.
     #[cfg(test)]
     pub(crate) fn isolated(directory: &Path, connector: &Path, state: &Path) -> Self {
-        Self::with_context(HarnessContext {
-            home: directory.join("home"),
-            config: directory.join("config"),
-            roaming: directory.join("config"),
-            codex_config: directory.join("codex").join("config.toml"),
-            connector: connector.to_path_buf(),
-            path_entries: Vec::new(),
-            locations: state.join(HARNESS_LOCATIONS_FILE),
-            windows: false,
-        })
+        Self::with_context(isolated_context(directory, connector, state))
+    }
+
+    /// Like [`Self::isolated`], run from inside `container`: the configurations below
+    /// `directory/config` are that app's private view.
+    #[cfg(test)]
+    pub(crate) fn isolated_inside(
+        directory: &Path,
+        connector: &Path,
+        state: &Path,
+        container: AppContainer,
+    ) -> Self {
+        let mut context = isolated_context(directory, connector, state);
+        context.private_view = Some(PrivateView {
+            container,
+            roots: vec![directory.join("config")],
+        });
+        Self::with_context(context)
     }
 
     /// Return the last complete, immutable harness check.
@@ -256,6 +267,23 @@ impl HarnessRegistry {
     }
 }
 
+/// A context over client configurations below `directory`, for tests that must not touch this
+/// user's clients.
+#[cfg(test)]
+fn isolated_context(directory: &Path, connector: &Path, state: &Path) -> HarnessContext {
+    HarnessContext {
+        home: directory.join("home"),
+        config: directory.join("config"),
+        roaming: directory.join("config"),
+        codex_config: directory.join("codex").join("config.toml"),
+        connector: connector.to_path_buf(),
+        path_entries: Vec::new(),
+        locations: state.join(HARNESS_LOCATIONS_FILE),
+        windows: false,
+        private_view: None,
+    }
+}
+
 fn definition(context: &HarnessContext, id: &str) -> Result<HarnessDefinition, HarnessError> {
     definitions(context)
         .into_iter()
@@ -352,6 +380,9 @@ pub struct HarnessSummary {
     pub can_download: bool,
     /// Whether the native Locate action is available.
     pub can_locate: bool,
+    /// Whether this process runs inside an app container that keeps this target's configuration
+    /// private: what it reads here is that app's view, and a change would reach only that app.
+    pub private_view: bool,
     /// Exact configuration destination currently resolved for this target.
     pub config_path: String,
     /// Exact installed connector command available for manual setup.
@@ -436,9 +467,30 @@ struct HarnessContext {
     path_entries: Vec<PathBuf>,
     locations: PathBuf,
     windows: bool,
+    /// Set when this process runs inside an app container: configuration below its `AppData`
+    /// roots is that app's private view, which no other app reads.
+    private_view: Option<PrivateView>,
+}
+
+/// The app container this process runs in and the directories it redirects.
+#[derive(Clone)]
+struct PrivateView {
+    container: AppContainer,
+    roots: Vec<PathBuf>,
 }
 
 impl HarnessContext {
+    /// The app whose private view holds `path`, when this process writes there.
+    fn private_to(&self, path: &Path) -> Option<&AppContainer> {
+        let view = self.private_view.as_ref()?;
+        let path = comparable(path);
+        view.roots
+            .iter()
+            .map(|root| comparable(root))
+            .any(|root| path == root || path.starts_with(&format!("{root}/")))
+            .then_some(&view.container)
+    }
+
     fn system() -> Self {
         let windows = cfg!(target_os = "windows");
         let home = if windows {
@@ -468,6 +520,20 @@ impl HarnessContext {
             .map(|layout| layout.state())
             .unwrap_or_default()
             .join(HARNESS_LOCATIONS_FILE);
+        let private_view = if windows {
+            Residence::detect()
+                .container()
+                .map(|container| PrivateView {
+                    container: container.clone(),
+                    roots: vec![
+                        roots.roaming.clone(),
+                        env::var_os("LOCALAPPDATA")
+                            .map_or_else(|| home.join("AppData/Local"), PathBuf::from),
+                    ],
+                })
+        } else {
+            None
+        };
         Self {
             home,
             config: roots.config,
@@ -477,8 +543,17 @@ impl HarnessContext {
             path_entries,
             locations,
             windows,
+            private_view,
         }
     }
+}
+
+/// A path as one lowercase string with forward slashes, for comparing Windows paths.
+fn comparable(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1007,6 +1082,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_uninstall: state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
         can_locate: true,
+        private_view: context.private_to(&definition.path).is_some(),
         config_path: definition.path.to_string_lossy().into_owned(),
         connector_command: context.connector.to_string_lossy().into_owned(),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
@@ -1209,6 +1285,7 @@ fn apply_install(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
     if !context.connector.is_file() {
         return Err(HarnessError::ConnectorMissing);
     }
@@ -1248,6 +1325,7 @@ fn apply_uninstall(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
     let changed = match definition.dialect {
         ConfigDialect::CodexToml => edit_toml(&definition.path, &context.connector, false)?,
         ConfigDialect::Yaml(dialect) => {
@@ -1284,6 +1362,7 @@ fn apply_fix(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
     if !context.connector.is_file() {
         return Err(HarnessError::ConnectorMissing);
     }
@@ -1306,6 +1385,18 @@ fn apply_fix(
             definition.name
         ),
     })
+}
+
+/// Refuse a change that would reach only the private view of the app container this process runs
+/// in.
+fn refuse_private(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<(), HarnessError> {
+    match context.private_to(&definition.path) {
+        Some(container) => Err(HarnessError::PrivateView(container.app.clone())),
+        None => Ok(()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2403,6 +2494,11 @@ pub enum HarnessError {
     /// A path has no writable parent.
     #[error("harness configuration path has no parent: {0}")]
     InvalidPath(PathBuf),
+    /// The change would reach only the private view of an app container.
+    #[error(
+        "Windows keeps this configuration private to {0}, so a change made from here would not          reach other apps; run Ghostlight's install from a regular terminal"
+    )]
+    PrivateView(String),
 }
 
 #[cfg(test)]
@@ -2418,9 +2514,9 @@ mod tests {
         bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
         edit_yaml, fix_toml, fix_yaml, harness_roots, inspect, inspect_json, inspect_toml,
         inspect_yaml, jsonc_options, manual_json_setup, replace_with_backup,
-        resolve_through_symlink, HarnessAction, HarnessContext, HarnessError, HarnessRegistry,
-        HarnessRoots, HarnessState, HarnessSummary, JsonDialect, RegistrationState, YamlDialect,
-        EVIDENCE_MAX_CHARS,
+        resolve_through_symlink, AppContainer, HarnessAction, HarnessContext, HarnessError,
+        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView,
+        RegistrationState, YamlDialect, EVIDENCE_MAX_CHARS,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2453,6 +2549,7 @@ mod tests {
             path_entries: Vec::new(),
             locations: directory.join("config/ghostlight/harness-locations.json"),
             windows: false,
+            private_view: None,
         }
     }
 
@@ -2564,6 +2661,7 @@ mod tests {
             path_entries: vec![binary_directory],
             locations: directory.join("locations.json"),
             windows: false,
+            private_view: None,
         });
 
         let zed = registry
@@ -3865,6 +3963,49 @@ mod tests {
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcp"]["servers"].get("ghostlight").is_none());
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn inside_an_app_container_appdata_clients_are_private_and_profile_clients_are_not() {
+        let directory = temporary("private-view");
+        let mut context = context(&directory);
+        context.private_view = Some(PrivateView {
+            container: AppContainer {
+                app: "Claude".into(),
+            },
+            roots: vec![directory.join("config")],
+        });
+        let desktop = context.roaming.join("Claude/claude_desktop_config.json");
+        fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        fs::write(&desktop, r#"{"mcpServers":{}}"#).unwrap();
+        let before = fs::read(&desktop).unwrap();
+        let registry = HarnessRegistry::with_context(context);
+
+        let summaries = registry.summaries();
+        let claude = summaries
+            .iter()
+            .find(|summary| summary.id == "claude-desktop")
+            .unwrap();
+        assert!(claude.private_view);
+        let codex = summaries
+            .iter()
+            .find(|summary| summary.id == "codex")
+            .unwrap();
+        assert!(!codex.private_view);
+
+        let refused = registry
+            .apply("claude-desktop", HarnessAction::Install)
+            .unwrap_err();
+        assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "Claude"));
+        assert_eq!(fs::read(&desktop).unwrap(), before);
+        assert!(
+            registry
+                .apply("codex", HarnessAction::Install)
+                .unwrap()
+                .changed
+        );
 
         fs::remove_dir_all(directory).unwrap();
     }

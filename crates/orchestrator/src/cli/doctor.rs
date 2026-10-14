@@ -14,6 +14,7 @@ use crate::cli::setup::{
 use crate::cli::status::{
     observe_runtime, render_runtime_status, runtime_document, RuntimeObservation,
 };
+use crate::install::container;
 use crate::install::layout::Layout;
 use crate::install::marker::DevelopmentMarker;
 use crate::install::record::InstallRecord;
@@ -129,6 +130,12 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
             if *ready { "ready" } else { "missing" }
         );
     }
+    if let Some(container) = &observation.native_host.private_view {
+        println!(
+            "Registrations: {}",
+            container::cannot_see_line(container, &Layout::new(observation.home.clone()))
+        );
+    }
     print_native_host_report(&observation.native_host);
     print_command_path_report(&observation.command_path);
     if observation.user_assets.state != crate::install::user_assets::UserAssetState::NotApplicable {
@@ -140,6 +147,14 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
+        if harness.private_view {
+            println!(
+                "MCP client: {} -- {} -- Windows gives the app this terminal runs in its own                  view of this configuration.",
+                harness.name,
+                container::NOT_VISIBLE
+            );
+            continue;
+        }
         println!(
             "MCP client: {} -- {} -- {}",
             harness.name,
@@ -191,6 +206,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
             .collect::<Vec<_>>(),
         "browser_connector": observation.native_host.connector.display().to_string(),
         "browsers": observation.native_host.browsers,
+        "private_view": observation.native_host.private_view,
         "command": observation.command_path,
         "documentation": observation.user_assets,
         "applications": observation.desktop,

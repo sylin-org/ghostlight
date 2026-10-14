@@ -1,8 +1,10 @@
 //! Windows parent identity and liveness through the audited FFI boundary.
 
+use std::collections::HashMap;
 use std::mem;
+use std::path::PathBuf;
 
-use crate::ProcessIdentity;
+use crate::{image, ProcessIdentity};
 
 type Handle = *mut core::ffi::c_void;
 
@@ -74,8 +76,11 @@ impl Drop for OwnedHandle {
     }
 }
 
-pub(super) fn parent() -> Option<ProcessIdentity> {
-    let snapshot = OwnedHandle::snapshot()?;
+/// Every running process as `(process id, parent process id)`, from one snapshot.
+fn process_table() -> Vec<(u32, u32)> {
+    let Some(snapshot) = OwnedHandle::snapshot() else {
+        return Vec::new();
+    };
     let mut entry = ProcessEntry32W {
         size: mem::size_of::<ProcessEntry32W>() as u32,
         usage: 0,
@@ -88,16 +93,50 @@ pub(super) fn parent() -> Option<ProcessIdentity> {
         flags: 0,
         executable: [0; MAX_PATH],
     };
+    let mut rows = Vec::new();
     // SAFETY: entry has the required size and remains writable for the complete snapshot walk.
     let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) } != 0;
     while found {
-        if entry.process_id == std::process::id() {
-            return identity(entry.parent_process_id);
-        }
+        rows.push((entry.process_id, entry.parent_process_id));
         // SAFETY: snapshot and entry remain valid for the next row.
         found = unsafe { Process32NextW(snapshot.0, &mut entry) } != 0;
     }
-    None
+    rows
+}
+
+pub(super) fn parent() -> Option<ProcessIdentity> {
+    process_table()
+        .into_iter()
+        .find(|(process_id, _)| *process_id == std::process::id())
+        .and_then(|(_, parent)| identity(parent))
+}
+
+/// Executable paths of this process's ancestors, nearest first, walking at most `limit` parents.
+///
+/// The walk ends at the first parent that cannot be identified or that started after its child,
+/// which is a parent id the system has since reused for an unrelated process. An ancestor whose
+/// image cannot be queried is skipped and the walk continues past it.
+pub(super) fn ancestor_images(limit: usize) -> Vec<PathBuf> {
+    let parents: HashMap<u32, u32> = process_table().into_iter().collect();
+    let mut images = Vec::new();
+    let mut child = std::process::id();
+    for _ in 0..limit {
+        let Some(&parent) = parents.get(&child) else {
+            break;
+        };
+        let (Some(child_identity), Some(parent_identity)) = (identity(child), identity(parent))
+        else {
+            break;
+        };
+        if parent_identity.created > child_identity.created {
+            break;
+        }
+        if let Some(image) = image::full_image_path(parent) {
+            images.push(image);
+        }
+        child = parent;
+    }
+    images
 }
 
 pub(super) fn identity(process_id: u32) -> Option<ProcessIdentity> {
@@ -138,7 +177,18 @@ pub(super) fn is_alive(expected: ProcessIdentity) -> bool {
 mod tests {
     use std::process::Command;
 
-    use super::{identity, is_alive};
+    use super::{ancestor_images, identity, is_alive};
+
+    #[test]
+    fn the_ancestor_walk_is_bounded_and_starts_at_the_parent() {
+        let one = ancestor_images(1);
+        assert!(one.len() <= 1);
+        assert!(ancestor_images(0).is_empty());
+        let all = ancestor_images(16);
+        assert!(all.len() <= 16);
+        assert!(!all.is_empty(), "a test process has a parent to name");
+        assert_eq!(all.first(), one.first());
+    }
 
     #[test]
     fn current_process_has_a_live_stable_identity() {

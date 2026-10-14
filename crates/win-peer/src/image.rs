@@ -23,7 +23,7 @@ extern "system" {
     ) -> i32;
 }
 
-/// The peer image's full path, for signature verification only. Never logged, never audited.
+/// A process image's full path. Never logged, never audited.
 pub(super) fn full_image_path(process_id: u32) -> Option<PathBuf> {
     // SAFETY: OpenProcess with only query-limited access takes no ownership of anything and the
     // handle is closed on every path below.

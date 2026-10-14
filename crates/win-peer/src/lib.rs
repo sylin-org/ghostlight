@@ -22,7 +22,9 @@
 //! attributes inside this same FFI boundary. ADR-0197 adds the shell's item identifier list of a
 //! file in `item_id_list`, which the installer's Start-menu shortcut names its target by. ADR-0197
 //! adds `clear_standard_handle_inheritance` in `standard_handles`, which keeps a detached child from
-//! holding its starter's standard pipes open.
+//! holding its starter's standard pipes open. ADR-0197 adds `ancestor_images`, the executable paths
+//! of a process's parent chain, from which the installer learns whether it runs inside an
+//! app's container.
 
 /// The process observed to own the remote endpoint of a local connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,6 +101,22 @@ pub fn process_identity(process_id: u32) -> Option<ProcessIdentity> {
     {
         let _ = process_id;
         None
+    }
+}
+
+/// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
+/// parents. Empty where the platform cannot answer.
+///
+/// The paths decide where this process runs (the installer asks whether an ancestor is a packaged
+/// app). They are never logged or audited.
+#[must_use]
+pub fn ancestor_images(limit: usize) -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    return process::ancestor_images(limit);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = limit;
+        Vec::new()
     }
 }
 

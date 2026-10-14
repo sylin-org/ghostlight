@@ -46,6 +46,14 @@ in-flight calls 10 s. If it is still running, that exact image is stopped. It th
 `bin/ghostlight serve`, and waits up to 30 s for the runtime file. Nothing needs stopping by
 hand. A connector that was not replaced keeps running and reconnects.
 
+Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
+the app's container, where registry and `%APPDATA%` writes reach only that app and no browser
+sees them. Run `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal. It
+writes the browser registrations, whose `HKCU` values name the manifest in
+`~/.ghostlight/manifests`. Later dev loops then work from inside the container: they rewrite
+only that manifest and report any registration they had to leave for a regular terminal.
+`doctor` inside a container cannot see what other apps see, and says so.
+
 `-Restore` runs `~/.ghostlight/bin/ghostlight deployment install --restore`. It is offline. It
 refuses when the connectors in `bin` speak another relay revision than the service there.
 Otherwise it removes the marker and restarts the installed service. `-Plan` with either form
@@ -186,7 +194,8 @@ It isolates runtime, audit, policy, diagnostics, and registration paths, then re
 fixtures. It neither reloads an existing extension nor changes a person's browser profile.
 
 Build all three executables side by side and ensure the platform native-messaging manifest points
-to that `ghostlight-browser-connector`. Load `extension/` unpacked and reload it after every
+to that `ghostlight-browser-connector` (on Windows the manifest is
+`~/.ghostlight/manifests/org.sylin.ghostlight.json`). Load `extension/` unpacked and reload it after every
 extension edit. Its pinned development identity and `org.sylin.ghostlight` host name must not
 change.
 

@@ -3,8 +3,21 @@
 //! This module coordinates machine-level integration: registering the native
 //! messaging host with Chromium browsers, updating MCP client configurations,
 //! and handling uninstallation.
+//!
+//! Inside a Windows app container the registry and `AppData` writes reach only that app, so an
+//! install there leaves those registrations unwritten, says which, and names the one command that
+//! finishes them from a regular terminal (see `crate::install::container`).
 
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
+use crate::install::container::{self, AppContainer};
+use crate::install::layout::Layout;
+
+/// Registrations an install left unwritten because the app container it ran in keeps them private.
+#[derive(Default)]
+struct KeptPrivate {
+    container: Option<AppContainer>,
+    registrations: Vec<String>,
+}
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
 pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
@@ -14,6 +27,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
 
     ghostlight_relay::home::home()?;
     let native_hosts = NativeHostRegistry::discover();
+    let mut kept_private = KeptPrivate::default();
     let mut install_usable = false;
     let initial_browser_report = native_hosts.check()?;
     let install_browser_ids = if install {
@@ -32,13 +46,29 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             None => native_hosts.install()?,
             Some(browser_ids) => native_hosts.install_selected(browser_ids)?,
         };
-        println!("Browser connection installed; changed: {}", result.changed);
+        println!(
+            "Browser connection {}; changed: {}",
+            if result.private.is_empty() {
+                "installed"
+            } else {
+                "prepared"
+            },
+            result.changed
+        );
         print_native_host_report(&result.report);
+        kept_private.container = result.report.private_view.clone();
+        kept_private.registrations.extend(
+            result
+                .private
+                .iter()
+                .map(|name| format!("{name} browser connection")),
+        );
         install_usable = result.report.browsers.iter().any(|browser| {
             (install_browser_ids
                 .as_ref()
                 .is_none_or(|browser_ids| browser_ids.contains(&browser.id)))
-                && browser.state == NativeHostState::Current
+                && (browser.state == NativeHostState::Current
+                    || result.private.contains(&browser.name))
                 && (browser.package.native_messaging_usable() || options.all_browsers)
         });
     } else {
@@ -103,12 +133,12 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     }
 
     if install && !options.dry_run && !install_usable {
-        return finish_setup(install, options, install_usable);
+        return conclude(install, options, install_usable, &kept_private);
     }
 
     if options.no_clients {
         println!("MCP client configuration was left unchanged.");
-        return finish_setup(install, options, install_usable);
+        return conclude(install, options, install_usable, &kept_private);
     }
 
     let harnesses = HarnessRegistry::discover();
@@ -130,7 +160,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         } else {
             println!("No MCP client configuration can be changed automatically.");
         }
-        return finish_setup(install, options, install_usable);
+        return conclude(install, options, install_usable, &kept_private);
     }
     let mut failures = Vec::new();
     for summary in selected {
@@ -141,6 +171,12 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
                 summary.name,
                 summary.state
             );
+            continue;
+        }
+        if install && summary.private_view {
+            kept_private
+                .registrations
+                .push(format!("{} MCP client", summary.name));
             continue;
         }
         let action = if install {
@@ -156,12 +192,37 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
             }
         }
     }
-    finish_setup(install, options, install_usable)?;
+    conclude(install, options, install_usable, &kept_private)?;
     if !failures.is_empty() {
         anyhow::bail!(
             "Ghostlight could not update {} MCP client integration(s)",
             failures.len()
         );
+    }
+    Ok(())
+}
+
+/// Finish the setup: when registrations were left unwritten because an app container keeps them
+/// private, name them and the command that finishes them; otherwise present the ready summary.
+fn conclude(
+    install: bool,
+    options: &SetupOptions,
+    install_usable: bool,
+    kept_private: &KeptPrivate,
+) -> anyhow::Result<()> {
+    let container = match &kept_private.container {
+        Some(container)
+            if install && !options.dry_run && !kept_private.registrations.is_empty() =>
+        {
+            container
+        }
+        _ => return finish_setup(install, options, install_usable),
+    };
+    println!();
+    for line in
+        container::kept_private_lines(container, &kept_private.registrations, &Layout::current()?)
+    {
+        println!("{line}");
     }
     Ok(())
 }
@@ -307,13 +368,22 @@ pub fn select_harnesses(
 pub(crate) fn print_native_host_report(report: &crate::install::native_host::NativeHostReport) {
     println!("Browser connector: {}", report.connector.display());
     for browser in &report.browsers {
-        println!(
-            "Browser: {} -- {} -- {} -- {}",
-            browser.name,
-            browser.package_detail,
-            browser.state.label(),
-            browser.detail
-        );
+        match &report.private_view {
+            Some(container) => println!(
+                "Browser: {} -- {} -- {} -- Windows gives {} its own view of the registry.",
+                browser.name,
+                browser.package_detail,
+                container::NOT_VISIBLE,
+                container.app
+            ),
+            None => println!(
+                "Browser: {} -- {} -- {} -- {}",
+                browser.name,
+                browser.package_detail,
+                browser.state.label(),
+                browser.detail
+            ),
+        }
     }
 }
 
@@ -424,6 +494,7 @@ mod tests {
         NativeHostReport {
             connector: PathBuf::from("/ghostlight-browser-connector"),
             browsers,
+            private_view: None,
         }
     }
 

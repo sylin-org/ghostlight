@@ -112,7 +112,7 @@ try {
     function Get-MachineNativeHostState {
         $parts = @()
         if ($IsWindows) {
-            $manifest = Join-Path $env:LOCALAPPDATA "Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json"
+            $manifest = Join-Path $env:USERPROFILE ".ghostlight\manifests\org.sylin.ghostlight.json"
             $parts += if (Test-Path -LiteralPath $manifest) {
                 (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
             } else { "<absent>" }

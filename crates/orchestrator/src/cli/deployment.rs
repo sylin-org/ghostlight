@@ -4,6 +4,7 @@
 //! one line, and a service that did not start is an error, so the exit code tells a script that
 //! the next launch will install again.
 
+use crate::install::container;
 use crate::install::deployment::{self, MarkerChange, Mode, Outcome, Request, ServiceDidNotStart};
 use crate::install::layout::Layout;
 use crate::install::reconcile::ReconcileReport;
@@ -63,12 +64,12 @@ fn report(outcome: &Outcome, layout: &Layout) {
         println!("The Ghostlight service started.");
     }
     if let Some(registrations) = &outcome.registrations {
-        report_registrations(registrations);
+        report_registrations(registrations, layout);
     }
 }
 
 /// Print what the reconcile changed and what it left for a person.
-fn report_registrations(report: &ReconcileReport) {
+fn report_registrations(report: &ReconcileReport, layout: &Layout) {
     if !report.browsers.is_empty() {
         println!(
             "Browser connection registered for {}.",
@@ -92,6 +93,11 @@ fn report_registrations(report: &ReconcileReport) {
     }
     for entry in &report.platform {
         println!("Updated the {entry}.");
+    }
+    if let Some(container) = &report.container {
+        for line in container::kept_private_lines(container, &report.kept_private, layout) {
+            println!("{line}");
+        }
     }
     for failure in &report.failures {
         eprintln!("Could not update a registration: {failure}");

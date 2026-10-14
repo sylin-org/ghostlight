@@ -55,9 +55,9 @@ function machineRegistration() {
     parts.push(
       readManifest(
         join(
-          process.env.LOCALAPPDATA || "",
-          "Ghostlight",
-          "NativeMessagingHosts",
+          process.env.USERPROFILE || "",
+          ".ghostlight",
+          "manifests",
           "org.sylin.ghostlight.json"
         )
       )

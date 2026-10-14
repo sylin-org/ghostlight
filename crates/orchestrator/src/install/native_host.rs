@@ -4,6 +4,14 @@
 //! `GHOSTLIGHT_NATIVE_HOST_DIR` roots every manifest and Windows registry key below one
 //! directory, so journeys and scratch builds exercise the real install and recovery seams
 //! without adopting the machine's persistent browser registration.
+//!
+//! On Windows the one manifest lives in `home/manifests`, which no app container redirects, and
+//! each browser's `HKCU` value names that fixed path. A registry value is written only when it
+//! differs from what is read, so an install that runs inside an app container (whose registry
+//! writes only that app sees) and finds the right value already registered writes nothing. When
+//! it would have to write one, it leaves the value alone and names the browser in
+//! [`NativeHostActionResult::private`] (ADR-0197 amendment, 2026-10-14). On Linux the browsers
+//! read each manifest file itself from their own configuration directory.
 
 use std::collections::HashSet;
 use std::env;
@@ -16,6 +24,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
+use super::container::{self, AppContainer, Residence};
+use super::layout::{Layout, MANIFESTS_DIRECTORY_NAME};
 
 /// Stable native-messaging identity used by every supported Chromium browser.
 pub const HOST_NAME: &str = "org.sylin.ghostlight";
@@ -96,6 +106,9 @@ pub struct NativeHostReport {
     pub connector: PathBuf,
     /// One result for every supported browser.
     pub browsers: Vec<BrowserRegistration>,
+    /// The app container this inspection ran in, when there is one: the registry it read is that
+    /// app's private view, so the states above say nothing about what other apps see.
+    pub private_view: Option<AppContainer>,
 }
 
 impl NativeHostReport {
@@ -115,6 +128,9 @@ pub struct NativeHostActionResult {
     pub changed: bool,
     /// State observed after the action.
     pub report: NativeHostReport,
+    /// Browsers whose registry value had to change but was left alone, because this process runs
+    /// inside an app container whose registry writes no other app sees.
+    pub private: Vec<String>,
 }
 
 /// Product-owned native-host lifecycle service.
@@ -228,10 +244,13 @@ impl NativeHostRegistry {
                 home: root.to_path_buf(),
                 config: root.join(".config"),
                 local: root.join("local"),
+                layout: Layout::new(root.join("ghostlight")),
+                manifests: root.join(MANIFESTS_DIRECTORY_NAME),
                 connector: normalize_path(connector),
                 browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
                 windows_browser_roots: Vec::new(),
                 registry_isolated: true,
+                residence: Residence::Regular,
             },
         }
     }
@@ -254,11 +273,17 @@ struct NativeHostContext {
     home: PathBuf,
     config: PathBuf,
     local: PathBuf,
+    /// The Ghostlight home, for the commands a report names.
+    layout: Layout,
+    /// Where the Windows manifest lives: `home/manifests`, or below the isolated root.
+    manifests: PathBuf,
     connector: PathBuf,
     browser_packages: BrowserPackageContext,
     windows_browser_roots: Vec<PathBuf>,
     /// Registry writes stay below the Ghostlight-owned isolated subkey (env-scoped journeys).
     registry_isolated: bool,
+    /// Where this process runs. Registry writes inside an app container are that app's alone.
+    residence: Residence,
 }
 
 impl NativeHostContext {
@@ -278,10 +303,20 @@ impl NativeHostContext {
             env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             &home,
         );
-        let connector = super::layout::Layout::current()
-            .map(|layout| layout.bin())
-            .unwrap_or_default()
-            .join(executable_name(CONNECTOR_NAME, platform));
+        let layout = Layout::current().unwrap_or_else(|_| Layout::new(PathBuf::new()));
+        let connector = layout.bin().join(executable_name(CONNECTOR_NAME, platform));
+        let manifests = if registry_isolated {
+            home.join(MANIFESTS_DIRECTORY_NAME)
+        } else {
+            layout.manifests()
+        };
+        // An isolated registry key is read by this process's own descendants only, so an app
+        // container's private view is exactly right for it.
+        let residence = if registry_isolated || platform != NativeHostPlatform::Windows {
+            Residence::Regular
+        } else {
+            Residence::detect()
+        };
         let browser_packages =
             BrowserPackageContext::system(&home, platform == NativeHostPlatform::Linux);
         let windows_browser_roots = if platform == NativeHostPlatform::Windows {
@@ -294,10 +329,22 @@ impl NativeHostContext {
             home,
             config,
             local,
+            layout,
+            manifests,
             connector: normalize_path(&connector),
             browser_packages,
             windows_browser_roots,
             registry_isolated,
+            residence,
+        }
+    }
+
+    /// The app container whose private registry view this process writes to, on Windows.
+    fn private_registry(&self) -> Option<&AppContainer> {
+        if self.platform == NativeHostPlatform::Windows {
+            self.residence.container()
+        } else {
+            None
         }
     }
 
@@ -540,6 +587,8 @@ trait RegistrationIo {
     fn read_file(&self, path: &Path) -> Result<Option<String>, NativeHostError>;
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError>;
     fn remove_file(&self, path: &Path) -> Result<(), NativeHostError>;
+    /// Remove `path` when it is an empty directory; whether it was removed.
+    fn remove_empty_directory(&self, path: &Path) -> Result<bool, NativeHostError>;
     fn read_registry(&self, key: &str) -> Result<Option<String>, NativeHostError>;
     fn write_registry(&self, key: &str, value: &str) -> Result<(), NativeHostError>;
     fn remove_registry(&self, key: &str) -> Result<(), NativeHostError>;
@@ -569,6 +618,30 @@ impl RegistrationIo for SystemRegistrationIo {
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(NativeHostError::Write {
+                path: path.to_path_buf(),
+                source,
+            }),
+        }
+    }
+
+    fn remove_empty_directory(&self, path: &Path) -> Result<bool, NativeHostError> {
+        let empty = match fs::read_dir(path) {
+            Ok(mut entries) => entries.next().is_none(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(source) => {
+                return Err(NativeHostError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
+        };
+        if !empty {
+            return Ok(false);
+        }
+        match fs::remove_dir(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(source) => Err(NativeHostError::Write {
                 path: path.to_path_buf(),
                 source,
@@ -621,6 +694,7 @@ fn inspect(
     Ok(NativeHostReport {
         connector: context.connector.clone(),
         browsers,
+        private_view: context.private_registry().cloned(),
     })
 }
 
@@ -638,23 +712,16 @@ fn inspect_browser(
                 return Ok((NativeHostState::Missing, None));
             };
             let registered_path = PathBuf::from(registered_path);
-            let physical_path = normalize_path(&registered_path);
             let contents = registration_io.read_file(&registered_path)?;
             classify_manifest(
                 contents.as_deref(),
                 &expected,
                 context.platform,
-                // A packaged caller can read a virtual AppData path that an ordinary browser
-                // cannot. The registry must name the physical file, not merely a path that
-                // resolves to that file inside this process's redirected filesystem view.
-                registered_path
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&physical_path.to_string_lossy())
-                    && same_path(
-                        &physical_path,
-                        &browser_manifest_path(context, browser),
-                        context.platform,
-                    ),
+                same_path(
+                    &registered_path,
+                    &browser_manifest_path(context, browser),
+                    context.platform,
+                ),
             )
         }
         NativeHostPlatform::Linux => {
@@ -779,68 +846,57 @@ fn apply_install_for_mode(
             || (mode == InstallMode::InstallOrUpdate
                 && observed.state == NativeHostState::NeedsAttention)
     }) {
-        let retired_changed = remove_retired_firefox_registration(context, registration_io)?;
+        let superseded_changed = remove_superseded(context, registration_io)?;
         return Ok(NativeHostActionResult {
-            changed: retired_changed,
+            changed: superseded_changed,
             report: before,
+            private: Vec::new(),
         });
     }
 
-    let mut changed = browsers.iter().any(|browser| {
-        let observed = before
+    let observed_state = |browser: &BrowserSpec| {
+        before
             .browsers
             .iter()
             .find(|observed| observed.id == browser.id)
-            .expect("every browser specification has an inspection result");
-        matches!(
-            observed.state,
-            NativeHostState::Missing | NativeHostState::Updatable | NativeHostState::OwnedElsewhere
-        )
-    });
+            .expect("every browser specification has an inspection result")
+            .state
+    };
+    let mut changed = false;
+    let mut private = Vec::new();
     match context.platform {
         NativeHostPlatform::Windows => {
             let mut written_manifests = HashSet::new();
             for browser in browsers {
-                let observed = before
-                    .browsers
-                    .iter()
-                    .find(|observed| observed.id == browser.id)
-                    .expect("every browser specification has an inspection result");
-                if observed.state != NativeHostState::NeedsAttention {
-                    let manifest_path = browser_manifest_path(context, browser);
-                    if written_manifests.insert(manifest_path.clone()) {
-                        let expected = HostManifest::expected(&context.connector);
-                        let contents = expected.to_json()?;
-                        if let Some(existing) = registration_io.read_file(&manifest_path)? {
-                            let parsed = serde_json::from_str::<HostManifest>(&existing).ok();
-                            if !parsed.as_ref().is_some_and(HostManifest::owned) {
-                                return Err(NativeHostError::ForeignManifest(manifest_path));
-                            }
-                        }
-                        registration_io.write_file(&manifest_path, &contents)?;
-                    }
-                    // Resolve after writing: MSIX can redirect creation into package-local storage.
-                    // Chromium runs outside that context and needs the resulting physical path.
-                    let physical_manifest = normalize_path(&manifest_path);
-                    let manifest_value = physical_manifest.to_string_lossy();
-                    registration_io
-                        .write_registry(&context.registry_key(browser), manifest_value.as_ref())?;
+                if observed_state(browser) == NativeHostState::NeedsAttention {
+                    continue;
+                }
+                let manifest_path = browser_manifest_path(context, browser);
+                if written_manifests.insert(manifest_path.clone()) {
+                    changed |= write_windows_manifest(context, registration_io, &manifest_path)?;
+                }
+                match register_manifest(context, registration_io, browser, &manifest_path)? {
+                    Registration::Unchanged => {}
+                    Registration::Written => changed = true,
+                    Registration::KeptPrivate => private.push(browser.name.to_owned()),
                 }
             }
         }
         NativeHostPlatform::Linux => {
             for browser in browsers {
-                let observed = before
-                    .browsers
-                    .iter()
-                    .find(|observed| observed.id == browser.id)
-                    .expect("every browser specification has an inspection result");
-                if observed.state != NativeHostState::NeedsAttention {
+                let state = observed_state(browser);
+                if state != NativeHostState::NeedsAttention {
                     let expected = HostManifest::expected(&context.connector);
                     let contents = expected.to_json()?;
                     registration_io
                         .write_file(&browser_manifest_path(context, browser), &contents)?;
                 }
+                changed |= matches!(
+                    state,
+                    NativeHostState::Missing
+                        | NativeHostState::Updatable
+                        | NativeHostState::OwnedElsewhere
+                );
             }
         }
     }
@@ -851,6 +907,9 @@ fn apply_install_for_mode(
             .iter()
             .find(|observed| observed.id == browser.id)
             .expect("every browser specification has an inspection result");
+        if private.iter().any(|name| name == browser.name) {
+            return false;
+        }
         match mode {
             InstallMode::InstallOrUpdate => matches!(
                 observed.state,
@@ -863,8 +922,69 @@ fn apply_install_for_mode(
     }) {
         return Err(NativeHostError::VerificationFailed);
     }
-    changed |= remove_retired_firefox_registration(context, registration_io)?;
-    Ok(NativeHostActionResult { changed, report })
+    changed |= remove_superseded(context, registration_io)?;
+    Ok(NativeHostActionResult {
+        changed,
+        report,
+        private,
+    })
+}
+
+/// What registering one browser's manifest path did.
+enum Registration {
+    /// The registry already names the manifest.
+    Unchanged,
+    /// The registry value was written.
+    Written,
+    /// The value differs, but this process runs inside an app container: a write would reach
+    /// only that app's private view, so none was made.
+    KeptPrivate,
+}
+
+/// Write the Windows manifest unless it already holds exactly the expected contents. A manifest
+/// that is not Ghostlight's is never replaced.
+fn write_windows_manifest(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    manifest_path: &Path,
+) -> Result<bool, NativeHostError> {
+    let contents = HostManifest::expected(&context.connector).to_json()?;
+    if let Some(existing) = registration_io.read_file(manifest_path)? {
+        if existing == contents {
+            return Ok(false);
+        }
+        let parsed = serde_json::from_str::<HostManifest>(&existing).ok();
+        if !parsed.as_ref().is_some_and(HostManifest::owned) {
+            return Err(NativeHostError::ForeignManifest(
+                manifest_path.to_path_buf(),
+            ));
+        }
+    }
+    registration_io.write_file(manifest_path, &contents)?;
+    Ok(true)
+}
+
+/// Point one browser's registry value at the manifest, reading it first and writing only when it
+/// differs.
+fn register_manifest(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+    browser: &BrowserSpec,
+    manifest_path: &Path,
+) -> Result<Registration, NativeHostError> {
+    let key = context.registry_key(browser);
+    let value = normalize_path(manifest_path).to_string_lossy().into_owned();
+    if registration_io
+        .read_registry(&key)?
+        .is_some_and(|current| current.eq_ignore_ascii_case(&value))
+    {
+        return Ok(Registration::Unchanged);
+    }
+    if context.private_registry().is_some() {
+        return Ok(Registration::KeptPrivate);
+    }
+    registration_io.write_registry(&key, &value)?;
+    Ok(Registration::Written)
 }
 
 fn apply_uninstall(
@@ -879,6 +999,12 @@ fn apply_uninstall_for(
     registration_io: &dyn RegistrationIo,
     browsers: &[BrowserSpec],
 ) -> Result<NativeHostActionResult, NativeHostError> {
+    if let Some(container) = context.private_registry() {
+        return Err(NativeHostError::PrivateView(container::uninstall_refusal(
+            container,
+            &context.layout,
+        )));
+    }
     let mut changed = false;
     let mut owned_manifests = HashSet::new();
     match context.platform {
@@ -937,11 +1063,70 @@ fn apply_uninstall_for(
             changed = true;
         }
     }
-    changed |= remove_retired_firefox_registration(context, registration_io)?;
+    changed |= remove_superseded(context, registration_io)?;
+    if context.platform == NativeHostPlatform::Windows {
+        registration_io.remove_empty_directory(&context.manifests)?;
+    }
     Ok(NativeHostActionResult {
         changed,
         report: inspect(context, registration_io)?,
+        private: Vec::new(),
     })
+}
+
+/// Remove what earlier versions registered and this version no longer uses: the retired Firefox
+/// registration and, on Windows, the manifest in the old `AppData` directory once no browser
+/// names it, then that directory when it is empty.
+///
+/// Nothing is removed from inside an app container: its view of `AppData` and the registry is
+/// that app's alone, so what it sees there is not what other apps have.
+fn remove_superseded(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+) -> Result<bool, NativeHostError> {
+    if context.private_registry().is_some() {
+        return Ok(false);
+    }
+    let mut changed = remove_retired_firefox_registration(context, registration_io)?;
+    if context.platform == NativeHostPlatform::Windows {
+        changed |= remove_legacy_windows_manifest(context, registration_io)?;
+    }
+    Ok(changed)
+}
+
+/// Remove the owned manifest in the old per-user `AppData` directory when no browser's registry
+/// value still names it.
+fn remove_legacy_windows_manifest(
+    context: &NativeHostContext,
+    registration_io: &dyn RegistrationIo,
+) -> Result<bool, NativeHostError> {
+    let directory = legacy_windows_manifest_directory(context);
+    let manifest = directory.join(format!("{HOST_NAME}.json"));
+    let owned = registration_io
+        .read_file(&manifest)?
+        .and_then(|contents| serde_json::from_str::<HostManifest>(&contents).ok())
+        .is_some_and(|manifest| manifest.owned());
+    let mut changed = false;
+    if owned {
+        let mut referenced = false;
+        for browser in BROWSERS {
+            referenced |= registration_io
+                .read_registry(&context.registry_key(browser))?
+                .is_some_and(|value| {
+                    same_path(
+                        &PathBuf::from(value),
+                        &manifest,
+                        NativeHostPlatform::Windows,
+                    )
+                });
+        }
+        if !referenced {
+            registration_io.remove_file(&manifest)?;
+            changed = true;
+        }
+    }
+    changed |= registration_io.remove_empty_directory(&directory)?;
+    Ok(changed)
 }
 
 /// Remove only the retired Firefox registration when its manifest still proves Ghostlight
@@ -951,11 +1136,9 @@ fn remove_retired_firefox_registration(
     registration_io: &dyn RegistrationIo,
 ) -> Result<bool, NativeHostError> {
     let manifest_path = match context.platform {
-        NativeHostPlatform::Windows => context
-            .local
-            .join("Ghostlight")
-            .join("NativeMessagingHosts")
-            .join(format!("{HOST_NAME}.firefox.json")),
+        NativeHostPlatform::Windows => {
+            legacy_windows_manifest_directory(context).join(format!("{HOST_NAME}.firefox.json"))
+        }
         NativeHostPlatform::Linux => context
             .home
             .join(".mozilla")
@@ -1025,12 +1208,18 @@ fn owned_elsewhere_detail(
     }
 }
 
+/// The one Windows manifest every browser's registry value names: `home/manifests`.
 fn windows_manifest_path(context: &NativeHostContext) -> PathBuf {
+    context.manifests.join(format!("{HOST_NAME}.json"))
+}
+
+/// The per-user `AppData` directory earlier versions kept the Windows manifest in. Packaged apps
+/// see a private copy of it, which is why the manifest moved below the Ghostlight home.
+fn legacy_windows_manifest_directory(context: &NativeHostContext) -> PathBuf {
     context
         .local
         .join("Ghostlight")
         .join("NativeMessagingHosts")
-        .join(format!("{HOST_NAME}.json"))
 }
 
 fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> PathBuf {
@@ -1231,6 +1420,9 @@ pub enum NativeHostError {
     /// A target has no parent directory.
     #[error("native-host path has no parent: {0}")]
     InvalidPath(PathBuf),
+    /// The change would reach only the private view of the app container this process runs in.
+    #[error("{0}")]
+    PrivateView(String),
 }
 
 #[cfg(test)]
@@ -1243,7 +1435,9 @@ mod tests {
     #[derive(Default)]
     struct MemoryIo {
         files: Mutex<HashMap<PathBuf, String>>,
+        directories: Mutex<HashSet<PathBuf>>,
         registry: Mutex<HashMap<String, String>>,
+        registry_writes: Mutex<Vec<String>>,
     }
 
     impl MemoryIo {
@@ -1254,6 +1448,15 @@ mod tests {
         fn registry(&self) -> MutexGuard<'_, HashMap<String, String>> {
             self.registry.lock().unwrap()
         }
+
+        /// The registry keys written so far, in order.
+        fn registry_writes(&self) -> Vec<String> {
+            self.registry_writes.lock().unwrap().clone()
+        }
+
+        fn has_directory(&self, path: &Path) -> bool {
+            self.directories.lock().unwrap().contains(path)
+        }
     }
 
     impl RegistrationIo for MemoryIo {
@@ -1263,6 +1466,12 @@ mod tests {
 
         fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError> {
             self.files().insert(path.to_path_buf(), contents.into());
+            if let Some(parent) = path.parent() {
+                self.directories
+                    .lock()
+                    .unwrap()
+                    .insert(parent.to_path_buf());
+            }
             Ok(())
         }
 
@@ -1271,11 +1480,19 @@ mod tests {
             Ok(())
         }
 
+        fn remove_empty_directory(&self, path: &Path) -> Result<bool, NativeHostError> {
+            if self.files().keys().any(|file| file.starts_with(path)) {
+                return Ok(false);
+            }
+            Ok(self.directories.lock().unwrap().remove(path))
+        }
+
         fn read_registry(&self, key: &str) -> Result<Option<String>, NativeHostError> {
             Ok(self.registry().get(key).cloned())
         }
 
         fn write_registry(&self, key: &str, value: &str) -> Result<(), NativeHostError> {
+            self.registry_writes.lock().unwrap().push(key.into());
             self.registry().insert(key.into(), value.into());
             Ok(())
         }
@@ -1352,11 +1569,14 @@ mod tests {
             Uuid::new_v4().simple()
         ));
         let local = root.join("AppData/Local");
+        let layout = Layout::new(root.join("Ghostlight"));
         NativeHostContext {
             platform,
             home: root.clone(),
             config: root.join(".config"),
             local: local.clone(),
+            manifests: layout.manifests(),
+            layout,
             connector: root
                 .join("Ghostlight/bin")
                 .join(executable_name(CONNECTOR_NAME, platform)),
@@ -1367,6 +1587,7 @@ mod tests {
                 root.join("Program Files (x86)"),
             ],
             registry_isolated: false,
+            residence: Residence::Regular,
         }
     }
 
@@ -1478,22 +1699,28 @@ mod tests {
             home: PathBuf::from("/home/test"),
             config: PathBuf::from("/home/test/.config"),
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
+            layout: Layout::new("/home/test/.ghostlight"),
+            manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
             connector: PathBuf::from("/opt/ghostlight/ghostlight-browser-connector"),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
             windows_browser_roots: Vec::new(),
             registry_isolated: false,
+            residence: Residence::Regular,
         };
         let windows = NativeHostContext {
             platform: NativeHostPlatform::Windows,
             home: PathBuf::from("/home/test"),
             config: PathBuf::from("/home/test/.config"),
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
+            layout: Layout::new("/home/test/.ghostlight"),
+            manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
             connector: PathBuf::from(
-                r"C:\Users\test\AppData\Local\Ghostlight\bin\ghostlight-browser-connector.exe",
+                r"C:\Users\test\.ghostlight\bin\ghostlight-browser-connector.exe",
             ),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
             windows_browser_roots: Vec::new(),
             registry_isolated: false,
+            residence: Residence::Regular,
         };
         assert_eq!(BROWSERS.len(), 4);
         assert_eq!(
@@ -1855,6 +2082,296 @@ mod tests {
         assert!(registration_io
             .files()
             .contains_key(&windows_manifest_path(&context)));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    fn windows_context_with_connector() -> NativeHostContext {
+        let context = context(NativeHostPlatform::Windows);
+        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+        fs::write(&context.connector, b"connector").unwrap();
+        context
+    }
+
+    fn inside_container(mut context: NativeHostContext, app: &str) -> NativeHostContext {
+        context.residence = Residence::AppContainer(AppContainer { app: app.into() });
+        context
+    }
+
+    fn browser_names() -> Vec<String> {
+        BROWSERS
+            .iter()
+            .map(|browser| browser.name.to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_windows_manifest_lives_in_the_home_and_every_browser_names_it() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+
+        let result = apply_install(&context, &registration_io).unwrap();
+
+        let manifest = windows_manifest_path(&context);
+        assert!(manifest.starts_with(context.layout.home()));
+        assert_eq!(
+            manifest,
+            context.layout.manifests().join("org.sylin.ghostlight.json")
+        );
+        assert!(registration_io.files().contains_key(&manifest));
+        for browser in BROWSERS {
+            assert_eq!(
+                registration_io
+                    .registry()
+                    .get(&context.registry_key(browser)),
+                Some(&manifest.to_string_lossy().into_owned()),
+                "{}",
+                browser.id
+            );
+        }
+        assert!(result.changed);
+        assert!(result.private.is_empty());
+        assert_eq!(result.report.private_view, None);
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn a_registry_value_is_written_only_when_it_differs() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        apply_install(&context, &registration_io).unwrap();
+        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+
+        // A stale manifest is rewritten; the registry already names it, so it is not touched.
+        let manifest = windows_manifest_path(&context);
+        let mut stale = HostManifest::expected(&context.connector);
+        stale.description = "Ghostlight connector (old)".into();
+        registration_io
+            .files()
+            .insert(manifest.clone(), stale.to_json().unwrap());
+        let repaired = apply_install(&context, &registration_io).unwrap();
+        assert!(repaired.changed);
+        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+        assert!(repaired
+            .report
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Current));
+
+        assert!(!apply_install(&context, &registration_io).unwrap().changed);
+        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn inside_a_container_the_manifest_is_written_and_no_registry_value_is() {
+        let context = inside_container(windows_context_with_connector(), "Claude");
+        let registration_io = MemoryIo::default();
+
+        let result = apply_install(&context, &registration_io).unwrap();
+
+        assert!(registration_io
+            .files()
+            .contains_key(&windows_manifest_path(&context)));
+        assert!(registration_io.registry_writes().is_empty());
+        assert!(registration_io.registry().is_empty());
+        assert!(result.changed);
+        assert_eq!(result.private, browser_names());
+        assert_eq!(
+            result.report.private_view,
+            Some(AppContainer {
+                app: "Claude".into()
+            })
+        );
+        assert!(result
+            .report
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Missing));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn inside_a_container_an_install_that_finds_the_registration_writes_nothing_private() {
+        let regular = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        apply_install(&regular, &registration_io).unwrap();
+        let writes = registration_io.registry_writes().len();
+
+        // The manifest is stale but the registry value is right: only the manifest changes.
+        let manifest = windows_manifest_path(&regular);
+        let mut stale = HostManifest::expected(&regular.connector);
+        stale.description = "Ghostlight connector (old)".into();
+        registration_io
+            .files()
+            .insert(manifest.clone(), stale.to_json().unwrap());
+        let context = inside_container(regular, "Codex");
+        let result = apply_install(&context, &registration_io).unwrap();
+
+        assert!(result.changed);
+        assert!(result.private.is_empty());
+        assert_eq!(registration_io.registry_writes().len(), writes);
+        assert!(result
+            .report
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Current));
+        assert!(!apply_install(&context, &registration_io).unwrap().changed);
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn inside_a_container_an_uninstall_is_refused_before_anything_changes() {
+        let context = inside_container(windows_context_with_connector(), "Claude");
+        let registration_io = MemoryIo::default();
+        let manifest = windows_manifest_path(&context);
+        registration_io.files().insert(
+            manifest.clone(),
+            HostManifest::expected(&context.connector)
+                .to_json()
+                .unwrap(),
+        );
+
+        let refused = apply_uninstall(&context, &registration_io).unwrap_err();
+
+        assert!(matches!(refused, NativeHostError::PrivateView(_)));
+        assert!(refused.to_string().contains("Claude"));
+        assert!(refused.to_string().ends_with("uninstall"));
+        assert!(registration_io.files().contains_key(&manifest));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    /// Plant an owned manifest in the old per-user `AppData` directory and point `browsers` at it.
+    fn plant_legacy_manifest(
+        context: &NativeHostContext,
+        registration_io: &MemoryIo,
+        browsers: &[BrowserSpec],
+    ) -> PathBuf {
+        let legacy = legacy_windows_manifest_directory(context).join("org.sylin.ghostlight.json");
+        registration_io.files().insert(
+            legacy.clone(),
+            HostManifest::expected(&context.connector)
+                .to_json()
+                .unwrap(),
+        );
+        registration_io
+            .directories
+            .lock()
+            .unwrap()
+            .insert(legacy.parent().unwrap().to_path_buf());
+        for browser in browsers {
+            registration_io.registry().insert(
+                context.registry_key(browser),
+                legacy.to_string_lossy().into_owned(),
+            );
+        }
+        legacy
+    }
+
+    #[test]
+    fn the_old_appdata_manifest_is_repointed_removed_and_its_directory_goes() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+        let before = inspect(&context, &registration_io).unwrap();
+        assert!(before
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Updatable));
+
+        let result = apply_install(&context, &registration_io).unwrap();
+
+        assert!(result.changed);
+        let manifest = windows_manifest_path(&context);
+        for browser in BROWSERS {
+            assert_eq!(
+                registration_io
+                    .registry()
+                    .get(&context.registry_key(browser)),
+                Some(&manifest.to_string_lossy().into_owned())
+            );
+        }
+        assert!(!registration_io.files().contains_key(&legacy));
+        assert!(!registration_io.has_directory(legacy.parent().unwrap()));
+        assert!(result
+            .report
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Current));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn the_old_appdata_directory_stays_while_it_holds_anything_else() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+        let other = legacy.with_file_name("notes.txt");
+        registration_io.files().insert(other.clone(), "mine".into());
+
+        apply_install(&context, &registration_io).unwrap();
+
+        assert!(!registration_io.files().contains_key(&legacy));
+        assert!(registration_io.files().contains_key(&other));
+        assert!(registration_io.has_directory(legacy.parent().unwrap()));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn the_old_manifest_stays_while_a_browser_outside_the_install_still_names_it() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+
+        apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+
+        assert!(registration_io.files().contains_key(&legacy));
+        assert_eq!(
+            registration_io
+                .registry()
+                .get(&context.registry_key(&BROWSERS[1])),
+            Some(&legacy.to_string_lossy().into_owned())
+        );
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn inside_a_container_the_old_manifest_and_its_registry_values_are_left_alone() {
+        let context = inside_container(windows_context_with_connector(), "Claude");
+        let registration_io = MemoryIo::default();
+        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+
+        let result = apply_install(&context, &registration_io).unwrap();
+
+        assert!(registration_io.files().contains_key(&legacy));
+        assert!(registration_io.has_directory(legacy.parent().unwrap()));
+        assert!(registration_io.registry_writes().is_empty());
+        assert_eq!(result.private, browser_names());
+        // The manifest in the home is ready for the install that runs outside the container.
+        assert!(registration_io
+            .files()
+            .contains_key(&windows_manifest_path(&context)));
+
+        let _ = fs::remove_dir_all(context.home);
+    }
+
+    #[test]
+    fn uninstall_removes_the_empty_manifests_directory() {
+        let context = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        apply_install(&context, &registration_io).unwrap();
+
+        apply_uninstall(&context, &registration_io).unwrap();
+
+        assert!(!registration_io.has_directory(&context.manifests));
 
         let _ = fs::remove_dir_all(context.home);
     }

@@ -250,3 +250,35 @@ differ, this section wins.
   with connectors that handshake and start the service when it is not up (Decisions 2, 11 and
   17), Quit, child tabs, session continuity, the strict break and the small removals.
 
+## Windows app container amendment (2026-10-14)
+
+Live finding: a process started under an MSIX-packaged desktop app (Claude desktop, Codex) runs
+in that app's container even though it reports no package identity. Its writes to `HKCU`,
+`%LOCALAPPDATA%` and `%APPDATA%` go to a private per-app view that Chrome and every other app
+never read. The user profile root, so the home, is not redirected. Breakaway attributes do not
+leave the container, and starting a process through WMI or the Task Scheduler is an
+EDR-flagged technique that Ghostlight does not use. Where this section and the text above
+differ, this section wins.
+
+- **Home layout.** `~/.ghostlight/manifests/` holds the native-host manifest on Windows,
+  `org.sylin.ghostlight.json`. Every browser's `HKCU` registration value names that fixed path.
+  After the first registration made outside a container, any later install, from anywhere, only
+  rewrites the manifest file. macOS and Linux keep their browser-owned manifest directories,
+  because those browsers read the file itself.
+- **Read first.** A registry value is written only when it differs from what is read, so an
+  install inside a container that finds the right value registered writes nothing.
+- **Container rule.** A process is inside an app container when an ancestor's executable lies
+  under a `WindowsApps` directory (the parent chain is walked to 16 levels through `win-peer`).
+  Inside one, the install does everything else but leaves each registration that needs a
+  redirected write unwritten: a browser's `HKCU` value, an MCP client configuration under
+  `%APPDATA%` or `%LOCALAPPDATA%`, the Start-menu shortcut and the installed-apps key. Its report
+  names the browser and client registrations it left and the one command that finishes them from
+  a regular terminal, `<home>/bin/ghostlight.exe install`. `doctor` there says it cannot see what
+  other apps see, instead of reporting registered. An uninstall inside a container is refused
+  with the command to run, because it could only change the private view.
+- **Migration.** Outside a container, an existing manifest in
+  `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts` is rewritten into `manifests/`, the registry
+  values are repointed, the old manifest is removed once no browser names it, and the old
+  directory is removed when empty.
+- **Development.** An agent that runs inside Claude desktop or Codex runs the install once from a
+  regular terminal; later development loops then work from inside the container.

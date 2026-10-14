@@ -137,8 +137,8 @@ try {
         if (-not $path.StartsWith($profile + [IO.Path]::DirectorySeparatorChar,
                 [StringComparison]::OrdinalIgnoreCase) -or
             $manifestFile.Name -ne 'org.sylin.ghostlight.json' -or
-            $manifestFile.Directory.Name -ne 'NativeMessagingHosts' -or
-            $manifestFile.Directory.Parent.Name -ne 'Ghostlight') {
+            $manifestFile.Directory.Name -ne 'manifests' -or
+            $manifestFile.Directory.Parent.Name -ne '.ghostlight') {
             throw 'Requires a physical per-user Ghostlight manifest path.'
         }
         $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json

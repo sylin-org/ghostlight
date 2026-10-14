@@ -7,6 +7,10 @@
 //! `bin/ghostlight`. Reconciling is idempotent: what is current is left alone. A native-host
 //! manifest that names another path is reclaimed; a client entry Ghostlight does not own, such
 //! as an `npx` launcher, is reported and left as it is.
+//!
+//! Inside a Windows app container the registry and `AppData` writes reach only that app, so the
+//! reconcile writes the manifest (below the home, which is shared) and leaves every registration
+//! that would need a redirected write, naming each one in [`ReconcileReport::kept_private`].
 
 use std::env;
 
@@ -14,6 +18,7 @@ use ghostlight_relay::home::TEST_HOME_VARIABLE;
 use serde::Serialize;
 
 use super::command_path::CommandPath;
+use super::container::{AppContainer, Residence};
 use super::desktop_entry::DesktopIntegration;
 use super::layout::Layout;
 use super::migration::RegistrationKind;
@@ -54,6 +59,11 @@ pub struct ReconcileReport {
     pub platform: Vec<String>,
     /// Registrations that could not be reconciled, each with its reason.
     pub failures: Vec<String>,
+    /// The app container the reconcile ran in, when it had to leave registrations unwritten.
+    pub container: Option<AppContainer>,
+    /// Registrations left unwritten because the container keeps their registry or `AppData`
+    /// location private; a regular terminal finishes them.
+    pub kept_private: Vec<String>,
 }
 
 /// The registrations of this user that name the installation, and which of them the installer
@@ -62,6 +72,7 @@ pub struct Registrations {
     native_hosts: Option<NativeHostRegistry>,
     clients: Option<HarnessRegistry>,
     platform_entries: bool,
+    residence: Residence,
 }
 
 impl Registrations {
@@ -77,6 +88,7 @@ impl Registrations {
             native_hosts: native_hosts_allowed().then(NativeHostRegistry::discover),
             clients: (!test_home).then(HarnessRegistry::discover),
             platform_entries: !test_home,
+            residence: Residence::detect(),
         }
     }
 
@@ -88,7 +100,15 @@ impl Registrations {
             native_hosts: Some(native_hosts),
             clients: Some(clients),
             platform_entries: false,
+            residence: Residence::Regular,
         }
+    }
+
+    /// The same registrations, run as if from inside `container`.
+    #[cfg(test)]
+    pub(crate) fn inside(mut self, container: AppContainer) -> Self {
+        self.residence = Residence::AppContainer(container);
+        self
     }
 
     /// The registrations a reconcile would write now. Nothing is changed.
@@ -148,7 +168,10 @@ impl Registrations {
             reconcile_clients(clients, &mut report);
         }
         if self.platform_entries {
-            reconcile_platform(layout, version, &mut report);
+            reconcile_platform(layout, version, &self.residence, &mut report);
+        }
+        if !report.kept_private.is_empty() {
+            report.container = self.residence.container().cloned();
         }
         report
     }
@@ -188,7 +211,18 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
         return;
     }
     match hosts.install() {
-        Ok(_) => report.browsers = changing,
+        Ok(result) => {
+            report.browsers = changing
+                .into_iter()
+                .filter(|name| !result.private.contains(name))
+                .collect();
+            report.kept_private.extend(
+                result
+                    .private
+                    .iter()
+                    .map(|name| format!("{name} browser connection")),
+            );
+        }
         Err(error) => report.failures.push(format!("Browser connection: {error}")),
     }
 }
@@ -205,6 +239,9 @@ fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
     };
     for summary in summaries {
         match summary.state {
+            HarnessState::Updatable if summary.private_view => report
+                .kept_private
+                .push(format!("{} MCP client", summary.name)),
             HarnessState::Updatable => match clients.apply(&summary.id, HarnessAction::Install) {
                 Ok(_) => report.clients_rewritten.push(summary.name),
                 Err(error) => report.failures.push(format!("{}: {error}", summary.name)),
@@ -219,7 +256,12 @@ fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
 }
 
 /// Write the platform's own entries for the installed service.
-fn reconcile_platform(layout: &Layout, version: &str, report: &mut ReconcileReport) {
+fn reconcile_platform(
+    layout: &Layout,
+    version: &str,
+    residence: &Residence,
+    report: &mut ReconcileReport,
+) {
     match CommandPath::discover().install() {
         Ok(result) if result.changed => report
             .platform
@@ -242,12 +284,23 @@ fn reconcile_platform(layout: &Layout, version: &str, report: &mut ReconcileRepo
         Ok(_) => {}
         Err(error) => report.failures.push(format!("Applications entry: {error}")),
     }
-    reconcile_windows(layout, version, report);
+    reconcile_windows(layout, version, residence, report);
 }
 
 /// Write the Start-menu shortcut and the Uninstall key.
+///
+/// Inside an app container both would land in that app's private view, so neither is written;
+/// the next install from a regular terminal writes them.
 #[cfg(windows)]
-fn reconcile_windows(layout: &Layout, version: &str, report: &mut ReconcileReport) {
+fn reconcile_windows(
+    layout: &Layout,
+    version: &str,
+    residence: &Residence,
+    report: &mut ReconcileReport,
+) {
+    if residence.container().is_some() {
+        return;
+    }
     match super::windows_entry::reconcile(layout, version) {
         Ok(change) => {
             if change.shortcut {
@@ -268,7 +321,13 @@ fn reconcile_windows(layout: &Layout, version: &str, report: &mut ReconcileRepor
 
 /// Other platforms have no Start menu or Uninstall key.
 #[cfg(not(windows))]
-fn reconcile_windows(_layout: &Layout, _version: &str, _report: &mut ReconcileReport) {}
+fn reconcile_windows(
+    _layout: &Layout,
+    _version: &str,
+    _residence: &Residence,
+    _report: &mut ReconcileReport,
+) {
+}
 
 #[cfg(test)]
 mod tests {
@@ -304,6 +363,22 @@ mod tests {
                 layout,
                 root,
             }
+        }
+
+        fn private_registrations(&self, app: &str) -> Registrations {
+            Registrations::isolated(
+                NativeHostRegistry::isolated(
+                    &self.root.join("hosts"),
+                    &self.layout.browser_connector(),
+                ),
+                HarnessRegistry::isolated_inside(
+                    &self.root.join("clients"),
+                    &self.layout.mcp_connector(),
+                    &self.layout.state(),
+                    AppContainer { app: app.into() },
+                ),
+            )
+            .inside(AppContainer { app: app.into() })
         }
 
         fn registrations(&self) -> Registrations {
@@ -405,5 +480,40 @@ mod tests {
             ),
             fixture.layout.mcp_connector()
         );
+    }
+
+    #[test]
+    fn inside_a_container_a_client_under_appdata_is_reported_private_and_left_alone() {
+        let fixture = Fixture::new();
+        let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
+        let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        Fixture::write_json(
+            &owned,
+            &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
+        );
+        let before = fs::read(&owned).unwrap();
+
+        let report = fixture
+            .private_registrations("Claude")
+            .reconcile(&fixture.layout, "2.0.0");
+
+        assert!(report.failures.is_empty(), "{report:?}");
+        assert!(report.clients_rewritten.is_empty(), "{report:?}");
+        assert_eq!(report.kept_private, ["Claude Desktop MCP client"]);
+        assert_eq!(
+            report.container,
+            Some(AppContainer {
+                app: "Claude".into()
+            })
+        );
+        assert_eq!(fs::read(&owned).unwrap(), before);
+    }
+
+    #[test]
+    fn a_regular_reconcile_reports_nothing_private() {
+        let fixture = Fixture::new();
+        let report = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
+        assert!(report.kept_private.is_empty(), "{report:?}");
+        assert_eq!(report.container, None);
     }
 }
