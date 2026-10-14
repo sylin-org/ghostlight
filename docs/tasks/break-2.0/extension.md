@@ -14,13 +14,22 @@ The lane builds no Rust.
 
 ## RESUME HERE
 
-Next slice: `extension-2-p4-asset-shell`. The protocol 4 fixtures are pinned; the page assets
-add `tests/golden/protocol4/assets.sha256` when they are built.
+Next slice: `extension-3-p4-asset-content`. The shell is in place: `level4/assets/` holds
+`world.js`, `page-shared.js`, `sensor.js`, `presentation-css.js`, `presentation.js` and `content.js`.
+Any change to them changes the bundle hash, so update `tests/golden/protocol4/assets.sha256`
+deliberately in the same commit (print it with `bundle.sha256(bundle.expand())` from
+`level4/assets/tests/bundle.js`).
+
+Left for extension-3 in `content.js`: coded errors at the throw sites (only `unknown_kind` is
+coded now), locator epochs, cancel checks inside `observe` and `prepareStableFill`, and the new
+kinds. `fillValuesRetained` and `prepareBrowserText` are unused until `verify_fill_retained` and
+`focus_text_field` land. The old `clear` kind is gone because the vocabulary has no such kind.
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
+| extension-2-p4-asset-shell | `level4/assets/` shell (world, page-shared, sensor, presentation-css, presentation, content), `tests/bundle.js`, `tests/fake-dom.js`, `tests/world.test.js` (18 tests), `tests/golden/protocol4/assets.sha256`. | see `git log` |
 | extension-1-p4-contracts | `tests/golden/protocol4/` (vocabulary, 10 frames, 6 events, 40 requests, 80 receipts, 32 world messages, 12 tolerance cases), `extension/lib/protocol.js`, `extension/tests/golden-protocol4.test.js`. | see `git log` |
 
 ## Counts
@@ -28,6 +37,7 @@ add `tests/golden/protocol4/assets.sha256` when they are built.
 - 17 primitives, 13 receipt failure codes, 10 call failure codes, 32 world message kinds,
   22 asset error codes (19 pre-effect).
 - 22 tests in `golden-protocol4.test.js`.
+- 18 tests in `level4/assets/tests/world.test.js`.
 
 ## Fixture conventions
 

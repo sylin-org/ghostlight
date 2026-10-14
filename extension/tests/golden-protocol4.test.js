@@ -116,7 +116,8 @@ test("every fixture parses, is ASCII, and ends with one newline", () => {
 });
 
 test("fixture directories hold only json files", () => {
-  assert.deepStrictEqual(fs.readdirSync(GOLDEN).sort(), [...SECTIONS, "vocabulary.json"].sort());
+  // assets.sha256 pins the page bundle; the level-4 asset tests own it.
+  assert.deepStrictEqual(fs.readdirSync(GOLDEN).sort(), [...SECTIONS, "vocabulary.json", "assets.sha256"].sort());
   for (const name of SECTIONS) {
     for (const file of fs.readdirSync(path.join(GOLDEN, name))) assert.ok(file.endsWith(".json"), `${name}/${file}`);
   }
