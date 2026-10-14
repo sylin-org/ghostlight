@@ -122,11 +122,7 @@ impl InvocationResult {
     /// Render the concise authored text that precedes structured MCP facts.
     #[must_use]
     pub fn model_text(&self) -> String {
-        if self.next_steps.is_empty() {
-            self.summary.clone()
-        } else {
-            format!("{} Next: {}", self.summary, self.next_steps.join(" "))
-        }
+        crate::language::outcome::model_text(&self.summary, &self.next_steps)
     }
 
     /// Whether the terminal result should carry MCP's tool-execution error signal.

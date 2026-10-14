@@ -488,13 +488,24 @@ fn a_session_before_initialize_has_no_resume_state() {
 }
 
 #[test]
+fn the_relay_fixture_resume_token_decodes() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay3/mcp.resume.json");
+    let text = std::fs::read_to_string(fixture).expect("relay 3 resume fixture");
+    let fixture: Value = serde_json::from_str(&text).unwrap();
+    let token = fixture["token"].as_str().expect("fixture token");
+    let state = ResumeState::decode(token).expect("fixture token decodes");
+    assert_eq!(state.revision, "2025-06-18");
+    let session = McpSession::resumed(state);
+    assert!(session.is_initialized());
+    assert!(!session.client_label().is_empty());
+}
+
+#[test]
 fn a_malformed_token_is_rejected() {
     assert_eq!(ResumeState::decode("nope"), Err(ResumeError::Format));
     assert_eq!(ResumeState::decode("rs1.***"), Err(ResumeError::Encoding));
-    assert_eq!(
-        ResumeState::decode("rs1.eyJyZXZpc2lvbiI6IjIwMjUtMDYtMTgifQ"),
-        Err(ResumeError::Content)
-    );
+    assert_eq!(ResumeState::decode("rs1.W10"), Err(ResumeError::Content));
     let unsupported = ResumeState {
         revision: "1999-01-01".into(),
         client_label: "c".into(),

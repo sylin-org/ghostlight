@@ -206,7 +206,9 @@ impl McpSession {
         let mut session = Self::new(state.channel);
         session.phase = Phase::Ready;
         session.revision = Some(negotiate(&state.revision));
-        session.client_label = bounded_label(&state.client_label);
+        if !state.client_label.is_empty() {
+            session.client_label = bounded_label(&state.client_label);
+        }
         session.session_key = state.session_key;
         session
     }
@@ -581,9 +583,11 @@ pub struct OwnedTab {
 pub struct ResumeState {
     /// The negotiated MCP revision.
     pub revision: String,
-    /// The client's own name, for attribution and presentation only.
+    /// The client's own name, for attribution and presentation only. A token may omit it.
+    #[serde(default)]
     pub client_label: String,
-    /// How the client reached the connector.
+    /// How the client reached the connector. A token may omit it; the opening names it too.
+    #[serde(default)]
     pub channel: String,
     /// The workspace session key, when the session was bound to one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -706,11 +710,6 @@ fn failure_call_result(failure: ConnectorFailure) -> Value {
     };
     let summary = failure.call_summary();
     let next_steps = failure.call_next_steps();
-    let text = if next_steps.is_empty() {
-        summary.to_owned()
-    } else {
-        format!("{summary} Next: {}", next_steps.join(" "))
-    };
     let envelope = json!({
         "status": status,
         "effect": effect,
@@ -720,7 +719,7 @@ fn failure_call_result(failure: ConnectorFailure) -> Value {
         "facts": {"reason": cause},
         "next_steps": next_steps,
     });
-    call_tool_result(text, envelope, true, Vec::new())
+    call_tool_result(failure.call_text(), envelope, true, Vec::new())
 }
 
 fn call_tool_result(

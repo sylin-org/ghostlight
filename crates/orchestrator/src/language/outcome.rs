@@ -1509,6 +1509,24 @@ impl From<WorkspaceError> for WorkspaceReason {
     }
 }
 
+/// The label that introduces the safe next steps in a result's model-facing text.
+const NEXT_STEPS_LABEL: &str = "Next:";
+
+/// Render a result's model-facing text: the summary, then its safe next steps, if any.
+#[must_use]
+pub fn model_text<S: AsRef<str>>(summary: &str, next_steps: &[S]) -> String {
+    let mut text = summary.to_owned();
+    if !next_steps.is_empty() {
+        text.push(' ');
+        text.push_str(NEXT_STEPS_LABEL);
+        for step in next_steps {
+            text.push(' ');
+            text.push_str(step.as_ref());
+        }
+    }
+    text
+}
+
 /// Authored sentence for a navigation that recreated a dead tab binding.
 #[must_use]
 pub fn page_recovered_summary(host: Option<&str>) -> String {

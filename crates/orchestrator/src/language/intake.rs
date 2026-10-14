@@ -103,6 +103,12 @@ impl ConnectorFailure {
         }
     }
 
+    /// The model-facing text of a tool call answered by this failure.
+    #[must_use]
+    pub fn call_text(self) -> String {
+        super::outcome::model_text(self.call_summary(), self.call_next_steps())
+    }
+
     /// The message of a JSON-RPC error for any other request answered by this failure.
     #[must_use]
     pub const fn request_message(self) -> &'static str {
