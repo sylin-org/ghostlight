@@ -36,8 +36,8 @@ function Invoke-Ghostlight {
     # may never arrive: after the process exits, drain for a short bounded time
     # and then stop reading.
     $readers = @(
-        @{ Reader = $process.StandardOutput; Sink = [Console]::Out; Pending = $null },
-        @{ Reader = $process.StandardError; Sink = [Console]::Error; Pending = $null }
+        @{ Reader = $process.StandardOutput; Sink = [Console]::Out; Pending = $null; Done = $false },
+        @{ Reader = $process.StandardError; Sink = [Console]::Error; Pending = $null; Done = $false }
     )
     $deadline = $null
     while ($true) {
