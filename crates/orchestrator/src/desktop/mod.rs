@@ -126,17 +126,6 @@ pub fn run(startup: Startup) -> Result<()> {
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
 
-    match crate::install::native_host::NativeHostRegistry::discover().reconcile_packaged_launch() {
-        Ok(Some(result)) => {
-            if result.changed {
-                eprintln!("Ghostlight updated the packaged browser connector registration");
-            }
-        }
-        Ok(None) => {}
-        Err(error) => {
-            eprintln!("Ghostlight could not reconcile the packaged browser connector: {error}");
-        }
-    }
     let host = Arc::new(ServiceHost::start_waiting(
         &ghostlight_relay::home::home()?,
         startup.lease_wait,

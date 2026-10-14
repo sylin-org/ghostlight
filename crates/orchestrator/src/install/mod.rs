@@ -12,11 +12,14 @@ pub mod layout;
 pub mod marker;
 pub mod migration;
 pub mod native_host;
+pub mod reconcile;
 pub mod record;
 #[cfg(test)]
 pub(crate) mod scratch;
 pub mod swap;
 pub mod user_assets;
+#[cfg(windows)]
+pub mod windows_entry;
 
 use std::collections::BTreeMap;
 use std::env;
@@ -77,6 +80,22 @@ impl HarnessRegistry {
         };
         let _ = registry.refresh();
         registry
+    }
+
+    /// A registry over client configurations below `directory` that names `connector`, for tests
+    /// that must not touch this user's clients.
+    #[cfg(test)]
+    pub(crate) fn isolated(directory: &Path, connector: &Path) -> Self {
+        Self::with_context(HarnessContext {
+            home: directory.join("home"),
+            config: directory.join("config"),
+            roaming: directory.join("config"),
+            codex_config: directory.join("codex").join("config.toml"),
+            connector: connector.to_path_buf(),
+            path_entries: Vec::new(),
+            locations: directory.join("state").join(HARNESS_LOCATIONS_FILE),
+            windows: false,
+        })
     }
 
     /// Return the last complete, immutable harness check.

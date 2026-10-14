@@ -6,6 +6,7 @@
 //! a model's call does.
 
 pub mod client;
+pub mod deployment;
 pub mod desktop;
 pub mod diagnostics;
 pub mod doctor;
@@ -281,9 +282,7 @@ fn report_transport(error: &ClientError) -> i32 {
 /// Dispatch a parsed launch mode to its dedicated subcommand handler.
 pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
     match mode {
-        parse::LaunchMode::DeploymentInstall(directory) => {
-            crate::install::deployment::install_download(&directory)
-        }
+        parse::LaunchMode::DeploymentInstall(request) => deployment::run(&request),
         parse::LaunchMode::Desktop => desktop::start_or_activate_desktop(),
         parse::LaunchMode::Serve => desktop::serve(),
         parse::LaunchMode::Open => desktop::open_desktop(),

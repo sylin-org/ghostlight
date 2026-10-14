@@ -19,7 +19,8 @@
 //! integration and real signed-subject evidence, without requiring Ghostlight's own certificate.
 //! Non-Windows targets compile the same surface returning `None`. ADR-0160 adds Windows-only
 //! creation of owner-private runtime files in `private_file`, keeping creation-time security
-//! attributes inside this same FFI boundary.
+//! attributes inside this same FFI boundary. ADR-0197 adds the shell's item identifier list of a
+//! file in `item_id_list`, which the installer's Start-menu shortcut names its target by.
 
 /// The process observed to own the remote endpoint of a local connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +42,8 @@ pub struct ProcessIdentity {
 
 #[cfg(target_os = "windows")]
 mod image;
+#[cfg(target_os = "windows")]
+mod item_id_list;
 #[cfg(target_os = "windows")]
 mod private_file;
 #[cfg(target_os = "windows")]
@@ -112,6 +115,13 @@ pub fn process_is_alive(process: ProcessIdentity) -> bool {
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
+}
+
+/// The shell's serialized item identifier list for the existing file at `path`, terminator
+/// included: what a shell link stores to name its target.
+#[cfg(target_os = "windows")]
+pub fn item_id_list(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    item_id_list::of_file(path)
 }
 
 /// Identify the process that owns the remote endpoint of a local connection.

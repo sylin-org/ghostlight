@@ -38,8 +38,8 @@ pub trait Launcher {
     fn run(&self, executable: &Path, arguments: &[OsString]) -> io::Result<i32>;
     /// Start `executable serve` detached with `home` as its working directory, without waiting.
     fn serve_detached(&self, executable: &Path, home: &Path) -> io::Result<()>;
-    /// Install this executable's package into `bin`.
-    fn install(&self, bin: &Path) -> Result<()>;
+    /// Install this executable's package as a release into the home of `layout`.
+    fn install(&self, layout: &Layout) -> Result<()>;
 }
 
 /// The launcher `main` uses: real processes and the real installer.
@@ -58,8 +58,8 @@ impl Launcher for ProcessLauncher {
             .map(drop)
     }
 
-    fn install(&self, bin: &Path) -> Result<()> {
-        crate::install::deployment::install_download(bin)
+    fn install(&self, layout: &Layout) -> Result<()> {
+        crate::install::deployment::install_carrier(layout)
     }
 }
 
@@ -106,7 +106,7 @@ pub fn start(
         }
         Entry::Forward(target) => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
         Entry::CarrierInstall => {
-            launcher.install(&layout.bin())?;
+            launcher.install(layout)?;
             Ok(Start::Exit(
                 launcher.run(&layout.service_executable(), &arguments)?,
             ))
@@ -186,8 +186,8 @@ mod tests {
             Ok(())
         }
 
-        fn install(&self, bin: &Path) -> Result<()> {
-            self.0.borrow_mut().push(Call::Install(bin.to_path_buf()));
+        fn install(&self, layout: &Layout) -> Result<()> {
+            self.0.borrow_mut().push(Call::Install(layout.bin()));
             Ok(())
         }
     }

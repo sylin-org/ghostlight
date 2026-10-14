@@ -24,6 +24,9 @@ pub const STORE_EXTENSION_ID: &str = "lejccfmoeogmhemakeknjjdhkfkgncdl";
 /// Unpacked development extension identity pinned by `extension/manifest.json`.
 pub const DEVELOPMENT_EXTENSION_ID: &str = "cjcmhepmagomefjggkcohdbfemacojoa";
 
+/// Environment variable that roots every manifest and registry key below one directory.
+pub const NATIVE_HOST_DIR_VARIABLE: &str = "GHOSTLIGHT_NATIVE_HOST_DIR";
+
 const HOST_DESCRIPTION: &str = "Ghostlight browser connector";
 const CONNECTOR_NAME: &str = "ghostlight-browser-connector";
 
@@ -194,18 +197,54 @@ impl NativeHostRegistry {
         apply_uninstall_for(&self.context, &SystemRegistrationIo, &browsers)
     }
 
-    /// Reconcile a package whose ordinary desktop launch runs in an identifiable final location.
+    /// Register every browser that has no Ghostlight registration and can start the connector.
     ///
-    /// Windows NSIS performs this before launch. Linux Debian installs use the first normal user
-    /// launch so a stale per-user 0.8 manifest cannot shadow the package-owned registration.
-    pub fn reconcile_packaged_launch(
-        &self,
-    ) -> Result<Option<NativeHostActionResult>, NativeHostError> {
-        if packaged_desktop_executable(&self.context.connector, self.context.platform) {
-            self.install().map(Some)
-        } else {
-            Ok(None)
+    /// Registrations that exist are left as they are, whoever owns them; reclaiming those is the
+    /// installer's deliberate act. Returns `None` when nothing was missing.
+    pub fn register_missing(&self) -> Result<Option<NativeHostActionResult>, NativeHostError> {
+        let missing: Vec<String> = self
+            .check()?
+            .browsers
+            .into_iter()
+            .filter(|browser| {
+                browser.state == NativeHostState::Missing
+                    && browser.package.native_messaging_usable()
+            })
+            .map(|browser| browser.id)
+            .collect();
+        if missing.is_empty() {
+            return Ok(None);
         }
+        self.install_selected(&missing).map(Some)
+    }
+
+    /// A registry over Linux-style manifests below `root`, naming `connector`, for tests that
+    /// must not touch the machine.
+    #[cfg(test)]
+    pub(crate) fn isolated(root: &Path, connector: &Path) -> Self {
+        Self {
+            context: NativeHostContext {
+                platform: NativeHostPlatform::Linux,
+                home: root.to_path_buf(),
+                config: root.join(".config"),
+                local: root.join("local"),
+                connector: normalize_path(connector),
+                browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
+                windows_browser_roots: Vec::new(),
+                registry_isolated: true,
+            },
+        }
+    }
+
+    /// Where the Linux-style manifest of `browser_id` lives for a registry made by
+    /// [`Self::isolated`].
+    #[cfg(test)]
+    pub(crate) fn isolated_manifest(&self, browser_id: &str) -> PathBuf {
+        let browser = BROWSERS
+            .iter()
+            .find(|browser| browser.id == browser_id)
+            .expect("a supported browser id");
+        browser_manifest_path(&self.context, browser)
     }
 }
 
@@ -234,7 +273,7 @@ impl NativeHostContext {
             NativeHostPlatform::Linux
         };
         let (home, local, config, registry_isolated) = native_host_roots(
-            env::var_os("GHOSTLIGHT_NATIVE_HOST_DIR").map(PathBuf::from),
+            env::var_os(NATIVE_HOST_DIR_VARIABLE).map(PathBuf::from),
             env::var_os("LOCALAPPDATA").map(PathBuf::from),
             env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             &home,
@@ -1019,16 +1058,6 @@ fn executable_name(name: &str, platform: NativeHostPlatform) -> String {
     }
 }
 
-fn packaged_desktop_executable(connector: &Path, platform: NativeHostPlatform) -> bool {
-    let Some(directory) = connector.parent() else {
-        return false;
-    };
-    match platform {
-        NativeHostPlatform::Windows => false,
-        NativeHostPlatform::Linux => directory == Path::new("/usr/bin"),
-    }
-}
-
 fn normalize_path(path: &Path) -> PathBuf {
     let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let rendered = canonical.to_string_lossy();
@@ -1505,22 +1534,6 @@ mod tests {
         }
 
         fs::remove_dir_all(context.home).unwrap();
-    }
-
-    #[test]
-    fn only_final_package_locations_trigger_first_launch_reconciliation() {
-        assert!(packaged_desktop_executable(
-            Path::new("/usr/bin/ghostlight-browser-connector"),
-            NativeHostPlatform::Linux
-        ));
-        assert!(!packaged_desktop_executable(
-            Path::new("/repo/target/debug/ghostlight-browser-connector"),
-            NativeHostPlatform::Linux
-        ));
-        assert!(!packaged_desktop_executable(
-            Path::new(r"C:\Program Files\Ghostlight\ghostlight-browser-connector.exe"),
-            NativeHostPlatform::Windows
-        ));
     }
 
     #[test]

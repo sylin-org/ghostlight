@@ -24,8 +24,9 @@ pub const SUBCOMMANDS: &[&str] = &[
 /// The parsed execution intent of a Ghostlight process invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LaunchMode {
-    /// Install verified download siblings at a fixed package destination.
-    DeploymentInstall(std::path::PathBuf),
+    /// Install a payload into the Ghostlight home, select a development build, or restore the
+    /// installed service.
+    DeploymentInstall(crate::install::deployment::Request),
     /// Start or activate the desktop workbench.
     Desktop,
     /// Start the service and its backgrounded desktop for a connector. It never reveals a window,
@@ -101,6 +102,36 @@ pub enum NativeHostCommand {
     Uninstall,
 }
 
+/// How `deployment install` is used.
+const DEPLOYMENT_USAGE: &str =
+    "usage: ghostlight deployment install [<payload directory>] [--development | --restore] [--plan]";
+
+/// Read the options of `deployment install`: at most one payload directory, at most one of
+/// `--development` and `--restore`, and `--plan`. A restore copies nothing, so it takes no
+/// payload.
+fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployment::Request> {
+    use crate::install::deployment::{Mode, Request};
+
+    let mut request = Request {
+        payload: None,
+        mode: Mode::Release,
+        plan_only: false,
+    };
+    for argument in arguments {
+        match argument.to_str() {
+            Some("--development") if request.mode == Mode::Release => {
+                request.mode = Mode::Development;
+            }
+            Some("--restore") if request.mode == Mode::Release => request.mode = Mode::Restore,
+            Some("--plan") if !request.plan_only => request.plan_only = true,
+            Some(option) if option.starts_with("--") => return None,
+            _ if request.payload.is_none() => request.payload = Some(argument.into()),
+            _ => return None,
+        }
+    }
+    (request.mode != Mode::Restore || request.payload.is_none()).then_some(request)
+}
+
 /// Parse command-line arguments into a typed `LaunchMode`.
 pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<LaunchMode> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
@@ -111,11 +142,12 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         if arguments
             .get(1)
             .is_some_and(|argument| argument == "install")
-            && arguments.len() == 3
         {
-            return Ok(LaunchMode::DeploymentInstall(arguments[2].clone().into()));
+            if let Some(request) = deployment_request(&arguments[2..]) {
+                return Ok(LaunchMode::DeploymentInstall(request));
+            }
         }
-        anyhow::bail!("usage: ghostlight deployment install <directory>");
+        anyhow::bail!("{DEPLOYMENT_USAGE}");
     }
     if arguments.is_empty() {
         return Ok(LaunchMode::Desktop);
@@ -478,6 +510,51 @@ mod tests {
             offenders.is_empty(),
             "terminal styling was added in {offenders:?}; honor NO_COLOR and update this test"
         );
+    }
+
+    #[test]
+    fn deployment_install_takes_one_payload_one_mode_and_a_plan() {
+        use crate::install::deployment::{Mode, Request};
+
+        let parse = |arguments: &[&str]| {
+            launch_mode(
+                ["deployment", "install"]
+                    .iter()
+                    .chain(arguments)
+                    .map(Into::into)
+                    .collect::<Vec<std::ffi::OsString>>(),
+            )
+        };
+        let request = |payload: Option<&str>, mode, plan_only| {
+            LaunchMode::DeploymentInstall(Request {
+                payload: payload.map(PathBuf::from),
+                mode,
+                plan_only,
+            })
+        };
+        assert_eq!(parse(&[]).unwrap(), request(None, Mode::Release, false));
+        assert_eq!(
+            parse(&["payload", "--plan"]).unwrap(),
+            request(Some("payload"), Mode::Release, true)
+        );
+        assert_eq!(
+            parse(&["--development"]).unwrap(),
+            request(None, Mode::Development, false)
+        );
+        assert_eq!(
+            parse(&["--restore", "--plan"]).unwrap(),
+            request(None, Mode::Restore, true)
+        );
+        for refused in [
+            &["--development", "--restore"][..],
+            &["--restore", "payload"],
+            &["one", "two"],
+            &["--plan", "--plan"],
+            &["--force"],
+        ] {
+            assert!(parse(refused).is_err(), "{refused:?}");
+        }
+        assert!(launch_mode(["deployment".into()]).is_err());
     }
 
     #[test]

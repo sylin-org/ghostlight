@@ -13,85 +13,44 @@ and an agent-launched browser can share a redirected filesystem view and conceal
 
 ## Build
 
-ADR-0167 makes every ordinary executable use one user installation. A build directory is not
-a second serving installation. Deploying with the script below selects development durably;
-running a package afterwards still reaches that development authority. Do not set
-`GHOSTLIGHT_RUNTIME_FILE` for the normal dev loop. The first upgrade to ADR-0167 must deploy all
-three binaries because every process imports the changed lifecycle seam.
+`cargo build --workspace` builds the three executables: `ghostlight` (the service and its
+workbench), `ghostlight-mcp-connector` and `ghostlight-browser-connector`. Tests and gates run
+from any target directory. A build directory never serves on its own: `serve` runs only from
+`~/.ghostlight/bin` or from the development build the marker selects (ADR-0197 Decisions 10
+and 13).
+
+## Deploying a build
 
 ```powershell
-scripts/dev-loop.ps1 -Action Deploy -Component orchestrator,mcp-connector,browser-connector -RegisterNativeHost
+pwsh scripts/dev-loop.ps1            # build, then install it as the development build
+pwsh scripts/dev-loop.ps1 -Plan      # build, then print what the install would do
+pwsh scripts/dev-loop.ps1 -Restore   # go back to the installed service; builds nothing
 ```
 
-Download installers and npm replace the permanent `~/.ghostlight/bin` sibling set.
-They verify the full download before the existing native deployment seam replaces changed
-images. Their version is an artifact identity, not a directory. Native-host and MCP registrations
-stay fixed across ordinary updates. The packaged extension connects by host name and installs
-the current service-owned page runtime on reconnect; a service update needs no extension reload.
+The script builds in `.target-dev-loop` (`-Profile debug` for a debug build) and runs
+`<build>/ghostlight deployment install --development`. The installer takes
+`~/.ghostlight/install.lock` and migrates a 1.x layout first when it finds one. It then
+rename-swaps the service into `~/.ghostlight/dev` and writes the marker
+`~/.ghostlight/development`. While the marker names an existing build, every other `ghostlight`
+forwards to it, and `bin/ghostlight serve` hands over to it. Connectors live in `bin`. They are
+replaced only when the build speaks another relay revision than `bin/install.json` records; at
+the 2.0 break the whole build goes into `bin` as well.
 
-The loop quiesces the shared production control root and the replaced directory, stops exact
-selected images, copies built binaries, and records development selection before resuming.
-Package setup remembers a release without taking development custody. To leave development,
-use `scripts/dev-loop.ps1 -Action Restore`; it requires an installed, complete release supporting
-ADR-0167, stops the selected authority, switches custody and refreshes native-host registration.
-It preserves policy, diagnostics and history locations. Published pre-ADR-0167 binaries are not
-valid restore candidates: update the package first. No automatic download is performed.
+The installer then asks the running service to quit, which gives in-flight calls 10 s. If it is
+still running, that exact image is stopped. It starts `bin/ghostlight serve`, waits up to 30 s for
+the runtime file, and reconciles every registration to name `bin`. Nothing needs stopping by
+hand. A connector that was not replaced keeps running and reconnects.
 
-The cross-directory process lane runs the ordinary process journey with package-side connectors,
-a selected development authority and an isolated user profile, without a runtime override:
+`-Restore` runs `~/.ghostlight/bin/ghostlight deployment install --restore`. It is offline. It
+refuses when the connectors in `bin` speak another relay revision than the service there.
+Otherwise it removes the marker and restarts the installed service. `-Plan` with either form
+prints one JSON document: the migration plan, the swaps, the connector replacements, the
+registrations to rewrite and the processes to stop. Nothing changes.
 
-```powershell
-$env:GHOSTLIGHT_BIN_DIR = "$PWD/.target-dev-loop/debug"
-$env:GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION = "1"
-node tests/process-journey.mjs
-```
-
-This proves process routing and reconnect with a synthetic browser, not installed Chrome or a
-reboot. Keep those acceptance claims separate.
-
-```powershell
-cargo build --workspace
-```
-
-The sibling executables are:
-
-- `target/debug/ghostlight` -- orchestrator plus Tauri workbench;
-- `target/debug/ghostlight-mcp-connector` -- MCP stdio shore; and
-- `target/debug/ghostlight-browser-connector` -- browser native-messaging shore.
-
-Run the product with its workbench:
-
-```powershell
-target/debug/ghostlight open
-```
-
-Run the complete desktop authority directly:
-
-```powershell
-target/debug/ghostlight
-```
-
-There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
-this same no-argument desktop authority.
-
-Linux MCP clients must forward their current desktop context when demand-starting
-this GUI authority. Ghostlight's Codex setup writes `env_vars` names for DISPLAY,
-WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, XDG_CURRENT_DESKTOP and
-XAUTHORITY; update an older owned registration through ordinary setup. Do not
-snapshot session addresses into configuration. When testing through MCP Inspector,
-forward these current values explicitly with its `-e` options, after the target
-command. The SDK's default reduced environment alone cannot initialize GTK.
-The Alpine fleet record preserves both the failing default and the corrected
-installed cold-start. Starting a browser first would conceal this handoff defect.
-
-The normal no-argument launch always starts the complete desktop authority with its tray and a
-backgrounded workbench: minimized on Windows and hidden on Linux. Connectors demand-start that same
-sibling executable with no application arguments. `ghostlight open` is the explicit human intent:
-it uses the shared lifecycle seam to demand-start the same ordinary authority when absent, then
-opens and focuses its workbench. Windows restores its existing view; Linux reconstructs its
-disposable view because Wayland cannot report or unset minimization. Closing destroys only the
-workbench window; the next tray or Applications Open reconstructs it, and tray Quit ends the whole
-process.
+Packages, npm and the get scripts run the same command without `--development`. A release refuses
+an older payload and does nothing for the same intact version. It writes `bin/install.json` only
+after the new service publishes, so a service that does not start is installed again on the next
+launch.
 
 ## What to restart
 
@@ -111,58 +70,7 @@ adapter does not bootstrap them back into those documents. Refresh a disposable 
 after reloading; do not automatically refresh user pages that can contain unsaved drafts. A fresh
 navigation is also enough. Reloading the extension alone does not prove existing pages are ready.
 
-## Replacing a live stack
-
-A running stack holds its own executables open, so a release swap is build-elsewhere, stop, copy,
-start. The order matters less than the scope.
-
-1. Build into an isolated target: `CARGO_TARGET_DIR=.target-release-swap cargo build --workspace
-   --release`.
-2. **Decide what to replace from the source diff, not from the build output.** Every binary is
-   rebuilt whenever a shared crate changes, so a differing file size proves nothing. Check
-   `git diff --stat <base>..HEAD -- crates/<crate>` per crate, and check whether the connector even
-   imports the bridge module that moved. A connector whose source did not change should be left
-   running: it reconnects to the new service on its own, which is exactly what
-   `process-journey.mjs` proves.
-3. Place `deploy.lock` in the live directory before stopping anything. It suppresses demand-start
-   for 30 minutes so a connector cannot start a replacement service mid-swap.
-4. Stop only processes whose exact image path is that directory. Never stop by image name; an
-   installed or user-owned stack may be running beside the build.
-5. Copy the binaries that changed, remove `deploy.lock`, then start `ghostlight`. The tray appears
-   and the workbench begins backgrounded.
-
-Replacing `ghostlight-browser-connector` closes the native port. The unchanged injector uses
-its existing retry timer and alarm wakeup to reconnect by the same host name. When the service
-alone changes, leave this connector running: it reconnects and carries the current page runtime
-without native-port churn. Reload the extension only when its packaged source changed.
-
-The repository script makes that narrow swap repeatable. It defaults to planning an orchestrator
-replacement and makes no changes:
-
-```powershell
-pwsh scripts/dev-loop.ps1
-```
-
-Run the one-command build and exact-path swap after reviewing that plan:
-
-```powershell
-pwsh scripts/dev-loop.ps1 -Action Deploy
-```
-
-Name connector replacements only when their source or shared contract changed. Native-host
-registration is also explicit because it changes browser registration on the current machine:
-
-```powershell
-pwsh scripts/dev-loop.ps1 -Action Deploy -Component orchestrator,mcp-connector
-pwsh scripts/dev-loop.ps1 -Action Deploy -Component browser-connector -RegisterNativeHost -NoStart
-```
-
-The script builds selected packages in `.target-dev-loop`, creates `deploy.lock`, stops only exact
-destination image paths under `target/release`, copies with a bounded retry, removes the lock, and
-starts the orchestrator only when it was selected. Both directories must stay inside this
-repository. A browser-connector replacement uses the injector's existing reconnect path.
-
-### Container builds and host deployment
+## Container builds and host deployment
 
 When build dependencies live in Toolbox but the installed authority runs on the
 host, keep the deployment controller on the host. Delegate only its Cargo command

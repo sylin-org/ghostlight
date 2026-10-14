@@ -79,6 +79,28 @@ pub fn remove_old_images(dir: &Path) {
     }
 }
 
+/// Every image of `name` in `dir`: `dir/name` and the images earlier swaps moved aside, as far as
+/// they exist. A process still running from any of them runs that executable.
+#[must_use]
+pub fn images(dir: &Path, name: &str) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Some(dir.join(name))
+        .filter(|path| path.is_file())
+        .into_iter()
+        .collect();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let moved_aside = entry.file_name().to_str().is_some_and(|file_name| {
+                old_image_number(file_name).is_some()
+                    && file_name.rsplit_once(OLD_MARKER).map(|(base, _)| base) == Some(name)
+            });
+            if moved_aside {
+                found.push(entry.path());
+            }
+        }
+    }
+    found
+}
+
 /// The first `name.old-<n>` path in `dir` that nothing occupies.
 fn unused_old_name(dir: &Path, name: &str) -> PathBuf {
     (1u32..)
@@ -219,6 +241,27 @@ mod tests {
                 "install.json"
             ]
         );
+    }
+
+    #[test]
+    fn images_lists_the_current_image_and_those_moved_aside() {
+        let scratch = Scratch::new();
+        let dir = scratch.path();
+        for name in [
+            "ghostlight",
+            "ghostlight.old-2",
+            "ghostlight-mcp-connector.old-3",
+            "ghostlight.new",
+        ] {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+        let mut found = images(dir, "ghostlight");
+        found.sort();
+        assert_eq!(
+            found,
+            [dir.join("ghostlight"), dir.join("ghostlight.old-2")]
+        );
+        assert!(images(&dir.join("absent"), "ghostlight").is_empty());
     }
 
     #[test]

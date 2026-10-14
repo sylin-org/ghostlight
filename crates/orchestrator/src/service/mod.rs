@@ -142,6 +142,7 @@ impl ServiceHost {
         let lease = acquire_lease(&home.join(LEASE_FILE_NAME), lease_wait)?;
         if let Ok(executable) = env::current_exe() {
             remove_old_images_beside(&executable);
+            register_missing_browsers(home, &executable);
         }
         let relay_listener = listener::bind().context("bind the relay listener")?;
         let port = relay_listener.local_addr()?.port();
@@ -1075,6 +1076,30 @@ fn acquire_lease(path: &Path, wait: Duration) -> Result<Lease> {
 fn remove_old_images_beside(executable: &Path) {
     if let Some(directory) = executable.parent() {
         install::swap::remove_old_images(directory);
+    }
+}
+
+/// Register every browser that has no Ghostlight registration, when `executable` serves the
+/// installation in `home` (the installed service or the marked development build). A person who
+/// installed through a route that never registered a browser gets one on the first start; a
+/// registration that exists is the installer's to reclaim, never this start's.
+fn register_missing_browsers(home: &Path, executable: &Path) {
+    if !install::reconcile::native_hosts_allowed() {
+        return;
+    }
+    let layout = install::layout::Layout::new(home);
+    let executable = install::entry::canonical_path(executable);
+    let marked = install::marker::DevelopmentMarker::read(&layout.development_marker())
+        .ok()
+        .flatten()
+        .map(|marker| marker.executable);
+    let serving = std::iter::once(layout.service_executable())
+        .chain(marked)
+        .any(|candidate| {
+            install::entry::same_path(&install::entry::canonical_path(&candidate), &executable)
+        });
+    if serving {
+        let _ = install::native_host::NativeHostRegistry::discover().register_missing();
     }
 }
 

@@ -13,7 +13,7 @@ scripts, and `scripts/check-repository-integrity.ps1`. No journeys and no binari
 
 ## RESUME HERE
 
-Next: switch-7, the installer rewrite that wires the break migration.
+Next: switch-8, the D22 removals.
 
 Later slices adopt `install::record::atomic_replace` for every installer writer, and gather the
 entry rule's facts through `install::entry::canonical_path`.
@@ -31,6 +31,7 @@ entry rule's facts through `install::entry::canonical_path`.
 | switch-5, commit 1 | One fixed home. Every path derives from `relay::home::home()`: the audit log in `home/state` (unless `GHOSTLIGHT_AUDIT_FILE`), MCP client locations and the handoff marker in `home/state`, user policy and the managed cache in `home/policy`, diagnostics in `home/diagnostics` and `home/diagnostics.on`; registrations name `home/bin`. The installation record and selection, `LaunchMode::Deployment`, `deployment::select` and `owns_registration`, `verify_serving_executable`, the deploy lock and the bridge `lifecycle` and `parent_process` modules are gone. `deployment install` copies changed executables into `bin` under `home/install.lock` until switch-7 rewrites it. `doctor` reports the home, `install.json` and the development marker. | see `git log` |
 | switch-5, commit 2 | The entry rule runs in `main` through `cli/start.rs` before dispatch: development forwarding (same arguments and inherited stdio, the child's exit code; `serve` detached and the parent exits 0), carrier install (`deployment install` logic into `bin`, then the installed service runs the command), refusal of `serve` from any other path; `doctor`, `status`, `help` and `--version` never install, and a command that does not parse never installs. A `Launcher` trait holds every process start, so the tests drive the real helper on temp homes. | see `git log` |
 | switch-6 | The one 2.0 break migration as a typed seam, not yet wired. `install/migration.rs` reads the 1.x installation record and the profile roots into a `Legacy`, `plan` says what will move, be archived, be deleted, be stopped and be re-registered (reading the disk, changing nothing), and `execute` carries it out: destinations are checked first, old images are stopped, each file is renamed or copied, verified and deleted, and the record is deleted last, so a second run continues from a failed one. The policy cache and the rollback-protection status move with the user policy; they are never deleted. A file already in its 2.0 place (a 1.x record whose policy directory was `home/policy`, in any spelling) is left alone, and a move from a file to itself is a no-op. | see `git log` |
+| switch-7 | One `deployment install [<payload dir>] [--development \| --restore] [--plan]`. Under `home/install.lock` it plans the break migration and carries it out before any swap; reads `bin/install.json`; a release refuses an older payload, leaves the same intact version alone, rename-swaps the service into `bin` and replaces connectors only when the relay revision changes; `--development` swaps into `dev`, writes the marker and also installs into `bin` when `bin` speaks another relay revision; `--restore` is offline, refuses a relay mismatch and removes the marker. The running service is asked to quit (10 s), its exact image is stopped if it stays, `bin/ghostlight serve` is started and `install.json` is written only once a new runtime file publishes (30 s). `install/reconcile.rs` reconciles native hosts (reclaiming manifests that name another path), owned MCP client entries (an `npx` entry is reported, not changed), the Linux entries and, in `install/windows_entry.rs`, the Start-menu shortcut (its target named by the shell's item list from `win-peer`) and the HKCU Uninstall key, replacing an NSIS one. `--plan` prints one JSON document. A `ProcessControl` trait holds every process start and stop. The byte-compare copy and the packaged-launch native-host reconcile are gone; the service registers missing browsers when it starts from `bin` or the marked build. Under `GHOSTLIGHT_TEST_HOME` the 1.x roots are read inside the test home and only native hosts rooted by `GHOSTLIGHT_NATIVE_HOST_DIR` are reconciled. | see `git log` |
 
 ## Notes
 
@@ -51,6 +52,6 @@ entry rule's facts through `install::entry::canonical_path`.
   level-3 page assets; switch-18 rewrites the journeys.
 - `tests/delight-journey.mjs`, `tests/frame-browser-journey.mjs`, `tests/keyboard-browser-journey.mjs`
   and `tests/linux/acceptance/cold.mjs` still name `service-worker.js`; switch-18 rewrites them.
-- switch-7: compute the migration plan before `execute`. `execute` deletes the 1.x record, and
-  `registrations_to_reclaim` is derived from the registrations found while that record still
-  exists, so a plan made afterwards would be empty.
+- The Windows Uninstall key runs `bin/ghostlight uninstall`, which removes Ghostlight's
+  registrations and leaves `~/.ghostlight` in place. A complete removal command is not part of
+  the break set.

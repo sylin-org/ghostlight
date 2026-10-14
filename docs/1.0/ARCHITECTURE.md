@@ -54,10 +54,23 @@ Before any command runs, `main` applies the entry rule (`install/entry.rs`, carr
 forwards to it with the same arguments; a forwarded `serve` starts detached and the parent exits.
 Without a marker, only `bin/ghostlight` serves. Any other copy is a carrier: a command that uses
 the service installs from the carrier's own directory when the installed service is absent,
-older or damaged, then runs the installed one. The install itself owns `bin/install.json`: under
-the install lock it compares the record with the package, refuses a package older than the
-installed service, leaves an intact install of the same version alone, and writes the record once
-the copy succeeds. `doctor`, `status`, `help` and `--version` never install.
+older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version` never
+install.
+
+`deployment install` (`install/deployment.rs`) is the only writer of `bin` and `dev`
+(ADR-0197 Decisions 14 and 15). Under the install lock it carries out the break migration
+(`install/migration.rs`) before anything is swapped, then compares `bin/install.json` with the
+payload: an older payload is refused, the same intact version is left alone, the service image is
+rename-swapped (`install/swap.rs`), and the connectors are replaced only when the relay revision
+changes. `--development` swaps the service into `dev` and writes the marker; `--restore` removes
+it. The installer asks the running service to quit, stops that exact image if it has not exited,
+starts `bin/ghostlight serve`, and writes `install.json` only once the new service publishes.
+Then `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
+one that names another path), owned MCP client entries, the Linux desktop entry, command link and
+manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
+A client entry Ghostlight does not own, such as an `npx` launcher, is reported and left alone.
+When the service starts from `bin` or the marked build, it registers any browser that has no
+registration yet.
 
 The orchestrator acquires an operating-system lifetime lease beside its runtime document before
 opening listeners or initializing the desktop. The lease, not the replaceable discovery document,

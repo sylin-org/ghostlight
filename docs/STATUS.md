@@ -2,6 +2,15 @@
 
 Last updated: 2026-10-05 (1.3.15 release integration in progress).
 
+## In flight: the 2.0 break set (2026-10-14)
+
+Dev carries the unreleased 2.0 break set of
+[ADR-0197](adr/0197-contained-seams-and-the-2-0-break.md). Progress lives in the ledgers under
+[docs/tasks/break-2.0/](tasks/break-2.0/): `service.md`, `extension.md` and `connectors.md` for
+the three lanes, and `switch.md` for the switch that wires them. `deployment install` now
+carries the break migration, `--development`, `--restore` and `--plan`. Nothing from the break
+set is published.
+
 ## Only main and dev (2026-10-05)
 
 Main `86952a8a` contains the published 1.3.14 runtime and active contracts.

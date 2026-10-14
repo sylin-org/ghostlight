@@ -52,7 +52,7 @@ const LEGACY_DEPLOY_LOCK_NAME: &str = "deploy.lock";
 const AUDIT_FILE_NAME: &str = "audit.jsonl";
 
 /// The user policy file, in the 1.x policy directory and again in `home/policy`.
-const USER_POLICY_FILE_NAME: &str = "user-policy.json";
+pub(super) const USER_POLICY_FILE_NAME: &str = "user-policy.json";
 
 /// The verified managed-policy cache, in the 1.x policy directory and again in `home/policy`.
 const MANAGED_CACHE_FILE_NAME: &str = "managed-policy.bundle";
@@ -265,6 +265,20 @@ impl LegacyRoots {
         })
     }
 
+    /// Roots that all lie inside `home`, so a test home never reads or moves this user's real
+    /// 1.x files.
+    #[must_use]
+    pub fn within(home: &Path) -> Self {
+        Self {
+            windows: cfg!(windows),
+            user_home: home.to_owned(),
+            local_app_data: None,
+            app_data: None,
+            xdg_state_home: None,
+            xdg_config_home: None,
+        }
+    }
+
     /// A root taken from the environment, or the profile-relative default when the environment
     /// names none or names a packaged app's private copy.
     fn real_root(&self, named: Option<&Path>, default: &[&str]) -> PathBuf {
@@ -341,16 +355,12 @@ pub struct Legacy {
 }
 
 impl Legacy {
-    /// Read the 1.x layout of the current user, with the Ghostlight home at `home`.
+    /// Read the 1.x layout below `roots`, with the Ghostlight home at `home`.
     ///
     /// Nothing is changed. Registrations come from the browsers' native-host manifests and the
     /// MCP clients' configurations as this user has them.
-    pub fn discover(home: &Path) -> Result<Self, MigrationError> {
+    pub fn discover(home: &Path, roots: LegacyRoots) -> Result<Self, MigrationError> {
         let installation = LegacyInstallation::read(&home.join(LEGACY_RECORD_NAME))?;
-        let roots = LegacyRoots::from_environment().map_err(|error| MigrationError::Record {
-            path: home.join(LEGACY_RECORD_NAME),
-            reason: error.to_string(),
-        })?;
         let layout = Layout::new(home);
         let old_directories: Vec<PathBuf> = installation
             .iter()
