@@ -5,7 +5,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::browser::adapter::chromium::level4::wire::PROTOCOL as PROTOCOL_FOUR;
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, PresentationActivity, PresentationKind, PresentationSignal,
 };
@@ -49,8 +48,8 @@ impl PresentationPort for BrowserPresentation {
     /// nothing to show, and showing its signal in some other browser would put a stranger's window
     /// under Ghostlight's badge.
     ///
-    /// A protocol-4 browser draws a notice only on the tab it names. A denial or attention
-    /// signal that names no tab is given the workspace's only tab, or its active one.
+    /// The browser draws a notice only on the tab it names. A denial or attention signal that
+    /// names no tab is given the workspace's only tab, or its active one.
     fn present(
         &self,
         workspace: &str,
@@ -66,7 +65,6 @@ impl PresentationPort for BrowserPresentation {
                 signal.signal,
                 PresentationKind::Denial | PresentationKind::Attention
             )
-            && self.speaks_protocol_four(&browser)
         {
             signal.tab_id = self.notice_tab(&browser, workspace, deadline, &cancelled);
         }
@@ -84,14 +82,6 @@ impl PresentationPort for BrowserPresentation {
 }
 
 impl BrowserPresentation {
-    /// Whether the browser's connection speaks adapter protocol 4.
-    fn speaks_protocol_four(&self, browser: &str) -> bool {
-        self.browser
-            .browsers()
-            .iter()
-            .any(|summary| summary.id == browser && summary.protocol == PROTOCOL_FOUR)
-    }
-
     /// The tab a workspace-wide notice belongs on: the workspace's only tab, or the active one
     /// among its tabs as one tab listing reports it. None when neither is known.
     fn notice_tab(
@@ -398,9 +388,7 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         | BrowserCommand::StopRecording { .. }
         | BrowserCommand::ExportRecording { .. }
         | BrowserCommand::DiscardRecording { .. }
-        | BrowserCommand::Cancel { .. }
-        | BrowserCommand::Present { .. }
-        | BrowserCommand::InstallPageRuntime { .. } => None,
+        | BrowserCommand::Present { .. } => None,
     }
 }
 
@@ -494,7 +482,6 @@ mod tests {
     /// A workspace working in the fake browser with these tabs, and the presentation over it.
     fn presenting(
         tabs: &[u64],
-        protocol: u16,
     ) -> (
         Arc<crate::browser::testing::FakeBrowser>,
         super::BrowserPresentation,
@@ -530,10 +517,7 @@ mod tests {
         }
         drop(lease);
         let browser = Arc::new(FakeBrowser::default());
-        browser.connect(vec![crate::browser::BrowserSummary {
-            protocol,
-            ..summary(FAKE_BROWSER, true)
-        }]);
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
         let presentation = super::BrowserPresentation::new(browser.clone(), store);
         (browser, presentation, workspace.as_str().to_owned())
     }
@@ -563,17 +547,16 @@ mod tests {
     }
 
     #[test]
-    fn a_protocol_four_denial_without_a_tab_goes_to_the_workspace_tab() {
-        use crate::browser::adapter::chromium::level4::wire::PROTOCOL;
+    fn a_denial_without_a_tab_goes_to_the_workspace_tab() {
         use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalTab};
 
-        let (browser, presentation, workspace) = presenting(&[12], PROTOCOL);
+        let (browser, presentation, workspace) = presenting(&[12]);
         browser.push(Ok(BrowserOutcome::Presented { rendered: false }));
         presentation.present(&workspace, denial()).unwrap();
         assert_eq!(presented_tabs(&browser), [Some(12)]);
         assert_eq!(browser.calls().len(), 1, "the only tab needs no listing");
 
-        let (browser, presentation, workspace) = presenting(&[12, 13], PROTOCOL);
+        let (browser, presentation, workspace) = presenting(&[12, 13]);
         let listed = |tab_id: u64, active: bool| PhysicalTab {
             tab_id,
             title: String::new(),
@@ -588,16 +571,6 @@ mod tests {
         presentation.present(&workspace, denial()).unwrap();
         assert!(matches!(browser.calls()[0], BrowserCommand::ListTabs));
         assert_eq!(presented_tabs(&browser), [Some(13)]);
-
-        let (browser, presentation, workspace) =
-            presenting(&[12], crate::browser::adapter::ADAPTER_PROTOCOL_MAJOR);
-        browser.push(Ok(BrowserOutcome::Presented { rendered: false }));
-        presentation.present(&workspace, denial()).unwrap();
-        assert_eq!(
-            presented_tabs(&browser),
-            [None],
-            "a level-3 extension chooses the tab itself"
-        );
     }
 
     #[test]

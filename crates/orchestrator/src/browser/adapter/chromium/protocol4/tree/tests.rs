@@ -1,5 +1,5 @@
 use super::*;
-use crate::browser::adapter::chromium::level4::wire::FrameFact;
+use crate::browser::adapter::chromium::protocol4::wire::FrameFact;
 
 fn frame(id: &str, loader: &str, parent: Option<&str>, url: &str) -> FrameFact {
     FrameFact {

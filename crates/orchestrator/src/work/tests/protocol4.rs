@@ -1,18 +1,17 @@
 //! What the model is told when protocol-4 work fails, end to end through the executor.
 //!
 //! Each case runs the executor over a real `RelayBrowserPort` and a scripted protocol-4
-//! extension, and checks the status, the effect and the repeat-safety the model reads. These are
-//! the places where protocol 4 tells the truth more precisely than the level-3 extension did: a
-//! failure that provably changed nothing is a plain failure, and one that may have changed the
-//! page is an unknown effect.
+//! extension, and checks the status, the effect and the repeat-safety the model reads: a failure
+//! that provably changed nothing is a plain failure, and one that may have changed the page is an
+//! unknown effect.
 
 use std::net::TcpListener;
 
 use serde_json::Value;
 
 use super::*;
-use crate::browser::adapter::chromium::level4::fake::{FakeExtension, Reply};
-use crate::browser::adapter::chromium::level4::wire;
+use crate::browser::adapter::chromium::protocol4::fake::{FakeExtension, Reply};
+use crate::browser::adapter::chromium::protocol4::wire;
 use crate::browser::RelayBrowserPort;
 
 /// The browser identity the scripted extension announces.

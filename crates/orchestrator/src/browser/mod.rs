@@ -6,41 +6,22 @@ pub mod session;
 pub mod transport;
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::browser::adapter::chromium::level4::{self, link::Link, wire};
-use crate::browser::adapter::{
-    adapter_capability, Adapter, AdapterCapability, BrowserEvent, BrowserFrame, BrowserOutcome,
-    BrowserPlatform, BrowserRequest, DiagnosticsState, HelloRefusal, Level, RuntimeControlState,
-    UnsupportedHello, Work, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
-    COMMAND_TRANSFER_MAX_CHUNKS,
-};
-use crate::browser::transport::{SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT};
-use base64::Engine as _;
-use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
-use serde::Serialize;
+use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link, wire};
+use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
+use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use uuid::Uuid;
 
-// Chromium accepts at most 1 MiB from a native host. Keep both direct frames
-// and base64-wrapped chunks comfortably below that physical boundary.
-const DIRECT_NATIVE_MESSAGE_BYTES: usize = 768 * 1024;
 // A native message inside Chromium's ordinary worker-idle window keeps the browser shore
 // observable without conflating a silent browser operation with a dead adapter.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
-// A dispatch probe's acknowledgement travels behind every earlier frame on the same ordered
-// stream, including a large chunked screenshot or recording receipt. A probe unanswered for less
-// than this proves nothing about the adapter, so a short deadline never quarantines it.
-const PROBE_VERDICT_MIN: Duration = Duration::from_secs(5);
 // How often a call waiting for its browser looks again.
 const AVAILABILITY_POLL: Duration = Duration::from_millis(40);
 // A product name is a label a person reads next to a browser they already recognize, not a
@@ -53,18 +34,16 @@ const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// How long a call waits for a browser that is on its way back before it says what is true.
 ///
-/// It covers one relay reconnect attempt (500 ms), the page-runtime installation that keeps a new
-/// connection private (the 5 s exchange budget), and a margin. Callers cap it by their own
-/// invocation deadline.
+/// It covers one relay reconnect attempt (500 ms), the hello exchange of the new connection (the
+/// 5 s exchange budget), and a margin. Callers cap it by their own invocation deadline.
 pub const RETURN_GRACE: Duration = Duration::from_secs(7);
 
 /// How long after the service publishes its endpoint a call with no browser still waits for the
 /// relays that served an earlier service.
 ///
 /// A waiting relay retries every 500 ms. This covers two retries and the hello. A relay that does
-/// reconnect registers inside it, and its registered connection then carries the wait through the
-/// page-runtime installation. A cold start with no browser loses only this much of its browser
-/// startup budget.
+/// reconnect registers inside it. A cold start with no browser loses only this much of its
+/// browser startup budget.
 pub(crate) const RELAY_RETURN_WINDOW: Duration = Duration::from_millis(1_500);
 
 /// Liveness timing for one relay port. Production uses the defaults; tests shorten them.
@@ -72,13 +51,9 @@ pub(crate) const RELAY_RETURN_WINDOW: Duration = Duration::from_millis(1_500);
 pub(crate) struct HeartbeatSettings {
     /// Time between timer heartbeats on an otherwise quiet connection.
     pub(crate) interval: Duration,
-    /// Time without any acknowledgement after which the heartbeat thread ends the connection's
-    /// availability. A level-3 connection's pending calls fail with it; a level-4 connection's
-    /// calls wait for their own receipts or a closed socket.
+    /// Time without any acknowledgement after which the connection is hidden from new work.
+    /// Calls already waiting keep waiting for their own receipts or a closed socket.
     pub(crate) timeout: Duration,
-    /// Minimum time a dispatch probe must go unanswered before a call's deadline may mark the
-    /// adapter as not answering.
-    pub(crate) verdict: Duration,
 }
 
 impl Default for HeartbeatSettings {
@@ -86,7 +61,6 @@ impl Default for HeartbeatSettings {
         Self {
             interval: HEARTBEAT_INTERVAL,
             timeout: HEARTBEAT_TIMEOUT,
-            verdict: PROBE_VERDICT_MIN,
         }
     }
 }
@@ -96,8 +70,7 @@ impl Default for HeartbeatSettings {
 pub enum Availability {
     /// The browser is connected and answering.
     Available,
-    /// The browser holds a registered connection that is still initializing or stopped
-    /// answering liveness probes.
+    /// The browser holds a registered connection that stopped answering liveness probes.
     NotAnswering,
     /// No connection is registered for the browser.
     Absent,
@@ -284,43 +257,23 @@ pub trait BrowserEventSink: Send + Sync {
     fn on_event(&self, browser: &str, event: BrowserEvent);
 }
 
-type PendingResult = Result<BrowserOutcome, BrowserError>;
-type PendingCalls = Mutex<HashMap<String, Sender<PendingResult>>>;
-
-/// What one connection's wire level needs to carry work.
-#[derive(Debug)]
-enum Channel {
-    /// Adapter protocol 3: calls awaiting correlated receipts, and the advertised capabilities.
-    Three {
-        pending: Arc<PendingCalls>,
-        capabilities: HashMap<String, u16>,
-    },
-    /// Adapter protocol 4: what each command carried over the connection uses.
-    Four { line: level4::link::Line },
-}
-
+/// One registered browser connection.
 #[derive(Debug)]
 struct Connection {
     id: String,
-    writer: Arc<SocketWriter>,
-    channel: Channel,
+    /// What each command carried over the connection uses: its writer, its awaited receipts and
+    /// its recordings.
+    line: Line,
     adapter_version: String,
-    adapter: Adapter,
     browser_id: String,
     browser_name: Option<String>,
-    liveness: Option<Arc<Liveness>>,
-    ready: bool,
+    liveness: Arc<Liveness>,
 }
 
 impl Connection {
-    /// Whether this connection can take work now: initialized, and answering when it
-    /// negotiated liveness.
+    /// Whether this connection is answering liveness probes now.
     fn available(&self, now: Instant, timeout: Duration) -> bool {
-        self.ready
-            && self
-                .liveness
-                .as_ref()
-                .is_none_or(|liveness| liveness.state().is_available(now, timeout))
+        self.liveness.state().is_available(now, timeout)
     }
 }
 
@@ -328,13 +281,8 @@ impl Connection {
 enum Reachability {
     /// No connection is registered for the browser.
     Absent,
-    /// A connection is registered but has not finished initializing.
-    Initializing,
-    /// The connection is initialized but its liveness has lapsed.
-    Silent {
-        writer: Arc<SocketWriter>,
-        liveness: Arc<Liveness>,
-    },
+    /// The connection's liveness has lapsed.
+    Silent,
     /// The connection can take work.
     Available,
 }
@@ -351,10 +299,6 @@ pub struct BrowserSummary {
     pub name: Option<String>,
     /// Adapter version currently serving this browser.
     pub adapter_version: String,
-    /// Target browser platform/engine family.
-    pub platform: BrowserPlatform,
-    /// Adapter protocol major this browser's connection speaks.
-    pub protocol: u16,
     /// Whether this is the most recently attended connected browser.
     pub attended: bool,
 }
@@ -377,7 +321,7 @@ struct AdapterRegistry {
     /// reconnects keeps the place its last reported attention earned. Connection order never
     /// enters this list (ADR-0084 D2).
     attention: Vec<String>,
-    /// When the last initialized connection ended without a successor.
+    /// When the last connection ended without a successor.
     ///
     /// A browser that left moments ago, such as an extension worker restarting its native port,
     /// is likely to come back. One that left longer ago than the return grace is evidence of
@@ -387,7 +331,7 @@ struct AdapterRegistry {
 
 impl AdapterRegistry {
     /// Remove exactly the named connection, never one that has since replaced it, and remember
-    /// when an initialized connection left.
+    /// when it left.
     fn remove_exact(&mut self, browser: &str, connection_id: &str) -> Option<Connection> {
         if self
             .connections
@@ -397,19 +341,17 @@ impl AdapterRegistry {
             return None;
         }
         let removed = self.connections.remove(browser)?;
-        if removed.ready {
-            self.departed = Some(Instant::now());
-        }
+        self.departed = Some(Instant::now());
         Some(removed)
     }
 
     /// Whether a browser is evidently on its way back at `now` (ADR-0196 Decision 12).
     ///
-    /// Each piece of evidence lapses on its own: a registered connection that is still
-    /// initializing or silent lasts as long as the connection, a departure lasts the return
-    /// grace, and a freshly opened port lasts the relay return window.
+    /// Each piece of evidence lapses on its own: a registered connection that is silent lasts as
+    /// long as the connection, a departure lasts the return grace, and a freshly opened port
+    /// lasts the relay return window.
     fn returning(&self, now: Instant, opened: Instant, timeout: Duration) -> bool {
-        let initializing_or_silent = self
+        let silent = self
             .connections
             .values()
             .any(|connection| !connection.available(now, timeout));
@@ -417,7 +359,7 @@ impl AdapterRegistry {
             .departed
             .is_some_and(|departed| now.saturating_duration_since(departed) < RETURN_GRACE);
         let relays_reconnecting = now.saturating_duration_since(opened) < RELAY_RETURN_WINDOW;
-        initializing_or_silent || departed_recently || relays_reconnecting
+        silent || departed_recently || relays_reconnecting
     }
 
     /// Record that one browser was attended most recently.
@@ -436,40 +378,11 @@ impl AdapterRegistry {
 
     /// What one browser's connection can do right now.
     fn reachability(&self, browser: &str, now: Instant, timeout: Duration) -> Reachability {
-        let Some(connection) = self.connections.get(browser) else {
-            return Reachability::Absent;
-        };
-        if !connection.ready {
-            return Reachability::Initializing;
+        match self.connections.get(browser) {
+            None => Reachability::Absent,
+            Some(connection) if !connection.available(now, timeout) => Reachability::Silent,
+            Some(_) => Reachability::Available,
         }
-        match &connection.liveness {
-            Some(liveness) if !connection.available(now, timeout) => Reachability::Silent {
-                writer: Arc::clone(&connection.writer),
-                liveness: Arc::clone(liveness),
-            },
-            _ => Reachability::Available,
-        }
-    }
-
-    /// Every initialized connection whose liveness has lapsed, with what a probe needs.
-    fn silent(
-        &self,
-        now: Instant,
-        timeout: Duration,
-    ) -> Vec<(String, Arc<SocketWriter>, Arc<Liveness>)> {
-        self.connections
-            .values()
-            .filter(|connection| connection.ready && !connection.available(now, timeout))
-            .filter_map(|connection| {
-                connection.liveness.as_ref().map(|liveness| {
-                    (
-                        connection.browser_id.clone(),
-                        Arc::clone(&connection.writer),
-                        Arc::clone(liveness),
-                    )
-                })
-            })
-            .collect()
     }
 
     /// Content-free inventory of connected browsers, most recently attended first.
@@ -484,8 +397,6 @@ impl AdapterRegistry {
                 id: connection.browser_id.clone(),
                 name: connection.browser_name.clone(),
                 adapter_version: connection.adapter_version.clone(),
-                platform: connection.adapter.platform(),
-                protocol: connection.adapter.level().major(),
                 attended: attended.as_deref() == Some(connection.browser_id.as_str()),
             })
             .collect();
@@ -503,10 +414,7 @@ impl AdapterRegistry {
 struct ConnectionLiveness {
     last_acknowledged_at: Instant,
     next_sequence: u32,
-    last_acknowledged_sequence: u32,
     stale: bool,
-    /// Whether the heartbeat timeout already ran out during the current silence.
-    timed_out: bool,
 }
 
 impl ConnectionLiveness {
@@ -514,9 +422,7 @@ impl ConnectionLiveness {
         Self {
             last_acknowledged_at: now,
             next_sequence: 0,
-            last_acknowledged_sequence: 0,
             stale: false,
-            timed_out: false,
         }
     }
 
@@ -531,13 +437,7 @@ impl ConnectionLiveness {
             return false;
         }
         self.last_acknowledged_at = now;
-        self.last_acknowledged_sequence = self.last_acknowledged_sequence.max(sequence);
-        self.timed_out = false;
         std::mem::replace(&mut self.stale, false)
-    }
-
-    fn acknowledged(&self, sequence: u32) -> bool {
-        self.last_acknowledged_sequence >= sequence
     }
 
     fn is_available(&self, now: Instant, timeout: Duration) -> bool {
@@ -552,17 +452,9 @@ impl ConnectionLiveness {
     }
 
     /// Apply the heartbeat timeout: when nothing was acknowledged for `timeout`, the adapter is
-    /// not answering. Returns whether this call is the first to see the timeout run out during
-    /// the current silence, and whether it made the adapter stale.
-    ///
-    /// The two differ when a dispatch probe already marked the adapter stale: the timeout still
-    /// runs out once, and that is still the moment the connection's pending calls end.
-    fn expire(&mut self, now: Instant, timeout: Duration) -> (bool, bool) {
-        if self.timed_out || now.saturating_duration_since(self.last_acknowledged_at) < timeout {
-            return (false, false);
-        }
-        self.timed_out = true;
-        (true, self.mark_stale())
+    /// not answering. Returns whether this made the adapter stale.
+    fn expire(&mut self, now: Instant, timeout: Duration) -> bool {
+        now.saturating_duration_since(self.last_acknowledged_at) >= timeout && self.mark_stale()
     }
 }
 
@@ -574,7 +466,6 @@ impl ConnectionLiveness {
 struct Liveness {
     state: Mutex<ConnectionLiveness>,
     browser_id: String,
-    level: Level,
     lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
 }
 
@@ -584,7 +475,6 @@ impl std::fmt::Debug for Liveness {
             .debug_struct("Liveness")
             .field("state", &*self.state())
             .field("browser_id", &self.browser_id)
-            .field("level", &self.level)
             .finish_non_exhaustive()
     }
 }
@@ -592,25 +482,20 @@ impl std::fmt::Debug for Liveness {
 impl Liveness {
     fn new(
         browser_id: String,
-        level: Level,
         lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
         now: Instant,
     ) -> Self {
         Self {
             state: Mutex::new(ConnectionLiveness::new(now)),
             browser_id,
-            level,
             lifecycle,
         }
     }
 
-    /// Begin one liveness probe and return the heartbeat frame that carries it, in this
-    /// connection's wire level.
-    fn probe(&self) -> Heartbeat {
-        let sequence = self.state().begin_probe();
-        match self.level {
-            Level::Three => Heartbeat::Three(BrowserFrame::Heartbeat { sequence }),
-            Level::Four => Heartbeat::Four(wire::Outbound::Heartbeat { sequence }),
+    /// Begin one liveness probe and return the heartbeat frame that carries it.
+    fn probe(&self) -> wire::Outbound {
+        wire::Outbound::Heartbeat {
+            sequence: self.state().begin_probe(),
         }
     }
 
@@ -628,19 +513,16 @@ impl Liveness {
         }
     }
 
-    /// Mark the adapter as not answering, reporting the transition. Returns whether it changed.
-    fn mark_stale(&self) -> bool {
+    /// Mark the adapter as not answering, reporting the transition.
+    fn mark_stale(&self) {
         let changed = self.state().mark_stale();
         self.report_stale(changed);
-        changed
     }
 
-    /// Apply the heartbeat timeout, reporting a stale transition. Returns whether the timeout
-    /// ran out for the first time during the current silence.
-    fn expire(&self, now: Instant, timeout: Duration) -> bool {
-        let (timed_out, changed) = self.state().expire(now, timeout);
+    /// Apply the heartbeat timeout, reporting a stale transition.
+    fn expire(&self, now: Instant, timeout: Duration) {
+        let changed = self.state().expire(now, timeout);
         self.report_stale(changed);
-        timed_out
     }
 
     fn report_stale(&self, changed: bool) {
@@ -652,48 +534,14 @@ impl Liveness {
     }
 }
 
-/// One liveness probe in the vocabulary of the connection's wire level.
-#[derive(Serialize)]
-#[serde(untagged)]
-enum Heartbeat {
-    /// The level-3 heartbeat frame.
-    Three(BrowserFrame),
-    /// The level-4 heartbeat frame.
-    Four(wire::Outbound),
-}
-
-/// The liveness probe written right after one dispatched request.
-struct DispatchProbe {
-    liveness: Arc<Liveness>,
-    sequence: u32,
-    sent: Instant,
-    verdict: Duration,
-}
-
-impl DispatchProbe {
-    /// Judge the adapter at this call's deadline.
-    ///
-    /// Only a probe unanswered for the whole verdict window marks the adapter as not answering.
-    /// A shorter deadline proves nothing, because the acknowledgement may still be queued behind
-    /// another call's large receipt. Either way the judgement changes availability for new
-    /// dispatch only: other calls in flight keep waiting for their own receipts, and ending the
-    /// whole connection stays with the heartbeat thread and a real end-of-stream.
-    fn judge(&self, now: Instant) {
-        let unanswered = !self.liveness.state().acknowledged(self.sequence);
-        if unanswered && now.saturating_duration_since(self.sent) >= self.verdict {
-            self.liveness.mark_stale();
-        }
-    }
-}
-
 /// Observes adapter connection lifecycle at the physical port boundary. The port calls this
 /// where connections are registered, replaced, and lost, and where an attached adapter stops or
 /// resumes answering; observers log or publish.
 pub trait AdapterLifecycleObserver: Send + Sync + 'static {
-    /// A browser's connection finished initializing and can take work.
+    /// A browser's connection was accepted and can take work.
     fn adapter_attached(&self, browser_id: &str, replaced: bool);
 
-    /// A browser's announced connection ended.
+    /// A browser's connection ended.
     fn adapter_detached(&self, browser_id: &str);
 
     /// A browser's connection is still attached but stopped acknowledging liveness probes.
@@ -709,7 +557,6 @@ pub struct RelayBrowserPort {
     adapters: Arc<Mutex<AdapterRegistry>>,
     event_sink: Mutex<Option<Arc<dyn BrowserEventSink>>>,
     control_state: Mutex<RuntimeControlState>,
-    diagnostics: Mutex<Option<DiagnosticsState>>,
     lifecycle: Mutex<Option<Arc<dyn AdapterLifecycleObserver>>>,
     /// The page assets every protocol-4 connection receives in `hello_accepted`.
     assets: Arc<wire::Assets>,
@@ -758,7 +605,6 @@ impl RelayBrowserPort {
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
             event_sink: Mutex::new(None),
             control_state: Mutex::new(RuntimeControlState::Active),
-            diagnostics: Mutex::new(None),
             lifecycle: Mutex::new(None),
             assets,
             heartbeat,
@@ -817,8 +663,7 @@ impl RelayBrowserPort {
     /// Whether one browser still holds a registered connection, available or not.
     ///
     /// An adapter that stops acknowledging is unavailable but still attached: its socket is open
-    /// and it may answer again. That is a different fact from being connected, and the difference
-    /// is what stops a quarantined adapter from being mistaken for a departed one.
+    /// and it may answer again. That is a different fact from being connected.
     #[cfg(test)]
     pub(crate) fn is_registered(&self, browser: &str) -> bool {
         lock(&self.adapters).connections.contains_key(browser)
@@ -860,9 +705,7 @@ impl RelayBrowserPort {
 
     /// Continue authentication using the reader that may already hold coalesced adapter bytes.
     ///
-    /// The first frame is read before it is decoded for a level: the field that names its
-    /// protocol chooses the adapter, and a hello no adapter serves is told so before the socket
-    /// closes.
+    /// The first frame must be a protocol-4 hello. Anything else is told to update and closed.
     pub(crate) fn attach_reader(
         &self,
         stream: TcpStream,
@@ -875,182 +718,23 @@ impl RelayBrowserPort {
         else {
             return Err(BrowserError::Authentication);
         };
-        let adapter = match Adapter::select(&hello) {
-            Ok(adapter) => adapter,
-            Err(HelloRefusal::Malformed) => return Err(BrowserError::Authentication),
-            Err(HelloRefusal::Unsupported(UnsupportedHello { offered, required })) => {
-                refuse_incompatible(stream);
-                return Err(BrowserError::Incompatible { offered, required });
-            }
-        };
-        match adapter.level() {
-            Level::Three => self.attach_level3(stream, reader, hello, adapter),
-            Level::Four => level4::connection::attach(self, stream, reader, hello, adapter),
-        }
+        protocol4::connection::attach(self, stream, reader, hello)
     }
 
-    /// Attach one connection whose hello chose adapter protocol 3.
-    fn attach_level3(
-        &self,
-        stream: TcpStream,
-        reader: SocketReader,
-        hello: Value,
-        adapter: Adapter,
-    ) -> Result<(), BrowserError> {
-        let Ok(BrowserFrame::Hello {
-            adapter_version,
-            browser_id,
-            adapter_epoch,
-            browser_name,
-            attended,
-            capabilities,
-            ..
-        }) = serde_json::from_value(hello)
-        else {
-            return Err(BrowserError::Authentication);
-        };
-        if !valid_opaque_id(&browser_id, BROWSER_ID_PREFIX) {
-            return Err(BrowserError::Authentication);
-        }
-        if !valid_opaque_id(&adapter_epoch, "adapter_") {
-            return Err(BrowserError::Authentication);
-        }
-        let capabilities = validated_capabilities(capabilities)?;
-        let browser_name = validated_browser_name(browser_name)?;
-        let reports_attention = capabilities
-            .get(adapter_capability::ADAPTER_ATTENTION)
-            .copied()
-            .unwrap_or_default()
-            >= 1;
-        let install = adapter.install_command(&capabilities);
-        let lifecycle = lock(&self.lifecycle).clone();
-        let liveness = (capabilities
-            .get(adapter_capability::ADAPTER_LIVENESS)
-            .copied()
-            .unwrap_or_default()
-            >= 1)
-            .then(|| {
-                Arc::new(Liveness::new(
-                    browser_id.clone(),
-                    Level::Three,
-                    lifecycle.clone(),
-                    Instant::now(),
-                ))
-            });
-
-        let writer = Arc::new(
-            SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
-        );
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let connection_id = format!("connection_{}", Uuid::new_v4().simple());
-        let connection = Connection {
-            id: connection_id.clone(),
-            writer: Arc::clone(&writer),
-            channel: Channel::Three {
-                pending: Arc::clone(&pending),
-                capabilities,
-            },
-            adapter_version,
-            adapter,
-            browser_id: browser_id.clone(),
-            browser_name,
-            liveness: liveness.clone(),
-            ready: false,
-        };
-        let replaced = self.register(connection, reports_attention && attended)?;
-        if let Err(error) = writer.native(&BrowserFrame::HelloAccepted {
-            major: adapter.level().major(),
-            service_version: env!("CARGO_PKG_VERSION").into(),
-            service_epoch: self.service_epoch.clone(),
-            control_state: *lock(&self.control_state),
-            diagnostics: *lock(&self.diagnostics),
-        }) {
-            self.detach_registered(&browser_id, &connection_id);
-            return Err(BrowserError::Protocol(error.to_string()));
-        }
-        let tag = ConnectionTag {
-            browser_id,
-            connection_id,
-        };
-        let announced = Arc::new(AtomicBool::new(false));
-        let reader_adapters = Arc::clone(&self.adapters);
-        let reader_tag = tag.clone();
-        let reader_liveness = liveness.clone();
-        let reader_notifications = self.notifications(&announced);
-        let heartbeat_writer = Arc::clone(&writer);
-        let heartbeat_pending = Arc::clone(&pending);
-        if let Err(error) = thread::Builder::new()
-            .name("ghostlight-browser-reader".into())
-            .spawn(move || {
-                read_adapter(
-                    reader,
-                    writer,
-                    pending,
-                    reader_notifications,
-                    reader_adapters,
-                    reader_tag,
-                    reader_liveness,
-                );
-            })
-        {
-            // The connection was registered before this thread could prove it would ever run.
-            // Leaving the registration in place on a spawn failure is a permanent zombie: a
-            // connection with no liveness capability negotiated reports "always available"
-            // forever (nothing else ever marks it stale), so every future call() to this
-            // browser_id would insert into pending, write successfully (the socket is still
-            // open), and simply time out, repeatedly, until this exact browser reconnects.
-            // Remove it, matched by connection id so a legitimate concurrent replacement is
-            // never the one torn down instead.
-            self.detach_registered(&tag.browser_id, &tag.connection_id);
-            return Err(BrowserError::Protocol(error.to_string()));
-        }
-
-        if let Some(command) = install.filter(|_| is_current(&self.adapters, &tag)) {
-            let cancelled = AtomicBool::new(false);
-            let installed = self.call(
-                &tag.browser_id,
-                "system",
-                command,
-                Instant::now() + EXCHANGE_TIMEOUT,
-                &cancelled,
-            );
-            match installed {
-                Ok(outcome) if adapter.acknowledged(&outcome) => {}
-                Ok(_) => {
-                    self.detach_registered(&tag.browser_id, &tag.connection_id);
-                    return Err(BrowserError::Protocol(
-                        "adapter acknowledged a different page runtime".into(),
-                    ));
-                }
-                Err(error) => {
-                    self.detach_registered(&tag.browser_id, &tag.connection_id);
-                    return Err(error);
-                }
-            }
-        }
-        if !self.publish_ready(&tag, &announced, replaced) {
-            return Err(BrowserError::DisconnectedBeforeDispatch);
-        }
-
-        if let Some(liveness) = liveness {
-            self.spawn_heartbeat(&tag, heartbeat_writer, liveness, Some(heartbeat_pending))?;
-        }
-        Ok(())
-    }
-
-    /// Register one connection under its browser identity, retiring the connection it replaces.
-    /// Returns whether it replaced one.
+    /// Register one accepted connection under its browser identity, retiring the connection it
+    /// replaces, and tell the lifecycle observer.
     ///
     /// # Errors
     ///
     /// Refuses a new browser once the port holds its connection capacity.
-    fn register(&self, connection: Connection, attended: bool) -> Result<bool, BrowserError> {
+    fn register(&self, connection: Connection, attended: bool) -> Result<(), BrowserError> {
         let browser_id = connection.browser_id.clone();
+        let lifecycle = lock(&self.lifecycle).clone();
         let mut adapters = lock(&self.adapters);
         if !adapters.connections.contains_key(&browser_id)
             && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
         {
-            connection.writer.close();
+            connection.line.writer.close();
             return Err(BrowserError::Protocol(
                 "browser connection capacity reached".into(),
             ));
@@ -1062,20 +746,21 @@ impl RelayBrowserPort {
         if attended {
             adapters.attend(&browser_id);
         }
-        Ok(previous.is_some())
+        if let Some(observer) = lifecycle.as_ref() {
+            observer.adapter_attached(&browser_id, previous.is_some());
+        }
+        Ok(())
     }
 
     /// The notification targets a new connection's reader reports to.
-    fn notifications(&self, announced: &Arc<AtomicBool>) -> AdapterNotifications {
+    fn notifications(&self) -> AdapterNotifications {
         AdapterNotifications {
             sink: lock(&self.event_sink).clone(),
             lifecycle: lock(&self.lifecycle).clone(),
-            announced: Arc::clone(announced),
         }
     }
 
-    /// Start the timer side of one connection's liveness. `pending` names the calls a full
-    /// heartbeat timeout fails; a connection whose calls only a closed socket fails passes none.
+    /// Start the timer side of one connection's liveness.
     ///
     /// # Errors
     ///
@@ -1085,7 +770,6 @@ impl RelayBrowserPort {
         tag: &ConnectionTag,
         writer: Arc<SocketWriter>,
         liveness: Arc<Liveness>,
-        pending: Option<Arc<PendingCalls>>,
     ) -> Result<(), BrowserError> {
         let adapters = Arc::clone(&self.adapters);
         let settings = self.heartbeat;
@@ -1093,54 +777,26 @@ impl RelayBrowserPort {
         if let Err(error) = thread::Builder::new()
             .name("ghostlight-browser-heartbeat".into())
             .spawn(move || {
-                heartbeat_adapter(writer, pending, liveness, adapters, heartbeat_tag, settings);
+                heartbeat_adapter(&writer, &liveness, &adapters, &heartbeat_tag, settings);
             })
         {
-            // The reader thread is already live at this point. Losing only the heartbeat is
-            // not the same zombie: a liveness-negotiated connection with nobody updating it
-            // goes stale on the normal schedule and is then correctly treated as
-            // unavailable, so this is tidiness rather than a silent-forever failure -- still
-            // worth cleaning up rather than leaving two threads disagreeing about the same
-            // connection.
+            // A connection with nobody probing it would go stale and stay registered, so undo
+            // the registration rather than leave a connection no thread watches.
             self.detach_registered(&tag.browser_id, &tag.connection_id);
             return Err(BrowserError::Protocol(error.to_string()));
         }
         Ok(())
     }
 
-    /// Publish one exact initialized connection to callers. A replaced connection can never
-    /// make its successor ready.
-    fn publish_ready(&self, tag: &ConnectionTag, announced: &AtomicBool, replaced: bool) -> bool {
-        let lifecycle = lock(&self.lifecycle).clone();
-        let mut adapters = lock(&self.adapters);
-        let Some(connection) = adapters.connections.get_mut(&tag.browser_id) else {
-            return false;
-        };
-        if connection.id != tag.connection_id {
-            return false;
-        }
-        connection.ready = true;
-        announced.store(true, Ordering::SeqCst);
-        if let Some(observer) = lifecycle.as_ref() {
-            observer.adapter_attached(&tag.browser_id, replaced);
-        }
-        true
-    }
-
     /// Remove a registered connection, but only the exact one named -- never a connection that
-    /// has since replaced it. `attach` registers a connection before either of its threads is
-    /// proven to actually run, so a spawn failure must undo exactly that registration, and
-    /// nothing else: a concurrent `attach` for the same `browser_id` may already have replaced it
-    /// with a newer, healthy connection by the time this runs, and that one must be left alone.
+    /// has since replaced it. A concurrent `attach` for the same `browser_id` may already have
+    /// replaced it with a newer, healthy connection, and that one must be left alone.
     fn detach_registered(&self, browser_id: &str, connection_id: &str) {
         let removed = lock(&self.adapters).remove_exact(browser_id, connection_id);
         if let Some(connection) = removed {
-            let was_ready = connection.ready;
             retire(&connection);
-            if was_ready {
-                if let Some(observer) = lock(&self.lifecycle).clone().as_ref() {
-                    observer.adapter_detached(browser_id);
-                }
+            if let Some(observer) = lock(&self.lifecycle).clone().as_ref() {
+                observer.adapter_detached(browser_id);
             }
         }
     }
@@ -1152,192 +808,39 @@ impl RelayBrowserPort {
         command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
-        let BrowserDispatch {
-            deadline,
-            cancelled,
-            admit,
-        } = dispatch;
-        if cancelled.load(Ordering::SeqCst) {
+        if dispatch.cancelled.load(Ordering::SeqCst) {
             return Err(BrowserError::CancelledBeforeDispatch);
         }
-        if Instant::now() >= deadline {
+        if Instant::now() >= dispatch.deadline {
             return Err(BrowserError::DeadlineBeforeDispatch);
         }
-        let required_capability = command.required_capability();
-        let (writer, pending, chunked_commands, liveness) = {
+        let line = {
             let adapters = lock(&self.adapters);
             let Some(connection) = adapters.connections.get(browser) else {
                 return Err(BrowserError::DisconnectedBeforeDispatch);
             };
-            if !connection.ready && !matches!(&command, Work::InstallPageRuntime { .. }) {
+            if !connection.available(Instant::now(), self.heartbeat.timeout) {
                 return Err(BrowserError::NotAnsweringBeforeDispatch);
             }
-            if connection.liveness.as_ref().is_some_and(|liveness| {
-                !liveness
-                    .state()
-                    .is_available(Instant::now(), self.heartbeat.timeout)
-            }) {
-                return Err(BrowserError::NotAnsweringBeforeDispatch);
-            }
-            let (pending, capabilities) = match &connection.channel {
-                Channel::Four { line } => {
-                    let line = line.clone();
-                    drop(adapters);
-                    let dispatch = BrowserDispatch {
-                        deadline,
-                        cancelled,
-                        admit,
-                    };
-                    return level4::run(command, &mut Link::new(line, workspace, dispatch));
-                }
-                Channel::Three {
-                    pending,
-                    capabilities,
-                } => (pending, capabilities),
-            };
-            let advertised = capabilities
-                .get(required_capability)
-                .copied()
-                .unwrap_or_default();
-            if advertised < command.required_revision() {
-                return Err(BrowserError::CapabilityVersion {
-                    capability: required_capability.to_string(),
-                    required: command.required_revision(),
-                    advertised,
-                });
-            }
-            if let Work::InDocuments { primitive, .. } = &command {
-                if matches!(
-                    **primitive,
-                    Work::InDocuments { .. } | Work::DescribeDocuments { .. }
-                ) {
-                    return Err(BrowserError::Protocol(
-                        "nested document execution is invalid".into(),
-                    ));
-                }
-                let capability = primitive.required_capability();
-                let advertised = capabilities.get(capability).copied().unwrap_or_default();
-                if advertised < primitive.required_revision() {
-                    return Err(BrowserError::CapabilityVersion {
-                        capability: capability.into(),
-                        required: primitive.required_revision(),
-                        advertised,
-                    });
-                }
-            }
-            (
-                Arc::clone(&connection.writer),
-                Arc::clone(pending),
-                capabilities
-                    .get(adapter_capability::CHUNKED_COMMANDS)
-                    .copied()
-                    .unwrap_or_default()
-                    >= 1,
-                connection.liveness.clone(),
-            )
+            connection.line.clone()
         };
-        let correlation = format!("physical_{}", Uuid::new_v4().simple());
-        let (sender, receiver) = mpsc::channel();
-        let frame = BrowserFrame::Request {
-            request: BrowserRequest {
-                correlation: correlation.clone(),
-                workspace: workspace.into(),
-                command,
-            },
-        };
-        let payload = serde_json::to_vec(&frame)
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
-        if payload.len() > COMMAND_TRANSFER_MAX_BYTES {
-            return Err(BrowserError::Primitive(format!(
-                "browser request exceeds the {COMMAND_TRANSFER_MAX_BYTES}-byte transfer bound"
-            )));
-        }
-        if payload.len() > DIRECT_NATIVE_MESSAGE_BYTES && !chunked_commands {
-            return Err(BrowserError::Primitive(
-                "adapter does not support chunked command transfers".into(),
-            ));
-        }
-        let mut output = writer
-            .until_unless(deadline.min(Instant::now() + DELIVERY_TIMEOUT), || {
-                cancelled.load(Ordering::SeqCst)
-            })
-            .map_err(|_| {
-                if cancelled.load(Ordering::SeqCst) {
-                    BrowserError::CancelledBeforeDispatch
-                } else if Instant::now() >= deadline {
-                    BrowserError::DeadlineBeforeDispatch
-                } else {
-                    // Another call held the writer for the whole delivery budget. The connection
-                    // is busy, not gone, and nothing of this call was written.
-                    BrowserError::BusyBeforeDispatch
-                }
-            })?;
-        if cancelled.load(Ordering::SeqCst) {
-            return Err(BrowserError::CancelledBeforeDispatch);
-        }
-        if Instant::now() >= deadline {
-            return Err(BrowserError::DeadlineBeforeDispatch);
-        }
-        admit()?;
-        lock(&pending).insert(correlation.clone(), sender);
-        let probe = liveness
-            .as_ref()
-            .map(|liveness| liveness.state().begin_probe());
-        if write_request_payload(&mut output, &payload, &correlation).is_err() {
-            lock(&pending).remove(&correlation);
-            mark_stale(&liveness);
-            return Err(BrowserError::DisconnectedAfterDispatch);
-        }
-        if let Some(sequence) = probe {
-            if write_native(&mut output, &BrowserFrame::Heartbeat { sequence }).is_err() {
-                lock(&pending).remove(&correlation);
-                mark_stale(&liveness);
-                return Err(BrowserError::DisconnectedAfterDispatch);
-            }
-        }
-        drop(output);
-        let sent = Instant::now();
-        let probe = liveness
-            .zip(probe)
-            .map(|(liveness, sequence)| DispatchProbe {
-                liveness,
-                sequence,
-                sent,
-                verdict: self.heartbeat.verdict,
-            });
-        await_receipt(
-            receiver,
-            &correlation,
-            &writer,
-            &pending,
-            deadline,
-            cancelled,
-            probe,
-        )
+        protocol4::run(command, &mut Link::new(line, workspace, dispatch))
     }
 
-    /// Wait for one browser's connection, sending a silent connection one immediate probe.
+    /// Wait for one browser's connection to be registered and answering.
     fn await_registered(
         &self,
         browser: &str,
         until: Instant,
         cancelled: &AtomicBool,
     ) -> Availability {
-        let mut probed = false;
         loop {
             let reachability =
                 lock(&self.adapters).reachability(browser, Instant::now(), self.heartbeat.timeout);
             let availability = match reachability {
                 Reachability::Available => return Availability::Available,
                 Reachability::Absent => Availability::Absent,
-                Reachability::Initializing => Availability::NotAnswering,
-                Reachability::Silent { writer, liveness } => {
-                    if !probed {
-                        probed = true;
-                        probe_now(&writer, &liveness, until, cancelled);
-                    }
-                    Availability::NotAnswering
-                }
+                Reachability::Silent => Availability::NotAnswering,
             };
             if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
                 return availability;
@@ -1349,54 +852,10 @@ impl RelayBrowserPort {
             );
         }
     }
-
-    /// Wait for any browser while one is evidently returning, sending each silent connection
-    /// one immediate probe. The evidence is read again on every poll, so the wait ends as soon
-    /// as it lapses.
-    fn await_first(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
-        let mut probed = Vec::new();
-        loop {
-            let connected = self.connected_browsers();
-            if !connected.is_empty() {
-                return connected;
-            }
-            let silent = lock(&self.adapters).silent(Instant::now(), self.heartbeat.timeout);
-            for (browser, writer, liveness) in silent {
-                if !probed.contains(&browser) {
-                    probe_now(&writer, &liveness, until, cancelled);
-                    probed.push(browser);
-                }
-            }
-            if cancelled.load(Ordering::SeqCst)
-                || Instant::now() >= until
-                || !self.browser_returning()
-            {
-                return connected;
-            }
-            thread::sleep(
-                until
-                    .saturating_duration_since(Instant::now())
-                    .min(AVAILABILITY_POLL),
-            );
-        }
-    }
 }
 
-/// Send one liveness probe now instead of waiting up to a full heartbeat interval for the
-/// timer. An acknowledgement makes a silent connection available again at once.
-///
-/// A writer busy with another call's transfer is left alone. Closing it over a probe would end
-/// every call on the connection.
-fn probe_now(writer: &SocketWriter, liveness: &Liveness, until: Instant, cancelled: &AtomicBool) {
-    let delivery = until.min(Instant::now() + DELIVERY_TIMEOUT);
-    let Ok(mut output) = writer.until_unless(delivery, || cancelled.load(Ordering::SeqCst)) else {
-        return;
-    };
-    let _ = write_native(&mut output, &liveness.probe());
-}
-
-/// Tell a hello that no adapter serves it why, then close its socket. Best effort: the
-/// extension may already be gone.
+/// Tell an extension that does not speak adapter protocol 4 to update, then close its socket.
+/// Best effort: the extension may already be gone.
 fn refuse_incompatible(stream: TcpStream) {
     let Ok(writer) = SocketWriter::new(stream) else {
         return;
@@ -1446,8 +905,7 @@ impl BrowserPort for RelayBrowserPort {
         self.connected_browsers()
     }
 
-    /// A connection still installing its page runtime is waited on until it is ready. A silent
-    /// one gets one immediate probe rather than the next timer heartbeat, up to 20 s away.
+    /// A silent connection is waited on until it answers a timer heartbeat again.
     fn await_available(
         &self,
         browser: &str,
@@ -1457,16 +915,12 @@ impl BrowserPort for RelayBrowserPort {
         self.await_registered(browser, until, cancelled)
     }
 
-    fn await_any(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
-        self.await_first(until, cancelled)
-    }
-
-    /// The evidence is any of: a registered connection that is still initializing or silent;
-    /// an initialized connection that ended less than the return grace ago, as when an
-    /// extension worker restarts its native port; or an endpoint published less than the relay
-    /// return window ago, while relays that served an earlier service reconnect. Attention a
-    /// browser reported at some point is not evidence: it never lapses, and a browser closed long
-    /// ago would then spend the whole wait that browser startup needs.
+    /// The evidence is any of: a registered connection that is silent; a connection that ended
+    /// less than the return grace ago, as when an extension worker restarts its native port; or
+    /// an endpoint published less than the relay return window ago, while relays that served an
+    /// earlier service reconnect. Attention a browser reported at some point is not evidence: it
+    /// never lapses, and a browser closed long ago would then spend the whole wait that browser
+    /// startup needs.
     fn browser_returning(&self) -> bool {
         let opened = *lock(&self.opened);
         lock(&self.adapters).returning(Instant::now(), opened, self.heartbeat.timeout)
@@ -1477,164 +931,22 @@ impl BrowserPort for RelayBrowserPort {
     /// rest.
     fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
         *lock(&self.control_state) = state;
-        self.broadcast_control(state, Audience::Every)
-    }
-}
-
-impl RelayBrowserPort {
-    /// Publish process-diagnostics state to every connected adapter and remember it so the
-    /// next hello carries it too.
-    ///
-    /// Protocol 4 carries no diagnostics state, so its connections hear nothing of it.
-    pub fn publish_diagnostics(&self, diagnostics: DiagnosticsState) -> Result<(), BrowserError> {
-        *lock(&self.diagnostics) = Some(diagnostics);
-        self.broadcast_control(*lock(&self.control_state), Audience::Diagnostics)
-    }
-
-    fn broadcast_control(
-        &self,
-        state: RuntimeControlState,
-        audience: Audience,
-    ) -> Result<(), BrowserError> {
-        let three = BrowserFrame::ControlState {
-            state,
-            diagnostics: *lock(&self.diagnostics),
-        };
-        let four = wire::Outbound::ControlState {
+        let frame = wire::Outbound::ControlState {
             state: state.into(),
         };
         let writers: Vec<_> = lock(&self.adapters)
             .connections
             .values()
-            .filter(|connection| audience.reaches(connection.adapter.level()))
-            .map(|connection| (Arc::clone(&connection.writer), connection.adapter.level()))
+            .map(|connection| Arc::clone(&connection.line.writer))
             .collect();
         let mut published = Ok(());
         let deadline = Instant::now() + CONTROL_DELIVERY_TIMEOUT;
-        for (writer, level) in writers {
-            let written = match level {
-                Level::Three => writer.native_until(&three, deadline),
-                Level::Four => writer.native_until(&four, deadline),
-            };
-            if written.is_err() {
+        for writer in writers {
+            if writer.native_until(&frame, deadline).is_err() {
                 published = Err(BrowserError::DisconnectedAfterDispatch);
             }
         }
         published
-    }
-}
-
-/// Which connections one control publication reaches.
-#[derive(Clone, Copy, Debug)]
-enum Audience {
-    /// Every connection: runtime control is a property of Ghostlight, not of one browser.
-    Every,
-    /// Connections whose level carries process-diagnostics state.
-    Diagnostics,
-}
-
-impl Audience {
-    /// Whether a connection speaking `level` hears the publication.
-    const fn reaches(self, level: Level) -> bool {
-        match self {
-            Self::Every => true,
-            Self::Diagnostics => matches!(level, Level::Three),
-        }
-    }
-}
-
-fn write_request_payload(
-    writer: &mut impl std::io::Write,
-    payload: &[u8],
-    correlation: &str,
-) -> Result<(), FrameError> {
-    if payload.len() <= DIRECT_NATIVE_MESSAGE_BYTES {
-        return write_length_frame(writer, payload);
-    }
-    if payload.len() > COMMAND_TRANSFER_MAX_BYTES {
-        return Err(FrameError::TooLarge);
-    }
-
-    let count = payload.len().div_ceil(COMMAND_CHUNK_PAYLOAD_BYTES);
-    let count = u16::try_from(count).map_err(|_| FrameError::TooLarge)?;
-    if count > COMMAND_TRANSFER_MAX_CHUNKS {
-        return Err(FrameError::TooLarge);
-    }
-    let total_bytes = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge)?;
-    let transfer_id = format!("transfer_{}", Uuid::new_v4().simple());
-    let mut sha256 = String::with_capacity(64);
-    for byte in Sha256::digest(payload) {
-        write!(&mut sha256, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-
-    for (index, chunk) in payload.chunks(COMMAND_CHUNK_PAYLOAD_BYTES).enumerate() {
-        let chunk_frame = BrowserFrame::CommandChunk {
-            transfer_id: transfer_id.clone(),
-            correlation: correlation.into(),
-            index: u16::try_from(index).map_err(|_| FrameError::TooLarge)?,
-            count,
-            total_bytes,
-            sha256: sha256.clone(),
-            data: base64::engine::general_purpose::STANDARD.encode(chunk),
-        };
-        write_native(writer, &chunk_frame)?;
-    }
-    Ok(())
-}
-
-fn await_receipt(
-    receiver: Receiver<PendingResult>,
-    correlation: &str,
-    writer: &Arc<SocketWriter>,
-    pending: &Arc<Mutex<HashMap<String, Sender<PendingResult>>>>,
-    deadline: Instant,
-    cancelled: &AtomicBool,
-    probe: Option<DispatchProbe>,
-) -> PendingResult {
-    loop {
-        if cancelled.load(Ordering::SeqCst) {
-            send_cancel(writer, correlation);
-            lock(pending).remove(correlation);
-            return Err(BrowserError::CancelledAfterDispatch);
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            send_cancel(writer, correlation);
-            lock(pending).remove(correlation);
-            if let Some(probe) = &probe {
-                probe.judge(now);
-            }
-            return Err(BrowserError::DeadlineAfterDispatch);
-        }
-        let wait = deadline
-            .saturating_duration_since(now)
-            .min(Duration::from_millis(20));
-        match receiver.recv_timeout(wait) {
-            Ok(result) => return result,
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(BrowserError::DisconnectedAfterDispatch)
-            }
-        }
-    }
-}
-
-/// Ask the adapter to stop one call's work. Best effort.
-///
-/// A writer busy with another call's transfer is skipped rather than closed: one call's deadline
-/// must never end the connection every other call on it is using.
-fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
-    let frame = BrowserFrame::Request {
-        request: BrowserRequest {
-            correlation: format!("cancel_{}", Uuid::new_v4().simple()),
-            workspace: "system".into(),
-            command: Work::Cancel {
-                correlation: correlation.into(),
-            },
-        },
-    };
-    if let Ok(mut output) = writer.until(Instant::now() + CONTROL_DELIVERY_TIMEOUT) {
-        let _ = write_native(&mut output, &frame);
     }
 }
 
@@ -1643,66 +955,6 @@ fn send_cancel(writer: &Arc<SocketWriter>, correlation: &str) {
 struct AdapterNotifications {
     sink: Option<Arc<dyn BrowserEventSink>>,
     lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
-    announced: Arc<AtomicBool>,
-}
-
-fn read_adapter(
-    mut reader: SocketReader,
-    writer: Arc<SocketWriter>,
-    pending: Arc<PendingCalls>,
-    notifications: AdapterNotifications,
-    adapters: Arc<Mutex<AdapterRegistry>>,
-    tag: ConnectionTag,
-    liveness: Option<Arc<Liveness>>,
-) {
-    let ConnectionTag { browser_id, .. } = &tag;
-    loop {
-        match reader.native::<BrowserFrame>(None) {
-            Ok(Some(BrowserFrame::Receipt { receipt })) => {
-                let correlation = receipt.correlation.clone();
-                if let Some(sender) = lock(&pending).remove(&correlation) {
-                    let _ = sender.send(Ok(receipt.result));
-                }
-                acknowledge(&writer, correlation);
-            }
-            Ok(Some(BrowserFrame::Error {
-                correlation: Some(correlation),
-                code,
-                message,
-                effect_unknown,
-            })) => {
-                if let Some(sender) = lock(&pending).remove(&correlation) {
-                    let error = adapter_error(&code, message, effect_unknown);
-                    let _ = sender.send(Err(error));
-                }
-                acknowledge(&writer, correlation);
-            }
-            Ok(Some(BrowserFrame::Event { event })) => {
-                if !is_current(&adapters, &tag) {
-                    continue;
-                }
-                if matches!(event, BrowserEvent::Attended) {
-                    lock(&adapters).attend(browser_id);
-                    continue;
-                }
-                if let Some(sink) = &notifications.sink {
-                    sink.on_event(browser_id, event);
-                }
-            }
-            Ok(Some(BrowserFrame::HeartbeatAck { sequence })) => {
-                if let Some(liveness) = &liveness {
-                    liveness.acknowledge(sequence, Instant::now());
-                }
-            }
-            Ok(Some(_)) => {}
-            Ok(None) | Err(_) => {
-                writer.close();
-                fail_pending(&pending, BrowserError::DisconnectedAfterDispatch);
-                end_connection(&adapters, &tag, &notifications);
-                return;
-            }
-        }
-    }
 }
 
 /// Forget one connection whose stream ended, and tell the sink and the lifecycle observer.
@@ -1723,38 +975,29 @@ fn end_connection(
         if let Some(sink) = &notifications.sink {
             sink.on_event(browser_id, BrowserEvent::Disconnected);
         }
-        if notifications.announced.load(Ordering::SeqCst) {
-            if let Some(observer) = &notifications.lifecycle {
-                observer.adapter_detached(browser_id);
-            }
+        if let Some(observer) = &notifications.lifecycle {
+            observer.adapter_detached(browser_id);
         }
     }
 }
 
-/// The timer side of liveness, and the one owner of whole-connection failure short of a real
-/// end-of-stream: only a full heartbeat timeout without any acknowledgement fails the
-/// connection's `pending` calls. A connection that passes none is only hidden while silent.
+/// The timer side of liveness. A full heartbeat timeout without any acknowledgement hides the
+/// connection from new work; only a closed socket fails the calls already waiting.
 fn heartbeat_adapter(
-    writer: Arc<SocketWriter>,
-    pending: Option<Arc<PendingCalls>>,
-    liveness: Arc<Liveness>,
-    adapters: Arc<Mutex<AdapterRegistry>>,
-    tag: ConnectionTag,
+    writer: &SocketWriter,
+    liveness: &Liveness,
+    adapters: &Mutex<AdapterRegistry>,
+    tag: &ConnectionTag,
     settings: HeartbeatSettings,
 ) {
     loop {
         if writer.wait_closed(settings.interval) {
             return;
         }
-        if !is_current(&adapters, &tag) {
+        if !is_current(adapters, tag) {
             return;
         }
-
-        if liveness.expire(Instant::now(), settings.timeout) {
-            if let Some(pending) = &pending {
-                fail_pending(pending, BrowserError::DisconnectedAfterDispatch);
-            }
-        }
+        liveness.expire(Instant::now(), settings.timeout);
         if writer.native(&liveness.probe()).is_err() {
             liveness.mark_stale();
             return;
@@ -1780,23 +1023,20 @@ fn is_current(adapters: &Mutex<AdapterRegistry>, tag: &ConnectionTag) -> bool {
         .is_some_and(|connection| connection.id == tag.connection_id)
 }
 
-/// End a connection that a fresher connection from the same browser has replaced.
+/// End a connection that has left the registry: a fresher connection from the same browser
+/// replaced it, or it was detached.
 ///
-/// Failing its pending work is not enough. An abandoned but still-open socket keeps its relay
+/// Failing its waiting calls is not enough. An abandoned but still-open socket keeps its relay
 /// process alive and keeps the browser's stale native port alive with it, so nothing on either
-/// shore ever learns the connection is finished, and a request written into it is dropped in
-/// silence rather than refused. Closing the stream is what makes the duplicate collapse: the
-/// relay reads end-of-stream and exits, and the browser observes its port disconnect.
+/// shore ever learns the connection is finished. Closing the stream is what makes the duplicate
+/// collapse: the relay reads end-of-stream and exits, and the browser observes its port
+/// disconnect.
 fn retire(previous: &Connection) {
-    match &previous.channel {
-        Channel::Three { pending, .. } => {
-            fail_pending(pending, BrowserError::DisconnectedAfterDispatch);
-        }
-        Channel::Four { line } => line
-            .receipts
-            .fail_all(&BrowserError::DisconnectedAfterDispatch),
-    }
-    previous.writer.close();
+    previous
+        .line
+        .receipts
+        .fail_all(&BrowserError::DisconnectedAfterDispatch);
+    previous.line.writer.close();
 }
 
 /// Validate the optional bounded product name an adapter reports for itself.
@@ -1813,28 +1053,6 @@ fn validated_browser_name(name: Option<String>) -> Result<Option<String>, Browse
     Ok(Some(name))
 }
 
-fn mark_stale(liveness: &Option<Arc<Liveness>>) {
-    if let Some(liveness) = liveness {
-        liveness.mark_stale();
-    }
-}
-
-fn acknowledge(writer: &Arc<SocketWriter>, correlation: String) {
-    let _ = writer.native(&BrowserFrame::Acknowledge { correlation });
-}
-
-fn adapter_error(code: &str, message: String, effect_unknown: bool) -> BrowserError {
-    if effect_unknown {
-        BrowserError::EffectUnknown(message)
-    } else if code == "local_interlock" {
-        BrowserError::LocalInterlock(message)
-    } else if code == "document_scope_changed" {
-        BrowserError::DocumentUnavailable
-    } else {
-        BrowserError::Primitive(message)
-    }
-}
-
 fn valid_opaque_id(value: &str, prefix: &str) -> bool {
     value.starts_with(prefix)
         && value.len() > prefix.len()
@@ -1842,37 +1060,6 @@ fn valid_opaque_id(value: &str, prefix: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn validated_capabilities(
-    capabilities: Vec<AdapterCapability>,
-) -> Result<HashMap<String, u16>, BrowserError> {
-    let mut validated = HashMap::new();
-    for capability in capabilities {
-        let valid_name = !capability.name.is_empty()
-            && capability.name.len() <= 64
-            && capability
-                .name
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
-        if !valid_name || capability.revision == 0 {
-            return Err(BrowserError::Authentication);
-        }
-        if validated
-            .insert(capability.name, capability.revision)
-            .is_some()
-        {
-            return Err(BrowserError::Authentication);
-        }
-    }
-    Ok(validated)
-}
-
-fn fail_pending(pending: &PendingCalls, error: BrowserError) {
-    let senders: Vec<_> = lock(pending).drain().map(|(_, sender)| sender).collect();
-    for sender in senders {
-        let _ = sender.send(Err(error.clone()));
-    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1960,20 +1147,19 @@ pub enum BrowserError {
         /// Candidate names or package diagnoses.
         details: Vec<String>,
     },
-    /// Browser adapter protocol major is incompatible.
-    #[error("browser adapter protocol major {offered} is incompatible with required {required}")]
-    Incompatible { offered: u16, required: u16 },
-    /// The adapter advertises an older revision of a physical capability than the command requires.
-    #[error(
-        "adapter supports {capability} revision {advertised}, command requires revision {required}"
-    )]
-    CapabilityVersion {
-        /// Physical capability family that is too old.
-        capability: String,
-        /// Minimum revision the command requires.
+    /// The extension does not speak the adapter protocol this service serves.
+    #[error("browser adapter protocol {offered} is incompatible with required {required}")]
+    Incompatible {
+        /// Protocol the extension's first frame named, or zero when it named none.
+        offered: u16,
+        /// Protocol this service serves.
         required: u16,
-        /// Highest revision the adapter advertised.
-        advertised: u16,
+    },
+    /// The extension does not know a primitive this command needs: it is older than the service.
+    #[error("the browser extension does not support the {primitive} primitive")]
+    Unsupported {
+        /// The primitive the extension answered as unsupported.
+        primitive: String,
     },
 }
 
@@ -1992,72 +1178,7 @@ impl BrowserError {
 }
 
 #[cfg(test)]
-mod contract_tests {
-    mod controls;
-    mod level3_bytes;
-    mod relay;
-
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::atomic::AtomicBool;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    use crate::browser::adapter::{
-        adapter_capability, AdapterCapability, BrowserCommand, BrowserFrame, BrowserPlatform,
-        ADAPTER_PROTOCOL_MAJOR,
-    };
-    use ghostlight_bridge::framing::{read_native, write_native};
-
-    use super::{BrowserError, BrowserPort, HeartbeatSettings, RelayBrowserPort};
-
-    fn capability(name: &str) -> AdapterCapability {
-        AdapterCapability {
-            name: name.into(),
-            revision: 1,
-        }
-    }
-
-    const TEST_BROWSER: &str = "browser_test";
-
-    fn announce_adapter(stream: &mut TcpStream, capabilities: Vec<AdapterCapability>) {
-        announce_browser(stream, TEST_BROWSER, false, capabilities);
-    }
-
-    fn announce_browser(
-        stream: &mut TcpStream,
-        browser_id: &str,
-        attended: bool,
-        capabilities: Vec<AdapterCapability>,
-    ) {
-        write_native(
-            stream,
-            &BrowserFrame::Hello {
-                major: ADAPTER_PROTOCOL_MAJOR,
-                adapter_version: "1.0.0".into(),
-                browser_id: browser_id.into(),
-                adapter_epoch: format!("adapter_{}", browser_id.replace("browser_", "")),
-                browser_name: None,
-                platform: Some(BrowserPlatform::Chromium),
-                attended,
-                capabilities,
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            read_native::<BrowserFrame>(stream).unwrap(),
-            Some(BrowserFrame::HelloAccepted { .. })
-        ));
-    }
-
-    fn short_heartbeat() -> HeartbeatSettings {
-        HeartbeatSettings {
-            interval: Duration::from_millis(10),
-            timeout: Duration::from_millis(50),
-            verdict: Duration::from_millis(50),
-        }
-    }
-}
+mod contract_tests;
 
 #[cfg(test)]
 pub(crate) mod testing {
@@ -2066,7 +1187,7 @@ pub(crate) mod testing {
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
 
-    use crate::browser::adapter::{BrowserOutcome, BrowserPlatform, RuntimeControlState, Work};
+    use crate::browser::adapter::{BrowserOutcome, RuntimeControlState, Work};
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
 
@@ -2109,8 +1230,6 @@ pub(crate) mod testing {
             id: id.into(),
             name: None,
             adapter_version: "1.0.0".into(),
-            platform: BrowserPlatform::Chromium,
-            protocol: crate::browser::adapter::ADAPTER_PROTOCOL_MAJOR,
             attended,
         }
     }

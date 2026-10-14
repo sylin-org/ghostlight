@@ -70,10 +70,8 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ),
         (
             "capability_version",
-            BrowserError::CapabilityVersion {
-                capability: "pointer_input".into(),
-                required: 2,
-                advertised: 1,
+            BrowserError::Unsupported {
+                primitive: "input".into(),
             },
         ),
     ];

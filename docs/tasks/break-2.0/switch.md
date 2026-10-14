@@ -13,7 +13,7 @@ scripts, and `scripts/check-repository-integrity.ps1`. No journeys and no binari
 
 ## RESUME HERE
 
-Next: switch-2 commit 2, protocol 4 only on the service side.
+Next: switch-3, the extension speaks protocol 4 only.
 
 ## Landed
 
@@ -22,6 +22,7 @@ Next: switch-2 commit 2, protocol 4 only on the service side.
 | switch-1, commit 1 | The service serves relay protocol 3 on one loopback listener (`intake/listener.rs`): the lease is the relay lease on `home/ghostlight-runtime.lock`; `publish_ready` writes `relay-templates.json` and then the relay-3 runtime file; openings are read under the 5 s deadline with bounded pre-auth slots, the token is compared in constant time, and refusals carry a code and a sentence from `language/intake.rs`. `mcp` streams feed `McpSession`, send a resume token after initialize and after every result, and a resume token restores the revision, client, channel and the tabs one `ListTabs` still finds. `browser` streams attach to the browser port. `control` answers readiness, `activate_workbench` and `quit`. The command line is an MCP client (`cli/client.rs`) on the `cli` channel; `status`, `doctor` and `open` use control streams, and `call` and `open` start `serve` when no service answers. `GHOSTLIGHT_TEST_HOME` replaced `GHOSTLIGHT_RUNTIME_FILE` in the service; service tests hold one shared test home. | see `git log` |
 | switch-1, commit 2 | The typed service bridge is gone: `service.rs`, `client.rs`, `relay.rs` and `runtime.rs` left `crates/bridge`. The session vocabulary lives in `intake/session.rs` without the serde it no longer needs; only tool definitions, the intake channel and the session marker serialize. The bridge's demand-start and its lease went with the runtime file they read; the installation record sits in the relay home and probes the relay lease. The Linux D-Bus activation test that drove the old demand-start is removed. | see `git log` |
 | switch-2, commit 1 | Protocol-4 goldens bind Rust and JavaScript. `level4/assets.rs` builds the page assets once from `assets/world.js` and the sources its include marker names, exactly as `bundle.js` does; the id is pinned to `assets.sha256`, the source stays under 512 KiB and `hello_accepted` under 768 KiB. `RelayBrowserPort::new` takes the assets and the service hands them over, so a protocol-4 hello is always served. `level4/golden.rs` checks requests, receipts, frames, events, tolerance, world messages, closed names, asset error codes against `world.js` and dispatch kinds against `content.js`. Drift fixed on the Rust side: `input` omits an absent precondition or guard, and key steps omit absent fields. | see `git log` |
+| switch-2, commit 2 | The service speaks adapter protocol 4 only. Any first frame that is not a protocol-4 hello hears `adapter_incompatible` with the language sentence and closes. The work vocabulary moved to `browser/adapter/work.rs` (re-exported as `crate::browser::adapter::*`) and the document types to `browser/adapter/documents.rs`. Level 3 is gone: `chromium/level3`, the wire frames and capability table, the MAIN-world bundle `chromium/assets*` and its runner, `InstallPageRuntime` and the ready gate, `Cancel` work, the per-request probe and quarantine, diagnostics publication over the browser wire, `ChildTabOpened`, `DiagnosticsToggleRequested`, the `Level` enum, `Adapter` selection and `BrowserPlatform`. `Family` stays. `chromium/level4` is now `chromium/protocol4`; command chunking lives in its link with the wire's transfer bounds. `BrowserError::CapabilityVersion` became `Unsupported {primitive}`, which language renders as an extension update. `BrowserSummary` lost `platform` and `protocol` (no surface showed them). Contract tests run against `FakeExtension`. CI, AGENTS.md, CONTRIBUTING.md, DEV-LOOP.md and ARCHITECTURE.md name the protocol-4 asset tests. Two extension tests that paired the level-3 worker with the deleted level-3 `content.js` are gone. | see `git log` |
 
 ## Notes
 
@@ -29,3 +30,7 @@ Next: switch-2 commit 2, protocol 4 only on the service side.
   opening was answered.
 - A channel that policy does not admit is refused at the opening with the `unsupported` code and
   the policy sentence. The channel switches go away in switch-11.
+- The extension on dev still speaks level 3 until switch-3, so a dev build of the service and
+  extension does not connect between switch-2 and switch-3.
+- `tests/keyboard-browser-journey.mjs` and `tests/stress-journey.mjs` still read the deleted
+  level-3 page assets; switch-18 rewrites the journeys.

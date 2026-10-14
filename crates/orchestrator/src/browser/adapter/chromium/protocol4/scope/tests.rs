@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::browser::adapter::chromium::level4::wire::CallFailure;
+use crate::browser::adapter::chromium::protocol4::wire::CallFailure;
 use crate::browser::adapter::documents::PhysicalDocument;
 
 fn physical(id: &str, parent: Option<&str>, url: &str) -> PhysicalDocument {
@@ -67,7 +67,7 @@ fn read(scope: &Scope, doc: &FrameRef) -> PlannedCall {
 }
 
 fn outcome() -> BrowserOutcome {
-    BrowserOutcome::Cancelled
+    BrowserOutcome::Presented { rendered: false }
 }
 
 #[test]

@@ -1,10 +1,9 @@
-//! The orchestrator's process-diagnostics hub: it owns this process's sink, performs the
-//! person-facing toggle act for every surface, and maps sink state onto the wire contract.
+//! The orchestrator's process-diagnostics hub: it owns this process's sink and performs the
+//! person-facing toggle act for every surface.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::browser::adapter::{DiagnosticsLayer, DiagnosticsState};
 use ghostlight_bridge::diagnostics::{
     self, event, resolve, set_marker, Activation, Component, Level, Sink,
 };
@@ -106,11 +105,6 @@ impl DiagnosticsHub {
         Arc::clone(&self.sink)
     }
 
-    /// The wire-visible state.
-    pub fn state(&self) -> DiagnosticsState {
-        wire_state(&self.sink)
-    }
-
     /// The directory diagnostics write into, when active.
     pub fn directory(&self) -> Option<PathBuf> {
         self.sink.activation().directory().map(Path::to_path_buf)
@@ -122,9 +116,8 @@ impl DiagnosticsHub {
         observe(&self.runtime_path)
     }
 
-    /// The person-facing toggle act: flip the marker, then let the sink re-evaluate. The
-    /// sink's change callback publishes the new state to connected adapters.
-    pub fn toggle(&self) -> DiagnosticsState {
+    /// The person-facing toggle act: flip the marker, then let the sink re-evaluate.
+    pub fn toggle(&self) {
         let on = matches!(self.sink.activation(), Activation::Off);
         self.sink.emit(
             event::DIAGNOSTICS_TOGGLE_REQUESTED,
@@ -147,18 +140,7 @@ impl DiagnosticsHub {
             None,
             &format!("layer now {}", self.sink.activation().layer()),
         );
-        self.state()
     }
-}
-
-/// Map a sink's activation to the wire state.
-pub fn wire_state(sink: &Sink) -> DiagnosticsState {
-    let layer = match sink.activation() {
-        Activation::Explicit { .. } => DiagnosticsLayer::Explicit,
-        Activation::Marker { .. } => DiagnosticsLayer::Marker,
-        Activation::Off => DiagnosticsLayer::Off,
-    };
-    DiagnosticsState { layer }
 }
 
 impl AdapterLifecycleObserver for DiagnosticsHub {

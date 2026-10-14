@@ -1,152 +1,49 @@
 //! Browser availability at the one browser seam: a call waits a bounded grace for a browser that
 //! is on its way back, then says what is true (ADR-0196 Decision 12).
 //!
-//! The relay cases run the executor over a real `RelayBrowserPort` and scripted adapter
-//! connections, because what they prove lives in the port: a connection still installing its
-//! page runtime, and a silent connection that answers one immediate probe.
+//! The relay cases run the executor over a real `RelayBrowserPort` and scripted protocol-4
+//! extensions, because what they prove lives in the port: a connection that left moments ago,
+//! and a silent connection that answers again.
 
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::mpsc;
+use std::net::TcpListener;
 use std::thread;
 use std::time::Instant;
 
-use crate::browser::adapter::{
-    adapter_capability, AdapterCapability, BrowserFrame, BrowserPlatform, BrowserReceipt,
-    ADAPTER_PROTOCOL_MAJOR,
-};
-use ghostlight_bridge::framing::{read_native, write_native};
+use crate::browser::adapter::chromium::protocol4::assets::page_assets;
+use crate::browser::adapter::chromium::protocol4::fake::{FakeExtension, Reply};
 
 use super::*;
 use crate::browser::{
     BrowserPort, HeartbeatSettings, RelayBrowserPort, RELAY_RETURN_WINDOW, RETURN_GRACE,
 };
 
-/// The browser identity every scripted adapter here announces.
+/// The browser identity every scripted extension here announces.
 const RELAY_BROWSER: &str = "browser_relay";
 
-/// What a scripted adapter does before it settles into answering everything.
-#[derive(Clone, Copy)]
-enum Script {
-    /// Answer from the start.
-    Answer,
-    /// Hold the page-runtime installation receipt for this long. The signal fires when the
-    /// installation request arrives, while the connection is registered but not ready.
-    InstallSlowly(Duration),
-    /// Ignore everything through the first cancellation, as a stalled extension worker would.
-    /// The signal fires when the worker comes back.
-    SilentUntilCancel,
+/// Attach one scripted extension that lists no tabs, announcing itself attended when asked.
+fn attach(port: &RelayBrowserPort, attended: bool) -> FakeExtension {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut hello = FakeExtension::hello(RELAY_BROWSER);
+    hello["attended"] = json!(attended);
+    let fake = FakeExtension::connect(
+        listener.local_addr().unwrap(),
+        &hello,
+        Box::new(|correlation, _| Reply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))),
+    );
+    port.attach(listener.accept().unwrap().0).unwrap();
+    fake
 }
 
-/// One scripted adapter connection serving on its own thread.
-struct Adapter {
-    closer: TcpStream,
-    thread: thread::JoinHandle<()>,
-}
-
-impl Adapter {
-    /// Connect to the service listener and run `script`, then list no tabs and acknowledge
-    /// every probe until the stream closes.
-    fn start(
-        address: SocketAddr,
-        capabilities: &'static [&'static str],
-        script: Script,
-        signal: Option<mpsc::Sender<()>>,
-    ) -> Self {
-        let mut stream = TcpStream::connect(address).unwrap();
-        let closer = stream.try_clone().unwrap();
-        let thread = thread::spawn(move || {
-            hello(&mut stream, capabilities);
-            let mut silent = matches!(script, Script::SilentUntilCancel);
-            while let Ok(Some(frame)) = read_native::<BrowserFrame>(&mut stream) {
-                let reply = match frame {
-                    BrowserFrame::Request { request } if silent => {
-                        if matches!(request.command, BrowserCommand::Cancel { .. }) {
-                            silent = false;
-                            if let Some(signal) = &signal {
-                                let _ = signal.send(());
-                            }
-                        }
-                        None
-                    }
-                    BrowserFrame::Heartbeat { .. } if silent => None,
-                    BrowserFrame::Request { request } => match request.command {
-                        BrowserCommand::InstallPageRuntime {
-                            revision, sha256, ..
-                        } => {
-                            if let Script::InstallSlowly(delay) = script {
-                                if let Some(signal) = &signal {
-                                    let _ = signal.send(());
-                                }
-                                thread::sleep(delay);
-                            }
-                            Some(receipt(
-                                request.correlation,
-                                BrowserOutcome::PageRuntimeInstalled { revision, sha256 },
-                            ))
-                        }
-                        BrowserCommand::ListTabs => Some(receipt(
-                            request.correlation,
-                            BrowserOutcome::Tabs { tabs: vec![] },
-                        )),
-                        _ => None,
-                    },
-                    BrowserFrame::Heartbeat { sequence } => {
-                        Some(BrowserFrame::HeartbeatAck { sequence })
-                    }
-                    _ => None,
-                };
-                if let Some(reply) = reply {
-                    if write_native(&mut stream, &reply).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
-        Self { closer, thread }
-    }
-
-    fn close(self) {
-        let _ = self.closer.shutdown(Shutdown::Both);
-        self.thread.join().unwrap();
-    }
-}
-
-/// Announce the scripted adapter. One that reports attention announces itself attended, as the
-/// extension does at hello for the window the person is using.
-fn hello(stream: &mut TcpStream, capabilities: &[&str]) {
-    write_native(
-        stream,
-        &BrowserFrame::Hello {
-            major: ADAPTER_PROTOCOL_MAJOR,
-            adapter_version: "1.0.0".into(),
-            browser_id: RELAY_BROWSER.into(),
-            adapter_epoch: "adapter_relay".into(),
-            browser_name: None,
-            platform: Some(BrowserPlatform::Chromium),
-            attended: capabilities.contains(&adapter_capability::ADAPTER_ATTENTION),
-            capabilities: capabilities
-                .iter()
-                .map(|name| AdapterCapability {
-                    name: (*name).into(),
-                    revision: 1,
-                })
-                .collect(),
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_native::<BrowserFrame>(stream).unwrap(),
-        Some(BrowserFrame::HelloAccepted { .. })
-    ));
-}
-
-fn receipt(correlation: String, result: BrowserOutcome) -> BrowserFrame {
-    BrowserFrame::Receipt {
-        receipt: BrowserReceipt {
-            correlation,
-            result,
-        },
-    }
+/// Attach one scripted extension from another thread after `delay`, as a relay reconnects.
+fn attach_later(
+    port: &Arc<RelayBrowserPort>,
+    delay: Duration,
+) -> thread::JoinHandle<FakeExtension> {
+    let port = Arc::clone(port);
+    thread::spawn(move || {
+        thread::sleep(delay);
+        attach(&port, false)
+    })
 }
 
 /// An executor over a real relay port, with fixed installed-browser facts so recovery, if it
@@ -212,17 +109,6 @@ fn list_tabs(
     )
 }
 
-const RUNTIME_AND_TABS: &[&str] = &[adapter_capability::PAGE_RUNTIME, adapter_capability::TABS];
-const LIVE_TABS: &[&str] = &[
-    adapter_capability::TABS,
-    adapter_capability::ADAPTER_LIVENESS,
-];
-const TABS_ONLY: &[&str] = &[adapter_capability::TABS];
-const ATTENDED_TABS: &[&str] = &[
-    adapter_capability::TABS,
-    adapter_capability::ADAPTER_ATTENTION,
-];
-
 /// A navigation with the default deadline, from a session that works in no browser yet.
 fn navigate(
     executor: &ApplicationExecutor,
@@ -249,120 +135,75 @@ fn await_unregistered(port: &RelayBrowserPort) {
     }
 }
 
-/// The same browser reconnecting is invisible while its new connection installs the page
-/// runtime. A session pinned to it waits and continues; it is never told about another profile.
+/// The same browser reconnecting, as when its extension worker restarts the native port, is
+/// waited for. A session pinned to it continues there; it is never told about another profile.
 #[test]
-fn a_pinned_browser_reconnecting_during_runtime_install_takes_the_call() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new(
-        "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
-    ));
+fn a_pinned_browser_that_reconnects_takes_the_call() {
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (executor, workspaces, workspace) =
         relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
 
-    let first = Adapter::start(address, TABS_ONLY, Script::Answer, None);
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let first = attach(&port, false);
     workspaces
         .pin_browser(workspace.as_str(), RELAY_BROWSER)
         .unwrap();
-
-    let (installing, install_arrived) = mpsc::channel();
-    let second = Adapter::start(
-        address,
-        RUNTIME_AND_TABS,
-        Script::InstallSlowly(Duration::from_millis(400)),
-        Some(installing),
-    );
-    let attaching = {
-        let port = Arc::clone(&port);
-        thread::spawn(move || port.attach(listener.accept().unwrap().0))
-    };
-    install_arrived.recv().unwrap();
-    assert!(
-        port.browsers().is_empty(),
-        "the reconnecting browser is private until its runtime is installed"
-    );
+    first.close();
+    await_unregistered(&port);
+    let second = attach_later(&port, Duration::from_millis(300));
 
     let listed = list_tabs(&executor, &workspace);
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
     assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
-    attaching.join().unwrap().unwrap();
-    first.close();
-    second.close();
+    drop(second.join().unwrap());
 }
 
-/// A pinned browser whose liveness lapsed is probed once, at once, and the call goes through as
-/// soon as it answers, long before the next timer heartbeat.
+/// A pinned browser whose liveness lapsed is waited for, and the call goes through as soon as it
+/// answers a heartbeat again.
 #[test]
-fn a_silent_pinned_browser_that_answers_the_probe_takes_the_call() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
+fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
     let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
+        page_assets(),
         HeartbeatSettings {
-            interval: Duration::from_secs(10),
-            timeout: Duration::from_secs(30),
-            verdict: Duration::from_millis(50),
+            interval: Duration::from_millis(20),
+            timeout: Duration::from_millis(150),
         },
     ));
     let (executor, workspaces, workspace) =
         relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
-    let (back, came_back) = mpsc::channel();
-    let adapter = Adapter::start(address, LIVE_TABS, Script::SilentUntilCancel, Some(back));
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let fake = Arc::new(attach(&port, false));
     workspaces
         .pin_browser(workspace.as_str(), RELAY_BROWSER)
         .unwrap();
 
-    // One unanswered probe past the verdict window makes the browser silent.
-    assert_eq!(
-        port.call(
-            RELAY_BROWSER,
-            workspace.as_str(),
-            BrowserCommand::ListTabs,
-            Instant::now() + Duration::from_millis(150),
-            &std::sync::atomic::AtomicBool::new(false),
-        ),
-        Err(BrowserError::DeadlineAfterDispatch)
-    );
-    assert!(port.browsers().is_empty());
-    came_back.recv().unwrap();
+    fake.acknowledge_heartbeats(false);
+    let until = Instant::now() + Duration::from_secs(5);
+    while !port.browsers().is_empty() {
+        assert!(Instant::now() < until, "silence never hid the browser");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let answering = {
+        let fake = Arc::clone(&fake);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            fake.acknowledge_heartbeats(true);
+        })
+    };
 
-    let started = Instant::now();
     let listed = list_tabs(&executor, &workspace);
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert!(
-        started.elapsed() < Duration::from_secs(3),
-        "the call probed at once instead of waiting for the 10 s heartbeat"
-    );
-    adapter.close();
+    answering.join().unwrap();
 }
 
 /// Right after a service start, the browser's relay is still reconnecting. A session with no
 /// browser yet waits for it inside the grace, and recovery never runs.
 #[test]
 fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new(
-        "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
-    ));
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (governance, policy) = manual_startup();
     let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
 
-    let reconnecting = {
-        let port = Arc::clone(&port);
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(300));
-            let adapter = Adapter::start(address, TABS_ONLY, Script::Answer, None);
-            port.attach(listener.accept().unwrap().0).unwrap();
-            adapter
-        })
-    };
+    let reconnecting = attach_later(&port, Duration::from_millis(300));
 
     let listed = list_tabs(&executor, &workspace);
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
@@ -370,7 +211,7 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some(RELAY_BROWSER)
     );
-    reconnecting.join().unwrap().close();
+    drop(reconnecting.join().unwrap());
     let _ = fs::remove_file(policy);
 }
 
@@ -380,24 +221,18 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
 /// the browser reported while it was open is not evidence.
 #[test]
 fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new(
-        "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
-    ));
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (governance, policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     // Long past the port's own reconnect window, so the departure is the only evidence.
     port.backdate(RETURN_GRACE);
 
-    let adapter = Adapter::start(address, ATTENDED_TABS, Script::Answer, None);
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let fake = attach(&port, true);
     assert!(
         port.browsers()[0].attended,
         "the browser reported attention"
     );
-    adapter.close();
+    fake.close();
     await_unregistered(&port);
     assert!(
         port.browser_returning(),
@@ -423,10 +258,7 @@ fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
 /// so a cold start with no browser leaves browser startup most of the deadline.
 #[test]
 fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_window() {
-    let port = Arc::new(RelayBrowserPort::new(
-        "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
-    ));
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (governance, policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     port.backdate(RETURN_GRACE);
@@ -447,46 +279,6 @@ fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_wind
         "the wait ended with the reconnect window, not the grace, took {:?}",
         published.elapsed()
     );
-    let _ = fs::remove_file(policy);
-}
-
-/// A relay that reconnects is registered before its page runtime is installed. That registration
-/// alone carries the wait of a session with no browser yet, long after the port's own reconnect
-/// window has closed, and the call takes the browser instead of reaching browser startup.
-#[test]
-fn a_registered_connection_still_installing_carries_the_wait_past_the_reconnect_window() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new(
-        "service_test".into(),
-        crate::browser::adapter::chromium::level4::assets::page_assets(),
-    ));
-    let (governance, policy) = manual_startup();
-    let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
-    port.backdate(RETURN_GRACE);
-
-    let (installing, install_arrived) = mpsc::channel();
-    let adapter = Adapter::start(
-        address,
-        RUNTIME_AND_TABS,
-        Script::InstallSlowly(Duration::from_millis(400)),
-        Some(installing),
-    );
-    let attaching = {
-        let port = Arc::clone(&port);
-        thread::spawn(move || port.attach(listener.accept().unwrap().0))
-    };
-    install_arrived.recv().unwrap();
-    assert!(port.browsers().is_empty() && port.browser_returning());
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(
-        workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some(RELAY_BROWSER)
-    );
-    attaching.join().unwrap().unwrap();
-    adapter.close();
     let _ = fs::remove_file(policy);
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::browser::adapter::chromium::level4::wire::Rect;
+use crate::browser::adapter::chromium::protocol4::wire::Rect;
 
 fn view() -> ViewFacts {
     ViewFacts {

@@ -356,7 +356,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
         GovernanceFacade::new(None, None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
-            crate::browser::adapter::chromium::level4::assets::page_assets(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
         )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -441,8 +441,6 @@ impl crate::browser::BrowserPort for ControlledBrowser {
             id: "browser-1".into(),
             name: Some("Chrome".into()),
             adapter_version: "1.0.0".into(),
-            platform: crate::browser::adapter::BrowserPlatform::Chromium,
-            protocol: crate::browser::adapter::ADAPTER_PROTOCOL_MAJOR,
             attended: true,
         }]
     }

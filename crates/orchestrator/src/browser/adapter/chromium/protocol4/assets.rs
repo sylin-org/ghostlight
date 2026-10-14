@@ -83,7 +83,7 @@ fn sha256_hex(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browser::adapter::chromium::level4::wire::{
+    use crate::browser::adapter::chromium::protocol4::wire::{
         Outbound, RuntimeControlState, DIRECT_FRAME_BYTES,
     };
 

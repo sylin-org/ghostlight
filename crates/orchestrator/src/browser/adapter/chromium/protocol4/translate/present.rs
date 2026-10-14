@@ -1,5 +1,4 @@
-//! One-way frames: presentation notices and cancellation. Nothing answers either, so neither
-//! waits.
+//! One-way presentation notices. Nothing answers a notice, so presenting never waits.
 
 use super::super::link::Link;
 use super::super::locator::Locator;
@@ -38,11 +37,4 @@ pub fn present(l: &Link<'_>, signal: PresentationSignal) -> Result<BrowserOutcom
         },
     })?;
     Ok(BrowserOutcome::Presented { rendered: false })
-}
-
-/// Ask the extension to interrupt the primitive with `correlation`.
-#[must_use]
-pub fn cancel(l: &Link<'_>, correlation: &str) -> BrowserOutcome {
-    l.cancel(correlation);
-    BrowserOutcome::Cancelled
 }

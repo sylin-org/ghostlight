@@ -1,14 +1,12 @@
 //! Protocol-4 attachment, routing and liveness against a scripted extension.
 
 use std::fmt::Write as _;
-use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::net::TcpListener;
 use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ghostlight_bridge::framing::{read_native, write_native};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -16,19 +14,17 @@ use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::wire;
 use super::Receipts;
 use crate::browser::adapter::{
-    adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
-    BrowserOutcome, BrowserPlatform, BrowserReadiness, BrowserReceipt, DiagnosticsLayer,
-    DiagnosticsState, PresentationActivity, PresentationKind, RuntimeControlIntent,
-    RuntimeControlState, ADAPTER_PROTOCOL_MAJOR,
+    BrowserEvent, BrowserReadiness, PresentationActivity, PresentationKind, RuntimeControlIntent,
+    RuntimeControlState,
 };
 use crate::browser::{
-    lock, AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, Channel,
-    HeartbeatSettings, RelayBrowserPort,
+    lock, AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, HeartbeatSettings,
+    RelayBrowserPort,
 };
 use crate::language::adapter::ADAPTER_INCOMPATIBLE;
 
 const FOUR: &str = "browser_four";
-const THREE: &str = "browser_three";
+const OTHER: &str = "browser_other";
 const PATIENCE: Duration = Duration::from_secs(5);
 
 fn assets() -> Arc<wire::Assets> {
@@ -62,11 +58,8 @@ fn channel(
     browser: &str,
 ) -> (Arc<crate::browser::transport::SocketWriter>, Arc<Receipts>) {
     let adapters = lock(&port.adapters);
-    let connection = &adapters.connections[browser];
-    let Channel::Four { line } = &connection.channel else {
-        panic!("a protocol-4 connection");
-    };
-    (Arc::clone(&connection.writer), Arc::clone(&line.receipts))
+    let line = &adapters.connections[browser].line;
+    (Arc::clone(&line.writer), Arc::clone(&line.receipts))
 }
 
 fn eventually(condition: impl Fn() -> bool) {
@@ -125,31 +118,30 @@ fn a_protocol_four_hello_is_accepted_with_the_assets_and_listed_ready() {
     let browsers = port.browsers();
     assert_eq!(browsers.len(), 1);
     assert_eq!(browsers[0].id, FOUR);
-    assert_eq!(browsers[0].protocol, wire::PROTOCOL);
     assert_eq!(browsers[0].name.as_deref(), Some("Chrome"));
     assert_eq!(browsers[0].adapter_version, "2.0.0");
     assert_eq!(*lifecycle.0.lock().unwrap(), [format!("attached {FOUR}")]);
 }
 
 #[test]
-fn a_hello_no_level_serves_hears_why_and_is_closed() {
-    for (hello, offered, required) in [
+fn a_first_frame_that_is_not_a_protocol_four_hello_hears_why_and_is_closed() {
+    for (hello, offered) in [
         (
             json!({"kind": "hello", "protocol": 5, "browser_id": FOUR}),
             5,
-            4,
         ),
-        (
-            json!({"kind": "hello", "major": 2, "browser_id": FOUR}),
-            2,
-            3,
-        ),
+        (json!({"kind": "hello", "major": 3, "browser_id": FOUR}), 0),
+        (json!({"kind": "receipt", "protocol": 4}), 4),
+        (json!([]), 0),
     ] {
         let port = port();
         let (fake, attached) = attach(&port, &hello);
         assert_eq!(
             attached,
-            Err(BrowserError::Incompatible { offered, required })
+            Err(BrowserError::Incompatible {
+                offered,
+                required: wire::PROTOCOL
+            })
         );
         let seen = fake.wait(|seen| seen.closed);
         assert_eq!(
@@ -249,11 +241,13 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
 #[test]
 fn attention_moves_the_browser_to_the_front() {
     let port = port();
-    let (_three, attached) = attach_level3(&port, THREE, true);
+    let mut attended = FakeExtension::hello(OTHER);
+    attended["attended"] = json!(true);
+    let (_other, attached) = attach(&port, &attended);
     attached.unwrap();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
-    assert_eq!(port.browsers()[0].id, THREE);
+    assert_eq!(port.browsers()[0].id, OTHER);
     fake.send(&json!({"kind": "event", "event": {"event": "attended"}}));
     eventually(|| port.browsers()[0].id == FOUR);
     assert!(port.browsers()[0].attended);
@@ -267,7 +261,6 @@ fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
         HeartbeatSettings {
             interval: Duration::from_millis(10),
             timeout: Duration::from_millis(60),
-            verdict: Duration::from_millis(60),
         },
     );
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
@@ -385,121 +378,15 @@ fn a_closed_socket_fails_waiting_calls_and_detaches() {
 }
 
 #[test]
-fn control_state_reaches_protocol_four_but_diagnostics_do_not() {
+fn control_state_reaches_every_connection() {
     let port = port();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
-    port.publish_diagnostics(DiagnosticsState {
-        layer: DiagnosticsLayer::Marker,
-    })
-    .unwrap();
     port.publish_control_state(RuntimeControlState::Attention)
         .unwrap();
     let seen = fake.wait(|seen| !seen.of_kind("control_state").is_empty());
     assert_eq!(
         seen.of_kind("control_state"),
         [&json!({"kind": "control_state", "state": "held"})]
-    );
-}
-
-/// Attach one level-3 browser that answers every request with an empty tab list.
-fn attach_level3(
-    port: &RelayBrowserPort,
-    browser_id: &'static str,
-    attended: bool,
-) -> (thread::JoinHandle<()>, Result<(), BrowserError>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    let ready = Arc::new(AtomicBool::new(false));
-    let client_ready = Arc::clone(&ready);
-    let client = thread::spawn(move || {
-        let mut stream = TcpStream::connect(address).unwrap();
-        write_native(
-            &mut stream,
-            &BrowserFrame::Hello {
-                major: ADAPTER_PROTOCOL_MAJOR,
-                adapter_version: "1.3.8".into(),
-                browser_id: browser_id.into(),
-                adapter_epoch: "adapter_three".into(),
-                browser_name: Some("Edge".into()),
-                platform: Some(BrowserPlatform::Chromium),
-                attended,
-                capabilities: vec![
-                    AdapterCapability {
-                        name: adapter_capability::TABS.into(),
-                        revision: 1,
-                    },
-                    AdapterCapability {
-                        name: adapter_capability::ADAPTER_ATTENTION.into(),
-                        revision: 1,
-                    },
-                ],
-            },
-        )
-        .unwrap();
-        client_ready.store(true, Ordering::SeqCst);
-        while let Ok(Some(frame)) = read_native::<BrowserFrame>(&mut stream) {
-            if let BrowserFrame::Request { request } = frame {
-                write_native(
-                    &mut stream,
-                    &BrowserFrame::Receipt {
-                        receipt: BrowserReceipt {
-                            correlation: request.correlation,
-                            result: BrowserOutcome::Tabs { tabs: vec![] },
-                        },
-                    },
-                )
-                .unwrap();
-            }
-        }
-    });
-    let attached = port.attach(listener.accept().unwrap().0);
-    assert!(ready.load(Ordering::SeqCst));
-    (client, attached)
-}
-
-#[test]
-fn protocol_three_and_four_browsers_route_by_browser_id() {
-    let port = port();
-    let (_three, attached) = attach_level3(&port, THREE, false);
-    attached.unwrap();
-    let (_four, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    attached.unwrap();
-
-    let mut listed: Vec<_> = port
-        .browsers()
-        .into_iter()
-        .map(|browser| (browser.id, browser.protocol))
-        .collect();
-    listed.sort();
-    assert_eq!(
-        listed,
-        [
-            (FOUR.to_owned(), wire::PROTOCOL),
-            (THREE.to_owned(), ADAPTER_PROTOCOL_MAJOR)
-        ]
-    );
-
-    let cancelled = AtomicBool::new(false);
-    let deadline = Instant::now() + PATIENCE;
-    assert_eq!(
-        port.call(
-            THREE,
-            "workspace",
-            BrowserCommand::ListTabs,
-            deadline,
-            &cancelled
-        ),
-        Ok(BrowserOutcome::Tabs { tabs: vec![] })
-    );
-    assert_eq!(
-        port.call(
-            FOUR,
-            "workspace",
-            BrowserCommand::ListTabs,
-            deadline,
-            &cancelled
-        ),
-        Ok(BrowserOutcome::Tabs { tabs: vec![] })
     );
 }

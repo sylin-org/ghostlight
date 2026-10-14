@@ -17,7 +17,7 @@ use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
     PresentationActivity, PresentationKind, PresentationSignal, RecordingDestination,
 };
-use crate::browser::{lock, BrowserDispatch, BrowserError, BrowserPort, Channel, RelayBrowserPort};
+use crate::browser::{lock, BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::governance::ReasonCode;
 
 const FOUR: &str = "browser_four";
@@ -85,11 +85,7 @@ fn summary() -> Value {
 }
 
 fn line(port: &RelayBrowserPort) -> Line {
-    let adapters = lock(&port.adapters);
-    let Channel::Four { line } = &adapters.connections[FOUR].channel else {
-        panic!("a protocol-4 connection");
-    };
-    line.clone()
+    lock(&port.adapters).connections[FOUR].line.clone()
 }
 
 fn recordings(port: &RelayBrowserPort) -> Arc<super::RecordingIndex> {
@@ -391,10 +387,8 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         (
             wire::Failure::Unsupported,
             None,
-            BrowserError::CapabilityVersion {
-                capability: "navigate".into(),
-                required: 1,
-                advertised: 0,
+            BrowserError::Unsupported {
+                primitive: "navigate".into(),
             },
         ),
     ] {
@@ -791,41 +785,6 @@ fn a_notice_is_written_once_and_never_awaited() {
     assert!(!seen.notices[1].defer_until_visible);
     assert_eq!(seen.notices[1].frame, None);
     assert!(seen.requests.is_empty(), "a notice is not a request");
-}
-
-#[test]
-fn cancel_work_forwards_a_cancel_frame_and_waits_for_nothing() {
-    let (port, fake) = port(Box::new(|_, _| Reply::Never));
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::Cancel {
-                correlation: "p4_elsewhere".into()
-            }
-        ),
-        Ok(BrowserOutcome::Cancelled)
-    );
-    assert_eq!(
-        fake.wait(|seen| !seen.cancels.is_empty()).cancels,
-        ["p4_elsewhere"]
-    );
-}
-
-#[test]
-fn a_page_runtime_install_is_a_protocol_failure_and_sends_nothing() {
-    let (port, fake) = port(Box::new(|_, _| Reply::Never));
-    assert!(matches!(
-        call(
-            &port,
-            BrowserCommand::InstallPageRuntime {
-                revision: 1,
-                sha256: String::new(),
-                script: String::new()
-            }
-        ),
-        Err(BrowserError::Protocol(_))
-    ));
-    assert!(fake.wait(|_| true).requests.is_empty());
 }
 
 #[test]

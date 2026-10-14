@@ -1724,7 +1724,7 @@ impl ApplicationExecutor {
                 json!({"reason":"deadline","phase":"before_dispatch"}),
             );
         }
-        if matches!(error, BrowserError::CapabilityVersion { .. }) {
+        if matches!(error, BrowserError::Unsupported { .. }) {
             return self.failed(
                 context,
                 decision,
@@ -2281,7 +2281,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::Protocol(_)
         | BrowserError::Authentication
         | BrowserError::Incompatible { .. }
-        | BrowserError::CapabilityVersion { .. } => (CheckFailure::BrowserRefused, admitted),
+        | BrowserError::Unsupported { .. } => (CheckFailure::BrowserRefused, admitted),
     }
 }
 
@@ -2495,8 +2495,6 @@ fn observed_from(outcome: &BrowserOutcome) -> Observed {
         | BrowserOutcome::RecordingAmbiguous { .. }
         | BrowserOutcome::RecordingNotFound
         | BrowserOutcome::Presented { .. }
-        | BrowserOutcome::Cancelled
-        | BrowserOutcome::PageRuntimeInstalled { .. }
         | BrowserOutcome::EffectUnknown { .. } => Observed::default(),
     }
 }
@@ -2586,7 +2584,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::Protocol(_)
         | BrowserError::Authentication
         | BrowserError::Incompatible { .. }
-        | BrowserError::CapabilityVersion { .. } => "browser_contract_failed",
+        | BrowserError::Unsupported { .. } => "browser_contract_failed",
         _ => "browser_effect_unknown",
     }
 }

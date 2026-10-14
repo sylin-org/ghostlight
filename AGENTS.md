@@ -158,7 +158,7 @@ Gate before every commit:
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
 - `npm test` from `extension/`
-- `npm test --prefix crates/orchestrator/src/browser/adapter/chromium/assets` (the Chromium page assets; no `npm install` needed)
+- `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"` (the Chromium page assets; no `npm install` needed)
 - `node --check` on changed extension and page-asset JavaScript
 
 The process and live browser journeys in `tests/` exercise the real executable boundaries. Run

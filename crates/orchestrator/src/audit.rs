@@ -482,7 +482,7 @@ mod tests {
                 crate::governance::GovernanceFacade::new(None, None),
                 Arc::new(crate::browser::RelayBrowserPort::new(
                     "audit-recovery-test".into(),
-                    crate::browser::adapter::chromium::level4::assets::page_assets(),
+                    crate::browser::adapter::chromium::protocol4::assets::page_assets(),
                 )),
                 crate::diagnostics::DiagnosticsHub::for_tests(),
             )

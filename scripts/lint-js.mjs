@@ -32,7 +32,7 @@ const require = createRequire(import.meta.url);
 const acorn = require("../extension/vendor/acorn.js");
 
 const IGNORED_PREFIX = "_";
-const PAGE_ASSET_DIR = /chromium\/level4\/assets$/;
+const PAGE_ASSET_DIR = /chromium\/protocol4\/assets$/;
 /** The extension scripts that run in a document, not in the service worker. */
 const EXTENSION_PAGE_SCRIPT =
   /(^|\/)extension\/(offscreen\.js|options\.js|popup\.js|lib\/gif\.js|vendor\/gifenc\.js)$/;

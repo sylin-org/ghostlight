@@ -245,30 +245,6 @@ test("adapter protocol three wires the closed physical mechanisms at the Chrome 
   assert.match(worker, /chrome\.tabs\.query\(\{ windowId: tab\.windowId \}\)/);
 });
 
-test("browser actions return the subject in the effect receipt without a describe round trip", () => {
-  const root = join(__dirname, "..");
-  const content = readFileSync(join(root, "../crates/orchestrator/src/browser/adapter/chromium/assets/content.js"), "utf8");
-  const worker = readFileSync(join(root, "service-worker.js"), "utf8");
-
-  assert.match(content, /sendResponse\(\{ ok: true, result: \{ activated: true, subject, rectangle: viewportRectangle\(element\) \} \}\)/);
-  assert.match(
-    worker,
-    /async function activate\([\s\S]*?await dispatchClick\([\s\S]*?subject: result\.subject/,
-    "target activation must use a trusted browser pointer and retain the resolved subject"
-  );
-  assert.doesNotMatch(content.slice(content.indexOf('if (message.kind === "activate")'), content.indexOf('if (message.kind === "fill")')), /element\.click\(\)|dispatchEvent/);
-  assert.match(
-    content,
-    /sendResponse\(\{ ok: true, result: \{ filled_count: message\.fields\.length, submitted: Boolean\(submitElement\) \} \}\)[\s\S]*?submitElement\.click\(\)/,
-    "the fill reply must cross to the worker before the verified submit runs"
-  );
-  assert.match(content, /kind === "box"[\s\S]*?rectangle: viewportRectangle\(element\), subject: actionSubject\(element\)/);
-  assert.match(worker, /outcome: "activated"[\s\S]*?subject: result\.subject/);
-  assert.match(worker, /outcome: "typed"[\s\S]*?subject: target\.subject/);
-  assert.match(worker, /outcome: "dragged"[\s\S]*?source_subject: sourceSubject[\s\S]*?destination_subject: destinationSubject/);
-  assert.doesNotMatch(worker, /describe_targets[\s\S]*?action label/);
-});
-
 test("the browser owns the whole recording capability, encoding included", () => {
   const root = join(__dirname, "..");
   const worker = readFileSync(join(root, "service-worker.js"), "utf8");

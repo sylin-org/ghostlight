@@ -1,15 +1,15 @@
 //! One adapter protocol 4 connection: the hello it opens with, the thread that reads its frames,
 //! and the receipts its calls await.
 //!
-//! The connection is ready as soon as its hello is valid. The page assets travel in
-//! `hello_accepted`, so there is no install round trip and no capability gate. Receipts route by
+//! Protocol 4 is the only adapter protocol: any other first frame is told to update. A valid
+//! hello is accepted with the page assets in `hello_accepted`, and its connection takes work at
+//! once. Receipts route by
 //! correlation and a receipt nobody awaits is ignored. Only a closed socket fails the calls still
 //! waiting: a connection that stops answering heartbeats is hidden from new work and fails
 //! nothing.
 
 use std::collections::HashMap;
 use std::net::TcpStream;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,12 +20,12 @@ use uuid::Uuid;
 
 use super::link::{Line, RecordingIndex};
 use super::wire;
-use crate::browser::adapter::{Adapter, BrowserEvent, Level};
+use crate::browser::adapter::{BrowserEvent, Family};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
-    end_connection, is_current, lock, valid_opaque_id, validated_browser_name,
-    AdapterNotifications, AdapterRegistry, BrowserError, Channel, Connection, ConnectionTag,
-    Liveness, RelayBrowserPort, BROWSER_ID_PREFIX,
+    end_connection, is_current, lock, refuse_incompatible, valid_opaque_id, validated_browser_name,
+    AdapterNotifications, AdapterRegistry, BrowserError, Connection, ConnectionTag, Liveness,
+    RelayBrowserPort, BROWSER_ID_PREFIX,
 };
 
 /// Longest engine version a hello may report.
@@ -34,6 +34,12 @@ const ENGINE_VERSION_MAX_CHARS: usize = 32;
 const RECEIPT_KIND: &str = "receipt";
 /// The frame field naming a frame's kind.
 const KIND_FIELD: &str = "kind";
+/// The kind of the first frame on every connection.
+const HELLO_KIND: &str = "hello";
+/// The hello field naming the protocol the extension speaks.
+const PROTOCOL_FIELD: &str = "protocol";
+/// The prefix of every connection identity.
+const CONNECTION_PREFIX: &str = "connection_";
 /// The receipt field naming the request it answers.
 const CORRELATION_FIELD: &str = "correlation";
 
@@ -79,78 +85,84 @@ impl Receipts {
     }
 }
 
-/// Validate a hello that chose protocol 4 and attach its connection to `port`.
+/// Attach one connection whose first frame is `hello` to `port`.
 ///
-/// The connection registers, hears `hello_accepted` with the port's page assets, and is
-/// published to callers at once.
+/// A first frame that is not a protocol-4 hello hears `adapter_incompatible` with the sentence
+/// that tells the person to update the extension, and its socket closes. A valid hello hears
+/// `hello_accepted` with the port's page assets, and its connection is registered and can take
+/// work at once.
 ///
 /// # Errors
 ///
-/// Returns [`BrowserError::Authentication`] for a hello that breaks the identity rules, and the
+/// Returns [`BrowserError::Incompatible`] for a first frame that is not a protocol-4 hello,
+/// [`BrowserError::Authentication`] for a hello that breaks the identity rules, and the
 /// transport failure when the connection cannot be set up.
 pub(crate) fn attach(
     port: &RelayBrowserPort,
     stream: TcpStream,
     reader: SocketReader,
     hello: Value,
-    adapter: Adapter,
 ) -> Result<(), BrowserError> {
+    let offered = offered_protocol(&hello);
+    if hello.get(KIND_FIELD).and_then(Value::as_str) != Some(HELLO_KIND)
+        || offered != wire::PROTOCOL
+    {
+        refuse_incompatible(stream);
+        return Err(BrowserError::Incompatible {
+            offered,
+            required: wire::PROTOCOL,
+        });
+    }
     let hello = validated_hello(hello)?;
     let browser_name = validated_browser_name(hello.browser_name)?;
-    let lifecycle = lock(&port.lifecycle).clone();
     let liveness = Arc::new(Liveness::new(
         hello.browser_id.clone(),
-        Level::Four,
-        lifecycle,
+        lock(&port.lifecycle).clone(),
         Instant::now(),
     ));
     let writer = Arc::new(
         SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
     );
+    writer
+        .native(&wire::Outbound::HelloAccepted {
+            service_epoch: port.service_epoch.clone(),
+            service_version: env!("CARGO_PKG_VERSION").into(),
+            control_state: (*lock(&port.control_state)).into(),
+            assets: (*port.assets).clone(),
+        })
+        .map_err(|error| {
+            writer.close();
+            BrowserError::Protocol(error.to_string())
+        })?;
     let receipts = Arc::new(Receipts::default());
     let tag = ConnectionTag {
         browser_id: hello.browser_id,
-        connection_id: format!("connection_{}", Uuid::new_v4().simple()),
+        connection_id: format!("{CONNECTION_PREFIX}{}", Uuid::new_v4().simple()),
     };
-    let replaced = port.register(
-        Connection {
-            id: tag.connection_id.clone(),
-            writer: Arc::clone(&writer),
-            channel: Channel::Four {
-                line: Line {
-                    writer: Arc::clone(&writer),
-                    receipts: Arc::clone(&receipts),
-                    recordings: Arc::new(RecordingIndex::default()),
-                },
-            },
-            adapter_version: hello.adapter_version,
-            adapter,
-            browser_id: tag.browser_id.clone(),
-            browser_name,
-            liveness: Some(Arc::clone(&liveness)),
-            ready: false,
-        },
-        hello.attended,
-    )?;
-    if let Err(error) = writer.native(&wire::Outbound::HelloAccepted {
-        service_epoch: port.service_epoch.clone(),
-        service_version: env!("CARGO_PKG_VERSION").into(),
-        control_state: (*lock(&port.control_state)).into(),
-        assets: (*port.assets).clone(),
-    }) {
-        port.detach_registered(&tag.browser_id, &tag.connection_id);
-        return Err(BrowserError::Protocol(error.to_string()));
-    }
-    let announced = Arc::new(AtomicBool::new(false));
     let reading = Reading {
         reader,
         writer: Arc::clone(&writer),
-        receipts,
-        notifications: port.notifications(&announced),
+        receipts: Arc::clone(&receipts),
+        notifications: port.notifications(),
         adapters: Arc::clone(&port.adapters),
         tag: tag.clone(),
         liveness: Arc::clone(&liveness),
     };
+    port.register(
+        Connection {
+            id: tag.connection_id.clone(),
+            line: Line {
+                writer: Arc::clone(&writer),
+                receipts,
+                recordings: Arc::new(RecordingIndex::default()),
+            },
+            adapter_version: hello.adapter_version,
+            browser_id: tag.browser_id.clone(),
+            browser_name,
+            liveness: Arc::clone(&liveness),
+        },
+        hello.attended,
+    )?;
     if let Err(error) = thread::Builder::new()
         .name("ghostlight-browser-reader".into())
         .spawn(move || reading.run())
@@ -158,16 +170,26 @@ pub(crate) fn attach(
         port.detach_registered(&tag.browser_id, &tag.connection_id);
         return Err(BrowserError::Protocol(error.to_string()));
     }
-    if !port.publish_ready(&tag, &announced, replaced) {
-        return Err(BrowserError::DisconnectedBeforeDispatch);
-    }
-    port.spawn_heartbeat(&tag, writer, liveness, None)
+    port.spawn_heartbeat(&tag, writer, liveness)
 }
 
-/// Decode and check a protocol-4 hello by the identity rules every level shares.
+/// The protocol a first frame names, or zero when it names none this service can read.
+fn offered_protocol(hello: &Value) -> u16 {
+    hello
+        .get(PROTOCOL_FIELD)
+        .and_then(Value::as_u64)
+        .and_then(|protocol| u16::try_from(protocol).ok())
+        .unwrap_or_default()
+}
+
+/// Decode and check a protocol-4 hello by the identity rules: an opaque browser identity, a
+/// platform this service serves, and a plain engine version.
 fn validated_hello(hello: Value) -> Result<wire::Hello, BrowserError> {
     let hello: wire::Hello =
         serde_json::from_value(hello).map_err(|_| BrowserError::Authentication)?;
+    if Family::from_platform(hello.platform.as_deref()).is_none() {
+        return Err(BrowserError::Authentication);
+    }
     let engine_version_valid = hello.engine_version.as_deref().is_none_or(|version| {
         !version.is_empty()
             && version.len() <= ENGINE_VERSION_MAX_CHARS

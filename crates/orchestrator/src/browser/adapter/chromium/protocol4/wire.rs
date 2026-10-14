@@ -20,9 +20,17 @@ use crate::browser::adapter as physical;
 pub const PROTOCOL: u16 = 4;
 /// Name of the isolated world that runs the service's page assets.
 pub const WORLD_NAME: &str = "ghostlight";
+/// Platform identity a Chromium extension names in its hello.
+pub const PLATFORM: &str = "ghostlight/chromium";
 /// Largest service-to-extension frame sent whole. Chromium caps host-to-extension messages at
 /// 1 MiB, so anything larger travels as command chunks.
 pub const DIRECT_FRAME_BYTES: usize = 768 * 1024;
+/// Most decoded bytes one command chunk carries. Base64 keeps the chunk frame under 1 MiB.
+pub const CHUNK_PAYLOAD_BYTES: usize = 512 * 1024;
+/// Largest serialized request one chunked transfer carries.
+pub const TRANSFER_MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Most chunks one transfer carries.
+pub const TRANSFER_MAX_CHUNKS: u16 = 64;
 /// Most world calls one `call` primitive carries, equal to the document limit so a route never
 /// splits.
 pub const MAX_WORLD_CALLS: usize = 256;
@@ -2095,6 +2103,11 @@ mod tests {
         assert_eq!(MAX_WORLD_CALLS, 256);
         assert_eq!(MAX_INPUT_STEPS, 4096);
         assert_eq!(MAX_UNSEEN, 64);
+        assert_eq!(PLATFORM, "ghostlight/chromium");
+        assert_eq!(TRANSFER_MAX_BYTES, 8 * 1024 * 1024);
+        assert_eq!(TRANSFER_MAX_CHUNKS, 64);
+        assert!(4 * CHUNK_PAYLOAD_BYTES.div_ceil(3) < 1024 * 1024);
+        assert!(TRANSFER_MAX_BYTES <= CHUNK_PAYLOAD_BYTES * usize::from(TRANSFER_MAX_CHUNKS));
     }
 
     #[test]

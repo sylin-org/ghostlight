@@ -38,9 +38,6 @@ use self::translate::{capture, keyboard, pointer, points, present, read, script,
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
-/// The failure of a page-runtime install sent to a protocol-4 connection, which receives its
-/// page assets in `hello_accepted`.
-const INSTALL_IS_LEVEL_THREE: &str = "page runtime installs are level 3 only";
 /// The failure of document-scoped work inside document-scoped work, or of a document
 /// description inside a scope.
 const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
@@ -107,9 +104,6 @@ fn translate(
             },
             settle_ms,
         ),
-        BrowserCommand::InstallPageRuntime { .. } => {
-            Err(BrowserError::Protocol(INSTALL_IS_LEVEL_THREE.into()))
-        }
         BrowserCommand::ListTabs => tabs::list_tabs(l),
         BrowserCommand::FocusTab { tab_id } => tabs::focus_tab(l, tab_id),
         BrowserCommand::OpenTab {
@@ -277,7 +271,6 @@ fn translate(
             max_output_bytes,
         ),
         BrowserCommand::DiscardRecording { recording_id } => records::discard(l, recording_id),
-        BrowserCommand::Cancel { correlation } => Ok(present::cancel(l, &correlation)),
         BrowserCommand::Present { signal } => present::present(l, signal),
         BrowserCommand::Screenshot {
             tab_id,

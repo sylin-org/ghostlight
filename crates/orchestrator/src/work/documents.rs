@@ -169,9 +169,7 @@ impl RequestScope {
             | BrowserCommand::StopRecording { .. }
             | BrowserCommand::ExportRecording { .. }
             | BrowserCommand::DiscardRecording { .. }
-            | BrowserCommand::Cancel { .. }
             | BrowserCommand::Present { .. }
-            | BrowserCommand::InstallPageRuntime { .. }
             | BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::InDocuments { .. } => return None,
         };

@@ -35,7 +35,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
-use crate::browser::adapter::chromium::level4::assets::page_assets;
+use crate::browser::adapter::chromium::protocol4::assets::page_assets;
 use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
@@ -146,19 +146,8 @@ impl ServiceHost {
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         browser
             .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
-        {
-            // Every activation transition, from any layer, republishes wire state so connected
-            // adapters and the workbench always show the same truth.
-            let browser_for_diagnostics = Arc::clone(&browser);
-            let sink_for_diagnostics = diagnostics.sink();
-            diagnostics.sink().set_on_change(Arc::new(move |_| {
-                let _ = browser_for_diagnostics
-                    .publish_diagnostics(crate::diagnostics::wire_state(&sink_for_diagnostics));
-            }));
-        }
         let _ = governance.runtime_decision();
         let _ = browser_port.publish_control_state(governance.runtime_state());
-        let _ = browser.publish_diagnostics(diagnostics.state());
         let presentation = PresentationReactor::new(Arc::new(BrowserPresentation::new(
             browser_port.clone(),
             workspaces.clone(),
@@ -194,7 +183,6 @@ impl ServiceHost {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
             browser: browser_port.clone(),
-            diagnostics: Arc::clone(&diagnostics),
         }));
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -1179,7 +1167,6 @@ struct ServiceBrowserEvents {
     governance: GovernanceFacade,
     workspaces: WorkspaceStore,
     browser: Arc<dyn BrowserPort>,
-    diagnostics: Arc<DiagnosticsHub>,
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
@@ -1194,15 +1181,9 @@ impl BrowserEventSink for ServiceBrowserEvents {
             BrowserEvent::ReadinessChanged { tab_id, readiness } => self
                 .workspaces
                 .apply_browser_readiness(browser, tab_id, readiness),
-            // Older adapters can still send this event. An opener does not prove authorship:
-            // a person can open a link from a controlled tab. Ownership needs explicit work.
-            BrowserEvent::ChildTabOpened { .. } => {}
             BrowserEvent::RuntimeControlRequested { intent } => {
                 let state = self.governance.apply_runtime_intent(intent);
                 let _ = self.browser.publish_control_state(state);
-            }
-            BrowserEvent::DiagnosticsToggleRequested => {
-                self.diagnostics.toggle();
             }
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id)
@@ -1312,7 +1293,6 @@ mod tests {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
             browser: browser.clone(),
-            diagnostics: diagnostics.clone(),
         };
         let view = WorkbenchFacade::new(
             projection,
@@ -1360,17 +1340,7 @@ mod tests {
                 );
             }
         }
-        // A user-created tab with an owned opener must still remain entirely unowned.
-        sink.on_event(
-            FAKE_BROWSER,
-            BrowserEvent::ChildTabOpened {
-                opener_tab_id: 7,
-                tab: PhysicalTab {
-                    tab_id: 8,
-                    ..tab.clone()
-                },
-            },
-        );
+        // A tab Ghostlight never opened stays entirely unowned when it commits.
         sink.on_event(
             FAKE_BROWSER,
             BrowserEvent::DocumentCommitted {
@@ -1527,7 +1497,6 @@ mod tests {
             governance: GovernanceFacade::new(None, None),
             workspaces: workspaces.clone(),
             browser: Arc::new(FakeBrowser::default()),
-            diagnostics: crate::diagnostics::DiagnosticsHub::for_tests(),
         };
         let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
         // The person loaded a page in a tab Ghostlight left open: it is theirs again.
@@ -1589,7 +1558,7 @@ mod tests {
     }
 
     /// Page assets a protocol-4 fake can be accepted with.
-    fn test_assets() -> Arc<crate::browser::adapter::chromium::level4::wire::Assets> {
+    fn test_assets() -> Arc<crate::browser::adapter::chromium::protocol4::wire::Assets> {
         use sha2::{Digest, Sha256};
         use std::fmt::Write as _;
 
@@ -1598,7 +1567,7 @@ mod tests {
         for byte in Sha256::digest(source.as_bytes()) {
             write!(&mut id, "{byte:02x}").unwrap();
         }
-        Arc::new(crate::browser::adapter::chromium::level4::wire::Assets { id, source })
+        Arc::new(crate::browser::adapter::chromium::protocol4::wire::Assets { id, source })
     }
 
     /// Serve the relay listener over a fake browser and publish it in `home`.
@@ -1939,9 +1908,11 @@ mod tests {
     /// Attach a protocol-4 extension for the returning browser that still lists its tab.
     fn attach_returning_browser(
         served: &Served,
-    ) -> crate::browser::adapter::chromium::level4::fake::FakeExtension {
-        use crate::browser::adapter::chromium::level4::fake::{FakeExtension, Reply as FakeReply};
-        use crate::browser::adapter::chromium::level4::wire::Primitive;
+    ) -> crate::browser::adapter::chromium::protocol4::fake::FakeExtension {
+        use crate::browser::adapter::chromium::protocol4::fake::{
+            FakeExtension, Reply as FakeReply,
+        };
+        use crate::browser::adapter::chromium::protocol4::wire::Primitive;
 
         let native = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let fake = FakeExtension::connect(
@@ -2164,8 +2135,8 @@ mod tests {
 
     #[test]
     fn a_browser_stream_carries_an_extension_to_the_browser_port() {
-        use crate::browser::adapter::chromium::level4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::level4::fake::Reply as FakeReply;
+        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
 
         let home = TestHome::new("browser-stream");
         let served = serve_fake(&home);

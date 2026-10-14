@@ -114,8 +114,8 @@ test("document names are undefined in the worker and allowed in an extension pag
 
 test("page assets share one scope and may return at the top", () => {
   const sources = [
-    { file: "dir/chromium/level4/assets/world.js", text: "if (!document) return;\nconsole.log(helper(__ghostlightAssetId));" },
-    { file: "dir/chromium/level4/assets/shared.js", text: "function helper(x) { return x; }" }
+    { file: "dir/chromium/protocol4/assets/world.js", text: "if (!document) return;\nconsole.log(helper(__ghostlightAssetId));" },
+    { file: "dir/chromium/protocol4/assets/shared.js", text: "function helper(x) { return x; }" }
   ];
   assert.deepEqual(lintSources(sources), []);
 });
@@ -127,7 +127,7 @@ test("a syntax error is reported once", () => {
 test("kinds follow the path", () => {
   assert.equal(kindOf("scripts/lint-js.mjs"), "module");
   assert.equal(kindOf("extension/tests/worker.test.js"), "node");
-  assert.equal(kindOf("crates/orchestrator/src/browser/adapter/chromium/level4/assets/world.js"), "page");
+  assert.equal(kindOf("crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/world.js"), "page");
   assert.equal(kindOf("extension/lib/world.js"), "worker");
   assert.equal(kindOf("extension/worker.js"), "worker");
   assert.equal(kindOf("extension/popup.js"), "extpage");

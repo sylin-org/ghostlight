@@ -8,24 +8,24 @@
 //! the browser may already have acted.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ghostlight_bridge::framing::write_native;
+use base64::Engine as _;
+use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::connection::{ReceiptResult, Receipts};
 use super::scope::{PlannedCall, Scope};
 use super::wire::{self, primitive_name};
 use super::world::{self, EffectClass};
-use crate::browser::adapter::COMMAND_TRANSFER_MAX_BYTES;
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
-use crate::browser::{
-    lock, write_request_payload, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT,
-};
+use crate::browser::{lock, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
 
 /// How long a cancelled primitive may take to report what it did.
 pub const CANCEL_GRACE: Duration = Duration::from_millis(500);
@@ -36,10 +36,8 @@ pub const RECEIPT_MARGIN: Duration = Duration::from_millis(250);
 const POLL: Duration = Duration::from_millis(20);
 /// The prefix of every protocol-4 correlation.
 const CORRELATION_PREFIX: &str = "p4_";
-/// The revision an extension that answers `unsupported` is told the primitive needs.
-pub const UNSUPPORTED_REQUIRED: u16 = 1;
-/// The revision an extension that answers `unsupported` is said to have.
-pub const UNSUPPORTED_ADVERTISED: u16 = 0;
+/// The prefix of every chunked transfer's identity.
+const TRANSFER_PREFIX: &str = "transfer_";
 /// The failure for a tab the browser does not have.
 const TAB_MISSING: &str = "browser tab is missing";
 /// The unknown effect of a command that runtime control held after it had acted.
@@ -414,9 +412,10 @@ impl<'a> Link<'a> {
             primitive: primitive.into_primitive(),
         })
         .map_err(|error| self.settle(BrowserError::Protocol(error.to_string())))?;
-        if payload.len() > COMMAND_TRANSFER_MAX_BYTES {
+        if payload.len() > wire::TRANSFER_MAX_BYTES {
             return Err(self.settle(BrowserError::Primitive(format!(
-                "browser request exceeds the {COMMAND_TRANSFER_MAX_BYTES}-byte transfer bound"
+                "browser request exceeds the {}-byte transfer bound",
+                wire::TRANSFER_MAX_BYTES
             ))));
         }
         let writer = Arc::clone(&self.line.writer);
@@ -668,10 +667,8 @@ impl<'a> Link<'a> {
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,
             wire::Failure::TabMissing => BrowserError::Primitive(TAB_MISSING.into()),
-            wire::Failure::Unsupported => BrowserError::CapabilityVersion {
-                capability: P::NAME.into(),
-                required: UNSUPPORTED_REQUIRED,
-                advertised: UNSUPPORTED_ADVERTISED,
+            wire::Failure::Unsupported => BrowserError::Unsupported {
+                primitive: P::NAME.into(),
             },
             wire::Failure::InvalidRequest => BrowserError::Protocol(message),
             wire::Failure::DebuggerUnavailable
@@ -770,3 +767,49 @@ fn failure_code(failure: wire::Failure) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Write one serialized request: whole when it fits one frame, otherwise as command chunks that
+/// each carry the transfer's length and hash.
+///
+/// # Errors
+///
+/// Returns [`FrameError::TooLarge`] when the request exceeds the transfer bound, and the
+/// writer's failure.
+fn write_request_payload(
+    writer: &mut impl std::io::Write,
+    payload: &[u8],
+    correlation: &str,
+) -> Result<(), FrameError> {
+    if payload.len() <= wire::DIRECT_FRAME_BYTES {
+        return write_length_frame(writer, payload);
+    }
+    if payload.len() > wire::TRANSFER_MAX_BYTES {
+        return Err(FrameError::TooLarge);
+    }
+    let count = u16::try_from(payload.len().div_ceil(wire::CHUNK_PAYLOAD_BYTES))
+        .map_err(|_| FrameError::TooLarge)?;
+    if count > wire::TRANSFER_MAX_CHUNKS {
+        return Err(FrameError::TooLarge);
+    }
+    let total_bytes = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge)?;
+    let transfer_id = format!("{TRANSFER_PREFIX}{}", Uuid::new_v4().simple());
+    let mut sha256 = String::with_capacity(64);
+    for byte in Sha256::digest(payload) {
+        write!(&mut sha256, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    for (index, chunk) in payload.chunks(wire::CHUNK_PAYLOAD_BYTES).enumerate() {
+        write_native(
+            writer,
+            &wire::Outbound::CommandChunk {
+                transfer_id: transfer_id.clone(),
+                correlation: correlation.into(),
+                index: u16::try_from(index).map_err(|_| FrameError::TooLarge)?,
+                count,
+                total_bytes,
+                sha256: sha256.clone(),
+                data: base64::engine::general_purpose::STANDARD.encode(chunk),
+            },
+        )?;
+    }
+    Ok(())
+}

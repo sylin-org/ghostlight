@@ -1138,7 +1138,7 @@ impl Refusal {
                 "The browser answered in a form Ghostlight does not recognize."
             }
             Self::BrowserAdapterOutdated => {
-                "The Ghostlight extension is older than this browser command."
+                "This browser command needs a newer Ghostlight extension."
             }
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
@@ -2579,7 +2579,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::BrowserAdapterOutdated,
-                "The Ghostlight extension is older than this browser command.",
+                "This browser command needs a newer Ghostlight extension.",
             ),
             (
                 Refusal::BrowserUnavailable {

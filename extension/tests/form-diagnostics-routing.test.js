@@ -153,26 +153,3 @@ test("diagnostic storage and missing receivers cannot fail passive routing", asy
   await state.sandbox.refreshFormDiagnostics();
   assert.deepEqual(state.work, []);
 });
-
-test("content state survives delayed startup responses and embedded documents stay disabled", async () => {
-  const source = readFileSync(join(__dirname, "../../crates/orchestrator/src/browser/adapter/chromium/assets/content.js"), "utf8");
-  for (const isTop of [true, false]) for (const enabled of [true, false]) {
-    const states = [];
-    let resolveStartup, listener;
-    const sandbox = {
-      document: {}, window: {}, IS_TOP: isTop,
-      credentialClass: () => false, queryAll: () => [],
-      GhostlightFormDiagnostics: { ...formDiagnosticsApi, createObserver: () => ({ setEnabled: value => states.push(value) }) },
-      chrome: { runtime: { sendMessage: () => new Promise(resolve => { resolveStartup = resolve; }) } }
-    };
-    vm.createContext(sandbox);
-    const startup = section(source, "  const formDiagnosticsApi =", "  function finishDragObservation(");
-    const receiver = section(source, "  window.__ghostlight_dispatch__ = function(message) {", "    // Resolve and scroll inside");
-    vm.runInContext(startup + receiver + "return false;\n});\n};", sandbox);
-    assert.equal(Boolean(resolveStartup), isTop, "only the top document requests observation state");
-    sandbox.window.__ghostlight_dispatch__({ kind: formDiagnosticsApi.STATE_MESSAGE_KIND, enabled });
-    resolveStartup?.({ ok: true, value: { enabled: !enabled } });
-    await new Promise(setImmediate);
-    assert.deepEqual(states, [isTop && enabled]);
-  }
-});

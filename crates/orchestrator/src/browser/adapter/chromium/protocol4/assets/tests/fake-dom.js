@@ -2,10 +2,8 @@
 
 // Test helper: a small fake DOM in a vm context, enough to run the protocol-4 page bundle.
 //
-// It descends from the fake DOM in the level-3 content tests (copied, not shared, so an edit to
-// either side never changes the other). It adds what the isolated-world runtime needs: a manual
-// timer queue, a mutation observer registry, element trees with classes, styles and removal, and
-// shadow roots the test can reach. Setting `innerHTML` throws, the way a Trusted Types page does.
+// It provides what the isolated-world runtime needs: a manual timer queue, a mutation observer
+// registry, element trees with classes, styles and removal, and shadow roots the test can reach. Setting `innerHTML` throws, the way a Trusted Types page does.
 
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");

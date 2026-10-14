@@ -132,23 +132,20 @@ is identity and presentation information; executor dispatch is capability-based.
 such as CDP is private adapter technique, not a second bridge vocabulary.
 
 The browser adapter is a service component. `browser/adapter/mod.rs` names a closed `Family`
-(Chromium) and the wire `Level` of that family; the hello's platform field chooses the family
-(Chromium when absent) and its protocol major chooses the level, so a connection carries one
-`Adapter` for its life. Chromium has one level, level 3, whose typed messages live in
-`adapter/chromium/level3` and are the published extension's protocol unchanged. The service's
-internal browser work vocabulary is `Work`; at level 3 it is the level 3 command set.
+(Chromium) and re-exports the service's internal browser work vocabulary from
+`browser/adapter/work.rs`: `BrowserCommand` in, `BrowserOutcome` back, `BrowserEvent` between
+calls. Chromium speaks one wire, adapter protocol 4 (`adapter/chromium/protocol4`, specified in
+`docs/design/adapter-protocol-4.md`). Its translator turns each unit of work into frozen
+primitives and back. Any first frame that is not a protocol-4 hello hears `adapter_incompatible`
+with a sentence telling the person to update the extension, and its socket closes.
 
-Page-local observation and presentation ship as one service-owned immutable bundle assembled in
-`adapter/chromium/assets.rs` from the JavaScript and CSS files under `adapter/chromium/assets/`.
-Node tests for those files sit beside them and run with `npm test --prefix` that directory. A
-service test pins the bundle's SHA-256, so moving or editing an asset cannot change what a
-published extension runs by accident. The process assembles and hashes the bundle once. A runtime-capable adapter verifies and installs the exact
-revision and SHA-256 through the ordinary correlated request/receipt path. Such a connection stays
-private until that receipt arrives; browser discovery and `adapter_attached` publish only the ready
-connection. An adapter without the page-runtime capability remains usable only for independent
-shell mechanisms it advertises. Chromium recursively installs the runtime in its root page and
-flat out-of-process iframe sessions before readiness, and pauses a newly attached child only until
-that exact runtime is installed. This requires Chromium 125 or newer.
+Page-local observation and presentation ship as one service-owned source assembled in
+`adapter/chromium/protocol4/assets.rs` from `assets/world.js` and the files its include marker
+names. The process assembles and hashes it once and sends it in every `hello_accepted`; the
+extension installs it into the isolated world `ghostlight` of every frame. Node tests for those
+files sit under `assets/tests` and run with `node --test`. The golden fixtures in
+`tests/golden/protocol4` pin the asset id, the wire and the world messages for both the service
+and the extension.
 
 ## Stable bridges
 

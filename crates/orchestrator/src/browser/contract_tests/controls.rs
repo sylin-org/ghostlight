@@ -1,45 +1,27 @@
 //! Prove runtime admission occurs after queued writer access and before transmission.
 
-use super::super::{lock, BrowserDispatch, Channel, Connection};
-use super::*;
-use crate::browser::adapter::Adapter;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use super::super::{lock, BrowserDispatch, BrowserError, BrowserPort};
+use super::{attach, navigated, port, TEST_BROWSER};
+use crate::browser::adapter::chromium::protocol4::fake::Reply;
+use crate::browser::adapter::BrowserCommand;
 use crate::governance::ReasonCode;
-use std::collections::HashMap;
-use std::io::Read;
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 
 #[test]
 fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() {
     for case in 0..3 {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        peer.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        let (stream, _) = listener.accept().unwrap();
-        let writer = Arc::new(crate::browser::transport::SocketWriter::new(stream).unwrap());
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let port = RelayBrowserPort::new(
-            "test".into(),
-            crate::browser::adapter::chromium::level4::assets::page_assets(),
+        let port = port();
+        let fake = attach(
+            &port,
+            TEST_BROWSER,
+            Box::new(|correlation, _| Reply::Now(navigated(correlation))),
         );
-        lock(&port.adapters).connections.insert(
-            TEST_BROWSER.into(),
-            Connection {
-                id: "connection".into(),
-                writer: writer.clone(),
-                channel: Channel::Three {
-                    pending: pending.clone(),
-                    capabilities: HashMap::from([(adapter_capability::TABS.into(), 1)]),
-                },
-                adapter_version: "test".into(),
-                browser_id: TEST_BROWSER.into(),
-                browser_name: None,
-                adapter: Adapter::negotiate(None, ADAPTER_PROTOCOL_MAJOR).unwrap(),
-                liveness: None,
-                ready: true,
-            },
-        );
+        let writer =
+            std::sync::Arc::clone(&lock(&port.adapters).connections[TEST_BROWSER].line.writer);
         let cancelled = AtomicBool::new(false);
         let held = AtomicBool::new(false);
         let (admitted, checked) = mpsc::channel();
@@ -57,7 +39,10 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
                 port.call_guarded(
                     TEST_BROWSER,
                     "workspace",
-                    BrowserCommand::ListTabs,
+                    BrowserCommand::Navigate {
+                        tab_id: 5,
+                        url: "https://example.com/".into(),
+                    },
                     BrowserDispatch {
                         deadline,
                         cancelled: &cancelled,
@@ -89,13 +74,9 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
                 })
             );
         });
+        thread::sleep(Duration::from_millis(50));
         assert!(
-            lock(&pending).is_empty(),
-            "refused work cannot leave a pending receipt"
-        );
-        let mut byte = [0];
-        assert!(
-            peer.read(&mut byte).is_err(),
+            fake.wait(|_| true).requests.is_empty(),
             "no command may reach the adapter"
         );
     }
