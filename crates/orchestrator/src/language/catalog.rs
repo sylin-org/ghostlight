@@ -49,161 +49,161 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_tabs",
             "Browser tabs",
-            "List, focus, or close this workspace's tabs. List reads the connected browser live and refuses when no browser is connected; use list to recover fresh tab handles for later calls.",
+            "List, focus, or close this session's tabs. List reads the live browser, refuses when none is connected, and returns fresh tab handles.",
             tabs_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_navigate",
             "Navigate",
-            "Go to an absolute HTTP(S) URL in a controlled tab. Reuses the obvious tab by default; set new_tab true to create one.",
+            "Go to an HTTP(S) URL. Reuses the obvious tab; new_tab true opens a new one.",
             navigate_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_history",
             "Browser history",
-            "Move back or forward, or reload the current page. A new document invalidates prior target_ and view_ handles, so collect fresh ones afterward.",
+            "Go back or forward, or reload. A new document invalidates target_ and view_ handles, so collect fresh ones.",
             history_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_window",
             "Browser window",
-            "Set zoom for one tab or resize the containing browser window. Either change invalidates current view_ handles, so take a fresh screenshot before more coordinate work.",
+            "Set a tab's zoom or resize its browser window. Either invalidates view_ handles, so take a fresh screenshot before coordinate work.",
             window_schema(),
             Hints::local_mutation(false),
         ),
         tool(
             "browser_read",
             "Read page",
-            "Read bounded visible text from the full composed page by default, including open shadow roots and embedded frames, or read one target. Article extraction is explicit. When the goal is a target_ handle to act on, use browser_inspect or browser_find instead.",
+            "Read visible page text, including open shadow roots and frames, or one target. To act, get handles from browser_inspect or browser_find.",
             read_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_inspect",
             "Inspect page",
-            "Inspect semantic controls or page structure. Scopes controls, structure, and all return fresh target_ handles for later actions. Scope document returns the page outline as one bounded tree of kinds and labels, without handles, and diffs it against the previous document snapshot of the same root and depth.",
+            "Inspect controls or page structure for fresh target_ handles. Scope document returns the outline as a bounded tree, without handles.",
             inspect_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_find",
             "Find on page",
-            "Find ranked semantic targets by visible or accessible text and receive fresh target_ handles. The fastest route to a control when you know its label.",
+            "Find ranked targets by visible or accessible text and get fresh target_ handles. Fastest when you know the label.",
             find_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_screenshot",
             "Take screenshot",
-            "Capture the viewport, the full page, one target, or a magnified region. Every capture returns a fresh view_ handle that later coordinate calls and region captures are built from.",
+            "Capture the viewport, full page, one target, or a magnified region; returns a view_ handle for coordinate calls.",
             screenshot_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_click",
             "Click",
-            "Click a current target_ handle, a control found by selector, or an exact point from a current view_ screenshot. Requires action; selector lookup or an expect check also requires read. Prefer a target when one is known; points suit canvases and maps.",
+            "Click a target_ handle, a control found by selector, or a point in a view_ screenshot. Needs action; a selector lookup or expect check also needs read. Prefer a target.",
             with_expect(click_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_scroll",
             "Scroll",
-            "Scroll the page, defaulting to down by a medium amount, or reveal one current target_. Wheel scrolling at exact coordinates needs a current view_.",
+            "Scroll the page (default down, medium), reveal a target_, or wheel-scroll at a point in a view_ screenshot.",
             scroll_schema(),
             Hints::browser_action(false),
         ),
         tool(
             "browser_hover",
             "Hover",
-            "Hover a current target_ handle or an exact point from a current view_ screenshot.",
+            "Hover a target_ handle or a point in a view_ screenshot.",
             hover_schema(),
             Hints::browser_action(false),
         ),
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill one to thirty form fields in one call. Requires read and write, including unsent drafts; submit_target also requires action. Nothing submits unless submit_target names the control. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
+            "Fill 1 to 30 fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a select does not offer is refused before any field changes. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
             with_expect(fill_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_type_text",
             "Type text",
-            "Type text through real per-character keyboard input. Requires action; selector lookup or an expect check also requires read. Use browser_fill_form instead when plain values are enough. For credentials, acknowledge the user's explicit instruction with user_authorized_credentials.",
+            "Type through real keyboard input. Needs action; a selector lookup or expect check also needs read. Prefer browser_fill_form for plain values. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
             with_expect(type_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_press_key",
             "Press key",
-            "Send one named key or one literal character, optionally aimed at a current target_. Requires action; an expect check also requires read. For a shortcut such as Control+A, send key a with modifiers Control; strokes sends keys in order.",
+            "Send a named key or literal character, optionally at a target_. Needs action; an expect check also needs read. For Control+A send key a with modifiers Control; strokes sends keys in order.",
             with_expect(key_schema()),
             Hints::browser_action(true),
         ),
         tool(
             "browser_drag",
             "Drag",
-            "Drag between two current target_ handles or between two exact points from one current view_ screenshot.",
+            "Drag between two target_ handles or two points in one view_ screenshot.",
             drag_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_wait",
             "Wait",
-            "Wait for one explicit observable page condition. A false condition is a decisive failed result, not an unknown effect.",
+            "Wait for one observable page condition. A false condition is a failed result, not an unknown effect.",
             wait_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_dialog",
             "Browser dialog",
-            "Inspect, accept, dismiss, or answer the current JavaScript dialog. A dialog blocks its page until it is handled, so deal with it before other work on that tab.",
+            "Inspect, accept, dismiss, or answer the open JavaScript dialog. A dialog blocks its page until handled.",
             dialog_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_upload",
             "Upload files",
-            "Attach explicitly supplied local paths, bounded inline files, or one captured image to an ordinary file input, or drop one captured image at a point in a current view. Requires write; selector lookup also requires read.",
+            "Attach local paths, inline files, or one captured image to a file input, or drop the image at a point in a view_. Needs write; a selector lookup also needs read.",
             upload_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_execute",
             "Execute JavaScript",
-            "Run bounded JavaScript in the page main world. It may read, mutate, or navigate, so prefer a semantic tool when one fits.",
+            "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool.",
             evaluate_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_flow",
             "Run flow",
-            "Compose one to twenty ordinary tool calls. Optional tab defaults tab-scoped steps; explicit child tabs win. Later arguments may reference earlier results. Step IDs are optional for simple batches. Stops at the first failed step by default.",
+            "Run 1 to 20 tool calls. tab defaults tab-scoped steps; a step's own tab wins. Later arguments may reference earlier results. Stops at the first failed step by default.",
             flow_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_record",
             "Record browser",
-            "Record browser work as a short memory-only GIF: start, check status, stop, save, or discard. A session holds one recording at a time. Save auto-stops an active capture.",
+            "Record browser work as a short memory-only GIF. One recording per session; save stops an active capture.",
             record_schema(),
             Hints::browser_action(true),
         ),
         tool(
             "browser_diagnose",
             "Diagnose page",
-            "Read opt-in console and network observations for a tab. Observation begins with the first call, so earlier activity is absent; reload or reproduce to capture it. Sensitive request data is never collected.",
+            "Read opt-in console and network observations for a tab. Observation begins with the first call, so reload or reproduce to capture earlier activity. Sensitive request data is never collected.",
             diagnose_schema(),
             Hints::browser_read(),
         ),
         tool(
             "policy_explain",
             "Explain policy",
-            "Read the authority in force as one compiled answer: situation sentence, one line per capability with its deciding layer, the rules behind those lines, permanent ceilings, and each layer's document. Available under every authority, including all-open; use it to learn why another call was refused or what is allowed before acting.",
+            "Explain the authority in force: one line per capability with its deciding layer, the rules behind them, permanent ceilings, and each layer's document. Available under every authority; use it to learn why a call was refused or what is allowed.",
             explain_policy_schema(),
             Hints::local_read(),
         ),
@@ -269,12 +269,6 @@ impl Hints {
     }
 }
 
-/// The one sentence every ordinary page tool carries for its settlement preference (ADR-0195).
-///
-/// Thirteen tools repeat it, so it stays one short sentence: what the default does and how to
-/// skip it. LANGUAGE.md carries the budget and the busy-page behavior.
-const VISUAL_SETTLE: &str = "False skips the brief wait for the page to settle.";
-
 fn tool(
     name: &str,
     title: &str,
@@ -283,9 +277,20 @@ fn tool(
     hints: Hints,
 ) -> ToolDefinition {
     let mut input_schema = input_schema;
+    if input_schema["required"]
+        .as_array()
+        .is_some_and(Vec::is_empty)
+    {
+        input_schema
+            .as_object_mut()
+            .expect("schema is an object")
+            .remove("required");
+    }
     input_schema["properties"]["timeout_ms"] = timeout(name);
     if super::settlement::PAGE_TOOLS.contains(&name) {
-        input_schema["properties"]["visual_settle"] = boolean(true, VISUAL_SETTLE);
+        // Thirteen tools carry it undescribed: the name, type and default say what it is, and
+        // LANGUAGE.md carries the budget and the busy-page behavior (ADR-0195).
+        input_schema["properties"]["visual_settle"] = boolean(true, "");
     }
     ToolDefinition {
         name: name.into(),
@@ -325,38 +330,23 @@ fn tabs_schema() -> Value {
     union(
         vec![
             object(
-                vec![(
-                    "action",
-                    constant(
-                        "list",
-                        "List this workspace's bound tabs from the live browser.",
-                    ),
-                )],
+                vec![("action", constant("list", "List this session's tabs."))],
                 vec!["action"],
             ),
             object(
                 vec![
                     (
                         "action",
-                        constant("focus", "Bring one exact tab and its window into view."),
+                        constant("focus", "Bring a tab and its window into view."),
                     ),
-                    (
-                        "tab",
-                        handle("tab_", "Exact tab handle from browser_tabs list."),
-                    ),
+                    ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
             object(
                 vec![
-                    (
-                        "action",
-                        constant("close", "Close one exact controlled tab."),
-                    ),
-                    (
-                        "tab",
-                        handle("tab_", "Exact tab handle from browser_tabs list."),
-                    ),
+                    ("action", constant("close", "Close a tab.")),
+                    ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
@@ -374,13 +364,13 @@ fn navigate_schema() -> Value {
             object(
                 vec![
                     ("url", url()),
-                    ("tab", handle("tab_", "Optional exact tab. Omit to use the only or sole active controlled tab.")),
+                    ("tab", tab()),
                     (
                         "beforeunload",
                         enumeration(
                             &["discard"],
                             None,
-                            "Explicitly discard a blocking unsaved-change prompt produced by this navigation. Default stops and reports it.",
+                            "Discard an unsaved-changes prompt this navigation causes. Default stops and reports it.",
                         ),
                     ),
                     ("new_tab", new_tab()),
@@ -389,7 +379,7 @@ fn navigate_schema() -> Value {
                         enumeration(
                             &["domain", "never"],
                             Some("domain"),
-                            "domain reuses a tab an earlier session of this client opened for this host and released (exact URL preferred); it never takes over a tab the person opened. never always creates. new_tab always creates, so domain cannot be combined with it.",
+                            "domain reuses a tab an earlier session of this client released for this host, never one the person opened. never always creates. domain cannot combine with new_tab.",
                         ),
                     ),
                 ],
@@ -403,7 +393,7 @@ fn navigate_schema() -> Value {
                         "browser",
                         handle(
                             "browser_",
-                            "Optional exact browser from browser_tabs list. Omit to use the browser the user attended most recently.",
+                            "From browser_tabs list. Omit to use the browser the user attended last.",
                         ),
                     ),
                 ],
@@ -418,25 +408,19 @@ fn navigate_schema() -> Value {
 }
 
 fn new_tab() -> Value {
-    boolean(
-        false,
-        "True opens the page in a new controlled tab. Omit it for the normal call.",
-    )
+    boolean(false, "True opens a new tab.")
 }
 
 fn history_schema() -> Value {
     union(
         vec![
-            history_branch("back", "Go back one page in this tab's history."),
-            history_branch("forward", "Go forward one page in this tab's history."),
+            history_branch("back", "Go back one page."),
+            history_branch("forward", "Go forward one page."),
             object(
                 vec![
-                    ("action", constant("reload", "Reload the selected page.")),
+                    ("action", constant("reload", "Reload the page.")),
                     ("tab", tab()),
-                    (
-                        "bypass_cache",
-                        boolean(false, "Request a reload that bypasses browser cache."),
-                    ),
+                    ("bypass_cache", boolean(false, "")),
                 ],
                 vec!["action"],
             ),
@@ -460,28 +444,22 @@ fn window_schema() -> Value {
         vec![
             object(
                 vec![
-                    ("action", constant("zoom", "Set visible tab zoom.")),
-                    (
-                        "percent",
-                        integer(25, 500, None, "Whole-number zoom percentage."),
-                    ),
+                    ("action", constant("zoom", "Set tab zoom.")),
+                    ("percent", integer(25, 500, None, "")),
                     ("tab", tab()),
                 ],
                 vec!["action", "percent"],
             ),
             object(
                 vec![
-                    (
-                        "action",
-                        constant("resize", "Resize the containing browser window."),
-                    ),
+                    ("action", constant("resize", "Resize the browser window.")),
                     (
                         "width",
-                        integer(320, 7_680, None, "Outer browser-window width in pixels."),
+                        integer(320, 7_680, None, "Outer window width in pixels."),
                     ),
                     (
                         "height",
-                        integer(240, 4_320, None, "Outer browser-window height in pixels."),
+                        integer(240, 4_320, None, "Outer window height in pixels."),
                     ),
                     ("tab", tab()),
                 ],
@@ -502,27 +480,24 @@ fn read_schema() -> Value {
                 ("tab", tab()),
                 (
                     "target",
-                    handle(
-                        "target_",
-                        "Optional current target to read instead of the page.",
-                    ),
+                    handle("target_", ""),
                 ),
                 (
                     "mode",
                     enumeration(
                         &["visible", "article"],
                         None,
-                        "Document reading mode; visible full-page reading is the default. Explicit article mode prefers the top document's article and falls back to the full page. Ignored with target.",
+                        "article prefers the top document's article, else the full page. Ignored with target.",
                     ),
                 ),
                 (
                     "max_chars",
-                    integer(500, 50_000, Some(8_000), "Maximum returned characters."),
+                    integer(500, 50_000, Some(8_000), ""),
                 ),
             ],
             vec![],
         ),
-        vec![json!({}), json!({"mode":"article","max_chars":50_000}), json!({"target":"target_..."})],
+        vec![json!({}), json!({"mode":"article","max_chars":50_000})],
     )
 }
 
@@ -536,15 +511,12 @@ fn inspect_schema() -> Value {
                     enumeration(
                         &["controls", "structure", "all", "document"],
                         Some("controls"),
-                        "What semantic facts to return. Document returns a tree of {kind, label, children} nodes, a snapshot handle, and, when the previous snapshot used the same root and max_depth, a diff whose paths are positions in that tree.",
+                        "document: a {kind, label, children} tree, a snapshot handle, and a diff against the previous snapshot when root and max_depth match.",
                     ),
                 ),
                 (
                     "root",
-                    handle(
-                        "target_",
-                        "Optional subtree root for document scope.",
-                    ),
+                    handle("target_", "Subtree root for document scope."),
                 ),
                 (
                     "max_depth",
@@ -553,19 +525,17 @@ fn inspect_schema() -> Value {
                         1,
                         12,
                         None,
-                        &format!(
-                            "Levels the document scope tree may reach; {DEFAULT_DOCUMENT_DEPTH} when omitted."
-                        ),
+                        &format!("Tree levels; {DEFAULT_DOCUMENT_DEPTH} when omitted."),
                     ),
                 ),
                 (
                     "max_items",
-                    integer(1, 200, Some(80), "Maximum returned semantic items."),
+                    integer(1, 200, Some(80), ""),
                 ),
             ],
             vec![],
         ),
-        vec![json!({}), json!({"scope":"all"}), json!({"scope":"document","max_depth":8}), json!({"scope":"document","root":"target_..."})],
+        vec![json!({}), json!({"scope":"document","max_depth":8})],
     )
 }
 
@@ -573,23 +543,13 @@ fn find_schema() -> Value {
     examples(
         object(
             vec![
-                (
-                    "text",
-                    text(1, 500, "Literal visible or accessible text to find."),
-                ),
+                ("text", text(1, 500, "Visible or accessible text.")),
                 ("tab", tab()),
                 (
                     "scope",
-                    enumeration(
-                        &["any", "control", "text"],
-                        Some("any"),
-                        "Kinds of semantic matches to return.",
-                    ),
+                    enumeration(&["any", "control", "text"], Some("any"), ""),
                 ),
-                (
-                    "max_results",
-                    integer(1, 50, Some(20), "Maximum ranked matches."),
-                ),
+                ("max_results", integer(1, 50, Some(20), "")),
             ],
             vec!["text"],
         ),
@@ -608,20 +568,14 @@ fn screenshot_schema() -> Value {
                         "full_page",
                         boolean(
                             false,
-                            "True captures the whole document instead of the viewport. Not with target or a region.",
+                            "True captures the whole document. Not with target or a region.",
                         ),
                     ),
                 ],
                 vec!["full_page"],
             ),
             object(
-                vec![
-                    ("tab", tab()),
-                    (
-                        "target",
-                        handle("target_", "Current semantic target to capture."),
-                    ),
-                ],
+                vec![("tab", tab()), ("target", handle("target_", ""))],
                 vec!["target"],
             ),
             object(
@@ -631,24 +585,19 @@ fn screenshot_schema() -> Value {
                         "view",
                         handle(
                             "view_",
-                            "Screenshot view whose image defines these coordinates; take a screenshot first, then pass its view_ handle.",
+                            "The region is in this view's image pixels; take a screenshot first.",
                         ),
                     ),
-                    (
-                        "x",
-                        coordinate("Horizontal image coordinate of the region."),
-                    ),
-                    ("y", coordinate("Vertical image coordinate of the region.")),
-                    ("width", extent("Region width in image pixels.")),
-                    ("height", extent("Region height in image pixels.")),
+                    ("x", coordinate()),
+                    ("y", coordinate()),
+                    ("width", extent()),
+                    ("height", extent()),
                 ],
                 vec!["view", "x", "y", "width", "height"],
             ),
         ],
         vec![
-            json!({}),
             json!({"full_page":true}),
-            json!({"target":"target_..."}),
             json!({"view":"view_...","x":120,"y":80,"width":400,"height":300}),
         ],
     )
@@ -659,47 +608,25 @@ fn click_schema() -> Value {
         ("tab", tab()),
         (
             "button",
-            enumeration(
-                &["primary", "middle", "secondary"],
-                Some("primary"),
-                "Pointer button.",
-            ),
+            enumeration(&["primary", "middle", "secondary"], Some("primary"), ""),
         ),
-        (
-            "click_count",
-            integer(1, 3, Some(1), "Single, double, or triple click."),
-        ),
-        (
-            "modifiers",
-            json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
-        ),
+        ("click_count", integer(1, 3, Some(1), "")),
+        ("modifiers", modifier_keys()),
         ("selector", semantic_selector()),
     ];
     union(
         vec![
             object(
-                with(
-                    common.clone(),
-                    (
-                        "target",
-                        handle("target_", "Current semantic target to click."),
-                    ),
-                ),
+                with(common.clone(), ("target", handle("target_", ""))),
                 vec!["target"],
             ),
             object(
                 with_many(
                     common,
                     vec![
-                        (
-                            "view",
-                            handle(
-                                "view_",
-                                "Screenshot view that defines these coordinates; take one first if you have none.",
-                            ),
-                        ),
-                        ("x", coordinate(IMAGE_X)),
-                        ("y", coordinate(IMAGE_Y)),
+                        ("view", handle("view_", VIEW_POINT)),
+                        ("x", coordinate()),
+                        ("y", coordinate()),
                     ],
                 ),
                 vec!["view", "x", "y"],
@@ -716,11 +643,11 @@ fn semantic_selector() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "description": "Typed semantic selector resolved against the live document. Lookup requires read.",
+        "description": "Lookup needs read.",
         "properties": {
-            "name": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Required accessible-name text."},
-            "role": {"type": "string", "enum": ["button","link","checkbox","radio","textbox","searchbox","combobox","listbox","select","slider","spinbutton","tab","menuitem","option","heading","image"], "description": "Optional closed role filter."},
-            "exact": {"type": "boolean", "default": false, "description": "Require the whole accessible name to equal the text."}
+            "name": {"type": "string", "minLength": 1, "maxLength": 500},
+            "role": {"type": "string", "enum": ["button","link","checkbox","radio","textbox","searchbox","combobox","listbox","select","slider","spinbutton","tab","menuitem","option","heading","image"]},
+            "exact": {"type": "boolean", "default": false}
         },
         "required": ["name"]
     })
@@ -730,13 +657,7 @@ fn scroll_schema() -> Value {
     union(
         vec![
             object(
-                vec![
-                    ("tab", tab()),
-                    (
-                        "target",
-                        handle("target_", "Current semantic target to reveal."),
-                    ),
-                ],
+                vec![("tab", tab()), ("target", handle("target_", ""))],
                 vec!["target"],
             ),
             object(
@@ -752,11 +673,7 @@ fn scroll_schema() -> Value {
                     ),
                     (
                         "amount",
-                        enumeration(
-                            &["small", "medium", "large", "page"],
-                            Some("medium"),
-                            "Scroll distance.",
-                        ),
+                        enumeration(&["small", "medium", "large", "page"], Some("medium"), ""),
                     ),
                 ],
                 vec![],
@@ -768,58 +685,37 @@ fn scroll_schema() -> Value {
                         "direction",
                         enumeration(&["up", "down"], Some("down"), SCROLL_DIRECTION),
                     ),
-                    (
-                        "view",
-                        handle(
-                            "view_",
-                            "Screenshot view that defines these coordinates; take one first if you have none.",
-                        ),
-                    ),
-                    ("x", coordinate(IMAGE_X)),
-                    ("y", coordinate(IMAGE_Y)),
-                    ("ticks", integer(1, 10, None, "Wheel ticks to send.")),
+                    ("view", handle("view_", VIEW_POINT)),
+                    ("x", coordinate()),
+                    ("y", coordinate()),
+                    ("ticks", integer(1, 10, None, "")),
                 ],
                 vec!["direction", "view", "x", "y", "ticks"],
             ),
         ],
         vec![
-            json!({}),
             json!({"direction":"down","amount":"page"}),
-            json!({"target":"target_..."}),
             json!({"view":"view_...","x":120,"y":80,"direction":"down","ticks":3}),
         ],
     )
 }
 
 /// One direction description for page and wheel scrolling, so the merged field reads once.
-const SCROLL_DIRECTION: &str =
-    "Scroll direction. Wheel scrolling at a view point takes only up or down.";
+const SCROLL_DIRECTION: &str = "Wheel scrolling at a view point takes only up or down.";
 
 fn hover_schema() -> Value {
     union(
         vec![
             object(
-                vec![
-                    ("tab", tab()),
-                    (
-                        "target",
-                        handle("target_", "Current semantic target to hover."),
-                    ),
-                ],
+                vec![("tab", tab()), ("target", handle("target_", ""))],
                 vec!["target"],
             ),
             object(
                 vec![
                     ("tab", tab()),
-                    (
-                        "view",
-                        handle(
-                            "view_",
-                            "Screenshot view that defines these coordinates; take one first if you have none.",
-                        ),
-                    ),
-                    ("x", coordinate(IMAGE_X)),
-                    ("y", coordinate(IMAGE_Y)),
+                    ("view", handle("view_", VIEW_POINT)),
+                    ("x", coordinate()),
+                    ("y", coordinate()),
                 ],
                 vec!["view", "x", "y"],
             ),
@@ -831,7 +727,7 @@ fn hover_schema() -> Value {
 fn credential_authorization() -> (&'static str, Value) {
     (
         "user_authorized_credentials",
-        boolean(false, "Set true only when the user explicitly authorized credential entry for this request. Existing user authorization is sufficient. This does not override configured policy or human Pause/Stop."),
+        boolean(false, "True only when the user explicitly authorized credential entry for this request. Never overrides policy or Pause/Stop."),
     )
 }
 
@@ -839,9 +735,18 @@ fn fill_schema() -> Value {
     examples(
         object(
             vec![
-                ("fields", json!({"type":"array","minItems":1,"maxItems":30,"description":"Ordinary form values to set. Each field provides exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_","Current form-control target."),"selector":semantic_selector(),"value":{"description":"Literal value, including an empty value to clear. Checkboxes and radios accept booleans; numeric inputs accept finite numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}})),
+                (
+                    "fields",
+                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Empty string clears. Checkboxes and radios take booleans; numeric inputs take numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}}),
+                ),
                 ("tab", tab()),
-                ("submit_target", handle("target_", "Optional current submit control. Supplying it may produce an external effect.")),
+                (
+                    "submit_target",
+                    handle(
+                        "target_",
+                        "Clicked after filling; may cause an external effect.",
+                    ),
+                ),
                 credential_authorization(),
             ],
             vec!["fields"],
@@ -860,23 +765,17 @@ fn type_schema() -> Value {
             text(
                 0,
                 8_000,
-                "Literal text to type. Empty text only clears, and needs clear_first true.",
+                "Empty text only clears, and needs clear_first true.",
             ),
         ),
-        (
-            "clear_first",
-            boolean(false, "Clear the current value before typing."),
-        ),
+        ("clear_first", boolean(false, "")),
         credential_authorization(),
         ("tab", tab()),
     ];
     union(
         vec![
             object(
-                with(
-                    common.clone(),
-                    ("target", handle("target_", "Current editable target.")),
-                ),
+                with(common.clone(), ("target", handle("target_", ""))),
                 vec!["target", "text"],
             ),
             object(
@@ -886,7 +785,7 @@ fn type_schema() -> Value {
                         "focused",
                         boolean(
                             false,
-                            "True types into the currently focused editable control instead of `target`.",
+                            "True types into the focused control instead of target.",
                         ),
                     ),
                 ),
@@ -905,20 +804,10 @@ fn type_schema() -> Value {
 }
 
 fn key_schema() -> Value {
-    let modifiers = (
-        "modifiers",
-        json!({"type":"array","uniqueItems":true,"default":[],"description":"Held modifier keys.","items":{"enum":["Alt","Control","Meta","Shift"]}}),
-    );
-    let shared = vec![
-        ("tab", tab()),
-        (
-            "target",
-            handle("target_", "Optional current target to receive the key."),
-        ),
-        modifiers,
-    ];
+    let modifiers = ("modifiers", modifier_keys());
+    let shared = vec![("tab", tab()), ("target", handle("target_", "")), modifiers];
     // Exclusive by construction: every named key is longer than one character.
-    let stroke_item = json!({"description":"One literal character or supported named key.","oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
+    let stroke_item = json!({"oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
     union(
         vec![
             object(
@@ -931,11 +820,11 @@ fn key_schema() -> Value {
                     vec![
                         (
                             "strokes",
-                            json!({"type":"array","minItems":1,"maxItems":20,"description":"Ordered keystroke sequence replacing `key`.","items":stroke_item}),
+                            json!({"type":"array","minItems":1,"maxItems":20,"description":"Replaces key.","items":stroke_item}),
                         ),
                         (
                             "repeat",
-                            integer(1, 100, Some(1), "Repetitions of the whole stroke sequence."),
+                            integer(1, 100, Some(1), "Repeats the whole sequence."),
                         ),
                     ],
                 ),
@@ -943,9 +832,7 @@ fn key_schema() -> Value {
             ),
         ],
         vec![
-            json!({"key":"Enter"}),
             json!({"key":"a","modifiers":["Control"]}),
-            json!({"strokes":["a","c"],"modifiers":["Control"]}),
             json!({"strokes":["ArrowDown"],"repeat":5}),
         ],
     )
@@ -956,10 +843,10 @@ fn drag_schema() -> Value {
         vec![
             object(
                 vec![
-                    ("source_target", handle("target_", "Current drag source.")),
+                    ("source_target", handle("target_", "")),
                     (
                         "destination_target",
-                        handle("target_", "Current drop destination."),
+                        handle("target_", ""),
                     ),
                     ("tab", tab()),
                 ],
@@ -969,12 +856,12 @@ fn drag_schema() -> Value {
                 vec![
                     (
                         "view",
-                        handle("view_", "Screenshot view that defines both points; take one first if you have none."),
+                        handle("view_", "Both points are pixels in this view's screenshot image; take one first."),
                     ),
-                    ("start_x", coordinate("Horizontal source pixel in the view's screenshot image.")),
-                    ("start_y", coordinate("Vertical source pixel in the view's screenshot image.")),
-                    ("end_x", coordinate("Horizontal destination pixel in the view's screenshot image.")),
-                    ("end_y", coordinate("Vertical destination pixel in the view's screenshot image.")),
+                    ("start_x", coordinate()),
+                    ("start_y", coordinate()),
+                    ("end_x", coordinate()),
+                    ("end_y", coordinate()),
                     ("tab", tab()),
                 ],
                 vec!["view", "start_x", "start_y", "end_x", "end_y"],
@@ -988,40 +875,31 @@ fn wait_schema() -> Value {
     use WaitInput::{OptionalTarget, Selector, Target, Text};
     union(
         vec![
-            wait_branch("load_ready", "The page finished loading.", None),
-            wait_branch("url_contains", "The page URL contains value.", Some(Text)),
-            wait_branch(
-                "text_present",
-                "value appears in the visible page text.",
-                Some(Text),
-            ),
+            wait_branch("load_ready", "Page finished loading.", None),
+            wait_branch("url_contains", "URL contains value.", Some(Text)),
+            wait_branch("text_present", "value is in the visible text.", Some(Text)),
             wait_branch(
                 "text_absent",
-                "value is gone from the visible page text.",
+                "value is gone from the visible text.",
                 Some(Text),
             ),
-            wait_branch("target_present", "target is present.", Some(Target)),
+            wait_branch("target_present", "target exists.", Some(Target)),
             wait_branch("target_absent", "target is gone.", Some(Target)),
             wait_branch(
                 "visual_settle",
-                "The page, or target when given, stopped moving and repainting.",
+                "The page, or target, stopped moving and repainting.",
                 Some(OptionalTarget),
             ),
             wait_branch(
                 "selector_present",
-                "A control matching selector exists.",
+                "selector matches a control.",
                 Some(Selector),
             ),
-            wait_branch(
-                "duration",
-                "Waits value milliseconds, then succeeds.",
-                Some(Text),
-            ),
+            wait_branch("duration", "Waits value milliseconds.", Some(Text)),
         ],
         vec![
             json!({"condition":"load_ready"}),
             json!({"condition":"text_present","value":"Ready"}),
-            json!({"condition":"visual_settle"}),
         ],
     )
 }
@@ -1045,18 +923,24 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
         ("tab", tab()),
         (
             "visual_settle",
-            json!({"type":"boolean","description":"Also wait briefly for the layout to settle once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest."}),
+            json!({"type":"boolean","description":"Also settle the layout once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest."}),
         ),
     ];
     let mut required = vec!["condition"];
     match input {
         None => {}
         Some(WaitInput::Text) => {
-            fields.push(("value", text(1, 2_000, "Text or URL fragment for url_contains, text_present, and text_absent, page text, not field values. For duration, whole milliseconds from 0 to 10000, written as a string.")));
+            fields.push(("value", text(1, 2_000, "Text or URL fragment; page text, not field values. For duration, milliseconds from 0 to 10000 as a string.")));
             required.push("value");
         }
         Some(kind @ (WaitInput::Target | WaitInput::OptionalTarget)) => {
-            fields.push(("target", handle("target_", "Current target for target_present and target_absent, or the optional subject of visual_settle.")));
+            fields.push((
+                "target",
+                handle(
+                    "target_",
+                    "For target_present, target_absent, and visual_settle.",
+                ),
+            ));
             if matches!(kind, WaitInput::Target) {
                 required.push("target");
             }
@@ -1072,10 +956,10 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
 fn dialog_schema() -> Value {
     union(
         vec![
-            dialog_branch("status", "Report whether a dialog is open.", false),
-            dialog_branch("accept", "Accept the open dialog.", false),
-            dialog_branch("dismiss", "Dismiss the open dialog.", false),
-            dialog_branch("respond", "Answer a prompt with text.", true),
+            dialog_branch("status", "Report whether one is open.", false),
+            dialog_branch("accept", "Accept it.", false),
+            dialog_branch("dismiss", "Dismiss it.", false),
+            dialog_branch("respond", "Answer a prompt.", true),
         ],
         vec![
             json!({"action":"status"}),
@@ -1091,10 +975,7 @@ fn dialog_branch(action: &str, action_description: &str, text_required: bool) ->
     ];
     let mut required = vec!["action"];
     if text_required {
-        fields.push((
-            "text",
-            text(0, 2_000, "Prompt response, including an empty response."),
-        ));
+        fields.push(("text", text(0, 2_000, "Prompt answer; may be empty.")));
         required.push("text");
     }
     object(fields, required)
@@ -1104,36 +985,35 @@ fn upload_schema() -> Value {
     examples(
         object(
             vec![
-                (
-                    "target",
-                    handle("target_", "Current ordinary file-input target."),
-                ),
+                ("target", handle("target_", "File input.")),
                 ("selector", semantic_selector()),
                 (
                     "paths",
-                    json!({"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"description":"Absolute local file paths selected explicitly for upload.","items":{"type":"string","minLength":1,"maxLength":4096}}),
+                    json!({"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"description":"Absolute paths.","items":{"type":"string","minLength":1,"maxLength":4096}}),
                 ),
                 (
                     "files",
-                    json!({"type":"array","minItems":1,"maxItems":5,"description":"Bounded inline files supplied directly.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":255},"media_type":{"type":"string","maxLength":100},"data_base64":{"type":"string","description":"Standard base64 file bytes."}},"required":["name","data_base64"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":255},"media_type":{"type":"string","maxLength":100},"data_base64":{"type":"string"}},"required":["name","data_base64"]}}),
                 ),
                 (
                     "source_image",
-                    handle("image_","Captured image_ handle from an earlier screenshot. Attach it to a file input, or drop it at a view point."),
+                    handle("image_", "From an earlier screenshot."),
                 ),
                 (
                     "view",
-                    handle("view_","Current screenshot view that defines the drop coordinates; requires source_image."),
+                    handle(
+                        "view_",
+                        "x and y are pixels in this view's image; needs source_image.",
+                    ),
                 ),
-                ("x", coordinate(IMAGE_X)),
-                ("y", coordinate(IMAGE_Y)),
+                ("x", coordinate()),
+                ("y", coordinate()),
                 ("tab", tab()),
             ],
             vec![],
         ),
         vec![
             json!({"target":"target_...","paths":[EXAMPLE_UPLOAD_PATH]}),
-            json!({"target":"target_...","files":[{"name":"notes.txt","media_type":"text/plain","data_base64":"SGk="}]}),
             json!({"source_image":"image_...","view":"view_...","x":120,"y":80}),
         ],
     )
@@ -1152,24 +1032,9 @@ fn evaluate_schema() -> Value {
     examples(
         object(
             vec![
-                (
-                    "script",
-                    text(
-                        1,
-                        20_000,
-                        "JavaScript source evaluated in the page main world.",
-                    ),
-                ),
+                ("script", text(1, 20_000, "")),
                 ("tab", tab()),
-                (
-                    "max_result_chars",
-                    integer(
-                        100,
-                        20_000,
-                        Some(8_000),
-                        "Maximum serialized result characters.",
-                    ),
-                ),
+                ("max_result_chars", integer(100, 20_000, Some(8_000), "")),
             ],
             vec!["script"],
         ),
@@ -1183,15 +1048,11 @@ fn flow_schema() -> Value {
             vec![
                 (
                     "steps",
-                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Ordinary tool calls executed in order. Omitted ids become step_1, step_2, and so on.","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64,"description":"Optional unique step id for result references."},"tool":{"type":"string","description":"Current advertised non-composite Ghostlight tool."},"arguments":{"type":"object","description":"Arguments for that tool. Any value may be an explicit reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Omitted ids become step_1, step_2, ...","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64},"tool":{"type":"string","description":"An advertised non-composite tool."},"arguments":{"type":"object","description":"That tool's arguments. Any value may be a reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
                 ),
                 (
                     "on_error",
-                    enumeration(
-                        &["stop", "continue"],
-                        Some("stop"),
-                        "Whether later steps run after a failed step.",
-                    ),
+                    enumeration(&["stop", "continue"], Some("stop"), ""),
                 ),
                 ("tab", tab()),
             ],
@@ -1199,7 +1060,6 @@ fn flow_schema() -> Value {
         ),
         vec![
             json!({"steps":[{"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.com"}},{"id":"read","tool":"browser_read","arguments":{"max_chars":2000}}]}),
-            json!({"steps":[{"tool":"browser_inspect"},{"tool":"browser_read","arguments":{"max_chars":2000}}]}),
         ],
     )
 }
@@ -1211,35 +1071,35 @@ fn record_schema() -> Value {
                 vec![
                     (
                         "action",
-                        constant("start", "Start a bounded memory-only recording."),
+                        constant("start", "Start recording."),
                     ),
                     ("tab", tab()),
                 ],
                 vec!["action"],
             ),
-            record_branch("status", "Return content-free recording state and bounds."),
-            record_branch("stop", "Stop capture and keep the frozen frames in memory."),
+            record_branch("status", "Report state and bounds."),
+            record_branch("stop", "Stop and keep the frames in memory."),
             object(
                 vec![
                     (
                         "action",
                         constant(
                             "save",
-                            "Save an immutable animated GIF. Requires read for captured sources, plus write when attaching to a target; active capture stops after capability admission.",
+                            "Save the GIF. Needs read for captured sources, plus write when attaching to a target; an active capture stops after admission.",
                         ),
                     ),
                     (
                         "target",
                         handle(
                             "target_",
-                            "Attach the replay to this current file input, inside the browser. Requires read + write.",
+                            "File input to attach the replay to, inside the browser.",
                         ),
                     ),
                     (
                         "download",
                         boolean(
                             false,
-                            "Let the browser save the replay as a file. It chooses where.",
+                            "The browser saves the replay as a file and chooses where.",
                         ),
                     ),
                 ],
@@ -1249,7 +1109,6 @@ fn record_schema() -> Value {
         ],
         vec![
             json!({"action":"start"}),
-            json!({"action":"stop"}),
             json!({"action":"save"}),
         ],
     )
@@ -1272,15 +1131,35 @@ fn diagnose_schema() -> Value {
         object(
             vec![
                 ("tab", tab()),
-                ("source", enumeration(&["both","console","network"],Some("both"),"Observation source.")),
-                ("detail", enumeration(&["problems","all"],Some("problems"),"Problems returns warnings, errors, failed requests, and HTTP failures.")),
-                ("match", text(1,500,"Optional case-insensitive literal filter; regular expressions are not accepted.")),
-                ("after", handle("diag_","Opaque continuation cursor from a prior diagnostic result.")),
-                ("limit", integer(1,200,Some(50),"Maximum returned observations.")),
+                (
+                    "source",
+                    enumeration(&["both", "console", "network"], Some("both"), ""),
+                ),
+                (
+                    "detail",
+                    enumeration(
+                        &["problems", "all"],
+                        Some("problems"),
+                        "problems: warnings, errors, failed requests, and HTTP failures.",
+                    ),
+                ),
+                (
+                    "match",
+                    text(
+                        1,
+                        500,
+                        "Case-insensitive literal filter, not a regular expression.",
+                    ),
+                ),
+                ("after", handle("diag_", "Cursor from a prior result.")),
+                ("limit", integer(1, 200, Some(50), "")),
             ],
             vec![],
         ),
-        vec![json!({}),json!({"source":"console","detail":"all","limit":100})],
+        vec![
+            json!({}),
+            json!({"source":"console","detail":"all","limit":100}),
+        ],
     )
 }
 
@@ -1609,10 +1488,10 @@ fn with_expect(mut schema: Value) -> Value {
     schema["properties"]["expect"] = json!({
         "type":"object",
         "additionalProperties":false,
-        "description":"Optional condition checked after the effect. Requires read as well as the action's capabilities, admitted before the effect. A failed check preserves the applied effect.",
+        "description":"Checked after the effect; needs read, admitted before the effect. A failed check keeps the effect.",
         "properties":{
             "condition":{"type":"string","enum":["load_ready","url_contains","text_present","text_absent"]},
-            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Required text for url_contains, text_present, and text_absent, page text, not field values; omit for load_ready."}
+            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Page text, not field values."}
         },
         "required":["condition"]
     });
@@ -1632,54 +1511,64 @@ fn with_many<'a>(
     fields
 }
 
+/// Attach a description to a field schema; an empty one leaves the field to its name, type,
+/// enum, bounds and default (ADR-0198 decision 26).
+fn described(mut schema: Value, description: &str) -> Value {
+    if !description.is_empty() {
+        schema["description"] = json!(description);
+    }
+    schema
+}
+
 fn constant(value: &str, description: &str) -> Value {
-    json!({"type":"string","const":value,"description":description})
+    described(json!({"type":"string","const":value}), description)
 }
 
 fn boolean(default: bool, description: &str) -> Value {
-    json!({"type":"boolean","default":default,"description":description})
+    described(json!({"type":"boolean","default":default}), description)
 }
 
 fn text(minimum: usize, maximum: usize, description: &str) -> Value {
-    json!({"type":"string","minLength":minimum,"maxLength":maximum,"description":description})
-}
-
-fn integer(minimum: usize, maximum: usize, default: Option<usize>, description: &str) -> Value {
-    let mut schema =
-        json!({"type":"integer","minimum":minimum,"maximum":maximum,"description":description});
-    if let Some(default) = default {
-        schema
-            .as_object_mut()
-            .expect("integer schema is an object")
-            .insert("default".into(), json!(default));
-    }
-    schema
-}
-
-fn enumeration(values: &[&str], default: Option<&str>, description: &str) -> Value {
-    let mut schema = json!({"type":"string","enum":values,"description":description});
-    if let Some(default) = default {
-        schema
-            .as_object_mut()
-            .expect("enum schema is an object")
-            .insert("default".into(), json!(default));
-    }
-    schema
-}
-
-fn handle(prefix: &str, description: &str) -> Value {
-    json!({"type":"string","minLength":prefix.len()+1,"maxLength":160,"pattern":format!("^{prefix}.+$"),"description":description})
-}
-
-fn tab() -> Value {
-    handle(
-        "tab_",
-        "Optional exact controlled tab. Omit only when one tab is unambiguous.",
+    described(
+        json!({"type":"string","minLength":minimum,"maxLength":maximum}),
+        description,
     )
 }
 
+fn integer(minimum: usize, maximum: usize, default: Option<usize>, description: &str) -> Value {
+    let mut schema = json!({"type":"integer","minimum":minimum,"maximum":maximum});
+    if let Some(default) = default {
+        schema["default"] = json!(default);
+    }
+    described(schema, description)
+}
+
+fn enumeration(values: &[&str], default: Option<&str>, description: &str) -> Value {
+    let mut schema = json!({"type":"string","enum":values});
+    if let Some(default) = default {
+        schema["default"] = json!(default);
+    }
+    described(schema, description)
+}
+
+fn handle(prefix: &str, description: &str) -> Value {
+    described(
+        json!({"type":"string","minLength":prefix.len()+1,"maxLength":160,"pattern":format!("^{prefix}.+$")}),
+        description,
+    )
+}
+
+/// The held modifier keys of a pointer or key call.
+fn modifier_keys() -> Value {
+    json!({"type":"array","uniqueItems":true,"default":[],"items":{"enum":["Alt","Control","Meta","Shift"]}})
+}
+
+fn tab() -> Value {
+    handle("tab_", "Omit when one tab is unambiguous.")
+}
+
 fn url() -> Value {
-    json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":4096,"description":"Absolute HTTP(S) URL."})
+    json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":4096})
 }
 
 /// The `timeout_ms` field every tool accepts, defaulting to what that tool has always been given.
@@ -1689,22 +1578,24 @@ fn timeout(tool: &str) -> Value {
         "browser_record" => DEFAULT_RECORD_TIMEOUT_MS,
         _ => DEFAULT_TIMEOUT_MS,
     };
-    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default,"description":"Maximum call time in milliseconds."})
+    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default})
 }
 
-/// A pointer x coordinate. Views map image pixels through their own scale, which is not 1 for
-/// full-page and magnified captures, so page CSS pixels would land in the wrong place.
-const IMAGE_X: &str = "Horizontal pixel in the view's screenshot image, from its left edge.";
+/// What the `view` field of every point-taking call says about its x and y.
+///
+/// Views map image pixels through their own scale, which is not 1 for full-page and magnified
+/// captures, so page CSS pixels would land in the wrong place. The coordinates carry no
+/// description of their own: the view they belong to says it once.
+const VIEW_POINT: &str = "x and y are pixels in this view's screenshot image; take one first.";
 
-/// A pointer y coordinate, in the same image pixels as `IMAGE_X`.
-const IMAGE_Y: &str = "Vertical pixel in the view's screenshot image, from its top edge.";
-
-fn coordinate(description: &str) -> Value {
-    json!({"type":"number","minimum":0,"maximum":1_000_000,"description":description})
+/// A pointer coordinate in the pixels of the call's view image.
+fn coordinate() -> Value {
+    json!({"type":"number","minimum":0,"maximum":1_000_000})
 }
 
-fn extent(description: &str) -> Value {
-    json!({"type":"number","exclusiveMinimum":0,"maximum":1_000_000,"description":description})
+/// A region size in the pixels of the call's view image.
+fn extent() -> Value {
+    json!({"type":"number","exclusiveMinimum":0,"maximum":1_000_000})
 }
 
 #[cfg(test)]

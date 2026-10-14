@@ -18,9 +18,18 @@ ordinary call. Tests validate every example and a list of ordinary calls against
 schemas, decode them, and check that every next step naming a tool names only fields that tool
 advertises (ADR-0196).
 
-Each declaration includes concise field descriptions, one shortest valid example, a truthful
-output schema, and standard MCP annotations. The implementation owns bounds and defaults as named
-constants shared by schema rendering and decoding.
+Each declaration includes field guidance, one shortest valid example, a truthful output schema,
+and standard MCP annotations. The catalog says only what a field's name, type, enum, bounds and
+default do not. Guidance every tool shares, the optional `tab` and the `timeout_ms` bound, is in
+the server instructions and in a short `tab` description; `timeout_ms` and `visual_settle` carry
+none. The coordinate fact lives once in each `view` description: `x` and `y` are pixels in the
+view's screenshot image, not CSS pixels. The governance phrases stay and are pinned by a test:
+"for this request", "admitted before the effect", "may cause an external effect", "needs write
+even for unsent drafts", and "screenshot image". The serialized `tools` array that `tools/list`
+returns has a size budget (31,600 characters, with caps on the five largest tools) that only
+ratchets down: a later change raises it by the measured size of a clause its new behavior needs.
+The implementation owns bounds and defaults as named constants shared by schema rendering and
+decoding. See [ADR-0198](../adr/0198-agent-experience.md).
 
 `browser_flow` is the single composition tool for one to twenty ordinary tool calls. Step IDs
 are optional for short batches and available for explicit result references. Each child uses the
@@ -110,11 +119,11 @@ loads tool schemas lazily picks its first calls from this text alone, so it teac
 loop in six short sentences and names only catalog tools:
 
 > Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
-> browser_navigate, or list this session's tabs with browser_tabs. Read a page with browser_read,
-> and get handles for its controls from browser_find or browser_inspect. Act with those handles,
-> for example with browser_click or browser_fill_form. Handles expire when the page changes, so
-> fetch fresh ones after navigation. Every result states its effect and whether repeating it is
-> safe.
+> browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
+> unambiguous. Read a page with browser_read, and get handles for its controls from browser_find or
+> browser_inspect. Act with those handles, for example with browser_click or browser_fill_form;
+> timeout_ms bounds the whole call. Handles expire when the page changes, so fetch fresh ones after
+> navigation. Every result states its effect and whether repeating it is safe.
 
 ## Result envelope
 

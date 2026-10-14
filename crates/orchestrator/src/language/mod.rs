@@ -48,11 +48,12 @@ const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 ///
 /// A client that defers loading tool schemas chooses its first calls from this text alone, so it
 /// teaches the whole working loop in six short sentences: open, read, collect handles, act, renew
-/// stale handles, and trust what each result says about its effect.
+/// stale handles, and trust what each result says about its effect. It also carries the guidance
+/// every tool shares, `tab` and `timeout_ms`, so no tool repeats it (ADR-0198 decision 26).
 pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. \
-Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs. \
+Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is unambiguous. \
 Read a page with browser_read, and get handles for its controls from browser_find or browser_inspect. \
-Act with those handles, for example with browser_click or browser_fill_form. \
+Act with those handles, for example with browser_click or browser_fill_form; timeout_ms bounds the whole call. \
 Handles expire when the page changes, so fetch fresh ones after navigation. \
 Every result states its effect and whether repeating it is safe.";
 /// Closed role vocabulary a semantic selector may filter on.
@@ -2640,6 +2641,12 @@ mod tests {
             .filter(|sentence| !sentence.trim().is_empty())
             .count();
         assert!(sentences <= 6, "{sentences} sentences");
+        for shared in ["omit tab when one tab is unambiguous", "timeout_ms bounds"] {
+            assert!(
+                SERVER_INSTRUCTIONS.contains(shared),
+                "instructions lost the shared guidance \"{shared}\""
+            );
+        }
         let named: Vec<&str> = SERVER_INSTRUCTIONS
             .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
             .filter(|word| word.starts_with("browser_") || word.starts_with("policy_"))

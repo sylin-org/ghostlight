@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use serde_json::{json, Value};
 
 use super::schema::{is_valid, violations};
+use crate::intake::session::ToolDefinition;
 use crate::language::{catalog, decode};
 
 /// An absolute path the decoder accepts on the platform the tests run on.
@@ -500,5 +501,73 @@ fn the_checker_rejects_invalid_calls_against_the_real_catalog() {
             "{tool} schema accepts invalid {call}"
         );
         assert!(decode(tool, call.clone()).is_err(), "{tool} decodes {call}");
+    }
+}
+
+/// The tools `tools/list` returns for the complete catalog: the output schema stays out of the
+/// listing, so it stays out of the measure.
+fn listed_tools() -> Vec<ToolDefinition> {
+    catalog()
+        .into_iter()
+        .map(|tool| ToolDefinition {
+            output_schema: None,
+            ..tool
+        })
+        .collect()
+}
+
+/// The most characters the `tools` array of `tools/list` may serialize to (ADR-0198 decision 26).
+///
+/// The budget ratchets down. A later change raises it only by the measured size of a clause its
+/// new behavior needs, and the commit that raises it says so.
+const CATALOG_BUDGET_CHARS: usize = 31_600;
+
+/// Tools that carry the most guidance get their own cap on the serialized tool object, so one
+/// tool cannot grow while the whole stays under budget.
+const TOOL_BUDGET_CHARS: [(&str, usize); 5] = [
+    ("browser_inspect", 1_250),
+    ("browser_find", 950),
+    ("browser_click", 2_200),
+    ("browser_fill_form", 2_700),
+    ("browser_read", 1_050),
+];
+
+/// Governance phrases the trim must keep. Each one says something no name, type or bound does.
+const PINNED_PHRASES: [&str; 5] = [
+    "for this request",
+    "admitted before the effect",
+    "may cause an external effect",
+    "needs write even for unsent drafts",
+    "screenshot image",
+];
+
+#[test]
+fn the_listed_catalog_stays_under_its_size_budget() {
+    let tools = listed_tools();
+    let size = serde_json::to_string(&tools)
+        .expect("catalog serializes")
+        .len();
+    assert!(
+        size <= CATALOG_BUDGET_CHARS,
+        "tools/list serializes to {size} characters; the budget is {CATALOG_BUDGET_CHARS}"
+    );
+    for (name, cap) in TOOL_BUDGET_CHARS {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("{name} is not in the catalog"));
+        let size = serde_json::to_string(tool).expect("tool serializes").len();
+        assert!(
+            size <= cap,
+            "{name} serializes to {size} characters; its cap is {cap}"
+        );
+    }
+}
+
+#[test]
+fn the_trim_keeps_the_governance_phrases() {
+    let listed = serde_json::to_string(&listed_tools()).expect("catalog serializes");
+    for phrase in PINNED_PHRASES {
+        assert!(listed.contains(phrase), "the catalog lost \"{phrase}\"");
     }
 }
