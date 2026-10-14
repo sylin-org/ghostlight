@@ -120,7 +120,7 @@ pub fn traverse_history(
     navigate(l, tab_id, to, false)
 }
 
-/// Close a tab, or release it from the workspace when `released` is set.
+/// Close a tab; `released` marks a close that releases a tab from an ended workspace.
 ///
 /// # Errors
 ///

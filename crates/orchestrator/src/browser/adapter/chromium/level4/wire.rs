@@ -385,7 +385,7 @@ pub struct TabRef {
 /// Arguments of `list_tabs`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ListTabs {
-    /// Restrict the listing to these tabs and their children; absent lists controlled tabs.
+    /// Limit the listing to these tabs and the tabs they opened. When absent, every tab is listed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_ids: Option<Vec<u64>>,
 }
@@ -447,9 +447,10 @@ pub enum NavigationTarget {
 /// Arguments of `close_tab`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CloseTab {
-    /// The tab to close, or to release when `released` is set.
+    /// The tab to close.
     pub tab_id: u64,
-    /// Whether the tab is only released from Ghostlight's grouping, not closed.
+    /// This close releases a tab from an ended workspace. If the preserve-tabs veto refuses it,
+    /// the extension marks the tab released.
     #[serde(default)]
     pub released: bool,
 }
@@ -1026,7 +1027,7 @@ pub struct TabFocused {
 /// Outcome of `close_tab`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TabClosed {
-    /// The tab that was closed or released.
+    /// The closed tab.
     pub tab_id: u64,
 }
 
@@ -1064,7 +1065,7 @@ pub struct FrameFact {
     pub parent_frame_id: Option<String>,
     /// The document's URL.
     pub url: String,
-    /// Whether the extension cannot call into this frame.
+    /// Whether the frame shows an error page for a failed load.
     #[serde(default)]
     pub unreachable: bool,
 }
@@ -1252,7 +1253,7 @@ pub struct DiagnosticsFacts {
     /// Whether this read began capture for the tab.
     #[serde(default)]
     pub capture_started: bool,
-    /// Entries left out because they belong to documents outside the admitted set.
+    /// Network entries left out because their URL is not allowed.
     #[serde(default)]
     pub omitted_count: usize,
     /// Entries erased by a clear.
