@@ -5,6 +5,7 @@
 # `ghostlight deployment install --development`. The installer owns locking,
 # stopping running images, and copying. -Restore runs the installed binary's
 # `deployment install --restore` instead and builds nothing.
+[CmdletBinding()]
 param(
     [switch]$Restore,
     [switch]$Plan,
@@ -30,15 +31,33 @@ function Invoke-Ghostlight {
     $info.RedirectStandardError = $true
     $info.UseShellExecute = $false
     $process = [System.Diagnostics.Process]::Start($info)
-    $stdout = $process.StandardOutput.ReadToEndAsync()
-    $stderr = $process.StandardError.ReadToEndAsync()
+    # Stream each line as it arrives. A detached service started by the
+    # installer can inherit the pipe ends and keep them open, so end of file
+    # may never arrive: after the process exits, drain for a short bounded time
+    # and then stop reading.
+    $readers = @(
+        @{ Reader = $process.StandardOutput; Sink = [Console]::Out; Pending = $null },
+        @{ Reader = $process.StandardError; Sink = [Console]::Error; Pending = $null }
+    )
+    $deadline = $null
+    while ($true) {
+        foreach ($entry in $readers) {
+            if ($null -eq $entry.Pending -and -not $entry.Done) { $entry.Pending = $entry.Reader.ReadLineAsync() }
+        }
+        $open = @($readers | Where-Object { -not $_.Done })
+        if ($open.Count -eq 0) { break }
+        if ($null -eq $deadline -and $process.HasExited) { $deadline = [DateTime]::UtcNow.AddMilliseconds(2000) }
+        if ($null -ne $deadline -and [DateTime]::UtcNow -ge $deadline) { break }
+        [void][System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]@($open | ForEach-Object { $_.Pending }), 100)
+        foreach ($entry in $open) {
+            if ($entry.Pending.IsCompleted) {
+                $line = $entry.Pending.GetAwaiter().GetResult()
+                $entry.Pending = $null
+                if ($null -eq $line) { $entry.Done = $true } else { $entry.Sink.WriteLine($line) }
+            }
+        }
+    }
     $process.WaitForExit()
-    # A detached service started by the installer can inherit the pipe ends and
-    # keep them open, so end of file may never arrive. Wait a short, bounded
-    # time for the output and print whatever has finished.
-    [void][System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr), 2000)
-    if ($stdout.IsCompleted) { [Console]::Out.Write($stdout.GetAwaiter().GetResult()) }
-    if ($stderr.IsCompleted) { [Console]::Error.Write($stderr.GetAwaiter().GetResult()) }
     exit $process.ExitCode
 }
 
