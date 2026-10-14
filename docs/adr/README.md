@@ -197,7 +197,7 @@ history live here.
 
 | [0171](0171-load-sensitive-settle-sensor.md) | Load-sensitive settle sensor for browser DOM operations: agnostic settlement sensor for reading and inspection, hot-path zero latency, and ticker immunity | Accepted |
 
-| [0172](0172-cross-workspace-tab-discovery.md) | Cross-workspace tab discovery and informative ownership refusals: identifying owning workspace identity and actionable next steps | Accepted |
+| [0172](0172-cross-workspace-tab-discovery.md) | Cross-workspace tab discovery and informative ownership refusals: identifying owning workspace identity and actionable next steps | Accepted (Decisions 1 and 3 amended to follow [0196](0196-simple-pipeline-and-contained-boundaries.md): label-only owner, own-tabs next step) |
 
 | [0173](0173-visual-settle-heuristic.md) | Visual quiescence and layout-stability settlement sensor: animation introspection, geometry stability, and first-class visual wait | Accepted |
 

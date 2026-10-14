@@ -141,8 +141,6 @@ pub enum Operation {
     Record(Record),
     /// Read bounded opt-in browser diagnostics.
     Diagnose(Diagnose),
-    /// Manage session workspace discovery and switching (ADR-0175).
-    ManageWorkspace(ManageWorkspace),
 
     /// Explain the authority in force (ADR-0136).
     ExplainPolicy(ExplainPolicy),
@@ -175,7 +173,6 @@ impl Operation {
             Self::HandleDialog(_) => "browser_dialog",
             Self::Record(_) => "browser_record",
             Self::Diagnose(_) => "browser_diagnose",
-            Self::ManageWorkspace(_) => "browser_workspace",
             Self::ExplainPolicy(_) => "policy_explain",
         }
     }
@@ -215,7 +212,6 @@ impl Operation {
             | Self::HandleDialog(_)
             | Self::Record(_)
             | Self::Diagnose(_)
-            | Self::ManageWorkspace(_)
             | Self::ExplainPolicy(_) => None,
         }
     }
@@ -229,14 +225,6 @@ impl Operation {
     pub fn timeout_can_grow(&self) -> bool {
         self.timeout_ms().is_some_and(|ms| ms < MAX_TIMEOUT_MS)
     }
-}
-
-/// Model input for workspace discovery and switching (ADR-0175).
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct ManageWorkspace {
-    pub action: String,
-    #[serde(default)]
-    pub workspace: Option<String>,
 }
 
 /// Model input for the cohesive tab controller.
@@ -926,8 +914,24 @@ impl LanguageError {
     }
 }
 
+/// Tools that left the catalog, each with the refusal that tells a caller holding an old
+/// catalog what to do instead. A retired name never decodes and never dispatches.
+const RETIRED_TOOLS: &[(&str, &str)] = &[
+    (
+        "browser_sequence",
+        "browser_sequence was removed; use browser_flow with ordinary tool steps. Refresh the tool catalog before retrying.",
+    ),
+    (
+        "browser_workspace",
+        "browser_workspace was removed; each session works only in its own tabs. Call browser_tabs with action list to see them. Refresh the tool catalog before retrying.",
+    ),
+];
+
 /// Decode and validate one catalog invocation.
 pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
+    if let Some((_, refusal)) = RETIRED_TOOLS.iter().find(|(retired, _)| *retired == name) {
+        return Err(LanguageError::Invalid((*refusal).into()));
+    }
     match name {
         "browser_tabs" => decode_tabs(input),
         "browser_navigate" => decode_navigate(input),
@@ -951,7 +955,14 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_inspect" => Operation::InspectPage(parse(
             input,
-            &["visual_settle", "tab", "scope", "root", "max_depth", "max_items"],
+            &[
+                "visual_settle",
+                "tab",
+                "scope",
+                "root",
+                "max_depth",
+                "max_items",
+            ],
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_choice(
@@ -1043,13 +1054,29 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_hover" => Operation::Hover(parse(
             input,
-            &["visual_settle", "target", "view", "x", "y", "tab", "timeout_ms"],
+            &[
+                "visual_settle",
+                "target",
+                "view",
+                "x",
+                "y",
+                "tab",
+                "timeout_ms",
+            ],
             validate_hover,
         )?)
         .into_ok(),
         "browser_fill_form" => Operation::FillForm(parse(
             input,
-            &["visual_settle", "fields", "tab", "submit_target", "user_authorized_credentials", "expect", "timeout_ms"],
+            &[
+                "visual_settle",
+                "fields",
+                "tab",
+                "submit_target",
+                "user_authorized_credentials",
+                "expect",
+                "timeout_ms",
+            ],
             validate_fill,
         )?)
         .into_ok(),
@@ -1122,7 +1149,13 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         .into_ok(),
         "browser_execute" => Operation::RunScript(parse(
             input,
-            &["visual_settle", "script", "tab", "max_result_chars", "timeout_ms"],
+            &[
+                "visual_settle",
+                "script",
+                "tab",
+                "max_result_chars",
+                "timeout_ms",
+            ],
             |value: &RunScript| {
                 validate_text(&value.script, 20_000, "script")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
@@ -1146,12 +1179,10 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             validate_wait,
         )?)
         .into_ok(),
-        "browser_sequence" => Err(LanguageError::Invalid("browser_sequence was removed; use browser_flow with ordinary tool steps. Refresh the tool catalog before retrying.".into())),
         "browser_flow" => decode_flow(input),
         "browser_dialog" => decode_dialog(input),
         "browser_record" => decode_record(input),
         "browser_diagnose" => decode_diagnose(input),
-        "browser_workspace" => decode_workspace(input),
         "policy_explain" => decode_explain_policy(input),
         other => Err(LanguageError::UnknownTool(other.into())),
     }
@@ -1469,35 +1500,6 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
 fn decode_explain_policy(input: Value) -> Result<Operation, LanguageError> {
     let value: ExplainPolicy = parse(input, &[], |_| Ok(()))?;
     Ok(Operation::ExplainPolicy(value))
-}
-
-fn decode_workspace(input: Value) -> Result<Operation, LanguageError> {
-    let value: ManageWorkspace = parse(
-        input,
-        &["action", "workspace"],
-        |value: &ManageWorkspace| {
-            validate_choice(&value.action, &["list", "switch"], "action")?;
-            match value.action.as_str() {
-                "list" if value.workspace.is_some() => {
-                    return Err(LanguageError::Invalid(
-                        "workspace is not valid when action is list".into(),
-                    ))
-                }
-                "switch" => validate_handle(
-                    value.workspace.as_deref().ok_or_else(|| {
-                        LanguageError::Invalid(
-                            "action switch needs a workspace: the handle of the workspace to switch to"
-                                .into(),
-                        )
-                    })?,
-                    "workspace_",
-                )?,
-                _ => {}
-            }
-            Ok(())
-        },
-    )?;
-    Ok(Operation::ManageWorkspace(value))
 }
 
 fn has_field(input: &Value, field: &str) -> bool {

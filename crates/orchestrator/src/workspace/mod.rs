@@ -55,18 +55,6 @@ impl std::borrow::Borrow<str> for WorkspaceId {
     }
 }
 
-impl From<String> for WorkspaceId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for WorkspaceId {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
 /// Opaque model-facing controlled tab handle.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TabHandle(String);
@@ -496,44 +484,6 @@ impl WorkspaceStore {
             .is_some_and(|state| state.session.is_some())
     }
 
-    /// Whether this workspace is currently admitted in the aggregate.
-    #[must_use]
-    pub fn exists(&self, workspace: &WorkspaceId) -> bool {
-        self.lock().workspaces.contains_key(workspace)
-    }
-
-    /// Whether this workspace currently has any active connections.
-    #[must_use]
-    pub fn has_connections(&self, workspace: &WorkspaceId) -> bool {
-        self.lock()
-            .workspaces
-            .get(workspace)
-            .is_some_and(|state| !state.connections.is_empty())
-    }
-
-    /// Transfer or attach a connection from one workspace to another.
-    pub fn switch_connection(
-        &self,
-        from: &WorkspaceId,
-        to: &WorkspaceId,
-        connection_id: &str,
-    ) -> Result<(), WorkspaceError> {
-        let mut state = self.lock();
-        if !state.workspaces.contains_key(to) {
-            return Err(WorkspaceError::UnknownWorkspace);
-        }
-        if let Some(from_state) = state.workspaces.get(from) {
-            if let Some(evidence) = from_state.connections.get(connection_id).cloned() {
-                if let Some(to_state) = state.workspaces.get_mut(to) {
-                    to_state
-                        .connections
-                        .insert(connection_id.to_string(), evidence);
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Release an MCP workspace and return the physical tabs it owned.
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
         self.lock()
@@ -617,42 +567,43 @@ impl WorkspaceStore {
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
-    /// Look up the descriptive label or identifier of another admitted workspace that owns the
-    /// requested tab handle. Returns None if the handle does not belong to any other workspace.
+    /// The client label of another admitted workspace that owns the requested tab handle.
+    ///
+    /// Returns None when no other workspace owns the handle, or when its owner has no client
+    /// label: a refusal never names another session by its workspace id.
     #[must_use]
     pub fn tab_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
-        let state = self.lock();
         let handle = TabHandle(requested.into());
-        for (id, workspace) in &state.workspaces {
-            if id != current && workspace.tabs.contains_key(&handle) {
-                let label = if !workspace.client_label.is_empty() {
-                    workspace.client_label.clone()
-                } else {
-                    id.as_str().to_string()
-                };
-                return Some(label);
-            }
-        }
-        None
+        self.labeled_owner(current, |workspace| workspace.tabs.contains_key(&handle))
     }
 
-    /// Look up the descriptive label or identifier of another admitted workspace that owns the
-    /// requested target handle. Returns None if the handle does not belong to any other workspace.
+    /// The client label of another admitted workspace that owns the requested target handle.
+    ///
+    /// Returns None when no other workspace owns the handle, or when its owner has no client
+    /// label: a refusal never names another session by its workspace id.
     #[must_use]
     pub fn target_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
-        let state = self.lock();
         let handle = TargetHandle(requested.into());
-        for (id, workspace) in &state.workspaces {
-            if id != current && workspace.targets.contains_key(&handle) {
-                let label = if !workspace.client_label.is_empty() {
-                    workspace.client_label.clone()
-                } else {
-                    id.as_str().to_string()
-                };
-                return Some(label);
-            }
-        }
-        None
+        self.labeled_owner(current, |workspace| workspace.targets.contains_key(&handle))
+    }
+
+    /// Name the other workspace that holds a handle, by its client label only.
+    ///
+    /// A workspace id is an internal key. No tool takes one, so naming it would only tell the
+    /// caller where another session lives (ADR-0196 Decision 8). An owner without a label is
+    /// therefore not attributed at all, and the refusal falls back to the generic sentence
+    /// (ADR-0172 Decision 4).
+    fn labeled_owner(
+        &self,
+        current: &WorkspaceId,
+        holds: impl Fn(&WorkspaceState) -> bool,
+    ) -> Option<String> {
+        self.lock()
+            .workspaces
+            .iter()
+            .find(|(id, workspace)| *id != current && holds(workspace))
+            .map(|(_, workspace)| workspace.client_label.clone())
+            .filter(|label| !label.is_empty())
     }
 
     /// Apply an asynchronous committed landing through the aggregate before later content use.
@@ -863,15 +814,15 @@ impl WorkspaceLease {
         held_or_selected(handle, tab)
     }
 
-    /// Look up the descriptive label or identifier of another admitted workspace that owns the
-    /// requested tab handle.
+    /// The client label of another admitted workspace that owns the requested tab handle, if it
+    /// has one.
     #[must_use]
     pub fn tab_owner(&self, requested: &str) -> Option<String> {
         self.store.tab_owner(&self.workspace, requested)
     }
 
-    /// Look up the descriptive label or identifier of another admitted workspace that owns the
-    /// requested target handle.
+    /// The client label of another admitted workspace that owns the requested target handle, if
+    /// it has one.
     #[must_use]
     pub fn target_owner(&self, requested: &str) -> Option<String> {
         self.store.target_owner(&self.workspace, requested)
@@ -1764,6 +1715,53 @@ mod tests {
             other.select_tab(Some(tab.handle.as_str())).unwrap_err(),
             WorkspaceError::NotOwnedTab
         );
+    }
+
+    #[test]
+    fn another_workspace_is_named_only_by_its_client_label() {
+        let store = WorkspaceStore::default();
+        let caller = store.admit("caller".into(), IntakeChannel::Mcp, None);
+        let labeled = store.admit("Codex".into(), IntakeChannel::Mcp, None);
+        let unlabeled = store.admit(String::new(), IntakeChannel::Mcp, None);
+        let handles = |workspace: &WorkspaceId, physical_id: u64| {
+            let lease = store.acquire(workspace).unwrap();
+            let tab = lease
+                .add_tab(&physical(physical_id, "https://example.com"))
+                .unwrap();
+            let targets = lease
+                .register_targets(
+                    &tab,
+                    &[ObservedTarget {
+                        locator: "l1".into(),
+                        role: "button".into(),
+                        name: "Go".into(),
+                        state: vec![],
+                        credential_class: false,
+                    }],
+                )
+                .unwrap();
+            (
+                tab.handle.as_str().to_owned(),
+                targets[0].0.as_str().to_owned(),
+            )
+        };
+        let (labeled_tab, labeled_target) = handles(&labeled, 1);
+        let (unlabeled_tab, unlabeled_target) = handles(&unlabeled, 2);
+
+        assert_eq!(
+            store.tab_owner(&caller, &labeled_tab).as_deref(),
+            Some("Codex")
+        );
+        assert_eq!(
+            store.target_owner(&caller, &labeled_target).as_deref(),
+            Some("Codex")
+        );
+        // An unlabeled owner is never named, so its workspace id cannot stand in for a label.
+        assert_eq!(store.tab_owner(&caller, &unlabeled_tab), None);
+        assert_eq!(store.target_owner(&caller, &unlabeled_target), None);
+        // A workspace's own handle has no other owner to name.
+        assert_eq!(store.tab_owner(&labeled, &labeled_tab), None);
+        assert_eq!(store.target_owner(&labeled, &labeled_target), None);
     }
 
     #[test]

@@ -211,7 +211,7 @@ whose heartbeat was acknowledged does not. The browser connector remains unaware
 
 ### Language
 
-Owns the one 24-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
+Owns the one 23-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
 defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
 facts. Nothing outside this context defines a tool or an alternate client dialect. Each tool
 advertises one portable object schema: every field any branch accepts, each as one schema that
@@ -233,6 +233,10 @@ unit-of-work state, uncertainty, and the single completion path.
 Owns MCP sessions, controlled tabs, opaque tab and target handles, document generations,
 view handles and viewport transforms, selection, ownership, leases, child-tab adoption, stale
 detection, and release on disconnect.
+
+A connection binds to one workspace when it is admitted and keeps it until it closes. Nothing
+moves a session into another workspace, and a handle from another session is refused before any
+browser work (ADR-0196 Decision 8).
 
 ### Recording
 

@@ -230,8 +230,6 @@ fn hint_violations(hint: &str, advertised: &Advertised) -> Vec<String> {
 fn outcome_variant(outcome: &Outcome) -> &'static str {
     match outcome {
         Outcome::TabsListed { .. } => "TabsListed",
-        Outcome::WorkspacesListed { .. } => "WorkspacesListed",
-        Outcome::WorkspaceSwitched { .. } => "WorkspaceSwitched",
         Outcome::PolicyExplained { .. } => "PolicyExplained",
         Outcome::SelectorUnresolved { .. } => "SelectorUnresolved",
         Outcome::CompositionRan(_) => "CompositionRan",
@@ -280,8 +278,6 @@ fn outcome_variant(outcome: &Outcome) -> &'static str {
 /// Every name `outcome_variant` can return.
 const OUTCOME_VARIANTS: &[&str] = &[
     "TabsListed",
-    "WorkspacesListed",
-    "WorkspaceSwitched",
     "PolicyExplained",
     "SelectorUnresolved",
     "CompositionRan",
@@ -598,10 +594,6 @@ fn outcome_samples() -> Vec<Outcome> {
     let mut samples = vec![
         Outcome::TabsListed { count: 0 },
         Outcome::TabsListed { count: 2 },
-        Outcome::WorkspacesListed { count: 2 },
-        Outcome::WorkspaceSwitched {
-            workspace: "workspace_1".into(),
-        },
         Outcome::PolicyExplained {
             capabilities: 4,
             layers: 0,

@@ -115,6 +115,16 @@ try {
     protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "fixed install", version: "1" } } }) + "\n");
   assert.ok((await until(() => replies.get(1), "MCP initialization")).result);
   mcp.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+  async function listedToolNames(id, label) {
+    mcp.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/list" }) + "\n");
+    const reply = await until(() => replies.get(id), label);
+    assert.ok(Array.isArray(reply.result?.tools), JSON.stringify(reply.error ?? reply));
+    return reply.result.tools.map(tool => tool.name);
+  }
+  // The catalog itself is pinned by the Rust catalog tests and the process journey. This journey
+  // proves the same MCP stream keeps serving exactly that catalog across the service replacement.
+  const catalogBefore = await listedToolNames(2, "MCP catalog before update");
+  assert.ok(catalogBefore.length > 0, "the all-open policy advertises a catalog");
   const peerIds = [native.pid, mcp.pid];
   // PE/ELF allow trailing data. Change only the service image without rebuilding the shores.
   appendFileSync(candidate, Buffer.from("\nfixed-installation-service-update\n"));
@@ -126,11 +136,10 @@ try {
   assert.deepEqual([native.pid, mcp.pid], peerIds);
   assert.notEqual(epochs.at(-1), epochs[0]);
   assert.equal(registration(), registrationBefore, "native registration remains fixed");
-  mcp.stdin.write('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n');
-  assert.equal((await until(() => replies.get(2), "same MCP stream after update")).result.tools.length, 24);
+  assert.deepEqual(await listedToolNames(3, "same MCP stream after update"), catalogBefore);
   assert.deepEqual(readdirSync(destination).sort(), names.map(name => name + suffix).sort());
   assert.equal(existsSync(join(control, "deploy.lock")), false);
-  console.log("PASS fixed installation: old owned routes migrated; history retained; real locked service replacement; same MCP/native processes; runtime reacknowledged; registration unchanged; no release directory or temporary leftovers");
+  console.log("PASS fixed installation: old owned routes migrated; history retained; real locked service replacement; same MCP/native processes and catalog; runtime reacknowledged; registration unchanged; no release directory or temporary leftovers");
 } finally {
   if (existsSync(installed("ghostlight"))) await command(installed("ghostlight"), ["native-host", "uninstall"]);
   // Keep demand-start quiesced while retiring only this fixture's exact installed images.

@@ -293,11 +293,6 @@ fn known_good_calls() -> Vec<(&'static str, Value)> {
             "browser_diagnose",
             json!({"source":"network","detail":"all","match":"api","after":"diag_1","limit":10}),
         ),
-        ("browser_workspace", json!({"action":"list"})),
-        (
-            "browser_workspace",
-            json!({"action":"switch","workspace":"workspace_1"}),
-        ),
         ("policy_explain", json!({})),
     ]
 }

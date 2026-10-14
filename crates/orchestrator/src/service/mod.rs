@@ -24,18 +24,15 @@ use ghostlight_bridge::service::{
 use ghostlight_bridge::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use uuid::Uuid;
 
-use serde_json::Value;
-
 use crate::audit::AuditRecorder;
 use crate::browser::{AdapterLifecycleObserver, BrowserEventSink, BrowserPort, RelayBrowserPort};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::{catalog_for, SERVER_INSTRUCTIONS};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
-use crate::work::result::Status;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
-use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
+use crate::workspace::{ReleasedTabs, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
@@ -681,7 +678,6 @@ fn serve_session(
     // each of them used to leave through `?` before the release ran. The workspace and every tab
     // it held then survived with nothing able to collect them: an unowned workspace has no owning
     // process to look up, so the reaper cannot see it either.
-    let active_workspace = Arc::new(Mutex::new(workspace.clone()));
     let served = (|| -> Result<()> {
         if catalog_watch.is_err() {
             bail!("session watcher could not start");
@@ -689,29 +685,19 @@ fn serve_session(
         for independent in [false, true] {
             let queue = queue.clone();
             let executor = executor.clone();
-            let active_workspace = active_workspace.clone();
+            let workspace = workspace.clone();
             let writer = writer.clone();
             workers.push(
                 thread::Builder::new()
                     .name("ghostlight-session-work".into())
                     .spawn(move || {
                         while let Some(job) = queue.next(independent) {
-                            let current_workspace = lock(&active_workspace).clone();
                             let result = executor.execute_prepared(
-                                &current_workspace,
+                                &workspace,
                                 &job.prepared,
                                 &job.cancellation,
                                 false,
                             );
-                            if result.status == Status::Succeeded {
-                                if let Some(target) = result
-                                    .facts
-                                    .get("switched_workspace")
-                                    .and_then(Value::as_str)
-                                {
-                                    *lock(&active_workspace) = WorkspaceId::from(target);
-                                }
-                            }
                             deliver_result(&writer, &job.id, result);
                             queue.complete(&job.id);
                         }
@@ -764,9 +750,8 @@ fn serve_session(
                             },
                         ),
                         Err(Refused::Full) => {
-                            let current_workspace = lock(&active_workspace).clone();
                             let result = executor.execute_prepared(
-                                &current_workspace,
+                                &workspace,
                                 &job.prepared,
                                 &job.cancellation,
                                 true,
@@ -801,9 +786,8 @@ fn serve_session(
     for worker in workers {
         let _ = worker.join();
     }
-    let final_workspace = lock(&active_workspace).clone();
     workspaces.disconnect(
-        &final_workspace,
+        &workspace,
         connection
             .attribution()
             .connection_id
@@ -812,16 +796,9 @@ fn serve_session(
     );
     // A workspace with an owner outlives this connection: the caller is still there and its next
     // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
-    if !workspaces.is_owned(&workspace) && !workspaces.has_connections(&workspace) {
+    if !workspaces.is_owned(&workspace) {
         let released = workspaces.release(&workspace);
         cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref());
-    }
-    if final_workspace != workspace
-        && !workspaces.is_owned(&final_workspace)
-        && !workspaces.has_connections(&final_workspace)
-    {
-        let released = workspaces.release(&final_workspace);
-        cleanup_released_tabs(final_workspace.as_str(), &released, browser.as_ref());
     }
     diagnostics.sink().emit(
         ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,

@@ -254,12 +254,6 @@ pub const DIRECTORY: &[CapabilityVariant] = &[
         "Read bounded opt-in browser diagnostics.",
     ),
     variant(
-        "browser_workspace",
-        None,
-        CapabilitySet::READ,
-        "List admitted workspaces or switch active session workspace.",
-    ),
-    variant(
         "policy_explain",
         None,
         CapabilitySet::EMPTY,
@@ -289,8 +283,7 @@ pub fn requirements(operation: &Operation) -> CapabilitySet {
         | Operation::SetZoom(_)
         | Operation::Hover(_)
         | Operation::Wait(_)
-        | Operation::Diagnose(_)
-        | Operation::ManageWorkspace(_) => CapabilitySet::READ,
+        | Operation::Diagnose(_) => CapabilitySet::READ,
         Operation::ResizeWindow(_) => CapabilitySet::EMPTY,
         Operation::ExplainPolicy(_) => CapabilitySet::EMPTY,
         Operation::Click(value) if value.selector.is_some() || value.expect.is_some() => {
@@ -402,7 +395,6 @@ mod tests {
                 json!({"action":"save","target":"target_1"})
             }
             ("browser_diagnose", None) => json!({}),
-            ("browser_workspace", None) => json!({"action":"list"}),
             ("policy_explain", None) => json!({}),
             (tool, variant) => panic!(
                 "DIRECTORY grew a (tool={tool}, variant={variant:?}) entry with no fixture in \
@@ -436,7 +428,6 @@ mod tests {
             "browser_dialog",
             "browser_record",
             "browser_diagnose",
-            "browser_workspace",
             "policy_explain",
         ]
         .into_iter()

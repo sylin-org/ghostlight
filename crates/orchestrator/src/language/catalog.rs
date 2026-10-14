@@ -13,7 +13,7 @@ use super::{
 };
 
 /// Canonical tool names in the complete catalog.
-pub const EXPECTED_TOOL_NAMES: [&str; 24] = [
+pub const EXPECTED_TOOL_NAMES: [&str; 23] = [
     "browser_tabs",
     "browser_navigate",
     "browser_history",
@@ -36,7 +36,6 @@ pub const EXPECTED_TOOL_NAMES: [&str; 24] = [
     "browser_flow",
     "browser_record",
     "browser_diagnose",
-    "browser_workspace",
     "policy_explain",
 ];
 
@@ -200,13 +199,6 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "Read opt-in console and network observations for a tab. Observation begins with the first call, so earlier activity is absent; reload or reproduce to capture it. Sensitive request data is never collected.",
             diagnose_schema(),
             Hints::browser_read(),
-        ),
-        tool(
-            "browser_workspace",
-            "Browser workspace",
-            "List admitted browser workspaces or switch the active session workspace to resolve cross-workspace tab ownership.",
-            workspace_schema(),
-            Hints::local_read(),
         ),
         tool(
             "policy_explain",
@@ -1324,46 +1316,6 @@ fn diagnose_schema() -> Value {
     )
 }
 
-fn workspace_schema() -> Value {
-    union(
-        vec![
-            object(
-                vec![(
-                    "action",
-                    constant(
-                        "list",
-                        "List admitted browser workspaces and cross-workspace tab holdings.",
-                    ),
-                )],
-                vec!["action"],
-            ),
-            object(
-                vec![
-                    (
-                        "action",
-                        constant(
-                            "switch",
-                            "Switch the active session workspace to resolve tab ownership.",
-                        ),
-                    ),
-                    (
-                        "workspace",
-                        handle(
-                            "workspace_",
-                            "Target workspace handle to switch session authority to.",
-                        ),
-                    ),
-                ],
-                vec!["action", "workspace"],
-            ),
-        ],
-        vec![
-            json!({"action":"list"}),
-            json!({"action":"switch","workspace":"workspace_..."}),
-        ],
-    )
-}
-
 fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     raw_object(fields, required)
 }
@@ -1989,7 +1941,6 @@ mod tests {
             ("browser_flow", false, true, false, true),
             ("browser_record", false, true, false, true),
             ("browser_diagnose", true, false, true, true),
-            ("browser_workspace", true, false, true, false),
             ("policy_explain", true, false, true, false),
         ];
 
@@ -2032,10 +1983,6 @@ mod tests {
         assert!(
             description("browser_diagnose").contains("Observation begins with the first call"),
             "diagnose must teach when observation starts"
-        );
-        assert!(
-            description("browser_workspace").contains("switch the active session workspace"),
-            "workspace tool must teach its discovery and switching purpose"
         );
 
         let screenshot = tool_schema("browser_screenshot");

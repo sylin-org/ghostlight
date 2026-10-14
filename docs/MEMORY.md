@@ -19,7 +19,8 @@ the owner wants, and what this project learned the hard way.
 
 - **Guard exact public versions and derive catalog documentation from source.** A minor-line check
   accepted README 1.3.6 while the public service had reached 1.3.10, and the implemented
-  `browser_workspace` tool raised the catalog to 24 while active language documents still said 23.
+  `browser_workspace` tool (since removed by ADR-0196) raised the catalog to 24 while active
+  language documents still said 23.
   Current README, install, trust, and direct-package surfaces must match `docs/public-status.json`
   exactly. The documented tool headings and counts must match `EXPECTED_TOOL_NAMES` in order.
 
@@ -104,8 +105,7 @@ the owner wants, and what this project learned the hard way.
 - **Delight through sane defaults.** Anticipate the caller's intent with intelligent, safe defaults
   rather than demanding boilerplate configuration. Screenshots and composite wait operations default to
   visual quiescence and layout settlement (`visual_settle: true`, ADR-0174) with zero-cost opt-out.
-  Cross-workspace operations provide discovery and smooth session rebinding (`browser_workspace`, ADR-0175)
-  instead of unresolvable error walls. Ergonomic pipeline templates (`with_authorized_tab`,
+  Ergonomic pipeline templates (`with_authorized_tab`,
   `with_authorized_optional_target`, ADR-0176/ADR-0177), modular CLI decomposition (`cli/`, ADR-0177),
   and centralized catalog invariants (`CATALOG_TOOL_COUNT`) keep developer extension clean and error-free.
 
@@ -645,10 +645,9 @@ Every one of these cost something to learn.
   `visual_settle: true` on `browser_screenshot` and composite `browser_wait` conditions ensures LLMs and users
   capture rendered layouts rather than mid-transition frames, without requiring explicit configuration on
   every call (ADR-0174).
-- **Workspace transitions must rebind dynamically without connection churn.** When an agent encounters
-  cross-workspace tab ownership mismatches, forcing a disconnect and reconnect loses context and session history.
-  A dedicated discovery and switching seam (`browser_workspace`, ADR-0175) with thread-safe atomic session
-  rebinding (`Arc<Mutex<WorkspaceId>>`) resolves multi-workspace routing cleanly inside the live MCP session.
+- **Sessions are contained.** ADR-0196 removed `browser_workspace` and its live rebinding: each
+  connection keeps one workspace, and a handle from another session is refused with a pointer to
+  the session's own tabs.
 - **Windows session shutdown messages require a top-level window, not a message-only window.**
   Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
   not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)

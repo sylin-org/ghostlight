@@ -211,10 +211,6 @@ pub enum SavedTo {
 pub enum Outcome {
     /// The workspace's bound tabs were listed, read live from the browser.
     TabsListed { count: usize },
-    /// Available workspaces were listed.
-    WorkspacesListed { count: usize },
-    /// Switched session active workspace.
-    WorkspaceSwitched { workspace: String },
     /// The authority in force was explained to the model (ADR-0136).
     PolicyExplained { capabilities: usize, layers: usize },
     /// A semantic selector matched zero or several visible controls.
@@ -419,15 +415,6 @@ impl Outcome {
             }
             Self::TabsListed { count } => {
                 format!("Listed {} in this session.", counted(*count, "tab", "tabs"))
-            }
-            Self::WorkspacesListed { count } => {
-                format!(
-                    "Listed {}.",
-                    counted(*count, "Ghostlight session", "Ghostlight sessions")
-                )
-            }
-            Self::WorkspaceSwitched { workspace } => {
-                format!("Switched session to workspace {workspace}.")
             }
             Self::PolicyExplained {
                 capabilities,
@@ -744,9 +731,6 @@ impl Outcome {
                 "Reproduce the problem or reload the page, then call browser_diagnose again."
                     .into(),
             ],
-            Self::WorkspaceSwitched { .. } => vec![
-                "Call browser_tabs with action list to inspect tabs in the switched workspace.".into(),
-            ],
             _ => vec![],
         }
     }
@@ -759,11 +743,6 @@ impl Outcome {
                 count: measured(*count),
                 ..Observed::default()
             },
-            Self::WorkspacesListed { count } => Observed {
-                count: measured(*count),
-                ..Observed::default()
-            },
-            Self::WorkspaceSwitched { .. } => Observed::default(),
             Self::PolicyExplained {
                 capabilities: count,
                 ..
@@ -1437,7 +1416,7 @@ impl WorkspaceReason {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]
             }
             Self::OwnershipMismatch { owner: Some(_) } => {
-                vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace.".into()]
+                vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles.".into()]
             }
             Self::OwnershipMismatch { owner: None } => {
                 vec!["Collect fresh handles from this session, then continue with those.".into()]
@@ -1770,10 +1749,6 @@ mod tests {
                     differences: Some(6),
                 },
                 "Returned the document tree: 1 node, 6 differences from the previous snapshot.",
-            ),
-            (
-                Outcome::WorkspacesListed { count: 2 },
-                "Listed 2 Ghostlight sessions.",
             ),
             (
                 Outcome::PolicyExplained {
@@ -2744,7 +2719,6 @@ mod tests {
     fn model_facing_sentences_use_plain_words() {
         let sentences = [
             Outcome::TabsListed { count: 3 }.summary(),
-            Outcome::WorkspacesListed { count: 3 }.summary(),
             Outcome::PolicyExplained {
                 capabilities: 3,
                 layers: 2,
@@ -2813,7 +2787,7 @@ mod tests {
                 owner: Some("Workspace B".into())
             }
             .next_steps(),
-            vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace."]
+            vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
         );
         assert_eq!(
             WorkspaceReason::OwnershipMismatch {
@@ -2932,16 +2906,6 @@ mod tests {
             .next_steps(),
             vec!["Narrow the subtree root or depth to capture the rest."]
         );
-        assert_eq!(
-            Outcome::WorkspaceSwitched {
-                workspace: "workspace_abc".into(),
-            }
-            .next_steps(),
-            vec!["Call browser_tabs with action list to inspect tabs in the switched workspace."]
-        );
-        assert!(Outcome::WorkspacesListed { count: 2 }
-            .next_steps()
-            .is_empty());
     }
 
     #[test]

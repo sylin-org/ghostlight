@@ -1,6 +1,10 @@
 # ADR-0172: Cross-workspace tab discovery and informative ownership refusals
 
-Date: 2026-09-14. Status: Accepted by owner direction.
+Date: 2026-09-14. Status: Accepted by owner direction. Decision 3 amended by ADR-0196 on
+2026-10-13: the next step points to the session's own tabs and never suggests a switch.
+Decision 1 amended the same day to follow ADR-0196 Decision 8: the owner is named only by its
+client label. An owner with no label gets the Decision 4 fallback, never its workspace
+identifier, because no tool acts on a workspace identifier any more.
 
 Builds on ADR-0010, ADR-0050, ADR-0157, ADR-0161, and ADR-0170.
 

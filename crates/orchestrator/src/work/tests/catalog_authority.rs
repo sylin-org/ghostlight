@@ -517,13 +517,6 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             omitted_count: 0,
         }],
     );
-    add(
-        "browser_workspace",
-        None,
-        &["read"],
-        json!({"action":"list"}),
-        vec![],
-    );
     add("policy_explain", None, &[], json!({}), vec![]);
     result
 }

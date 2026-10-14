@@ -5,6 +5,25 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- Remove the `browser_workspace` tool. The catalog has 23 tools again. A session works only in
+  its own tabs and can no longer list other sessions or switch into another session's workspace.
+  A call to the old tool fails before any browser work and points to `browser_tabs` list
+  (ADR-0196).
+
+### Fixed
+
+- A tab handle from another session now points the model to its own `browser_tabs` list
+  instead of suggesting a switch.
+- A refusal for another session's handle names that session only by its client label. When the
+  client reported no usable name, the refusal is the generic one instead of showing the other
+  session's internal workspace id.
+- Each connection keeps one workspace for its life. A switch could leave the original
+  workspace and its tabs open until the service restarted; that path is gone.
+
 ## [1.3.15] - 2026-10-05
 
 ### Fixed

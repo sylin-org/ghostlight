@@ -19,7 +19,7 @@ const EXPECTED_TOOLS = [
   "browser_click", "browser_scroll", "browser_hover", "browser_fill_form",
   "browser_type_text", "browser_press_key", "browser_drag", "browser_wait",
   "browser_dialog", "browser_upload", "browser_execute", "browser_flow",
-  "browser_record", "browser_diagnose", "browser_workspace", "policy_explain"
+  "browser_record", "browser_diagnose", "policy_explain"
 ];
 const checks = [];
 const evidence = [];
@@ -382,11 +382,9 @@ try {
   await succeed("browser_navigate", { tab: localTab, url: `http://localhost:${localPort}/` });
   await succeed("browser_history", { tab: localTab, action: "back" });
   assert.match((await succeed("browser_read", { tab: localTab })).facts.text, /Installed interaction acceptance/);
-  await succeed("browser_tabs", { action: "list" });
-  const workspaces = await succeed("browser_workspace", { action: "list" });
-  assert.ok(workspaces.facts.count >= 1);
-  assert.ok(workspaces.facts.workspaces.some(workspace => workspace.active && workspace.tab_count >= 1));
-  check("history restores the prior document and live workspace listing remains usable");
+  const listedTabs = await succeed("browser_tabs", { action: "list" });
+  assert.ok(listedTabs.facts.tabs.some(entry => entry.tab === localTab));
+  check("history restores the prior document and the session's own tab listing remains usable");
 
   const opened = structured(await request("tools/call", {
     name: "browser_navigate",

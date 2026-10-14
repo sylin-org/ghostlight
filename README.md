@@ -43,10 +43,10 @@ The published release is 1.3.14. It is available as the GitHub release
 
 ## What you get
 
-- **24 catalog tools**: 23 browser tools covering tabs, navigation, reading a page, screenshots,
-  semantic clicks and hovers, form input, file upload, scripts, waits, short flows, dialogs,
-  diagnostics, and workspace switching, plus one policy tool that explains the authority in
-  force. One call carries the intent; Ghostlight performs the browser steps behind it.
+- **23 catalog tools**: 22 browser tools covering tabs, navigation, reading a page, screenshots,
+  semantic clicks and hovers, form input, file upload, scripts, waits, short flows, dialogs, and
+  diagnostics, plus one policy tool that explains the authority in force. One call carries the
+  intent; Ghostlight performs the browser steps behind it.
 - **One truthful answer per call**: what happened, what changed in the browser, what is ready, and
   whether running it again is safe. Ghostlight writes that answer, never the page, and adds at most
   two recovery steps of its own. When an effect is uncertain it says so rather than guessing, and

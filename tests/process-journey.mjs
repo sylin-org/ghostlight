@@ -33,7 +33,7 @@ const EXPECTED_TOOLS = [
   "browser_click", "browser_scroll", "browser_hover", "browser_fill_form",
   "browser_type_text", "browser_press_key", "browser_drag", "browser_wait",
   "browser_dialog", "browser_upload", "browser_execute", "browser_flow",
-  "browser_record", "browser_diagnose", "browser_workspace", "policy_explain"
+  "browser_record", "browser_diagnose", "policy_explain"
 ];
 const environment = {
   ...process.env,
@@ -626,7 +626,7 @@ try {
   assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
   assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
-  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_workspace"), true);
+  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_workspace"), false);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
 
   // Local destinations use the same policy path as remote sites, across the real executables.

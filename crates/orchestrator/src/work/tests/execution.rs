@@ -776,6 +776,11 @@ fn retired_tools_and_inputs_never_dispatch_or_change_human_controls() {
             "browser_sequence".to_string(),
             json!({"steps":[{"action":"click","target":"target_one"}]}),
         ),
+        ("browser_workspace".to_string(), json!({"action":"list"})),
+        (
+            "browser_workspace".to_string(),
+            json!({"action":"switch","workspace":"workspace_other"}),
+        ),
         (
             "browser_flow".to_string(),
             json!({"dry_run":true,"steps":[{"tool":"browser_tabs"}]}),
@@ -3166,19 +3171,17 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
     assert_eq!(result.summary, "That tab handle belongs to Workspace B.");
     assert_eq!(
         result.next_steps,
-        vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace."]
+        vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
     );
 }
 
 #[test]
-fn browser_workspace_list_and_switch_resolves_cross_workspace_tab_ownership() {
+fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
     let (executor, browser, _, workspace_a, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     let workspace_b = executor
         .workspaces
         .admit("Workspace B".into(), IntakeChannel::Mcp, None);
-
-    // Workspace B opens a tab.
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
         tab: tab(42, "https://example.com/"),
@@ -3192,62 +3195,166 @@ fn browser_workspace_list_and_switch_resolves_cross_workspace_tab_ownership() {
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
-    let tab_b = opened.facts["tab"].as_str().unwrap();
+    let tab_b = opened.facts["tab"].as_str().unwrap().to_owned();
+    let dispatched = browser.calls().len();
 
-    // Workspace A lists workspaces: discovers Workspace B.
-    let list_res = executor.execute(
+    // Session A holds B's handle. It is refused before any browser work, the refusal points
+    // at A's own tabs, and nothing in it names B's workspace or a way into it.
+    let refused = executor.execute(
         &workspace_a,
-        "browser_workspace",
+        "browser_read",
+        json!({"tab": tab_b}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.status, Status::Failed);
+    assert_eq!(refused.effect, Effect::None);
+    assert_eq!(refused.facts["reason"], "ownership_mismatch");
+    assert_eq!(
+        refused.next_steps,
+        vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
+    );
+    let rendered = serde_json::to_string(&refused).unwrap();
+    assert!(!rendered.contains(workspace_b.as_str()), "{rendered}");
+    assert!(!rendered.contains("browser_workspace"), "{rendered}");
+
+    // The removed switch, called directly or as a flow step, is refused and dispatches nothing.
+    for (tool, input) in [
+        (
+            "browser_workspace",
+            json!({"action": "switch", "workspace": workspace_b.as_str()}),
+        ),
+        (
+            "browser_flow",
+            json!({"steps": [{"tool": "browser_workspace", "arguments": {"action": "switch", "workspace": workspace_b.as_str()}}]}),
+        ),
+    ] {
+        let result = executor.execute(
+            &workspace_a,
+            tool,
+            input,
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Failed, "{tool}: {result:?}");
+        assert_eq!(result.effect, Effect::None, "{tool}: {result:?}");
+    }
+    assert_eq!(browser.calls().len(), dispatched);
+
+    // A's own listing never shows B's tab, even though the browser reports it.
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(42, "https://example.com/")],
+    }));
+    let listed = executor.execute(
+        &workspace_a,
+        "browser_tabs",
         json!({"action": "list"}),
         None,
         &CancellationToken::default(),
     );
-    assert_eq!(list_res.status, Status::Succeeded);
-    assert_eq!(list_res.facts["count"], 2);
-    let workspaces_arr = list_res.facts["workspaces"].as_array().unwrap();
-    assert!(workspaces_arr
-        .iter()
-        .any(|w| w["workspace"] == workspace_b.as_str() && w["tab_count"] == 1));
+    assert_eq!(listed.status, Status::Succeeded);
+    assert_eq!(listed.facts["tabs"], json!([]));
 
-    // Attempt switch to nonexistent workspace fails cleanly.
-    let bad_switch = executor.execute(
-        &workspace_a,
-        "browser_workspace",
-        json!({"action": "switch", "workspace": "workspace_nonexistent"}),
-        None,
-        &CancellationToken::default(),
-    );
-    assert_eq!(bad_switch.status, Status::Failed);
-    assert_eq!(bad_switch.facts["reason"], "workspace_closed");
-
-    // Workspace A switches to Workspace B.
-    let switch_res = executor.execute(
-        &workspace_a,
-        "browser_workspace",
-        json!({"action": "switch", "workspace": workspace_b.as_str()}),
-        None,
-        &CancellationToken::default(),
-    );
-    assert_eq!(switch_res.status, Status::Succeeded);
-    assert_eq!(switch_res.facts["switched_workspace"], workspace_b.as_str());
-
-    // Switched workspace now has direct access to read tab_b.
+    // B still owns and reads its tab.
     browser.push(Ok(BrowserOutcome::Text {
         tab_id: 42,
-        text: "Delightful Hello".into(),
+        text: "Workspace B content".into(),
         truncated: false,
         title: "Example".into(),
         url: "https://example.com/".into(),
     }));
-    let read_res = executor.execute(
+    let read = executor.execute(
         &workspace_b,
         "browser_read",
         json!({"tab": tab_b}),
         None,
         &CancellationToken::default(),
     );
-    assert_eq!(read_res.status, Status::Succeeded);
-    assert_eq!(read_res.facts["text"], "Delightful Hello");
+    assert_eq!(read.status, Status::Succeeded);
+    assert_eq!(read.facts["text"], "Workspace B content");
+}
+
+/// A client can reach Ghostlight with no usable name: an empty `clientInfo.name`, or one made
+/// only of control or bidi characters, bounds to an empty label. Its handles are still refused
+/// to other sessions, and the refusal falls back to the generic sentence instead of naming the
+/// owner by its workspace id.
+#[test]
+fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
+    for label in ["", "\u{202e}\u{200b}\u{0007}"] {
+        let (executor, browser, _, workspace_a, _) = fixture();
+        browser.connect(vec![summary(FAKE_BROWSER, true)]);
+        let workspace_b = executor
+            .workspaces
+            .admit(label.into(), IntakeChannel::Mcp, None);
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(42, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace_b,
+            "browser_navigate",
+            json!({"url": "https://example.com", "new_tab": true}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        let tab_b = opened.facts["tab"].as_str().unwrap().to_owned();
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 42,
+            targets: vec![ObservedTarget {
+                locator: "btn-1".into(),
+                role: "button".into(),
+                name: "Save".into(),
+                state: vec![],
+                credential_class: false,
+            }],
+        }));
+        let inspected = executor.execute(
+            &workspace_b,
+            "browser_inspect",
+            json!({"tab": tab_b, "scope": "controls", "max_items": 10}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(inspected.status, Status::Succeeded, "{inspected:?}");
+        let target_b = inspected.facts["items"][0]["target"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let dispatched = browser.calls().len();
+
+        for (tool, input) in [
+            ("browser_read", json!({"tab": tab_b})),
+            ("browser_click", json!({"target": target_b})),
+        ] {
+            let refused = executor.execute(
+                &workspace_a,
+                tool,
+                input,
+                None,
+                &CancellationToken::default(),
+            );
+            assert_eq!(refused.status, Status::Failed, "{tool}: {refused:?}");
+            assert_eq!(refused.effect, Effect::None, "{tool}");
+            assert_eq!(refused.facts["reason"], "ownership_mismatch", "{tool}");
+            assert!(
+                refused.facts.get("owner_workspace").is_none(),
+                "{tool}: {refused:?}"
+            );
+            assert_eq!(
+                refused.summary,
+                "That handle belongs to a different Ghostlight session."
+            );
+            assert_eq!(
+                refused.next_steps,
+                vec!["Collect fresh handles from this session, then continue with those."]
+            );
+            let rendered = serde_json::to_string(&refused).unwrap();
+            assert!(!rendered.contains(workspace_b.as_str()), "{rendered}");
+        }
+        assert_eq!(browser.calls().len(), dispatched);
+    }
 }
 
 #[test]
@@ -3438,7 +3545,7 @@ fn cross_workspace_tab_discovery_stress_permutations() {
                 );
                 assert_eq!(
                     result.next_steps,
-                    vec!["Switch workspace with browser_workspace, or call browser_tabs with action list to see tabs in the current workspace."]
+                    vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
                 );
             }
         }

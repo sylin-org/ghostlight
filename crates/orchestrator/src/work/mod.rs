@@ -12,7 +12,6 @@ mod reading;
 mod receipt;
 mod recording;
 pub mod result;
-mod workspace_management;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -511,7 +510,6 @@ impl ApplicationExecutor {
             Operation::HandleDialog(value) => self.handle_dialog(context, lease, value),
             Operation::Diagnose(value) => self.diagnose(context, lease, value),
             Operation::Record(value) => self.perform_record(context, Some(lease), value),
-            Operation::ManageWorkspace(value) => self.manage_workspace(context, value),
             Operation::ExplainPolicy(_) => self.explain_policy(context),
         }
     }
@@ -521,10 +519,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         operation: &Operation,
     ) -> Terminal {
-        if !matches!(
-            operation,
-            Operation::ExplainPolicy(_) | Operation::ManageWorkspace(_)
-        ) {
+        if !matches!(operation, Operation::ExplainPolicy(_)) {
             if let Some(terminal) = self.audit_preflight(context) {
                 return terminal;
             }
@@ -532,9 +527,8 @@ impl ApplicationExecutor {
         match operation {
             Operation::Record(value) => self.perform_record(context, None, value),
             Operation::ExplainPolicy(_) => self.explain_policy(context),
-            Operation::ManageWorkspace(value) => self.manage_workspace(context, value),
             _ => {
-                unreachable!("only recording cleanup, client export, policy explain, and workspace manage bypass the workspace lease")
+                unreachable!("only recording cleanup, client export, and policy explain bypass the workspace lease")
             }
         }
     }
@@ -1893,10 +1887,7 @@ fn operation_requires_workspace_lease(operation: &Operation) -> bool {
             target: None,
             ..
         }) if matches!(action.as_str(), "status" | "stop" | "save" | "discard")
-    ) && !matches!(
-        operation,
-        Operation::ExplainPolicy(_) | Operation::ManageWorkspace(_)
-    )
+    ) && !matches!(operation, Operation::ExplainPolicy(_))
 }
 
 fn permitted() -> Decision {
@@ -1975,7 +1966,6 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::RunFlow(_) => PresentationActivity::Quiet,
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
         Operation::Diagnose(_) => PresentationActivity::Quiet,
-        Operation::ManageWorkspace(_) => PresentationActivity::Quiet,
         Operation::ExplainPolicy(_) => PresentationActivity::Quiet,
         Operation::Record(value) if value.action == "start" => PresentationActivity::Screenshot,
         Operation::Record(_) => PresentationActivity::Quiet,

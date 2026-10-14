@@ -2,7 +2,7 @@
 
 ## Contract rules
 
-The 24 tools below are the complete 1.0 catalog. Input objects and nested objects set
+The 23 tools below are the complete 1.0 catalog. Input objects and nested objects set
 `additionalProperties` to `false`. Every input schema is a top-level object without root-level
 `oneOf`, `allOf`, or `anyOf`, because current Kiro and Bedrock reject those otherwise valid JSON
 Schema forms. Conditional inputs advertise one portable teaching envelope; the typed decoder
@@ -29,9 +29,11 @@ to `stop`. Captured result payloads have a bounded total budget; progress remain
 
 Authority comes from configured managed/local policy and human controls. Tools do not accept
 `restrict_hosts`, `restrict_capabilities`, or `browser_flow.dry_run`. The retired `browser_sequence`
-tool is replaced by ordinary tool steps in `browser_flow`. Obsolete calls fail before browser work
+tool is replaced by ordinary tool steps in `browser_flow`. The retired `browser_workspace` tool is
+gone because a session works only in its own workspace. Obsolete calls fail before browser work
 with catalog-refresh guidance; nothing retries automatically. Existing history remains readable.
-See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md).
+See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md) and
+[ADR-0196](../adr/0196-simple-pipeline-and-contained-boundaries.md).
 
 An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
 the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected
@@ -42,6 +44,15 @@ before any browser work, and the refusal says which case it hit:
 | No tab yet | `This session has no open tab yet.` | `no_tab` | `browser_navigate` with `url` |
 | Several tabs could be meant | `More than one tab is open in this session, so the call must name one.` | `ambiguous_tab` | `browser_tabs` list, then repeat with `tab` |
 | Named tab is gone | `That tab is no longer open.` | `tab_unavailable` | `browser_tabs` list |
+
+Each session works only in its own workspace. A tab, target, or view handle that belongs to
+another session is refused before any browser work with `reason: ownership_mismatch`. When the
+owning session has a client label, the summary names that label, for example `That tab handle
+belongs to Codex.`, the `owner_workspace` fact carries it, and the next step is `browser_tabs` list
+in the caller's own session. Otherwise, including a client that reported an empty name, the
+summary is `That handle belongs to a different Ghostlight session.` and the next step is to collect
+fresh handles in this session. A refusal never carries another session's workspace id. No tool
+lists other sessions or moves a session into another workspace (ADR-0196 Decision 8).
 
 Tab handles are durable correlation slots: navigating by a handle whose
 tab has closed recreates that tab through the governed open path under the same handle and says
@@ -634,22 +645,6 @@ post data, query strings, and fragments. Results contain ordered bounded entries
 cursor, truncation and eviction facts, and counts of host-filtered entries. Diagnostic evidence is
 untrusted model-visible content. It is never policy input, audit payload, persistent storage, or
 page presentation.
-
-### `browser_workspace`
-
-List admitted browser workspaces or switch the active MCP session to another admitted workspace.
-Use it when a tab handle belongs to another workspace and the session must continue there without
-disconnecting or losing conversation context. Shortest call: `{"action":"list"}`.
-
-Inputs are one closed branch: `action: "list"` with no workspace, or `action: "switch"` with one
-opaque `workspace_` handle. Capability: `read`.
-
-Listing returns each workspace handle, client label, tab count, active state, lease state, and held
-tab count, plus the total count and active workspace. Switching first proves the target workspace
-still exists. An unknown or closed handle is refused without changing the active binding. A
-successful switch returns the previous and selected workspace handles; subsequent browser calls
-use the selected workspace. The operation is local and read-only: it dispatches no browser work
-and mutates no workspace state, although it changes which existing workspace the MCP session uses.
 
 ### `policy_explain`
 
