@@ -1,6 +1,7 @@
 //! Persistent service lifecycle and generic bridge session handling.
 
 mod admission;
+pub mod lifetime;
 
 use std::env;
 use std::io::BufReader;
@@ -31,6 +32,7 @@ use crate::browser::{
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
 use crate::language::catalog_for;
+use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
@@ -40,6 +42,13 @@ const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
 
 use admission::{Capacity, Job, Permit, QueueBudget, Refused, SessionQueue};
+use lifetime::{DiscoveryWatch, Drain};
+
+/// The desktop's request to leave its event loop, installed once the desktop exists.
+pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
+
+/// How often a start that waits for the service lease asks for it again.
+const LEASE_POLL: Duration = Duration::from_millis(50);
 
 /// A running local service host. Dropping it requests listener shutdown.
 pub struct ServiceHost {
@@ -54,6 +63,9 @@ pub struct ServiceHost {
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
     runtime_path: PathBuf,
+    drain: Arc<Drain>,
+    quit_signal: Arc<Mutex<Option<QuitSignal>>>,
+    discovery: Arc<DiscoveryWatch>,
     _lease: ServiceLease,
 }
 
@@ -76,21 +88,35 @@ impl ServiceHost {
     /// Prepare the authenticated service under its lifetime lease without publishing discovery.
     /// The desktop must call `publish_ready` only after its native interaction route is ready.
     pub fn start(path: &Path) -> Result<Self> {
-        let diagnostics = DiagnosticsHub::birth(path);
-        Self::start_with_diagnostics(path, Arc::clone(&diagnostics)).inspect_err(|error| {
-            diagnostics.sink().emit(
-                ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
-                ghostlight_bridge::diagnostics::Level::Error,
-                None,
-                &format!("service startup: {error:#}"),
-            );
-        })
+        Self::start_waiting(path, Duration::ZERO)
     }
 
-    fn start_with_diagnostics(path: &Path, diagnostics: Arc<DiagnosticsHub>) -> Result<Self> {
-        let lease = ServiceLease::try_acquire(path)
-            .context("open the orchestrator service lease")?
-            .ok_or(AuthorityAlreadyRunning)?;
+    /// Like [`ServiceHost::start`], but a held lease is asked for again until `lease_wait` has
+    /// passed. A `serve` start uses this so a service that is about to exit does not make its
+    /// successor give up.
+    pub fn start_waiting(path: &Path, lease_wait: Duration) -> Result<Self> {
+        let diagnostics = DiagnosticsHub::birth(path);
+        Self::start_with_diagnostics(path, Arc::clone(&diagnostics), lease_wait).inspect_err(
+            |error| {
+                // Meeting the running service is how a racing start ends, not a failure.
+                if !error.is::<AuthorityAlreadyRunning>() {
+                    diagnostics.sink().emit(
+                        ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                        ghostlight_bridge::diagnostics::Level::Error,
+                        None,
+                        &format!("service startup: {error:#}"),
+                    );
+                }
+            },
+        )
+    }
+
+    fn start_with_diagnostics(
+        path: &Path,
+        diagnostics: Arc<DiagnosticsHub>,
+        lease_wait: Duration,
+    ) -> Result<Self> {
+        let lease = acquire_lease(path, lease_wait)?;
         ghostlight_bridge::installation::verify_serving_executable(path)?;
         let service_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .context("bind service bridge")?;
@@ -165,6 +191,7 @@ impl ServiceHost {
         }));
 
         let stop = Arc::new(AtomicBool::new(false));
+        let drain = Arc::new(Drain::default());
         let audit_stop = stop.clone();
         let audit_for_thread = Arc::clone(&audit);
         let audit_thread = std::thread::spawn(move || {
@@ -182,6 +209,7 @@ impl ServiceHost {
             governance.clone(),
             endpoint.token.clone(),
             Arc::clone(&diagnostics),
+            Arc::clone(&drain),
         );
         let browser_thread = spawn_browser_listener(
             browser_listener,
@@ -198,6 +226,9 @@ impl ServiceHost {
             stop,
             threads: vec![service_thread, browser_thread, audit_thread],
             runtime_path: path.into(),
+            drain,
+            quit_signal: Arc::default(),
+            discovery: Arc::default(),
             _lease: lease,
         })
     }
@@ -209,6 +240,7 @@ impl ServiceHost {
         self.browser.endpoint_published();
         write_runtime(&self.runtime_path, &self.endpoint)
             .context("publish desktop-ready endpoint")?;
+        self.discovery.settle();
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
             ghostlight_bridge::diagnostics::Level::Info,
@@ -222,6 +254,69 @@ impl ServiceHost {
         Ok(())
     }
 
+    /// Stop this process by itself if discovery has not been published by `deadline`.
+    ///
+    /// `publish_ready` cancels the deadline. On expiry the service records a diagnostics event and
+    /// calls `on_expiry`, which ends the process. A start that stalls therefore never holds the
+    /// lease against the starts that follow it.
+    pub fn expect_discovery_by(
+        &self,
+        deadline: Instant,
+        on_expiry: impl FnOnce() + Send + 'static,
+    ) -> Result<()> {
+        let diagnostics = Arc::clone(&self.diagnostics);
+        self.discovery
+            .arm(deadline, move || {
+                diagnostics.sink().emit(
+                    ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                    ghostlight_bridge::diagnostics::Level::Error,
+                    None,
+                    "discovery was not published in time; the service stopped",
+                );
+                on_expiry();
+            })
+            .context("start the discovery deadline")
+    }
+
+    /// Install the request the desktop makes to leave its event loop with status 0.
+    pub fn install_quit_signal(&self, signal: QuitSignal) {
+        *lock(&self.quit_signal) = Some(signal);
+    }
+
+    /// Begin a quit: refuse new work, let in-flight invocations finish for up to `grace`, then ask
+    /// the desktop to exit. Returns at once; a second call while a quit is under way does nothing.
+    pub fn begin_quit(&self, grace: Duration) {
+        if !self.drain.begin_quit() {
+            return;
+        }
+        let drain = Arc::clone(&self.drain);
+        let signal = Arc::clone(&self.quit_signal);
+        let diagnostics = Arc::clone(&self.diagnostics);
+        let spawned = thread::Builder::new()
+            .name("ghostlight-quit-drain".into())
+            .spawn(move || {
+                let drained = drain.wait_idle(grace);
+                diagnostics.sink().emit(
+                    ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
+                    ghostlight_bridge::diagnostics::Level::Info,
+                    None,
+                    &format!("quit: drained={drained} in_flight={}", drain.in_flight()),
+                );
+                let signal = lock(&signal).clone();
+                if let Some(signal) = signal {
+                    signal();
+                }
+            });
+        if spawned.is_err() {
+            self.diagnostics.sink().emit(
+                ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                ghostlight_bridge::diagnostics::Level::Error,
+                None,
+                "the quit drain could not start",
+            );
+        }
+    }
+
     /// The process-diagnostics hub this authority owns.
     #[must_use]
     pub fn diagnostics(&self) -> Arc<DiagnosticsHub> {
@@ -229,6 +324,7 @@ impl ServiceHost {
     }
 
     fn join(&mut self) {
+        self.discovery.settle();
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
         let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.endpoint.service_port));
@@ -312,6 +408,7 @@ fn spawn_service_listener(
     governance: GovernanceFacade,
     token: String,
     diagnostics: Arc<DiagnosticsHub>,
+    drain: Arc<Drain>,
 ) -> JoinHandle<()> {
     let handshakes = Capacity::new(admission::HANDSHAKES);
     let sessions = Capacity::new(admission::SESSIONS);
@@ -338,6 +435,7 @@ fn spawn_service_listener(
                         let governance = governance.clone();
                         let token = token.clone();
                         let diagnostics = Arc::clone(&diagnostics);
+                        let drain = Arc::clone(&drain);
                         let _ = thread::Builder::new()
                             .name("ghostlight-mcp-session".into())
                             .spawn(move || {
@@ -353,6 +451,7 @@ fn spawn_service_listener(
                                     handshake,
                                     sessions,
                                     budget,
+                                    drain,
                                     session_stop,
                                 ).is_err() {
                                     eprintln!("MCP service session ended after an invalid or interrupted exchange.");
@@ -464,6 +563,7 @@ fn serve_session(
     handshake: Permit,
     sessions: Capacity,
     budget: QueueBudget,
+    drain: Arc<Drain>,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
@@ -621,7 +721,7 @@ fn serve_session(
             channel.as_str()
         ),
     );
-    let queue = Arc::new(SessionQueue::new(budget));
+    let queue = Arc::new(SessionQueue::new(budget, drain));
     let mut workers = Vec::new();
     let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
     let catalog_watch_stop = Arc::new(AtomicBool::new(false));
@@ -752,15 +852,19 @@ fn serve_session(
                                 message: "Request id is already active.".into(),
                             },
                         ),
-                        Err(Refused::Full) => {
-                            let result = executor.execute_prepared(
-                                &workspace,
-                                &job.prepared,
-                                &job.cancellation,
-                                true,
-                            );
-                            deliver_result(&writer, &job.id, result);
-                        }
+                        Err(Refused::Full) => match queue.begin_unqueued() {
+                            Ok(_flight) => {
+                                let result = executor.execute_prepared(
+                                    &workspace,
+                                    &job.prepared,
+                                    &job.cancellation,
+                                    true,
+                                );
+                                deliver_result(&writer, &job.id, result);
+                            }
+                            Err(_) => refuse_while_quitting(&writer, job.id),
+                        },
+                        Err(Refused::ShuttingDown) => refuse_while_quitting(&writer, job.id),
                         Err(Refused::Closed) => break,
                     }
                 }
@@ -810,6 +914,35 @@ fn serve_session(
         workspace.as_str(),
     );
     served
+}
+
+/// Answer an invocation that arrived after a quit began.
+fn refuse_while_quitting(writer: &SocketWriter, id: String) {
+    write_response(
+        writer,
+        &ServiceResponse::Error {
+            id: Some(id),
+            code: SHUTTING_DOWN_CODE.into(),
+            message: SHUTTING_DOWN_MESSAGE.into(),
+        },
+    );
+}
+
+/// Take the service lease, asking again until `wait` has passed while another process holds it.
+fn acquire_lease(path: &Path, wait: Duration) -> Result<ServiceLease> {
+    let give_up = Instant::now() + wait;
+    loop {
+        if let Some(lease) =
+            ServiceLease::try_acquire(path).context("open the orchestrator service lease")?
+        {
+            return Ok(lease);
+        }
+        let remaining = give_up.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(AuthorityAlreadyRunning.into());
+        }
+        thread::sleep(LEASE_POLL.min(remaining));
+    }
 }
 
 /// Close the tabs of every session whose owning process is gone.
@@ -1532,5 +1665,145 @@ mod tests {
                 released: true
             })
         );
+    }
+
+    /// A host that signals through a channel instead of a desktop, with its published endpoint.
+    fn quittable_host(
+        name: &str,
+    ) -> (
+        std::path::PathBuf,
+        ServiceHost,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (directory, path) = runtime_path(name);
+        let host = ServiceHost::start(&path).unwrap();
+        host.publish_ready().unwrap();
+        let (quit, quit_requested) = std::sync::mpsc::channel();
+        host.install_quit_signal(Arc::new(move || {
+            let _ = quit.send(());
+        }));
+        (directory, host, quit_requested)
+    }
+
+    #[test]
+    fn a_quit_answers_new_invocations_with_shutting_down() {
+        use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
+
+        let (directory, host, quit_requested) = quittable_host("quit-refuses");
+        let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
+        write_json_line(
+            &mut stream,
+            &ServiceRequest::Hello {
+                major: SERVICE_BRIDGE_MAJOR,
+                token: host.endpoint.token.clone(),
+                client_label: "quit-probe".into(),
+                channel: IntakeChannel::Mcp,
+                session: None,
+            },
+        )
+        .unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let accepted: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
+        assert!(matches!(accepted, ServiceResponse::HelloAccepted { .. }));
+
+        host.begin_quit(Duration::from_secs(5));
+        quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("an idle service asks the desktop to exit at once");
+
+        write_json_line(
+            &mut stream,
+            &ServiceRequest::Invoke {
+                id: "late".into(),
+                tool: "browser_tabs".into(),
+                input: serde_json::json!({"action": "list"}),
+                deadline_ms: None,
+            },
+        )
+        .unwrap();
+        let refused: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
+        assert_eq!(
+            refused,
+            ServiceResponse::Error {
+                id: Some("late".into()),
+                code: SHUTTING_DOWN_CODE.into(),
+                message: SHUTTING_DOWN_MESSAGE.into(),
+            }
+        );
+        drop(reader);
+        drop(stream);
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_quit_waits_for_work_in_flight_and_then_asks_the_desktop_to_exit() {
+        let (directory, host, quit_requested) = quittable_host("quit-drains");
+        // The fake executor: an invocation the service has admitted and not yet finished.
+        let running = host.drain.admit().unwrap();
+
+        host.begin_quit(Duration::from_secs(30));
+        assert!(
+            quit_requested
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "the desktop is not asked to exit while work is in flight"
+        );
+        // A second quit while one is under way changes nothing.
+        host.begin_quit(Duration::ZERO);
+        assert!(quit_requested
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+
+        drop(running);
+        quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the desktop is asked to exit once the work finishes");
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_quit_stops_waiting_for_work_after_the_grace() {
+        let (directory, host, quit_requested) = quittable_host("quit-bound");
+        let _stuck = host.drain.admit().unwrap();
+
+        let started = Instant::now();
+        host.begin_quit(Duration::from_millis(200));
+        quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the desktop is asked to exit when the grace ends");
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_start_that_never_publishes_discovery_stops_by_itself() {
+        let (directory, path) = runtime_path("discovery-stalls");
+        let host = ServiceHost::start(&path).unwrap();
+        let (expired, fired) = std::sync::mpsc::channel();
+        host.expect_discovery_by(Instant::now() + Duration::from_millis(100), move || {
+            let _ = expired.send(());
+        })
+        .unwrap();
+        assert!(fired.recv_timeout(Duration::from_secs(5)).is_ok());
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn publishing_discovery_cancels_the_stop() {
+        let (directory, path) = runtime_path("discovery-published");
+        let host = ServiceHost::start(&path).unwrap();
+        let (expired, fired) = std::sync::mpsc::channel();
+        host.expect_discovery_by(Instant::now() + Duration::from_millis(200), move || {
+            let _ = expired.send(());
+        })
+        .unwrap();
+        host.publish_ready().unwrap();
+        assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
+        drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

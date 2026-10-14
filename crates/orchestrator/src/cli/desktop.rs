@@ -51,7 +51,7 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
     if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
         // A bus launch requests existence, never Open. In a cold-start race a losing
         // process must exit at the lifetime lease instead of revealing the winner's UI.
-        return crate::desktop::run();
+        return crate::desktop::run(crate::desktop::Startup::interactive());
     }
     let runtime = ghostlight_bridge::runtime::runtime_file()?;
     match crate::service::request_workbench_activation(&runtime) {
@@ -59,12 +59,34 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
         Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
         Err(_) => {}
     }
-    match crate::desktop::run() {
+    match crate::desktop::run(crate::desktop::Startup::interactive()) {
         Ok(()) => Ok(()),
         Err(start_error) if start_error.is::<crate::service::AuthorityAlreadyRunning>() => {
             finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
         }
         Err(start_error) => Err(start_error),
+    }
+}
+
+/// Start the service and its backgrounded desktop for a connector, then run until quit.
+///
+/// This is the start a connector makes, so it differs from a human start in three ways. It never
+/// reveals a window. It exits 0 without a word when another service holds the lease, once it has
+/// asked for the lease for a second. And it stops by itself, with a nonzero status and a
+/// diagnostics event, when discovery is not published within the discovery window.
+pub fn serve() -> anyhow::Result<()> {
+    let started = Instant::now();
+    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
+        anyhow::bail!("Ghostlight is being updated; it will be available when deployment finishes");
+    }
+    settle_serve(crate::desktop::run(crate::desktop::Startup::serve(started)))
+}
+
+/// Turn how a `serve` start ended into its exit: finding the service already running is success.
+pub fn settle_serve(ended: anyhow::Result<()>) -> anyhow::Result<()> {
+    match ended {
+        Err(error) if error.is::<crate::service::AuthorityAlreadyRunning>() => Ok(()),
+        other => other,
     }
 }
 
@@ -197,6 +219,57 @@ mod tests {
         assert!(super::desktop_bus_start(Some(OsStr::new("session"))));
         assert!(!super::desktop_bus_start(Some(OsStr::new("system"))));
         assert!(!super::desktop_bus_start(None));
+    }
+
+    #[test]
+    fn serve_exits_quietly_while_another_service_holds_the_lease() {
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-serve-decision-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let runtime = directory.join("runtime.json");
+        let running = crate::service::ServiceHost::start(&runtime).unwrap();
+
+        let started = Instant::now();
+        let contended =
+            crate::service::ServiceHost::start_waiting(&runtime, Duration::from_millis(200))
+                .err()
+                .expect("the lease is held");
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "a serve start asks for the lease for its whole wait"
+        );
+        assert!(settle_serve(Err(contended)).is_ok());
+
+        // Only a held lease is success; any other end of a start is still an error.
+        assert!(settle_serve(Err(anyhow::anyhow!("native desktop construction failed"))).is_err());
+        assert!(settle_serve(Ok(())).is_ok());
+
+        // A lease released inside the wait is taken, not reported as held.
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(running);
+        });
+        let taken =
+            crate::service::ServiceHost::start_waiting(&runtime, Duration::from_secs(5)).unwrap();
+        release.join().unwrap();
+        drop(taken);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_serve_start_waits_for_the_lease_and_a_human_start_does_not() {
+        let started = Instant::now();
+        let serve = crate::desktop::Startup::serve(started);
+        assert_eq!(serve.lease_wait, Duration::from_secs(1));
+        assert_eq!(
+            serve.discovery_deadline,
+            Some(started + crate::service::lifetime::DISCOVERY_WINDOW)
+        );
+        let human = crate::desktop::Startup::interactive();
+        assert_eq!(human.lease_wait, Duration::ZERO);
+        assert!(human.discovery_deadline.is_none());
     }
 
     #[test]

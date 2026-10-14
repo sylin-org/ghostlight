@@ -1,11 +1,19 @@
 //! What Ghostlight says on its MCP intake.
 //!
-//! Two kinds of words live here: the messages of the JSON-RPC errors the MCP session engine
-//! answers itself, and the sentences of the failure templates a connector sends when it cannot
-//! reach the service. The connector authors no words, so both come from this module.
+//! Three kinds of words live here: the messages of the JSON-RPC errors the MCP session engine
+//! answers itself, the sentences of the failure templates a connector sends when it cannot
+//! reach the service, and the sentence the service answers to work that arrives during a quit.
+//! The connector authors no words, so all three come from this module.
 
 /// Longest message a JSON-RPC error carries, in characters.
 const MAX_ERROR_MESSAGE_CHARS: usize = 500;
+
+/// The service's stable reason code for an invocation that arrives after a quit has begun.
+pub const SHUTTING_DOWN_CODE: &str = "shutting_down";
+
+/// What the service says to an invocation that arrives after a quit has begun.
+pub const SHUTTING_DOWN_MESSAGE: &str =
+    "Ghostlight is quitting and takes no new work. Nothing was sent. Try the call again in a moment.";
 
 /// A request the MCP session engine answers with a JSON-RPC error instead of forwarding it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -123,7 +131,7 @@ impl ConnectorFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectorFailure, ProtocolRefusal};
+    use super::{ConnectorFailure, ProtocolRefusal, SHUTTING_DOWN_MESSAGE};
 
     #[test]
     fn every_failure_sentence_is_plain_ascii() {
@@ -133,6 +141,13 @@ mod tests {
             assert!(failure.call_next_steps().iter().all(|step| step.is_ascii()));
             assert!(failure.call_summary().ends_with('.'));
         }
+    }
+
+    #[test]
+    fn the_quit_refusal_is_plain_ascii_and_says_nothing_was_sent() {
+        assert!(SHUTTING_DOWN_MESSAGE.is_ascii());
+        assert!(SHUTTING_DOWN_MESSAGE.contains("Nothing was sent"));
+        assert!(SHUTTING_DOWN_MESSAGE.ends_with('.'));
     }
 
     #[test]

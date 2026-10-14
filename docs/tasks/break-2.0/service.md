@@ -15,10 +15,12 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-11`. `intake::mcp::McpSession` is the transport-free MCP engine; nothing
-feeds it yet. switch-1 connects it to relay-3 `mcp` streams, sends the `HelloAccepted` session key
-to `bind_session`, hands out `ResumeState::encode` tokens, and writes `failure_templates()` to
-`relay-templates.json` (replacing `TEMPLATES_RELAY` with the relay crate's `RELAY`).
+Lane complete after `service-11`. Next is the switch. `intake::mcp::McpSession` is the
+transport-free MCP engine; nothing feeds it yet. switch-1 connects it to relay-3 `mcp` streams,
+sends the `HelloAccepted` session key to `bind_session`, hands out `ResumeState::encode` tokens, and
+writes `failure_templates()` to `relay-templates.json` (replacing `TEMPLATES_RELAY` with the relay
+crate's `RELAY`). It also wires the relay-3 control op `quit` to `ServiceHost::begin_quit(QUIT_GRACE)`
+and makes connectors spawn `ghostlight serve`.
 
 ## Landed
 
@@ -34,6 +36,7 @@ to `bind_session`, hands out `ResumeState::encode` tokens, and writes `failure_t
 | service-8-p4-fill | `translate/forms.rs`: fields grouped by document in first-appearance order; an orphan submit refused before anything is sent; one guarded Sequence of `prepare_fill` per document before any edit; field kinds from the plans (`world::{FieldKind, FillPlan}`); consecutive local fields share one Sequence of `fill_local`; a text field is one `input` behind `focus_text_field` typing `keys::replace_text`; the fill's own budget checked before every field; a Parallel `verify_fill_retained` (limit `FILL_RETAINED_LIMIT_MS` = 2000, settle 25 without a submit); `submit_fill` with settle 250. 11 tests in `translate/tests/forms.rs`. `work/tests/protocol4.rs` runs the executor over a real `RelayBrowserPort` and the FakeExtension (now `pub(crate)` in test builds) for the five section 5 model-visible deltas, asserting status, summary, effect and repeat-safety. | see `git log` |
 | service-9-p4-points-drag | `translate/points.rs`: `ActivatePoint` and `ActivatePointModified` (view first and validated before any effect; `scroll_point` on the top document; route; click steps, settle 250), `WheelAt` (ticks of 120, up is negative, settle 120, receipt at the viewport point), `HoverPoint`, `DragPoints` (two `viewport_point` calls in one sequence; a drag path of 12 strides), `DropImageAt` (always routed; `drop_files` at the local position in the deepest document). `translate::route_and_admit` places a point, admits its document as an input subject, and leaves a point that zero or several owners claim unresolved ("point has no current document subject"); a scope that allows every document skips the routing. `Activate` and `Hover` use it instead of refusing a restricted scope. `pointer::drag` (locators, spec 4.6 order). `records::export_to_page` (`attach_file` through `Scope::call`, with the scope guard). `route` returns a `Routed` (document, local point, subject). `untranslated` and the last `CapabilityVersion` fallback are gone. 21 tests in `translate/tests/points.rs`. | see `git log` |
 | service-10-mcp-intake | `intake/{mod.rs, mcp.rs}`: `McpSession` (`new(channel)`, `resumed(ResumeState)`, `accept(line) -> Vec<Step>`, `render(ServiceResponse) -> Vec<Value>`, `resume_state(tabs, recording)`), ported from the BASE connector's `main.rs`, `mcp_2025_11_25.rs` and `mcp_2026_07_28.rs`. Batches reply as one array once their catalog requests are answered; tool results go out one by one. Tool results carry the envelope only in `structuredContent`; `tools/list` drops `outputSchema`. `ResumeState` travels as `rs1.` plus base64url JSON. `failure_templates()` for cut-off and expired requests; every sentence and JSON-RPC error message in `language/intake.rs`. `intake::server_profile()` now also feeds the bridge `HelloAccepted`. 26 tests. | see `git log` |
+| service-11-serve-and-quit | `ghostlight serve` (`LaunchMode::Serve`, `cli::desktop::serve`, `desktop::Startup`): asks for the lease for 1 s and exits 0 quietly when another service holds it (a contended start no longer logs `process_failed`), never reveals a window, and exits 3 with a diagnostics event if discovery is not published within 30 s (`ServiceHost::expect_discovery_by`, cancelled by `publish_ready`). `service/lifetime.rs`: `Drain`/`InFlight`, `DiscoveryWatch`, `QUIT_GRACE`, `DISCOVERY_WINDOW`. `ServiceHost::begin_quit(grace)` refuses new invocations (`shutting_down`, sentence in `language/intake.rs`; `SessionQueue::admit` returns `Refused::ShuttingDown`), waits for in-flight ones up to the grace, then calls the quit signal the desktop installed (`app.exit(0)`). The tray Quit is unchanged. `serve` is in help but not in `SUBCOMMANDS`, like `native-host`; the shell completions are the packaging owner's to extend. 12 tests. | see `git log` |
 
 ## Notes
 

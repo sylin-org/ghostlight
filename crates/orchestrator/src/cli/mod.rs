@@ -299,6 +299,7 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
             Ok(())
         }
         parse::LaunchMode::Desktop => desktop::start_or_activate_desktop(),
+        parse::LaunchMode::Serve => desktop::serve(),
         parse::LaunchMode::Open => desktop::open_desktop(),
         parse::LaunchMode::Call => desktop::run_call(),
         parse::LaunchMode::Diagnostics(command) => diagnostics::run(&command),

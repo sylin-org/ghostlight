@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use super::lifetime::{Drain, InFlight};
 use crate::work::{CancellationToken, PreparedInvocation};
 
 const SESSION_WORK: usize = 32;
@@ -79,6 +80,7 @@ struct Active {
     job: Job,
     bytes: usize,
     _permit: Permit,
+    _flight: InFlight,
 }
 
 #[derive(Default)]
@@ -95,21 +97,29 @@ pub(super) enum Refused {
     Duplicate,
     Full,
     Closed,
+    ShuttingDown,
 }
 
 pub(super) struct SessionQueue {
     state: Mutex<State>,
     available: Condvar,
     budget: QueueBudget,
+    drain: Arc<Drain>,
 }
 
 impl SessionQueue {
-    pub(super) fn new(budget: QueueBudget) -> Self {
+    pub(super) fn new(budget: QueueBudget, drain: Arc<Drain>) -> Self {
         Self {
             state: Mutex::default(),
             available: Condvar::new(),
             budget,
+            drain,
         }
+    }
+
+    /// Count an invocation that runs outside the queue, or refuse it because a quit has begun.
+    pub(super) fn begin_unqueued(&self) -> Result<InFlight, Refused> {
+        self.drain.admit().map_err(|_| Refused::ShuttingDown)
     }
 
     pub(super) fn admit(&self, job: Job, bytes: usize) -> Result<(), Refused> {
@@ -117,6 +127,7 @@ impl SessionQueue {
         if state.stopped {
             return Err(Refused::Closed);
         }
+        let flight = self.begin_unqueued()?;
         // Never replace the cancellation token of a request already admitted.
         if state.active.contains_key(&job.id) {
             return Err(Refused::Duplicate);
@@ -147,6 +158,7 @@ impl SessionQueue {
                 job,
                 bytes,
                 _permit: permit,
+                _flight: flight,
             },
         );
         self.available.notify_all();
@@ -258,7 +270,7 @@ mod tests {
 
     #[test]
     fn duplicates_keep_the_original_token_and_queued_cancellation_bypasses_work() {
-        let queue = SessionQueue::new(QueueBudget::default());
+        let queue = SessionQueue::new(QueueBudget::default(), Arc::default());
         let original = job("same", false);
         queue.admit(original.clone(), 512).unwrap();
         assert_eq!(
@@ -276,14 +288,14 @@ mod tests {
     #[test]
     fn bursts_are_fifo_and_full_work_preserves_controls_and_another_session() {
         let budget = QueueBudget::default();
-        let queue = SessionQueue::new(budget.clone());
+        let queue = SessionQueue::new(budget.clone(), Arc::default());
         for i in 0..SESSION_WORK {
             queue.admit(job(&i.to_string(), false), 512).unwrap();
         }
         assert_eq!(queue.admit(job("overflow", false), 512), Err(Refused::Full));
         queue.admit(job("control", true), 512).unwrap();
         assert_eq!(queue.next(true).unwrap().id, "control");
-        let other = SessionQueue::new(budget);
+        let other = SessionQueue::new(budget, Arc::default());
         other.admit(job("other", false), 512).unwrap();
         assert_eq!(other.next(false).unwrap().id, "other");
         for i in 0..SESSION_WORK {
@@ -306,14 +318,33 @@ mod tests {
             work: Capacity::new(1024),
             controls: Capacity::new(1024),
         };
-        let queue = SessionQueue::new(budget.clone());
+        let queue = SessionQueue::new(budget.clone(), Arc::default());
         queue.admit(job("big", false), 1024).unwrap();
-        let other = SessionQueue::new(budget);
+        let other = SessionQueue::new(budget, Arc::default());
         assert_eq!(other.admit(job("next", false), 1), Err(Refused::Full));
         other.admit(job("status", true), 512).unwrap();
         queue.stop();
         assert!(queue.next(false).unwrap().cancellation.is_cancelled());
         queue.complete("big");
         other.admit(job("next", false), 1024).unwrap();
+    }
+
+    #[test]
+    fn a_quit_refuses_admission_and_a_finished_job_leaves_the_drain() {
+        let drain = Arc::new(Drain::default());
+        let queue = SessionQueue::new(QueueBudget::default(), drain.clone());
+        queue.admit(job("running", false), 512).unwrap();
+        assert_eq!(drain.in_flight(), 1);
+        drain.begin_quit();
+        assert_eq!(
+            queue.admit(job("late", false), 512),
+            Err(Refused::ShuttingDown)
+        );
+        assert_eq!(queue.begin_unqueued().err(), Some(Refused::ShuttingDown));
+        assert_eq!(queue.next(false).unwrap().id, "running");
+        assert_eq!(drain.in_flight(), 1, "a job runs until it completes");
+        queue.complete("running");
+        assert_eq!(drain.in_flight(), 0);
+        assert!(drain.wait_idle(Duration::from_millis(10)));
     }
 }

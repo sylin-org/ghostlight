@@ -5,6 +5,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tauri::menu::{Menu, MenuItem};
@@ -21,6 +22,7 @@ use crate::governance::effective::EffectiveAuthority;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSetupResult, HarnessSummary,
 };
+use crate::service::lifetime::DISCOVERY_WINDOW;
 use crate::service::ServiceHost;
 use crate::workbench::{
     PolicyPreview, SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink,
@@ -35,6 +37,40 @@ const SEARCH_QUERY_LIMIT: usize = 120;
 const POLICY_DOCUMENT_LIMIT: usize = 256 * 1024;
 /// Single channel the disposable workbench listens on for sequenced orchestrator changes.
 const CHANGE_EVENT: &str = "ghostlight://change";
+/// How long a `serve` start keeps asking for the service lease while another process holds it.
+const SERVE_LEASE_WAIT: Duration = Duration::from_secs(1);
+/// The status a `serve` start exits with when it never became discoverable.
+pub const DISCOVERY_STALLED_EXIT: i32 = 3;
+
+/// How a desktop process was asked to start.
+#[derive(Clone, Copy, Debug)]
+pub struct Startup {
+    /// How long to keep asking for the service lease while another process holds it.
+    pub lease_wait: Duration,
+    /// When discovery must be published by. A start that misses it stops by itself.
+    pub discovery_deadline: Option<Instant>,
+}
+
+impl Startup {
+    /// A person asked for Ghostlight: take the lease or yield at once, and wait for nothing.
+    #[must_use]
+    pub const fn interactive() -> Self {
+        Self {
+            lease_wait: Duration::ZERO,
+            discovery_deadline: None,
+        }
+    }
+
+    /// A connector asked for the service: wait briefly for the lease, and stop by itself if
+    /// discovery is not published within the discovery window of `process_start`.
+    #[must_use]
+    pub fn serve(process_start: Instant) -> Self {
+        Self {
+            lease_wait: SERVE_LEASE_WAIT,
+            discovery_deadline: Some(process_start + DISCOVERY_WINDOW),
+        }
+    }
+}
 
 struct DesktopState {
     workbench: WorkbenchFacade,
@@ -86,7 +122,7 @@ impl WorkbenchEventSink for NativeEvents {
 }
 
 /// Start the orchestrator and its backgrounded desktop workbench in one process.
-pub fn run() -> Result<()> {
+pub fn run(startup: Startup) -> Result<()> {
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
 
@@ -105,9 +141,13 @@ pub fn run() -> Result<()> {
             eprintln!("Ghostlight could not reconcile the packaged browser connector: {error}");
         }
     }
-    let host = Arc::new(ServiceHost::start(
+    let host = Arc::new(ServiceHost::start_waiting(
         &ghostlight_bridge::runtime::runtime_file()?,
+        startup.lease_wait,
     )?);
+    if let Some(deadline) = startup.discovery_deadline {
+        host.expect_discovery_by(deadline, || std::process::exit(DISCOVERY_STALLED_EXIT))?;
+    }
     let ready_host = Arc::clone(&host);
     let workbench = host.workbench.clone();
     let setup_workbench = workbench.clone();
@@ -184,6 +224,9 @@ pub fn run() -> Result<()> {
             anyhow::bail!("Ghostlight desktop authority failed during startup");
         }
     };
+    // A quit from the service asks for the same exit the tray Quit takes.
+    let quit_handle = app.handle().clone();
+    host.install_quit_signal(Arc::new(move || quit_handle.exit(0)));
     #[cfg(target_os = "windows")]
     let _shutdown_listener = {
         let app_handle = app.handle().clone();
