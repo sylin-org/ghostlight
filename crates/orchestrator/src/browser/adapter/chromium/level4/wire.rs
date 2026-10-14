@@ -37,6 +37,44 @@ pub mod error_code {
     pub const ADAPTER_INCOMPATIBLE: &str = "adapter_incompatible";
 }
 
+/// The closed names of the primitives, as the `name` tag of a request spells them.
+pub mod primitive_name {
+    /// `list_tabs`.
+    pub const LIST_TABS: &str = "list_tabs";
+    /// `open_tab`.
+    pub const OPEN_TAB: &str = "open_tab";
+    /// `navigate`.
+    pub const NAVIGATE: &str = "navigate";
+    /// `focus_tab`.
+    pub const FOCUS_TAB: &str = "focus_tab";
+    /// `close_tab`.
+    pub const CLOSE_TAB: &str = "close_tab";
+    /// `set_zoom`.
+    pub const SET_ZOOM: &str = "set_zoom";
+    /// `resize_window`.
+    pub const RESIZE_WINDOW: &str = "resize_window";
+    /// `frames`.
+    pub const FRAMES: &str = "frames";
+    /// `call`.
+    pub const CALL: &str = "call";
+    /// `evaluate_main`.
+    pub const EVALUATE_MAIN: &str = "evaluate_main";
+    /// `view`.
+    pub const VIEW: &str = "view";
+    /// `input`.
+    pub const INPUT: &str = "input";
+    /// `capture`.
+    pub const CAPTURE: &str = "capture";
+    /// `dialog`.
+    pub const DIALOG: &str = "dialog";
+    /// `diagnostics`.
+    pub const DIAGNOSTICS: &str = "diagnostics";
+    /// `recording`.
+    pub const RECORDING: &str = "recording";
+    /// `accessibility_snapshot`.
+    pub const ACCESSIBILITY_SNAPSHOT: &str = "accessibility_snapshot";
+}
+
 // ---- frames, extension to service ----
 
 /// A frame the extension sends to the service.
@@ -919,6 +957,20 @@ pub struct Tab {
     /// The tab that opened this one, when Ghostlight controls or names it.
     #[serde(default)]
     pub opener_tab_id: Option<u64>,
+}
+
+impl From<Tab> for physical::PhysicalTab {
+    /// The physical tab the rest of the service uses. The opener is a routing fact the
+    /// physical tab does not carry.
+    fn from(tab: Tab) -> Self {
+        Self {
+            tab_id: tab.tab_id,
+            title: tab.title,
+            url: tab.url,
+            active: tab.active,
+            readiness: tab.readiness.into(),
+        }
+    }
 }
 
 /// Browser-local readiness of a tab.

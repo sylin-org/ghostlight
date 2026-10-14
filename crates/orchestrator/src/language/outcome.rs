@@ -123,6 +123,9 @@ impl TargetRole {
 /// Maximum number of visible characters retained from one browser-observed action label.
 const TARGET_LABEL_MAX_CHARS: usize = 80;
 
+/// Maximum number of visible characters retained from one JavaScript dialog's message.
+const DIALOG_MESSAGE_MAX_CHARS: usize = 500;
+
 /// The bounded human identity of the element an action actually used.
 ///
 /// The role is always narrowed to Ghostlight's closed vocabulary. The optional name is page
@@ -140,7 +143,7 @@ impl ActionSubject {
         Self {
             role: TargetRole::classify(role),
             label: if preserve_name {
-                normalized_target_label(name)
+                one_line_bounded(name, TARGET_LABEL_MAX_CHARS)
             } else {
                 None
             },
@@ -344,8 +347,12 @@ pub enum Outcome {
     },
     /// A browser dialog was resolved.
     DialogHandled { accepted: bool },
-    /// Current JavaScript-dialog state was observed.
-    DialogObserved { present: bool },
+    /// Current JavaScript-dialog state was observed, with the dialog's message when the browser
+    /// reported one.
+    DialogObserved {
+        present: bool,
+        message: Option<String>,
+    },
     /// Bounded console and network diagnostics were read.
     DiagnosticsRead {
         count: usize,
@@ -638,10 +645,19 @@ impl Outcome {
             } => waited(condition, *elapsed_ms, *satisfied, host),
             Self::DialogHandled { accepted: true } => "Accepted the browser dialog.".into(),
             Self::DialogHandled { accepted: false } => "Dismissed the browser dialog.".into(),
-            Self::DialogObserved { present: true } => {
-                "A JavaScript dialog is currently visible.".into()
-            }
-            Self::DialogObserved { present: false } => {
+            Self::DialogObserved {
+                present: true,
+                message,
+            } => match message
+                .as_deref()
+                .and_then(|message| one_line_bounded(message, DIALOG_MESSAGE_MAX_CHARS))
+            {
+                Some(message) => {
+                    format!("A JavaScript dialog is currently visible: \"{message}\".")
+                }
+                None => "A JavaScript dialog is currently visible.".into(),
+            },
+            Self::DialogObserved { present: false, .. } => {
                 "No JavaScript dialog is currently visible.".into()
             }
             Self::DiagnosticsRead {
@@ -721,7 +737,7 @@ impl Outcome {
                 "Read or inspect the page to see its current state before choosing another action."
                     .into(),
             ],
-            Self::DialogObserved { present: true } => vec![
+            Self::DialogObserved { present: true, .. } => vec![
                 "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.".into(),
             ],
             Self::DiagnosticsRead {
@@ -1655,7 +1671,9 @@ fn whole_seconds(duration_ms: u64) -> usize {
     usize::try_from(duration_ms.saturating_add(500) / 1_000).unwrap_or(usize::MAX)
 }
 
-fn normalized_target_label(value: &str) -> Option<String> {
+/// Page-authored text as one bounded line: controls and direction overrides become spaces,
+/// double quotes become single ones, and anything over `max_chars` ends in an ellipsis.
+fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
     let cleaned: String = value
         .chars()
         .map(|character| {
@@ -1675,10 +1693,10 @@ fn normalized_target_label(value: &str) -> Option<String> {
         return None;
     }
     let count = one_line.chars().count();
-    if count <= TARGET_LABEL_MAX_CHARS {
+    if count <= max_chars {
         return Some(one_line);
     }
-    let mut bounded: String = one_line.chars().take(TARGET_LABEL_MAX_CHARS - 3).collect();
+    let mut bounded: String = one_line.chars().take(max_chars - 3).collect();
     bounded.push_str("...");
     Some(bounded)
 }
@@ -2059,11 +2077,25 @@ mod tests {
                 "Dismissed the browser dialog.",
             ),
             (
-                Outcome::DialogObserved { present: true },
+                Outcome::DialogObserved {
+                    present: true,
+                    message: None,
+                },
                 "A JavaScript dialog is currently visible.",
             ),
             (
-                Outcome::DialogObserved { present: false },
+                Outcome::DialogObserved {
+                    present: true,
+                    message: Some("Leave this page?
+Changes are \"unsaved\".".into()),
+                },
+                "A JavaScript dialog is currently visible: \"Leave this page? Changes are 'unsaved'.\".",
+            ),
+            (
+                Outcome::DialogObserved {
+                    present: false,
+                    message: None,
+                },
                 "No JavaScript dialog is currently visible.",
             ),
             (
@@ -2928,12 +2960,18 @@ mod tests {
         .next_steps()
         .is_empty());
         assert_eq!(
-            Outcome::DialogObserved { present: true }.next_steps(),
+            Outcome::DialogObserved {
+            present: true,
+            message: None,
+        }.next_steps(),
             vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
         );
-        assert!(Outcome::DialogObserved { present: false }
-            .next_steps()
-            .is_empty());
+        assert!(Outcome::DialogObserved {
+            present: false,
+            message: None,
+        }
+        .next_steps()
+        .is_empty());
         assert_eq!(
             Outcome::DocumentInspected {
                 nodes: 0,

@@ -201,6 +201,7 @@ impl ApplicationExecutor {
                 // told `never` runs no reuse ladder of its own, so even an adapter that still has
                 // one can never adopt a tab the person opened.
                 reuse: ReusePolicy::Never.as_str().into(),
+                focus_window: holds_no_tab(lease),
             },
         ) {
             Ok(BrowserOutcome::TabOpened {
@@ -431,6 +432,7 @@ impl ApplicationExecutor {
                         // A recovered stale handle must be a fresh tab under that handle, not
                         // an adoption of an unrelated same-host tab.
                         reuse: ReusePolicy::Never.as_str().into(),
+                        focus_window: holds_no_tab(lease),
                     },
                 ) {
                     Ok(BrowserOutcome::TabOpened {
@@ -752,4 +754,9 @@ impl ApplicationExecutor {
             }
         }
     }
+}
+
+/// Whether the workspace holds no tab yet, so the tab it opens should bring its window into view.
+fn holds_no_tab(lease: &WorkspaceLease) -> bool {
+    lease.tabs().is_ok_and(|tabs| tabs.is_empty())
 }

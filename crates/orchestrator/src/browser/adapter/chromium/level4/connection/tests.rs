@@ -12,7 +12,7 @@ use ghostlight_bridge::framing::{read_native, write_native};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::super::fake::{FakeExtension, Script};
+use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::wire;
 use super::{write_request, Receipts};
 use crate::browser::adapter::{
@@ -47,7 +47,7 @@ fn port() -> RelayBrowserPort {
 }
 
 fn quiet() -> Script {
-    Box::new(|correlation, _| FakeExtension::ok(correlation, json!({"tabs": []})))
+    Box::new(|correlation, _| Reply::Now(FakeExtension::ok(correlation, json!({"tabs": []}))))
 }
 
 /// Connect a fake extension with `hello` and let the port attach it.
@@ -65,10 +65,10 @@ fn channel(
 ) -> (Arc<crate::browser::transport::SocketWriter>, Arc<Receipts>) {
     let adapters = lock(&port.adapters);
     let connection = &adapters.connections[browser];
-    let Channel::Four { receipts } = &connection.channel else {
+    let Channel::Four { line } = &connection.channel else {
         panic!("a protocol-4 connection");
     };
-    (Arc::clone(&connection.writer), Arc::clone(receipts))
+    (Arc::clone(&connection.writer), Arc::clone(&line.receipts))
 }
 
 fn eventually(condition: impl Fn() -> bool) {
@@ -326,7 +326,7 @@ fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
                 wire::Primitive::EvaluateMain(evaluate) => json!({"length": evaluate.script.len()}),
                 _ => json!({"tabs": []}),
             };
-            FakeExtension::ok(correlation, outcome)
+            Reply::Now(FakeExtension::ok(correlation, outcome))
         }),
     );
     port.attach(listener.accept().unwrap().0).unwrap();
@@ -565,10 +565,6 @@ fn protocol_three_and_four_browsers_route_by_browser_id() {
             deadline,
             &cancelled
         ),
-        Err(BrowserError::CapabilityVersion {
-            capability: "list_tabs".into(),
-            required: 1,
-            advertised: 0,
-        })
+        Ok(BrowserOutcome::Tabs { tabs: vec![] })
     );
 }

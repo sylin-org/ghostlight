@@ -1,7 +1,8 @@
 //! A scripted protocol-4 extension over a real loopback socket, for tests.
 //!
 //! It sends its hello at once, acknowledges heartbeats, answers each request through a scripted
-//! closure, reassembles chunked requests, and records every frame the service sends.
+//! closure (at once, when the request is cancelled, or never), reassembles chunked requests, and
+//! records every frame the service sends.
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{Shutdown, SocketAddr, TcpStream};
@@ -19,8 +20,18 @@ use super::wire;
 /// How long a test waits for the fake to see what it expects.
 const PATIENCE: Duration = Duration::from_secs(5);
 
-/// The scripted answer to one request: the receipt for a correlation and its primitive.
-pub(crate) type Script = Box<dyn Fn(&str, &wire::Primitive) -> wire::Receipt + Send>;
+/// When the fake answers one request.
+pub(crate) enum Reply {
+    /// Answer with this receipt at once.
+    Now(wire::Receipt),
+    /// Hold this receipt until the service cancels the request, then answer with it.
+    OnCancel(wire::Receipt),
+    /// Never answer.
+    Never,
+}
+
+/// The scripted reply to one request, given its correlation and primitive.
+pub(crate) type Script = Box<dyn Fn(&str, &wire::Primitive) -> Reply + Send>;
 
 /// Everything the fake has seen from the service.
 #[derive(Debug, Default)]
@@ -70,6 +81,15 @@ impl FakeExtension {
         })
     }
 
+    /// A receipt that answers `correlation` with a failure code and no effect.
+    pub(crate) fn failed(correlation: &str, failure: wire::Failure) -> wire::Receipt {
+        wire::Receipt {
+            ok: None,
+            failure: Some(failure),
+            ..Self::ok(correlation, Value::Null)
+        }
+    }
+
     /// A receipt that answers `correlation` with an outcome and no effect.
     pub(crate) fn ok(correlation: &str, outcome: Value) -> wire::Receipt {
         wire::Receipt {
@@ -98,6 +118,7 @@ impl FakeExtension {
             acknowledging: Arc::clone(&acknowledging),
             script,
             transfers: HashMap::new(),
+            held: HashMap::new(),
         };
         let reader = thread::spawn(move || reading.run());
         Self {
@@ -161,6 +182,7 @@ struct Reading {
     acknowledging: Arc<AtomicBool>,
     script: Script,
     transfers: HashMap<String, BTreeMap<u64, Vec<u8>>>,
+    held: HashMap<String, wire::Receipt>,
 }
 
 impl Reading {
@@ -182,6 +204,9 @@ impl Reading {
             Some("cancel") => {
                 let correlation = frame["correlation"].as_str().unwrap_or_default().to_owned();
                 self.record(|seen| seen.cancels.push(correlation.clone()));
+                if let Some(receipt) = self.held.remove(&correlation) {
+                    self.send(&wire::Inbound::Receipt(receipt));
+                }
             }
             Some("notice") => {
                 let notice: wire::Notice =
@@ -215,25 +240,30 @@ impl Reading {
         }
     }
 
-    /// Record one request and answer it through the script, or as unsupported when its
+    /// Record one request and answer it as the script says, or as unsupported when its
     /// primitive is not one this fake knows.
     fn request(&mut self, frame: &Value) {
         let correlation = frame["correlation"].as_str().unwrap_or_default().to_owned();
-        let receipt = match serde_json::from_value::<wire::Primitive>(frame["primitive"].clone()) {
+        let reply = match serde_json::from_value::<wire::Primitive>(frame["primitive"].clone()) {
             Ok(primitive) => {
-                let receipt = (self.script)(&correlation, &primitive);
+                let reply = (self.script)(&correlation, &primitive);
                 self.record(|seen| {
                     seen.requests.push((correlation.clone(), primitive.clone()));
                 });
-                receipt
+                reply
             }
-            Err(_) => wire::Receipt {
-                failure: Some(wire::Failure::Unsupported),
-                ok: None,
-                ..FakeExtension::ok(&correlation, Value::Null)
-            },
+            Err(_) => Reply::Now(FakeExtension::failed(
+                &correlation,
+                wire::Failure::Unsupported,
+            )),
         };
-        self.send(&wire::Inbound::Receipt(receipt));
+        match reply {
+            Reply::Now(receipt) => self.send(&wire::Inbound::Receipt(receipt)),
+            Reply::OnCancel(receipt) => {
+                self.held.insert(correlation, receipt);
+            }
+            Reply::Never => {}
+        }
     }
 
     fn send(&self, frame: &impl serde::Serialize) {

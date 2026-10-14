@@ -19,6 +19,7 @@ use ghostlight_bridge::framing::FrameError;
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::link::{Line, RecordingIndex};
 use super::wire;
 use crate::browser::adapter::{Adapter, BrowserEvent, Level};
 use crate::browser::transport::{SocketReader, SocketWriter};
@@ -147,7 +148,11 @@ pub(crate) fn attach(
             id: tag.connection_id.clone(),
             writer: Arc::clone(&writer),
             channel: Channel::Four {
-                receipts: Arc::clone(&receipts),
+                line: Line {
+                    writer: Arc::clone(&writer),
+                    receipts: Arc::clone(&receipts),
+                    recordings: Arc::new(RecordingIndex::default()),
+                },
             },
             adapter_version: hello.adapter_version,
             adapter,

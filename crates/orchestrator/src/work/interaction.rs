@@ -42,7 +42,8 @@ impl ApplicationExecutor {
                         tab_id,
                         present,
                         dialog_type,
-                    }) if tab_id == selected.physical_id => (present, dialog_type),
+                        message,
+                    }) if tab_id == selected.physical_id => (present, dialog_type, message),
                     Ok(_) => {
                         return self.protocol_failure(context, decision, Some(selected.physical_id))
                     }
@@ -65,6 +66,7 @@ impl ApplicationExecutor {
                         true,
                         Outcome::DialogObserved {
                             present: observed.0,
+                            message: observed.2,
                         },
                         json!({"tab":selected.handle.as_str(),"present":observed.0,"dialog_type":observed.1}),
                     );

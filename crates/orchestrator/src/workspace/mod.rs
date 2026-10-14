@@ -816,6 +816,19 @@ impl WorkspaceStore {
             .and_then(|state| state.browser.clone())
     }
 
+    /// The physical ids of the tabs this workspace controls, in ascending order.
+    #[must_use]
+    pub fn physical_tabs(&self, workspace: &str) -> Vec<u64> {
+        let mut tabs: Vec<u64> = self
+            .lock()
+            .workspaces
+            .get(workspace)
+            .map(|state| state.tabs.values().map(|tab| tab.physical_id).collect())
+            .unwrap_or_default();
+        tabs.sort_unstable();
+        tabs
+    }
+
     /// Bind a workspace to the browser its work belongs to.
     ///
     /// The first binding wins for the life of the workspace. Re-binding the same browser is the

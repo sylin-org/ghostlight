@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::browser::adapter::chromium::level4::{self, wire};
+use crate::browser::adapter::chromium::level4::{self, link::Link, wire};
 use crate::browser::adapter::{
     adapter_capability, Adapter, AdapterCapability, BrowserEvent, BrowserFrame, BrowserOutcome,
     BrowserPlatform, BrowserRequest, DiagnosticsState, HelloRefusal, Level, RuntimeControlState,
@@ -50,12 +50,6 @@ const MAX_BROWSER_CONNECTIONS: usize = 16;
 // Every browser identity an adapter mints starts with this prefix.
 const BROWSER_ID_PREFIX: &str = "browser_";
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
-// The tag that names a unit of work on the level-3 wire.
-const WORK_TAG: &str = "command";
-// What a protocol-4 connection reports for every command until commands are translated into
-// primitives: the command needs a first revision, and the connection advertises none.
-const UNTRANSLATED_REQUIRED: u16 = 1;
-const UNTRANSLATED_ADVERTISED: u16 = 0;
 
 /// How long a call waits for a browser that is on its way back before it says what is true.
 ///
@@ -301,10 +295,8 @@ enum Channel {
         pending: Arc<PendingCalls>,
         capabilities: HashMap<String, u16>,
     },
-    /// Adapter protocol 4: calls awaiting receipts, routed by the connection's reader.
-    Four {
-        receipts: Arc<level4::connection::Receipts>,
-    },
+    /// Adapter protocol 4: what each command carried over the connection uses.
+    Four { line: level4::link::Line },
 }
 
 #[derive(Debug)]
@@ -1171,8 +1163,6 @@ impl RelayBrowserPort {
         if Instant::now() >= deadline {
             return Err(BrowserError::DeadlineBeforeDispatch);
         }
-        let correlation = format!("physical_{}", Uuid::new_v4().simple());
-        let (sender, receiver) = mpsc::channel();
         let required_capability = command.required_capability();
         let (writer, pending, chunked_commands, liveness) = {
             let adapters = lock(&self.adapters);
@@ -1189,16 +1179,21 @@ impl RelayBrowserPort {
             }) {
                 return Err(BrowserError::NotAnsweringBeforeDispatch);
             }
-            let Channel::Three {
-                pending,
-                capabilities,
-            } = &connection.channel
-            else {
-                return Err(BrowserError::CapabilityVersion {
-                    capability: work_name(&command),
-                    required: UNTRANSLATED_REQUIRED,
-                    advertised: UNTRANSLATED_ADVERTISED,
-                });
+            let (pending, capabilities) = match &connection.channel {
+                Channel::Four { line } => {
+                    let line = line.clone();
+                    drop(adapters);
+                    let dispatch = BrowserDispatch {
+                        deadline,
+                        cancelled,
+                        admit,
+                    };
+                    return level4::run(command, &mut Link::new(line, workspace, dispatch));
+                }
+                Channel::Three {
+                    pending,
+                    capabilities,
+                } => (pending, capabilities),
             };
             let advertised = capabilities
                 .get(required_capability)
@@ -1241,6 +1236,8 @@ impl RelayBrowserPort {
                 connection.liveness.clone(),
             )
         };
+        let correlation = format!("physical_{}", Uuid::new_v4().simple());
+        let (sender, receiver) = mpsc::channel();
         let frame = BrowserFrame::Request {
             request: BrowserRequest {
                 correlation: correlation.clone(),
@@ -1396,14 +1393,6 @@ fn probe_now(writer: &SocketWriter, liveness: &Liveness, until: Instant, cancell
         return;
     };
     let _ = write_native(&mut output, &liveness.probe());
-}
-
-/// The wire name of one unit of work, as its tag spells it.
-fn work_name(command: &Work) -> String {
-    serde_json::to_value(command)
-        .ok()
-        .and_then(|value| value.get(WORK_TAG)?.as_str().map(str::to_owned))
-        .unwrap_or_default()
 }
 
 /// Tell a hello that no adapter serves it why, then close its socket. Best effort: the
@@ -1803,7 +1792,9 @@ fn retire(previous: &Connection) {
         Channel::Three { pending, .. } => {
             fail_pending(pending, BrowserError::DisconnectedAfterDispatch);
         }
-        Channel::Four { receipts } => receipts.fail_all(&BrowserError::DisconnectedAfterDispatch),
+        Channel::Four { line } => line
+            .receipts
+            .fail_all(&BrowserError::DisconnectedAfterDispatch),
     }
     previous.writer.close();
 }

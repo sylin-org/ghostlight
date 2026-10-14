@@ -10,12 +10,14 @@ use std::io::Read;
 use serde_json::Value;
 
 use super::*;
-use crate::browser::adapter::{BrowserOutcome, BrowserReceipt};
+use crate::browser::adapter::{BrowserOutcome, BrowserReceipt, BrowserRequest};
 
 const HELLO_ACCEPTED: &str = r#"{"kind":"hello_accepted","major":3,"service_version":"<version>","service_epoch":"service_bytes","control_state":"active"}"#;
 const INSTALL_PAGE_RUNTIME: &str = r#"{"kind":"request","request":{"correlation":"<correlation>","workspace":"system","command":{"command":"install_page_runtime","revision":1,"sha256":"9eb521d0cab493adeda19cef6091c6513de27e06c59d509dcf2c3869ac79d8b4","script":"<script>"}}}"#;
 const LIST_TABS_REQUEST: &str = r#"{"kind":"request","request":{"correlation":"<correlation>","workspace":"workspace_bytes","command":{"command":"list_tabs"}}}"#;
 const ACKNOWLEDGE: &str = r#"{"kind":"acknowledge","correlation":"<correlation>"}"#;
+const OPEN_TAB_REQUEST: &str = r#"{"kind":"request","request":{"correlation":"physical_bytes","workspace":"workspace_bytes","command":{"command":"open_tab","url":"https://example.com/","group_title":"Ghostlight - test","reuse":"never"}}}"#;
+const DIALOG_RECEIPT: &str = r#"{"kind":"receipt","receipt":{"correlation":"physical_bytes","result":{"outcome":"dialog","tab_id":7,"present":true,"dialog_type":"alert"}}}"#;
 
 const CORRELATION: &str = "<correlation>";
 const VERSION: &str = "<version>";
@@ -142,4 +144,39 @@ fn level_three_frames_keep_their_bytes() {
     assert_eq!(install_acknowledge, ACKNOWLEDGE);
     assert_eq!(list, LIST_TABS_REQUEST);
     assert_eq!(acknowledge, ACKNOWLEDGE);
+}
+
+#[test]
+fn level_three_open_tab_and_dialog_frames_ignore_what_only_protocol_four_carries() {
+    for focus_window in [false, true] {
+        let frame = BrowserFrame::Request {
+            request: BrowserRequest {
+                correlation: "physical_bytes".into(),
+                workspace: "workspace_bytes".into(),
+                command: BrowserCommand::OpenTab {
+                    url: "https://example.com/".into(),
+                    group_title: "Ghostlight - test".into(),
+                    reuse: "never".into(),
+                    focus_window,
+                },
+            },
+        };
+        assert_eq!(serde_json::to_string(&frame).unwrap(), OPEN_TAB_REQUEST);
+    }
+    let dialog = BrowserFrame::Receipt {
+        receipt: BrowserReceipt {
+            correlation: "physical_bytes".into(),
+            result: BrowserOutcome::Dialog {
+                tab_id: 7,
+                present: true,
+                dialog_type: "alert".into(),
+                message: None,
+            },
+        },
+    };
+    assert_eq!(
+        serde_json::from_str::<BrowserFrame>(DIALOG_RECEIPT).unwrap(),
+        dialog
+    );
+    assert_eq!(serde_json::to_string(&dialog).unwrap(), DIALOG_RECEIPT);
 }

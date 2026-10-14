@@ -722,8 +722,14 @@ fn outcome_samples() -> Vec<Outcome> {
         },
         Outcome::ScriptEvaluated { host: host() },
         Outcome::DialogHandled { accepted: true },
-        Outcome::DialogObserved { present: true },
-        Outcome::DialogObserved { present: false },
+        Outcome::DialogObserved {
+            present: true,
+            message: None,
+        },
+        Outcome::DialogObserved {
+            present: false,
+            message: None,
+        },
         Outcome::DiagnosticsRead {
             count: 0,
             capture_started: true,

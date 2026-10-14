@@ -696,11 +696,16 @@ pub enum BrowserCommand {
     /// `reuse` is `domain` when the edge may adopt an existing unbound same-host tab instead of
     /// creating one, and `never` when a fresh tab is required. Older adapters that predate the
     /// field deserialize it as absent and always create, which stays correct.
+    ///
+    /// `focus_window` is true when the workspace holds no tab yet, so its first tab comes into
+    /// view. Only protocol 4 carries it; it never reaches the level-3 wire.
     OpenTab {
         url: String,
         group_title: String,
         #[serde(default)]
         reuse: String,
+        #[serde(skip)]
+        focus_window: bool,
     },
     /// Navigate a physical tab.
     Navigate { tab_id: u64, url: String },
@@ -1281,11 +1286,13 @@ pub enum BrowserOutcome {
         elapsed_ms: u64,
         readiness: BrowserReadiness,
     },
-    /// Dialog observation.
+    /// Dialog observation, with the dialog's bounded message when the adapter reports one.
     Dialog {
         tab_id: u64,
         present: bool,
         dialog_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
     /// Dialog handling receipt.
     DialogHandled {
@@ -1511,6 +1518,7 @@ mod tests {
                     url: "https://example.com".into(),
                     group_title: "Ghostlight - test".into(),
                     reuse: "domain".into(),
+                    focus_window: false,
                 },
             },
         };
