@@ -533,12 +533,13 @@ const TOOL_BUDGET_CHARS: [(&str, usize); 5] = [
 ];
 
 /// Governance phrases the trim must keep. Each one says something no name, type or bound does.
-const PINNED_PHRASES: [&str; 5] = [
+const PINNED_PHRASES: [&str; 6] = [
     "for this request",
     "admitted before the effect",
     "may cause an external effect",
     "needs write even for unsent drafts",
     "screenshot image",
+    "Omit for load_ready, else required",
 ];
 
 #[test]
@@ -570,4 +571,20 @@ fn the_trim_keeps_the_governance_phrases() {
     for phrase in PINNED_PHRASES {
         assert!(listed.contains(phrase), "the catalog lost \"{phrase}\"");
     }
+}
+
+/// These tools lead with the shortest call LANGUAGE.md documents for them: `{}` where every
+/// field has a default, `{"key":"Enter"}` for `browser_press_key`.
+#[test]
+fn the_documented_shortest_calls_lead_their_examples() {
+    let first = |name: &str| {
+        listed_tools()
+            .into_iter()
+            .find(|tool| tool.name == name)
+            .map(|tool| tool.input_schema["examples"][0].clone())
+            .unwrap_or_else(|| panic!("{name} is not in the catalog"))
+    };
+    assert_eq!(first("browser_screenshot"), json!({}));
+    assert_eq!(first("browser_scroll"), json!({}));
+    assert_eq!(first("browser_press_key"), json!({"key":"Enter"}));
 }

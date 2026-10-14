@@ -335,17 +335,14 @@ fn tabs_schema() -> Value {
             ),
             object(
                 vec![
-                    (
-                        "action",
-                        constant("focus", "Bring a tab and its window into view."),
-                    ),
+                    ("action", constant("focus", "")),
                     ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
             object(
                 vec![
-                    ("action", constant("close", "Close a tab.")),
+                    ("action", constant("close", "")),
                     ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
@@ -452,15 +449,9 @@ fn window_schema() -> Value {
             ),
             object(
                 vec![
-                    ("action", constant("resize", "Resize the browser window.")),
-                    (
-                        "width",
-                        integer(320, 7_680, None, "Outer window width in pixels."),
-                    ),
-                    (
-                        "height",
-                        integer(240, 4_320, None, "Outer window height in pixels."),
-                    ),
+                    ("action", constant("resize", "")),
+                    ("width", integer(320, 7_680, None, "")),
+                    ("height", integer(240, 4_320, None, "")),
                     ("tab", tab()),
                 ],
                 vec!["action", "width", "height"],
@@ -597,6 +588,7 @@ fn screenshot_schema() -> Value {
             ),
         ],
         vec![
+            json!({}),
             json!({"full_page":true}),
             json!({"view":"view_...","x":120,"y":80,"width":400,"height":300}),
         ],
@@ -694,6 +686,7 @@ fn scroll_schema() -> Value {
             ),
         ],
         vec![
+            json!({}),
             json!({"direction":"down","amount":"page"}),
             json!({"view":"view_...","x":120,"y":80,"direction":"down","ticks":3}),
         ],
@@ -832,6 +825,7 @@ fn key_schema() -> Value {
             ),
         ],
         vec![
+            json!({"key":"Enter"}),
             json!({"key":"a","modifiers":["Control"]}),
             json!({"strokes":["ArrowDown"],"repeat":5}),
         ],
@@ -1491,7 +1485,7 @@ fn with_expect(mut schema: Value) -> Value {
         "description":"Checked after the effect; needs read, admitted before the effect. A failed check keeps the effect.",
         "properties":{
             "condition":{"type":"string","enum":["load_ready","url_contains","text_present","text_absent"]},
-            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Page text, not field values."}
+            "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Omit for load_ready, else required; page text, not field values."}
         },
         "required":["condition"]
     });
