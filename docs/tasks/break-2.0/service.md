@@ -15,15 +15,27 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-2`. The wire vocabulary is in place and nothing consumes it yet.
+Next slice: `service-3`. The port accepts protocol-4 hellos beside protocol 3. A protocol-4
+connection is ready at once, routes events and receipts, and answers every command with
+`CapabilityVersion` until service-5 translates work into primitives. Nothing sets the page assets
+yet (switch-2 wires them), so a running service still refuses protocol 4.
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
 | service-1-p4-wire | `chromium/level4/{mod.rs, wire.rs}`: protocol 4 frames, primitives, arguments, outcomes, `Failure`, `CallFailure`, and tolerant mirrors of the physical vocabulary. 23 inline tests from the spec's JSON examples. | see `git log` |
+| service-2-p4-attach | `Adapter::select` reads the first frame as JSON (`protocol` field for level 4, `major` for level 3); `Level::Four`; `level4/connection.rs` (hello rules, reader, `Receipts`, `write_request`); `level4/fake.rs` FakeExtension; `adapter_incompatible` error frame with its sentence in `language/adapter.rs`; `BrowserSummary.protocol` and the workbench row; `set_protocol4_assets`. Level-3 byte goldens in `contract_tests/level3_bytes.rs`, captured before the change. | see `git log` |
 
 ## Notes
+
+- A hello that names an unsupported protocol is told the newest protocol of the field it used:
+  `major` hellos hear 3, `protocol` hellos hear 4. A published 1.3.x extension therefore still
+  reads a major it can act on, and the relay contract suite stays unchanged.
+- `Connection` holds a `Channel`: level 3 keeps its pending map and capability table, level 4 its
+  `Receipts`. Only level 3 lets a heartbeat timeout fail pending calls.
+- The workspace MSRV rose to 1.89 in the connectors lane, which turned on clippy's
+  `manual_is_multiple_of`; `language/outcome.rs` was fixed in its own commit.
 
 - Every module on the path from `lib.rs` is `pub`, so the new items are not dead code before
   they are wired.

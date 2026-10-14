@@ -31,6 +31,12 @@ pub const MAX_INPUT_STEPS: usize = 4096;
 /// Most unseen frames a guard or inventory reports.
 pub const MAX_UNSEEN: usize = 64;
 
+/// Closed codes of the uncorrelated `error` frame the service sends.
+pub mod error_code {
+    /// The extension's hello names a protocol this service does not serve. The socket closes.
+    pub const ADAPTER_INCOMPATIBLE: &str = "adapter_incompatible";
+}
+
 // ---- frames, extension to service ----
 
 /// A frame the extension sends to the service.

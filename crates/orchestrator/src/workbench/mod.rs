@@ -912,6 +912,7 @@ impl WorkbenchFacade {
                     id: browser.id,
                     family,
                     adapter_version: Some(browser.adapter_version),
+                    protocol: browser.protocol,
                     connected: true,
                 }
             })
@@ -1239,6 +1240,8 @@ pub struct BrowserInstanceSummary {
     pub family: String,
     /// Adapter version if supplied by the connection.
     pub adapter_version: Option<String>,
+    /// Adapter protocol major the connection speaks.
+    pub protocol: u16,
     /// Current connection state.
     pub connected: bool,
 }

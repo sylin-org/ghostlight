@@ -1,6 +1,6 @@
 //! Prove runtime admission occurs after queued writer access and before transmission.
 
-use super::super::{lock, BrowserDispatch, Connection};
+use super::super::{lock, BrowserDispatch, Channel, Connection};
 use super::*;
 use crate::browser::adapter::Adapter;
 use crate::governance::ReasonCode;
@@ -25,12 +25,14 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
             Connection {
                 id: "connection".into(),
                 writer: writer.clone(),
-                pending: pending.clone(),
+                channel: Channel::Three {
+                    pending: pending.clone(),
+                    capabilities: HashMap::from([(adapter_capability::TABS.into(), 1)]),
+                },
                 adapter_version: "test".into(),
                 browser_id: TEST_BROWSER.into(),
                 browser_name: None,
                 adapter: Adapter::negotiate(None, ADAPTER_PROTOCOL_MAJOR).unwrap(),
-                capabilities: HashMap::from([(adapter_capability::TABS.into(), 1)]),
                 liveness: None,
                 ready: true,
             },

@@ -439,6 +439,7 @@ impl crate::browser::BrowserPort for ControlledBrowser {
             name: Some("Chrome".into()),
             adapter_version: "1.0.0".into(),
             platform: crate::browser::adapter::BrowserPlatform::Chromium,
+            protocol: crate::browser::adapter::ADAPTER_PROTOCOL_MAJOR,
             attended: true,
         }]
     }

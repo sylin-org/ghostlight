@@ -2,7 +2,10 @@
 //! primitives.
 //!
 //! The extension runs a small closed set of primitives and reports facts. The service decides
-//! what they mean. This module is the service's side of that contract, starting with the wire
-//! vocabulary every later piece builds on.
+//! what they mean. This module is the service's side of that contract: the wire vocabulary, and
+//! the connection that carries it.
 
+pub mod connection;
+#[cfg(test)]
+mod fake;
 pub mod wire;

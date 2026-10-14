@@ -2,15 +2,18 @@
 //!
 //! One adapter exists per browser family. The extension's hello names its family and wire
 //! protocol, and the service picks the matching [`Adapter`]: the wire level it speaks and the
-//! page assets it installs. Everything that runs in a page, and the translation from the
-//! service's `Work` to browser primitives, lives under the family module, so a service update
-//! ships new page code without an extension update.
+//! page assets it ships. Everything that runs in a page, and the translation from the service's
+//! `Work` to browser primitives, lives under the family module, so a service update ships new page
+//! code without an extension update.
 //!
-//! Chromium is the only family and level 3 is its only level. The vocabulary of that level is
-//! re-exported here, so the rest of the service names `crate::browser::adapter::BrowserCommand`
-//! and never a level path. A second level changes this file and the family module, not callers.
+//! Chromium is the only family. It speaks level 3, the published extension's protocol, and level
+//! 4. The level-3 vocabulary is re-exported here, so the rest of the service names
+//! `crate::browser::adapter::BrowserCommand` and never a level path.
 
 use std::collections::HashMap;
+
+use serde::Deserialize as _;
+use serde_json::Value;
 
 pub mod chromium;
 
@@ -40,6 +43,19 @@ impl Family {
         }
     }
 
+    /// The protocol major of this family's newest level that names its protocol in `field`.
+    fn newest_in(self, field: &str) -> u16 {
+        let levels = match self {
+            Self::Chromium => chromium::LEVELS,
+        };
+        levels
+            .iter()
+            .filter(|level| level.hello_field() == field)
+            .map(|level| level.major())
+            .max()
+            .unwrap_or_default()
+    }
+
     /// The platform identity this family reports in browser discovery.
     #[must_use]
     pub const fn platform(self) -> BrowserPlatform {
@@ -49,11 +65,24 @@ impl Family {
     }
 }
 
+/// The hello field in which a level-3 extension names its protocol.
+const MAJOR_FIELD: &str = "major";
+/// The hello field in which a level-4 extension names its protocol.
+const PROTOCOL_FIELD: &str = "protocol";
+/// The hello field naming the extension's platform.
+const PLATFORM_FIELD: &str = "platform";
+/// The frame field naming a frame's kind.
+const KIND_FIELD: &str = "kind";
+/// The kind of the first frame on every browser connection.
+const HELLO_KIND: &str = "hello";
+
 /// Wire level of a family: the adapter protocol revision its extension speaks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Level {
     /// Adapter protocol 3, spoken by the published Chromium extension.
     Three,
+    /// Adapter protocol 4: frozen primitives, with page assets shipped in `hello_accepted`.
+    Four,
 }
 
 impl Level {
@@ -62,6 +91,15 @@ impl Level {
     pub const fn major(self) -> u16 {
         match self {
             Self::Three => ADAPTER_PROTOCOL_MAJOR,
+            Self::Four => chromium::level4::wire::PROTOCOL,
+        }
+    }
+
+    /// The hello field in which an extension speaking this level names its protocol.
+    const fn hello_field(self) -> &'static str {
+        match self {
+            Self::Three => MAJOR_FIELD,
+            Self::Four => PROTOCOL_FIELD,
         }
     }
 }
@@ -73,6 +111,15 @@ pub struct UnsupportedHello {
     pub offered: u16,
     /// Protocol major the family's newest level speaks.
     pub required: u16,
+}
+
+/// Why a first frame chose no adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HelloRefusal {
+    /// The frame is not a hello this service can read.
+    Malformed,
+    /// The hello names a protocol no level of its family speaks.
+    Unsupported(UnsupportedHello),
 }
 
 /// The family and wire level chosen for one browser connection at hello.
@@ -106,6 +153,47 @@ impl Adapter {
             })
     }
 
+    /// Choose the adapter for a first frame read as JSON, before it is decoded for its level.
+    ///
+    /// Each level names its protocol in its own hello field: level 3 in `major`, level 4 in
+    /// `protocol`. A hello that names an unsupported protocol in a field is told the newest
+    /// protocol its family speaks in that field, so a published level-3 extension still hears the
+    /// major it can act on.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HelloRefusal::Malformed`] when the frame is not a readable hello, and
+    /// [`HelloRefusal::Unsupported`] when no level of its family speaks the named protocol.
+    pub fn select(hello: &Value) -> Result<Self, HelloRefusal> {
+        if hello.get(KIND_FIELD).and_then(Value::as_str) != Some(HELLO_KIND) {
+            return Err(HelloRefusal::Malformed);
+        }
+        let platform = match hello.get(PLATFORM_FIELD) {
+            None | Some(Value::Null) => None,
+            Some(platform) => {
+                Some(BrowserPlatform::deserialize(platform).map_err(|_| HelloRefusal::Malformed)?)
+            }
+        };
+        let family = Family::from_platform(platform);
+        for field in [PROTOCOL_FIELD, MAJOR_FIELD] {
+            let Some(offered) = hello.get(field) else {
+                continue;
+            };
+            let offered = offered
+                .as_u64()
+                .and_then(|offered| u16::try_from(offered).ok())
+                .ok_or(HelloRefusal::Malformed)?;
+            return match Self::negotiate(platform, offered) {
+                Ok(adapter) if adapter.level.hello_field() == field => Ok(adapter),
+                _ => Err(HelloRefusal::Unsupported(UnsupportedHello {
+                    offered,
+                    required: family.newest_in(field),
+                })),
+            };
+        }
+        Err(HelloRefusal::Malformed)
+    }
+
     /// The browser engine family.
     #[must_use]
     pub const fn family(self) -> Family {
@@ -124,20 +212,18 @@ impl Adapter {
         self.family.platform()
     }
 
-    /// Whether the adapter must receive this family's page assets before it takes work, given
-    /// the capabilities it advertised.
+    /// The work that installs this adapter's page assets before it takes work, given the
+    /// capabilities it advertised, or `None` when nothing must be installed first.
+    ///
+    /// Level 3 installs its bundle with a correlated command. Level 4 ships its assets in
+    /// `hello_accepted`, so it never needs one.
     #[must_use]
-    pub fn installs_assets(self, capabilities: &HashMap<String, u16>) -> bool {
+    pub fn install_command(self, capabilities: &HashMap<String, u16>) -> Option<Work> {
         match (self.family, self.level) {
-            (Family::Chromium, Level::Three) => chromium::assets::installs(capabilities),
-        }
-    }
-
-    /// The work that installs this adapter's page assets.
-    #[must_use]
-    pub fn install_command(self) -> Work {
-        match (self.family, self.level) {
-            (Family::Chromium, Level::Three) => chromium::assets::install_command(),
+            (Family::Chromium, Level::Three) => {
+                chromium::assets::installs(capabilities).then(chromium::assets::install_command)
+            }
+            (Family::Chromium, Level::Four) => None,
         }
     }
 
@@ -146,6 +232,7 @@ impl Adapter {
     pub fn acknowledged(self, outcome: &BrowserOutcome) -> bool {
         match (self.family, self.level) {
             (Family::Chromium, Level::Three) => chromium::assets::acknowledged(outcome),
+            (Family::Chromium, Level::Four) => false,
         }
     }
 }
@@ -153,6 +240,7 @@ impl Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_hello_without_a_platform_is_chromium_level_three() {
@@ -166,33 +254,91 @@ mod tests {
     }
 
     #[test]
-    fn a_protocol_major_without_a_level_is_refused_with_the_required_major() {
-        for major in [0, ADAPTER_PROTOCOL_MAJOR - 1, ADAPTER_PROTOCOL_MAJOR + 1] {
+    fn a_protocol_major_without_a_level_is_refused_with_the_newest_major() {
+        for major in [
+            0,
+            ADAPTER_PROTOCOL_MAJOR - 1,
+            chromium::level4::wire::PROTOCOL + 1,
+        ] {
             assert_eq!(
                 Adapter::negotiate(None, major),
                 Err(UnsupportedHello {
                     offered: major,
-                    required: ADAPTER_PROTOCOL_MAJOR
+                    required: chromium::level4::wire::PROTOCOL
                 })
             );
         }
     }
 
     #[test]
-    fn assets_install_only_for_an_adapter_that_advertises_the_page_runtime() {
+    fn each_level_is_selected_by_its_own_hello_field() {
+        let three = Adapter::select(&json!({"kind": "hello", "major": 3})).expect("level 3");
+        assert_eq!(three.level(), Level::Three);
+        let four = Adapter::select(&json!({
+            "kind": "hello",
+            "protocol": 4,
+            "platform": "ghostlight/chromium"
+        }))
+        .expect("level 4");
+        assert_eq!(four.level(), Level::Four);
+        assert_eq!(four.platform(), BrowserPlatform::Chromium);
+    }
+
+    #[test]
+    fn a_hello_naming_a_protocol_in_another_level_field_is_unsupported() {
+        for (hello, offered, required) in [
+            (json!({"kind": "hello", "major": 4}), 4, 3),
+            (json!({"kind": "hello", "major": 2}), 2, 3),
+            (json!({"kind": "hello", "protocol": 3}), 3, 4),
+            (json!({"kind": "hello", "protocol": 5}), 5, 4),
+        ] {
+            assert_eq!(
+                Adapter::select(&hello),
+                Err(HelloRefusal::Unsupported(UnsupportedHello {
+                    offered,
+                    required
+                })),
+                "{hello}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_frame_that_is_not_a_readable_hello_is_malformed() {
+        for frame in [
+            json!({"kind": "receipt", "protocol": 4}),
+            json!({"kind": "hello"}),
+            json!({"kind": "hello", "protocol": "4"}),
+            json!({"kind": "hello", "protocol": 70000}),
+            json!({"kind": "hello", "protocol": 4, "platform": "ghostlight/gecko"}),
+            json!([]),
+        ] {
+            assert_eq!(
+                Adapter::select(&frame),
+                Err(HelloRefusal::Malformed),
+                "{frame}"
+            );
+        }
+    }
+
+    #[test]
+    fn assets_install_only_for_a_level_three_adapter_that_advertises_the_page_runtime() {
         let adapter = Adapter::negotiate(None, ADAPTER_PROTOCOL_MAJOR).expect("level 3");
         let mut capabilities = HashMap::new();
-        assert!(!adapter.installs_assets(&capabilities));
+        assert!(adapter.install_command(&capabilities).is_none());
         capabilities.insert(adapter_capability::PAGE_RUNTIME.to_string(), 1);
-        assert!(adapter.installs_assets(&capabilities));
+        assert!(adapter.install_command(&capabilities).is_some());
+        let four = Adapter::negotiate(None, chromium::level4::wire::PROTOCOL).expect("level 4");
+        assert!(four.install_command(&capabilities).is_none());
     }
 
     #[test]
     fn the_install_command_is_acknowledged_by_its_own_receipt_only() {
         let adapter = Adapter::negotiate(None, ADAPTER_PROTOCOL_MAJOR).expect("level 3");
-        let Work::InstallPageRuntime {
+        let capabilities = HashMap::from([(adapter_capability::PAGE_RUNTIME.to_string(), 1)]);
+        let Some(Work::InstallPageRuntime {
             revision, sha256, ..
-        } = adapter.install_command()
+        }) = adapter.install_command(&capabilities)
         else {
             panic!("level 3 installs through the page-runtime command");
         };
