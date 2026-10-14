@@ -1711,19 +1711,117 @@ test("the dispatched kinds equal the vocabulary's world kinds exactly", () => {
   assert.deepEqual([...dispatched].sort(), [...vocabulary.world_message_kinds].sort());
 });
 
-test("every world kind has a golden message and every golden message is accepted", async () => {
+// The locator the golden fixtures carry is minted for a page that no longer exists; a message
+// that kept it would stop at stale_locator before any other field was read. Each page below mints
+// live locators for the roles the fixtures give their locators, and `bind` swaps them in.
+const GOLDEN_LOCATOR = /^locator_a1b2c3d4_(\d+)$/;
+
+/** A page holding one live element for every locator role the golden messages use. */
+async function goldenPage() {
+  const harness = contentHarness();
+  const owner = embedFixture(harness);
+  harness.document.elementFromPoint = () => owner;
+  const panel = harness.newInput("Panel");
+  const name = harness.newInput("Name", { value: "Ada Lovelace" });
+  const email = harness.newInput("Email", { value: "ada@example.com" });
+  const send = harness.newInput("Send", { type: "submit" });
+  const country = harness.select([{ value: "us", text: "United States" }, { value: "ca", text: "Canada" }]);
+  country.setAttribute("aria-label", "Country");
+  harness.document.body.append(country);
+  harness.document.body.append(harness.text("Saved"));
+  const form = { contains: (element) => element === send };
+  name.closest = (selector) => (selector === "form" ? form : null);
+  const selects = [];
+  const select = name.select.bind(name);
+  name.select = () => { selects.push(name); select(); };
+
+  const [file] = await harness.targets();
+  const minted = {
+    1: panel, 2: panel, 3: name, 4: email, 5: send, 6: name, 7: email, 8: send, 9: name, 10: country, 11: panel
+  };
+  const locators = { 12: file.locator };
+  for (const [role, element] of Object.entries(minted)) {
+    const label = element.getAttribute("aria-label");
+    locators[role] = (await harness.targets()).find((target) => target.name === label).locator;
+  }
+  return {
+    harness, owner, name, email, send, panel, selects,
+    /** The message with every golden locator replaced by the live locator of the same role. */
+    bind(message) {
+      return JSON.parse(JSON.stringify(message), (_key, value) => {
+        const match = typeof value === "string" ? GOLDEN_LOCATOR.exec(value) : null;
+        if (!match) return value;
+        assert.ok(locators[match[1]], `golden locator role ${match[1]} has a live element`);
+        return locators[match[1]];
+      });
+    },
+    locatorOf: (role) => locators[role]
+  };
+}
+
+/** The message with `key` replaced, after proving the golden message carries that key. */
+function withKey(message, key, value) {
+  assert.ok(Object.hasOwn(message, key), `${message.kind} golden carries ${key}`);
+  return { ...message, [key]: value };
+}
+
+/** Kinds that read the focused control, so the page focuses one first. */
+const FOCUSED_KINDS = new Set(["clear_focused", "describe_focused", "verify_focused_text", "require_focused", "focus_probe"]);
+
+/** Kinds whose reply carries a value the fixture's field names decide; each is checked by name. */
+const GOLDEN_PROBES = {
+  async attach_file(page, message, options) {
+    const reply = await page.harness.send(page.bind(message), options);
+    assert.equal(reply.ok, true);
+    assert.equal(page.harness.input.files[0].name, message.file_name, "file_name names the attached file");
+  },
+  async type_text(page, message) {
+    page.name.value = "Existing";
+    const reply = await page.harness.send(page.bind(message));
+    assert.equal(reply.ok, true);
+    assert.equal(page.selects.length, 1, "clear_first selects the existing text");
+    const unchanged = await page.harness.send(page.bind(withKey(message, "clear_first", false)));
+    assert.equal(unchanged.ok, true);
+    assert.equal(page.selects.length, 1, "clear_first false keeps the existing text");
+  },
+  async prepare_fill(page, message) {
+    const elsewhere = page.locatorOf(11);
+    const reply = await page.harness.send(page.bind(withKey(message, "submit_locator", elsewhere)));
+    assert.equal(reply.error?.code, "submit_outside_form", "submit_locator names the control that must sit in the form");
+  },
+  async verify_fill_retained(page, message) {
+    assert.equal(message.stable_ms, 250);
+    const clock = () => page.harness.dom.context.performance.now();
+    const started = clock();
+    const reply = await page.harness.send(page.bind(withKey(message, "stable_ms", 400)));
+    assert.equal(reply.ok, true);
+    assert.ok(clock() - started >= 400, "stable_ms is the time every field must hold its value");
+    page.name.value = "Other";
+    const lost = await page.harness.send(page.bind(withKey(message, "limit_ms", 100)));
+    assert.equal(lost.error?.code, "not_retained", "limit_ms bounds the wait for the values to hold");
+  }
+};
+
+test("every world kind has a golden message that content.js reads and accepts", async () => {
   const directory = path.join(GOLDEN, "world");
   const files = fs.readdirSync(directory).filter((name) => name.endsWith(".json")).sort();
   assert.deepEqual(files.map((name) => name.replace(/\.json$/, "")), [...vocabulary.world_message_kinds].sort());
+  const source = bundle.read("content.js");
+  const attachment = { media_type: "image/gif", data: "aGVsbG8=", size: 5 };
   for (const file of files) {
     const message = JSON.parse(fs.readFileSync(path.join(directory, file), "utf8"));
     assert.equal(`${message.kind}.json`, file);
-    const harness = contentHarness();
-    const owner = embedFixture(harness);
-    harness.document.elementFromPoint = () => owner;
-    const reply = await harness.send(message, { owner, attachment: { media_type: "image/gif", data: "aGVsbG8=", size: 5 } });
-    const code = reply.ok ? null : reply.error.code;
-    assert.ok(code !== "unknown_kind" && code !== "invalid_request", `${file} was refused as ${code}: ${reply.error?.message}`);
+    for (const key of Object.keys(message)) {
+      if (key !== "kind") assert.ok(source.includes(`message.${key}`), `${file}: content.js reads ${key}`);
+    }
+    const page = await goldenPage();
+    if (FOCUSED_KINDS.has(message.kind)) page.name.focus();
+    const options = { owner: page.owner, attachment };
+    const reply = await page.harness.send(page.bind(message), options);
+    page.harness.dom.advance(10);
+    assert.equal(reply.ok, true, `${file} was answered ${reply.error?.code}: ${reply.error?.message}`);
+    const probe = GOLDEN_PROBES[message.kind];
+    if (probe) await probe(await goldenPage(), message, options);
   }
 });
 
