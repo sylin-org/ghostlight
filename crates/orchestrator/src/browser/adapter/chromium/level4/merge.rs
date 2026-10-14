@@ -144,27 +144,28 @@ pub struct SubtreePlan {
 /// Decide whether the embedded documents are read, and with what budget.
 ///
 /// Returns `None` when the top tree already spent the node bound, was cut, or leaves no depth
-/// for a child. Without a top tree the first embedded document stands in for it, so it may use
-/// the whole depth.
+/// for a child. Embedded documents always sit one level below the top, so they get one level
+/// less than `max_depth` even when the top tree could not be read: the first embedded tree then
+/// stands in as the root and the rest nest under it, which keeps the whole answer within
+/// `max_depth`.
 #[must_use]
 pub fn subtree_plan(
     root: Option<&TreeValue>,
     limit: usize,
     max_depth: usize,
 ) -> Option<SubtreePlan> {
-    match root {
-        None => Some(SubtreePlan {
-            max_depth,
-            max_nodes: limit,
-        }),
-        Some(root) => {
-            let used = count_nodes(&root.tree);
-            (!root.truncated && used < limit && max_depth > 1).then(|| SubtreePlan {
-                max_depth: max_depth - 1,
-                max_nodes: limit - used,
-            })
-        }
+    if max_depth <= 1 {
+        return None;
     }
+    let used = match root {
+        None => 0,
+        Some(root) if root.truncated => return None,
+        Some(root) => count_nodes(&root.tree),
+    };
+    (used < limit).then(|| SubtreePlan {
+        max_depth: max_depth - 1,
+        max_nodes: limit - used,
+    })
 }
 
 /// A structure tree folded across documents.

@@ -348,7 +348,7 @@ fn without_a_top_tree_the_first_embedded_tree_stands_in() {
     assert_eq!(
         subtree_plan(None, 400, 3),
         Some(SubtreePlan {
-            max_depth: 3,
+            max_depth: 2,
             max_nodes: 400
         })
     );
@@ -365,6 +365,23 @@ fn without_a_top_tree_the_first_embedded_tree_stands_in() {
     assert_eq!(tree.label, "frame 2");
     assert_eq!(labels(&tree), ["frame 5"]);
     assert!(!merged.truncated);
+}
+
+#[test]
+fn without_a_top_tree_and_no_depth_for_children_nothing_is_read() {
+    assert_eq!(subtree_plan(None, 400, 1), None);
+    let merged = append_and_trim(None, Vec::new(), true, 400);
+    assert_eq!(merged.tree, None);
+    assert!(merged.truncated);
+}
+
+#[test]
+fn a_lone_embedded_tree_with_unread_siblings_is_reported_truncated() {
+    let merged = append_and_trim(None, vec![value(node("frame 2", vec![]), false)], true, 400);
+    let tree = merged.tree.expect("a tree");
+    assert_eq!(tree.label, "frame 2");
+    assert!(tree.children.is_empty());
+    assert!(merged.truncated);
 }
 
 #[test]
