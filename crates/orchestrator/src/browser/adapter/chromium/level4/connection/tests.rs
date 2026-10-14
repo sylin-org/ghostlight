@@ -41,9 +41,7 @@ fn assets() -> Arc<wire::Assets> {
 }
 
 fn port() -> RelayBrowserPort {
-    let port = RelayBrowserPort::new("service_four".into());
-    port.set_protocol4_assets(assets());
-    port
+    RelayBrowserPort::new("service_four".into(), assets())
 }
 
 fn quiet() -> Script {
@@ -167,22 +165,6 @@ fn a_hello_no_level_serves_hears_why_and_is_closed() {
 }
 
 #[test]
-fn a_port_without_assets_refuses_protocol_four() {
-    let port = RelayBrowserPort::new("service_four".into());
-    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    assert_eq!(
-        attached,
-        Err(BrowserError::Incompatible {
-            offered: 4,
-            required: 3
-        })
-    );
-    let seen = fake.wait(|seen| seen.closed);
-    assert_eq!(seen.of_kind("error").len(), 1);
-    assert!(port.browsers().is_empty());
-}
-
-#[test]
 fn a_malformed_protocol_four_hello_is_closed_without_an_answer() {
     let mut cases = Vec::new();
     for (field, value) in [
@@ -281,13 +263,13 @@ fn attention_moves_the_browser_to_the_front() {
 fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
     let port = RelayBrowserPort::with_heartbeat_settings(
         "service_four".into(),
+        assets(),
         HeartbeatSettings {
             interval: Duration::from_millis(10),
             timeout: Duration::from_millis(60),
             verdict: Duration::from_millis(60),
         },
     );
-    port.set_protocol4_assets(assets());
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
 

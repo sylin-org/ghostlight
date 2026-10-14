@@ -126,7 +126,10 @@ fn level_three_frames_keep_their_bytes() {
     });
 
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::new("service_bytes".into());
+    let port = RelayBrowserPort::new(
+        "service_bytes".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
     port.attach(stream).unwrap();
     let cancelled = AtomicBool::new(false);
     port.call(

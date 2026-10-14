@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
+use crate::browser::adapter::chromium::level4::assets::page_assets;
 use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
@@ -141,7 +142,7 @@ impl ServiceHost {
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::from_environment();
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
-        let browser = Arc::new(RelayBrowserPort::new(service_epoch));
+        let browser = Arc::new(RelayBrowserPort::new(service_epoch, page_assets()));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         browser
             .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
@@ -1317,7 +1318,10 @@ mod tests {
             projection,
             workspaces.clone(),
             governance,
-            Arc::new(crate::browser::RelayBrowserPort::new("passive-test".into())),
+            Arc::new(crate::browser::RelayBrowserPort::new(
+                "passive-test".into(),
+                super::page_assets(),
+            )),
             diagnostics,
         );
 
@@ -1618,8 +1622,10 @@ mod tests {
         use crate::workspace::WorkspaceStore;
 
         let browser = Arc::new(FakeBrowser::default());
-        let relay = Arc::new(crate::browser::RelayBrowserPort::new("service_test".into()));
-        relay.set_protocol4_assets(test_assets());
+        let relay = Arc::new(crate::browser::RelayBrowserPort::new(
+            "service_test".into(),
+            test_assets(),
+        ));
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::new(None, None);
         let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();

@@ -9,10 +9,13 @@
 //! into one answer and do the coordinate arithmetic between documents. [`run`] is where one
 //! unit of browser work becomes the primitives that carry it.
 
+pub mod assets;
 pub mod connection;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod geometry;
+#[cfg(test)]
+mod golden;
 pub mod keys;
 pub mod link;
 pub mod locator;

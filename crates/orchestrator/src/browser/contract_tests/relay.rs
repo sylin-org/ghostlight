@@ -120,7 +120,10 @@ fn incompatible_browser_bridge_fails_during_hello() {
         .unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let port = RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
     assert_eq!(
         port.attach(stream),
         Err(BrowserError::Incompatible {
@@ -151,7 +154,11 @@ fn an_older_capability_revision_refuses_before_dispatch() {
         hold.recv().unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
+    let port = RelayBrowserPort::with_heartbeat_settings(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+        short_heartbeat(),
+    );
     port.attach(stream).unwrap();
 
     assert_eq!(
@@ -227,7 +234,11 @@ fn attachment_without_adapter_acknowledgement_becomes_unavailable() {
         hold.recv().unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
+    let port = RelayBrowserPort::with_heartbeat_settings(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+        short_heartbeat(),
+    );
     port.attach(stream).unwrap();
     assert!(port.is_connected());
 
@@ -267,7 +278,11 @@ fn an_adapter_without_liveness_keeps_its_compatible_attachment_semantics() {
         hold.recv().unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::with_heartbeat_settings("service_test".into(), short_heartbeat());
+    let port = RelayBrowserPort::with_heartbeat_settings(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+        short_heartbeat(),
+    );
     port.attach(stream).unwrap();
 
     thread::sleep(Duration::from_millis(75));
@@ -315,6 +330,7 @@ fn a_probe_unanswered_past_the_verdict_stops_new_dispatch_but_not_calls_in_fligh
     let (stream, _) = listener.accept().unwrap();
     let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
         HeartbeatSettings {
             interval: Duration::from_secs(10),
             timeout: Duration::from_secs(30),
@@ -427,7 +443,10 @@ fn a_short_deadline_with_a_late_acknowledgement_leaves_the_connection_and_other_
         hold.recv().unwrap();
     });
     let (stream, _) = listener.accept().unwrap();
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let transitions = Arc::new(Transitions::default());
     port.set_lifecycle_observer(Arc::clone(&transitions) as Arc<dyn AdapterLifecycleObserver>);
     port.attach(stream).unwrap();
@@ -513,6 +532,7 @@ fn a_silent_connection_answers_an_immediate_probe_while_work_waits_for_it() {
     let (stream, _) = listener.accept().unwrap();
     let port = RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
         HeartbeatSettings {
             interval: Duration::from_secs(10),
             timeout: Duration::from_secs(30),
@@ -602,7 +622,10 @@ fn waiting_for_a_browser_tells_an_initializing_connection_from_an_absent_one() {
         .unwrap();
         let _ = hold.recv();
     });
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     assert_eq!(
         port.await_available(
             TEST_BROWSER,
@@ -693,6 +716,7 @@ fn heartbeat_acknowledgements_keep_a_silent_operation_available() {
     let (stream, _) = listener.accept().unwrap();
     let port = RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
         HeartbeatSettings {
             interval: Duration::from_millis(100),
             timeout: Duration::from_secs(1),
@@ -720,7 +744,10 @@ fn heartbeat_acknowledgements_keep_a_silent_operation_available() {
 fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let port = RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
 
     let mut adapters = Vec::new();
     for browser in ["browser_chrome", "browser_edge"] {
@@ -798,7 +825,10 @@ fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
 fn a_second_connection_from_one_browser_collapses_onto_the_first() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let port = RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
 
     // One browser opening two native ports is the failure this design exists to make
     // impossible: the browser mints its identity once, so the second connection is the same
@@ -987,7 +1017,10 @@ fn runtime_capable_adapter_is_published_only_after_exact_installation_acknowledg
     });
 
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let port = RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
     port.set_lifecycle_observer(Arc::new(AttachedFlag(Arc::clone(&attached))));
     port.attach(stream).unwrap();
     assert!(attached.load(Ordering::SeqCst));
@@ -1043,7 +1076,10 @@ fn mismatched_runtime_acknowledgement_retires_the_unpublished_connection() {
     });
 
     let (stream, _) = listener.accept().unwrap();
-    let port = RelayBrowserPort::new("service_test".into());
+    let port = RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    );
     port.set_lifecycle_observer(Arc::new(AttachedFlag(Arc::clone(&attached))));
     assert!(matches!(
         port.attach(stream),

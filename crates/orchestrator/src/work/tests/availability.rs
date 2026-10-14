@@ -255,7 +255,10 @@ fn await_unregistered(port: &RelayBrowserPort) {
 fn a_pinned_browser_reconnecting_during_runtime_install_takes_the_call() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let (executor, workspaces, workspace) =
         relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
 
@@ -298,6 +301,7 @@ fn a_silent_pinned_browser_that_answers_the_probe_takes_the_call() {
     let address = listener.local_addr().unwrap();
     let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
         "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
         HeartbeatSettings {
             interval: Duration::from_secs(10),
             timeout: Duration::from_secs(30),
@@ -343,7 +347,10 @@ fn a_silent_pinned_browser_that_answers_the_probe_takes_the_call() {
 fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let (governance, policy) = manual_startup();
     let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
 
@@ -375,7 +382,10 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
 fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let (governance, policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     // Long past the port's own reconnect window, so the departure is the only evidence.
@@ -413,7 +423,10 @@ fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
 /// so a cold start with no browser leaves browser startup most of the deadline.
 #[test]
 fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_window() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let (governance, policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     port.backdate(RETURN_GRACE);
@@ -444,7 +457,10 @@ fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_wind
 fn a_registered_connection_still_installing_carries_the_wait_past_the_reconnect_window() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let port = Arc::new(RelayBrowserPort::new("service_test".into()));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_test".into(),
+        crate::browser::adapter::chromium::level4::assets::page_assets(),
+    ));
     let (governance, policy) = manual_startup();
     let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
     port.backdate(RETURN_GRACE);

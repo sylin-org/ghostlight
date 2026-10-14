@@ -282,7 +282,10 @@ fn page_modes_filter_before_extraction_and_keep_hosts_only_in_human_details() {
                 executor.workbench.clone(),
                 executor.workspaces.clone(),
                 executor.governance.clone(),
-                Arc::new(crate::browser::RelayBrowserPort::new("test".into())),
+                Arc::new(crate::browser::RelayBrowserPort::new(
+                    "test".into(),
+                    crate::browser::adapter::chromium::level4::assets::page_assets(),
+                )),
                 crate::diagnostics::DiagnosticsHub::for_tests(),
             );
             let snapshot = facade.snapshot();

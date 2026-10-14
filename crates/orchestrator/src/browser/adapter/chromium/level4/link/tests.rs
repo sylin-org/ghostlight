@@ -26,11 +26,13 @@ const GROUP_TITLE: &str = "Ghostlight - Claude Code";
 const PATIENCE: Duration = Duration::from_secs(30);
 
 fn port(script: Script) -> (RelayBrowserPort, FakeExtension) {
-    let port = RelayBrowserPort::new("service_link".into());
-    port.set_protocol4_assets(Arc::new(wire::Assets {
-        id: "0".repeat(64),
-        source: String::new(),
-    }));
+    let port = RelayBrowserPort::new(
+        "service_link".into(),
+        Arc::new(wire::Assets {
+            id: "0".repeat(64),
+            source: String::new(),
+        }),
+    );
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let fake = FakeExtension::connect(
         listener.local_addr().unwrap(),

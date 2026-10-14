@@ -546,12 +546,12 @@ pub struct Input {
     /// The tab that receives the input.
     pub tab_id: u64,
     /// A world call run right before the first step, for example a focus check.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precondition: Option<WorldCall>,
     /// The steps, 1 to [`MAX_INPUT_STEPS`].
     pub steps: Vec<InputStep>,
     /// Currency check run right before the steps.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard: Option<DocumentGuard>,
     /// Bounded wait after the steps for the page to settle.
     #[serde(default)]
@@ -601,16 +601,16 @@ pub enum InputStep {
         /// The key value.
         key: String,
         /// The physical key code.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         code: Option<String>,
         /// The legacy virtual key code.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         key_code: Option<u16>,
         /// Text the key produces.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
         /// Text the key produces without modifiers.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         unmodified_text: Option<String>,
         /// Bitmask of held modifier keys.
         #[serde(default)]

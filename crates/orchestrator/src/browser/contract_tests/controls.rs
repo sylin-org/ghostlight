@@ -19,7 +19,10 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
         let (stream, _) = listener.accept().unwrap();
         let writer = Arc::new(crate::browser::transport::SocketWriter::new(stream).unwrap());
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let port = RelayBrowserPort::new("test".into());
+        let port = RelayBrowserPort::new(
+            "test".into(),
+            crate::browser::adapter::chromium::level4::assets::page_assets(),
+        );
         lock(&port.adapters).connections.insert(
             TEST_BROWSER.into(),
             Connection {

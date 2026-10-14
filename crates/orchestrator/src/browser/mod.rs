@@ -711,9 +711,8 @@ pub struct RelayBrowserPort {
     control_state: Mutex<RuntimeControlState>,
     diagnostics: Mutex<Option<DiagnosticsState>>,
     lifecycle: Mutex<Option<Arc<dyn AdapterLifecycleObserver>>>,
-    /// The page assets a protocol-4 connection receives in `hello_accepted`. Without them the
-    /// port refuses protocol-4 hellos.
-    protocol4_assets: Mutex<Option<Arc<wire::Assets>>>,
+    /// The page assets every protocol-4 connection receives in `hello_accepted`.
+    assets: Arc<wire::Assets>,
     heartbeat: HeartbeatSettings,
     /// When relays could last begin reconnecting to this port: its construction, then the moment
     /// the service published the endpoint relays find it by. Right after that, relays that served
@@ -731,23 +730,29 @@ impl std::fmt::Debug for RelayBrowserPort {
 }
 
 impl RelayBrowserPort {
-    /// Construct a disconnected relay port for one restart-local service epoch.
+    /// Construct a disconnected relay port for one restart-local service epoch, shipping
+    /// `assets` to every protocol-4 connection.
     #[must_use]
-    pub fn new(service_epoch: String) -> Self {
-        Self::with_settings(service_epoch, HeartbeatSettings::default())
+    pub fn new(service_epoch: String, assets: Arc<wire::Assets>) -> Self {
+        Self::with_settings(service_epoch, assets, HeartbeatSettings::default())
     }
 
     /// Construct a relay port with shortened liveness timing for tests.
     #[cfg(test)]
     pub(crate) fn with_heartbeat_settings(
         service_epoch: String,
+        assets: Arc<wire::Assets>,
         heartbeat: HeartbeatSettings,
     ) -> Self {
         debug_assert!(heartbeat.interval < heartbeat.timeout);
-        Self::with_settings(service_epoch, heartbeat)
+        Self::with_settings(service_epoch, assets, heartbeat)
     }
 
-    fn with_settings(service_epoch: String, heartbeat: HeartbeatSettings) -> Self {
+    fn with_settings(
+        service_epoch: String,
+        assets: Arc<wire::Assets>,
+        heartbeat: HeartbeatSettings,
+    ) -> Self {
         Self {
             service_epoch,
             adapters: Arc::new(Mutex::new(AdapterRegistry::default())),
@@ -755,7 +760,7 @@ impl RelayBrowserPort {
             control_state: Mutex::new(RuntimeControlState::Active),
             diagnostics: Mutex::new(None),
             lifecycle: Mutex::new(None),
-            protocol4_assets: Mutex::new(None),
+            assets,
             heartbeat,
             opened: Mutex::new(Instant::now()),
         }
@@ -795,11 +800,6 @@ impl RelayBrowserPort {
     /// Install the adapter lifecycle observer.
     pub fn set_lifecycle_observer(&self, observer: Arc<dyn AdapterLifecycleObserver>) {
         *lock(&self.lifecycle) = Some(observer);
-    }
-
-    /// Install the page assets every protocol-4 connection receives in `hello_accepted`.
-    pub fn set_protocol4_assets(&self, assets: Arc<wire::Assets>) {
-        *lock(&self.protocol4_assets) = Some(assets);
     }
 
     /// Whether at least one compatible adapter is currently connected.

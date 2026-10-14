@@ -126,11 +126,13 @@ fn opened(
     FakeExtension,
     crate::workspace::WorkspaceId,
 ) {
-    let port = Arc::new(RelayBrowserPort::new("service_protocol4".into()));
-    port.set_protocol4_assets(Arc::new(wire::Assets {
-        id: "0".repeat(64),
-        source: String::new(),
-    }));
+    let port = Arc::new(RelayBrowserPort::new(
+        "service_protocol4".into(),
+        Arc::new(wire::Assets {
+            id: "0".repeat(64),
+            source: String::new(),
+        }),
+    ));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let fake = FakeExtension::connect(
         listener.local_addr().unwrap(),

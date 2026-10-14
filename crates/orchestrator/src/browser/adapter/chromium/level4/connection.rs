@@ -82,13 +82,11 @@ impl Receipts {
 /// Validate a hello that chose protocol 4 and attach its connection to `port`.
 ///
 /// The connection registers, hears `hello_accepted` with the port's page assets, and is
-/// published to callers at once. Without page assets the port cannot serve protocol 4, and the
-/// hello is refused as incompatible.
+/// published to callers at once.
 ///
 /// # Errors
 ///
-/// Returns [`BrowserError::Incompatible`] when the port has no page assets,
-/// [`BrowserError::Authentication`] for a hello that breaks the identity rules, and the
+/// Returns [`BrowserError::Authentication`] for a hello that breaks the identity rules, and the
 /// transport failure when the connection cannot be set up.
 pub(crate) fn attach(
     port: &RelayBrowserPort,
@@ -97,13 +95,6 @@ pub(crate) fn attach(
     hello: Value,
     adapter: Adapter,
 ) -> Result<(), BrowserError> {
-    let Some(assets) = lock(&port.protocol4_assets).clone() else {
-        crate::browser::refuse_incompatible(stream);
-        return Err(BrowserError::Incompatible {
-            offered: Level::Four.major(),
-            required: Level::Three.major(),
-        });
-    };
     let hello = validated_hello(hello)?;
     let browser_name = validated_browser_name(hello.browser_name)?;
     let lifecycle = lock(&port.lifecycle).clone();
@@ -145,7 +136,7 @@ pub(crate) fn attach(
         service_epoch: port.service_epoch.clone(),
         service_version: env!("CARGO_PKG_VERSION").into(),
         control_state: (*lock(&port.control_state)).into(),
-        assets: (*assets).clone(),
+        assets: (*port.assets).clone(),
     }) {
         port.detach_registered(&tag.browser_id, &tag.connection_id);
         return Err(BrowserError::Protocol(error.to_string()));

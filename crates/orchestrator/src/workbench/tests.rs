@@ -354,7 +354,10 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
         projection,
         crate::workspace::WorkspaceStore::default(),
         GovernanceFacade::new(None, None),
-        Arc::new(crate::browser::RelayBrowserPort::new("epoch".into())),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::level4::assets::page_assets(),
+        )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
 
