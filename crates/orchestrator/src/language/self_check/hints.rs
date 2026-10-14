@@ -13,6 +13,10 @@
 //!   field names too. In a clause that names no tool ("repeat the call with ..."), each must be a
 //!   field some catalog tool advertises.
 //!
+//! - A handle value (a handle prefix, then eight lowercase base32 characters, such as
+//!   `target_7k2nb5xe`) is never a field name. When it directly follows a field whose schema
+//!   takes handles of one prefix, it must carry that prefix.
+//!
 //! Representative values cover every `Outcome` and `Refusal` variant. The matches in
 //! `outcome_variant` and `refusal_variant` have no wildcard, so a new variant stops this module
 //! compiling until it is named there. Add the name to the variant list beside the match and a
@@ -36,6 +40,36 @@ const ARTICLES: &[&str] = &["a", "an", "the"];
 
 /// Prefixes that make a word a tool name.
 const TOOL_PREFIXES: &[&str] = &["browser_", "policy_"];
+
+/// The prefixes the catalog gives its handle fields (`handle()` in the catalog, pattern
+/// `^<prefix>.+$`). A hint may name a handle value that starts with one of them.
+const HANDLE_PREFIXES: &[&str] = &["target_", "tab_", "view_", "diag_", "image_", "invocation_"];
+
+/// How many characters follow a handle prefix: eight, the length the workspace mints.
+const HANDLE_SUFFIX_LEN: usize = 8;
+
+/// Whether a character belongs to a handle's random part: lowercase RFC 4648 base32.
+fn is_handle_suffix_char(character: char) -> bool {
+    character.is_ascii_lowercase() || ('2'..='7').contains(&character)
+}
+
+/// The prefix of a word shaped like a handle value, or none.
+fn handle_prefix(word: &str) -> Option<&'static str> {
+    HANDLE_PREFIXES.iter().copied().find(|prefix| {
+        word.strip_prefix(prefix).is_some_and(|suffix| {
+            suffix.len() == HANDLE_SUFFIX_LEN && suffix.chars().all(is_handle_suffix_char)
+        })
+    })
+}
+
+/// The handle prefix a field's schema requires, read from its `^<prefix>` pattern.
+fn required_handle_prefix(schema: &Value) -> Option<&'static str> {
+    let pattern = schema.get("pattern")?.as_str()?.strip_prefix('^')?;
+    HANDLE_PREFIXES
+        .iter()
+        .copied()
+        .find(|prefix| pattern.starts_with(prefix))
+}
 
 /// One word of a hint, with whether the author marked it as a name.
 struct Word {
@@ -64,7 +98,10 @@ fn is_tool_word(word: &str) -> bool {
 }
 
 fn is_identifier(word: &Word) -> bool {
-    word.marked || (word.text.contains('_') && !is_tool_word(&word.text))
+    word.marked
+        || (word.text.contains('_')
+            && !is_tool_word(&word.text)
+            && handle_prefix(&word.text).is_none())
 }
 
 /// What the catalog advertises, read once.
@@ -154,6 +191,24 @@ fn hint_violations(hint: &str, advertised: &Advertised) -> Vec<String> {
                 tools.push(&word.text);
                 continue;
             }
+            if let Some(prefix) = handle_prefix(&word.text) {
+                let named = index
+                    .checked_sub(2)
+                    .and_then(|before| words.get(before))
+                    .map(|field| field.text.as_str());
+                for tool in &tools {
+                    let required = named
+                        .and_then(|name| advertised.fields(tool)?.get(name))
+                        .and_then(required_handle_prefix);
+                    if let Some(required) = required.filter(|required| *required != prefix) {
+                        found.push(format!(
+                            "`{tool}` field `{}` does not take a {prefix} handle (it takes {required})",
+                            named.unwrap_or_default()
+                        ));
+                    }
+                }
+                continue;
+            }
             let field = if word.text == "with" {
                 after_with = true;
                 while words
@@ -165,6 +220,7 @@ fn hint_violations(hint: &str, advertised: &Advertised) -> Vec<String> {
                 match words.get(index) {
                     Some(next)
                         if !is_tool_word(&next.text)
+                            && handle_prefix(&next.text).is_none()
                             && (!tools.is_empty() || is_identifier(next)) =>
                     {
                         index += 1;
@@ -944,6 +1000,14 @@ fn the_hint_checker_catches_calls_the_decoder_would_reject() {
             "no catalog tool has a field `timeout_millis`",
         ),
         (
+            "Repeat browser_click with tab target_7k2nb5xe.",
+            "`browser_click` field `tab` does not take a target_ handle",
+        ),
+        (
+            "Repeat browser_click with targt target_7k2nb5xe.",
+            "`browser_click` has no field `targt`",
+        ),
+        (
             "Call browser_read with `max_result_chars` set higher.",
             "`browser_read` has no field `max_result_chars`",
         ),
@@ -959,6 +1023,9 @@ fn the_hint_checker_catches_calls_the_decoder_would_reject() {
         "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.",
         "Repeat with a longer timeout_ms when the page genuinely needs more time.",
         "Check the page with browser_read or browser_inspect before repeating.",
+        "Repeat browser_click with target target_7k2nb5xe.",
+        "Repeat browser_fill_form with target_7k2nb5xe set to one of the offered options.",
+        "Call browser_dialog with action dismiss on tab tab_m3k5q2xa.",
     ] {
         assert_eq!(hint_violations(hint, &advertised), Vec::<String>::new(), "{hint}");
     }
