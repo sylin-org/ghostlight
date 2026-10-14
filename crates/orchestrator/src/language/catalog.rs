@@ -277,15 +277,6 @@ fn tool(
     hints: Hints,
 ) -> ToolDefinition {
     let mut input_schema = input_schema;
-    if input_schema["required"]
-        .as_array()
-        .is_some_and(Vec::is_empty)
-    {
-        input_schema
-            .as_object_mut()
-            .expect("schema is an object")
-            .remove("required");
-    }
     input_schema["properties"]["timeout_ms"] = timeout(name);
     if super::settlement::PAGE_TOOLS.contains(&name) {
         // Thirteen tools carry it undescribed: the name, type and default say what it is, and
@@ -1163,7 +1154,11 @@ fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
 
 fn raw_object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     let properties: BTreeMap<_, _> = fields.into_iter().collect();
-    json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
+    let mut schema = json!({"type":"object","additionalProperties":false,"properties":properties});
+    if !required.is_empty() {
+        schema["required"] = json!(required);
+    }
+    schema
 }
 
 /// Advertise a conditional call's branches as one portable object schema.
@@ -1192,8 +1187,8 @@ fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
         let branch_required: Vec<String> = branch
             .get("required")
             .and_then(Value::as_array)
-            .expect("union branches declare required fields")
-            .iter()
+            .into_iter()
+            .flatten()
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
@@ -1214,13 +1209,17 @@ fn union(branches: Vec<Value>, examples: Vec<Value>) -> Value {
         })
         .collect();
 
-    json!({
+    let mut schema = json!({
         "type":"object",
         "additionalProperties":false,
         "properties":properties,
-        "required":required.unwrap_or_default(),
         "examples":examples
-    })
+    });
+    let required = required.unwrap_or_default();
+    if !required.is_empty() {
+        schema["required"] = json!(required);
+    }
+    schema
 }
 
 /// Keywords `merge_same_type` combines across variants instead of requiring them to agree.
@@ -1301,7 +1300,11 @@ fn merge_same_type(name: &str, kind: &str, variants: Vec<Value>) -> Value {
         }
         None => {
             for &(keyword, lower) in bound_keywords(kind) {
-                if let Some(bound) = widened_bound(&variants, keyword, lower) {
+                // A zero minimum length is what every string already has.
+                let widest = widened_bound(&variants, keyword, lower);
+                if let Some(bound) =
+                    widest.filter(|bound| keyword != "minLength" || *bound != json!(0))
+                {
                     merged.insert(keyword.into(), bound);
                 }
             }
@@ -1523,10 +1526,11 @@ fn boolean(default: bool, description: &str) -> Value {
 }
 
 fn text(minimum: usize, maximum: usize, description: &str) -> Value {
-    described(
-        json!({"type":"string","minLength":minimum,"maxLength":maximum}),
-        description,
-    )
+    let mut schema = json!({"type":"string","maxLength":maximum});
+    if minimum > 0 {
+        schema["minLength"] = json!(minimum);
+    }
+    described(schema, description)
 }
 
 fn integer(minimum: usize, maximum: usize, default: Option<usize>, description: &str) -> Value {
@@ -1547,7 +1551,7 @@ fn enumeration(values: &[&str], default: Option<&str>, description: &str) -> Val
 
 fn handle(prefix: &str, description: &str) -> Value {
     described(
-        json!({"type":"string","minLength":prefix.len()+1,"maxLength":160,"pattern":format!("^{prefix}.+$")}),
+        json!({"type":"string","maxLength":160,"pattern":format!("^{prefix}.+$")}),
         description,
     )
 }
@@ -1899,7 +1903,7 @@ mod tests {
         let text = property(&typing, "text").expect("text property");
         assert_eq!(
             (&text["type"], &text["minLength"], &text["maxLength"]),
-            (&json!("string"), &json!(0), &json!(8_000))
+            (&json!("string"), &Value::Null, &json!(8_000))
         );
 
         let wait = tool_schema("browser_wait");
@@ -1964,7 +1968,7 @@ mod tests {
         );
         assert_eq!(
             field("text"),
-            json!({"type":"string","minLength":0,"maxLength":10,"description":"Words. Empty."})
+            json!({"type":"string","maxLength":10,"description":"Words. Empty."})
         );
         assert_eq!(
             field("clear"),
@@ -1997,10 +2001,23 @@ mod tests {
         assert_eq!(
             mixed["properties"]["value"],
             json!({"description":"Text. Flag.","anyOf":[
-                {"type":"string","minLength":0,"maxLength":5},
+                {"type":"string","maxLength":5},
                 {"type":"boolean","default":false}
             ]})
         );
+    }
+
+    #[test]
+    fn a_handle_field_refuses_an_empty_value_without_a_minimum_length() {
+        let read = tool_schema("browser_read");
+        let target = property(&read, "target").expect("target property");
+        assert!(target.get("minLength").is_none());
+        let valid = json!({"tab":"tab_1","target":"target_1"});
+        assert!(crate::language::decode("browser_read", valid).is_ok());
+        for empty in ["", "target_"] {
+            let call = json!({"tab":"tab_1","target":empty});
+            assert!(crate::language::decode("browser_read", call).is_err());
+        }
     }
 
     #[test]
