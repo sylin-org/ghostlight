@@ -33,14 +33,20 @@ function Invoke-Ghostlight {
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
-    [Console]::Out.Write($stdout.GetAwaiter().GetResult())
-    [Console]::Error.Write($stderr.GetAwaiter().GetResult())
+    # A detached service started by the installer can inherit the pipe ends and
+    # keep them open, so end of file may never arrive. Wait a short, bounded
+    # time for the output and print whatever has finished.
+    [void][System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr), 2000)
+    if ($stdout.IsCompleted) { [Console]::Out.Write($stdout.GetAwaiter().GetResult()) }
+    if ($stderr.IsCompleted) { [Console]::Error.Write($stderr.GetAwaiter().GetResult()) }
     exit $process.ExitCode
 }
 
 if ($Restore) {
     $installed = Join-Path (Join-Path (Join-Path $HOME ".ghostlight") "bin") $exe
-    Invoke-Ghostlight -Binary $installed -Arguments @("deployment", "install", "--restore")
+    $restore = @("deployment", "install", "--restore")
+    if ($Plan) { $restore += "--plan" }
+    Invoke-Ghostlight -Binary $installed -Arguments $restore
 }
 
 $target = if ([System.IO.Path]::IsPathFullyQualified($TargetDirectory)) {
@@ -55,8 +61,7 @@ if (-not $target.StartsWith($root, $comparison)) {
     throw "TargetDirectory must remain inside the repository: $target"
 }
 
-$env:CARGO_TARGET_DIR = $target
-$build = @("build", "--workspace", "--locked")
+$build = @("build", "--workspace", "--locked", "--target-dir", $target)
 if ($Profile -eq "release") { $build += "--release" }
 Push-Location $repo
 try {

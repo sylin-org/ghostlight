@@ -4,7 +4,7 @@ Lane rules are in [BOOTSTRAP.md](BOOTSTRAP.md). Target: ADR-0197 Decisions 1-4, 
 
 ## RESUME HERE
 
-Next slice: connectors-5 onward, per the lane plan. No blockers.
+Next slice: connectors-6 onward, per the lane plan. No blockers.
 
 ## Landed
 
@@ -43,6 +43,14 @@ Next slice: connectors-5 onward, per the lane plan. No blockers.
   reconnects with a fresh hello. Gate: 11 connector tests, 19 MCP connector tests, 64 relay unit
   tests and 9 fixture tests pass. The bridge test that reads `browser-connector/src/main.rs`
   stays broken until the bridge goes in the switch, like the MCP one.
+
+- connectors-5: `scripts/dev-loop.ps1` builds the workspace into `.target-dev-loop` (passed to
+  cargo with `--target-dir`, so the shell environment is untouched) and hands the result to
+  `ghostlight deployment install --development`; `-Restore` runs the installed binary's
+  `deployment install --restore`; `-Plan` adds `--plan` to either. Output is read with a bounded
+  wait so a detached service holding the pipes cannot hang the script. The script was
+  parse-checked and not run. It depends on `deployment install --development/--restore/--plan`
+  from the switch deployment slice.
 
 ## Blockers
 
