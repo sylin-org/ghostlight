@@ -327,6 +327,46 @@ fn a_tool_result_carries_the_envelope_once_with_images_and_the_error_flag() {
 }
 
 #[test]
+fn older_revisions_get_the_lean_json_in_the_text_block() {
+    for revision in SUPPORTED_REVISIONS {
+        let mut session = McpSession::new(CHANNEL);
+        session.accept(&initialize_line(json!(1), revision));
+        session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        let id = invoke_id(&session.accept(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_screenshot"}}"#,
+        ));
+        let lines = session.render(ServiceResponse::Result {
+            id,
+            text: "Captured the view.".into(),
+            result: json!({"status": "succeeded", "readiness": "not_applicable", "facts": {"view": "view_1"}}),
+            is_error: false,
+            content: vec![ServiceContent::Image {
+                mime_type: "image/jpeg".into(),
+                data: "base64-image".into(),
+            }],
+        });
+        let result = &lines[0]["result"];
+        let text = result["content"][0]["text"].as_str().unwrap();
+        let lean = &result["structuredContent"];
+        assert_eq!(
+            lean,
+            &json!({"status": "succeeded", "facts": {"view": "view_1"}})
+        );
+        if revision < "2025-06-18" {
+            let expected = format!(
+                "Captured the view.
+
+Result: {lean}"
+            );
+            assert_eq!(text, expected, "{revision}");
+        } else {
+            assert_eq!(text, "Captured the view.", "{revision}");
+        }
+        assert_eq!(result["content"][1]["type"], "image");
+    }
+}
+
+#[test]
 fn a_service_result_loses_its_defaults_in_structured_content() {
     let mut session = ready_session();
     let id = invoke_id(&session.accept(

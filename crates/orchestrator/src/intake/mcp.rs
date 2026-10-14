@@ -8,7 +8,9 @@
 //!
 //! A tool result carries the envelope once, in `structuredContent`, as the lean model view with
 //! fields at their default omitted (ADR-0198 Decision 21); its text block is the service's summary
-//! and next steps, and tool definitions carry no `outputSchema` (ADR-0197 Decision 17). [`ResumeState`] is what lets a session continue across a service restart
+//! and next steps, and tool definitions carry no `outputSchema` (ADR-0197 Decision 17). A session
+//! negotiated at a revision before 2025-06-18 cannot read `structuredContent`, so its text block
+//! also carries the same lean JSON after `Result: ` (ADR-0198 Decision 24). [`ResumeState`] is what lets a session continue across a service restart
 //! (Decision 12), and [`failure_templates`] holds the answers a connector gives when it cannot
 //! reach the service (Decision 2).
 
@@ -38,6 +40,13 @@ pub const LATEST_REVISION: &str = "2025-11-25";
 /// Every initialized MCP revision this engine serves, oldest first.
 pub const SUPPORTED_REVISIONS: [&str; 4] =
     ["2024-11-05", "2025-03-26", "2025-06-18", LATEST_REVISION];
+/// The first MCP revision whose clients read `structuredContent`; earlier ones get the lean JSON
+/// in the text block as well (ADR-0198 Decision 24).
+const STRUCTURED_CONTENT_REVISION: &str = "2025-06-18";
+/// What introduces the lean JSON in the text block of a result for an older revision.
+const TEXT_RESULT_LABEL: &str = "
+
+Result: ";
 /// The MCP revision whose stateless `server/discover` request this engine answers.
 pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
@@ -310,7 +319,11 @@ impl McpSession {
             } => self
                 .finish_call(&id)
                 .map(|client_id| {
-                    success(client_id, call_tool_result(text, result, is_error, content))
+                    let revision = self.revision.unwrap_or(LATEST_REVISION);
+                    success(
+                        client_id,
+                        call_tool_result(revision, text, result, is_error, content),
+                    )
                 })
                 .into_iter()
                 .collect(),
@@ -721,15 +734,31 @@ fn failure_call_result(failure: ConnectorFailure) -> Value {
         "facts": {"reason": cause},
         "next_steps": next_steps,
     });
-    call_tool_result(failure.call_text(), envelope, true, Vec::new())
+    // A template is built before any client negotiates a revision and the connector fills only its
+    // id, so it is written for the latest revision: structured content only, no text copy.
+    call_tool_result(
+        LATEST_REVISION,
+        failure.call_text(),
+        envelope,
+        true,
+        Vec::new(),
+    )
 }
 
+/// Build a `tools/call` result. The envelope travels as lean `structuredContent`; for a revision
+/// that predates it, the same JSON is also appended to the first text block.
 fn call_tool_result(
-    text: String,
+    revision: &str,
+    mut text: String,
     envelope: Value,
     is_error: bool,
     images: Vec<ServiceContent>,
 ) -> Value {
+    let lean = lean::project(&envelope);
+    if revision < STRUCTURED_CONTENT_REVISION {
+        text.push_str(TEXT_RESULT_LABEL);
+        text.push_str(&lean.to_string());
+    }
     let mut blocks = vec![json!({"type": content::TEXT, "text": text})];
     for item in images {
         match item {
@@ -738,7 +767,7 @@ fn call_tool_result(
             }
         }
     }
-    json!({"content": blocks, "structuredContent": lean::project(&envelope), "isError": is_error})
+    json!({"content": blocks, "structuredContent": lean, "isError": is_error})
 }
 
 fn success(id: Value, result: Value) -> Value {
