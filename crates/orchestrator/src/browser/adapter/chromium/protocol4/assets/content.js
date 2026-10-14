@@ -52,6 +52,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const FIELD_ROLES = new Set([
     "textbox", "combobox", "searchbox", "checkbox", "radio", "switch", "spinbutton", "slider", "listbox"
   ]);
+  // The role an input type has by HTML-AAM. Any type not listed reads as a textbox.
+  const INPUT_ROLES = new Map([
+    ["checkbox", "checkbox"], ["radio", "radio"], ["button", "button"], ["submit", "button"],
+    ["reset", "button"], ["range", "slider"], ["number", "spinbutton"], ["search", "searchbox"]
+  ]);
   const GROUP_ROLES = new Set(["radiogroup", "group"]);
   // The accessibility role an element has by its tag alone, beyond the control roles roleFor
   // names. A tag that is not in this table has no role of its own and reads as generic.
@@ -171,6 +176,13 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return shared.bounded(plainText(element, 500).text, 500);
   }
 
+  // A select that shows its options as a list: one that takes several choices or is sized to
+  // show more than one row. Every other native select is a dropdown.
+  function isListSelect(select) {
+    const rows = Number.parseInt(select.getAttribute("size"), 10);
+    return select.multiple === true || select.getAttribute("multiple") !== null || rows > 1;
+  }
+
   function roleFor(element) {
     const explicit = element.getAttribute("role");
     if (explicit) return shared.bounded(explicit, 100);
@@ -178,19 +190,16 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const type = String(element.getAttribute("type") ?? "").toLowerCase();
     if (tag === "a") return "link";
     if (tag === "button") return "button";
-    if (tag === "select") return "combobox";
+    if (tag === "select") return isListSelect(element) ? "listbox" : "combobox";
     if (tag === "textarea") return "textbox";
-    if (tag === "input" && type === "checkbox") return "checkbox";
-    if (tag === "input" && type === "radio") return "radio";
-    if (tag === "input" && ["button", "submit", "reset"].includes(type)) return "button";
-    if (tag === "input") return "textbox";
+    if (tag === "input") return INPUT_ROLES.get(type) ?? "textbox";
     if (/^h[1-6]$/.test(tag)) return "heading";
     return IMPLICIT_ROLES.get(tag) ?? "generic";
   }
 
   function stateFor(element) {
     const state = [];
-    if (element.disabled || element.getAttribute("aria-disabled") === "true") state.push("disabled");
+    if (isDisabled(element)) state.push("disabled");
     if (element.checked || element.getAttribute("aria-checked") === "true") state.push("checked");
     if (element.getAttribute("aria-expanded") === "true") state.push("expanded");
     if (element.getAttribute("aria-expanded") === "false") state.push("collapsed");
@@ -200,6 +209,19 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     if (element.readOnly === true || element.getAttribute("aria-readonly") === "true") state.push("readonly");
     if (isInvalid(element)) state.push("invalid");
     return state.slice(0, 8);
+  }
+
+  // Whether the control cannot be used: the browser's own :disabled, which also covers a control
+  // inside a disabled fieldset, or the page's aria-disabled. An engine that does not know the
+  // pseudo-class falls back to the disabled property.
+  function isDisabled(element) {
+    let native;
+    try {
+      native = element.matches(":disabled");
+    } catch {
+      native = element.disabled === true;
+    }
+    return native || element.getAttribute("aria-disabled") === "true";
   }
 
   // Whether the page or the browser calls the control invalid: after the person touched it, or
@@ -664,7 +686,12 @@ ${line}` : line;
     const controls = ACTIONABLE_SELECTOR;
     const structure = "main,nav,header,footer,form,table,ul,ol,h1,h2,h3,h4,h5,h6,section,article";
     const selector = kind === "controls" ? controls : kind === "structure" ? structure : `${controls},${structure}`;
-    return queryAll(selector);
+    return queryAll(selector).filter((element) => !isHiddenInput(element));
+  }
+
+  // An input of type hidden holds page data, not a control anyone can use.
+  function isHiddenInput(element) {
+    return inputType(element) === "hidden";
   }
 
   function inspect(kind, maximum) {
@@ -678,13 +705,20 @@ ${line}` : line;
     return node.assignedSlot ?? node.parentNode ?? node.host ?? null;
   }
 
+  // The option texts of a native select, so a dropdown is found by a choice it offers. A
+  // credential-class select offers none: what it lists is never searchable.
+  function optionTexts(element) {
+    if (tagOf(element) !== "select" || credentialClass(element)) return "";
+    return Array.from(element.options ?? []).map((option) => oneLine(option.text)).join(" ");
+  }
+
   function findTargets(text, kind, maximum) {
     const needle = text.toLocaleLowerCase();
-    const pool = kind === "control" ? candidates("controls") : queryAll(TEXT_FIND_SELECTOR);
+    const pool = kind === "control" ? candidates("controls") : queryAll(TEXT_FIND_SELECTOR).filter((element) => !isHiddenInput(element));
     const hits = [];
     for (const element of pool.slice(0, 3000)) {
-      const haystack = `${accessibleName(element)} ${plainText(element, 2000).text}`.toLocaleLowerCase();
-      const isControl = element.matches("a[href],button,input,textarea,select,summary,[role],[contenteditable='true']");
+      const haystack = `${accessibleName(element)} ${plainText(element, 2000).text} ${optionTexts(element)}`.toLocaleLowerCase();
+      const isControl = element.matches(ACTIONABLE_SELECTOR);
       if (haystack.includes(needle) && (kind !== "control" || isControl) && (kind !== "text" || !isControl)) {
         hits.push({ element, isControl });
       }
@@ -744,7 +778,7 @@ ${line}` : line;
   }
 
   function inspectTree(rootElement, maxDepth, maximum = DOCUMENT_TREE_NODE_LIMIT) {
-    const controlRoles = ["button", "link", "textbox", "checkbox", "radio", "combobox", "tab", "menuitem", "option", "slider"];
+    const controlRoles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "tab", "menuitem", "option", "slider", "spinbutton"];
     let count = 0;
     function build(element, depth) {
       count += 1;
@@ -1008,7 +1042,7 @@ ${line}` : line;
         : "zero-size";
       throw new AssetError("not_visible", `target is not visible for ${intent} (${reason})`);
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true" || closestAcrossBoundaries(element, "[inert]")) {
+    if (isDisabled(element) || closestAcrossBoundaries(element, "[inert]")) {
       throw new AssetError("disabled", `target is disabled for ${intent}`);
     }
     if (["fill", "type"].includes(intent) && (element.readOnly || element.getAttribute("aria-readonly") === "true")) {
@@ -1087,7 +1121,7 @@ ${line}` : line;
     if (!(element instanceof HTMLInputElement) || element.type !== "file") {
       throw new AssetError("not_file_input", "target is not a file input");
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true" || closestAcrossBoundaries(element, "[inert]")) {
+    if (isDisabled(element) || closestAcrossBoundaries(element, "[inert]")) {
       throw new AssetError("disabled", "target is disabled for upload");
     }
     return element;

@@ -5,8 +5,17 @@ const CREDENTIAL_AUTOCOMPLETE = new Set([
   "new-password",
   "one-time-code",
   "cc-number",
-  "cc-csc"
+  "cc-csc",
+  "cc-exp",
+  "cc-name"
 ]);
+
+// Names that mark a credential-class field. Matched on the lowercased name and id after a
+// camelCase name is split into words, each side bounded by a non-letter or the string end.
+const CREDENTIAL_NAME = new RegExp(
+  "(^|[^a-z])(password|passwd|passcode|pin|ssn|iban|otp|one.?time|secret|token|cvv|cvc|" +
+  "card.?number|api.?key|cc-exp|cc-name)([^a-z]|$)"
+);
 
 function bounded(value, maximum) {
   return String(value ?? "").slice(0, maximum);
@@ -17,8 +26,9 @@ function isCredentialMetadata(metadata) {
   if (type === "password") return true;
   const autocomplete = String(metadata.autocomplete ?? "").toLowerCase().split(/\s+/);
   if (autocomplete.some((token) => CREDENTIAL_AUTOCOMPLETE.has(token))) return true;
-  const identity = `${metadata.name ?? ""} ${metadata.id ?? ""}`.toLowerCase();
-  return /(^|[^a-z])(password|passwd|passcode|otp|one.?time|secret|token|cvv|cvc)([^a-z]|$)/.test(identity);
+  const words = (value) => String(value ?? "").replace(/([a-z])([A-Z])/g, "$1 $2");
+  const identity = `${words(metadata.name)} ${words(metadata.id)}`.toLowerCase();
+  return CREDENTIAL_NAME.test(identity);
 }
 
 // The agent's text-condition value, shaped like page text: a whitespace run holding a newline

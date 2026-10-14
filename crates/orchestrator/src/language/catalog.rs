@@ -9,7 +9,7 @@ use crate::governance::AuthoritySnapshot;
 
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
-    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
+    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS, SEMANTIC_ROLES,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -629,7 +629,7 @@ fn semantic_selector() -> Value {
         "description": "Lookup needs read.",
         "properties": {
             "name": {"type": "string", "minLength": 1, "maxLength": 500},
-            "role": {"type": "string", "enum": ["button","link","checkbox","radio","textbox","searchbox","combobox","listbox","select","slider","spinbutton","tab","menuitem","option","heading","image"]},
+            "role": {"type": "string", "enum": SEMANTIC_ROLES},
             "exact": {"type": "boolean", "default": false}
         },
         "required": ["name"]

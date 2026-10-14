@@ -56,7 +56,11 @@ Read a page with browser_read, and get handles for its controls from browser_fin
 Act with those handles, for example with browser_click or browser_fill_form; timeout_ms bounds the whole call. \
 Handles expire when the page changes, so fetch fresh ones after navigation. \
 Every result states its effect and whether repeating it is safe.";
-/// Closed role vocabulary a semantic selector may filter on.
+/// Closed role vocabulary a semantic selector may filter on, and the enum the catalog advertises.
+///
+/// Every entry is a role the page asset's `roleFor` can produce for an observed control, and the
+/// page-asset test `every semantic role is producible` builds one element per entry, so the
+/// two lists move together.
 const SEMANTIC_ROLES: &[&str] = &[
     "button",
     "link",
@@ -66,14 +70,11 @@ const SEMANTIC_ROLES: &[&str] = &[
     "searchbox",
     "combobox",
     "listbox",
-    "select",
     "slider",
     "spinbutton",
     "tab",
     "menuitem",
     "option",
-    "heading",
-    "image",
 ];
 
 const NAMED_KEYS: &[&str] = &[
@@ -2536,6 +2537,35 @@ mod tests {
         DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
         EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, SERVER_INSTRUCTIONS,
     };
+
+    /// Collect every `role` enum the catalog advertises, wherever a selector sits in a schema.
+    fn role_enums(schema: &serde_json::Value, found: &mut Vec<serde_json::Value>) {
+        match schema {
+            serde_json::Value::Object(map) => {
+                if let Some(role) = map.get("role").and_then(|role| role.get("enum")) {
+                    found.push(role.clone());
+                }
+                map.values().for_each(|value| role_enums(value, found));
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().for_each(|item| role_enums(item, found))
+            }
+            _ => {}
+        }
+    }
+
+    /// The role enum a tool advertises is the vocabulary the decoder accepts, and nothing else.
+    #[test]
+    fn every_advertised_selector_role_is_in_the_semantic_role_vocabulary() {
+        let mut found = Vec::new();
+        for tool in catalog() {
+            role_enums(&tool.input_schema, &mut found);
+        }
+        assert!(!found.is_empty(), "no tool advertises a selector role");
+        for advertised in found {
+            assert_eq!(advertised, json!(super::SEMANTIC_ROLES));
+        }
+    }
 
     /// Every tool advertises `timeout_ms` with the default its decoder applies, and a call may
     /// carry any value in range, so a deadline refusal that suggests a longer `timeout_ms`

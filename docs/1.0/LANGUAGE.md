@@ -79,7 +79,9 @@ moved. An address in another origin always starts a new generation. An explicit
 `browser_navigate` or `browser_history` call always starts one too.
 Typed semantic selectors (name, optional role, optional exact match) are accepted wherever target
 handles are, including `selector_present` waits, so drivers can prefer what a control is called
-over stashing handles.
+over stashing handles. A selector's `role` is one of `button`, `link`, `checkbox`, `radio`,
+`textbox`, `searchbox`, `combobox`, `listbox`, `slider`, `spinbutton`, `tab`, `menuitem` or
+`option`; each is a role an observed control can have.
 
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
@@ -327,7 +329,10 @@ default 6; optional `max_items` from 1 to 200, default 80; optional `timeout_ms`
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, an accessibility
 role, bounded accessible name, state, and credential-class flag, and a control adds the keys in
 the table below when they apply. An element with no role of its
-own reads as `generic`, never as a tag name. A field with no label, `aria-label` or title is named
+own reads as `generic`, never as a tag name. Native controls have their HTML-AAM roles: a range
+input is a `slider`, a number input a `spinbutton`, a search input a `searchbox`, a select that
+takes several choices or shows more than one row a `listbox`, and any other select a `combobox`.
+An input of type hidden is not a control and is never listed. A field with no label, `aria-label` or title is named
 by its placeholder, as browsers do, so `browser_find` and semantic selectors reach it by that
 text. Selectors are not exposed. It answers once the page has been quiet for 300 ms, within the
 settle budget.
@@ -345,9 +350,14 @@ offered nothing of that kind:
 | `group` | For a radio or checkbox, the fieldset legend or the nearest labelled group. At most 80 characters. |
 | `error` | Present when the control is invalid after the person touched it, or the page says `aria-invalid`. The page's own error text when it names one; otherwise a phrase such as `is required`, `is not a valid email address` or `is too short (at least 8 characters)`. The browser's validation message is never used except for a custom error. |
 
-State words gain `required`, `readonly` and `invalid`. A credential-class control carries `value`
-as `[hidden]` when set and empty when empty, and none of the other keys. Option text, hints and
-errors are page content and follow read authorization on the document, like `browser_read`.
+State words gain `required`, `readonly` and `invalid`. A control inside a disabled fieldset reads
+`disabled` and is refused as not actionable, as one with the `disabled` attribute is.
+
+A control is credential-class by its type, its autocomplete token, or its name or id, which is
+split at camelCase before matching, so `apiKey`, `cardNumber`, `userPin`, `ssn` and `iban` count.
+A credential-class control carries `value` as `[hidden]` when set and empty when empty, and none of
+the other keys. Option text, hints and errors are page content and follow read authorization on the
+document, like `browser_read`.
 
 A `document` scope returns no target handles. Its facts are `tab`, `document_generation`,
 `tree`, `nodes`, `truncated`, `snapshot`, and sometimes `diff`. `tree` is one bounded
@@ -374,6 +384,7 @@ Find current semantic targets by visible or accessible text across the composed 
 open shadow roots and http(s) embedded frames. Use it when the desired label or text is known.
 Text search also matches `div`, `[draggable]`, `[aria-label]`, and `[tabindex]` elements, and
 prefers the deepest match over a container that only holds it. Names never include field values.
+Option text finds its dropdown. A credential-class dropdown is never found by its options.
 Shortest call: `{"text":"Submit"}`.
 
 Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,

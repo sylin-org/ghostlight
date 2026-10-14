@@ -336,6 +336,166 @@ test("elements with no role of their own report an accessibility role, never a t
   assert.deepEqual(roles, { Site: "navigation", Items: "list", Top: "banner", Billing: "region" });
 });
 
+/** A control of the given native kind, labelled with `label`, appended to `parent`. */
+function nativeControl(harness, parent, label, tag, attributes = {}) {
+  const control = tag === "select" ? harness.select([{ value: "a", text: "A" }]) : harness.element(tag);
+  control.setAttribute("aria-label", label);
+  for (const [name, value] of Object.entries(attributes)) control.setAttribute(name, value);
+  parent.append(control);
+  return control;
+}
+
+test("native controls get their HTML-AAM roles", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  nativeControl(harness, body, "Volume", "input", { type: "range" });
+  nativeControl(harness, body, "Quantity", "input", { type: "number" });
+  nativeControl(harness, body, "Query", "input", { type: "search" });
+  nativeControl(harness, body, "Email", "input", { type: "email" });
+  nativeControl(harness, body, "Notes", "textarea");
+  nativeControl(harness, body, "Country", "select");
+  const multiple = nativeControl(harness, body, "Tags", "select");
+  multiple.multiple = true;
+  nativeControl(harness, body, "Rows", "select", { size: "4" });
+  nativeControl(harness, body, "Single row", "select", { size: "1" });
+  harness.setBody(body);
+
+  const roles = Object.fromEntries((await harness.targets()).map((target) => [target.name, target.role]));
+
+  for (const [name, role] of Object.entries({
+    Volume: "slider", Quantity: "spinbutton", Query: "searchbox", Email: "textbox", Notes: "textbox",
+    Country: "combobox", Tags: "listbox", Rows: "listbox", "Single row": "combobox"
+  })) {
+    assert.equal(roles[name], role, name);
+  }
+});
+
+// Keep this list equal to SEMANTIC_ROLES in crates/orchestrator/src/language/mod.rs. The test
+// below reads that file, so a role added on one side and not the other fails here.
+const SEMANTIC_ROLES = [
+  "button", "link", "checkbox", "radio", "textbox", "searchbox", "combobox", "listbox",
+  "slider", "spinbutton", "tab", "menuitem", "option"
+];
+
+test("every semantic role is producible", async () => {
+  const rust = fs.readFileSync(path.join(REPO, "crates", "orchestrator", "src", "language", "mod.rs"), "utf8");
+  const literal = /const SEMANTIC_ROLES: &\[&str\] = &\[([^\]]*)\];/.exec(rust)[1];
+  assert.deepEqual([...literal.matchAll(/"([a-z]+)"/g)].map((match) => match[1]), SEMANTIC_ROLES);
+
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const builders = {
+    button: () => nativeControl(harness, body, "button", "button"),
+    link: () => nativeControl(harness, body, "link", "a", { href: "/x" }),
+    checkbox: () => nativeControl(harness, body, "checkbox", "input", { type: "checkbox" }),
+    radio: () => nativeControl(harness, body, "radio", "input", { type: "radio" }),
+    textbox: () => nativeControl(harness, body, "textbox", "input", { type: "text" }),
+    searchbox: () => nativeControl(harness, body, "searchbox", "input", { type: "search" }),
+    combobox: () => nativeControl(harness, body, "combobox", "select"),
+    listbox: () => nativeControl(harness, body, "listbox", "select", { multiple: "" }),
+    slider: () => nativeControl(harness, body, "slider", "input", { type: "range" }),
+    spinbutton: () => nativeControl(harness, body, "spinbutton", "input", { type: "number" }),
+    tab: () => nativeControl(harness, body, "tab", "div", { role: "tab" }),
+    menuitem: () => nativeControl(harness, body, "menuitem", "div", { role: "menuitem" }),
+    option: () => nativeControl(harness, body, "option", "div", { role: "option" })
+  };
+  for (const role of SEMANTIC_ROLES) {
+    assert.equal(typeof builders[role], "function", `${role} has a builder`);
+    builders[role]();
+  }
+  harness.setBody(body);
+
+  for (const role of SEMANTIC_ROLES) {
+    const found = await harness.send({ kind: "query_semantic", name: role, role, exact: true });
+    assert.equal(found.value.targets.length, 1, role);
+    assert.equal(found.value.targets[0].role, role);
+  }
+});
+
+test("a hidden input is not a control", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  nativeControl(harness, body, "Csrf", "input", { type: "hidden" });
+  nativeControl(harness, body, "Visible", "input", { type: "text" });
+  harness.setBody(body);
+
+  const names = (await harness.targets()).map((target) => target.name);
+  const all = await harness.send({ kind: "inspect", inspect_kind: "all", max_items: 40, visual_settle: false });
+  const found = await harness.send({ kind: "find", text: "Csrf", find_kind: "any", max_results: 5 });
+  const semantic = await harness.send({ kind: "query_semantic", name: "Csrf", exact: true });
+
+  assert.ok(names.includes("Visible"));
+  assert.ok(!names.includes("Csrf"));
+  assert.ok(!all.value.targets.some((target) => target.name === "Csrf"));
+  assert.equal(found.value.targets.length, 0);
+  assert.equal(semantic.value.targets.length, 0);
+});
+
+test("a control inside a disabled fieldset is disabled and not actionable", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const fieldset = harness.element("fieldset");
+  fieldset.setAttribute("disabled", "");
+  nativeControl(harness, fieldset, "Locked", "input", { type: "text" });
+  nativeControl(harness, body, "Open", "input", { type: "text" });
+  body.append(fieldset);
+  harness.setBody(body);
+
+  const byName = Object.fromEntries((await harness.targets()).map((target) => [target.name, target]));
+  assert.ok(byName.Locked.state.includes("disabled"));
+  assert.ok(!byName.Open.state.includes("disabled"));
+  assert.equal(await harness.codeOf({ kind: "hover", locator: byName.Locked.locator }), "disabled");
+  assert.equal(await harness.codeOf({ kind: "hover", locator: byName.Open.locator }), null);
+});
+
+test("credential names are recognized across spellings and innocent names keep their class", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const names = {
+    credential: [
+      "apiKey", "api_key", "api-key", "cardNumber", "card_number", "userPin", "pin", "ssn", "iban",
+      "cc-exp", "cc-name", "currentPassword", "oneTimeCode", "authToken", "api_token"
+    ],
+    innocent: [
+      "tokenizer", "shipping", "spinner", "pinned", "username", "keyword", "apikeyboard",
+      "cardholder", "business", "ibanez"
+    ]
+  };
+  for (const name of [...names.credential, ...names.innocent]) {
+    nativeControl(harness, body, name, "input", { type: "text", name });
+  }
+  harness.setBody(body);
+
+  const classes = Object.fromEntries((await harness.targets()).map((target) => [target.name, target.credential_class]));
+
+  for (const name of names.credential) assert.equal(classes[name], true, name);
+  for (const name of names.innocent) assert.equal(classes[name], false, name);
+});
+
+test("a dropdown is found by one of its option texts, unless it is a credential", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const role = harness.select([
+    { value: "", text: "Choose a role" },
+    { value: "admin", text: "Administrator" },
+    { value: "viewer", text: "Read   only viewer" }
+  ]);
+  role.setAttribute("aria-label", "Role");
+  const secret = harness.select([{ value: "a", text: "Zebra clearance" }]);
+  secret.setAttribute("aria-label", "Level");
+  secret.setAttribute("name", "userPin");
+  body.append(role, secret);
+  harness.setBody(body);
+
+  for (const text of ["Administrator", "administrator", "read only"]) {
+    const found = await harness.send({ kind: "find", text, find_kind: "control", max_results: 5 });
+    assert.deepEqual(found.value.targets.map((target) => target.name), ["Role"], text);
+    assert.deepEqual(found.value.targets[0].options, ["Administrator", "Read only viewer"]);
+  }
+  const hidden = await harness.send({ kind: "find", text: "Zebra", find_kind: "any", max_results: 5 });
+  assert.equal(hidden.value.targets.length, 0);
+});
+
 test("document tree containers carry a declared name only, never a dump of their text", async () => {
   const harness = contentHarness();
   const body = harness.element("body");

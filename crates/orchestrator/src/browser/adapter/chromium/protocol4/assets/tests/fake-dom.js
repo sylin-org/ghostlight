@@ -10,11 +10,21 @@ const { webcrypto } = require("node:crypto");
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
+/** Whether `:disabled` matches: the control is disabled itself or sits inside a disabled fieldset. */
+function matchesDisabled(element) {
+  if (element.disabled === true) return true;
+  for (let node = element.parentNode; node; node = node.parentNode) {
+    if (String(node.tagName ?? "").toLowerCase() === "fieldset" && node.getAttribute?.("disabled") !== null) return true;
+  }
+  return false;
+}
+
 function selectorMatches(element, selector) {
   const tag = String(element.tagName ?? "").toLowerCase();
   return selector.split(",").map((part) => part.trim()).some((part) => {
     if (part === "*") return true;
     if (part === ":user-invalid") return element.userInvalid === true;
+    if (part === ":disabled") return matchesDisabled(element);
     if (part.startsWith("#")) return element.id === part.slice(1);
     if (part === tag || part.startsWith(`${tag}[`)) return true;
     const attribute = /^\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\]$/.exec(part);
@@ -199,7 +209,10 @@ function createFakeDom({ top = true } = {}) {
     getRootNode() { return document; }
     getBoundingClientRect() { return { left: 0, top: 0, width: this.hidden ? 0 : 100, height: this.hidden ? 0 : 30 }; }
     closest() { return null; }
-    matches(selector) { return selector === ":user-invalid" ? this.userInvalid === true : true; }
+    matches(selector) {
+      if (selector === ":disabled") return matchesDisabled(this);
+      return selector === ":user-invalid" ? this.userInvalid === true : true;
+    }
     click() { this.events.push("click"); }
     select() { selectedRange = { selected: this }; }
   }

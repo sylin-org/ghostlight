@@ -88,7 +88,7 @@ impl TargetRole {
             "checkbox" | "switch" => Self::Checkbox,
             "radio" => Self::Radio,
             "textbox" | "searchbox" => Self::Textbox,
-            "combobox" | "listbox" | "select" => Self::Combobox,
+            "combobox" | "listbox" => Self::Combobox,
             "slider" | "spinbutton" => Self::Slider,
             "tab" => Self::Tab,
             "menuitem" | "menuitemcheckbox" | "menuitemradio" => Self::MenuItem,
