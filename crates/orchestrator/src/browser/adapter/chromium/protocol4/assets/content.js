@@ -286,9 +286,18 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return { value: full.slice(0, limit), chars: sized ? full.length : 0 };
   }
 
+  // The placeholder of a native select: its first option when that option's value is empty. Only
+  // that option reads as an empty choice; any other option, even one with an empty value, is a
+  // real choice and reads as its own text.
+  function selectPlaceholder(select) {
+    const first = select.options?.[0];
+    return first && first.value === "" ? first : null;
+  }
+
   function selectValue(element, secret, limit, listing) {
+    const placeholder = selectPlaceholder(element);
     const texts = Array.from(element.selectedOptions ?? [])
-      .filter((option) => option.value !== "")
+      .filter((option) => option !== placeholder)
       .map((option) => oneLine(option.text));
     const answer = {};
     if (secret) {
@@ -304,11 +313,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return answer;
   }
 
-  // The options of a native select in document order, the placeholder (a first option whose
-  // value is empty) set apart. A disabled optgroup disables its options.
+  // The options of a native select in document order, the placeholder set apart. A disabled optgroup disables its options.
   function selectChoices(select, listing) {
     const all = Array.from(select.options ?? []);
-    const placeholder = all.length > 0 && all[0].value === "" ? all[0] : null;
+    const placeholder = selectPlaceholder(select);
     const choices = all.filter((option) => option !== placeholder).map((option) => {
       const parent = option.parentNode;
       const group = parent && tagOf(parent) === "optgroup" ? parent : null;

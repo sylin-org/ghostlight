@@ -2223,6 +2223,31 @@ test("a select carries its chosen text, its options in order and its placeholder
   assert.equal(chosen.value, "Administrator");
 });
 
+test("only the placeholder reads as empty: a later option with an empty value reads as its own text", async () => {
+  const harness = contentHarness();
+  const select = labelledSelect(harness, "Filter", [
+    { value: "any", text: "Any" },
+    { value: "", text: "None" },
+    { value: "new", text: "Newest" }
+  ]);
+  // The fake select picks by value, so name the chosen option directly.
+  Object.defineProperty(select, "selectedOptions", { configurable: true, get: () => [select.options[1]] });
+  const locator = await harness.locatorOf("Filter");
+
+  assert.equal((await controlNamed(harness, "Filter")).value, "None");
+  const read = await harness.send({ kind: "read_text", mode: "visible", locator, max_chars: 500, visual_settle: false });
+  assert.equal(read.value.text, "None\nOptions: Any; None; Newest");
+
+  const placed = labelledSelect(harness, "Pick", [
+    { value: "", text: "Choose..." },
+    { value: "", text: "Nothing" },
+    { value: "a", text: "Alpha" }
+  ]);
+  assert.equal((await controlNamed(harness, "Pick")).value, "");
+  Object.defineProperty(placed, "selectedOptions", { configurable: true, get: () => [placed.options[1]] });
+  assert.equal((await controlNamed(harness, "Pick")).value, "Nothing");
+});
+
 test("a select names an option by its value only when its text is not unique, and marks disabled ones", async () => {
   const harness = contentHarness();
   labelledSelect(harness, "Plan", [

@@ -338,7 +338,7 @@ offered nothing of that kind:
 | Key | Meaning |
 |---|---|
 | `value` | What the field holds, at most 80 characters, with `value_chars` (the full length) when longer. Empty when the field is empty or a select shows its empty placeholder option. A multiple select gives an array of at most 25 chosen texts. Covers text fields, textareas, native selects, rich editors, range and number. |
-| `options` | A native select only, in document order, at most 25 entries of 60 characters, with `options_total` when cut. An entry is the bare text, `{"text","value"}` when the text is not unique, `{"text","disabled":true}` when the option or its optgroup is disabled, or `{"group","options"}` for an optgroup. The empty placeholder option is left out and shown as `hint`. |
+| `options` | A native select only, in document order, at most 25 entries of 60 characters, with `options_total` when cut. An entry is the bare text, `{"text","value"}` when the text is not unique, `{"text","disabled":true}` when the option or its optgroup is disabled, or `{"group","options"}` for an optgroup. The placeholder is the first option when its value is empty; it is left out and shown as `hint`. Any other option with an empty value is a real choice. |
 | `type` | The input type, only for `date`, `time`, `datetime-local`, `month`, `week`, `number`, `range`, `color`, `file`, `email`, `url` and `tel`. |
 | `limits` | The constraints the page declared, among `min`, `max`, `step`, `minlength`, `maxlength`, `pattern`, `accept`, and `multiple:true`. |
 | `hint` | A placeholder that says something other than the name, else the text `aria-describedby` points to, else the select's placeholder option. At most 120 characters. |

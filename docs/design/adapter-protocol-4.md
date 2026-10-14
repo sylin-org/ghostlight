@@ -1703,7 +1703,7 @@ Every kind is built only by a typed constructor in `world.rs`.
 | Key | Holds |
 |---|---|
 | `value` | What a text field, textarea, native select, rich editor, range or number holds: at most 80 characters, with `value_chars` when longer. A multiple select gives an array of at most 25 chosen texts. Empty when nothing is chosen or the empty placeholder option is. |
-| `options`, `options_total` | A native select only: at most 25 entries of 60 characters in document order, with `options_total` when cut. An entry is the bare text, `{text, value}` when the text is not unique, `{text, disabled:true}` when the option or its optgroup is disabled, or `{group, options}` for an optgroup. The empty placeholder option is left out. |
+| `options`, `options_total` | A native select only: at most 25 entries of 60 characters in document order, with `options_total` when cut. An entry is the bare text, `{text, value}` when the text is not unique, `{text, disabled:true}` when the option or its optgroup is disabled, or `{group, options}` for an optgroup. The placeholder is the first option when its value is empty; it is left out. Any other option with an empty value is a real choice. |
 | `type` | `date`, `time`, `datetime-local`, `month`, `week`, `number`, `range`, `color`, `file`, `email`, `url` or `tel`. |
 | `limits` | Only the declared attributes among `min`, `max`, `step`, `minlength`, `maxlength`, `pattern` and `accept`, as strings, and `multiple:true`. |
 | `hint` | A placeholder that differs from the name, else the `aria-describedby` text, else the select's placeholder option text. At most 120 characters. |
