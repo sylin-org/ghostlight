@@ -1300,11 +1300,7 @@ fn merge_same_type(name: &str, kind: &str, variants: Vec<Value>) -> Value {
         }
         None => {
             for &(keyword, lower) in bound_keywords(kind) {
-                // A zero minimum length is what every string already has.
-                let widest = widened_bound(&variants, keyword, lower);
-                if let Some(bound) =
-                    widest.filter(|bound| keyword != "minLength" || *bound != json!(0))
-                {
+                if let Some(bound) = widened_bound(&variants, keyword, lower) {
                     merged.insert(keyword.into(), bound);
                 }
             }
@@ -1526,11 +1522,10 @@ fn boolean(default: bool, description: &str) -> Value {
 }
 
 fn text(minimum: usize, maximum: usize, description: &str) -> Value {
-    let mut schema = json!({"type":"string","maxLength":maximum});
-    if minimum > 0 {
-        schema["minLength"] = json!(minimum);
-    }
-    described(schema, description)
+    described(
+        json!({"type":"string","minLength":minimum,"maxLength":maximum}),
+        description,
+    )
 }
 
 fn integer(minimum: usize, maximum: usize, default: Option<usize>, description: &str) -> Value {
@@ -1903,7 +1898,7 @@ mod tests {
         let text = property(&typing, "text").expect("text property");
         assert_eq!(
             (&text["type"], &text["minLength"], &text["maxLength"]),
-            (&json!("string"), &Value::Null, &json!(8_000))
+            (&json!("string"), &json!(0), &json!(8_000))
         );
 
         let wait = tool_schema("browser_wait");
@@ -1968,7 +1963,7 @@ mod tests {
         );
         assert_eq!(
             field("text"),
-            json!({"type":"string","maxLength":10,"description":"Words. Empty."})
+            json!({"type":"string","minLength":0,"maxLength":10,"description":"Words. Empty."})
         );
         assert_eq!(
             field("clear"),
@@ -2001,7 +1996,7 @@ mod tests {
         assert_eq!(
             mixed["properties"]["value"],
             json!({"description":"Text. Flag.","anyOf":[
-                {"type":"string","maxLength":5},
+                {"type":"string","minLength":0,"maxLength":5},
                 {"type":"boolean","default":false}
             ]})
         );
