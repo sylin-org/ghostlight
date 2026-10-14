@@ -42,14 +42,14 @@ impl ManagedPaths {
         #[cfg(target_os = "linux")]
         let bootstrap = PathBuf::from("/etc/ghostlight/managed.json");
 
-        let state = super::paths::state_directory();
+        let policy = super::paths::policy_directory();
 
         Self {
             bootstrap,
-            cache: state
+            cache: policy
                 .as_ref()
                 .map(|path| path.join("managed-policy.bundle")),
-            status: state.map(|path| path.join("managed-status.json")),
+            status: policy.map(|path| path.join("managed-status.json")),
         }
     }
 

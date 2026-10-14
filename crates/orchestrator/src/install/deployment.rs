@@ -1,83 +1,63 @@
-//! Orchestrator-owned installation selection for package setup and the development loop.
+//! `ghostlight deployment install`: put this package's executables into the fixed `bin`.
+//!
+//! A package verifies its download, then runs its own `ghostlight` with this command. The
+//! executables beside it are copied into `home/bin` under the install lock; an executable whose
+//! bytes did not change is left alone, so its running streams survive (ADR-0197 Decisions 13
+//! and 14).
 
-use std::env;
-use std::fs;
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ghostlight_bridge::installation::{self, Installation, Selection};
+use super::layout::{Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, MCP_CONNECTOR_EXECUTABLE_NAME};
+use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
 
-const COMPONENTS: &[&str] = &[
-    "ghostlight",
-    "ghostlight-mcp-connector",
-    "ghostlight-browser-connector",
+/// The executables one package carries and one install replaces.
+const COMPONENTS: [&str; 3] = [
+    SERVICE_EXECUTABLE_NAME,
+    MCP_CONNECTOR_EXECUTABLE_NAME,
+    BROWSER_CONNECTOR_EXECUTABLE_NAME,
 ];
 
-/// Install the verified siblings of this download into one permanent package directory.
+/// How long an install waits for another install to finish.
+const INSTALL_LOCK_WAIT: Duration = Duration::from_secs(35);
+
+/// Pause between attempts to take the install lock.
+const INSTALL_LOCK_POLL: Duration = Duration::from_millis(25);
+
+/// How long a replaced process may take to exit.
+const STOP_WAIT: Duration = Duration::from_secs(10);
+
+/// Install the verified siblings of this executable into `destination`.
 ///
-/// Downloaders verify the complete payload before invoking this package seam. Existing
-/// startup custody and exact image paths protect replacement; no updater process persists.
+/// Downloaders verify the complete payload before invoking this package seam. The install lock
+/// in the Ghostlight home serializes concurrent installs; no updater process persists.
 pub fn install_download(destination: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(
         destination.is_absolute(),
         "The installation destination must be absolute"
     );
-    anyhow::ensure!(
-        env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_none(),
-        "Package installation cannot use an isolated test home"
-    );
-    let current = env::current_exe()?;
+    let current = std::env::current_exe()?;
     let source = current
         .parent()
         .ok_or_else(|| io::Error::other("download has no directory"))?;
-    installation::validate_siblings(source)?;
+    validate_siblings(source)?;
     fs::create_dir_all(destination)?;
     let destination = fs::canonicalize(destination)?;
     anyhow::ensure!(
         fs::canonicalize(source)? != destination,
         "Run package installation from its temporary download directory"
     );
-    let runtime = installation::production_runtime()?;
-    let control = installation::control_directory()?;
-    fs::create_dir_all(&control)?;
-    let marker = control.join(ghostlight_bridge::lifecycle::DEPLOY_LOCK_FILE);
-    let marker_file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&marker)?;
-    let result = install_download_locked(source, &destination, &runtime);
-    drop(marker_file);
-    fs::remove_file(marker)?;
-    result
+    install_locked(source, &destination, &Layout::current()?.install_lock())
 }
 
-fn install_download_locked(
-    source: &Path,
-    destination: &Path,
-    runtime: &Path,
-) -> anyhow::Result<()> {
-    let guard = installation::lock(runtime)?;
-    let previous = installation::read(runtime)?;
+/// Copy the changed executables from `source` into `destination` while holding `lock`.
+fn install_locked(source: &Path, destination: &Path, lock: &Path) -> anyhow::Result<()> {
+    let _guard = hold_install_lock(lock)?;
     let changed = changed_components(source, destination)?;
-    let legacy = previous.as_ref().filter(|record| {
-        record.development_directory.is_none() && record.directory() != destination
-    });
-    anyhow::ensure!(
-        legacy.is_none() || runtime == installation::production_runtime()?,
-        "Registration migration cannot use a private installation record"
-    );
-    let mut images: Vec<PathBuf> = changed.iter().map(|name| destination.join(name)).collect();
-    // A service change retires the serving image. Unchanged shores retain their streams.
-    if let Some(record) = legacy {
-        images.extend(
-            COMPONENTS
-                .iter()
-                .map(|name| record.directory().join(installation::executable_name(name))),
-        );
-    }
-    // Copy before stopping anything. The temporary payload is never an elected installation.
-    let mut replacements = Vec::new();
+    // Copy before stopping anything. The temporary payload never runs.
+    let mut replacements: Vec<(PathBuf, PathBuf)> = Vec::new();
     for name in &changed {
         let temporary = destination.join(format!(
             ".{name}.download-{}",
@@ -92,6 +72,10 @@ fn install_download_locked(
         }
         replacements.push((temporary, destination.join(name)));
     }
+    let images: Vec<PathBuf> = replacements
+        .iter()
+        .map(|(_, target)| target.clone())
+        .collect();
     let mut backups = Vec::new();
     let replaced = (|| -> anyhow::Result<()> {
         stop_exact_images(&images)?;
@@ -103,7 +87,6 @@ fn install_download_locked(
             backups.push((target.clone(), backup));
             fs::rename(temporary, target)?;
         }
-        installation::select_locked(runtime, destination, Selection::Release)?;
         Ok(())
     })();
     if replaced.is_err() {
@@ -125,50 +108,69 @@ fn install_download_locked(
     for (temporary, _) in &replacements {
         let _ = fs::remove_file(temporary);
     }
-    replaced?;
-    drop(guard);
-    if let Some(record) = legacy {
-        // Migrate the existing owned routes once; later updates leave them fixed.
-        let migrated = (|| -> anyhow::Result<()> {
-            super::native_host::NativeHostRegistry::discover().install()?;
-            let harnesses = super::HarnessRegistry::discover().setup_detected()?;
-            anyhow::ensure!(
-                harnesses.failures.is_empty(),
-                "Could not migrate every owned harness registration; old binaries were retained"
-            );
-            super::command_path::CommandPath::discover().install()?;
-            super::desktop_entry::DesktopIntegration::discover().install()?;
-            Ok(())
-        })();
-        if migrated.is_err() {
-            // Keep the previous selection eligible for a migration retry. Both routes
-            // still have their binaries if an independent registration already moved.
-            let _guard = installation::lock(runtime)?;
-            installation::select_locked(runtime, record.directory(), Selection::Release)?;
+    replaced
+}
+
+/// Take the install lock at `path`, waiting up to [`INSTALL_LOCK_WAIT`] for another install.
+fn hold_install_lock(path: &Path) -> io::Result<File> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    let deadline = Instant::now() + INSTALL_LOCK_WAIT;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(INSTALL_LOCK_POLL);
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Ghostlight installation is still changing; retry shortly",
+                ))
+            }
+            Err(TryLockError::Error(error)) => return Err(error),
         }
-        migrated?;
-        retire_versioned_siblings(record.directory(), destination)?;
+    }
+}
+
+/// Require every executable a package carries in `directory`.
+fn validate_siblings(directory: &Path) -> io::Result<()> {
+    for name in COMPONENTS {
+        let path = directory.join(name);
+        if !path.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("The Ghostlight package is missing {}", path.display()),
+            ));
+        }
     }
     Ok(())
 }
 
+/// The executables whose bytes in `source` differ from the copy in `destination`.
 fn changed_components(source: &Path, destination: &Path) -> io::Result<Vec<String>> {
     let mut changed = Vec::new();
     for name in COMPONENTS {
-        let name = installation::executable_name(name);
-        let bytes = fs::read(source.join(&name))?;
-        let matches = match fs::read(destination.join(&name)) {
+        let bytes = fs::read(source.join(name))?;
+        let matches = match fs::read(destination.join(name)) {
             Ok(installed) => installed == bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => false,
             Err(error) => return Err(error),
         };
         if !matches {
-            changed.push(name);
+            changed.push(name.to_owned());
         }
     }
     Ok(changed)
 }
 
+/// Stop every process running one of `images`, and wait for them to exit.
 fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let mut system = System::new();
@@ -200,7 +202,7 @@ fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
             stopped.push(process.pid());
         }
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + STOP_WAIT;
     while !stopped.is_empty() {
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&stopped),
@@ -223,175 +225,76 @@ fn stop_exact_images(images: &[PathBuf]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn retire_versioned_siblings(previous: &Path, destination: &Path) -> io::Result<()> {
-    // Only the former package layout under this exact bin root is eligible. History,
-    // diagnostics, unknown files and arbitrary portable installations stay untouched.
-    if previous.parent() != Some(destination)
-        || !previous
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| {
-                name.strip_prefix('v').is_some_and(|version| {
-                    version.split('.').count() == 3
-                        && version.split('.').all(|part| {
-                            !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
-                        })
-                })
-            })
-    {
-        return Ok(());
-    }
-    for name in COMPONENTS {
-        match fs::remove_file(previous.join(installation::executable_name(name))) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-    // Remove only an empty directory; retained state is deliberately preserved.
-    let _ = fs::remove_dir(previous);
-    Ok(())
-}
-
-/// Select this executable set while preserving development custody during package installation.
-pub fn select(selection: Selection) -> io::Result<Option<Installation>> {
-    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some() {
-        // Explicit fixtures retain their private election; never edit the production record.
-        return Ok(None);
-    }
-    let runtime = installation::production_runtime()?;
-    let guard = installation::lock(&runtime)?;
-    let current = env::current_exe()?;
-    let directory = current
-        .parent()
-        .ok_or_else(|| io::Error::other("executable has no directory"))?;
-    let record = installation::select_locked(&runtime, directory, selection)?;
-    drop(guard);
-    Ok(Some(record))
-}
-
-/// An inactive package may remove its artifacts, but cannot unregister the user's active route.
-pub fn owns_registration() -> io::Result<bool> {
-    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some() {
-        return Ok(true);
-    }
-    let runtime = installation::production_runtime()?;
-    let Some(record) = installation::read(&runtime)? else {
-        return Ok(true);
-    };
-    let current = env::current_exe()?;
-    let directory = current
-        .parent()
-        .ok_or_else(|| io::Error::other("executable has no directory"))?;
-    Ok(std::fs::canonicalize(directory)? == std::fs::canonicalize(record.directory())?)
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::scratch::Scratch;
     use super::*;
 
-    fn fixture() -> (PathBuf, PathBuf, PathBuf) {
-        let root = env::temp_dir().join(format!(
-            "ghostlight-fixed-install-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let source = root.join("download");
-        let destination = root.join("bin");
+    fn payload(scratch: &Scratch) -> (PathBuf, PathBuf, PathBuf) {
+        let source = scratch.path().join("download");
+        let destination = scratch.path().join("home").join("bin");
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&destination).unwrap();
         for name in COMPONENTS {
-            fs::write(source.join(installation::executable_name(name)), name).unwrap();
+            fs::write(source.join(name), name).unwrap();
         }
         (
-            root,
             fs::canonicalize(source).unwrap(),
             fs::canonicalize(destination).unwrap(),
+            scratch.path().join("home").join("install.lock"),
         )
     }
 
     #[test]
-    fn repeated_package_updates_keep_one_directory_and_preserve_state() {
-        let (root, source, destination) = fixture();
-        let runtime = root.join("ghostlight-runtime.json");
-        install_download_locked(&source, &destination, &runtime).unwrap();
-        let first = installation::read(&runtime).unwrap().unwrap();
-        fs::write(
-            first.state_directory.join("audit.jsonl"),
-            "retained history",
-        )
-        .unwrap();
-        fs::write(
-            source.join(installation::executable_name("ghostlight")),
-            "next service",
-        )
-        .unwrap();
+    fn repeated_installs_replace_only_what_changed() {
+        let scratch = Scratch::new();
+        let (source, destination, lock) = payload(&scratch);
+        install_locked(&source, &destination, &lock).unwrap();
+        for name in COMPONENTS {
+            assert_eq!(fs::read_to_string(destination.join(name)).unwrap(), name);
+        }
+        fs::write(source.join(SERVICE_EXECUTABLE_NAME), "next service").unwrap();
         assert_eq!(
             changed_components(&source, &destination).unwrap(),
-            vec![installation::executable_name("ghostlight")]
+            vec![SERVICE_EXECUTABLE_NAME.to_owned()]
         );
-        install_download_locked(&source, &destination, &runtime).unwrap();
-        assert_eq!(installation::read(&runtime).unwrap().unwrap(), first);
+        install_locked(&source, &destination, &lock).unwrap();
         assert_eq!(
-            fs::read_to_string(first.state_directory.join("audit.jsonl")).unwrap(),
-            "retained history"
+            fs::read_to_string(destination.join(SERVICE_EXECUTABLE_NAME)).unwrap(),
+            "next service"
         );
-        assert_eq!(fs::read_dir(&destination).unwrap().count(), 3);
+        assert_eq!(
+            fs::read_dir(&destination).unwrap().count(),
+            COMPONENTS.len()
+        );
         assert!(changed_components(&source, &destination)
             .unwrap()
             .is_empty());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn fixed_package_updates_preserve_development_custody() {
-        let (root, source, destination) = fixture();
-        let runtime = root.join("ghostlight-runtime.json");
-        let before =
-            installation::select_locked(&runtime, &source, Selection::Development).unwrap();
-        install_download_locked(&source, &destination, &runtime).unwrap();
-        let after = installation::read(&runtime).unwrap().unwrap();
-        assert_eq!(after.directory(), before.directory());
-        assert_eq!(after.state_directory, before.state_directory);
+    fn a_package_missing_an_executable_is_refused() {
+        let scratch = Scratch::new();
+        let (source, _, _) = payload(&scratch);
+        validate_siblings(&source).unwrap();
+        fs::remove_file(source.join(BROWSER_CONNECTOR_EXECUTABLE_NAME)).unwrap();
         assert_eq!(
-            after.release_directory,
-            Some(fs::canonicalize(&destination).unwrap())
+            validate_siblings(&source).unwrap_err().kind(),
+            io::ErrorKind::NotFound
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn private_installation_record_cannot_migrate_user_registrations() {
-        let (root, source, destination) = fixture();
-        let runtime = root.join("ghostlight-runtime.json");
-        let before = installation::select_locked(&runtime, &source, Selection::Release).unwrap();
-        let error = install_download_locked(&source, &destination, &runtime).unwrap_err();
-        assert!(error.to_string().contains("private installation record"));
-        assert_eq!(installation::read(&runtime).unwrap().unwrap(), before);
-        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn migration_removes_only_old_package_binaries_and_keeps_history() {
-        let (root, source, destination) = fixture();
-        let old = destination.join("v1.3.11");
-        fs::create_dir(&old).unwrap();
-        for name in COMPONENTS {
-            fs::copy(
-                source.join(installation::executable_name(name)),
-                old.join(installation::executable_name(name)),
-            )
-            .unwrap();
-        }
-        fs::write(old.join("audit.jsonl"), "old history").unwrap();
-        retire_versioned_siblings(&source, &destination).unwrap();
-        installation::validate_siblings(&source).unwrap();
-        retire_versioned_siblings(&old, &destination).unwrap();
-        assert_eq!(
-            fs::read_to_string(old.join("audit.jsonl")).unwrap(),
-            "old history"
-        );
-        assert_eq!(fs::read_dir(&old).unwrap().count(), 1);
-        fs::remove_dir_all(root).unwrap();
+    fn a_held_install_lock_is_waited_for() {
+        let scratch = Scratch::new();
+        let lock = scratch.path().join("install.lock");
+        let held = hold_install_lock(&lock).unwrap();
+        let waiter = {
+            let lock = lock.clone();
+            std::thread::spawn(move || hold_install_lock(&lock).map(drop))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        drop(held);
+        waiter.join().unwrap().unwrap();
     }
 }

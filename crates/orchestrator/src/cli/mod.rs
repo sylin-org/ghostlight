@@ -283,11 +283,6 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
         parse::LaunchMode::DeploymentInstall(directory) => {
             crate::install::deployment::install_download(&directory)
         }
-        parse::LaunchMode::Deployment(selection) => {
-            let record = crate::install::deployment::select(selection)?;
-            println!("{}", serde_json::to_string(&record)?);
-            Ok(())
-        }
         parse::LaunchMode::Desktop => desktop::start_or_activate_desktop(),
         parse::LaunchMode::Serve => desktop::serve(),
         parse::LaunchMode::Open => desktop::open_desktop(),

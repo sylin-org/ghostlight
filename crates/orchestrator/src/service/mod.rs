@@ -61,6 +61,12 @@ const QUEUED_METADATA_BYTES: usize = 512;
 /// Prefix of the per-service secret every opening presents.
 const TOKEN_PREFIX: &str = "runtime_";
 
+/// Environment variable naming an audit log in place of the one in the state directory.
+const AUDIT_FILE_VARIABLE: &str = "GHOSTLIGHT_AUDIT_FILE";
+
+/// File name of the audit log in the state directory.
+const AUDIT_FILE_NAME: &str = "audit.jsonl";
+
 /// Suffix of the sibling file the failure templates are written through.
 const TEMPORARY_SUFFIX: &str = ".tmp";
 
@@ -137,8 +143,6 @@ impl ServiceHost {
         if let Ok(executable) = env::current_exe() {
             remove_old_images_beside(&executable);
         }
-        let runtime_path = home.join(RUNTIME_FILE_NAME);
-        ghostlight_bridge::installation::verify_serving_executable(&runtime_path)?;
         let relay_listener = listener::bind().context("bind the relay listener")?;
         let port = relay_listener.local_addr()?.port();
         let token = format!("{TOKEN_PREFIX}{}", Uuid::new_v4().simple());
@@ -156,13 +160,13 @@ impl ServiceHost {
             browser_port.clone(),
             workspaces.clone(),
         )));
-        let audit_path = env::var_os("GHOSTLIGHT_AUDIT_FILE")
+        let audit_path = env::var_os(AUDIT_FILE_VARIABLE)
             .map(PathBuf::from)
-            .map(Ok)
             .unwrap_or_else(|| {
-                ghostlight_bridge::installation::state_directory(&runtime_path)
-                    .map(|directory| directory.join("audit.jsonl"))
-            })?;
+                install::layout::Layout::new(home)
+                    .state()
+                    .join(AUDIT_FILE_NAME)
+            });
         let projection = WorkbenchProjection::default();
         let _ = projection.load_history(&audit_path);
         let durable_audit = Arc::new(JsonlAuditSink::new(&audit_path));

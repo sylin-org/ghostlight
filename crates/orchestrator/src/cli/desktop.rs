@@ -3,11 +3,8 @@
 //! This module coordinates process activation, single-instance workbench window
 //! presentation, runtime readiness waiting, policy inspection, and local `call` execution.
 
-use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use ghostlight_relay::home::TEST_HOME_VARIABLE;
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -29,26 +26,6 @@ pub enum ActivationState {
 
 /// Start the orchestrator desktop application or activate an existing running instance.
 pub fn start_or_activate_desktop() -> anyhow::Result<()> {
-    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
-        anyhow::bail!("Ghostlight is being updated; it will be available when deployment finishes");
-    }
-    if std::env::var_os(TEST_HOME_VARIABLE).is_none() {
-        let runtime = ghostlight_bridge::installation::production_runtime()?;
-        let selection = ghostlight_bridge::installation::read(&runtime)?;
-        if selection.as_ref().is_none_or(|record| {
-            record.development_directory.is_none()
-                && record
-                    .release_directory
-                    .as_ref()
-                    .is_some_and(|release| release != record.directory())
-        }) {
-            let _selection = ghostlight_bridge::installation::startup_selection()?;
-        }
-        let selected = ghostlight_bridge::installation::selected_executable()?;
-        if std::fs::canonicalize(selected)? != std::fs::canonicalize(std::env::current_exe()?)? {
-            return open_desktop();
-        }
-    }
     #[cfg(target_os = "linux")]
     if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
         // A bus launch requests existence, never Open. In a cold-start race a losing
@@ -77,9 +54,6 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
 /// diagnostics event, when discovery is not published within the discovery window.
 pub fn serve() -> anyhow::Result<()> {
     let started = Instant::now();
-    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
-        anyhow::bail!("Ghostlight is being updated; it will be available when deployment finishes");
-    }
     settle_serve(crate::desktop::run(crate::desktop::Startup::serve(started)))
 }
 
@@ -104,46 +78,8 @@ pub fn open_desktop() -> anyhow::Result<()> {
         Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
         Err(_) => {}
     }
-    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
-        anyhow::bail!("Ghostlight is being updated; open it again when the update finishes");
-    }
-    start_service()?;
+    ghostlight_relay::spawn::start_service()?;
     finish_activation(wait_for_workbench_activation(), None)
-}
-
-/// Start `ghostlight serve` from the selected installation in the Ghostlight home, without
-/// waiting for it.
-///
-/// Only the selected executable may take the service lease (ADR-0197 Decision 10), so a start
-/// from a carrier, package or development copy starts the selection, never itself. The
-/// installation lock is held until the child exists, so an installer cannot elect another
-/// directory in between. The lease makes a start that meets a running service harmless: it
-/// exits quietly.
-pub fn start_service() -> anyhow::Result<()> {
-    let home = ghostlight_relay::home::home()?;
-    std::fs::create_dir_all(&home)?;
-    let selection = ghostlight_bridge::installation::startup_selection()?;
-    let runtime = match selection {
-        Some(_) => Some(ghostlight_bridge::installation::production_runtime()?),
-        None => None,
-    };
-    let executable = demand_start_executable(runtime.as_deref(), &std::env::current_exe()?)?;
-    let mut child = ghostlight_relay::spawn::build_command(&executable, &home).spawn()?;
-    drop(selection);
-    // Collect the exit status so a start that lost the lease race does not linger.
-    thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
-}
-
-/// The executable a demand start runs: the one the installation record beside `runtime`
-/// selects, or `invoking` itself under a test home, which has no selection.
-fn demand_start_executable(runtime: Option<&Path>, invoking: &Path) -> std::io::Result<PathBuf> {
-    match runtime {
-        Some(runtime) => ghostlight_bridge::installation::selected_executable_in(runtime, invoking),
-        None => Ok(invoking.to_path_buf()),
-    }
 }
 
 /// Wait until the workbench presentation attaches and activates or times out.
@@ -205,10 +141,7 @@ pub fn run_call() -> anyhow::Result<()> {
         }
     };
     if crate::cli::client::readiness().is_err() {
-        if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
-            anyhow::bail!("Ghostlight is being updated; retry when deployment finishes");
-        }
-        start_service()?;
+        ghostlight_relay::spawn::start_service()?;
         wait_for_service()?;
     }
     let mut out = std::io::stdout().lock();
@@ -231,7 +164,7 @@ pub fn wait_for_service() -> anyhow::Result<()> {
         }
         thread::sleep(ACTIVATION_RETRY_DELAY);
     }
-    anyhow::bail!("The selected Ghostlight authority did not become ready in time; run ghostlight doctor for its deployment details")
+    anyhow::bail!("The Ghostlight service did not become ready in time; run ghostlight doctor for its installation details")
 }
 
 #[cfg(test)]
@@ -245,43 +178,6 @@ mod tests {
         assert!(super::desktop_bus_start(Some(OsStr::new("session"))));
         assert!(!super::desktop_bus_start(Some(OsStr::new("system"))));
         assert!(!super::desktop_bus_start(None));
-    }
-
-    #[test]
-    fn a_demand_start_runs_the_selected_installation_not_the_invoking_copy() {
-        use ghostlight_bridge::installation::{executable_name, lock, select_locked, Selection};
-
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-demand-start-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let runtime = root.join("home").join("runtime.json");
-        let selected = root.join("selected");
-        let invoking = root.join("carrier").join(executable_name("ghostlight"));
-        std::fs::create_dir_all(&selected).unwrap();
-        for name in [
-            "ghostlight",
-            "ghostlight-mcp-connector",
-            "ghostlight-browser-connector",
-        ] {
-            std::fs::write(selected.join(executable_name(name)), b"fixture").unwrap();
-        }
-
-        // Before any selection exists, the invoking copy's own directory is the candidate.
-        assert_eq!(
-            demand_start_executable(Some(&runtime), &invoking).unwrap(),
-            invoking
-        );
-        let guard = lock(&runtime).unwrap();
-        let record = select_locked(&runtime, &selected, Selection::Bootstrap).unwrap();
-        drop(guard);
-        assert_eq!(
-            demand_start_executable(Some(&runtime), &invoking).unwrap(),
-            record.directory().join(executable_name("ghostlight"))
-        );
-        // A test home has no selection: the invoking executable serves.
-        assert_eq!(demand_start_executable(None, &invoking).unwrap(), invoking);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

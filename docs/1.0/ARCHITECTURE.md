@@ -42,46 +42,29 @@ orchestrator start initializes this desktop authority; there is no service-only 
 
 ## Local lifecycle
 
-Production has one installation per OS user, not one per executable directory (ADR-0167).
-Download installs and npm use fixed `~/.ghostlight/bin` sibling paths (ADR-0193).
-They verify the complete download before invoking the native deployment seam. Ordinary
-service replacement preserves unchanged connector streams and browser registration.
-The connected injector installs the current service-owned page runtime without an
-extension update or reload. Versions identify artifacts, never package install directories.
-The user profile's `.ghostlight` directory owns durable executable selection and the shared
-runtime, startup admission and lifetime lease. Package copies are inactive artifacts; both
-connectors and CLI invocations resolve the selected authority. Explicit development selection
-survives package installation and service restart. `GHOSTLIGHT_RUNTIME_FILE` is only an explicit
-isolated fixture/deployment seam. Selected history, diagnostics and policy paths survive binary
-selection changes. Installer registrations target the selected set; inactive uninstall preserves
-them. Malformed selection or missing selected binaries never elect an alternative authority.
+There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
+(ADR-0197 Decision 10): the installed executables in `bin`, the runtime file and lease, the state
+directory `state` (audit log, MCP client locations, the extension handoff marker), the policy
+directory `policy`, and diagnostics in `diagnostics` with the `diagnostics.on` marker.
+`GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
+installs into `bin` (ADR-0197 Decision 13); registrations name the executables there.
 
 The orchestrator acquires an operating-system lifetime lease beside its runtime document before
 opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
 admits the single local authority. Concurrent launch losers exit before creating a second runtime
 identity or tray.
 
-Both connectors call the same bridge-owned recovery operation after a service connection fails.
-It observes the lifetime lease, honors a fresh deployment lock, and starts only the exact sibling
-`ghostlight` executable with no application arguments and with detached null standard streams. The
-connectors retain their existing reconnect behavior and learn no workbench or product semantics.
+A connector that finds no service starts `bin/ghostlight serve` detached and keeps connecting on
+its backoff schedule. A `serve` that loses the lease exits quietly, and one that has not published
+discovery within 30 seconds exits, so a stalled start never blocks the next one. The desktop
+publishes discovery only after native Ready has established its interaction route (ADR-0166).
 
-Startup admission is separate from the authority lifetime lease. One caller holds
-a per-runtime `.startup` lock through a bounded launch-to-ready exchange; a shared
-five-second failed-start cooldown prevents retry amplification. Native failed
-children are reaped, and only the caller's own unready child can be stopped on
-startup timeout. Named OS activation uses the same admission without a child PID
-or host-command fallback. The desktop publishes discovery only after native Ready
-has established its interaction route. Typed lease contention may await the winner;
-a genuine desktop startup failure exits promptly with diagnostics (ADR-0166).
-
-A no-argument launch first asks a running authority to reveal its workbench, then otherwise starts
+A no-argument launch first asks a running service to reveal its workbench, then otherwise starts
 the complete desktop authority, creates its tray, and backgrounds the workbench: minimized on
-Windows and hidden on Linux. Connectors use that exact no-argument launch. The explicit local-human
-`ghostlight open` intent composes the same bridge lifecycle operation with the same authenticated
-activation request: when absent it demand-starts the ordinary no-argument sibling, waits for its
-runtime, then reveals it. The request admits no workspace and adds no listener. No supported launch
-can create an authority that refuses presentation by design.
+Windows and hidden on Linux. The explicit local-human `ghostlight open` intent sends the same
+authenticated activation request; when no service answers it starts `bin/ghostlight serve`, waits
+for its runtime, then reveals it. The request admits no workspace and adds no listener. No
+supported launch can create an authority that refuses presentation by design.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
 disposable workbench, and native minimize remains compositor-owned. Windows Open focuses or

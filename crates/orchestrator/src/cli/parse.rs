@@ -26,8 +26,6 @@ pub const SUBCOMMANDS: &[&str] = &[
 pub enum LaunchMode {
     /// Install verified download siblings at a fixed package destination.
     DeploymentInstall(std::path::PathBuf),
-    /// Local package/development lifecycle seam, never a model-facing tool.
-    Deployment(ghostlight_bridge::installation::Selection),
     /// Start or activate the desktop workbench.
     Desktop,
     /// Start the service and its backgrounded desktop for a connector. It never reveals a window,
@@ -110,7 +108,6 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         .first()
         .is_some_and(|argument| argument == "deployment")
     {
-        use ghostlight_bridge::installation::Selection;
         if arguments
             .get(1)
             .is_some_and(|argument| argument == "install")
@@ -118,13 +115,7 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         {
             return Ok(LaunchMode::DeploymentInstall(arguments[2].clone().into()));
         }
-        let selection = match arguments.get(1).and_then(|argument| argument.to_str()) {
-            Some("development") if arguments.len() == 2 => Selection::Development,
-            Some("release") if arguments.len() == 2 => Selection::Release,
-            Some("restore") if arguments.len() == 2 => Selection::Restore,
-            _ => anyhow::bail!("usage: ghostlight deployment <development|release|restore>"),
-        };
-        return Ok(LaunchMode::Deployment(selection));
+        anyhow::bail!("usage: ghostlight deployment install <directory>");
     }
     if arguments.is_empty() {
         return Ok(LaunchMode::Desktop);

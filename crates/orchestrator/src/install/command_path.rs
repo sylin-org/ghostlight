@@ -121,7 +121,9 @@ impl CommandPathContext {
         let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
         Self {
             unix: cfg!(unix),
-            executable: ghostlight_bridge::installation::selected_executable().unwrap_or_default(),
+            executable: super::layout::Layout::current()
+                .map(|layout| layout.service_executable())
+                .unwrap_or_default(),
             bin_home: home.join(".local/bin"),
         }
     }

@@ -6,9 +6,10 @@
 //! layout holds names only and touches no file: callers pass the home that
 //! `ghostlight_relay::home::home()` resolves, and tests pass a temporary directory.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
-use ghostlight_relay::home::{BIN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME};
+use ghostlight_relay::home::{self, BIN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME};
 
 /// Directory holding a development build of the service.
 pub const DEV_DIRECTORY_NAME: &str = "dev";
@@ -58,6 +59,12 @@ impl Layout {
     #[must_use]
     pub fn new(home: impl Into<PathBuf>) -> Self {
         Self { home: home.into() }
+    }
+
+    /// The layout under this user's Ghostlight home, as `ghostlight_relay::home::home()`
+    /// resolves it.
+    pub fn current() -> io::Result<Self> {
+        Ok(Self::new(home::home()?))
     }
 
     /// The Ghostlight home directory.

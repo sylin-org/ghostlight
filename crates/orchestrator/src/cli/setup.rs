@@ -12,12 +12,6 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use crate::install::native_host::{NativeHostRegistry, NativeHostState};
     use crate::install::{HarnessAction, HarnessRegistry};
 
-    if install && !options.dry_run {
-        crate::install::deployment::select(ghostlight_bridge::installation::Selection::Release)?;
-    } else if !install && !crate::install::deployment::owns_registration()? {
-        println!("The active Ghostlight installation is preserved; this package owns no active registrations.");
-        return Ok(());
-    }
     ghostlight_relay::home::home()?;
     let native_hosts = NativeHostRegistry::discover();
     let mut install_usable = false;
@@ -366,14 +360,6 @@ pub(crate) fn print_desktop_integration_report(
 pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
     use crate::install::native_host::{NativeHostRegistry, NativeHostState};
 
-    if command == NativeHostCommand::Install {
-        crate::install::deployment::select(ghostlight_bridge::installation::Selection::Release)?;
-    } else if command == NativeHostCommand::Uninstall
-        && !crate::install::deployment::owns_registration()?
-    {
-        println!("The active Ghostlight browser registration is preserved.");
-        return Ok(());
-    }
     ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
     let (verb, changed, report, migration) = match command {
@@ -421,14 +407,6 @@ pub fn run_flatpak_native_host(
     command: NativeHostCommand,
     allow_activation: bool,
 ) -> anyhow::Result<()> {
-    if command == NativeHostCommand::Install {
-        crate::install::deployment::select(ghostlight_bridge::installation::Selection::Release)?;
-    } else if command == NativeHostCommand::Uninstall
-        && !crate::install::deployment::owns_registration()?
-    {
-        println!("The active Ghostlight Flatpak registration is preserved.");
-        return Ok(());
-    }
     let registry = crate::install::flatpak::FlatpakRegistry::discover()?;
     let report = match command {
         NativeHostCommand::Check => registry.check()?,

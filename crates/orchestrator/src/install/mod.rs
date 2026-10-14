@@ -35,6 +35,8 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
 const SERVER_NAME: &str = "ghostlight";
+/// File in the state directory recording where each MCP client's configuration was found.
+const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
 // Codex filters its stdio child's environment. Linux demand-start needs the invoking
 // desktop session, not captured machine-local values or a second service-only route.
 const CODEX_DESKTOP_ENVIRONMENT: &[&str] = &[
@@ -434,15 +436,19 @@ impl HarnessContext {
             env::var_os("CODEX_HOME").map(PathBuf::from),
             windows,
         );
-        let connector = ghostlight_bridge::installation::selected_executable()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
+        let layout = layout::Layout::current();
+        let connector = layout
+            .as_ref()
+            .map(layout::Layout::bin)
             .unwrap_or_default()
             .join(executable_name("ghostlight-mcp-connector", windows));
         let path_entries = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect())
             .unwrap_or_default();
-        let locations = roots.config.join("ghostlight/harness-locations.json");
+        let locations = layout
+            .map(|layout| layout.state())
+            .unwrap_or_default()
+            .join(HARNESS_LOCATIONS_FILE);
         Self {
             home,
             config: roots.config,

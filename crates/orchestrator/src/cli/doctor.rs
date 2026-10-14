@@ -14,13 +14,18 @@ use crate::cli::setup::{
 use crate::cli::status::{
     observe_runtime, render_runtime_status, runtime_document, RuntimeObservation,
 };
+use crate::install::layout::Layout;
+use crate::install::marker::DevelopmentMarker;
+use crate::install::record::InstallRecord;
 
 /// Everything `doctor` observed, gathered once.
 ///
 /// The text and JSON renderings read the same values, so a script and a person cannot be told
 /// different things about the same machine.
 pub struct DoctorObservation {
-    installation: Option<ghostlight_bridge::installation::Installation>,
+    home: PathBuf,
+    installed: Option<InstallRecord>,
+    development: Option<DevelopmentMarker>,
     environment: crate::language::environment::Environment,
     binaries: Vec<(PathBuf, bool)>,
     sibling_set_ready: bool,
@@ -41,18 +46,14 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     use crate::install::HarnessRegistry;
     use crate::language::environment;
 
-    let executable = ghostlight_bridge::installation::selected_executable()?;
-    let directory = executable
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("the Ghostlight executable has no parent directory"))?;
+    let layout = Layout::current()?;
     let mut sibling_set_ready = true;
     let mut binaries = Vec::new();
-    for name in [
-        executable_name("ghostlight"),
-        executable_name("ghostlight-mcp-connector"),
-        executable_name("ghostlight-browser-connector"),
+    for path in [
+        layout.service_executable(),
+        layout.mcp_connector(),
+        layout.browser_connector(),
     ] {
-        let path = directory.join(name);
         let ready = path.is_file();
         sibling_set_ready &= ready;
         binaries.push((path, ready));
@@ -65,7 +66,9 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     };
     let diagnostics = crate::diagnostics::observe(&runtime.path);
     Ok(DoctorObservation {
-        installation: ghostlight_bridge::installation::read(&runtime.path)?,
+        installed: InstallRecord::read(&layout.install_record())?,
+        development: DevelopmentMarker::read(&layout.development_marker())?,
+        home: layout.home().to_path_buf(),
         // Same module as the install summary, so the two can never describe this machine
         // differently.
         environment: environment::current(),
@@ -90,13 +93,19 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
-    if let Some(installation) = &observation.installation {
+    println!("Home: {}", observation.home.display());
+    match &observation.installed {
+        Some(record) => println!(
+            "Installed: Ghostlight {} -- relay {}",
+            record.service_version, record.relay_revision
+        ),
+        None => println!("Installed: nothing recorded in the Ghostlight home"),
+    }
+    if let Some(development) = &observation.development {
         println!(
-            "Selected authority: {} -- {}",
-            installation.directory().display(),
-            installation.source()
+            "Development build: {} -- it serves in place of the installed service",
+            development.executable.display()
         );
-        println!("Shared runtime: {}", observation.runtime.path.display());
     }
     println!(
         "Environment: {} -- {}",
@@ -161,9 +170,10 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
     serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "installation": {
+            "home": observation.home,
             "runtime_file": observation.runtime.path,
-            "selection": observation.installation,
-            "source": observation.installation.as_ref().map(|selection| selection.source()),
+            "installed": observation.installed,
+            "development": observation.development,
             "invoking_executable": std::env::current_exe().ok(),
         },
         "environment": {
@@ -194,14 +204,6 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
 /// Format a readiness summary line for output.
 pub fn readiness_line(readiness: &crate::workbench::ReadinessSummary) -> String {
     format!("Readiness: {} -- {}", readiness.word, readiness.detail)
-}
-
-fn executable_name(name: &str) -> String {
-    if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.into()
-    }
 }
 
 #[cfg(test)]

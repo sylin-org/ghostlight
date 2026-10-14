@@ -23,7 +23,7 @@ use notify::Watcher as _;
 /// The environment variable that turns diagnostics on and names the directory.
 pub const ENV_DIR: &str = "GHOSTLIGHT_DIAGNOSTICS_DIR";
 /// The presence-only marker file that turns diagnostics on beside the runtime discovery file.
-pub const MARKER_FILE_NAME: &str = "diagnostics.on";
+pub const MARKER_FILE_NAME: &str = ghostlight_relay::home::DIAGNOSTICS_MARKER_NAME;
 /// The header record's schema marker.
 pub const SCHEMA: &str = "ghostlight-diagnostics-1";
 /// Log files kept per component after pruning.
@@ -137,21 +137,16 @@ impl Activation {
     }
 }
 
-/// The activation marker in the selected installation's preserved state directory.
+/// The activation marker: `diagnostics.on` in the Ghostlight home beside the runtime file.
 pub fn marker_path(runtime_path: &Path) -> PathBuf {
-    crate::installation::state_directory(runtime_path)
-        .map(|directory| directory.join(MARKER_FILE_NAME))
-        .unwrap_or_else(|_| runtime_path.with_file_name(MARKER_FILE_NAME))
+    runtime_path.with_file_name(MARKER_FILE_NAME)
 }
 
-/// The default log directory: a `logs` folder beside the installation's activation marker.
-/// This is where logs go when the marker layer activates, and where
-/// retained logs remain readable after they are turned off.
+/// The default log directory: `diagnostics` in the Ghostlight home beside the runtime file.
+/// This is where logs go when the marker layer activates, and where retained logs remain
+/// readable after they are turned off.
 pub fn default_directory(runtime_path: &Path) -> PathBuf {
-    match marker_path(runtime_path).parent() {
-        Some(directory) => directory.join("logs"),
-        None => PathBuf::from("logs"),
-    }
+    runtime_path.with_file_name(ghostlight_relay::home::DIAGNOSTICS_DIRECTORY_NAME)
 }
 
 /// Resolve the activation layers: an explicit directory wins, then the marker, then off.
@@ -299,13 +294,10 @@ impl Sink {
             Level::Info,
             None,
             &format!(
-                "executable={} runtime={} runtime_exists={} deploy_lock={}",
+                "executable={} runtime={} runtime_exists={}",
                 std::env::current_exe().unwrap_or_default().display(),
                 runtime_path.display(),
-                runtime_path.exists(),
-                runtime_path
-                    .with_file_name(crate::lifecycle::DEPLOY_LOCK_FILE)
-                    .exists()
+                runtime_path.exists()
             ),
         );
         sink
@@ -740,7 +732,7 @@ mod tests {
     }
 
     fn log_lines(root: &Path) -> usize {
-        let root = root.join("logs");
+        let root = root.join("diagnostics");
         fs::read_dir(root)
             .map(|entries| {
                 entries
@@ -762,7 +754,7 @@ mod tests {
         assert_eq!(
             resolve(None, &runtime),
             Activation::Marker {
-                directory: root.join("logs")
+                directory: root.join("diagnostics")
             }
         );
         assert_eq!(
@@ -787,13 +779,13 @@ mod tests {
             Component::Orchestrator,
             "9.9.9-test",
             &runtime,
-            Some(root.join("logs")),
+            Some(root.join("diagnostics")),
             &OsMarkerWatcher,
             None,
         );
         assert_eq!(sink.activation().layer(), "explicit");
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "test process");
-        let logs = root.join("logs");
+        let logs = root.join("diagnostics");
         let mut log_files: Vec<PathBuf> = fs::read_dir(&logs)
             .expect("log dir")
             .filter_map(Result::ok)
@@ -865,7 +857,7 @@ mod tests {
         sink.evaluate();
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
         wait_until_bounded(|| log_lines(&root) == 3);
-        let log_dir = root.join("logs");
+        let log_dir = root.join("diagnostics");
         let log = fs::read_dir(&log_dir)
             .expect("dir")
             .filter_map(Result::ok)
@@ -973,7 +965,7 @@ mod tests {
     #[test]
     fn pruning_keeps_the_newest_per_component_and_never_touches_the_marker() {
         let root = temp_root("prune");
-        let directory = root.join("logs");
+        let directory = root.join("diagnostics");
         fs::create_dir_all(&directory).expect("dir");
         for index in 0..10 {
             let name = format!(

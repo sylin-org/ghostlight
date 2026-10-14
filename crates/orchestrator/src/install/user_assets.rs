@@ -143,7 +143,9 @@ impl UserAssetContext {
         let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
         Self {
             linux: cfg!(target_os = "linux"),
-            executable: ghostlight_bridge::installation::selected_executable().unwrap_or_default(),
+            executable: super::layout::Layout::current()
+                .map(|layout| layout.service_executable())
+                .unwrap_or_default(),
             data_home: env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(".local/share")),

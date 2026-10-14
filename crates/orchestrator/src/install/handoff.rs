@@ -5,7 +5,6 @@
 //! and repeated installs remain non-interactive. The marker is local, version-family state and
 //! carries no installation identity or machine data off-device.
 
-use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -46,7 +45,7 @@ pub fn offer(
     automated: bool,
     install_usable: bool,
 ) -> io::Result<HandoffOutcome> {
-    let marker = marker_path(&state_root()?);
+    let marker = marker_path(&super::layout::Layout::current()?.state());
     let already_offered = marker.exists();
     if !should_offer(dry_run, no_open, automated, install_usable, already_offered) {
         return Ok(if already_offered {
@@ -66,33 +65,9 @@ pub fn offer(
     Ok(HandoffOutcome::Opened)
 }
 
-fn state_root() -> io::Result<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("USERPROFILE")
-                    .map(PathBuf::from)
-                    .map(|home| home.join("AppData/Local"))
-            })
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no local data directory"))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|home| home.join(".local/state"))
-            })
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no user state directory"))
-    }
-}
-
-fn marker_path(state_root: &Path) -> PathBuf {
-    state_root.join("ghostlight").join(HANDOFF_MARKER)
+/// The handoff marker in the state directory of the Ghostlight home.
+fn marker_path(state: &Path) -> PathBuf {
+    state.join(HANDOFF_MARKER)
 }
 
 fn reserve_marker(path: &Path) -> io::Result<bool> {
@@ -167,10 +142,10 @@ mod tests {
     }
 
     #[test]
-    fn marker_is_private_to_ghostlight_user_state() {
+    fn marker_lives_in_the_state_directory() {
         assert_eq!(
             marker_path(Path::new("/state")),
-            Path::new("/state/ghostlight/extension-handoff-v1")
+            Path::new("/state/extension-handoff-v1")
         );
     }
 
