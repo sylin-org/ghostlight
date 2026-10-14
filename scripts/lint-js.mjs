@@ -13,7 +13,9 @@
 //   page    the protocol-4 page assets: one shared scope per directory, because the service
 //           concatenates them into a single function body.
 //   extpage the extension's document scripts: the popup, options and offscreen pages and the
-//           scripts their .html files load. They may read the document names and chrome.
+//           scripts only their .html files load. They may read the document names and chrome.
+//           A script the service worker also imports (lib/state.js, lib/recording.js) takes the
+//           worker kind, because it must run where there is no document.
 //   worker  every other extension script (service worker, libraries). No document names: a
 //           service worker has no window or document.
 //
@@ -33,7 +35,7 @@ const IGNORED_PREFIX = "_";
 const PAGE_ASSET_DIR = /chromium\/level4\/assets$/;
 /** The extension scripts that run in a document, not in the service worker. */
 const EXTENSION_PAGE_SCRIPT =
-  /(^|\/)extension\/(offscreen\.js|options\.js|popup\.js|lib\/(state|recording|gif)\.js|vendor\/gifenc\.js)$/;
+  /(^|\/)extension\/(offscreen\.js|options\.js|popup\.js|lib\/gif\.js|vendor\/gifenc\.js)$/;
 
 /** Split a whitespace-separated word list. */
 function words(text) {

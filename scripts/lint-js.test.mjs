@@ -132,5 +132,7 @@ test("kinds follow the path", () => {
   assert.equal(kindOf("extension/worker.js"), "worker");
   assert.equal(kindOf("extension/popup.js"), "extpage");
   assert.equal(kindOf("extension/offscreen.js"), "extpage");
-  assert.equal(kindOf("extension/lib/state.js"), "extpage");
+  assert.equal(kindOf("extension/lib/state.js"), "worker");
+  assert.equal(kindOf("extension/lib/recording.js"), "worker");
+  assert.equal(kindOf("extension/lib/gif.js"), "extpage");
 });
