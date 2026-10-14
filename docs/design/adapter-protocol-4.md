@@ -155,10 +155,16 @@ connection is ready at once; no install round trip
 4. Anything else gets `{kind:"error", code:"adapter_incompatible", message}` and the socket closes. Today the
    socket closes silently.
 5. At level 4, after validation:
-   - register the connection as `ready`;
-   - start its reader thread (`read_level4`) and its heartbeat thread;
-   - write `hello_accepted`;
-   - publish `adapter_attached`.
+   - write `hello_accepted`, remembering the control state it carried;
+   - register the connection as `ready` and publish `adapter_attached`;
+   - read the control state again and, if it changed since `hello_accepted`, write `control_state` with
+     the new state while holding the state lock;
+   - start its reader thread (`read_level4`) and its heartbeat thread.
+
+   `hello_accepted` goes first so no request or `control_state` frame can precede it. A hold, resume or
+   end published between that write and the registration misses the new connection, so the second read
+   settles it. A publish stores the state before it snapshots the registered connections, so whichever
+   side runs second sees the other.
 
    There is no `InstallPageRuntime` and no capability gate.
 

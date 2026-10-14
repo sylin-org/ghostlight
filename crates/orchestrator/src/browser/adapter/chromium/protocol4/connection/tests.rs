@@ -390,3 +390,29 @@ fn control_state_reaches_every_connection() {
         [&json!({"kind": "control_state", "state": "held"})]
     );
 }
+
+#[test]
+fn a_connection_registered_after_a_publish_missed_it_ends_on_the_published_state() {
+    let port = port();
+    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
+    attached.unwrap();
+    let (writer, _) = channel(&port, FOUR);
+    // A hold stored after `hello_accepted` carried `active`, whose snapshot predates the
+    // registration and so never reached this connection.
+    *lock(&port.control_state) = RuntimeControlState::Held;
+    super::settle_control_state(&port, &writer, wire::RuntimeControlState::Active);
+    // A connection whose `hello_accepted` already carried the state hears nothing more.
+    super::settle_control_state(&port, &writer, wire::RuntimeControlState::Held);
+    port.publish_control_state(RuntimeControlState::Ended)
+        .unwrap();
+
+    let seen = fake.wait(|seen| seen.of_kind("control_state").len() == 2);
+    assert_eq!(seen.frames[0]["control_state"], "active");
+    assert_eq!(
+        seen.of_kind("control_state"),
+        [
+            &json!({"kind": "control_state", "state": "held"}),
+            &json!({"kind": "control_state", "state": "ended"})
+        ]
+    );
+}

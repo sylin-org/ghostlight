@@ -25,7 +25,7 @@ use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     end_connection, is_current, lock, refuse_incompatible, valid_opaque_id, validated_browser_name,
     AdapterNotifications, AdapterRegistry, BrowserError, Connection, ConnectionTag, Liveness,
-    RelayBrowserPort, BROWSER_ID_PREFIX,
+    RelayBrowserPort, BROWSER_ID_PREFIX, CONTROL_DELIVERY_TIMEOUT,
 };
 
 /// Longest engine version a hello may report.
@@ -92,6 +92,11 @@ impl Receipts {
 /// `hello_accepted` with the port's page assets, and its connection is registered and can take
 /// work at once.
 ///
+/// `hello_accepted` is written before the connection is registered, so no request or
+/// `control_state` frame can precede it. Once registered, the connection's control state is
+/// settled against the state `hello_accepted` carried: a publish that ran in between missed this
+/// connection in its snapshot, and the settle sends what it published.
+///
 /// # Errors
 ///
 /// Returns [`BrowserError::Incompatible`] for a first frame that is not a protocol-4 hello,
@@ -123,11 +128,12 @@ pub(crate) fn attach(
     let writer = Arc::new(
         SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
     );
+    let carried: wire::RuntimeControlState = (*lock(&port.control_state)).into();
     writer
         .native(&wire::Outbound::HelloAccepted {
             service_epoch: port.service_epoch.clone(),
             service_version: env!("CARGO_PKG_VERSION").into(),
-            control_state: (*lock(&port.control_state)).into(),
+            control_state: carried,
             assets: (*port.assets).clone(),
         })
         .map_err(|error| {
@@ -163,6 +169,7 @@ pub(crate) fn attach(
         },
         hello.attended,
     )?;
+    settle_control_state(port, &writer, carried);
     if let Err(error) = thread::Builder::new()
         .name("ghostlight-browser-reader".into())
         .spawn(move || reading.run())
@@ -171,6 +178,29 @@ pub(crate) fn attach(
         return Err(BrowserError::Protocol(error.to_string()));
     }
     port.spawn_heartbeat(&tag, writer, liveness)
+}
+
+/// Send a just-registered connection the port's control state when it is no longer the state its
+/// `hello_accepted` carried.
+///
+/// A publish stores the state before it snapshots the registered connections, so a publish that
+/// missed this connection stored its state before this read. The state lock is held while the
+/// frame is written, so a later publish cannot store a newer state and reach this connection
+/// before this older frame does. A writer that cannot deliver the frame closes itself, and the
+/// connection's reader then ends it.
+fn settle_control_state(
+    port: &RelayBrowserPort,
+    writer: &SocketWriter,
+    carried: wire::RuntimeControlState,
+) {
+    let current = lock(&port.control_state);
+    let state = wire::RuntimeControlState::from(*current);
+    if state != carried {
+        let _ = writer.native_until(
+            &wire::Outbound::ControlState { state },
+            Instant::now() + CONTROL_DELIVERY_TIMEOUT,
+        );
+    }
 }
 
 /// The protocol a first frame names, or zero when it names none this service can read.
