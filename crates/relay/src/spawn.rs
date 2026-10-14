@@ -185,10 +185,12 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn the_linux_launch_has_null_stdio_and_its_own_process_group() {
         let command = build_command(Path::new("ghostlight"), Path::new("home"));
-        let description = format!("{command:#?}");
-        assert!(description.contains("stdin: Some(Null)"), "{description}");
-        assert!(description.contains("stdout: Some(Null)"), "{description}");
-        assert!(description.contains("stderr: Some(Null)"), "{description}");
-        assert!(description.contains("pgroup: Some(0)"), "{description}");
+        // The pretty Debug form spreads each field over several lines; compare it without
+        // whitespace so the assertions do not depend on its indentation.
+        let description: String = format!("{command:#?}").split_whitespace().collect();
+        assert!(description.contains("stdin:Some(Null"), "{description}");
+        assert!(description.contains("stdout:Some(Null"), "{description}");
+        assert!(description.contains("stderr:Some(Null"), "{description}");
+        assert!(description.contains("pgroup:Some(0"), "{description}");
     }
 }
