@@ -79,6 +79,12 @@ test("the options connection card renders the same state in the same words", () 
   assert.match(script, /setupRoute\.hidden = snapshot\.link_state !== "host_absent"/);
 });
 
+test("the developer diagnostics card describes only the connection log", () => {
+  const markup = read("options.html");
+  assert.ok(markup.includes("Saves bounded connection details for this browser and shows the raw connection error."));
+  assert.doesNotMatch(markup, /form[- ](reset|trac)/i);
+});
+
 test("the bundled setup page needs no network and contains no product state", () => {
   const markup = read("setup.html");
   assert.ok(markup.includes(NOT_INSTALLED_HERE));
