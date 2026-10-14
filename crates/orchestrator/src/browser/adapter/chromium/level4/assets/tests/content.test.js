@@ -1538,7 +1538,7 @@ function effectScenarios(harness) {
         return { kind: "fill_local", field: { locator: await locatorFor("Sel"), value: "nope" }, allow_credentials: false };
       }],
       ["fill_local", "disabled", async () => {
-        const box = textField("Box", { type: "checkbox", disabled: true });
+        textField("Box", { type: "checkbox", disabled: true });
         return { kind: "fill_local", field: { locator: await locatorFor("Box"), value: "yes" }, allow_credentials: false };
       }],
       ["fill_local", "credential_authorization_required", async () => {

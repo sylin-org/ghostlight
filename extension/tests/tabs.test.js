@@ -40,8 +40,6 @@ function setup({ browser = {}, cancelled = [], managed = [] } = {}) {
   return { chrome, debuggerChrome, lifecycle, hook, tabs, advance: (ms) => { clock += ms; } };
 }
 
-const FACT = (id, extra = {}) => ({ tab_id: id, title: "Example Domain", url: "https://example.com/", active: true, readiness: "complete", ...extra });
-
 test("every handler carries validate, run, addresses and tabOf", () => {
   const { tabs } = setup();
   for (const name of HANDLERS) {
