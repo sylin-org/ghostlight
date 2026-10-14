@@ -288,15 +288,20 @@ pub fn validate_siblings(directory: &Path) -> io::Result<()> {
 
 /// Resolve the selected executable for setup and diagnosis, without creating a selection.
 pub fn selected_executable() -> io::Result<PathBuf> {
-    let selected = read(&production_runtime()?)?.map(|record| record.directory().to_path_buf());
-    Ok(selected
-        .or_else(|| {
-            env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(Path::to_path_buf))
-        })
-        .ok_or_else(|| invalid("Ghostlight executable has no directory"))?
-        .join(executable_name("ghostlight")))
+    selected_executable_in(&production_runtime()?, &env::current_exe()?)
+}
+
+/// Resolve the executable the record beside `runtime` selects, or the `invoking` executable's
+/// sibling when no installation has been selected yet.
+pub fn selected_executable_in(runtime: &Path, invoking: &Path) -> io::Result<PathBuf> {
+    let directory = match read(runtime)? {
+        Some(record) => record.directory().to_path_buf(),
+        None => invoking
+            .parent()
+            .ok_or_else(|| invalid("Ghostlight executable has no directory"))?
+            .to_path_buf(),
+    };
+    Ok(directory.join(executable_name("ghostlight")))
 }
 
 /// Stable state location for production; explicitly isolated fixtures retain their own state.

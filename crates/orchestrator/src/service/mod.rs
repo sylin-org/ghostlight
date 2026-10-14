@@ -38,7 +38,8 @@ use crate::audit::AuditRecorder;
 use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
-    AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, RelayBrowserPort,
+    AdapterLifecycleObserver, Availability, BrowserError, BrowserEventSink, BrowserPort,
+    RelayBrowserPort,
 };
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
@@ -61,7 +62,7 @@ const TOKEN_PREFIX: &str = "runtime_";
 /// Suffix of the sibling file the failure templates are written through.
 const TEMPORARY_SUFFIX: &str = ".tmp";
 
-/// Longest a resumed session waits for one browser to list its tabs.
+/// Longest a resumed session waits for one browser to return, and then for it to list its tabs.
 const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
 
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
@@ -506,7 +507,8 @@ fn serve_control(mut connection: TcpStream, op: ControlOp, intake: &Intake) {
 ///
 /// The opening names the channel and, for the command line, the process that owns the session.
 /// A resume token continues an earlier session: its revision, client and owned tabs come back,
-/// and tabs the browser no longer has stay stale.
+/// and tabs the browser no longer has stay stale. Tabs of a browser that has not returned yet
+/// stay in the token and are bound when it does.
 fn serve_mcp(
     mut connection: TcpStream,
     intake: &Arc<Intake>,
@@ -565,7 +567,13 @@ fn serve_mcp(
                 McpSession::resumed(state),
             ));
             let live = LiveSession::open(intake, &wire, &opening)?;
-            restore_tabs(intake, &live.workspace, &owned_tabs);
+            let unrestored = restore_tabs(
+                intake,
+                &live.workspace,
+                &owned_tabs,
+                Instant::now() + RESTORE_DEADLINE,
+            );
+            *lock(&wire.unrestored) = unrestored;
             wire.publish_resume(&intake.workspaces, &live.workspace);
             (wire, Some(live))
         }
@@ -626,6 +634,9 @@ struct McpWire {
     writer: Arc<SocketWriter>,
     session: Mutex<McpSession>,
     resume: Mutex<Option<String>>,
+    /// Resumed tabs whose browser has not listed its tabs yet. They stay in every resume token
+    /// until that browser answers.
+    unrestored: Mutex<Vec<OwnedTab>>,
 }
 
 impl McpWire {
@@ -634,6 +645,7 @@ impl McpWire {
             writer,
             session: Mutex::new(session),
             resume: Mutex::new(None),
+            unrestored: Mutex::new(Vec::new()),
         }
     }
 
@@ -671,7 +683,7 @@ impl McpWire {
     /// Hand the connector a fresh resume token when what it would restore has changed.
     fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
         let browser = workspaces.browser_of(workspace.as_str());
-        let owned_tabs = browser
+        let mut owned_tabs: Vec<OwnedTab> = browser
             .map(|browser_id| {
                 workspaces
                     .tab_bindings(workspace.as_str())
@@ -684,6 +696,12 @@ impl McpWire {
                     .collect()
             })
             .unwrap_or_default();
+        let unrestored: Vec<OwnedTab> = lock(&self.unrestored)
+            .iter()
+            .filter(|tab| !owned_tabs.iter().any(|bound| bound.handle == tab.handle))
+            .cloned()
+            .collect();
+        owned_tabs.extend(unrestored);
         let Some(state) = lock(&self.session).resume_state(owned_tabs, None) else {
             return;
         };
@@ -775,9 +793,11 @@ impl LiveSession {
         Ok(live)
     }
 
-    /// The once-a-second thread that advances cancelled work, keeps waiting work visible and
-    /// tells the client when policy changes the catalog it was given.
+    /// The once-a-second thread that advances cancelled work, keeps waiting work visible, binds
+    /// resumed tabs whose browser has returned, and tells the client when policy changes the
+    /// catalog it was given.
     fn spawn_watch(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>) -> Result<JoinHandle<()>> {
+        let intake = Arc::clone(intake);
         let queue = Arc::clone(&self.queue);
         let executor = Arc::clone(&intake.executor);
         let workspace = self.workspace.clone();
@@ -797,6 +817,7 @@ impl LiveSession {
                     for job in queue.jobs() {
                         executor.show_waiting(&workspace, &job.prepared);
                     }
+                    restore_returned_tabs(&intake, &wire, &workspace);
                     let Some(previous) = lock(&published).clone() else {
                         continue;
                     };
@@ -956,24 +977,42 @@ impl LiveSession {
 
 /// Bind a resumed session's tabs again, checking each browser once for the tabs it still has.
 ///
-/// A tab the browser no longer lists, or one another session now controls, is not bound: its
-/// handle answers as stale, which is the truth after a restart.
-fn restore_tabs(intake: &Intake, workspace: &WorkspaceId, owned: &[OwnedTab]) {
+/// Each browser is waited for until `until`, since after a service restart a browser returns
+/// some time after the client does. Only the browser's own tab list stales a tab: a tab it no
+/// longer lists, or one another session now controls, is not bound, and its handle answers as
+/// stale, which is the truth after a restart. The tabs of a browser that could not be asked come
+/// back unrestored, to be kept in the resume token and bound when that browser returns.
+fn restore_tabs(
+    intake: &Intake,
+    workspace: &WorkspaceId,
+    owned: &[OwnedTab],
+    until: Instant,
+) -> Vec<OwnedTab> {
     let mut by_browser: BTreeMap<&str, Vec<&OwnedTab>> = BTreeMap::new();
     for tab in owned {
         by_browser.entry(&tab.browser_id).or_default().push(tab);
     }
+    let mut unrestored = Vec::new();
     for (browser, tabs) in by_browser {
         let cancelled = AtomicBool::new(false);
-        let Ok(BrowserOutcome::Tabs { tabs: live }) = intake.browser_port.call(
-            browser,
-            workspace.as_str(),
-            BrowserCommand::ListTabs,
-            Instant::now() + RESTORE_DEADLINE,
-            &cancelled,
-        ) else {
+        let returned = intake
+            .browser_port
+            .await_available(browser, until, &cancelled)
+            == Availability::Available;
+        let listed = returned.then(|| {
+            intake.browser_port.call(
+                browser,
+                workspace.as_str(),
+                BrowserCommand::ListTabs,
+                Instant::now() + RESTORE_DEADLINE,
+                &cancelled,
+            )
+        });
+        let Some(Ok(BrowserOutcome::Tabs { tabs: live })) = listed else {
+            unrestored.extend(tabs.into_iter().cloned());
             continue;
         };
+        // A session already working in another browser cannot hold these tabs: they are stale.
         if intake
             .workspaces
             .pin_browser(workspace.as_str(), browser)
@@ -982,6 +1021,7 @@ fn restore_tabs(intake: &Intake, workspace: &WorkspaceId, owned: &[OwnedTab]) {
             continue;
         }
         let Ok(lease) = intake.workspaces.acquire(workspace) else {
+            unrestored.extend(tabs.into_iter().cloned());
             continue;
         };
         for tab in tabs {
@@ -990,6 +1030,22 @@ fn restore_tabs(intake: &Intake, workspace: &WorkspaceId, owned: &[OwnedTab]) {
             }
         }
     }
+    unrestored
+}
+
+/// Bind the resumed tabs of browsers that have returned since the session resumed, without
+/// waiting for any browser, and hand the client a token that reflects them.
+fn restore_returned_tabs(intake: &Intake, wire: &McpWire, workspace: &WorkspaceId) {
+    let pending = lock(&wire.unrestored).clone();
+    if pending.is_empty() {
+        return;
+    }
+    let still = restore_tabs(intake, workspace, &pending, Instant::now());
+    if still.len() == pending.len() {
+        return;
+    }
+    *lock(&wire.unrestored) = still;
+    wire.publish_resume(&intake.workspaces, workspace);
 }
 
 /// Answer an invocation that arrived after a quit began.
@@ -1543,6 +1599,17 @@ mod tests {
 
     /// Serve the relay listener over a fake browser and publish it in `home`.
     fn serve_fake(home: &TestHome) -> Served {
+        serve(home, false)
+    }
+
+    /// Serve the relay listener with the relay port as the session's browser port, so sessions
+    /// meet browsers only as protocol-4 extensions attach.
+    fn serve_relayed(home: &TestHome) -> Served {
+        serve(home, true)
+    }
+
+    /// Serve the relay listener in `home`; `relayed` puts the relay port behind the sessions.
+    fn serve(home: &TestHome, relayed: bool) -> Served {
         use crate::audit::{AuditRecorder, JsonlAuditSink};
         use crate::governance::GovernanceFacade;
         use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -1593,7 +1660,11 @@ mod tests {
             token: TEST_TOKEN.into(),
             executor,
             workspaces,
-            browser_port: browser.clone(),
+            browser_port: if relayed {
+                relay.clone()
+            } else {
+                browser.clone()
+            },
             browser: relay.clone(),
             workbench,
             governance,
@@ -1830,6 +1901,115 @@ mod tests {
         );
         let (listed, _) = response(&mut socket, 9);
         assert!(listed["result"]["tools"].is_array(), "{listed}");
+    }
+
+    /// The browser identity of an extension that returns after its session resumed.
+    const RETURNING_BROWSER: &str = "browser_returning";
+
+    /// The tab the returning browser still holds.
+    const RETURNING_TAB: u64 = 12;
+
+    /// A resume token for a session that owned the returning browser's tab.
+    fn returning_token() -> String {
+        ResumeState {
+            revision: "2025-06-18".into(),
+            client_label: "returning client".into(),
+            channel: String::new(),
+            session_key: Some("workspace_earlier".into()),
+            owned_tabs: vec![returning_tab()],
+            recording: None,
+        }
+        .encode()
+    }
+
+    fn returning_tab() -> crate::intake::mcp::OwnedTab {
+        crate::intake::mcp::OwnedTab {
+            browser_id: RETURNING_BROWSER.into(),
+            tab_id: RETURNING_TAB,
+            handle: "tab_kept".into(),
+        }
+    }
+
+    /// Attach a protocol-4 extension for the returning browser that still lists its tab.
+    fn attach_returning_browser(
+        served: &Served,
+    ) -> crate::browser::adapter::chromium::level4::fake::FakeExtension {
+        use crate::browser::adapter::chromium::level4::fake::{FakeExtension, Reply as FakeReply};
+        use crate::browser::adapter::chromium::level4::wire::Primitive;
+
+        let native = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let fake = FakeExtension::connect(
+            native.local_addr().unwrap(),
+            &FakeExtension::hello(RETURNING_BROWSER),
+            Box::new(|correlation, primitive| {
+                let outcome = match primitive {
+                    Primitive::ListTabs(_) => json!({"tabs": [{"tab_id": RETURNING_TAB,
+                        "title": "Example", "url": "https://example.com/", "active": true,
+                        "readiness": "complete"}]}),
+                    _ => Value::Null,
+                };
+                FakeReply::Now(FakeExtension::ok(correlation, outcome))
+            }),
+        );
+        served.relay.attach(native.accept().unwrap().0).unwrap();
+        fake
+    }
+
+    /// The tabs the one session holds in the workspace store.
+    fn bound_tabs(served: &Served) -> Vec<(String, u64)> {
+        let summaries = served.intake.workspaces.summaries();
+        assert_eq!(summaries.len(), 1);
+        served.intake.workspaces.tab_bindings(&summaries[0].id)
+    }
+
+    #[test]
+    fn a_resumed_session_waits_for_its_browser_to_return() {
+        let home = TestHome::new("resume-returning");
+        let served = serve_relayed(&home);
+        let token = returning_token();
+        let resumed = thread::spawn(move || {
+            let mut socket = open_mcp(Some(token));
+            let McpFrame::Resume { token } =
+                frame::read_frame::<McpFrame>(&mut socket).unwrap().unwrap()
+            else {
+                panic!("a resumed session hands back a fresh token first");
+            };
+            (socket, token)
+        });
+        // The client reconnects first; the browser returns after the session opened.
+        eventually(|| !served.intake.workspaces.summaries().is_empty());
+        thread::sleep(Duration::from_millis(200));
+        let _browser = attach_returning_browser(&served);
+        let (_socket, token) = resumed.join().unwrap();
+        assert_eq!(
+            ResumeState::decode(&token).unwrap().owned_tabs,
+            vec![returning_tab()]
+        );
+        assert_eq!(
+            bound_tabs(&served),
+            vec![("tab_kept".to_owned(), RETURNING_TAB)]
+        );
+    }
+
+    #[test]
+    fn a_browser_that_returns_late_keeps_and_then_binds_its_tabs() {
+        let home = TestHome::new("resume-late");
+        let served = serve_relayed(&home);
+        let mut socket = open_mcp(Some(returning_token()));
+        let McpFrame::Resume { token } =
+            frame::read_frame::<McpFrame>(&mut socket).unwrap().unwrap()
+        else {
+            panic!("a resumed session hands back a fresh token first");
+        };
+        // The browser did not return in time: nothing is bound, and nothing is forgotten.
+        assert_eq!(
+            ResumeState::decode(&token).unwrap().owned_tabs,
+            vec![returning_tab()]
+        );
+        assert!(bound_tabs(&served).is_empty());
+
+        let _browser = attach_returning_browser(&served);
+        eventually(|| bound_tabs(&served) == vec![("tab_kept".to_owned(), RETURNING_TAB)]);
     }
 
     #[test]
