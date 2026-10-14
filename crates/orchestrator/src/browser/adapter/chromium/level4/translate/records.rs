@@ -15,8 +15,10 @@ use std::fmt::Write as _;
 use sha2::{Digest, Sha256};
 
 use super::super::link::Link;
-use super::super::scope::Scope;
+use super::super::locator::Locator;
+use super::super::scope::{PlannedCall, Scope};
 use super::super::wire;
+use super::super::world;
 use crate::browser::adapter::{BrowserOutcome, DiagnosticDetail, DiagnosticSource};
 use crate::browser::BrowserError;
 
@@ -173,6 +175,52 @@ pub fn export(
         destination,
         max_output_bytes,
     })
+}
+
+/// Where an export attaches a recording in a page.
+#[derive(Clone, Copy, Debug)]
+pub struct PageExport<'a> {
+    /// The tab that receives the GIF.
+    pub tab_id: u64,
+    /// The encoded locator of the file input that takes it.
+    pub locator: &'a str,
+    /// The name the file carries.
+    pub file_name: &'a str,
+}
+
+/// Encode one recording and attach it to a file input of a page.
+///
+/// The extension runs the attach call with the GIF as its attachment, after checking the guard,
+/// so the GIF never passes through this service. The call goes through the scope like any other
+/// content call, and a document the scope does not allow is refused before anything is sent.
+///
+/// # Errors
+///
+/// Returns the plain failure of a malformed locator or a refused document, and the primitive's
+/// failure.
+pub fn export_to_page(
+    l: &mut Link<'_>,
+    scope: Option<&Scope>,
+    recording_id: Option<String>,
+    page: PageExport<'_>,
+    max_output_bytes: usize,
+) -> Result<BrowserOutcome, BrowserError> {
+    let target = Locator::decode(page.locator)?;
+    let message = world::attach_file(&target.local, page.file_name);
+    let plan = match scope {
+        Some(scope) => scope.call(&target.doc, message)?,
+        None => PlannedCall::unscoped(&target.doc, message),
+    };
+    export(
+        l,
+        recording_id,
+        wire::RecordingTarget::Page {
+            tab_id: page.tab_id,
+            call: plan.call,
+            guard: scope.map(Scope::guard),
+        },
+        max_output_bytes,
+    )
 }
 
 /// Erase one recording.

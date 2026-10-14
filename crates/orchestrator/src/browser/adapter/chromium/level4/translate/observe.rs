@@ -116,7 +116,7 @@ pub fn describe_documents(
             x: point.x,
             y: point.y,
         };
-        bind(route(l, &tree, tab_id, at, true)?.map(|(doc, _)| doc));
+        bind(route(l, &tree, tab_id, at, true)?.map(|routed| routed.doc));
     }
     if subjects.focused {
         bind(focused_document(l, &tree, tab_id)?);

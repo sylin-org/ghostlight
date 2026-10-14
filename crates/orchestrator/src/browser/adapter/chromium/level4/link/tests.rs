@@ -810,23 +810,8 @@ fn cancel_work_forwards_a_cancel_frame_and_waits_for_nothing() {
 }
 
 #[test]
-fn work_not_yet_translated_answers_that_the_extension_lacks_it() {
+fn a_page_runtime_install_is_a_protocol_failure_and_sends_nothing() {
     let (port, fake) = port(Box::new(|_, _| Reply::Never));
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::Drag {
-                tab_id: 12,
-                source_locator: "T:t1:locator_a1_1".into(),
-                destination_locator: "T:t1:locator_a1_2".into(),
-            }
-        ),
-        Err(BrowserError::CapabilityVersion {
-            capability: "drag".into(),
-            required: 1,
-            advertised: 0,
-        })
-    );
     assert!(matches!(
         call(
             &port,

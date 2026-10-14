@@ -15,14 +15,11 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-9`. `level4::run` translates rows 1, 3, 12-21, 23, 26, 29, 31-35, 38, 40-41,
-44 and 46 (`translate/{read,observe,pointer,keyboard,capture,script,forms}.rs`), the diagnostics
-and recording rows in `translate/records.rs`, and the browser-native rows. Point input, drag and a
-recording export into a page still answer `CapabilityVersion { capability, 1, 0 }` until
-service-9 translates them. A click or hover whose scope leaves a document unreadable is refused
-with `DocumentUnavailable` until service-9 adds `route_and_admit`; the test
-`a_click_on_a_restricted_scope_is_refused_until_its_point_can_be_placed` marks the place. Nothing
-sets the page assets yet (switch-2 wires them), so a running service still refuses protocol 4.
+Next slice: `service-10`. `level4::run` is exhaustive: every `BrowserCommand` variant is
+translated, except `InstallPageRuntime`, which is a protocol failure at protocol 4. Point input,
+drag, file drop and a recording export into a page are in `translate/{points,pointer,records}.rs`.
+Nothing sets the page assets yet (switch-2 wires them), so a running service still refuses
+protocol 4.
 
 ## Landed
 
@@ -36,6 +33,7 @@ sets the page assets yet (switch-2 wires them), so a running service still refus
 | service-6-p4-documents-reading | `translate/{read,observe}.rs` and `translate/mod.rs` (`Reach`, answer decoding, point routing); `run` admits `InDocuments`; `Scope::open` for work sent without a scope; diagnostics reads bound to `hex(sha256(sorted allowed ids))`; recording starts watch the scope's real documents; `world::Observed.readiness`. | see `git log` |
 | service-7-p4-interaction | `translate/{pointer,keyboard,capture,script}.rs` and `translate::{settled, send_input, OnDialog}`: click and hover (prepare plus owner-box chain in one sequence, then input at the centre in top-viewport coordinates, settle 250 for a click, a dialog counts as success), scroll, text into a control, text into the focused control (first focused document in tree order, cleared there alone, precondition on the input), key presses (preconditioned, no text under Alt, Control or Meta), viewport, page, target and region captures (one `capture` primitive, best-effort settle, view check), upload (chunked over 768 KiB by the link) and script evaluation (an exception is an unknown effect). `keys::hover`, world answers for scroll, typing, focus and upload. 27 tests in `translate/tests/interaction.rs`. | see `git log` |
 | service-8-p4-fill | `translate/forms.rs`: fields grouped by document in first-appearance order; an orphan submit refused before anything is sent; one guarded Sequence of `prepare_fill` per document before any edit; field kinds from the plans (`world::{FieldKind, FillPlan}`); consecutive local fields share one Sequence of `fill_local`; a text field is one `input` behind `focus_text_field` typing `keys::replace_text`; the fill's own budget checked before every field; a Parallel `verify_fill_retained` (limit `FILL_RETAINED_LIMIT_MS` = 2000, settle 25 without a submit); `submit_fill` with settle 250. 11 tests in `translate/tests/forms.rs`. `work/tests/protocol4.rs` runs the executor over a real `RelayBrowserPort` and the FakeExtension (now `pub(crate)` in test builds) for the five section 5 model-visible deltas, asserting status, summary, effect and repeat-safety. | see `git log` |
+| service-9-p4-points-drag | `translate/points.rs`: `ActivatePoint` and `ActivatePointModified` (view first and validated before any effect; `scroll_point` on the top document; route; click steps, settle 250), `WheelAt` (ticks of 120, up is negative, settle 120, receipt at the viewport point), `HoverPoint`, `DragPoints` (two `viewport_point` calls in one sequence; a drag path of 12 strides), `DropImageAt` (always routed; `drop_files` at the local position in the deepest document). `translate::route_and_admit` places a point, admits its document as an input subject, and leaves a point that zero or several owners claim unresolved ("point has no current document subject"); a scope that allows every document skips the routing. `Activate` and `Hover` use it instead of refusing a restricted scope. `pointer::drag` (locators, spec 4.6 order). `records::export_to_page` (`attach_file` through `Scope::call`, with the scope guard). `route` returns a `Routed` (document, local point, subject). `untranslated` and the last `CapabilityVersion` fallback are gone. 21 tests in `translate/tests/points.rs`. | see `git log` |
 
 ## Notes
 
@@ -77,6 +75,10 @@ sets the page assets yet (switch-2 wires them), so a running service still refus
 - Work sent without a scope reads every addressable document of one `frames` inventory
   (`Scope::open`) and carries no guard. The executor wraps every content command in
   `InDocuments`, so this path costs one extra round trip only outside the executor.
+- A scope that allows every document skips point routing, so a point input there names the subject
+  the top document reports; over an embedded document that is the embed element. A file drop
+  always routes, because it is delivered inside the document. `route_and_admit` lives beside `route`
+  in `translate/mod.rs`, not in `geometry.rs`, because `geometry` is pure and routing sends calls.
 - A first routing hop in page coordinates asks `hit_point` alone and probes owners afterwards at
   the viewport point it reports, because `owner_probe` reads viewport coordinates. Deeper hops
   ask both in one call.

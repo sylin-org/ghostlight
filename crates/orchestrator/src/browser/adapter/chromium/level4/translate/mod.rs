@@ -12,6 +12,7 @@ pub mod forms;
 pub mod keyboard;
 pub mod observe;
 pub mod pointer;
+pub mod points;
 pub mod present;
 pub mod read;
 pub mod records;
@@ -22,7 +23,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::geometry::{self, RouteStep, MAX_ROUTE_DEPTH};
-use super::link::{Link, UNSUPPORTED_ADVERTISED, UNSUPPORTED_REQUIRED};
+use super::link::Link;
 use super::locator::Locator;
 use super::scope::{PlannedCall, Scope};
 use super::tree::FrameTree;
@@ -31,11 +32,11 @@ use super::wire::{
     InputStop, Point,
 };
 use super::world::{self, EffectClass, Hit, OwnerProbe};
-use crate::browser::adapter::{BrowserCommand, PhysicalActionSubject};
+use crate::browser::adapter::PhysicalActionSubject;
 use crate::browser::BrowserError;
 
-/// The tag that names a unit of work.
-const WORK_TAG: &str = "command";
+/// The failure of a point that cannot be placed in exactly one document.
+const UNRESOLVED_POINT: &str = "point has no current document subject";
 /// The failure of a world call the extension skipped because an earlier one failed.
 const CALL_SKIPPED: &str = "a page call was skipped";
 /// The protocol failure of a world call status this service does not know.
@@ -46,25 +47,6 @@ const DIALOG_DURING_INPUT: &str = "a dialog opened while input was being sent";
 const INPUT_INCOMPLETE: &str = "input stopped before its last step";
 /// The protocol failure of input whose precondition went unanswered.
 const PRECONDITION_UNANSWERED: &str = "input did not answer its precondition";
-
-/// The refusal for work this service does not yet translate into primitives: the work needs a
-/// first revision, and the connection advertises none.
-#[must_use]
-pub fn untranslated(command: &BrowserCommand) -> BrowserError {
-    BrowserError::CapabilityVersion {
-        capability: work_name(command),
-        required: UNSUPPORTED_REQUIRED,
-        advertised: UNSUPPORTED_ADVERTISED,
-    }
-}
-
-/// The name of one unit of work, as its tag spells it.
-fn work_name(command: &BrowserCommand) -> String {
-    serde_json::to_value(command)
-        .ok()
-        .and_then(|value| value.get(WORK_TAG)?.as_str().map(str::to_owned))
-        .unwrap_or_default()
-}
 
 /// The documents one unit of work may reach.
 pub enum Reach<'s> {
@@ -334,6 +316,17 @@ fn wire_name(code: &impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
+/// A point placed in the document it lands in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Routed {
+    /// The deepest document under the point.
+    pub doc: FrameRef,
+    /// The point in that document's own viewport.
+    pub local: Point,
+    /// The role and name of the element under the point.
+    pub subject: Option<PhysicalActionSubject>,
+}
+
 /// Find the document a point lands in, and the subject under it there.
 ///
 /// Routing starts at the top document and descends one embedded document per round trip, at
@@ -351,7 +344,7 @@ pub fn route(
     tab_id: u64,
     point: Point,
     page: bool,
-) -> Result<Option<(FrameRef, Option<PhysicalActionSubject>)>, BrowserError> {
+) -> Result<Option<Routed>, BrowserError> {
     let mut doc = tree.top().clone();
     let mut local = point;
     let mut page = page;
@@ -402,7 +395,13 @@ pub fn route(
             Vec::new()
         };
         match geometry::route_step(&hit, children.iter().cloned().zip(owners)) {
-            RouteStep::Subject { subject } => return Ok(Some((doc, subject))),
+            RouteStep::Subject { subject } => {
+                return Ok(Some(Routed {
+                    doc,
+                    local: Point { x: hit.x, y: hit.y },
+                    subject,
+                }))
+            }
             RouteStep::Descend { child, local: next } => {
                 doc = child;
                 local = next;
@@ -412,6 +411,30 @@ pub fn route(
         }
     }
     Ok(None)
+}
+
+/// Place a point of the top viewport in its document, and admit that document as the subject of
+/// the input that will reach the point.
+///
+/// This is the check a scope that leaves some document unreadable needs before input: a point
+/// over an embedded document that scope does not allow must not be clicked, and neither must
+/// one that cannot be placed at all.
+///
+/// # Errors
+///
+/// Returns the failure of a `call` primitive, a plain failure for a point that cannot be placed
+/// in exactly one document, and [`BrowserError::DocumentUnavailable`] when the scope does not
+/// allow the document the point lands in. Nothing has been sent as input in any of these cases.
+pub fn route_and_admit(
+    l: &mut Link<'_>,
+    scope: &mut Scope,
+    tab_id: u64,
+    point: Point,
+) -> Result<Routed, BrowserError> {
+    let routed = route(l, scope.tree(), tab_id, point, false)?
+        .ok_or_else(|| BrowserError::Primitive(UNRESOLVED_POINT.into()))?;
+    scope.admit_input_subject(&routed.doc)?;
+    Ok(routed)
 }
 
 #[cfg(test)]

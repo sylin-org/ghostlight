@@ -28,9 +28,10 @@ use self::scope::Scope;
 use self::translate::forms::{self, Fill};
 use self::translate::keyboard::{PressKey, TypeFocused, TypeText};
 use self::translate::observe::{self, Subjects, Wait};
-use self::translate::pointer::{Click, Scroll};
-use self::translate::records::{self, DiagnosticsRead};
-use self::translate::{capture, keyboard, pointer, present, read, script, tabs, untranslated};
+use self::translate::pointer::{Click, Drag, Scroll};
+use self::translate::points::{PointClick, PointDrag, PointDrop, PointWheel, ViewPoint};
+use self::translate::records::{self, DiagnosticsRead, PageExport};
+use self::translate::{capture, keyboard, pointer, points, present, read, script, tabs};
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
@@ -44,8 +45,7 @@ const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
 /// Carry one unit of browser work over a protocol-4 connection.
 ///
 /// Work inside a document scope runs with that scope admitted, and answers with what it read
-/// alongside what the scope reached. Work this service does not translate yet answers that the
-/// extension lacks the capability, so no unit of work is ever sent half-translated.
+/// alongside what the scope reached.
 ///
 /// # Errors
 ///
@@ -253,6 +253,26 @@ fn translate(
             wire::RecordingTarget::Client,
             max_output_bytes,
         ),
+        BrowserCommand::ExportRecording {
+            recording_id,
+            destination:
+                RecordingDestination::Target {
+                    tab_id,
+                    locator,
+                    file_name,
+                },
+            max_output_bytes,
+        } => records::export_to_page(
+            l,
+            scope.as_deref(),
+            recording_id,
+            PageExport {
+                tab_id,
+                locator: &locator,
+                file_name: &file_name,
+            },
+            max_output_bytes,
+        ),
         BrowserCommand::DiscardRecording { recording_id } => records::discard(l, recording_id),
         BrowserCommand::Cancel { correlation } => Ok(present::cancel(l, &correlation)),
         BrowserCommand::Present { signal } => present::present(l, signal),
@@ -391,16 +411,123 @@ fn translate(
             script,
             max_result_chars,
         } => script::evaluate(l, scope, tab_id, &script, max_result_chars),
-        BrowserCommand::ActivatePoint { .. }
-        | BrowserCommand::ActivatePointModified { .. }
-        | BrowserCommand::WheelAt { .. }
-        | BrowserCommand::HoverPoint { .. }
-        | BrowserCommand::Drag { .. }
-        | BrowserCommand::DragPoints { .. }
-        | BrowserCommand::DropImageAt { .. }
-        | BrowserCommand::ExportRecording {
-            destination: RecordingDestination::Target { .. },
-            ..
-        } => Err(untranslated(&command)),
+        BrowserCommand::ActivatePoint {
+            tab_id,
+            point,
+            expected_viewport,
+            button,
+            click_count,
+        } => points::activate(
+            l,
+            scope,
+            PointClick {
+                at: ViewPoint {
+                    tab_id,
+                    point,
+                    expected: &expected_viewport,
+                },
+                button: &button,
+                click_count,
+                modifiers: &[],
+            },
+        ),
+        BrowserCommand::ActivatePointModified {
+            tab_id,
+            point,
+            expected_viewport,
+            button,
+            click_count,
+            modifiers,
+        } => points::activate(
+            l,
+            scope,
+            PointClick {
+                at: ViewPoint {
+                    tab_id,
+                    point,
+                    expected: &expected_viewport,
+                },
+                button: &button,
+                click_count,
+                modifiers: &modifiers,
+            },
+        ),
+        BrowserCommand::WheelAt {
+            tab_id,
+            point,
+            expected_viewport,
+            direction,
+            ticks,
+        } => points::wheel(
+            l,
+            scope,
+            PointWheel {
+                at: ViewPoint {
+                    tab_id,
+                    point,
+                    expected: &expected_viewport,
+                },
+                direction: &direction,
+                ticks,
+            },
+        ),
+        BrowserCommand::HoverPoint {
+            tab_id,
+            point,
+            expected_viewport,
+        } => points::hover(
+            l,
+            scope,
+            ViewPoint {
+                tab_id,
+                point,
+                expected: &expected_viewport,
+            },
+        ),
+        BrowserCommand::Drag {
+            tab_id,
+            source_locator,
+            destination_locator,
+        } => pointer::drag(
+            l,
+            scope,
+            Drag {
+                tab_id,
+                source: &source_locator,
+                destination: &destination_locator,
+            },
+        ),
+        BrowserCommand::DragPoints {
+            tab_id,
+            start,
+            end,
+            expected_viewport,
+        } => points::drag(
+            l,
+            scope,
+            PointDrag {
+                tab_id,
+                start,
+                end,
+                expected: &expected_viewport,
+            },
+        ),
+        BrowserCommand::DropImageAt {
+            tab_id,
+            point,
+            expected_viewport,
+            file,
+        } => points::drop_file(
+            l,
+            scope,
+            PointDrop {
+                at: ViewPoint {
+                    tab_id,
+                    point,
+                    expected: &expected_viewport,
+                },
+                file: &file,
+            },
+        ),
     }
 }

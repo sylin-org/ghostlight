@@ -99,7 +99,7 @@ fn page() -> Calls {
     Box::new(|call| call.calls.iter().map(answer).collect())
 }
 
-fn inputs_seen(fake: &FakeExtension) -> Vec<wire::Input> {
+pub(super) fn inputs_seen(fake: &FakeExtension) -> Vec<wire::Input> {
     fake.wait(|_| true)
         .requests
         .iter()
@@ -122,7 +122,7 @@ fn captures_seen(fake: &FakeExtension) -> Vec<wire::Capture> {
 }
 
 /// The wire name of every primitive the extension received, in order.
-fn primitives_seen(fake: &FakeExtension) -> Vec<String> {
+pub(super) fn primitives_seen(fake: &FakeExtension) -> Vec<String> {
     fake.wait(|_| true)
         .requests
         .iter()
@@ -136,7 +136,7 @@ fn primitives_seen(fake: &FakeExtension) -> Vec<String> {
 }
 
 /// The message kind of every world call of one `call`.
-fn kinds(call: &wire::Call) -> Vec<String> {
+pub(super) fn kinds(call: &wire::Call) -> Vec<String> {
     call.calls
         .iter()
         .map(|world| world.message["kind"].as_str().unwrap().to_owned())
@@ -174,7 +174,7 @@ fn type_focused(clear_first: bool) -> BrowserCommand {
     }
 }
 
-fn unscoped(outcome: BrowserOutcome) -> BrowserOutcome {
+pub(super) fn unscoped(outcome: BrowserOutcome) -> BrowserOutcome {
     unwrap_scoped(outcome).1
 }
 
@@ -182,7 +182,7 @@ fn done(steps: u32) -> Value {
     json!({"completed_steps": steps, "stopped": null})
 }
 
-fn view() -> Value {
+pub(super) fn view() -> Value {
     json!({"visual_page_x": 0, "visual_page_y": 0, "visual_css_width": 800,
            "visual_css_height": 600, "content_css_width": 800, "content_css_height": 2000,
            "device_scale": 1, "zoom": 1})
@@ -194,7 +194,7 @@ fn captured(view: Value) -> Value {
            "view": view})
 }
 
-fn expected_view() -> ViewportGeometry {
+pub(super) fn expected_view() -> ViewportGeometry {
     ViewportGeometry {
         scope: CaptureScope::Viewport,
         page_x: 0.0,
@@ -343,22 +343,6 @@ fn a_failure_after_the_click_has_an_unknown_effect() {
         )),
         "input that stopped short of its last step may have landed in part"
     );
-}
-
-#[test]
-fn a_click_on_a_restricted_scope_is_refused_until_its_point_can_be_placed() {
-    // service-9: a restricted scope needs the click's point routed to its document and admitted
-    // there. Until route_and_admit exists the click is refused; service-9 flips this test to
-    // assert that a click on an allowed document is sent and one on a denied document is not.
-    let (port, fake) = rig(page(), finished);
-    assert_eq!(
-        call(
-            &port,
-            scoped(scope(&["T.t1"], false), activate(TOP_LOCATOR))
-        ),
-        Err(BrowserError::DocumentUnavailable)
-    );
-    assert!(inputs_seen(&fake).is_empty());
 }
 
 #[test]

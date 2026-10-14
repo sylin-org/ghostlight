@@ -789,3 +789,4 @@ fn describing_documents_binds_locators_points_and_focus_to_current_documents() {
 
 mod forms;
 mod interaction;
+mod points;

@@ -1,24 +1,39 @@
-//! Pointer work on a located target: clicks, hovers and scrolls.
+//! Pointer work on a located target: clicks, hovers, scrolls and drags.
 //!
 //! A click or a hover is two steps. The first asks the target's own document to bring it into
 //! view and report where it is, along with the position of every embedded document between it
 //! and the top, all in one sequence. The second sends the pointer to that spot, in top-viewport
 //! coordinates, as input guarded by the scope. A target that cannot be prepared fails with
-//! nothing done; the input is the only step that can change the page.
+//! nothing done; the input is the only step that can change the page. A drag measures both of
+//! its ends the same way before it presses anywhere.
+
+use std::ops::Range;
+
+use serde_json::Value;
 
 use super::super::geometry;
 use super::super::keys;
 use super::super::link::Link;
 use super::super::locator::Locator;
 use super::super::scope::Scope;
-use super::super::wire::{CallMode, FrameRef, Point};
+use super::super::wire::{CallMode, FrameRef, InputStep, Point};
 use super::super::world::{self, Message, OwnerBox, Prepared, ScrollOffset, Scrolled};
-use super::{input_for, reach, send_input, settled, value, OnDialog, Reach};
+use super::{input_for, reach, route_and_admit, send_input, settled, value, OnDialog, Reach};
 use crate::browser::adapter::{BrowserOutcome, PhysicalActionSubject};
 use crate::browser::BrowserError;
 
 /// How long the page may take to settle after a click, in milliseconds.
-const CLICK_SETTLE_MS: u64 = 250;
+pub(super) const CLICK_SETTLE_MS: u64 = 250;
+/// How many moves a drag takes from where it presses to where it releases.
+const DRAG_STEPS: usize = 12;
+/// The calls a drag makes to bring its two ends into view: the destination, then the source.
+const DRAG_PREPARATIONS: usize = 2;
+/// Where the source's measurement sits among a drag's calls.
+const DRAG_SOURCE_BOX: usize = 2;
+/// Where the destination's measurement sits among a drag's calls.
+const DRAG_DESTINATION_BOX: usize = 3;
+/// How many calls a drag makes before the owner-box chains that place its ends.
+const DRAG_FIXED_CALLS: usize = 4;
 
 /// One click on a located target.
 #[derive(Clone, Copy, Debug)]
@@ -83,15 +98,35 @@ fn aim(
     })
 }
 
-/// Click a located target.
-///
-/// A point that must be placed in its document before input is refused for now: no input
-/// reaches a document the scope leaves unreadable, and the placing is not done here. A dialog
-/// the click opens is the page's answer, so it counts as success.
+/// Admit the document the pointer will reach as a subject of the scope's input. A scope that
+/// leaves some document unreadable first places the target's point in its document, because
+/// something else may lie over the target.
 ///
 /// # Errors
 ///
-/// Returns the plain failure of a target that cannot be prepared, the refusal above, and the
+/// Returns what [`route_and_admit`] and the scope's admission return. Nothing has been sent as
+/// input.
+fn admit_aim(
+    l: &mut Link<'_>,
+    reach: &mut Reach<'_>,
+    tab_id: u64,
+    aim: &Aim,
+) -> Result<(), BrowserError> {
+    if reach.point_check_needed() {
+        route_and_admit(l, reach.scope(), tab_id, aim.point)?;
+    }
+    reach.admit_input(&aim.doc)
+}
+
+/// Click a located target.
+///
+/// A scope that leaves some document unreadable has the click's point placed in its document
+/// first, and a document it does not allow is refused before any input. A dialog the click
+/// opens is the page's answer, so it counts as success.
+///
+/// # Errors
+///
+/// Returns the plain failure of a target that cannot be prepared, the refusals above, and the
 /// failure of the input, which is an unknown effect once the click began.
 pub fn activate(
     l: &mut Link<'_>,
@@ -100,10 +135,7 @@ pub fn activate(
 ) -> Result<BrowserOutcome, BrowserError> {
     let mut reach = reach(l, scope, click.tab_id)?;
     let aim = aim(l, &mut reach, click.tab_id, click.locator, world::activate)?;
-    if reach.point_check_needed() {
-        return Err(BrowserError::DocumentUnavailable);
-    }
-    reach.admit_input(&aim.doc)?;
+    admit_aim(l, &mut reach, click.tab_id, &aim)?;
     let steps = keys::click(
         aim.point,
         keys::mouse_button(click.button),
@@ -132,10 +164,7 @@ pub fn hover(
 ) -> Result<BrowserOutcome, BrowserError> {
     let mut reach = reach(l, scope, tab_id)?;
     let aim = aim(l, &mut reach, tab_id, locator, world::hover)?;
-    if reach.point_check_needed() {
-        return Err(BrowserError::DocumentUnavailable);
-    }
-    reach.admit_input(&aim.doc)?;
+    admit_aim(l, &mut reach, tab_id, &aim)?;
     let input = input_for(l, tab_id, None, keys::hover(aim.point), reach.guard(), 0);
     send_input(l, input, OnDialog::Succeeded)?;
     Ok(BrowserOutcome::Hovered {
@@ -204,5 +233,120 @@ pub fn scroll(
         x,
         y,
         subject: scrolled.subject,
+    })
+}
+
+/// What a drag between two located targets asks for.
+#[derive(Clone, Copy, Debug)]
+pub struct Drag<'a> {
+    /// The tab.
+    pub tab_id: u64,
+    /// The encoded locator of the target the drag starts on.
+    pub source: &'a str,
+    /// The encoded locator of the target the drag ends on.
+    pub destination: &'a str,
+}
+
+/// Drag from one located target to another.
+///
+/// The destination is brought into view first and then the source, so the source is the one
+/// left in view, and both are measured in the same sequence as the owner-box chains that place
+/// them in the top viewport. The pointer then presses on the source, moves in equal strides and
+/// releases on the destination. A drag is not bounded to the documents at its ends, so the
+/// scope's admission of the two targets is the check, and no point is routed.
+///
+/// # Errors
+///
+/// Returns the plain failure of a target that cannot be prepared, and the failure of the
+/// input, which is an unknown effect once the pointer pressed.
+pub fn drag(
+    l: &mut Link<'_>,
+    scope: Option<&mut Scope>,
+    request: Drag<'_>,
+) -> Result<BrowserOutcome, BrowserError> {
+    let source = Locator::decode(request.source)?;
+    let destination = Locator::decode(request.destination)?;
+    let mut reach = reach(l, scope, request.tab_id)?;
+    let source_chain = reach.get().tree().chain(&source.doc)?;
+    let destination_chain = reach.get().tree().chain(&destination.doc)?;
+    let source_end = DRAG_FIXED_CALLS + source_chain.len();
+    let destination_end = source_end + destination_chain.len();
+    let mut plans = vec![
+        reach
+            .get()
+            .call(&destination.doc, world::hover(&destination.local))?,
+        reach.get().call(&source.doc, world::hover(&source.local))?,
+        reach.get().call(&source.doc, world::box_(&source.local))?,
+        reach
+            .get()
+            .call(&destination.doc, world::box_(&destination.local))?,
+    ];
+    plans.extend(source_chain);
+    plans.extend(destination_chain);
+    let guard = reach.guard();
+    let budget = l.budget_ms();
+    let answers = l.call(
+        request.tab_id,
+        &plans,
+        CallMode::Sequence,
+        guard,
+        0,
+        budget,
+        Some(reach.scope()),
+    )?;
+    for answer in &answers[..DRAG_PREPARATIONS] {
+        value::<Value>(answer)?;
+    }
+    let from: Prepared = value(&answers[DRAG_SOURCE_BOX])?;
+    let onto: Prepared = value(&answers[DRAG_DESTINATION_BOX])?;
+    let boxes = |range: Range<usize>| {
+        answers[range]
+            .iter()
+            .map(value::<OwnerBox>)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let start = from.rectangle.center() + geometry::offset(&boxes(DRAG_FIXED_CALLS..source_end)?);
+    let end = onto.rectangle.center() + geometry::offset(&boxes(source_end..destination_end)?);
+    reach.admit_input(&source.doc)?;
+    reach.admit_input(&destination.doc)?;
+    dragged(
+        l,
+        &reach,
+        request.tab_id,
+        (start, end),
+        (Some(from.subject), Some(onto.subject)),
+    )
+}
+
+/// The subjects at the two ends of a drag, source first.
+pub(super) type DragSubjects = (Option<PhysicalActionSubject>, Option<PhysicalActionSubject>);
+
+/// Press at the start of a drag, move to its end and release, then report the tab and the
+/// subjects at both ends.
+///
+/// A dialog that opens while the pointer is down leaves the drag half done, so it is an unknown
+/// effect.
+///
+/// # Errors
+///
+/// Returns the failure of the input, and a plain failure when the browser no longer has the tab.
+pub(super) fn dragged(
+    l: &mut Link<'_>,
+    reach: &Reach<'_>,
+    tab_id: u64,
+    (start, end): (Point, Point),
+    (source_subject, destination_subject): DragSubjects,
+) -> Result<BrowserOutcome, BrowserError> {
+    let steps = vec![InputStep::Drag {
+        path: keys::drag_path(start, end, DRAG_STEPS),
+        modifiers: 0,
+    }];
+    let input = input_for(l, tab_id, None, steps, reach.guard(), 0);
+    send_input(l, input, OnDialog::EffectUnknown)?;
+    Ok(BrowserOutcome::Dragged {
+        tab: l.tab(tab_id)?.into(),
+        source_subject,
+        destination_subject,
+        committed_urls: l.committed(),
     })
 }

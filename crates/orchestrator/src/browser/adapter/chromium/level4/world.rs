@@ -911,6 +911,29 @@ pub struct Uploaded {
     pub subject: Option<PhysicalActionSubject>,
 }
 
+/// A page point placed in the top viewport.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ViewportPoint {
+    /// The point's horizontal position in the top document's viewport.
+    pub x: f64,
+    /// The point's vertical position in the top document's viewport.
+    pub y: f64,
+    /// The role and name of the element the top document finds under the point.
+    #[serde(default)]
+    pub subject: Option<PhysicalActionSubject>,
+}
+
+impl ViewportPoint {
+    /// Where input must go to reach the point.
+    #[must_use]
+    pub const fn at(&self) -> Point {
+        Point {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
 /// What lies under a point.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Hit {
