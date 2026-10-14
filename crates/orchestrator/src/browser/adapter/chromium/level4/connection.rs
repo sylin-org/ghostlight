@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use ghostlight_bridge::framing::FrameError;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -25,8 +24,8 @@ use crate::browser::adapter::{Adapter, BrowserEvent, Level};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     end_connection, is_current, lock, valid_opaque_id, validated_browser_name,
-    write_request_payload, AdapterNotifications, AdapterRegistry, BrowserError, Channel,
-    Connection, ConnectionTag, Liveness, RelayBrowserPort, BROWSER_ID_PREFIX,
+    AdapterNotifications, AdapterRegistry, BrowserError, Channel, Connection, ConnectionTag,
+    Liveness, RelayBrowserPort, BROWSER_ID_PREFIX,
 };
 
 /// Longest engine version a hello may report.
@@ -78,27 +77,6 @@ impl Receipts {
             let _ = sender.send(Err(error.clone()));
         }
     }
-}
-
-/// Write one request on a connection before `deadline`: whole when it fits a direct frame, and
-/// as command chunks otherwise.
-///
-/// # Errors
-///
-/// Returns the framing failure when the writer cannot be had in time, the request exceeds the
-/// transfer bound, or the socket fails. A failed write closes the connection.
-pub fn write_request(
-    writer: &SocketWriter,
-    correlation: &str,
-    primitive: wire::Primitive,
-    deadline: Instant,
-) -> Result<(), FrameError> {
-    let payload = serde_json::to_vec(&wire::Outbound::Request {
-        correlation: correlation.into(),
-        primitive,
-    })?;
-    let mut output = writer.until(deadline)?;
-    write_request_payload(&mut output, &payload, correlation)
 }
 
 /// Validate a hello that chose protocol 4 and attach its connection to `port`.

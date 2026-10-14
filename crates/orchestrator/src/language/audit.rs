@@ -123,12 +123,22 @@ pub enum AuditRefusal {
 
 impl Outcome {
     /// Project a completed operation's authored sentence without copying its result facts.
+    ///
+    /// A dialog message is page-authored text, so the durable sentence omits it.
     #[must_use]
     pub fn audit(&self) -> AuditProjection {
+        let summary = match self {
+            Self::DialogObserved { present, .. } => Self::DialogObserved {
+                present: *present,
+                message: None,
+            }
+            .summary(),
+            _ => self.summary(),
+        };
         AuditProjection {
             unconfirmed_history_steps: 0,
             coverage: None,
-            summary: self.summary(),
+            summary,
             refusal: None,
             tools: vec![],
             composition: match self {
@@ -251,6 +261,20 @@ mod tests {
         };
         assert_eq!(outcome.audit().summary(), outcome.summary());
         assert_eq!(outcome.observed().count, Some(12));
+    }
+
+    #[test]
+    fn retained_dialog_observation_omits_the_page_authored_message() {
+        let outcome = Outcome::DialogObserved {
+            present: true,
+            message: Some("Delete account PRIVATE_DIALOG_TEXT?".into()),
+        };
+        assert!(outcome.summary().contains("PRIVATE_DIALOG_TEXT"));
+        let audit = outcome.audit();
+        assert!(!audit.summary().contains("PRIVATE_DIALOG_TEXT"));
+        assert!(audit
+            .summary()
+            .contains("JavaScript dialog is currently visible"));
     }
 
     #[test]

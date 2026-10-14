@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::wire;
-use super::{write_request, Receipts};
+use super::Receipts;
 use crate::browser::adapter::{
     adapter_capability, AdapterCapability, BrowserCommand, BrowserEvent, BrowserFrame,
     BrowserOutcome, BrowserPlatform, BrowserReadiness, BrowserReceipt, DiagnosticsLayer,
@@ -315,58 +315,11 @@ fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
 }
 
 #[test]
-fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
+fn unknown_and_unreadable_receipts_end_nothing() {
     let port = port();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
-        &FakeExtension::hello(FOUR),
-        Box::new(|correlation, primitive| {
-            let outcome = match primitive {
-                wire::Primitive::EvaluateMain(evaluate) => json!({"length": evaluate.script.len()}),
-                _ => json!({"tabs": []}),
-            };
-            Reply::Now(FakeExtension::ok(correlation, outcome))
-        }),
-    );
-    port.attach(listener.accept().unwrap().0).unwrap();
-    let (writer, receipts) = channel(&port, FOUR);
-    let deadline = Instant::now() + PATIENCE;
-
-    let listed = receipts.register("p4_list");
-    write_request(
-        &writer,
-        "p4_list",
-        wire::Primitive::ListTabs(wire::ListTabs { tab_ids: None }),
-        deadline,
-    )
-    .unwrap();
-    let receipt = listed.recv_timeout(PATIENCE).unwrap().unwrap();
-    assert_eq!(receipt.correlation, "p4_list");
-    assert_eq!(receipt.ok, Some(json!({"tabs": []})));
-
-    let script = "x".repeat(wire::DIRECT_FRAME_BYTES + 1);
-    let evaluated = receipts.register("p4_large");
-    write_request(
-        &writer,
-        "p4_large",
-        wire::Primitive::EvaluateMain(wire::EvaluateMain {
-            tab_id: 7,
-            script: script.clone(),
-            max_result_chars: 10,
-            guard: None,
-            settle_ms: 0,
-            timeout_ms: 1_000,
-        }),
-        deadline,
-    )
-    .unwrap();
-    let receipt = evaluated.recv_timeout(PATIENCE).unwrap().unwrap();
-    assert_eq!(receipt.ok, Some(json!({"length": script.len()})));
-    let seen = fake.wait(|seen| seen.requests.len() == 2);
-    assert!(seen.of_kind("command_chunk").len() > 1);
-    assert_eq!(seen.requests[1].0, "p4_large");
-    drop(seen);
+    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
+    attached.unwrap();
+    let (_, receipts) = channel(&port, FOUR);
 
     fake.send(&wire::Inbound::Receipt(FakeExtension::ok(
         "p4_nobody",

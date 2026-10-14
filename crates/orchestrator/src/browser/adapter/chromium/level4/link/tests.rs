@@ -12,7 +12,7 @@ use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::scope::PlannedCall;
 use super::super::translate::tabs::group_key;
 use super::super::{wire, world};
-use super::{FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
+use super::{Answers, FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
     PresentationActivity, PresentationKind, PresentationSignal, RecordingDestination,
@@ -910,7 +910,48 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
         assert_eq!(link.effect_started(), acted, "{answers:?}");
     }
 
-    *next.lock().unwrap() = FakeExtension::ok("", json!({"answers": []}));
+    for (plan, dispatched, unpaired) in [(read(), false, true), (scroll(), true, false)] {
+        *next.lock().unwrap() = wire::Receipt {
+            dispatched,
+            ..FakeExtension::ok("", json!({"answers": []}))
+        };
+        let mut link = Link::new(
+            line(&port),
+            WORKSPACE,
+            BrowserDispatch {
+                deadline: Instant::now() + PATIENCE,
+                cancelled: &cancelled,
+                admit: &admit,
+            },
+        );
+        let failed = link
+            .call(12, &[plan], wire::CallMode::Parallel, None, 0, 1_000, None)
+            .unwrap_err();
+        assert_eq!(matches!(failed, BrowserError::Protocol(_)), unpaired);
+        assert_eq!(
+            matches!(failed, BrowserError::EffectUnknown(_)),
+            !unpaired,
+            "unpaired answers after a dispatched effect leave the effect unknown"
+        );
+    }
+}
+
+/// Run one scroll `call` under a cancellation raised once the fake holds it, with the fake
+/// answering the cancel with an ok receipt whose scroll returned and whose `dispatched` flag
+/// is `dispatched`.
+fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
+    let (port, fake) = port(Box::new(move |correlation, _| {
+        Reply::OnCancel(wire::Receipt {
+            dispatched,
+            ..FakeExtension::ok(
+                correlation,
+                json!({"answers": [{"status": "returned",
+                                    "envelope": {"ok": true, "value": null}}]}),
+            )
+        })
+    }));
+    let cancelled = AtomicBool::new(false);
+    let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
         WORKSPACE,
@@ -920,18 +961,79 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
             admit: &admit,
         },
     );
-    assert!(matches!(
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            drop(fake.wait(|seen| !seen.requests.is_empty()));
+            cancelled.store(true, Ordering::SeqCst);
+        });
         link.call(
             12,
-            &[read()],
-            wire::CallMode::Parallel,
+            &[PlannedCall::top(world::scroll(None, Some("down"), None))],
+            wire::CallMode::Sequence,
             None,
             0,
             1_000,
-            None
-        ),
-        Err(BrowserError::Protocol(_))
-    ));
+            None,
+        )
+    })
+}
+
+#[test]
+fn an_ok_call_receipt_during_the_cancel_grace_keeps_its_effect() {
+    assert_eq!(
+        cancelled_call(true),
+        Err(BrowserError::CancelledAfterDispatch)
+    );
+    assert_eq!(
+        cancelled_call(false),
+        Err(BrowserError::CancelledBeforeDispatch)
+    );
+}
+
+#[test]
+fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
+    let (port, fake) = port(Box::new(|correlation, primitive| {
+        let outcome = match primitive {
+            wire::Primitive::EvaluateMain(evaluate) => {
+                json!({"value": evaluate.script.len().to_string()})
+            }
+            _ => json!({"tabs": []}),
+        };
+        Reply::Now(FakeExtension::ok(correlation, outcome))
+    }));
+    let cancelled = AtomicBool::new(false);
+    let admit = || Ok(());
+    let mut link = Link::new(
+        line(&port),
+        WORKSPACE,
+        BrowserDispatch {
+            deadline: Instant::now() + PATIENCE,
+            cancelled: &cancelled,
+            admit: &admit,
+        },
+    );
+    let listed = link.send(wire::ListTabs { tab_ids: None }).unwrap();
+    assert!(listed.tabs.is_empty());
+
+    let script = "x".repeat(wire::DIRECT_FRAME_BYTES + 1);
+    let evaluated = link
+        .send(wire::EvaluateMain {
+            tab_id: 7,
+            script: script.clone(),
+            max_result_chars: 10,
+            guard: None,
+            settle_ms: 0,
+            timeout_ms: 1_000,
+        })
+        .unwrap();
+    assert_eq!(evaluated.value, script.len().to_string());
+    let seen = fake.wait(|seen| seen.requests.len() == 2);
+    let chunks = seen.of_kind("command_chunk");
+    assert!(chunks.len() > 1);
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk["correlation"] == seen.requests[1].0.as_str()));
+    assert_ne!(seen.requests[0].0, seen.requests[1].0);
 }
 
 #[test]

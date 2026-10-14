@@ -66,10 +66,6 @@ pub trait Spec {
     const NAME: &'static str;
     /// The primitive's class.
     const CLASS: Class;
-    /// Whether a successful receipt's answers, rather than its `dispatched` flag, say whether an
-    /// effect happened. Only `call` reports per-call answers.
-    const ANSWERS_DECIDE_EFFECT: bool = false;
-
     /// Whether this request can change the browser. Most primitives answer by class; a few
     /// decide by their arguments.
     fn carries_effect(&self) -> bool {
@@ -228,7 +224,6 @@ impl Spec for WorldCalls {
     type Outcome = wire::Called;
     const NAME: &'static str = primitive_name::CALL;
     const CLASS: Class = Class::Effect;
-    const ANSWERS_DECIDE_EFFECT: bool = true;
 
     fn carries_effect(&self) -> bool {
         self.effectful
@@ -402,6 +397,15 @@ impl<'a> Link<'a> {
     /// Returns the receipt's failure mapped to a [`BrowserError`]. Once anything in the command
     /// may have changed the browser, every failure says the effect is unknown.
     pub fn send<P: Spec>(&mut self, primitive: P) -> Result<P::Outcome, BrowserError> {
+        let (outcome, dispatched) = self.exchange(primitive)?;
+        self.effect_started |= dispatched;
+        Ok(outcome)
+    }
+
+    /// Send one primitive and return its outcome with whether its receipt says an effectful
+    /// primitive dispatched. Every failure has already counted that effect; a successful outcome
+    /// leaves it to the caller, which may judge it more finely from the outcome itself.
+    fn exchange<P: Spec>(&mut self, primitive: P) -> Result<(P::Outcome, bool), BrowserError> {
         let effectful = primitive.carries_effect();
         self.ready()?;
         let correlation = format!("{CORRELATION_PREFIX}{}", Uuid::new_v4().simple());
@@ -449,7 +453,8 @@ impl<'a> Link<'a> {
     /// # Errors
     ///
     /// Returns the receipt's failure, or [`BrowserError::Protocol`] when the answers do not pair
-    /// with the calls.
+    /// with the calls. Answers that do not pair cannot say which calls ran, so the receipt's
+    /// `dispatched` flag decides whether that failure follows an effect.
     #[expect(
         clippy::too_many_arguments,
         reason = "one argument per field of the call primitive, plus the scope that records it"
@@ -464,7 +469,7 @@ impl<'a> Link<'a> {
         budget_ms: u64,
         mut scope: Option<&mut Scope>,
     ) -> Result<Answers, BrowserError> {
-        let called = self.send(WorldCalls {
+        let (called, dispatched) = self.exchange(WorldCalls {
             call: wire::Call {
                 tab_id,
                 mode,
@@ -476,6 +481,7 @@ impl<'a> Link<'a> {
             effectful: plans.iter().any(|plan| plan.effect == EffectClass::Effect),
         })?;
         if called.answers.len() != plans.len() {
+            self.effect_started |= dispatched;
             return Err(self.settle(BrowserError::Protocol(ANSWERS_UNPAIRED.into())));
         }
         for (plan, answer) in plans.iter().zip(&called.answers) {
@@ -559,7 +565,7 @@ impl<'a> Link<'a> {
         correlation: &str,
         receiver: &Receiver<ReceiptResult>,
         effectful: bool,
-    ) -> Result<P::Outcome, BrowserError> {
+    ) -> Result<(P::Outcome, bool), BrowserError> {
         loop {
             if self.cancel_requested() {
                 self.cancel(correlation);
@@ -568,7 +574,10 @@ impl<'a> Link<'a> {
                     receiver.recv_timeout(until.saturating_duration_since(Instant::now()));
                 self.line.receipts.forget(correlation);
                 let acted = match answered {
-                    Ok(Ok(receipt)) => self.absorb::<P>(&receipt, effectful),
+                    Ok(Ok(receipt)) => {
+                        self.keep(&receipt);
+                        effectful && receipt.dispatched
+                    }
                     _ => effectful,
                 };
                 self.effect_started |= acted;
@@ -600,24 +609,31 @@ impl<'a> Link<'a> {
         }
     }
 
-    /// Turn one receipt into the primitive's outcome or failure.
+    /// Turn one receipt into the primitive's outcome, with whether an effectful primitive
+    /// dispatched, or into its failure, which counts that effect.
     fn finish<P: Spec>(
         &mut self,
         receipt: wire::Receipt,
         effectful: bool,
-    ) -> Result<P::Outcome, BrowserError> {
-        self.absorb::<P>(&receipt, effectful);
-        match (receipt.ok, receipt.failure) {
+    ) -> Result<(P::Outcome, bool), BrowserError> {
+        self.keep(&receipt);
+        let dispatched = effectful && receipt.dispatched;
+        let decoded = match (receipt.ok, receipt.failure) {
             (Some(ok), None) => serde_json::from_value(ok)
-                .map_err(|error| self.settle(BrowserError::Protocol(error.to_string()))),
-            (None, Some(failure)) => Err(self.failure::<P>(failure, receipt.message)),
-            _ => Err(self.settle(BrowserError::Protocol(ONE_OF_OK_AND_FAILURE.into()))),
-        }
+                .map_err(|error| BrowserError::Protocol(error.to_string())),
+            (None, Some(failure)) => Err(Self::failure::<P>(failure, receipt.message)),
+            _ => Err(BrowserError::Protocol(ONE_OF_OK_AND_FAILURE.into())),
+        };
+        decoded
+            .map(|outcome| (outcome, dispatched))
+            .map_err(|error| {
+                self.effect_started |= dispatched;
+                self.settle(error)
+            })
     }
 
-    /// Keep a receipt's facts: its commits, unioned in order without duplicates, its tab, and
-    /// whether it acted. Returns whether this receipt acted.
-    fn absorb<P: Spec>(&mut self, receipt: &wire::Receipt, effectful: bool) -> bool {
+    /// Keep a receipt's facts: its commits, unioned in order without duplicates, and its tab.
+    fn keep(&mut self, receipt: &wire::Receipt) {
         for url in &receipt.committed_urls {
             if !self.committed.contains(url) {
                 self.committed.push(url.clone());
@@ -626,16 +642,12 @@ impl<'a> Link<'a> {
         if let Some(tab) = &receipt.tab {
             self.last_tab = Some(tab.clone());
         }
-        let answers_decide = P::ANSWERS_DECIDE_EFFECT && receipt.ok.is_some();
-        let acted = effectful && receipt.dispatched && !answers_decide;
-        self.effect_started |= acted;
-        acted
     }
 
     /// The error a receipt's failure code stands for.
-    fn failure<P: Spec>(&self, failure: wire::Failure, message: Option<String>) -> BrowserError {
+    fn failure<P: Spec>(failure: wire::Failure, message: Option<String>) -> BrowserError {
         let message = message.unwrap_or_else(|| failure_code(failure));
-        let error = match failure {
+        match failure {
             wire::Failure::LocalInterlock => BrowserError::LocalInterlock(message),
             wire::Failure::DocumentChanged => BrowserError::DocumentUnavailable,
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
@@ -653,8 +665,7 @@ impl<'a> Link<'a> {
             | wire::Failure::CaptureTooLarge
             | wire::Failure::SessionLost
             | wire::Failure::Other => BrowserError::Primitive(message),
-        };
-        self.settle(error)
+        }
     }
 
     /// Restate an error once the command may have acted: an interruption becomes its after
