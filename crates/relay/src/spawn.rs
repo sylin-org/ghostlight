@@ -18,15 +18,20 @@ pub const SERVE_ARGUMENT: &str = "serve";
 
 /// Windows process creation flag: the child gets no console window.
 #[cfg(windows)]
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Windows process creation flag: the child does not inherit the parent's console.
 #[cfg(windows)]
-pub const DETACHED_PROCESS: u32 = 0x0000_0008;
+const DETACHED_PROCESS: u32 = 0x0000_0008;
 
 /// Windows process creation flag: the child is not part of the parent's Ctrl+C group.
 #[cfg(windows)]
-pub const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// The Windows creation flags of the detached `serve` launch.
+#[cfg(windows)]
+pub const SERVE_CREATION_FLAGS: u32 =
+    CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
 
 /// The wait between attempts to start the service.
 ///
@@ -66,14 +71,19 @@ impl Default for Backoff {
     }
 }
 
-/// The command that starts the service from `executable`: `serve`, null stdio, detached.
+/// The command that starts the service from `executable`: `serve`, null stdio, detached, with
+/// `directory` as its working directory.
 ///
-/// Building the command does not start anything; [`start_service`] does.
+/// The service outlives the client that started it, and a running process holds its working
+/// directory open on Windows. `directory` must therefore be one the service owns, never the
+/// connector's own (usually the user's project folder). Building the command does not start
+/// anything; [`start_service`] does.
 #[must_use]
-pub fn build_command(executable: &Path) -> Command {
+pub fn build_command(executable: &Path, directory: &Path) -> Command {
     let mut command = Command::new(executable);
     command
         .arg(SERVE_ARGUMENT)
+        .current_dir(directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -81,12 +91,13 @@ pub fn build_command(executable: &Path) -> Command {
     command
 }
 
-/// Start the installed service (`home/bin/ghostlight serve`) and return without waiting for it.
+/// Start the installed service (`home/bin/ghostlight serve`, working directory `home`) and
+/// return without waiting for it.
 ///
 /// Success means the process was created, not that the service is ready. The service is ready
 /// when the runtime file names a listener that accepts an opening.
 pub fn start_service() -> io::Result<()> {
-    let mut child = build_command(&home::service_executable()?).spawn()?;
+    let mut child = build_command(&home::service_executable()?, &home::home()?).spawn()?;
     // The caller does not wait. A thread collects the exit status so a service that exits early
     // (for example one that lost the lease race) does not linger as a zombie.
     thread::spawn(move || {
@@ -100,7 +111,7 @@ pub fn start_service() -> io::Result<()> {
 fn detach(command: &mut Command) {
     use std::os::windows::process::CommandExt;
 
-    command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    command.creation_flags(SERVE_CREATION_FLAGS);
 }
 
 /// Detach the child from this process's process group.
@@ -146,17 +157,38 @@ mod tests {
 
     #[test]
     fn the_command_runs_the_executable_with_the_single_serve_argument() {
-        let command = build_command(Path::new("ghostlight"));
+        let command = build_command(Path::new("ghostlight"), Path::new("home"));
         assert_eq!(command.get_program(), OsStr::new("ghostlight"));
         let arguments: Vec<_> = command.get_args().collect();
         assert_eq!(arguments, [OsStr::new("serve")]);
     }
 
     #[test]
+    fn the_service_starts_in_the_directory_it_is_given() {
+        let command = build_command(Path::new("ghostlight"), Path::new("home"));
+        assert_eq!(command.get_current_dir(), Some(Path::new("home")));
+    }
+
+    #[test]
     #[cfg(windows)]
-    fn the_windows_flags_are_the_documented_values() {
+    fn the_windows_launch_is_windowless_detached_and_in_its_own_group() {
+        assert_eq!(
+            SERVE_CREATION_FLAGS,
+            CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        );
         assert_eq!(CREATE_NO_WINDOW, 0x0800_0000);
         assert_eq!(DETACHED_PROCESS, 0x0000_0008);
         assert_eq!(CREATE_NEW_PROCESS_GROUP, 0x0000_0200);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_linux_launch_has_null_stdio_and_its_own_process_group() {
+        let command = build_command(Path::new("ghostlight"), Path::new("home"));
+        let description = format!("{command:#?}");
+        assert!(description.contains("stdin: Some(Null)"), "{description}");
+        assert!(description.contains("stdout: Some(Null)"), "{description}");
+        assert!(description.contains("stderr: Some(Null)"), "{description}");
+        assert!(description.contains("pgroup: Some(0)"), "{description}");
     }
 }
