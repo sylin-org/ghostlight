@@ -4,21 +4,27 @@
 //! lived, and each of those could sit in a different place on each platform. 2.0 keeps
 //! everything under the Ghostlight home (ADR-0197 Decisions 10, 16 and 22). This module reads
 //! the old layout, says in a [`MigrationPlan`] what will move, be archived, be deleted, be
-//! stopped and be re-registered, and carries that plan out in three steps the installer
+//! stopped and be re-registered, and carries that plan out in four steps the installer
 //! interleaves with its own:
 //!
 //! 1. [`prepare`] makes every destination and refuses a destination that holds other content, so
 //!    a conflict is found before anything has changed;
-//! 2. [`relocate`] moves each file by rename (or copy, verify and delete across volumes), after
-//!    the installer has stopped the old programs that hold those files open;
-//! 3. [`finish`] deletes the old lifecycle files, the installation record last, once the last
+//! 2. [`relocate`] moves the policy, the managed-policy files, the walkthrough marker and the
+//!    client locations by rename (or copy, verify and delete across volumes), before the new
+//!    executables are swapped in and registered: no 1.x program holds those files open, and a
+//!    2.0 service that a browser or client starts the moment the registrations change must find
+//!    the user's policy where 2.0 keeps it, and the clients the user located already known;
+//! 3. [`archive_audit`] moves the old audit log aside once the programs that write it have
+//!    stopped;
+//! 4. [`finish`] deletes the old lifecycle files, the installation record last, once the last
 //!    old program has stopped and cannot write them again.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
 //! installer's step, not this module's: it must happen after the registrations name the new
 //! executables, or a browser relaunches an old connector from an old registration. A failure
 //! leaves the source file where it was, a second run continues from whatever a failed run
-//! completed, and a run after success has nothing to do.
+//! completed, and a run after success has nothing to do. A destination that holds other content
+//! than the file being moved is never overwritten, and its original is never deleted.
 
 use std::env;
 use std::fs::{self, File};
@@ -73,7 +79,7 @@ const MANAGED_STATUS_FILE_NAME: &str = "managed-status.json";
 const HANDOFF_MARKER_NAME: &str = "extension-handoff-v1";
 
 /// The MCP client location file, in the 1.x configuration directory and again in `home/state`.
-const HARNESS_LOCATIONS_NAME: &str = "harness-locations.json";
+pub(super) const HARNESS_LOCATIONS_NAME: &str = "harness-locations.json";
 
 /// Directory below the 1.x configuration root that held the client location file.
 const LEGACY_CONFIG_DIRECTORY_NAME: &str = "ghostlight";
@@ -308,7 +314,7 @@ impl LegacyRoots {
     }
 
     /// Where the 1.x client location file was.
-    fn harness_locations_directory(&self) -> PathBuf {
+    pub(super) fn harness_locations_directory(&self) -> PathBuf {
         let root = if self.windows {
             self.real_root(self.app_data.as_deref(), &["AppData", "Roaming"])
         } else {
@@ -597,13 +603,22 @@ pub fn prepare(plan: &MigrationPlan) -> Result<(), MigrationError> {
     plan.transfers().try_for_each(prepare_transfer)
 }
 
-/// Move every file of `plan`.
+/// Move the policy, managed-policy, marker and client-location files of `plan` to where 2.0 keeps
+/// them.
 ///
-/// The old programs that hold these files open must already be stopped. A failure returns an
-/// error naming the path and leaves the file it was moving in place, and running the same plan
-/// again continues from there.
+/// No 1.x program holds these files open, so this runs before anything is swapped, registered or
+/// stopped. A failure returns an error naming the path and leaves the file it was moving in
+/// place, and running the same plan again continues from there.
 pub fn relocate(plan: &MigrationPlan) -> Result<(), MigrationError> {
-    plan.transfers().try_for_each(relocate_transfer)
+    plan.moves.iter().try_for_each(relocate_transfer)
+}
+
+/// Move the old audit log of `plan` aside, to the archive file that gives 2.0 a new log.
+///
+/// The old programs that write the log must already be stopped. Failures behave as in
+/// [`relocate`].
+pub fn archive_audit(plan: &MigrationPlan) -> Result<(), MigrationError> {
+    plan.audit_archive.iter().try_for_each(relocate_transfer)
 }
 
 /// Delete the old lifecycle files of `plan`, the installation record last.
@@ -653,7 +668,14 @@ fn relocate_transfer(transfer: &Move) -> Result<(), MigrationError> {
         return Ok(());
     }
     if to.exists() {
-        // A previous run copied the file and stopped before deleting the original.
+        // A previous run copied the file and stopped before deleting the original. Any other
+        // content was written there since `prepare` looked, and the original stays.
+        if !same_content(from, to) {
+            return Err(MigrationError::Conflict {
+                source_path: from.clone(),
+                destination: to.clone(),
+            });
+        }
         return remove_original(from);
     }
     if fs::rename(from, to).is_ok() {
@@ -943,6 +965,7 @@ mod tests {
     fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
         prepare(plan)?;
         relocate(plan)?;
+        archive_audit(plan)?;
         finish(plan)
     }
 
@@ -1401,6 +1424,41 @@ mod tests {
             "cache"
         );
         assert!(!fixture.home.join(LEGACY_RECORD_NAME).exists());
+    }
+
+    #[test]
+    fn a_destination_that_appears_after_the_check_keeps_the_original() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let policy = fixture.path("user/AppData/Local/Ghostlight");
+        let cache = fixture.home.join("policy").join(MANAGED_CACHE_FILE_NAME);
+        fixture.write(&cache, "a bundle written by a 2.0 service");
+        let error = relocate(&plan).unwrap_err();
+        assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
+        assert!(error.to_string().contains(&cache.display().to_string()));
+        assert_eq!(
+            fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
+            "cache"
+        );
+        assert_eq!(
+            fs::read_to_string(&cache).unwrap(),
+            "a bundle written by a 2.0 service"
+        );
+    }
+
+    #[test]
+    fn the_audit_log_is_archived_apart_from_the_early_moves() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
+        prepare(&plan).unwrap();
+        relocate(&plan).unwrap();
+        assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
+        assert!(!archive.exists());
+        archive_audit(&plan).unwrap();
+        assert!(!fixture.home.join(AUDIT_FILE_NAME).exists());
+        assert_eq!(fs::read_to_string(archive).unwrap(), AUDIT);
     }
 
     #[test]

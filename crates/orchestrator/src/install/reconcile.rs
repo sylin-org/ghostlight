@@ -312,7 +312,11 @@ mod tests {
                     &self.root.join("hosts"),
                     &self.layout.browser_connector(),
                 ),
-                HarnessRegistry::isolated(&self.root.join("clients"), &self.layout.mcp_connector()),
+                HarnessRegistry::isolated(
+                    &self.root.join("clients"),
+                    &self.layout.mcp_connector(),
+                    &self.layout.state(),
+                ),
             )
         }
 

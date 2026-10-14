@@ -4,7 +4,9 @@
 //! with this command (ADR-0197 Decisions 13 to 15). Under the install lock it:
 //!
 //! 1. checks the 2.0 break migration's destinations when a 1.x layout is found, so a conflict
-//!    changes nothing;
+//!    changes nothing, then moves the 1.x policy, managed-policy and client-location files into
+//!    the home: no 1.x program holds them open, and the 2.0 service or client that the next
+//!    steps let start must find them in place;
 //! 2. reads `bin/install.json` and decides what to replace: a release refuses an older payload,
 //!    does nothing for the same intact version, rename-swaps the service image into `bin`, and
 //!    replaces the connectors only when the relay revision changes; `--development` swaps the
@@ -13,10 +15,9 @@
 //! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
 //!    before anything old is stopped, so a browser or client that relaunches a connector the
 //!    moment the old one stops starts the new one;
-//! 4. stops the 1.x images, looks again for a few rounds for any that respawned, and moves the
-//!    1.x state into the home;
-//! 5. asks the running service to quit and stops that exact image if it has not exited, then
-//!    removes the 1.x lifecycle files, the installation record last;
+//! 4. stops the 1.x images and looks again for a few rounds for any that respawned;
+//! 5. asks the running service to quit and stops that exact image if it has not exited, archives
+//!    the 1.x audit log, then removes the 1.x lifecycle files, the installation record last;
 //! 6. starts `bin/ghostlight serve` and writes `install.json` only once the new service
 //!    publishes.
 //!
@@ -508,11 +509,14 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// Carry out `plan`.
 ///
 /// The migration's destinations are checked before any swap, so a conflict leaves every
-/// executable as it was. The registrations are written as soon as `bin` holds the new
-/// executables and before any old program is stopped: an old connector that a browser relaunches
-/// from a registration that still named it would write the 1.x installation record again. The
-/// 1.x state moves only after those programs have stopped, because they hold it open, and the
-/// 1.x lifecycle files are deleted after the last stop.
+/// executable as it was, and the files no 1.x program holds open (policy, managed policy, client
+/// locations) move before anything is swapped: the registrations that follow let a 2.0 service
+/// or a client start, and they must find the user's policy and located clients in place. The
+/// registrations are written as soon as `bin` holds the new executables and before any old
+/// program is stopped: an old connector that a browser relaunches from a registration that still
+/// named it would write the 1.x installation record again. The 1.x audit log, which an old
+/// service writes, moves after the stops, and the 1.x lifecycle files are deleted after the last
+/// one.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
@@ -525,6 +529,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     let migrating = !plan.migration.is_empty();
     if migrating {
         migration::prepare(&plan.migration)?;
+        migration::relocate(&plan.migration)?;
     }
     for placed in plan.swaps.iter().chain(&plan.connector_replacements) {
         swap::rename_swap(&placed.directory, &placed.name, &placed.source)?;
@@ -541,15 +546,13 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         .registrations
         .reconcile(layout, &context.build.version);
     stop_legacy(context.control, &legacy_images(&plan))?;
-    if migrating {
-        migration::relocate(&plan.migration)?;
-    }
     let service_started = if plan.restart {
         let stale = runtime_token(layout);
         if !context.control.quit(layout) {
             context.control.stop_image(&running_images(layout))?;
         }
         if migrating {
+            migration::archive_audit(&plan.migration)?;
             migration::finish(&plan.migration)?;
         }
         Some(
@@ -726,7 +729,9 @@ fn hold_install_lock(path: &Path) -> io::Result<File> {
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use super::super::migration::{LegacyInstallation, LEGACY_RECORD_NAME, USER_POLICY_FILE_NAME};
+    use super::super::migration::{
+        LegacyInstallation, HARNESS_LOCATIONS_NAME, LEGACY_RECORD_NAME, USER_POLICY_FILE_NAME,
+    };
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
     use super::super::HarnessRegistry;
@@ -861,7 +866,11 @@ mod tests {
             let hosts = root.join("hosts");
             let registrations = Registrations::isolated(
                 NativeHostRegistry::isolated(&hosts, &layout.browser_connector()),
-                HarnessRegistry::isolated(&root.join("clients"), &layout.mcp_connector()),
+                HarnessRegistry::isolated(
+                    &root.join("clients"),
+                    &layout.mcp_connector(),
+                    &layout.state(),
+                ),
             );
             Self {
                 scratch,
@@ -1230,6 +1239,53 @@ mod tests {
             assert!(sightings[index].registered, "{calls:?} at {index}");
         }
         assert!(fixture.manifest_names_bin_connector());
+    }
+
+    #[test]
+    fn a_client_the_user_located_is_reconciled_to_bin() {
+        let mut fixture = Fixture::new();
+        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+        let located = fixture
+            .scratch
+            .path()
+            .join("portable")
+            .join("claude_desktop_config.json");
+        let old_connector = fixture
+            .scratch
+            .path()
+            .join("old-1x")
+            .join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        fs::create_dir_all(located.parent().unwrap()).unwrap();
+        fs::write(
+            &located,
+            serde_json::json!({"mcpServers": {"ghostlight": {"command": old_connector}}})
+                .to_string(),
+        )
+        .unwrap();
+        // The 1.x file the user's located paths were kept in, where the 1.x layout had it.
+        let locations = LegacyRoots::within(&fixture.scratch.path().join("profile"))
+            .harness_locations_directory()
+            .join(HARNESS_LOCATIONS_NAME);
+        fs::create_dir_all(locations.parent().unwrap()).unwrap();
+        fs::write(
+            &locations,
+            serde_json::json!({"claude-desktop": {"config": located}}).to_string(),
+        )
+        .unwrap();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let written: serde_json::Value = serde_json::from_str(&fixture.read(located)).unwrap();
+        let command = PathBuf::from(
+            written["mcpServers"]["ghostlight"]["command"]
+                .as_str()
+                .unwrap(),
+        );
+        assert_eq!(
+            fs::canonicalize(command).unwrap(),
+            fs::canonicalize(fixture.layout.mcp_connector()).unwrap()
+        );
+        assert!(!locations.exists());
     }
 
     #[test]

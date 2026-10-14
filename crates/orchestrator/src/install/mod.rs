@@ -82,10 +82,10 @@ impl HarnessRegistry {
         registry
     }
 
-    /// A registry over client configurations below `directory` that names `connector`, for tests
-    /// that must not touch this user's clients.
+    /// A registry over client configurations below `directory` that names `connector` and keeps
+    /// its located paths in `state`, for tests that must not touch this user's clients.
     #[cfg(test)]
-    pub(crate) fn isolated(directory: &Path, connector: &Path) -> Self {
+    pub(crate) fn isolated(directory: &Path, connector: &Path, state: &Path) -> Self {
         Self::with_context(HarnessContext {
             home: directory.join("home"),
             config: directory.join("config"),
@@ -93,7 +93,7 @@ impl HarnessRegistry {
             codex_config: directory.join("codex").join("config.toml"),
             connector: connector.to_path_buf(),
             path_entries: Vec::new(),
-            locations: directory.join("state").join(HARNESS_LOCATIONS_FILE),
+            locations: state.join(HARNESS_LOCATIONS_FILE),
             windows: false,
         })
     }
