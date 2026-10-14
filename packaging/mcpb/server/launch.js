@@ -62,6 +62,11 @@ function bundleVersion(serverDirectory) {
   return JSON.parse(fs.readFileSync(manifest, "utf8")).version;
 }
 
+/** The connector the install put under the Ghostlight home: the one executable this launcher runs. */
+function installedConnector(home, platform) {
+  return path.join(home, "bin", `ghostlight-mcp-connector${platform === "win32" ? ".exe" : ""}`);
+}
+
 /**
  * True when the installed service is the same as or newer than this bundle. An absent,
  * unreadable or unordered `install.json` counts as older, so the bundle installs itself.
@@ -91,11 +96,11 @@ function run(options = {}) {
   const serverDirectory = options.serverDirectory ?? __dirname;
   const spawnProcess = options.spawnSyncImpl ?? spawnSync;
   const standardError = options.stderr ?? process.stderr;
+  const home = ghostlightHome(options);
+  const mcpConnector = installedConnector(home, platform);
   let orchestrator;
-  let mcpConnector;
   try {
     orchestrator = binaryPath("ghostlight", { platform, architecture, serverDirectory });
-    mcpConnector = binaryPath("ghostlight-mcp-connector", { platform, architecture, serverDirectory });
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;
@@ -103,7 +108,8 @@ function run(options = {}) {
 
   let current;
   try {
-    current = installIsCurrent(ghostlightHome(options), options.version ?? bundleVersion(serverDirectory));
+    current = fs.existsSync(mcpConnector)
+      && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory));
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;

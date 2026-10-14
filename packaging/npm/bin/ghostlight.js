@@ -28,8 +28,8 @@ const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
 const INSTALL_RECORD_NAME = "install.json";
 /** Marker file in the Ghostlight home that selects a development installation. */
 const DEVELOPMENT_MARKER_NAME = "development";
-/** First commands that start the service or make it installed. Every other command is read-only. */
-const LAUNCH_COMMANDS = new Set(["install", "open", "serve"]);
+/** First arguments of the commands that never install (ADR-0197 Decision 13). */
+const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-h", "--version", "-V"]);
 
 /** The Linux shared library the desktop service links, and the packages that provide it. */
 const WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
@@ -80,11 +80,11 @@ export function selectedExecutable(arguments_, platform = process.platform, arch
 }
 
 /**
- * True when the command starts or installs the service: no arguments (the MCP connector),
- * `install`, `open` or `serve`. Every other command only reads and never installs.
+ * True for the commands that never install: `doctor`, `status`, `help` and `--version`. Every
+ * other command, including no arguments (the MCP connector), needs the installed set.
  */
-export function launchesService(arguments_) {
-  return arguments_.length === 0 || LAUNCH_COMMANDS.has(arguments_[0]);
+export function neverInstalls(arguments_) {
+  return arguments_.length > 0 && NEVER_INSTALL_COMMANDS.has(arguments_[0]);
 }
 
 /**
@@ -278,10 +278,11 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
 }
 
 /**
- * Decides what to run and makes it ready. Launch commands (see `launchesService`) run the
- * installed set when `install.json` is the same as or newer than this package, or when the
- * development marker exists; otherwise the verified download installs itself first. Every other
- * command runs the installed service, or a verified staged copy that installs nothing.
+ * Decides what to run and makes it ready. Every command except the never-install ones (see
+ * `neverInstalls`) runs the installed set when `install.json` is the same as or newer than this
+ * package, or when the development marker exists; otherwise the verified download installs itself
+ * first. The never-install commands run the installed service, or a verified staged copy that
+ * installs nothing.
  *
  * Resolves to the executable, its arguments, and `cleanup` for any staged files.
  */
@@ -299,7 +300,7 @@ export async function prepareLaunch({
   const directory = join(home, "bin");
   const executables = executableNames(platform, architecture);
   const installed = join(directory, selectedExecutable(arguments_, platform, architecture));
-  const launch = launchesService(arguments_);
+  const launch = !neverInstalls(arguments_);
   const nothingToClean = async () => {};
   const readPackage = async () => {
     const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));

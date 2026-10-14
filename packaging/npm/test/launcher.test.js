@@ -13,7 +13,7 @@ import {
   compareVersions,
   ensureBinary,
   executableNames,
-  launchesService,
+  neverInstalls,
   publishedAssetNames,
   releaseTarget,
   requireLinuxLibraries,
@@ -204,13 +204,13 @@ test("unverified download bytes never replace the cache", async () => {
 });
 
 
-test("only no arguments, install, open and serve start or install the service", () => {
-  for (const arguments_ of [[], ["install"], ["install", "--dry-run"], ["open"], ["serve"]]) {
-    assert.equal(launchesService(arguments_), true, arguments_.join(" ") || "(no arguments)");
+test("only doctor, status, help and version never install", () => {
+  for (const command of ["doctor", "status", "help", "--help", "-h", "--version", "-V"]) {
+    assert.equal(neverInstalls([command, "--json"]), true, command);
   }
-  for (const command of ["doctor", "status", "help", "--help", "-h", "--version", "-V",
-    "diagnostics", "policy", "call", "uninstall", "deployment", "unknown"]) {
-    assert.equal(launchesService([command, "install"]), false, command);
+  for (const arguments_ of [[], ["install"], ["open"], ["serve"], ["diagnostics", "path"],
+    ["policy", "validate"], ["call", "--catalog"], ["uninstall"], ["deployment", "install"], ["unknown"]]) {
+    assert.equal(neverInstalls(arguments_), false, arguments_.join(" ") || "(no arguments)");
   }
 });
 
@@ -367,9 +367,8 @@ test("a bad download never touches the installed service", async () => {
   }
 });
 
-test("read-only commands run the installed service whatever its version and never install", async () => {
-  for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"],
-    ["diagnostics", "path"], ["policy", "validate", "p.json"], ["call", "--catalog"]]) {
+test("never-install commands run the installed service whatever its version and never install", async () => {
+  for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"]]) {
     const f = await launcherFixture();
     try {
       await f.install("1.0.0");
@@ -383,7 +382,23 @@ test("read-only commands run the installed service whatever its version and neve
   }
 });
 
-test("a read-only command with nothing installed runs a verified staged service and installs nothing", async () => {
+test("every other command with nothing installed installs the complete set first", async () => {
+  for (const arguments_ of [["call", "--catalog"], ["policy", "validate", "p.json"], ["diagnostics", "path"], ["unknown"]]) {
+    const f = await launcherFixture();
+    try {
+      const launch = await f.prepareLaunch({ ...f.options, arguments_ });
+      assert.equal(launch.executable, join(f.bin, "ghostlight"));
+      assert.deepEqual(launch.arguments_, arguments_);
+      assert.equal(f.activity.downloads.length, 3, arguments_[0]);
+      assert.equal(f.activity.installs.length, 1, arguments_[0]);
+      assert.deepEqual((await readdir(f.home)).sort(), ["bin"], "the stage is removed");
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("a never-install command with nothing installed runs a verified staged service and installs nothing", async () => {
   const f = await launcherFixture();
   try {
     const launch = await f.prepareLaunch({ ...f.options, arguments_: ["--version"] });

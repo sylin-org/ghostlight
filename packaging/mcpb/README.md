@@ -7,9 +7,11 @@ The package does not download code or send telemetry at runtime.
 The bundle contains the persistent `ghostlight` service, the protocol-versioned
 `ghostlight-mcp-connector` stdio edge, and the browser-only `ghostlight-browser-connector` native
 host for every packaged platform. On each start the launcher reads `~/.ghostlight/bin/install.json`.
-Only when the installed service is absent or older than the bundle does it run the bundled
-`ghostlight deployment install`, which puts the three executables under `~/.ghostlight/bin`
-and registers the local browser native host and service. It then starts `ghostlight-mcp-connector`.
+Only when the installed service is absent or older than the bundle, or the installed connector is
+missing, does it run the bundled `ghostlight deployment install`, which puts the three executables
+under `~/.ghostlight/bin` and registers the local browser native host and service. It then
+starts the installed `~/.ghostlight/bin/ghostlight-mcp-connector`, never the copy in the bundle,
+so a newer service installed by npm always meets a connector of its own revision.
 Claude Desktop remains the sole owner of its MCP configuration. Users must separately install
 Ghostlight in Browser from the Chrome Web Store.
 
