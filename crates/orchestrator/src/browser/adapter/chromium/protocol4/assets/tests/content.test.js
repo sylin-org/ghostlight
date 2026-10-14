@@ -1455,6 +1455,102 @@ test("a cancel token ends a sensor settle", async () => {
   assert.equal(harness.dom.pendingTimers(), 0);
 });
 
+// ---- quiet sampled reads -----------------------------------------------------------------------
+
+/** Milliseconds of fake time a call took, driven the way `send` does. */
+async function timed(harness, message) {
+  const started = harness.dom.context.performance.now();
+  const reply = await harness.send(message);
+  return { reply, elapsed: harness.dom.context.performance.now() - started };
+}
+
+test("a sampled read on an idle page answers once it has been quiet, not at the ceiling", async () => {
+  const harness = contentHarness();
+  harness.newInput("Name");
+  const { reply, elapsed } = await timed(harness, { kind: "inspect", inspect_kind: "controls", max_items: 40 });
+  assert.ok(reply.value.targets.some((target) => target.name === "Name"));
+  assert.ok(elapsed >= 300 && elapsed < 400, `answered after ${elapsed} ms`);
+});
+
+test("a form that hydrates in batches is returned whole", async () => {
+  const harness = contentHarness();
+  for (let index = 0; index < 3; index += 1) harness.newInput(`Field ${index}`);
+  harness.dom.context.setTimeout(() => {
+    for (let index = 3; index < 9; index += 1) harness.newInput(`Field ${index}`);
+    harness.dom.mutate();
+  }, 200);
+  const { reply, elapsed } = await timed(harness, { kind: "inspect", inspect_kind: "controls", max_items: 40 });
+  const names = reply.value.targets.map((target) => target.name);
+  for (let index = 0; index < 9; index += 1) assert.ok(names.includes(`Field ${index}`), `Field ${index} is returned`);
+  assert.ok(elapsed >= 500 && elapsed < 600, `answered after ${elapsed} ms`);
+});
+
+test("a find with no match on a complete idle page answers empty once it is quiet", async () => {
+  const harness = contentHarness();
+  harness.setBody(harness.element("body"));
+  const { reply, elapsed } = await timed(harness, { kind: "find", text: "Nothing like this", find_kind: "any", max_results: 20 });
+  assert.deepEqual(reply.value.targets, []);
+  assert.ok(elapsed >= 300 && elapsed < 400, `answered after ${elapsed} ms`);
+});
+
+test("an empty page that is still loading waits for a control or the ceiling", async () => {
+  const waiting = contentHarness();
+  waiting.setBody(waiting.element("body"));
+  waiting.document.readyState = "loading";
+  const ceiling = await timed(waiting, { kind: "find", text: "Late", find_kind: "any", max_results: 20, settle_ms: 1000 });
+  assert.deepEqual(ceiling.reply.value.targets, []);
+  assert.ok(ceiling.elapsed >= 1000, `answered after ${ceiling.elapsed} ms`);
+
+  const arriving = contentHarness();
+  arriving.setBody(arriving.element("body"));
+  arriving.document.readyState = "loading";
+  arriving.dom.context.setTimeout(() => {
+    arriving.newInput("Late");
+    arriving.dom.mutate();
+  }, 400);
+  const late = await timed(arriving, { kind: "find", text: "Late", find_kind: "any", max_results: 20, settle_ms: 1000 });
+  assert.equal(late.reply.value.targets.length, 1);
+  assert.ok(late.elapsed >= 700 && late.elapsed < 800, `answered after ${late.elapsed} ms`);
+});
+
+/** The settle sensor alone, loaded into a fake page, for options no message sets. */
+function sensorIn(dom) {
+  const source = bundle.read("sensor.js");
+  return dom.run(`(function () {
+    class AssetError extends Error { constructor(code, message) { super(message); this.code = code; } }
+    const world = { onDispose() {} };
+    ${source}
+    return sensor;
+  })()`, "sensor.js");
+}
+
+test("an unsatisfied sample clears a pending quiet timer", async () => {
+  const dom = createFakeDom();
+  const sensor = sensorIn(dom);
+  let satisfied = false;
+  const sample = () => ({ satisfied });
+  let answeredAt = null;
+  const pending = sensor.settle(sample, (candidate) => candidate.satisfied, { maxWaitMs: 400 }).then((value) => {
+    answeredAt = dom.context.performance.now();
+    return value;
+  });
+  const step = async (ms) => {
+    await tick();
+    dom.advance(ms);
+    await tick();
+  };
+  satisfied = true;
+  dom.mutate();
+  await step(20);
+  satisfied = false;
+  dom.mutate();
+  await step(100);
+  assert.equal(answeredAt, null, "the stale satisfied sample did not resolve the wait");
+  await step(400);
+  assert.deepEqual(plain(await pending), { satisfied: false });
+  assert.ok(answeredAt >= 400, `answered at ${answeredAt} ms`);
+});
+
 // ---- locators ------------------------------------------------------------------------------------
 
 test("locators carry the world's epoch and are minted in order", async () => {

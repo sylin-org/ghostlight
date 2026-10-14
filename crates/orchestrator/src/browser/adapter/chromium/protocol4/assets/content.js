@@ -38,6 +38,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const FILL_RETAINED_STABLE_MS = 250;
   const FILL_RETAINED_POLL_MS = 25;
   const OBSERVE_POLL_MS = 100;
+  // How long a sampled read waits without a page change before it answers.
+  const QUIET_READ_MS = 300;
   const FILL_SETTLE_POLL_MS = 50;
   const LOCATOR_PREFIX = `locator_${world.EPOCH}_`;
   const EMBED_TAGS = new Set(["iframe", "frame"]);
@@ -839,10 +841,16 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     presentation.setRuntimeState(local.runtime);
   }
 
-  // One sampled read: the sensor waits for a non-empty sample unless the caller asked for none.
+  // One sampled read: the sensor answers once the page has been quiet for QUIET_READ_MS and the
+  // sample is non-empty or the document is complete, unless the caller asked for no waiting.
   function sampled(message, ctx, extract, isSatisfied) {
     if (message.visual_settle === false) return extract();
-    return sensor.settle(extract, isSatisfied, { maxWaitMs: message.settle_ms, cancelled: () => ctx.signal.cancelled });
+    return sensor.settle(extract, isSatisfied, {
+      maxWaitMs: message.settle_ms,
+      quietMs: QUIET_READ_MS,
+      requireQuiet: true,
+      cancelled: () => ctx.signal.cancelled
+    });
   }
 
   async function dispatch(message, ctx) {
@@ -899,16 +907,16 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     }
     if (message.kind === "inspect") {
       const extract = () => inspect(message.inspect_kind, message.max_items);
-      return sampled(message, ctx, extract, (targets) => Array.isArray(targets) && targets.length > 0);
+      return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
     if (message.kind === "find") {
       const extract = () => findTargets(message.text, message.find_kind, message.max_results);
-      return sampled(message, ctx, extract, (targets) => Array.isArray(targets) && targets.length > 0);
+      return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
     if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
     if (message.kind === "query_semantic") {
       const extract = () => querySemanticTargets(message);
-      return sampled(message, ctx, extract, (targets) => Array.isArray(targets) && targets.length > 0);
+      return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
     if (message.kind === "describe_focused") return { targets: [observation(focusedControl())] };
     if (message.kind === "verify_focused_text") {

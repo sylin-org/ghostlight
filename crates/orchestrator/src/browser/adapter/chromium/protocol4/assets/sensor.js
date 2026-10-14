@@ -24,14 +24,21 @@ const sensor = (() => {
    * @param {() => any} sample Synchronous DOM extraction function.
    * @param {(candidate: any) => boolean} isSatisfied Truth test for a non-empty/settled result.
    * @param {object} [options] Optional overrides and dependencies. `cancelled` is polled and
-   * ends the wait with the `cancelled` asset error.
+   * ends the wait with the `cancelled` asset error. `quietMs` is how long a satisfied sample
+   * must stay unchanged. `requireQuiet` makes every sample, the first included, wait for
+   * `quietMs` without an observed mutation before it can end the wait: each mutation re-samples
+   * and restarts that window. When the window passes the wait ends if the sample is satisfied or
+   * the document is `complete`, so an empty answer on an idle finished page does not run to the
+   * ceiling; an empty page that is still loading keeps waiting for a mutation or the ceiling.
+   * Without `requireQuiet` a satisfied first sample returns at once.
    * @returns {Promise<any>} The settled or final candidate.
    */
   async function settle(sample, isSatisfied, options = {}) {
     const isCancelled = options.cancelled ?? neverCancelled;
     if (isCancelled()) throw cancelledError();
+    const requireQuiet = options.requireQuiet === true;
     const initial = sample();
-    if (isSatisfied(initial)) return initial;
+    if (!requireQuiet && isSatisfied(initial)) return initial;
 
     const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
     const quietMs = options.quietMs ?? DEFAULT_QUIET_MS;
@@ -76,7 +83,35 @@ const sensor = (() => {
       }
       running.add(abort);
 
-      function evaluateAndSchedule() {
+      // Start a fresh quiet window, dropping any window already running.
+      function armQuiet() {
+        if (settledTimer) clearTimeoutFn(settledTimer);
+        settledTimer = setTimeoutFn(onQuiet, quietMs);
+      }
+
+      // A quiet window passed with no mutation. Take a final sample and end the wait when it is
+      // satisfied or the document is complete; otherwise open another window.
+      function onQuiet() {
+        settledTimer = null;
+        if (finished) return;
+        try {
+          latest = sample();
+        } catch (error) {
+          cleanup();
+          reject(error);
+          return;
+        }
+        if (isSatisfied(latest) || doc.readyState === "complete") {
+          cleanup();
+          resolve(latest);
+          return;
+        }
+        armQuiet();
+      }
+
+      // `mutated` is false for a poll tick, which carries no evidence of change and so must not
+      // restart a quiet window that is already running.
+      function evaluateAndSchedule(mutated = true) {
         if (finished) return;
         try {
           latest = sample();
@@ -86,12 +121,19 @@ const sensor = (() => {
           return;
         }
 
+        if (requireQuiet) {
+          if (mutated || !settledTimer) armQuiet();
+          return;
+        }
         if (isSatisfied(latest)) {
           if (settledTimer) clearTimeoutFn(settledTimer);
           settledTimer = setTimeoutFn(() => {
             cleanup();
             resolve(latest);
           }, quietMs);
+        } else if (settledTimer) {
+          clearTimeoutFn(settledTimer);
+          settledTimer = null;
         }
       }
 
@@ -110,7 +152,7 @@ const sensor = (() => {
       if (Observer && targetRoot && typeof targetRoot.nodeType === "number") {
         try {
           observer = new Observer(() => {
-            evaluateAndSchedule();
+            evaluateAndSchedule(true);
           });
           observer.observe(targetRoot, {
             childList: true,
@@ -127,7 +169,7 @@ const sensor = (() => {
       // an interval poll guarantees progress until maxWaitMs.
       function poll() {
         if (finished) return;
-        evaluateAndSchedule();
+        evaluateAndSchedule(false);
         if (!finished) {
           pollTimer = setTimeoutFn(poll, DEFAULT_POLL_INTERVAL_MS);
         }
@@ -147,6 +189,9 @@ const sensor = (() => {
         cancelTimer = setTimeoutFn(watchCancel, DEFAULT_POLL_INTERVAL_MS);
       }
       if (options.cancelled) cancelTimer = setTimeoutFn(watchCancel, DEFAULT_POLL_INTERVAL_MS);
+
+      // The sample taken before the wait opens the first quiet window.
+      if (requireQuiet) armQuiet();
     });
   }
 

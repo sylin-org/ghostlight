@@ -315,7 +315,8 @@ Facts: `tab`, `document_generation`, and `items`. Each item has a target handle,
 role, bounded accessible name, state, and credential-class flag. An element with no role of its
 own reads as `generic`, never as a tag name. A field with no label, `aria-label` or title is named
 by its placeholder, as browsers do, so `browser_find` and semantic selectors reach it by that
-text. Selectors are not exposed.
+text. Selectors are not exposed. It answers once the page has been quiet for 300 ms, within the
+settle budget.
 
 A `document` scope returns no target handles. Its facts are `tab`, `document_generation`,
 `tree`, `nodes`, `truncated`, `snapshot`, and sometimes `diff`. `tree` is one bounded
@@ -349,7 +350,7 @@ default `any`; optional `max_results` from 1 to 50, default 20. Capability:
 `read`.
 
 Facts: `tab`, `document_generation`, and bounded ranked `matches` with target, role, name, and
-state.
+state. It answers once the page has been quiet for 300 ms, within the settle budget.
 
 ### `browser_screenshot`
 

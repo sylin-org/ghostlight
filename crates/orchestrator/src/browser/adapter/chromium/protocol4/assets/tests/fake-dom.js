@@ -362,6 +362,8 @@ function createFakeDom({ top = true } = {}) {
     advance,
     pendingTimers: () => timers.size,
     activeObservers: () => observers.size,
+    /** Tell every live mutation observer that the page changed, as the browser would. */
+    mutate() { for (const observer of [...observers]) observer.callback([], observer); },
     svgNamespacesCreated: () => created.namespaces.filter((namespace) => namespace === SVG_NAMESPACE).length,
     HTMLElement,
     HTMLInputElement,
