@@ -44,6 +44,7 @@ use crate::browser::{
 };
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
+use crate::install;
 use crate::intake::listener::{self, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::language::catalog_for;
@@ -133,6 +134,9 @@ impl ServiceHost {
         lease_wait: Duration,
     ) -> Result<Self> {
         let lease = acquire_lease(&home.join(LEASE_FILE_NAME), lease_wait)?;
+        if let Ok(executable) = env::current_exe() {
+            remove_old_images_beside(&executable);
+        }
         let runtime_path = home.join(RUNTIME_FILE_NAME);
         ghostlight_bridge::installation::verify_serving_executable(&runtime_path)?;
         let relay_listener = listener::bind().context("bind the relay listener")?;
@@ -1061,6 +1065,15 @@ fn acquire_lease(path: &Path, wait: Duration) -> Result<Lease> {
         thread::sleep(LEASE_POLL.min(remaining));
     }
 }
+
+/// Remove the images earlier installs moved aside in the directory `executable` runs from. The
+/// lease is held, so no other service of this home is starting.
+fn remove_old_images_beside(executable: &Path) {
+    if let Some(directory) = executable.parent() {
+        install::swap::remove_old_images(directory);
+    }
+}
+
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     for released in workspaces.reap(&owner_alive) {
@@ -2004,6 +2017,21 @@ mod tests {
         assert!(after.sessions.is_empty());
         assert_eq!(after.history, before.history);
         drop(host);
+    }
+
+    #[test]
+    fn starting_clears_the_images_installs_moved_aside() {
+        let home = TestHome::new("old-images");
+        let executable = std::env::current_exe().unwrap();
+        let old = executable.with_file_name(format!(
+            "ghostlight-start-test-{}.old-1",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&old, b"image").unwrap();
+        let host = ServiceHost::start(home.path()).unwrap();
+        assert!(!old.exists(), "the numbered old image was left behind");
+        drop(host);
+        let _ = std::fs::remove_file(&old);
     }
 
     #[test]

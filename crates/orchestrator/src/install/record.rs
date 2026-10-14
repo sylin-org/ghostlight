@@ -54,23 +54,26 @@ impl InstallRecord {
 pub enum Standing {
     /// Nothing is recorded as installed.
     Absent,
-    /// The installed version is older than the payload: install.
+    /// The installed version is older than the payload: install, whatever state its image is in.
     Older,
     /// Same version and an intact image: nothing to do.
     Same,
-    /// The record cannot be trusted or the image is missing or changed: install again.
+    /// The record cannot be trusted, or the version matches and the image is missing or
+    /// changed: install again.
     Damaged,
-    /// The installed version is newer than the payload: refuse the payload.
+    /// The installed version is newer than the payload, or the payload's version cannot be
+    /// ordered: refuse the payload, even when the installed image is damaged.
     Newer,
 }
 
 /// Compare the recorded install with the payload.
 ///
 /// `installed_image_sha` is the SHA-256 of the service image now in `bin`, or `None` when there
-/// is none. A missing or different image is damage, whatever the version says, because a repair
-/// must not wait on an ordering. A version that does not parse is damage when it is the
-/// installed one and a refusal when it is the payload's: nothing is installed that cannot be
-/// ordered.
+/// is none. Versions are compared first, because an older payload is refused whatever state the
+/// installed image is in: a repair must never be a downgrade. A recorded version that does not
+/// parse is damage, and a payload version that does not parse is a refusal, since nothing is
+/// installed that cannot be ordered. Only a payload of the same version looks at the image: a
+/// missing or different image makes it a repair.
 #[must_use]
 pub fn decide(
     installed: Option<&InstallRecord>,
@@ -80,9 +83,6 @@ pub fn decide(
     let Some(installed) = installed else {
         return Standing::Absent;
     };
-    if installed_image_sha != Some(installed.service_sha256.as_str()) {
-        return Standing::Damaged;
-    }
     let Some(installed_version) = Version::parse(&installed.service_version) else {
         return Standing::Damaged;
     };
@@ -91,8 +91,11 @@ pub fn decide(
     };
     match payload_version.cmp(&installed_version) {
         Ordering::Greater => Standing::Older,
-        Ordering::Equal => Standing::Same,
         Ordering::Less => Standing::Newer,
+        Ordering::Equal if installed_image_sha == Some(installed.service_sha256.as_str()) => {
+            Standing::Same
+        }
+        Ordering::Equal => Standing::Damaged,
     }
 }
 
@@ -340,7 +343,12 @@ mod tests {
             (Some(&installed), "1.9.9", Some("aa"), Standing::Newer),
             (Some(&installed), "2.0.0", Some("bb"), Standing::Damaged),
             (Some(&installed), "2.0.0", None, Standing::Damaged),
-            (Some(&installed), "1.0.0", Some("bb"), Standing::Damaged),
+            (Some(&installed), "1.0.0", Some("bb"), Standing::Newer),
+            (Some(&installed), "1.0.0", None, Standing::Newer),
+            (Some(&installed), "2.0.1", Some("bb"), Standing::Older),
+            (Some(&installed), "2.0.1", None, Standing::Older),
+            (Some(&installed), "nonsense", None, Standing::Newer),
+            (Some(&unordered), "2.0.0", None, Standing::Damaged),
             (Some(&installed), "nonsense", Some("aa"), Standing::Newer),
             (Some(&unordered), "2.0.0", Some("aa"), Standing::Damaged),
         ];
