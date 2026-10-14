@@ -11,7 +11,7 @@
 
 pub mod connection;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod geometry;
 pub mod keys;
 pub mod link;
@@ -25,6 +25,7 @@ pub mod world;
 
 use self::link::Link;
 use self::scope::Scope;
+use self::translate::forms::{self, Fill};
 use self::translate::keyboard::{PressKey, TypeFocused, TypeText};
 use self::translate::observe::{self, Subjects, Wait};
 use self::translate::pointer::{Click, Scroll};
@@ -368,6 +369,23 @@ fn translate(
             locator,
             files,
         } => keyboard::upload_files(l, scope, tab_id, &locator, &files),
+        BrowserCommand::Fill {
+            tab_id,
+            fields,
+            submit_locator,
+            timeout_ms,
+            allow_credentials,
+        } => forms::fill(
+            l,
+            scope,
+            Fill {
+                tab_id,
+                fields: &fields,
+                submit_locator: submit_locator.as_deref(),
+                timeout_ms,
+                allow_credentials,
+            },
+        ),
         BrowserCommand::EvaluateScript {
             tab_id,
             script,
@@ -377,7 +395,6 @@ fn translate(
         | BrowserCommand::ActivatePointModified { .. }
         | BrowserCommand::WheelAt { .. }
         | BrowserCommand::HoverPoint { .. }
-        | BrowserCommand::Fill { .. }
         | BrowserCommand::Drag { .. }
         | BrowserCommand::DragPoints { .. }
         | BrowserCommand::DropImageAt { .. }

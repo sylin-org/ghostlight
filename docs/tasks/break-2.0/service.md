@@ -15,12 +15,12 @@ Never stage `Cargo.lock` or a `Cargo.toml`.
 
 ## RESUME HERE
 
-Next slice: `service-8`. `level4::run` translates rows 1, 3, 12-21, 23, 26, 29, 32-35, 38, 40-41,
-44 and 46 (`translate/{read,observe,pointer,keyboard,capture,script}.rs`), the diagnostics and
-recording rows in `translate/records.rs`, and the browser-native rows. Form fill, point input,
-drag and a recording export into a page still answer `CapabilityVersion { capability, 1, 0 }`
-until services 8-9 translate them. A click or hover whose scope leaves a document unreadable is
-refused with `DocumentUnavailable` until service-9 adds `route_and_admit`; the test
+Next slice: `service-9`. `level4::run` translates rows 1, 3, 12-21, 23, 26, 29, 31-35, 38, 40-41,
+44 and 46 (`translate/{read,observe,pointer,keyboard,capture,script,forms}.rs`), the diagnostics
+and recording rows in `translate/records.rs`, and the browser-native rows. Point input, drag and a
+recording export into a page still answer `CapabilityVersion { capability, 1, 0 }` until
+service-9 translates them. A click or hover whose scope leaves a document unreadable is refused
+with `DocumentUnavailable` until service-9 adds `route_and_admit`; the test
 `a_click_on_a_restricted_scope_is_refused_until_its_point_can_be_placed` marks the place. Nothing
 sets the page assets yet (switch-2 wires them), so a running service still refuses protocol 4.
 
@@ -35,6 +35,7 @@ sets the page assets yet (switch-2 wires them), so a running service still refus
 | service-5-p4-link-native | `level4/link.rs` (`Link`, `Spec` per primitive, `RecordingIndex`, `Line`; cancel grace, deadline, effect ledger, failure mapping), `level4::run`, `translate/{tabs,records,present}.rs`; `OpenTab.focus_window` (skipped on the level-3 wire) set when the workspace holds no tab; `Dialog.message` rendered in the dialog status sentence; protocol-4 notice tab choice in `BrowserPresentation`. | see `git log` |
 | service-6-p4-documents-reading | `translate/{read,observe}.rs` and `translate/mod.rs` (`Reach`, answer decoding, point routing); `run` admits `InDocuments`; `Scope::open` for work sent without a scope; diagnostics reads bound to `hex(sha256(sorted allowed ids))`; recording starts watch the scope's real documents; `world::Observed.readiness`. | see `git log` |
 | service-7-p4-interaction | `translate/{pointer,keyboard,capture,script}.rs` and `translate::{settled, send_input, OnDialog}`: click and hover (prepare plus owner-box chain in one sequence, then input at the centre in top-viewport coordinates, settle 250 for a click, a dialog counts as success), scroll, text into a control, text into the focused control (first focused document in tree order, cleared there alone, precondition on the input), key presses (preconditioned, no text under Alt, Control or Meta), viewport, page, target and region captures (one `capture` primitive, best-effort settle, view check), upload (chunked over 768 KiB by the link) and script evaluation (an exception is an unknown effect). `keys::hover`, world answers for scroll, typing, focus and upload. 27 tests in `translate/tests/interaction.rs`. | see `git log` |
+| service-8-p4-fill | `translate/forms.rs`: fields grouped by document in first-appearance order; an orphan submit refused before anything is sent; one guarded Sequence of `prepare_fill` per document before any edit; field kinds from the plans (`world::{FieldKind, FillPlan}`); consecutive local fields share one Sequence of `fill_local`; a text field is one `input` behind `focus_text_field` typing `keys::replace_text`; the fill's own budget checked before every field; a Parallel `verify_fill_retained` (limit `FILL_RETAINED_LIMIT_MS` = 2000, settle 25 without a submit); `submit_fill` with settle 250. 11 tests in `translate/tests/forms.rs`. `work/tests/protocol4.rs` runs the executor over a real `RelayBrowserPort` and the FakeExtension (now `pub(crate)` in test builds) for the five section 5 model-visible deltas, asserting status, summary, effect and repeat-safety. | see `git log` |
 
 ## Notes
 

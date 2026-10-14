@@ -815,16 +815,14 @@ fn work_not_yet_translated_answers_that_the_extension_lacks_it() {
     assert_eq!(
         call(
             &port,
-            BrowserCommand::Fill {
+            BrowserCommand::Drag {
                 tab_id: 12,
-                fields: vec![],
-                submit_locator: None,
-                timeout_ms: 1_000,
-                allow_credentials: false,
+                source_locator: "T:t1:locator_a1_1".into(),
+                destination_locator: "T:t1:locator_a1_2".into(),
             }
         ),
         Err(BrowserError::CapabilityVersion {
-            capability: "fill".into(),
+            capability: "drag".into(),
             required: 1,
             advertised: 0,
         })

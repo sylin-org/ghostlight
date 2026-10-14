@@ -2602,6 +2602,7 @@ mod tests {
     mod documents;
     mod execution;
     mod presentation;
+    mod protocol4;
     mod provenance;
     mod tabs;
     use std::fs;

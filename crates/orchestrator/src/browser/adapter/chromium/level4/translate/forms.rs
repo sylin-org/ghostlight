@@ -1,0 +1,346 @@
+//! Form fill: several fields, in one or more documents, then an optional submit.
+//!
+//! A fill validates before it edits. Its first round trip asks every document that holds a
+//! field to check its fields and the submit control and to wait for a stable form, in one
+//! sequence, so a field that cannot take its value refuses before any other field is touched.
+//! The plans that come back say how each field takes its value. Consecutive fields the page sets
+//! itself share one call; a text field is one input that focuses the control as its
+//! precondition and types the value as trusted keystrokes. Then every document confirms its
+//! fields kept their values, and only then is the submit control clicked.
+//!
+//! The fill has its own time budget inside the command's deadline. Once a field was edited,
+//! every failure, including a spent budget or runtime control holding the work between fields,
+//! leaves the effect unknown.
+
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
+
+use super::super::keys;
+use super::super::link::{Answers, Link};
+use super::super::locator::Locator;
+use super::super::scope::{PlannedCall, Scope};
+use super::super::wire::{CallAnswer, CallMode, DocumentGuard, FrameRef};
+use super::super::world::{self, FieldKind, FillPlan, Submitted};
+use super::{input_for, reach, send_input, settled, value, OnDialog, Reach};
+use crate::browser::adapter::{BrowserOutcome, PhysicalField};
+use crate::browser::BrowserError;
+
+/// The longest a fill waits for its values to hold, in milliseconds.
+pub const FILL_RETAINED_LIMIT_MS: u64 = 2_000;
+/// How long the page may settle after a fill with no submit, in milliseconds.
+const FILLED_SETTLE_MS: u64 = 25;
+/// How long the page may settle after a submit click, in milliseconds.
+const SUBMIT_SETTLE_MS: u64 = 250;
+/// The failure of a field whose locator names no document.
+const NOT_FRAME_SCOPED: &str = "field target is not frame-scoped";
+/// The failure of a submit control in no document that holds a field.
+const ORPHAN_SUBMIT: &str = "submit control is not contained in the resolved form";
+/// The failure of a plan that does not say how each field takes its value.
+const INVALID_PLAN: &str = "content primitive returned an invalid fill plan";
+/// The failure of a fill that ran out of its own time budget.
+const BUDGET_EXHAUSTED: &str = "form fill exhausted its physical execution budget";
+/// The failure of a fill whose values did not hold.
+const NOT_RETAINED: &str = "target did not retain filled value";
+
+/// What a fill asks for.
+#[derive(Clone, Copy, Debug)]
+pub struct Fill<'a> {
+    /// The tab.
+    pub tab_id: u64,
+    /// The fields, each with an encoded locator, in the order they are filled.
+    pub fields: &'a [PhysicalField],
+    /// The encoded locator of the control to click after the fields, when there is one.
+    pub submit_locator: Option<&'a str>,
+    /// The fill's own time budget, in milliseconds.
+    pub timeout_ms: u64,
+    /// Whether the request may fill credential-class controls.
+    pub allow_credentials: bool,
+}
+
+/// The fields of one document, with document-local locators, in the order they were asked for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    /// The document.
+    pub doc: FrameRef,
+    /// Its fields.
+    pub fields: Vec<PhysicalField>,
+}
+
+/// Group fields by the document their locators name, documents in order of first appearance.
+///
+/// # Errors
+///
+/// Returns a plain failure for a field whose locator names no document.
+pub fn group_by_document(fields: &[PhysicalField]) -> Result<Vec<Group>, BrowserError> {
+    let mut groups: Vec<Group> = Vec::new();
+    for field in fields {
+        let target = Locator::decode(&field.locator)
+            .map_err(|_| BrowserError::Primitive(NOT_FRAME_SCOPED.into()))?;
+        let local = PhysicalField {
+            locator: target.local,
+            value: field.value.clone(),
+        };
+        match groups.iter_mut().find(|group| group.doc == target.doc) {
+            Some(group) => group.fields.push(local),
+            None => groups.push(Group {
+                doc: target.doc,
+                fields: vec![local],
+            }),
+        }
+    }
+    Ok(groups)
+}
+
+/// How each field of each group takes its value, from the answers to preparing the groups.
+///
+/// # Errors
+///
+/// Returns the page's refusal of a field or of the submit control, and a plain failure for a
+/// plan that does not name one known kind per field.
+pub fn field_kinds(
+    answers: &[CallAnswer],
+    groups: &[Group],
+) -> Result<Vec<Vec<FieldKind>>, BrowserError> {
+    groups
+        .iter()
+        .zip(answers)
+        .map(|(group, answer)| {
+            let plan = value::<Value>(answer)?;
+            serde_json::from_value::<FillPlan>(plan)
+                .ok()
+                .map(|plan| plan.field_kinds)
+                .filter(|kinds| kinds.len() == group.fields.len())
+                .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))
+        })
+        .collect()
+}
+
+/// Fill fields and, when asked, click the submit control.
+///
+/// # Errors
+///
+/// Returns a plain failure for a malformed field or submit locator, a submit control outside
+/// the fields' documents, or a field any document refuses while preparing; and an unknown
+/// effect for any failure once a field was edited.
+pub fn fill(
+    l: &mut Link<'_>,
+    scope: Option<&mut Scope>,
+    request: Fill<'_>,
+) -> Result<BrowserOutcome, BrowserError> {
+    let budget = Instant::now() + Duration::from_millis(request.timeout_ms);
+    let credentials = request.allow_credentials;
+    let groups = group_by_document(request.fields)?;
+    let submit = request.submit_locator.map(Locator::decode).transpose()?;
+    if submit
+        .as_ref()
+        .is_some_and(|target| !groups.iter().any(|group| group.doc == target.doc))
+    {
+        return Err(BrowserError::Primitive(ORPHAN_SUBMIT.into()));
+    }
+    let tab_id = request.tab_id;
+    let mut reach = reach(l, scope, tab_id)?;
+    let prepare = groups
+        .iter()
+        .map(|group| {
+            let submit_local = submit
+                .as_ref()
+                .filter(|target| target.doc == group.doc)
+                .map(|target| target.local.as_str());
+            reach.get().call(
+                &group.doc,
+                world::prepare_fill(&group.fields, credentials, submit_local),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let guard = reach.guard();
+    let plans = send(
+        l,
+        &mut reach,
+        Batch {
+            tab_id,
+            plans: &prepare,
+            mode: CallMode::Sequence,
+            guard,
+            settle_ms: 0,
+            budget,
+        },
+    )?;
+    let kinds = field_kinds(&plans, &groups)?;
+    let mut filled = 0;
+    for (group, kinds) in groups.iter().zip(kinds) {
+        let mut run = Vec::new();
+        let mut input_admitted = false;
+        for (field, kind) in group.fields.iter().zip(kinds) {
+            require_budget(l, budget)?;
+            match kind {
+                FieldKind::Local => run.push(
+                    reach
+                        .get()
+                        .call(&group.doc, world::fill_local(field, credentials))?,
+                ),
+                FieldKind::BrowserText => {
+                    flush(l, &mut reach, tab_id, &mut run, budget)?;
+                    if !input_admitted {
+                        reach.admit_input(&group.doc)?;
+                        input_admitted = true;
+                    }
+                    let focus = reach
+                        .get()
+                        .call(&group.doc, world::focus_text_field(field, credentials))?;
+                    let input = input_for(
+                        l,
+                        tab_id,
+                        Some(focus),
+                        keys::replace_text(&field.value),
+                        reach.guard(),
+                        0,
+                    )
+                    .within(remaining_ms(budget));
+                    send_input(l, input, OnDialog::EffectUnknown)?;
+                }
+            }
+            filled += 1;
+        }
+        flush(l, &mut reach, tab_id, &mut run, budget)?;
+    }
+    let limit = FILL_RETAINED_LIMIT_MS.min(remaining_ms(budget));
+    let verify = groups
+        .iter()
+        .map(|group| {
+            reach.get().call(
+                &group.doc,
+                world::verify_fill_retained(&group.fields, credentials, limit),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let retained = send(
+        l,
+        &mut reach,
+        Batch {
+            tab_id,
+            plans: &verify,
+            mode: CallMode::Parallel,
+            guard: None,
+            settle_ms: if submit.is_none() {
+                FILLED_SETTLE_MS
+            } else {
+                0
+            },
+            budget,
+        },
+    )?;
+    if retained
+        .iter()
+        .any(|answer| value::<Value>(answer).is_err())
+    {
+        return Err(l.settle(BrowserError::Primitive(NOT_RETAINED.into())));
+    }
+    let submitted = match &submit {
+        Some(target) => {
+            require_budget(l, budget)?;
+            let fields = groups
+                .iter()
+                .find(|group| group.doc == target.doc)
+                .map_or(&[][..], |group| group.fields.as_slice());
+            let plan = reach.get().call(
+                &target.doc,
+                world::submit_fill(fields, &target.local, credentials),
+            )?;
+            let answers = send(
+                l,
+                &mut reach,
+                Batch {
+                    tab_id,
+                    plans: &[plan],
+                    mode: CallMode::Sequence,
+                    guard: None,
+                    settle_ms: SUBMIT_SETTLE_MS,
+                    budget,
+                },
+            )?;
+            settled::<Submitted>(l, &answers[0])?.submitted
+        }
+        None => false,
+    };
+    Ok(BrowserOutcome::Filled {
+        tab: l.tab(tab_id)?.into(),
+        filled_count: filled,
+        submitted,
+        committed_urls: l.committed(),
+    })
+}
+
+/// One `call` of a fill.
+struct Batch<'p> {
+    /// The tab.
+    tab_id: u64,
+    /// The world calls.
+    plans: &'p [PlannedCall],
+    /// How the extension runs them.
+    mode: CallMode,
+    /// The currency check that rides on the call, when there is one.
+    guard: Option<DocumentGuard>,
+    /// How long the page may settle after the calls, in milliseconds.
+    settle_ms: u64,
+    /// When the fill's own budget ends.
+    budget: Instant,
+}
+
+/// Send one `call` bounded by the fill's budget. No calls sends nothing and answers nothing.
+fn send(l: &mut Link<'_>, reach: &mut Reach<'_>, call: Batch<'_>) -> Result<Answers, BrowserError> {
+    if call.plans.is_empty() {
+        return Ok(Vec::new());
+    }
+    l.call(
+        call.tab_id,
+        call.plans,
+        call.mode,
+        call.guard,
+        call.settle_ms,
+        remaining_ms(call.budget),
+        Some(reach.scope()),
+    )
+}
+
+/// Fill the fields gathered in `run` in one sequence, and empty it.
+fn flush(
+    l: &mut Link<'_>,
+    reach: &mut Reach<'_>,
+    tab_id: u64,
+    run: &mut Vec<PlannedCall>,
+    budget: Instant,
+) -> Result<(), BrowserError> {
+    let plans = std::mem::take(run);
+    let guard = reach.guard();
+    let answers = send(
+        l,
+        reach,
+        Batch {
+            tab_id,
+            plans: &plans,
+            mode: CallMode::Sequence,
+            guard,
+            settle_ms: 0,
+            budget,
+        },
+    )?;
+    for answer in &answers {
+        settled::<Value>(l, answer)?;
+    }
+    Ok(())
+}
+
+/// Fail when the fill's own budget is spent: plainly before any edit, as an unknown effect
+/// after one.
+fn require_budget(l: &Link<'_>, budget: Instant) -> Result<(), BrowserError> {
+    if Instant::now() >= budget {
+        return Err(l.settle(BrowserError::Primitive(BUDGET_EXHAUSTED.into())));
+    }
+    Ok(())
+}
+
+/// What is left of the fill's budget, in milliseconds.
+fn remaining_ms(budget: Instant) -> u64 {
+    u64::try_from(budget.saturating_duration_since(Instant::now()).as_millis()).unwrap_or(u64::MAX)
+}

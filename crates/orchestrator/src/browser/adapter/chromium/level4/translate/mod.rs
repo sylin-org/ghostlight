@@ -8,6 +8,7 @@
 //! the routing of a point to the document it lands in.
 
 pub mod capture;
+pub mod forms;
 pub mod keyboard;
 pub mod observe;
 pub mod pointer;
@@ -237,6 +238,15 @@ pub struct PlannedInput {
     /// What the precondition can have changed in the page, which says whether a precondition
     /// the page answered counts as an effect.
     precondition_effect: EffectClass,
+}
+
+impl PlannedInput {
+    /// The same input, bounded also by `budget_ms`.
+    #[must_use]
+    pub fn within(mut self, budget_ms: u64) -> Self {
+        self.input.timeout_ms = self.input.timeout_ms.min(budget_ms);
+        self
+    }
 }
 
 /// The input for `steps` on a tab, bounded by what the deadline leaves.

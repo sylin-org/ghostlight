@@ -837,6 +837,24 @@ pub struct TreeValue {
     pub truncated: bool,
 }
 
+/// How one field of a fill takes its value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    /// The page sets the value itself: selects, checkboxes, radios and other controls that take
+    /// no keystrokes.
+    Local,
+    /// The browser types the value into the focused control as trusted input.
+    BrowserText,
+}
+
+/// The answer to preparing a fill: how each field, in order, takes its value.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+pub struct FillPlan {
+    /// One kind per field.
+    pub field_kinds: Vec<FieldKind>,
+}
+
 /// The answer to a submit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 pub struct Submitted {
