@@ -14,7 +14,7 @@ The lane builds no Rust.
 
 ## RESUME HERE
 
-Next slice: the one after `extension-5-p4-world-inventory-input` in `lanes-break.json`. The level-4 page
+Next slice: the one after `extension-6-p4-tabs-capture-notice` in `lanes-break.json`. The level-4 page
 assets are complete for this lane: `content.js` dispatches exactly the 32 vocabulary kinds, every
 throw site is an `AssetError` with its code, and the cancel token ends `observe`,
 `prepare_fill`, `verify_fill_retained` and the sensor waits. Any change to the six sources changes
@@ -25,6 +25,7 @@ the bundle hash, so update `tests/golden/protocol4/assets.sha256` deliberately i
 
 | Slice | What | Commit |
 |---|---|---|
+| extension-6-p4-tabs-capture-notice | `lib/tabs.js` (`GhostlightTabs`): `listTabs` with `opener_tab_id`, `openTab` (group by key from `storage.session`, title fallback after reload, duplicate merge, `focus_window`, adopt, ready wait with timeout and cancel), `navigate` (url, back, forward, reload, `discard_beforeunload` with `acceptBeforeUnload`), `focusTab`, `closeTab` (preserve-tabs veto, released marking), `setZoom`, `resizeWindow`. `lib/capture.js` (`GhostlightCapture`): `view` and `capture` (clip kinds, budget scale, quality ladder, `capture_too_large`, measured image size, hide through the world's per-tab hold count inside `finally`). `lib/notice.js` (`GhostlightNotice`): `deliver`, `flush`, `flushWindow`, `activityList`, deferral through `presentation-queue.js` under one namespace, quiet completion, never attaches. Each primitive handler is `{validate, run, addresses, tabOf}`. Tests: `tabs.test.js` (35), `capture.test.js` (20), `notice.test.js` (15), the scripted browser and golden driver in `tests/p4-chrome.js`. | see `git log` |
 | extension-5-p4-world-inventory-input | `lib/world.js` (`GhostlightWorld`): fixed SHIMS and WRAP, `setAssets` with the sha256 check, `register` as the sessions installer, objectId world handles with a loader re-check, `owner_of` through `DOM.getFrameOwner`, `callOne` with the dialog and deadline race and one lazy reinstall, `mapCallError`, `callPrimitive` (sequence, parallel, race), cancel tokens, `ambientAll`, `present`, `disposeTab`, `devicePixelRatio`, `documentObject`, `localFacts` with capture holds, and the dialog watch. `lib/inventory.js` (`GhostlightInventory`): `snapshot` over root and child sessions, unseen urls, `topSnapshot`, `checkGuard`, `currentLoader`, `framesPrimitive`. `lib/input.js` (`GhostlightInput`): the input batch with precondition, dialog race and drag interception (`dragIntercepted`, `cancelDragInterception`). Tests: `world.test.js` (22), `inventory.test.js` (11), `input.test.js` (13), shared doubles in `tests/p4-fakes.js`. | see `git log` |
 | extension-4-p4-sessions | `lib/sessions.js` (`GhostlightSessions`): attach leases, retained tabs, focus emulation, dialogs as `{type, message, sessionId}`, opt-in domains, `CDP_ALLOW` (33 methods) and `cdp()` with `browser_refused`, root and child session registry with registration identifiers, `forEachSession`, `rootSession`, `childSessions`, `onRelease` and `onSessionGone`; `tests/sessions.test.js` (41 tests). `lib/debugger.js` is untouched until the switch deletes it. | see `git log` |
 | extension-3-p4-asset-content | Level-4 `content.js` behaviour: coded errors, locator epochs, cancel tokens, `verify_fill_retained`, `observe` `until_satisfied`, `hit_point`, `owner_box`, `owner_probe`, `focus_probe`, `require_focused`, `focus_text_field`, `attach_file`; `tests/content.test.js` (85 tests); new asset hash. | see `git log` |
@@ -36,7 +37,8 @@ the bundle hash, so update `tests/golden/protocol4/assets.sha256` deliberately i
 - 17 primitives, 13 receipt failure codes, 10 call failure codes, 32 world message kinds,
   22 asset error codes (19 pre-effect).
 - 22 tests in `golden-protocol4.test.js`, 41 in `sessions.test.js`, 22 in `world.test.js`, 11 in
-  `inventory.test.js`, 13 in `input.test.js`.
+  `inventory.test.js`, 13 in `input.test.js`, 35 in `tabs.test.js`, 20 in `capture.test.js`, 15 in
+  `notice.test.js`.
 - 19 tests in `level4/assets/tests/world.test.js`, 85 in `level4/assets/tests/content.test.js`.
 
 ## Fixture conventions
@@ -83,3 +85,12 @@ the bundle hash, so update `tests/golden/protocol4/assets.sha256` deliberately i
   attachment for the root and once per child; the root also gets the iframe `Target.setAutoAttach`
   after its installer, which is what makes child sessions arrive. A child that ended before its
   setup finished does not fail the tab.
+- Worker wiring for the extension-6 modules: `tabs.create({lifecycle, controlled, isCancelled})` needs
+  the worker's controlled-tab hook `{manage(tabId), release(tabId), managedIds()}`. The worker calls
+  `tabs.acceptBeforeUnload(tabId, dialog)` on every `Page.javascriptDialogOpening`.
+  `capture.create({lifecycle, worldCalls})` uses the world's hold count for `hidden`.
+  `notice.create({worldCalls, inventory, queue, changed})` takes the presentation queue instance;
+  the worker persists the queue and refreshes the popup from `changed()`, calls `flush(tabId)` on
+  tab activation and tab complete and `flushWindow(windowId)` on `windows.onFocusChanged`, and reads
+  `activityList()` for the popup. `open_tab` marks its own tab controlled, so its handler
+  `addresses` is false; `close_tab` is also not addressing.
