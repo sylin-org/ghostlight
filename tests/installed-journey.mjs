@@ -697,14 +697,18 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
     assert.equal(status.facts.present, true, JSON.stringify(status));
     return status;
   };
+  // The type is a fact; the bounded message is in the sentence the service says.
+  const assertDialog = (status, type, message) => {
+    assert.equal(status.facts.dialog_type, type, JSON.stringify(status));
+    assert.match(status.summary, new RegExp(`visible: "${message}`), status.summary);
+  };
   let status = await raise("Raise alert");
-  assert.match(JSON.stringify(status.facts), /alert/i);
-  assert.match(JSON.stringify(status.facts), /Alert message/);
+  assertDialog(status, "alert", "Alert message");
   await t.succeed("browser_dialog", { tab, action: "accept" });
   assert.equal(await t.evalIn(tag, "window.alerts"), 1);
 
   status = await raise("Raise confirm");
-  assert.match(JSON.stringify(status.facts), /Confirm message/);
+  assertDialog(status, "confirm", "Confirm message");
   await t.succeed("browser_dialog", { tab, action: "dismiss" });
   assert.equal(await t.evalIn(tag, "window.confirmed"), false);
   await raise("Raise confirm");
@@ -712,7 +716,7 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
   assert.equal(await t.evalIn(tag, "window.confirmed"), true);
 
   status = await raise("Raise prompt");
-  assert.match(JSON.stringify(status.facts), /Prompt message/);
+  assertDialog(status, "prompt", "Prompt message");
   await t.succeed("browser_dialog", { tab, action: "respond", text: "Typed answer" });
   assert.equal(await t.evalIn(tag, "window.answer"), "Typed answer");
   await raise("Raise prompt");
@@ -731,7 +735,7 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
   assert.match(JSON.stringify(filled), /dialog/i, `the outcome does not point at the dialog: ${JSON.stringify(filled)}`);
   const raised = await t.succeed("browser_dialog", { tab, action: "status" });
   assert.equal(raised.facts.present, true, `the fill's alert is not reported: ${JSON.stringify(raised)}`);
-  assert.match(JSON.stringify(raised.facts), /Raised by the trap field/);
+  assertDialog(raised, "alert", "Raised by the trap field");
   await t.succeed("browser_dialog", { tab, action: "accept" });
   assert.equal(await t.evalIn(tag, "window.trapAlerts"), 1);
   assert.equal((await t.succeed("browser_dialog", { tab, action: "status" })).facts.present, false, "the dialog is still reported after accept");
@@ -741,7 +745,7 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
   assert.notEqual(evaluated.status, "failed", JSON.stringify(evaluated));
   const open = await t.succeed("browser_dialog", { tab, action: "status" });
   assert.equal(open.facts.present, true, `the evaluation's alert is not reported: ${JSON.stringify(evaluated)}`);
-  assert.match(JSON.stringify(open.facts), /Raised by an evaluation/);
+  assertDialog(open, "alert", "Raised by an evaluation");
   await t.succeed("browser_dialog", { tab, action: "accept" });
   return `fill answered in ${elapsed} ms with ${filled.status}; evaluation reported ${evaluated.status}`;
 });
@@ -1167,7 +1171,7 @@ live("live-desk", "live /demo/desk/: read, find the bell, click, dialog message,
   assert.ok(["succeeded", "attention_required"].includes(clicked.status), JSON.stringify(clicked));
   const status = await t.succeed("browser_dialog", { tab, action: "status" });
   assert.equal(status.facts.present, true, JSON.stringify(status));
-  assert.ok(JSON.stringify(status.facts).length > 30, "dialog status carries no message");
+  assert.match(status.summary, /visible: ".+"/, "dialog status carries no message");
   await t.succeed("browser_dialog", { tab, action: "respond", text: "Ghostlight was here" });
   await t.succeed("browser_wait", { tab, condition: "text_present", value: "the bell says", timeout_ms: 15000 });
   clicked = await t.call("browser_click", { tab, target: bell });
