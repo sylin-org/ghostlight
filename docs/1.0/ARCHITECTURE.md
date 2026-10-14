@@ -49,6 +49,14 @@ directory `policy`, and diagnostics in `diagnostics` with the `diagnostics.on` m
 `GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
 installs into `bin` (ADR-0197 Decision 13); registrations name the executables there.
 
+Before any command runs, `main` applies the entry rule (`install/entry.rs`, carried out by
+`cli/start.rs`). While the `development` marker names an existing build, every other copy
+forwards to it with the same arguments; a forwarded `serve` starts detached and the parent exits.
+Without a marker, only `bin/ghostlight` serves. Any other copy is a carrier: a command that uses
+the service installs from the carrier's own directory when the installed service is absent,
+older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version` never
+install.
+
 The orchestrator acquires an operating-system lifetime lease beside its runtime document before
 opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
 admits the single local authority. Concurrent launch losers exit before creating a second runtime

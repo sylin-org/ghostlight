@@ -132,7 +132,8 @@ fn forward_unless_self(current_exe: &Path, target: &Path) -> Entry {
 
 /// Whether two canonical executable paths name the same file. On Windows the comparison ignores
 /// ASCII case, the difference between `/` and `\`, a trailing separator and the verbatim prefix.
-fn same_path(left: &Path, right: &Path) -> bool {
+#[must_use]
+pub fn same_path(left: &Path, right: &Path) -> bool {
     if cfg!(windows) {
         comparable(left) == comparable(right)
     } else {

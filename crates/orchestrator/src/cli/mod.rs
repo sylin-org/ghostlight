@@ -12,6 +12,7 @@ pub mod doctor;
 pub mod parse;
 pub mod session;
 pub mod setup;
+pub mod start;
 pub mod status;
 
 use std::io::{BufRead, Write};

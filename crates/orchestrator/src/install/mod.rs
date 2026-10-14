@@ -14,7 +14,7 @@ pub mod migration;
 pub mod native_host;
 pub mod record;
 #[cfg(test)]
-mod scratch;
+pub(crate) mod scratch;
 pub mod swap;
 pub mod user_assets;
 
