@@ -789,6 +789,8 @@ mod tests {
         policy_witness: Option<(PathBuf, PathBuf)>,
         /// Files a 1.x program writes while it is being stopped.
         writes_on_stop: Vec<(PathBuf, String)>,
+        /// How many of the next requests to stop an image fail.
+        failing_stops: Cell<u32>,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -802,6 +804,7 @@ mod tests {
                 witness: None,
                 policy_witness: None,
                 writes_on_stop: Vec::new(),
+                failing_stops: Cell::new(0),
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -849,6 +852,10 @@ mod tests {
 
         fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
             self.note(Call::Stop(images.to_vec()));
+            if self.failing_stops.get() > 0 {
+                self.failing_stops.set(self.failing_stops.get() - 1);
+                anyhow::bail!("Could not stop Ghostlight process");
+            }
             for (path, text) in &self.writes_on_stop {
                 fs::write(path, text).unwrap();
             }
@@ -1406,6 +1413,107 @@ mod tests {
         assert_eq!(outcome.service_started, Some(true));
         assert_eq!(fixture.read(copy), "saved by a 2.0 service");
         assert!(!fixture.legacy_record().exists());
+    }
+
+    /// Run an install that fails to stop the 1.x service after the copies were made, and return
+    /// the 1.x original and the copy of the user policy it left.
+    fn failed_run_after_the_copy(fixture: &mut Fixture) -> (PathBuf, PathBuf) {
+        let original = plant_legacy_policy(fixture);
+        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+        let control = FakeControl::new();
+        control.failing_stops.set(1);
+        let error = fixture.run(Mode::Release, VERSION, &control).unwrap_err();
+        assert!(error.to_string().contains("Could not stop"), "{error}");
+        assert_eq!(fixture.read(original.clone()), "user policy");
+        assert_eq!(fixture.read(copy.clone()), "user policy");
+        (original, copy)
+    }
+
+    #[test]
+    fn a_run_that_failed_to_stop_the_1x_service_is_finished_by_the_next_install() {
+        let mut fixture = Fixture::new();
+        let (original, copy) = failed_run_after_the_copy(&mut fixture);
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(!original.exists());
+        assert_eq!(fixture.read(copy), "user policy");
+    }
+
+    #[test]
+    fn a_1x_save_after_a_failed_run_wins_on_the_next_install() {
+        let mut fixture = Fixture::new();
+        let (original, copy) = failed_run_after_the_copy(&mut fixture);
+        fs::write(&original, "saved by the 1.x service").unwrap();
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(!original.exists());
+        assert_eq!(fixture.read(copy), "saved by the 1.x service");
+    }
+
+    #[test]
+    fn a_2_0_rewrite_of_the_copy_after_a_failed_run_is_kept_on_the_next_install() {
+        let mut fixture = Fixture::new();
+        let (original, copy) = failed_run_after_the_copy(&mut fixture);
+        fs::write(&copy, "written by a 2.0 service").unwrap();
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(!original.exists());
+        assert_eq!(fixture.read(copy), "written by a 2.0 service");
+    }
+
+    #[test]
+    fn both_sides_changing_after_a_failed_run_is_reported_once_and_the_third_install_succeeds() {
+        let mut fixture = Fixture::new();
+        let (original, copy) = failed_run_after_the_copy(&mut fixture);
+        fs::write(&original, "saved by the 1.x service").unwrap();
+        fs::write(&copy, "written by a 2.0 service").unwrap();
+        let error = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<MigrationError>(),
+                Some(MigrationError::Conflict { .. })
+            ),
+            "{error}"
+        );
+        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+        assert_eq!(fixture.read(aside), "saved by the 1.x service");
+        assert_eq!(fixture.read(copy.clone()), "written by a 2.0 service");
+
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(fixture.read(copy), "written by a 2.0 service");
+        assert!(!fixture.legacy_record().exists());
+    }
+
+    #[test]
+    fn a_destination_that_was_never_copied_still_refuses_the_install() {
+        let mut fixture = Fixture::new();
+        let original = plant_legacy_policy(&mut fixture);
+        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+        fs::create_dir_all(fixture.layout.policy()).unwrap();
+        fs::write(&copy, "somebody else's file").unwrap();
+        let error = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<MigrationError>(),
+                Some(MigrationError::Conflict { .. })
+            ),
+            "{error}"
+        );
+        assert_eq!(fixture.read(original), "user policy");
+        assert_eq!(fixture.read(copy), "somebody else's file");
     }
 
     #[test]

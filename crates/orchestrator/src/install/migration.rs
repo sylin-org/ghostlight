@@ -14,25 +14,28 @@
 //!    registered, and leaves every original in place: a 1.x service is still running and reads
 //!    the user's policy from its original on every decision, and a 2.0 service that a browser or
 //!    client starts the moment the registrations change must find the same files at their new
-//!    place;
+//!    place. Beside each copy it records the content that was copied;
 //! 3. [`archive_audit`] moves the old audit log aside once the programs that write it have
 //!    stopped;
 //! 4. [`retire_state`] removes those originals once the last 1.x program has stopped and cannot
 //!    write them again. A 1.x program may have rewritten an original in the meantime (its policy
 //!    workbench saves the user policy, its managed-policy refresh rewrites the status and cache),
-//!    so an original that changed after the copy is published over the copy, and one that
-//!    diverged from a changed copy is set aside under a name no plan reads, so the next install
-//!    is never blocked by it;
+//!    and a 2.0 service may have rewritten a copy, so each original is compared with the content
+//!    that was copied: an original that changed is published over a copy that did not, and one
+//!    that diverged from a changed copy is set aside under a name no plan reads, so the next
+//!    install is never blocked by it;
 //! 5. [`finish`] deletes the old lifecycle files, the installation record last, once the last
 //!    old program has stopped and cannot write them again.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
 //! installer's step, not this module's: it must happen after the registrations name the new
 //! executables, or a browser relaunches an old connector from an old registration. A failure
-//! leaves the source file where it was, a second run continues from whatever a failed run
-//! completed, and a run after success has nothing to do. A destination that holds other content
-//! than the file being copied is never overwritten, and an original is deleted only when its
-//! content is at the destination.
+//! leaves the source file where it was. A run that fails after the copies and before the
+//! originals are retired leaves both in place, and either may change before the next run; the
+//! record beside each copy tells that run what was copied, so it retires the originals by the
+//! same rule instead of refusing them. A run after success has nothing to do. A destination that
+//! holds content this migration did not copy is never overwritten, and an original is deleted
+//! only when its content is at the destination.
 
 use std::env;
 use std::fs::{self, File};
@@ -103,6 +106,9 @@ const LEGACY_CACHE_DIRECTORY_NAME: &str = "ghostlight";
 
 /// Suffix of the name an original takes when it and its copy both changed.
 const SET_ASIDE_SUFFIX: &str = "pre-2.0";
+
+/// Suffix of the file beside a copy that records the content that was copied.
+const COPY_BASE_SUFFIX: &str = "copied-sha256";
 
 /// Label used in the archived audit file name when the old version cannot be read.
 const UNKNOWN_VERSION_LABEL: &str = "pre-2.0";
@@ -653,7 +659,8 @@ pub struct Copied {
 /// A 1.x service is still running and reads the user policy from its original on every decision,
 /// so the originals stay until [`retire_state`] runs after the last 1.x program has stopped. A
 /// failure returns an error naming the path, and running the same plan again continues from
-/// there.
+/// there. A copy an earlier run made, and a program has changed since, is adopted: the record
+/// beside it names the content that was copied.
 pub fn copy_state(plan: &MigrationPlan) -> Result<Vec<Copied>, MigrationError> {
     let mut copied = Vec::new();
     for transfer in &plan.moves {
@@ -724,7 +731,10 @@ fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
             source,
         })?;
     }
-    if transfer.to.exists() && !same_content(&transfer.from, &transfer.to) {
+    if transfer.to.exists()
+        && !same_content(&transfer.from, &transfer.to)
+        && recorded_copy(&transfer.to).is_none()
+    {
         return Err(MigrationError::Conflict {
             source_path: transfer.from.clone(),
             destination: transfer.to.clone(),
@@ -736,8 +746,12 @@ fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
 
 /// Copy one file to its destination and report what was copied.
 ///
-/// A file that is gone, or that already sits at its destination, has nothing to copy. A
-/// destination that already holds the same content was copied by an earlier run.
+/// A file that is gone, or that already sits at its destination, has nothing to copy. Before a
+/// copy is made, a file beside the destination records what is being copied, and it stays until
+/// the original is retired. A destination that holds other content than the original is one an
+/// earlier run copied, and a 1.x or 2.0 program changed since, when that record is there: the
+/// record is the content to compare against when the original is retired. Without the record the
+/// destination was never ours, and the original stays.
 fn copy_transfer(transfer: &Move) -> Result<Option<Copied>, MigrationError> {
     let Move { from, to } = transfer;
     if !from.is_file() || same_location(from, to) {
@@ -748,27 +762,72 @@ fn copy_transfer(transfer: &Move) -> Result<Option<Copied>, MigrationError> {
         to: to.clone(),
         source,
     };
-    if to.exists() {
-        // Any other content was written there since `prepare` looked, and the original stays.
-        if !same_content(from, to) {
-            return Err(MigrationError::Conflict {
-                source_path: from.clone(),
-                destination: to.clone(),
-                disposition: Disposition::Untouched,
-            });
-        }
-    } else {
+    let sha256 = if !to.exists() {
+        let intended = record::sha256_file(from).map_err(failed)?;
+        record_copy(to, &intended).map_err(failed)?;
         copy_verified(from, to).map_err(failed)?;
-    }
-    let sha256 = record::sha256_file(to).map_err(failed)?;
+        let copied = record::sha256_file(to).map_err(failed)?;
+        if copied != intended {
+            record_copy(to, &copied).map_err(failed)?;
+        }
+        copied
+    } else if same_content(from, to) {
+        let copied = record::sha256_file(to).map_err(failed)?;
+        record_copy(to, &copied).map_err(failed)?;
+        copied
+    } else {
+        recorded_copy(to).ok_or_else(|| MigrationError::Conflict {
+            source_path: from.clone(),
+            destination: to.clone(),
+            disposition: Disposition::Untouched,
+        })?
+    };
     Ok(Some(Copied {
         transfer: transfer.clone(),
         sha256,
     }))
 }
 
-/// Retire one original after its copy was made.
+/// The file beside a copy that records the content that was copied.
+fn record_path(copy: &Path) -> PathBuf {
+    let mut name = copy.as_os_str().to_owned();
+    name.push(format!(".{COPY_BASE_SUFFIX}"));
+    PathBuf::from(name)
+}
+
+/// Record that `sha256` is the content being copied to `copy`.
+fn record_copy(copy: &Path, sha256: &str) -> io::Result<()> {
+    let record = record_path(copy);
+    let mut temporary = record.as_os_str().to_owned();
+    temporary.push(format!(".{}.migrating", uuid::Uuid::new_v4().simple()));
+    let temporary = PathBuf::from(temporary);
+    let written = fs::write(&temporary, sha256).and_then(|()| fs::rename(&temporary, &record));
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
+}
+
+/// The content an earlier run recorded as copied to `copy`, if it did.
+fn recorded_copy(copy: &Path) -> Option<String> {
+    let text = fs::read_to_string(record_path(copy)).ok()?;
+    let sha256 = text.trim();
+    (!sha256.is_empty()).then(|| sha256.to_owned())
+}
+
+/// Retire one original after its copy was made, and drop the record of what was copied once
+/// nothing is left to retire: a file that cannot be removed keeps its record, so the next run
+/// still knows what the copy was.
 fn retire_transfer(done: &Copied) -> Result<(), MigrationError> {
+    let outcome = settle_transfer(done);
+    if matches!(outcome, Ok(()) | Err(MigrationError::Conflict { .. })) {
+        let _ = fs::remove_file(record_path(&done.transfer.to));
+    }
+    outcome
+}
+
+/// Delete, publish or set aside one original, by comparing it and its copy with what was copied.
+fn settle_transfer(done: &Copied) -> Result<(), MigrationError> {
     let Move { from, to } = &done.transfer;
     if !from.is_file() {
         return Ok(());
@@ -1733,6 +1792,63 @@ mod tests {
             fs::read_to_string(&copy).unwrap(),
             "edited by a 2.0 service"
         );
+    }
+
+    #[test]
+    fn the_record_beside_a_copy_goes_when_its_original_is_retired() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        let copied = copy_state(&plan).unwrap();
+        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+        assert!(record_path(&copy).is_file());
+        retire_state(&copied).unwrap();
+        for transfer in &plan.moves {
+            assert!(!record_path(&transfer.to).exists());
+        }
+    }
+
+    #[test]
+    fn a_copy_that_a_failed_run_left_is_adopted_whichever_side_changed_since() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        prepare(&plan).unwrap();
+        copy_state(&plan).unwrap();
+        let original = legacy_user_policy(&fixture);
+        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+        let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
+        fs::write(&original, "saved by a 1.x workbench").unwrap();
+        fs::write(&status, "written by a 2.0 service").unwrap();
+
+        // The failed run never retired anything, and the next plan lists the same files.
+        let again = fixture.plan();
+        assert_eq!(again.moves, plan.moves);
+        execute(&again).unwrap();
+        assert!(!original.exists());
+        assert_eq!(
+            fs::read_to_string(&copy).unwrap(),
+            "saved by a 1.x workbench"
+        );
+        assert_eq!(
+            fs::read_to_string(&status).unwrap(),
+            "written by a 2.0 service"
+        );
+        for transfer in &plan.moves {
+            assert!(!transfer.from.exists(), "{}", transfer.from.display());
+            assert!(!record_path(&transfer.to).exists());
+        }
+    }
+
+    #[test]
+    fn a_different_destination_without_a_record_is_refused_and_nothing_is_copied() {
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+        fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        fs::write(&copy, "somebody else's file").unwrap();
+        let error = prepare(&plan).unwrap_err();
+        assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
+        assert!(!record_path(&copy).exists());
     }
 
     #[test]
