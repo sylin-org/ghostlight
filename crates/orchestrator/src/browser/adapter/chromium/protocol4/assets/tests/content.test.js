@@ -1524,8 +1524,9 @@ function sensorIn(dom) {
   })()`, "sensor.js");
 }
 
-test("an unsatisfied sample clears a pending quiet timer", async () => {
+test("a satisfied sample that a later mutation empties does not end a loading page's wait", async () => {
   const dom = createFakeDom();
+  dom.document.readyState = "loading";
   const sensor = sensorIn(dom);
   let satisfied = false;
   const sample = () => ({ satisfied });
@@ -1546,7 +1547,9 @@ test("an unsatisfied sample clears a pending quiet timer", async () => {
   dom.mutate();
   await step(100);
   assert.equal(answeredAt, null, "the stale satisfied sample did not resolve the wait");
-  await step(400);
+  await step(250);
+  assert.equal(answeredAt, null, "the quiet window ended on an empty sample of a loading page");
+  await step(100);
   assert.deepEqual(plain(await pending), { satisfied: false });
   assert.ok(answeredAt >= 400, `answered at ${answeredAt} ms`);
 });
