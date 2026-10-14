@@ -7,6 +7,11 @@
 //! cut off or does not come back in time. Those answers are the service's own failure templates;
 //! the connector authors no words.
 //!
+//! A client response reaches the service only when it answers a request the live connection made.
+//! A lone response that answers nothing outstanding is dropped, and a batch loses such elements
+//! and is sent without them, or not at all when nothing is left. So a late answer to a service
+//! that went away never reaches the next one, which may have reused the id.
+//!
 //! Everything runs on one loop over [`Event`]s. Threads only read: one for stdin, one per service
 //! connection, and one per connection attempt. Time comes from an injected [`Clock`] so the bounds
 //! can be tested without waiting for them.
@@ -169,15 +174,17 @@ struct Forwarder<W: Write> {
     ever_connected: bool,
     /// Whether a connection attempt is running.
     attempting: bool,
-    /// When the next connection attempt may run.
-    next_attempt: Option<Instant>,
+    /// When the next connection attempt may run. Read only while there is no link and no
+    /// attempt, and set whenever a link ends, so a held request always has one coming.
+    next_attempt: Instant,
     backoff: Backoff,
     /// The resume token the service last handed this session.
     resume: Option<String>,
     hold: Hold,
     /// Client requests delivered to the service and not yet answered, by id key.
     client_requests: BTreeMap<String, Request>,
-    /// Service requests written to the client and not yet answered, by id key.
+    /// Requests the live connection wrote to the client and that are not yet answered, by id
+    /// key. Only answers to these reach the service.
     service_requests: BTreeMap<String, Request>,
 }
 
@@ -193,7 +200,7 @@ impl<W: Write> Forwarder<W> {
             generation: 0,
             ever_connected: false,
             attempting: false,
-            next_attempt: Some(now),
+            next_attempt: now,
             backoff: Backoff::new(),
             resume: None,
             hold: Hold::default(),
@@ -214,8 +221,11 @@ impl<W: Write> Forwarder<W> {
         for expired in self.hold.expire(now) {
             self.answer(&expired.requests, Failure::Expired)?;
         }
-        let due = self.next_attempt.is_some_and(|at| at <= now);
-        if due && self.link.is_none() && !self.attempting && self.wants_service() {
+        if self.next_attempt <= now
+            && self.link.is_none()
+            && !self.attempting
+            && self.wants_service()
+        {
             self.attempt();
         }
         Ok(())
@@ -223,8 +233,7 @@ impl<W: Write> Forwarder<W> {
 
     /// How long to wait for the next event, or `None` to wait without a deadline.
     fn wait(&self) -> Option<Duration> {
-        let attempt = self
-            .next_attempt
+        let attempt = Some(self.next_attempt)
             .filter(|_| self.link.is_none() && !self.attempting && self.wants_service());
         let deadline = [attempt, self.hold.next_expiry()]
             .into_iter()
@@ -248,7 +257,7 @@ impl<W: Write> Forwarder<W> {
             Event::Connected(socket) => self.connected(socket)?,
             Event::AttemptFailed => {
                 self.attempting = false;
-                self.next_attempt = Some(self.environment.clock.now() + self.backoff.next_wait());
+                self.next_attempt = self.environment.clock.now() + self.backoff.next_wait();
             }
             Event::Frame(generation, frame) => {
                 if self.is_current(generation) {
@@ -310,14 +319,13 @@ impl<W: Write> Forwarder<W> {
     /// Take a newly accepted connection and deliver everything held, in order.
     fn connected(&mut self, socket: TcpStream) -> io::Result<()> {
         self.attempting = false;
-        self.next_attempt = None;
         self.backoff.reset();
         self.ever_connected = true;
         let reader = match socket.try_clone() {
             Ok(reader) => reader,
             Err(error) => {
                 (self.environment.log)(LogEvent::ConnectFailed, &error.to_string());
-                self.next_attempt = Some(self.environment.clock.now());
+                self.next_attempt = self.environment.clock.now();
                 return Ok(());
             }
         };
@@ -338,7 +346,8 @@ impl<W: Write> Forwarder<W> {
         Ok(())
     }
 
-    /// One line from the client: answer a ping, deliver while connected, otherwise hold.
+    /// One line from the client: answer a ping, drop answers the live connection never asked
+    /// for, then deliver while connected, otherwise hold.
     fn client_line(&mut self, bytes: &[u8]) -> io::Result<()> {
         let mut line = String::from_utf8_lossy(bytes).into_owned();
         if line.ends_with('\r') {
@@ -355,22 +364,30 @@ impl<W: Write> Forwarder<W> {
                 rpc::RESULT: {},
             }));
         }
+        let (answered, unasked): (Vec<String>, Vec<String>) = inspection
+            .responses
+            .into_iter()
+            .partition(|key| self.service_requests.contains_key(key));
+        let line = if unasked.is_empty() {
+            line
+        } else {
+            match without_responses(&line, &unasked) {
+                Some(line) => line,
+                None => return Ok(()),
+            }
+        };
         if self.link.is_some() {
-            return self.deliver(line, inspection.requests, &inspection.responses);
+            return self.deliver(line, inspection.requests, &answered);
         }
-        let has_request = !inspection.requests.is_empty();
         let held = HeldLine {
             line,
             requests: inspection.requests,
             held_at: self.environment.clock.now(),
         };
-        if let Err(refused) = self.hold.push(held) {
-            return self.answer(&refused.requests, Failure::Expired);
+        match self.hold.push(held) {
+            Ok(()) => Ok(()),
+            Err(refused) => self.answer(&refused.requests, Failure::Expired),
         }
-        if has_request && self.next_attempt.is_none() {
-            self.next_attempt = Some(self.environment.clock.now());
-        }
-        Ok(())
     }
 
     /// Write one client line to the live connection, once.
@@ -425,13 +442,16 @@ impl<W: Write> Forwarder<W> {
         }
     }
 
-    /// Drop the connection and answer every outstanding client request as cut off.
+    /// Drop the connection, answer every outstanding client request as cut off, and let the next
+    /// attempt run as soon as a held request wants one.
     ///
-    /// Requests the service made of the client are forgotten: the service that asked is gone.
+    /// Requests the service made of the client are forgotten, so the client's late answers to them
+    /// are dropped rather than sent to whichever service comes next.
     fn disconnect(&mut self) -> io::Result<()> {
         if let Some(link) = self.link.take() {
             let _ = link.shutdown(Shutdown::Both);
         }
+        self.next_attempt = self.environment.clock.now();
         self.service_requests.clear();
         let cut_off: Vec<Request> = std::mem::take(&mut self.client_requests)
             .into_values()
@@ -490,7 +510,8 @@ struct Inspection {
     requests: Vec<Request>,
     /// Id keys the line answers: elements with an id and no method.
     responses: Vec<String>,
-    /// The id of a lone `ping` request, which the connector answers itself.
+    /// The id of a lone `ping` request. The connector answers a client's ping itself; a service's
+    /// ping is an ordinary request and is also in `requests`.
     ping: Option<Value>,
 }
 
@@ -504,11 +525,10 @@ impl Inspection {
                 elements.iter().for_each(|element| inspection.note(element))
             }
             Ok(element) => {
-                let is_ping = element.get(rpc::METHOD).and_then(Value::as_str) == Some(rpc::PING);
-                match element.get(rpc::ID) {
-                    Some(id) if is_ping => inspection.ping = Some(id.clone()),
-                    _ => inspection.note(&element),
+                if element.get(rpc::METHOD).and_then(Value::as_str) == Some(rpc::PING) {
+                    inspection.ping = element.get(rpc::ID).cloned();
                 }
+                inspection.note(&element);
             }
             Err(_) => {}
         }
@@ -531,6 +551,27 @@ impl Inspection {
             None => self.responses.push(key),
         }
     }
+}
+
+/// `line` without the responses whose id key is in `keys`, or `None` when nothing is left.
+///
+/// Only a batch keeps other elements; it is written back as compact JSON without the dropped
+/// ones. A lone response in `keys` leaves nothing.
+fn without_responses(line: &str, keys: &[String]) -> Option<String> {
+    let Ok(Value::Array(mut elements)) = serde_json::from_str::<Value>(line) else {
+        return None;
+    };
+    elements.retain(|element| {
+        let unasked = element.get(rpc::METHOD).is_none()
+            && element
+                .get(rpc::ID)
+                .is_some_and(|id| keys.contains(&id.to_string()));
+        !unasked
+    });
+    if elements.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&elements).ok()
 }
 
 /// One line read from the client.
