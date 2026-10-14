@@ -63,24 +63,39 @@ test("CODES equals the asset error codes of the vocabulary", () => {
   assert.deepEqual(codes, vocabulary.asset_error_codes);
 });
 
+const FORBIDDEN = [
+  ["chrome.", /(?<![\w$])chrome\??\.[A-Za-z_$]/],
+  ["browser.", /(?<![\w$])browser\??\.[A-Za-z_$]/],
+  ["fetch(", /(?<![\w$])fetch\(/],
+  ["XMLHttpRequest", /XMLHttpRequest/],
+  ["WebSocket", /WebSocket/],
+  ["sendMessage", /sendMessage/],
+  ["__ghostlight_dispatch__", /__ghostlight_dispatch__/],
+  ["innerHTML assignment", /\.innerHTML\s*=/],
+  ["insertAdjacentHTML", /insertAdjacentHTML/],
+  ["outerHTML", /outerHTML/],
+  ["a global Ghostlight namespace", /Ghostlight(Shared|Sensor|Presentation|PresentationCss|FormDiagnostics)/],
+  ["form diagnostics", /formDiagnostics/i]
+];
+
+function violations(text) {
+  return FORBIDDEN.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+}
+
+test("the forbidden-API scan catches qualified and optional-chained forms", () => {
+  assert.deepEqual(violations("globalThis.fetch(url)"), ["fetch("]);
+  assert.deepEqual(violations("window.fetch(url)"), ["fetch("]);
+  assert.deepEqual(violations("self.fetch(url)"), ["fetch("]);
+  assert.deepEqual(violations("window.chrome.runtime.connect()"), ["chrome."]);
+  assert.deepEqual(violations("chrome?.runtime"), ["chrome."]);
+  assert.deepEqual(violations("globalThis.browser.runtime"), ["browser."]);
+  assert.deepEqual(violations("browser?.runtime"), ["browser."]);
+  assert.deepEqual(violations("the browser. Then"), []);
+});
+
 test("no protocol-4 source touches a browser API or the retired global", () => {
-  const forbidden = [
-    ["chrome.", /(?<![\w$.])chrome\.[A-Za-z_$]/],
-    ["browser.", /(?<![\w$.])browser\.[A-Za-z_$]/],
-    ["fetch(", /(?<![\w$.])fetch\(/],
-    ["XMLHttpRequest", /XMLHttpRequest/],
-    ["WebSocket", /WebSocket/],
-    ["sendMessage", /sendMessage/],
-    ["__ghostlight_dispatch__", /__ghostlight_dispatch__/],
-    ["innerHTML assignment", /\.innerHTML\s*=/],
-    ["insertAdjacentHTML", /insertAdjacentHTML/],
-    ["outerHTML", /outerHTML/],
-    ["a global Ghostlight namespace", /Ghostlight(Shared|Sensor|Presentation|PresentationCss|FormDiagnostics)\b/],
-    ["form diagnostics", /formDiagnostics/i]
-  ];
   for (const name of sources()) {
-    const text = bundle.read(name);
-    for (const [label, pattern] of forbidden) assert.doesNotMatch(text, pattern, `${name} must not contain ${label}`);
+    assert.deepEqual(violations(bundle.read(name)), [], `${name} must not contain a forbidden API`);
   }
 });
 
