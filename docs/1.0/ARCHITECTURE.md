@@ -86,7 +86,9 @@ Only then does the installer stop the 1.x images (and look again for a few round
 respawned), ask the running service to quit and stop that exact image if it has not exited,
 retire the copied originals (one a 1.x program rewrote after the copy is published over the copy
 first; an original and a copy that both changed are kept, the original set aside as
-`<name>.pre-2.0`, and the install reports it, so the next install is never blocked),
+`<name>.pre-2.0`, and the install reports it, so the next install is never blocked; a file
+beside each copy records what was copied, so an install that fails before this step is finished
+by the next one by the same rule),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
 start `bin/ghostlight serve`, and write `install.json` only once the new service publishes.
 Registering first matters: a browser relaunches its connector from the registration the moment
