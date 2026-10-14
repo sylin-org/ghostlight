@@ -78,9 +78,10 @@ try {
         }
     }
 
+    # The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
     # Windows GUI-subsystem executables need an explicit waited process for CLI commands.
     $candidate = Join-Path $downloadDirectory "ghostlight.exe"
-    $deploy = Start-Process -FilePath $candidate -ArgumentList @("deployment", "install", "`"$installDirectory`"") -WindowStyle Hidden -Wait -PassThru
+    $deploy = Start-Process -FilePath $candidate -ArgumentList @("deployment", "install") -WindowStyle Hidden -Wait -PassThru
     if ($deploy.ExitCode -ne 0) { throw "Ghostlight installation failed with exit code $($deploy.ExitCode)." }
 }
 finally {

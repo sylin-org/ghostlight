@@ -4,7 +4,7 @@ Lane rules are in [BOOTSTRAP.md](BOOTSTRAP.md). Target: ADR-0197 Decisions 1-4, 
 
 ## RESUME HERE
 
-Next slice: connectors-7 onward, per the lane plan. No blockers.
+Next slice: connectors-8 onward, per the lane plan. No blockers.
 
 ## Landed
 
@@ -70,6 +70,25 @@ Next slice: connectors-7 onward, per the lane plan. No blockers.
   in the policy check (`~/.ghostlight/policy/user-policy.json`, schema 4). The `--live` checks
   for pages other than desk, the iframe pair, brief and foundry are generic because those pages
   are not in the repository.
+
+- connectors-7: launchers follow the 2.0 install rules (ADR-0197 D13, D14, D16).
+  `packaging/npm/bin/ghostlight.js` classifies the command first: no arguments, `install`, `open`
+  and `serve` launch; every other command is read-only. A launch runs the installed set when
+  `~/.ghostlight/bin/install.json` `service_version` is the same or newer than the package (or the
+  `~/.ghostlight/development` marker exists); otherwise it downloads, verifies against
+  `checksums.json`, runs `<staged>/ghostlight deployment install` (no directory argument) and then
+  the installed binary. Installed binaries are no longer hashed per launch. Read-only commands run
+  the installed service, or a verified staged copy that installs nothing and is removed on exit.
+  On Linux it checks for `libwebkit2gtk-4.1.so.0` (`ldconfig -p`, then known directories) and names
+  the package. The launcher's home override is now `GHOSTLIGHT_TEST_HOME` (was `GHOSTLIGHT_HOME`),
+  so it reads the same home the service uses. `scripts/get.ps1` and `scripts/get.sh` call
+  `deployment install` without a directory. `packaging/mcpb/server/launch.js` runs the bundled
+  `ghostlight deployment install` only when the install record is absent or older than the bundle
+  version, then the bundled connector; its README notes 2.0.0 is the channel's final release.
+  Gate: 23 npm launcher tests and 8 MCPB launcher tests pass; both get scripts parse. Not run:
+  any download or install. Follow-ups outside this lane: `tests/linux/acceptance/npm/native.mjs`
+  still sets `GHOSTLIGHT_HOME`, and `tests/fixed-installation-journey.mjs` still passes a
+  directory to `deployment install`; both are switch-time work.
 
 ## Blockers
 

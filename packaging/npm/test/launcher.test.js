@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,12 +10,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   assertAllowedDownload,
   assetNames,
+  compareVersions,
   ensureBinary,
   executableNames,
+  launchesService,
   publishedAssetNames,
   releaseTarget,
+  requireLinuxLibraries,
   selectedExecutable,
   validateChecksums,
+  webkitLibraryPresent,
 } from "../bin/ghostlight.js";
 
 test("a real offline npm install invokes the launcher through the platform bin entry", async () => {
@@ -39,7 +43,7 @@ test("a real offline npm install invokes the launcher through the platform bin e
         ? [process.execPath, join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")]
         : ["npm"];
     const environment = { ...process.env, npm_config_cache: join(directory, "cache"),
-      GHOSTLIGHT_HOME: join(directory, "ghostlight-cache") };
+      GHOSTLIGHT_TEST_HOME: join(directory, "ghostlight-home") };
     const run = (command, args) => spawnSync(command, args, { cwd: directory, env: environment,
       windowsHide: true, encoding: "utf8", timeout: 30000 });
     const runNpm = args => run(npmCommand[0], [...npmCommand.slice(1), ...args]);
@@ -199,59 +203,224 @@ test("unverified download bytes never replace the cache", async () => {
   }
 });
 
-test("service updates reuse fixed paths and verify the whole download before replacement", async () => {
-  const area = await mkdtemp(join(tmpdir(), "ghostlight-fixed-install-"));
-  try {
-    const packageRoot = join(area, "package");
-    await mkdir(packageRoot);
-    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
-    await cp(fileURLToPath(new URL("../bin", import.meta.url)), join(packageRoot, "bin"), { recursive: true });
-    const { prepareLaunch } = await import(pathToFileURL(join(packageRoot, "bin/ghostlight.js")).href);
-    const cacheRoot = join(area, "home");
-    const directory = join(cacheRoot, "bin");
-    let installs = 0;
-    let corrupt = false;
-    let bytes;
-    const metadata = async version => {
-      bytes = Object.fromEntries(publishedAssetNames().map(name => [name, Buffer.from(`${version}:${name}`)]));
-      await writeFile(join(packageRoot, "package.json"), JSON.stringify({ version, type: "module" }));
-      await writeFile(join(packageRoot, "checksums.json"), JSON.stringify({ version, algorithm: "sha256",
-        binaries: Object.fromEntries(Object.entries(bytes).map(([name, body]) => [name, createHash("sha256").update(body).digest("hex")])) }));
-    };
-    const options = {
-      platform: "linux", architecture: "x64", cacheRoot, arguments_: [],
-      fetchImpl: async url => new Response(corrupt && url.endsWith("ghostlight-browser-connector-x86_64-unknown-linux-gnu")
-        ? "wrong third binary" : bytes[url.split("/").at(-1)]),
-      installImpl: async (candidate, destination) => {
-        installs++;
-        assert.equal(destination, directory);
-        assert.notEqual(dirname(candidate), directory);
-        for (const name of executableNames("linux", "x64")) {
-          await readFile(join(dirname(candidate), name));
-        }
-        await mkdir(destination, { recursive: true });
-        for (const name of executableNames("linux", "x64")) await cp(join(dirname(candidate), name), join(destination, name));
-      },
-    };
-    await metadata("1.3.12");
-    const first = await prepareLaunch(options);
-    assert.equal(first.executable, join(directory, "ghostlight-mcp-connector"));
-    await prepareLaunch({ ...options, fetchImpl: async () => { throw new Error("unexpected download"); } });
-    assert.equal(installs, 1);
-    await metadata("1.3.13");
-    corrupt = true;
-    await assert.rejects(prepareLaunch(options), /failed checksum/);
-    assert.match(await readFile(join(directory, "ghostlight"), "utf8"), /^1\.3\.12:/);
-    assert.equal(installs, 1, "a bad third download never interrupts the installed service");
-    corrupt = false;
-    const second = await prepareLaunch(options);
-    assert.equal(second.executable, first.executable);
-    assert.match(await readFile(join(directory, "ghostlight"), "utf8"), /^1\.3\.13:/);
-    const { readdir } = await import("node:fs/promises");
-    assert.deepEqual((await readdir(cacheRoot)).sort(), ["bin"]);
-    assert.deepEqual((await readdir(directory)).sort(), executableNames("linux", "x64").sort());
-  } finally {
-    assert.equal(resolve(dirname(area)), resolve(tmpdir()));
-    await rm(area, { recursive: true, force: true });
+
+test("only no arguments, install, open and serve start or install the service", () => {
+  for (const arguments_ of [[], ["install"], ["install", "--dry-run"], ["open"], ["serve"]]) {
+    assert.equal(launchesService(arguments_), true, arguments_.join(" ") || "(no arguments)");
   }
+  for (const command of ["doctor", "status", "help", "--help", "-h", "--version", "-V",
+    "diagnostics", "policy", "call", "uninstall", "deployment", "unknown"]) {
+    assert.equal(launchesService([command, "install"]), false, command);
+  }
+});
+
+test("versions order numerically and a pre-release sorts below its release", () => {
+  assert.ok(compareVersions("2.0.0", "1.9.9") > 0);
+  assert.ok(compareVersions("1.3.9", "1.3.15") < 0);
+  assert.equal(compareVersions("2.0.0", "2.0.0"), 0);
+  assert.ok(compareVersions("2.0.0-rc.1", "2.0.0") < 0);
+  assert.equal(compareVersions("not-a-version", "2.0.0"), null);
+  assert.equal(compareVersions(undefined, "2.0.0"), null);
+});
+
+const PACKAGE_VERSION = "2.0.0";
+
+/** A copy of the launcher with a package version and checksums for fixture binaries. */
+async function launcherFixture() {
+  const area = await mkdtemp(join(tmpdir(), "ghostlight-launch-"));
+  const packageRoot = join(area, "package");
+  await mkdir(packageRoot);
+  await cp(fileURLToPath(new URL("../bin", import.meta.url)), join(packageRoot, "bin"), { recursive: true });
+  const bytes = Object.fromEntries(publishedAssetNames().map(name => [name, Buffer.from(`${PACKAGE_VERSION}:${name}`)]));
+  await writeFile(join(packageRoot, "package.json"), JSON.stringify({ version: PACKAGE_VERSION, type: "module" }));
+  await writeFile(join(packageRoot, "checksums.json"), JSON.stringify({ version: PACKAGE_VERSION, algorithm: "sha256",
+    binaries: Object.fromEntries(Object.entries(bytes).map(([name, body]) => [name, createHash("sha256").update(body).digest("hex")])) }));
+  const { prepareLaunch } = await import(pathToFileURL(join(packageRoot, "bin/ghostlight.js")).href);
+  const home = join(area, "home");
+  const bin = join(home, "bin");
+  const names = executableNames("linux", "x64");
+  const activity = { downloads: [], installs: [] };
+  const options = {
+    platform: "linux", architecture: "x64", cacheRoot: home, libraryProbe: () => true,
+    fetchImpl: async url => {
+      activity.downloads.push(url.split("/").at(-1));
+      return new Response(bytes[url.split("/").at(-1)]);
+    },
+    installImpl: async (candidate, destination) => {
+      activity.installs.push({ candidate, destination });
+      await mkdir(destination, { recursive: true });
+      for (const name of names) await cp(join(dirname(candidate), name), join(destination, name));
+      await writeFile(join(destination, "install.json"), JSON.stringify({ service_version: PACKAGE_VERSION }));
+    },
+  };
+  const install = async (version, contents = "installed") => {
+    await mkdir(bin, { recursive: true });
+    for (const name of names) await writeFile(join(bin, name), `${contents}:${name}`);
+    if (version !== undefined) await writeFile(join(bin, "install.json"), JSON.stringify({ service_version: version }));
+  };
+  const cleanup = () => rm(area, { recursive: true, force: true });
+  return { area, home, bin, names, options, activity, install, prepareLaunch, cleanup };
+}
+
+const NO_DOWNLOAD = async () => { throw new Error("unexpected download"); };
+
+test("a launch with nothing installed downloads, verifies, installs from the stage, then runs the installed binary", async () => {
+  const f = await launcherFixture();
+  try {
+    const launch = await f.prepareLaunch({ ...f.options, arguments_: [] });
+    assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+    assert.equal(f.activity.downloads.length, 3);
+    assert.equal(f.activity.installs.length, 1);
+    assert.equal(f.activity.installs[0].destination, f.bin);
+    assert.notEqual(dirname(f.activity.installs[0].candidate), f.bin);
+    assert.deepEqual((await readdir(f.home)).sort(), ["bin"], "the stage is removed");
+    const open = await f.prepareLaunch({ ...f.options, arguments_: ["open"], fetchImpl: NO_DOWNLOAD });
+    assert.equal(open.executable, join(f.bin, "ghostlight"));
+    assert.equal(f.activity.installs.length, 1, "the second launch finds the install current");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a launch installs when the installed service is older", async () => {
+  for (const record of ["1.3.15", "1.9.9", "2.0.0-rc.1"]) {
+    const f = await launcherFixture();
+    try {
+      await f.install(record);
+      const launch = await f.prepareLaunch({ ...f.options, arguments_: ["serve"] });
+      assert.equal(launch.executable, join(f.bin, "ghostlight"));
+      assert.equal(f.activity.installs.length, 1, record);
+      assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^2\.0\.0:/);
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("a launch installs when the install record is absent or unreadable", async () => {
+  for (const record of [undefined, "{ not json"]) {
+    const f = await launcherFixture();
+    try {
+      await f.install(undefined);
+      if (record) await writeFile(join(f.bin, "install.json"), record);
+      await f.prepareLaunch({ ...f.options, arguments_: ["install"] });
+      assert.equal(f.activity.installs.length, 1, String(record));
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("a launch runs the installed set untouched when it is the same or newer", async () => {
+  for (const record of ["2.0.0", "2.0.1", "2.1.0", "10.0.0"]) {
+    const f = await launcherFixture();
+    try {
+      await f.install(record);
+      const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
+      assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+      assert.equal(f.activity.installs.length, 0, record);
+      assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/,
+        "installed files are not hashed or replaced");
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("a launch installs when the executable it would run is missing", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("2.0.0");
+    await rm(join(f.bin, "ghostlight-mcp-connector"));
+    await f.prepareLaunch({ ...f.options, arguments_: [] });
+    assert.equal(f.activity.installs.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("the development marker keeps the installed set whatever its version", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("1.0.0");
+    await writeFile(join(f.home, "development"), "");
+    const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
+    assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+    assert.equal(f.activity.installs.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a bad download never touches the installed service", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("1.3.15");
+    await assert.rejects(f.prepareLaunch({ ...f.options, arguments_: [],
+      fetchImpl: async url => new Response(url.endsWith("ghostlight-browser-connector-x86_64-unknown-linux-gnu")
+        ? "wrong" : "right") }), /failed checksum/);
+    assert.equal(f.activity.installs.length, 0);
+    assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/);
+    assert.deepEqual((await readdir(f.home)).sort(), ["bin"], "the failed stage is removed");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("read-only commands run the installed service whatever its version and never install", async () => {
+  for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"],
+    ["diagnostics", "path"], ["policy", "validate", "p.json"], ["call", "--catalog"]]) {
+    const f = await launcherFixture();
+    try {
+      await f.install("1.0.0");
+      const launch = await f.prepareLaunch({ ...f.options, arguments_, fetchImpl: NO_DOWNLOAD });
+      assert.equal(launch.executable, join(f.bin, "ghostlight"));
+      assert.deepEqual(launch.arguments_, arguments_);
+      assert.equal(f.activity.installs.length, 0, arguments_[0]);
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("a read-only command with nothing installed runs a verified staged service and installs nothing", async () => {
+  const f = await launcherFixture();
+  try {
+    const launch = await f.prepareLaunch({ ...f.options, arguments_: ["--version"] });
+    assert.equal(f.activity.installs.length, 0);
+    assert.deepEqual(f.activity.downloads, ["ghostlight-x86_64-unknown-linux-gnu"]);
+    assert.equal(dirname(launch.executable).startsWith(f.home), true);
+    assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/);
+    await launch.cleanup();
+    assert.deepEqual(await readdir(f.home), [], "the stage goes away and nothing is installed");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Linux without the WebKit library fails by name before any download or install", async () => {
+  const f = await launcherFixture();
+  try {
+    for (const arguments_ of [[], ["doctor"]]) {
+      await assert.rejects(f.prepareLaunch({ ...f.options, arguments_, libraryProbe: () => false }),
+        /libwebkit2gtk-4\.1\.so\.0.*libwebkit2gtk-4\.1-0/);
+    }
+    assert.deepEqual(f.activity.downloads, []);
+    assert.equal(f.activity.installs.length, 0);
+    assert.doesNotThrow(() => requireLinuxLibraries("win32", () => false));
+    assert.doesNotThrow(() => requireLinuxLibraries("linux", () => true));
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("the WebKit library is found through ldconfig or the known library directories", () => {
+  const listed = () => ({ status: 0, stdout: "\tlibwebkit2gtk-4.1.so.0 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0\n" });
+  const unrelated = () => ({ status: 0, stdout: "\tlibc.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libc.so.6\n" });
+  const absent = () => ({ error: new Error("ENOENT") });
+  assert.equal(webkitLibraryPresent({ run: listed, exists: () => false }), true);
+  assert.equal(webkitLibraryPresent({ run: unrelated, exists: () => false }), false);
+  assert.equal(webkitLibraryPresent({ run: absent, exists: () => false }), false);
+  assert.equal(webkitLibraryPresent({ run: absent,
+    exists: path => path === "/usr/lib64/libwebkit2gtk-4.1.so.0" }), true);
 });

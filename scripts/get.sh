@@ -83,9 +83,9 @@ for component in ghostlight ghostlight-mcp-connector ghostlight-browser-connecto
   chmod 0755 "$downloaded"
 done
 
-# The verified service owns exact-process replacement at the permanent paths.
-# Download failure cannot partially replace a working installation.
-"$temporary/ghostlight" deployment install "$install_directory"
+# The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
+# A failed download cannot partially replace a working installation.
+"$temporary/ghostlight" deployment install
 
 ghostlight="$install_directory/ghostlight"
 echo "Ghostlight ${version} installed at ${install_directory}"

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, realpathSync } from "node:fs";
+import { createReadStream, existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -20,6 +20,26 @@ const EXECUTABLES = [
   "ghostlight",
   "ghostlight-mcp-connector",
   "ghostlight-browser-connector",
+];
+
+/** Environment variable that moves the Ghostlight home. It exists for journeys only. */
+const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
+/** Record the installer writes into the install directory once a service is running. */
+const INSTALL_RECORD_NAME = "install.json";
+/** Marker file in the Ghostlight home that selects a development installation. */
+const DEVELOPMENT_MARKER_NAME = "development";
+/** First commands that start the service or make it installed. Every other command is read-only. */
+const LAUNCH_COMMANDS = new Set(["install", "open", "serve"]);
+
+/** The Linux shared library the desktop service links, and the packages that provide it. */
+const WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
+const WEBKIT_PACKAGES = "libwebkit2gtk-4.1-0 (Debian, Ubuntu), webkit2gtk4.1 (Fedora), webkit2gtk-4.1 (Arch)";
+const LIBRARY_DIRECTORIES = [
+  "/usr/lib/x86_64-linux-gnu",
+  "/lib/x86_64-linux-gnu",
+  "/usr/lib64",
+  "/usr/lib",
+  "/usr/local/lib",
 ];
 
 export function releaseTarget(platform = process.platform, architecture = process.arch) {
@@ -57,6 +77,88 @@ export function publishedAssetNames() {
 export function selectedExecutable(arguments_, platform = process.platform, architecture = process.arch) {
   const [orchestrator, mcpConnector] = executableNames(platform, architecture);
   return arguments_.length === 0 ? mcpConnector : orchestrator;
+}
+
+/**
+ * True when the command starts or installs the service: no arguments (the MCP connector),
+ * `install`, `open` or `serve`. Every other command only reads and never installs.
+ */
+export function launchesService(arguments_) {
+  return arguments_.length === 0 || LAUNCH_COMMANDS.has(arguments_[0]);
+}
+
+/**
+ * Orders two release versions. Returns a negative, zero or positive number, or null when either
+ * is not `major.minor.patch` with an optional pre-release suffix. A pre-release sorts below its
+ * release.
+ */
+export function compareVersions(left, right) {
+  const parse = (value) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(value));
+    return match ? { numbers: match.slice(1, 4).map(Number), pre: match[4] } : null;
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) {
+    return null;
+  }
+  for (let index = 0; index < 3; index++) {
+    if (a.numbers[index] !== b.numbers[index]) {
+      return a.numbers[index] - b.numbers[index];
+    }
+  }
+  if (a.pre === b.pre) {
+    return 0;
+  }
+  if (a.pre === undefined) {
+    return 1;
+  }
+  if (b.pre === undefined) {
+    return -1;
+  }
+  return a.pre < b.pre ? -1 : 1;
+}
+
+/** Reads `install.json` from the install directory; absent or unreadable records are null. */
+export async function readInstallRecord(directory) {
+  try {
+    return JSON.parse(await readFile(join(directory, INSTALL_RECORD_NAME), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT" || error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * True when the installed service is the same as or newer than the package. An absent,
+ * unreadable or unordered record counts as older, so the next launch installs.
+ */
+export async function installedSetIsCurrent(directory, packageVersion) {
+  const record = await readInstallRecord(directory);
+  const order = compareVersions(record?.service_version, packageVersion);
+  return order !== null && order >= 0;
+}
+
+/** True when the dynamic loader lists, or a known library directory holds, the WebKit library. */
+export function webkitLibraryPresent({ run = spawnSync, exists = existsSync } = {}) {
+  for (const loader of ["ldconfig", "/sbin/ldconfig", "/usr/sbin/ldconfig"]) {
+    const result = run(loader, ["-p"], { encoding: "utf8", windowsHide: true });
+    if (!result.error && result.status === 0 && String(result.stdout).includes(WEBKIT_LIBRARY)) {
+      return true;
+    }
+  }
+  return LIBRARY_DIRECTORIES.some((directory) => exists(`${directory}/${WEBKIT_LIBRARY}`));
+}
+
+/** Throws a sentence naming the missing package when Linux lacks the library the service needs. */
+export function requireLinuxLibraries(platform, probe = webkitLibraryPresent) {
+  if (platform === "linux" && !probe()) {
+    throw new Error(
+      `Ghostlight needs ${WEBKIT_LIBRARY}, which is not installed. Install its package: ${WEBKIT_PACKAGES}.`,
+    );
+  }
 }
 
 export function validateChecksums(manifest, version, names) {
@@ -147,58 +249,102 @@ export async function ensureBinary({
   return true;
 }
 
+/** Downloads and verifies the given executables into a fresh stage directory under `cacheRoot`. */
+async function stageDownloads({ indexes, packageJson, manifest, platform, architecture, cacheRoot, fetchImpl, reporter }) {
+  const assets = assetNames(platform, architecture);
+  const executables = executableNames(platform, architecture);
+  await mkdir(cacheRoot, { recursive: true });
+  const stage = await mkdtemp(join(cacheRoot, ".download-"));
+  try {
+    for (const [position, index] of indexes.entries()) {
+      const changed = await ensureBinary({
+        path: join(stage, executables[index]),
+        url: `${RELEASE_ROOT}/v${packageJson.version}/${assets[index]}`,
+        expectedHash: manifest.binaries[assets[index]],
+        fetchImpl,
+        onDownload: () => reporter(
+          `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${position + 1}/${indexes.length})...`,
+        ),
+      });
+      if (changed) {
+        reporter(`Verified ${EXECUTABLES[index]}.`);
+      }
+    }
+  } catch (error) {
+    await rm(stage, { recursive: true, force: true });
+    throw error;
+  }
+  return stage;
+}
+
+/**
+ * Decides what to run and makes it ready. Launch commands (see `launchesService`) run the
+ * installed set when `install.json` is the same as or newer than this package, or when the
+ * development marker exists; otherwise the verified download installs itself first. Every other
+ * command runs the installed service, or a verified staged copy that installs nothing.
+ *
+ * Resolves to the executable, its arguments, and `cleanup` for any staged files.
+ */
 export async function prepareLaunch({
-  arguments_: arguments_ = process.argv.slice(2),
+  arguments_ = process.argv.slice(2),
   platform = process.platform,
   architecture = process.arch,
-  cacheRoot = process.env.GHOSTLIGHT_HOME ?? join(homedir(), ".ghostlight"),
+  cacheRoot = process.env[TEST_HOME_VARIABLE] ?? join(homedir(), ".ghostlight"),
   fetchImpl = globalThis.fetch,
   reporter = () => {},
   installImpl = installDownload,
+  libraryProbe = webkitLibraryPresent,
 } = {}) {
-  const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
-  const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "checksums.json"), "utf8"));
-  const assets = assetNames(platform, architecture);
+  const home = resolve(cacheRoot);
+  const directory = join(home, "bin");
   const executables = executableNames(platform, architecture);
-  validateChecksums(manifest, packageJson.version, publishedAssetNames());
-  const directory = resolve(cacheRoot, "bin");
-  const matches = await Promise.all(assets.map(async (asset, index) => {
-    try { return await sha256(join(directory, executables[index])) === manifest.binaries[asset]; }
-    catch (error) { if (error?.code === "ENOENT") return false; throw error; }
-  }));
-  if (!matches.every(Boolean)) {
-    await mkdir(cacheRoot, { recursive: true });
-    const stage = await mkdtemp(join(resolve(cacheRoot), ".download-"));
+  const installed = join(directory, selectedExecutable(arguments_, platform, architecture));
+  const launch = launchesService(arguments_);
+  const nothingToClean = async () => {};
+  const readPackage = async () => {
+    const packageJson = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(PACKAGE_ROOT, "checksums.json"), "utf8"));
+    validateChecksums(manifest, packageJson.version, publishedAssetNames());
+    return { packageJson, manifest };
+  };
+  const stageOptions = { platform, architecture, cacheRoot: home, fetchImpl, reporter };
+
+  if (launch) {
+    const packageVersion = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
+    const development = existsSync(join(home, DEVELOPMENT_MARKER_NAME));
+    if (development || (existsSync(installed) && await installedSetIsCurrent(directory, packageVersion))) {
+      requireLinuxLibraries(platform, libraryProbe);
+      return { executable: installed, arguments_, cleanup: nothingToClean };
+    }
+    const { packageJson, manifest } = await readPackage();
+    requireLinuxLibraries(platform, libraryProbe);
+    const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
     try {
-      for (const [index, asset] of assets.entries()) {
-        const url = `${RELEASE_ROOT}/v${packageJson.version}/${asset}`;
-        const changed = await ensureBinary({
-          path: join(stage, executables[index]),
-          url,
-          expectedHash: manifest.binaries[asset],
-          fetchImpl,
-          onDownload: () => reporter(
-            `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${index + 1}/${assets.length})...`,
-          ),
-        });
-        if (changed) {
-          reporter(`Verified ${EXECUTABLES[index]}.`);
-        }
-      }
       await installImpl(join(stage, executables[0]), directory);
     } finally {
       await rm(stage, { recursive: true, force: true });
     }
+    return { executable: installed, arguments_, cleanup: nothingToClean };
   }
+
+  const service = join(directory, executables[0]);
+  if (existsSync(service)) {
+    requireLinuxLibraries(platform, libraryProbe);
+    return { executable: service, arguments_, cleanup: nothingToClean };
+  }
+  const { packageJson, manifest } = await readPackage();
+  requireLinuxLibraries(platform, libraryProbe);
+  const stage = await stageDownloads({ ...stageOptions, indexes: [0], packageJson, manifest });
   return {
-    executable: join(directory, selectedExecutable(arguments_, platform, architecture)),
+    executable: join(stage, executables[0]),
     arguments_,
+    cleanup: () => rm(stage, { recursive: true, force: true }),
   };
 }
 
-function installDownload(executable, directory) {
+function installDownload(executable) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, ["deployment", "install", directory], {
+    const child = spawn(executable, ["deployment", "install"], {
       stdio: ["ignore", "ignore", "inherit"], windowsHide: true,
     });
     child.on("error", reject);
@@ -215,12 +361,14 @@ async function main() {
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => child.kill(signal));
   }
-  child.on("error", (error) => {
+  child.on("error", async (error) => {
     console.error(`ghostlight: ${error.message}`);
     process.exitCode = 1;
+    await launch.cleanup();
   });
-  child.on("exit", (code, signal) => {
+  child.on("exit", async (code, signal) => {
     process.exitCode = code ?? (signal ? 1 : 0);
+    await launch.cleanup();
   });
 }
 

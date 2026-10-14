@@ -2,9 +2,13 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { binaryPath, run, targetFor } = require("../server/launch.js");
+const { binaryPath, compareVersions, installIsCurrent, run, targetFor } = require("../server/launch.js");
+
+const BUNDLE_VERSION = "2.0.0";
 
 test("the bundle maps the supported Claude Desktop platform", () => {
   assert.equal(targetFor("win32", "x64"), "x86_64-pc-windows-msvc");
@@ -19,37 +23,97 @@ test("binary paths keep the three sibling executables in one target directory", 
   );
 });
 
-test("browser setup stays off MCP stdout and precedes the stdio edge", () => {
+test("versions order numerically and a pre-release sorts below its release", () => {
+  assert.ok(compareVersions("2.0.0", "1.9.9") > 0);
+  assert.ok(compareVersions("1.3.9", "1.3.15") < 0);
+  assert.equal(compareVersions("2.0.0", "2.0.0"), 0);
+  assert.ok(compareVersions("2.0.0-rc.1", "2.0.0") < 0);
+  assert.equal(compareVersions("junk", "2.0.0"), null);
+});
+
+/** A temporary Ghostlight home, optionally holding an install record. */
+function homeWithRecord(record) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ghostlight-mcpb-"));
+  if (record !== undefined) {
+    fs.mkdirSync(path.join(home, "bin"));
+    fs.writeFileSync(path.join(home, "bin", "install.json"), record);
+  }
+  return home;
+}
+
+/** Runs the launcher against a fake spawner; returns the exit status and the commands run. */
+function launch(record, overrides = {}) {
+  const home = homeWithRecord(record);
   const calls = [];
-  const status = run({
-    platform: "win32",
-    architecture: "x64",
-    serverDirectory: path.join("fixture", "server"),
-    spawnSyncImpl(command, args, options) {
-      calls.push({ command, args, options });
-      return { status: 0, stdout: "setup output", stderr: "" };
-    },
-    stderr: { write: () => assert.fail("unexpected stderr") },
-  });
+  const errors = [];
+  try {
+    const status = run({
+      platform: "win32",
+      architecture: "x64",
+      serverDirectory: path.join("fixture", "server"),
+      version: BUNDLE_VERSION,
+      env: { GHOSTLIGHT_TEST_HOME: home },
+      spawnSyncImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return overrides.spawn ? overrides.spawn(command, args) : { status: 0, stdout: "setup output", stderr: "" };
+      },
+      stderr: { write: (value) => errors.push(value) },
+    });
+    return { status, calls, errors };
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test("an absent install record installs from the bundle off MCP stdout, then starts the stdio edge", () => {
+  const { status, calls, errors } = launch(undefined);
   assert.equal(status, 0);
-  assert.deepEqual(calls[0].args, ["install", "--no-clients", "--no-open"]);
+  assert.deepEqual(errors, []);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].command, /ghostlight\.exe$/);
+  assert.deepEqual(calls[0].args, ["deployment", "install"]);
   assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
   assert.match(calls[1].command, /ghostlight-mcp-connector\.exe$/);
+  assert.deepEqual(calls[1].args, []);
   assert.equal(calls[1].options.stdio, "inherit");
 });
 
-test("a setup failure is returned and the MCP connector never starts", () => {
-  const calls = [];
-  const errors = [];
-  const status = run({
-    platform: "win32",
-    architecture: "x64",
-    serverDirectory: path.join("fixture", "server"),
-    spawnSyncImpl(command) {
-      calls.push(command);
-      return { status: 7, stdout: "", stderr: "registration refused" };
-    },
-    stderr: { write: (value) => errors.push(value) },
+test("an older or unreadable install record installs first", () => {
+  for (const record of [
+    JSON.stringify({ service_version: "1.3.15" }),
+    JSON.stringify({ service_version: "2.0.0-rc.1" }),
+    JSON.stringify({}),
+    "{ not json",
+  ]) {
+    const { status, calls } = launch(record);
+    assert.equal(status, 0, record);
+    assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], []], record);
+  }
+});
+
+test("the same or a newer install record starts the stdio edge without installing", () => {
+  for (const version of ["2.0.0", "2.0.1", "2.1.0", "10.0.0"]) {
+    const { status, calls } = launch(JSON.stringify({ service_version: version }));
+    assert.equal(status, 0, version);
+    assert.equal(calls.length, 1, version);
+    assert.match(calls[0].command, /ghostlight-mcp-connector\.exe$/);
+    assert.equal(calls[0].options.stdio, "inherit");
+  }
+});
+
+test("the install record is read from the bin directory of the Ghostlight home", () => {
+  const home = homeWithRecord(JSON.stringify({ service_version: "2.0.0" }));
+  try {
+    assert.equal(installIsCurrent(home, "2.0.0"), true);
+    assert.equal(installIsCurrent(path.join(home, "missing"), "2.0.0"), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("an install failure is returned and the MCP connector never starts", () => {
+  const { status, calls, errors } = launch(undefined, {
+    spawn: () => ({ status: 7, stdout: "", stderr: "registration refused" }),
   });
   assert.equal(status, 7);
   assert.equal(calls.length, 1);
