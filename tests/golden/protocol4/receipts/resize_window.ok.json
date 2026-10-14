@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_000b",
+  "ok": {"tab_id":12,"width":1280,"height":800,"affected_tab_ids":[12,13]},
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

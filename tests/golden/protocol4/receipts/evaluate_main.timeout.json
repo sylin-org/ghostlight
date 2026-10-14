@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0011",
+  "failure": "timeout",
+  "message": "The script did not finish in 5000 ms.",
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

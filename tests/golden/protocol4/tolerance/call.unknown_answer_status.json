@@ -1,0 +1,11 @@
+{
+  "description": "A call answer status that protocol 4 does not define.",
+  "frame": {
+    "kind": "receipt",
+    "correlation": "p4_000d",
+    "ok": {"answers":[{"status":"paused","note":"x"}]},
+    "dispatched": true,
+    "committed_urls": []
+  },
+  "expect": {"maps_to":"unknown"}
+}

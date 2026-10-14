@@ -1,0 +1,25 @@
+{
+  "kind": "request",
+  "correlation": "p4_0028",
+  "primitive": {
+    "name": "accessibility_snapshot",
+    "args": {
+      "tab_id": 12,
+      "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+      "max_nodes": 2000,
+      "max_depth": 6,
+      "query": {"role":"button","name":"Save"},
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          }
+        ],
+        "exact": false,
+        "unseen": 0
+      }
+    }
+  }
+}

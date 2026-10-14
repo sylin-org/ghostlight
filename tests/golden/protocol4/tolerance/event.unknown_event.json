@@ -1,0 +1,5 @@
+{
+  "description": "An event that protocol 4 does not define.",
+  "frame": {"kind":"event","event":{"event":"future_event","tab_id":12}},
+  "expect": {"ignored":true}
+}

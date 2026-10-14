@@ -1,0 +1,6 @@
+{
+  "kind": "prepare_fill",
+  "fields": [{"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},{"locator":"locator_a1b2c3d4_7","value":"ada@example.com"}],
+  "allow_credentials": false,
+  "submit_locator": "locator_a1b2c3d4_8"
+}

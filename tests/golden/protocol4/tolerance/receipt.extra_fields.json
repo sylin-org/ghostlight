@@ -1,0 +1,30 @@
+{
+  "description": "A receipt with extra fields at every level.",
+  "frame": {
+    "kind": "receipt",
+    "correlation": "p4_0004",
+    "ok": {
+      "tab": {
+        "tab_id": 12,
+        "title": "Example Domain",
+        "url": "https://example.com/",
+        "active": true,
+        "readiness": "complete",
+        "future_field": 1
+      },
+      "future_outcome": true
+    },
+    "dispatched": true,
+    "committed_urls": ["https://example.com/"],
+    "tab": {
+      "tab_id": 12,
+      "title": "Example Domain",
+      "url": "https://example.com/",
+      "active": true,
+      "readiness": "complete",
+      "future_field": 1
+    },
+    "future_receipt_field": "x"
+  },
+  "expect": {"decodes_as":"receipts/navigate.ok.json"}
+}

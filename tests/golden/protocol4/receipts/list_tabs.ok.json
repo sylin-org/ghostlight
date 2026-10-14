@@ -1,0 +1,19 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0001",
+  "ok": {
+    "tabs": [
+      {
+        "tab_id": 12,
+        "title": "Account",
+        "url": "https://example.com/account",
+        "active": true,
+        "readiness": "complete",
+        "opener_tab_id": 3
+      },
+      {"tab_id":13,"title":"Docs","url":"https://docs.example.com/","active":false,"readiness":"loading"}
+    ]
+  },
+  "dispatched": false,
+  "committed_urls": []
+}

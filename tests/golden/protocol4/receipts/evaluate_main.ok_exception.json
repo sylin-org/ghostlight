@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0011",
+  "ok": {"value":"","truncated":false,"exception":"ReferenceError: nope is not defined"},
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

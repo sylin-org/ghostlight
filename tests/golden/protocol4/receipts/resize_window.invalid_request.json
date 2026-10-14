@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_000b",
+  "failure": "invalid_request",
+  "message": "Window width must be between 320 and 7680.",
+  "dispatched": false,
+  "committed_urls": []
+}

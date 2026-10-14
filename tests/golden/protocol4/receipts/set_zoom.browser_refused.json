@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_000a",
+  "failure": "browser_refused",
+  "message": "Zoom level is outside the range the browser allows.",
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

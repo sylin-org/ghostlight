@@ -1,0 +1,29 @@
+{
+  "kind": "request",
+  "correlation": "p4_0016",
+  "primitive": {
+    "name": "input",
+    "args": {
+      "tab_id": 12,
+      "steps": [{"step":"drag","path":[{"x":100,"y":120},{"x":180,"y":160},{"x":260,"y":200}],"modifiers":0}],
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          },
+          {
+            "frame_id": "6D1C84E9A7F203B5C9E4D7A1B82F0C36",
+            "loader_id": "C7E2A9F5031B8D64E9A0C3F7D2B16E85",
+            "url": "https://widgets.example.net/embed"
+          }
+        ],
+        "exact": true,
+        "unseen": 0
+      },
+      "settle_ms": 200,
+      "timeout_ms": 8000
+    }
+  }
+}

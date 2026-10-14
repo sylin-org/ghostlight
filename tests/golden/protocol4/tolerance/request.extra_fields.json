@@ -1,0 +1,10 @@
+{
+  "description": "A request with extra fields beside and inside the primitive arguments.",
+  "frame": {
+    "kind": "request",
+    "correlation": "p4_0008",
+    "future_trace": "t1",
+    "primitive": {"name":"focus_tab","args":{"tab_id":12,"future_arg":"x"}}
+  },
+  "expect": {"decodes_as":"requests/focus_tab.json"}
+}

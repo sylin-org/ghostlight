@@ -1,0 +1,13 @@
+{
+  "description": "A tab readiness that protocol 4 does not define.",
+  "frame": {
+    "kind": "receipt",
+    "correlation": "p4_0004",
+    "ok": {
+      "tab": {"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"prerendering"}
+    },
+    "dispatched": true,
+    "committed_urls": ["https://example.com/"]
+  },
+  "expect": {"maps_to":"unknown"}
+}

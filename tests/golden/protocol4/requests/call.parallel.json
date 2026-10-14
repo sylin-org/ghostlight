@@ -1,0 +1,48 @@
+{
+  "kind": "request",
+  "correlation": "p4_000e",
+  "primitive": {
+    "name": "call",
+    "args": {
+      "tab_id": 12,
+      "mode": "parallel",
+      "calls": [
+        {
+          "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+          "message": {
+            "kind": "read_text",
+            "locator": "locator_a1b2c3d4_1",
+            "mode": "article",
+            "max_chars": 20000,
+            "settle_ms": 1500,
+            "visual_settle": true
+          }
+        },
+        {
+          "frame": {"frame_id":"6D1C84E9A7F203B5C9E4D7A1B82F0C36","loader_id":"C7E2A9F5031B8D64E9A0C3F7D2B16E85"},
+          "message": {
+            "kind": "read_text",
+            "locator": "locator_a1b2c3d4_1",
+            "mode": "article",
+            "max_chars": 20000,
+            "settle_ms": 1500,
+            "visual_settle": true
+          }
+        }
+      ],
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          }
+        ],
+        "exact": false,
+        "unseen": 0
+      },
+      "settle_ms": 0,
+      "timeout_ms": 10000
+    }
+  }
+}

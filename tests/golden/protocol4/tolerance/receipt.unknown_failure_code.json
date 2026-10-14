@@ -1,0 +1,12 @@
+{
+  "description": "A receipt failure code that protocol 4 does not define.",
+  "frame": {
+    "kind": "receipt",
+    "correlation": "p4_0004",
+    "failure": "from_the_future",
+    "message": "New failure.",
+    "dispatched": true,
+    "committed_urls": []
+  },
+  "expect": {"maps_to":"other"}
+}

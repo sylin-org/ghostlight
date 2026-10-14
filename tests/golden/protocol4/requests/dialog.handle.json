@@ -1,0 +1,5 @@
+{
+  "kind": "request",
+  "correlation": "p4_001e",
+  "primitive": {"name":"dialog","args":{"tab_id":12,"op":{"op":"handle","accept":true,"text":"yes"}}}
+}

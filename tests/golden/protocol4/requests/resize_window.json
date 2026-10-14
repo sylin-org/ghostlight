@@ -1,0 +1,5 @@
+{
+  "kind": "request",
+  "correlation": "p4_000b",
+  "primitive": {"name":"resize_window","args":{"tab_id":12,"width":1280,"height":800}}
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_001e",
+  "ok": {"present":true,"dialog_type":"confirm","handled":true,"accepted":true},
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

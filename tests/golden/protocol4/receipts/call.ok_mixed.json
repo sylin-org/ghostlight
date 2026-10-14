@@ -1,0 +1,22 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_000e",
+  "ok": {
+    "answers": [
+      {
+        "status": "returned",
+        "envelope": {
+          "ok": true,
+          "value": {"rectangle":{"x":10,"y":20,"width":100,"height":40},"subject":{"role":"button","name":"Save"}}
+        }
+      },
+      {"status":"returned","envelope":{"ok":false,"error":{"code":"stale_locator","message":"stale browser locator"}}},
+      {"status":"failed","code":"document_changed","message":"Cannot find context with specified id","started":false},
+      {"status":"failed","code":"page_exception","message":"TypeError: x is not a function","started":true},
+      {"status":"skipped"}
+    ]
+  },
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

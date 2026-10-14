@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0013",
+  "failure": "session_lost",
+  "message": "The debugger detached during input.",
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

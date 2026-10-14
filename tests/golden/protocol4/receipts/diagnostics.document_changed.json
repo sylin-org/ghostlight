@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_001f",
+  "failure": "document_changed",
+  "message": "The page changed before diagnostics were read.",
+  "dispatched": false,
+  "committed_urls": []
+}

@@ -1,0 +1,7 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_001e",
+  "ok": {"present":false,"dialog_type":"unknown","handled":false,"accepted":false},
+  "dispatched": false,
+  "committed_urls": []
+}

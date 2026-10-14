@@ -1,0 +1,42 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_001f",
+  "ok": {
+    "entries": [
+      {
+        "entry": "console",
+        "cursor": "cursor_0a1c",
+        "timestamp_ms": 1790999990000,
+        "level": "error",
+        "text": "Uncaught TypeError",
+        "url": "https://example.com/app.js"
+      },
+      {
+        "entry": "network",
+        "cursor": "cursor_0a1d",
+        "timestamp_ms": 1790999990100,
+        "method": "GET",
+        "url": "https://example.com/api",
+        "resource_type": "fetch",
+        "status": 500
+      },
+      {
+        "entry": "network",
+        "cursor": "cursor_0a1e",
+        "timestamp_ms": 1790999990200,
+        "method": "POST",
+        "url": "https://example.com/log",
+        "resource_type": "xhr",
+        "failure": "net::ERR_FAILED"
+      }
+    ],
+    "cursor": "cursor_0a1e",
+    "truncated": false,
+    "evicted": false,
+    "capture_started": true,
+    "omitted_count": 0,
+    "cleared_count": 0
+  },
+  "dispatched": false,
+  "committed_urls": []
+}

@@ -1,0 +1,22 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0023",
+  "ok": {
+    "result": "stopped",
+    "summary": {
+      "recording_id": "rec_41c7",
+      "tab_id": 12,
+      "state": "frozen",
+      "frame_count": 18,
+      "bytes_held": 912340,
+      "duration_ms": 4200,
+      "source_urls": ["https://example.com/account"],
+      "source_urls_complete": true,
+      "retention_expires_unix_ms": 1791000300000,
+      "stop_reason": "explicit"
+    },
+    "changed": true
+  },
+  "dispatched": false,
+  "committed_urls": []
+}

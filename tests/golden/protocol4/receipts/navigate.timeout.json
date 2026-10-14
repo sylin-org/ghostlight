@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0004",
+  "failure": "timeout",
+  "message": "The tab did not become ready in 8000 ms.",
+  "dispatched": true,
+  "committed_urls": ["https://example.com/"],
+  "tab": {"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"loading"}
+}

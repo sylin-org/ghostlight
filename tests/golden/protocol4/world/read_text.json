@@ -1,0 +1,8 @@
+{
+  "kind": "read_text",
+  "locator": "locator_a1b2c3d4_1",
+  "mode": "article",
+  "max_chars": 20000,
+  "settle_ms": 1500,
+  "visual_settle": true
+}

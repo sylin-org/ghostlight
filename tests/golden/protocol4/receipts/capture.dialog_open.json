@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0019",
+  "failure": "dialog_open",
+  "message": "A JavaScript dialog blocks the page.",
+  "dispatched": false,
+  "committed_urls": []
+}

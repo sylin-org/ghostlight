@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0009",
+  "failure": "local_interlock",
+  "message": "Ghostlight is preserving controlled tabs by local browser choice.",
+  "dispatched": false,
+  "committed_urls": []
+}

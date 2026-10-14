@@ -1,0 +1,13 @@
+{
+  "kind": "request",
+  "correlation": "p4_0024",
+  "primitive": {
+    "name": "recording",
+    "args": {
+      "op": "export",
+      "recording_id": "rec_41c7",
+      "destination": {"destination":"download","file_name":"demo.gif"},
+      "max_output_bytes": 16777216
+    }
+  }
+}

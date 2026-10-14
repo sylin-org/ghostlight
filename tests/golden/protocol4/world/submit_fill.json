@@ -1,0 +1,6 @@
+{
+  "kind": "submit_fill",
+  "fields": [{"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"}],
+  "submit_locator": "locator_a1b2c3d4_8",
+  "allow_credentials": false
+}

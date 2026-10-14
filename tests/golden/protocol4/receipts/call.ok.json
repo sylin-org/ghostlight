@@ -1,0 +1,19 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_000d",
+  "ok": {
+    "answers": [
+      {
+        "status": "returned",
+        "envelope": {
+          "ok": true,
+          "value": {"rectangle":{"x":10,"y":20,"width":100,"height":40},"subject":{"role":"button","name":"Save"}}
+        }
+      },
+      {"status":"returned","envelope":{"ok":true,"value":{"activated":true}}}
+    ]
+  },
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

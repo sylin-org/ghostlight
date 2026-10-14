@@ -1,0 +1,11 @@
+{
+  "description": "An input stop reason that protocol 4 does not define.",
+  "frame": {
+    "kind": "receipt",
+    "correlation": "p4_0013",
+    "ok": {"completed_steps":1,"stopped":{"reason":"future_reason"},"native_drag":false},
+    "dispatched": true,
+    "committed_urls": []
+  },
+  "expect": {"maps_to":"other"}
+}

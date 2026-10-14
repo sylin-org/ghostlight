@@ -1,0 +1,8 @@
+{
+  "kind": "request",
+  "correlation": "p4_0025",
+  "primitive": {
+    "name": "recording",
+    "args": {"op":"export","recording_id":"rec_41c7","destination":{"destination":"client"},"max_output_bytes":5242880}
+  }
+}

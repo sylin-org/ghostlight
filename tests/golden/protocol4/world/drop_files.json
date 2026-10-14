@@ -1,0 +1,6 @@
+{
+  "kind": "drop_files",
+  "x": 400,
+  "y": 300,
+  "files": [{"name":"notes.txt","media_type":"text/plain","data":"aGVsbG8=","size":5}]
+}

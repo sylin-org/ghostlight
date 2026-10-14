@@ -1,0 +1,8 @@
+{
+  "kind": "verify_fill_retained",
+  "fields": [{"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},{"locator":"locator_a1b2c3d4_7","value":"ada@example.com"}],
+  "allow_credentials": false,
+  "stable_ms": 250,
+  "poll_ms": 25,
+  "limit_ms": 3000
+}

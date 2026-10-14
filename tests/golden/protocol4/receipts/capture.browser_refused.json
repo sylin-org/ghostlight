@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0019",
+  "failure": "browser_refused",
+  "message": "CDP method Page.captureScreenshot was refused.",
+  "dispatched": false,
+  "committed_urls": []
+}

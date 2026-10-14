@@ -1,0 +1,15 @@
+{
+  "kind": "request",
+  "correlation": "p4_0003",
+  "primitive": {
+    "name": "open_tab",
+    "args": {
+      "url": "https://example.com/inbox",
+      "group_key": "workspace_9a2c",
+      "group_title": "Ghostlight - Research",
+      "adopt_tab_id": 14,
+      "focus_window": true,
+      "ready_timeout_ms": 8000
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "kind": "focus_text_field",
+  "field": {"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},
+  "allow_credentials": false,
+  "settle_ms": 1500,
+  "visual_settle": true
+}

@@ -1,0 +1,5 @@
+{
+  "kind": "request",
+  "correlation": "p4_0027",
+  "primitive": {"name":"recording","args":{"op":"discard","recording_id":"rec_41c7"}}
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0011",
+  "failure": "document_changed",
+  "message": "The page changed before the script ran.",
+  "dispatched": false,
+  "committed_urls": []
+}

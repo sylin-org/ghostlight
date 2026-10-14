@@ -1,0 +1,34 @@
+{
+  "kind": "request",
+  "correlation": "p4_0018",
+  "primitive": {
+    "name": "input",
+    "args": {
+      "tab_id": 12,
+      "precondition": {
+        "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+        "message": {
+          "kind": "focus_text_field",
+          "field": {"locator":"locator_a1b2c3d4_6","value":"Ada Lovelace"},
+          "allow_credentials": false,
+          "settle_ms": 1500,
+          "visual_settle": true
+        }
+      },
+      "steps": [{"step":"insert_text","text":"Ada Lovelace"}],
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          }
+        ],
+        "exact": false,
+        "unseen": 0
+      },
+      "settle_ms": 100,
+      "timeout_ms": 8000
+    }
+  }
+}

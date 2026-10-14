@@ -1,0 +1,5 @@
+{
+  "description": "A frame kind that protocol 4 does not define.",
+  "frame": {"kind":"future_frame","payload":{"anything":true}},
+  "expect": {"ignored":true}
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0004",
+  "failure": "cancelled",
+  "message": "The request was cancelled.",
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"loading"}
+}

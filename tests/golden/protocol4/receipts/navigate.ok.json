@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0004",
+  "ok": {"tab":{"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"complete"}},
+  "dispatched": true,
+  "committed_urls": ["https://example.com/"],
+  "tab": {"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"complete"}
+}

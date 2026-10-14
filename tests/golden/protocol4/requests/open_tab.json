@@ -1,0 +1,14 @@
+{
+  "kind": "request",
+  "correlation": "p4_0002",
+  "primitive": {
+    "name": "open_tab",
+    "args": {
+      "url": "https://example.com/",
+      "group_key": "workspace_9a2c",
+      "group_title": "Ghostlight - Research",
+      "focus_window": false,
+      "ready_timeout_ms": 8000
+    }
+  }
+}

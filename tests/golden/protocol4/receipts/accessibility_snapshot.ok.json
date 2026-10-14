@@ -1,0 +1,20 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0028",
+  "ok": {
+    "nodes": [
+      {"node_id":"ax_1","role":"RootWebArea","name":"Account"},
+      {
+        "node_id": "ax_2",
+        "parent_id": "ax_1",
+        "role": "button",
+        "name": "Save",
+        "value": "",
+        "properties": [["focused","true"],["disabled","false"]]
+      }
+    ],
+    "truncated": false
+  },
+  "dispatched": false,
+  "committed_urls": []
+}

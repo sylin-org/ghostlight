@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0019",
+  "failure": "capture_too_large",
+  "message": "No quality in the budget fits the size limit.",
+  "dispatched": false,
+  "committed_urls": []
+}

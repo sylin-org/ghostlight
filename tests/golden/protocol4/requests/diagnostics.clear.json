@@ -1,0 +1,1 @@
+{"kind":"request","correlation":"p4_0020","primitive":{"name":"diagnostics","args":{"op":"clear","tab_ids":[12,13]}}}

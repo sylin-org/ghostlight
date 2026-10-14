@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0007",
+  "failure": "debugger_unavailable",
+  "message": "Another debugger is attached to this tab.",
+  "dispatched": false,
+  "committed_urls": []
+}

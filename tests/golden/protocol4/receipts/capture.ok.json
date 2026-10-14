@@ -1,0 +1,24 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0019",
+  "ok": {
+    "mime_type": "image/jpeg",
+    "data": "/9j/4AAQSkZJRgABAQ==",
+    "width": 1280,
+    "height": 720,
+    "output_scale": 1,
+    "clip": {"x":0,"y":0,"width":1280,"height":720},
+    "view": {
+      "visual_page_x": 0,
+      "visual_page_y": 0,
+      "visual_css_width": 1280,
+      "visual_css_height": 720,
+      "content_css_width": 1280,
+      "content_css_height": 2400,
+      "device_scale": 2,
+      "zoom": 1
+    }
+  },
+  "dispatched": false,
+  "committed_urls": []
+}

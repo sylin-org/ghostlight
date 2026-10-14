@@ -1,0 +1,19 @@
+{
+  "kind": "request",
+  "correlation": "p4_0019",
+  "primitive": {
+    "name": "capture",
+    "args": {
+      "tab_id": 12,
+      "clip": {"clip":"viewport"},
+      "budget": {
+        "max_side": 1568,
+        "max_pixels": 1150000,
+        "min_scale": 0.3,
+        "magnify": false,
+        "qualities": [80,60,40],
+        "max_base64_chars": 1400000
+      }
+    }
+  }
+}

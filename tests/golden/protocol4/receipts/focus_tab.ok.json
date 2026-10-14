@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0008",
+  "ok": {"tab_id":12,"active":true,"window_focused":true},
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

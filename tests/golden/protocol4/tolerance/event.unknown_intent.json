@@ -1,0 +1,5 @@
+{
+  "description": "A runtime control intent that protocol 4 does not define.",
+  "frame": {"kind":"event","event":{"event":"runtime_control_requested","intent":"future_intent"}},
+  "expect": {"ignored":true}
+}

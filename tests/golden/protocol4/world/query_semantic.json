@@ -1,0 +1,9 @@
+{
+  "kind": "query_semantic",
+  "name": "Email address",
+  "role": "textbox",
+  "exact": false,
+  "form_scope": true,
+  "settle_ms": 1500,
+  "visual_settle": true
+}

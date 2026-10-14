@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0016",
+  "ok": {"completed_steps":1,"native_drag":true},
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

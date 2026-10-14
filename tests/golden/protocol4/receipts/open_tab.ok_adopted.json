@@ -1,0 +1,11 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0003",
+  "ok": {
+    "tab": {"tab_id":14,"title":"Inbox","url":"https://example.com/inbox","active":true,"readiness":"complete"},
+    "adopted": true
+  },
+  "dispatched": true,
+  "committed_urls": ["https://example.com/inbox"],
+  "tab": {"tab_id":14,"title":"Inbox","url":"https://example.com/inbox","active":true,"readiness":"complete"}
+}

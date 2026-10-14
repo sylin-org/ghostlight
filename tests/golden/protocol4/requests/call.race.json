@@ -1,0 +1,53 @@
+{
+  "kind": "request",
+  "correlation": "p4_000f",
+  "primitive": {
+    "name": "call",
+    "args": {
+      "tab_id": 12,
+      "mode": "race",
+      "calls": [
+        {
+          "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+          "message": {
+            "kind": "observe",
+            "condition": "text_present",
+            "value": "Saved",
+            "locator": "locator_a1b2c3d4_9",
+            "timeout_ms": 5000,
+            "until_satisfied": true
+          }
+        },
+        {
+          "frame": {"frame_id":"6D1C84E9A7F203B5C9E4D7A1B82F0C36","loader_id":"C7E2A9F5031B8D64E9A0C3F7D2B16E85"},
+          "message": {
+            "kind": "observe",
+            "condition": "text_present",
+            "value": "Saved",
+            "locator": "locator_a1b2c3d4_9",
+            "timeout_ms": 5000,
+            "until_satisfied": true
+          }
+        }
+      ],
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          },
+          {
+            "frame_id": "6D1C84E9A7F203B5C9E4D7A1B82F0C36",
+            "loader_id": "C7E2A9F5031B8D64E9A0C3F7D2B16E85",
+            "url": "https://widgets.example.net/embed"
+          }
+        ],
+        "exact": true,
+        "unseen": 0
+      },
+      "settle_ms": 0,
+      "timeout_ms": 6000
+    }
+  }
+}

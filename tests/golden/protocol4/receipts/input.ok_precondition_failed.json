@@ -1,0 +1,12 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0018",
+  "ok": {
+    "precondition": {"status":"returned","envelope":{"ok":false,"error":{"code":"focus_lost","message":"focus moved before typing"}}},
+    "completed_steps": 0,
+    "native_drag": false
+  },
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Account","url":"https://example.com/account","active":true,"readiness":"complete"}
+}

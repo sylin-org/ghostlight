@@ -1,0 +1,8 @@
+{
+  "kind": "observe",
+  "condition": "text_present",
+  "value": "Saved",
+  "locator": "locator_a1b2c3d4_9",
+  "timeout_ms": 5000,
+  "until_satisfied": true
+}

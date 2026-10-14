@@ -1,0 +1,7 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0027",
+  "ok": {"result":"discarded","recording_id":"rec_41c7","released_bytes":912340},
+  "dispatched": false,
+  "committed_urls": []
+}

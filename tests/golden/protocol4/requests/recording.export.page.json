@@ -1,0 +1,31 @@
+{
+  "kind": "request",
+  "correlation": "p4_0026",
+  "primitive": {
+    "name": "recording",
+    "args": {
+      "op": "export",
+      "recording_id": "rec_41c7",
+      "destination": {
+        "destination": "page",
+        "tab_id": 12,
+        "call": {
+          "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+          "message": {"kind":"attach_file","locator":"locator_a1b2c3d4_12","file_name":"demo.gif"}
+        },
+        "guard": {
+          "documents": [
+            {
+              "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+              "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+              "url": "https://example.com/account"
+            }
+          ],
+          "exact": false,
+          "unseen": 0
+        }
+      },
+      "max_output_bytes": 16777216
+    }
+  }
+}

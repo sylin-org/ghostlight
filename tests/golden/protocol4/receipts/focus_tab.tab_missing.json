@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0008",
+  "failure": "tab_missing",
+  "message": "No tab with id: 12.",
+  "dispatched": false,
+  "committed_urls": []
+}

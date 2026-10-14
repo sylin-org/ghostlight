@@ -1,0 +1,28 @@
+{
+  "kind": "request",
+  "correlation": "p4_001f",
+  "primitive": {
+    "name": "diagnostics",
+    "args": {
+      "op": "read",
+      "tab_id": 12,
+      "source": "both",
+      "detail": "problems",
+      "match_text": "timeout",
+      "after": "cursor_0a1b",
+      "limit": 50,
+      "binding": "binding_6c2d",
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          }
+        ],
+        "exact": false,
+        "unseen": 0
+      }
+    }
+  }
+}

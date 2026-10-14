@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0021",
+  "failure": "debugger_unavailable",
+  "message": "The debugger cannot attach to this page.",
+  "dispatched": false,
+  "committed_urls": []
+}

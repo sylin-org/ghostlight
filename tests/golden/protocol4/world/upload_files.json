@@ -1,0 +1,5 @@
+{
+  "kind": "upload_files",
+  "locator": "locator_a1b2c3d4_12",
+  "files": [{"name":"notes.txt","media_type":"text/plain","data":"aGVsbG8=","size":5}]
+}

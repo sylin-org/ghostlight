@@ -1,0 +1,5 @@
+{
+  "kind": "request",
+  "correlation": "p4_0005",
+  "primitive": {"name":"navigate","args":{"tab_id":12,"to":{"to":"back"},"discard_beforeunload":false,"ready_timeout_ms":8000}}
+}

@@ -1,0 +1,5 @@
+{
+  "description": "A primitive name that protocol 4 does not define.",
+  "frame": {"kind":"request","correlation":"p4_9e01","primitive":{"name":"future_primitive","args":{"anything":true}}},
+  "expect": {"answered":"receipts/unknown_primitive.unsupported.json"}
+}

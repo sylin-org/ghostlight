@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0026",
+  "failure": "document_changed",
+  "message": "The page changed before the recording was attached.",
+  "dispatched": false,
+  "committed_urls": []
+}

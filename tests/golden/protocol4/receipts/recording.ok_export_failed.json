@@ -1,0 +1,7 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0024",
+  "ok": {"result":"export_failed","reason":"The encoded recording is larger than the output budget."},
+  "dispatched": false,
+  "committed_urls": []
+}

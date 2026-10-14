@@ -1,0 +1,10 @@
+{
+  "kind": "hello",
+  "protocol": 4,
+  "browser_id": "browser_3f2a9c",
+  "browser_name": "Chrome",
+  "platform": "ghostlight/chromium",
+  "engine_version": "131.0.6778.86",
+  "adapter_version": "2.0.0",
+  "attended": true
+}

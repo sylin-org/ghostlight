@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0011",
+  "failure": "invalid_request",
+  "message": "The script is not valid JavaScript.",
+  "dispatched": false,
+  "committed_urls": []
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "notice",
+  "tab_id": 12,
+  "frame": {"frame_id":"2F7A9C41D0E85B36A1C4F290E7B3D568","loader_id":"9B04E6A3C1D8F25747A0B9E3C6D1F482"},
+  "signal": {
+    "invocation": "inv_4e9a",
+    "signal": "target",
+    "activity": "click",
+    "phase": "Clicking the Save button",
+    "detail": "Account form",
+    "locator": "locator_a1b2c3d4_8",
+    "click": {"clicks":1,"button":"left"}
+  },
+  "defer_until_visible": true
+}

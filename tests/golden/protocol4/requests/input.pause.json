@@ -1,0 +1,8 @@
+{
+  "kind": "request",
+  "correlation": "p4_0017",
+  "primitive": {
+    "name": "input",
+    "args": {"tab_id":12,"steps":[{"step":"pause","ms":50},{"step":"pause","ms":1000}],"settle_ms":0,"timeout_ms":3000}
+  }
+}

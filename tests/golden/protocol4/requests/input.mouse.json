@@ -1,0 +1,82 @@
+{
+  "kind": "request",
+  "correlation": "p4_0013",
+  "primitive": {
+    "name": "input",
+    "args": {
+      "tab_id": 12,
+      "steps": [
+        {
+          "step": "mouse",
+          "action": "moved",
+          "x": 320,
+          "y": 240,
+          "button": "none",
+          "buttons": 0,
+          "click_count": 0,
+          "modifiers": 0,
+          "delta_x": 0,
+          "delta_y": 0,
+          "force": 0
+        },
+        {
+          "step": "mouse",
+          "action": "pressed",
+          "x": 320,
+          "y": 240,
+          "button": "left",
+          "buttons": 1,
+          "click_count": 1,
+          "modifiers": 0,
+          "delta_x": 0,
+          "delta_y": 0,
+          "force": 0.5
+        },
+        {
+          "step": "mouse",
+          "action": "released",
+          "x": 320,
+          "y": 240,
+          "button": "left",
+          "buttons": 0,
+          "click_count": 1,
+          "modifiers": 0,
+          "delta_x": 0,
+          "delta_y": 0,
+          "force": 0
+        },
+        {
+          "step": "mouse",
+          "action": "wheel",
+          "x": 320,
+          "y": 240,
+          "button": "none",
+          "buttons": 0,
+          "click_count": 0,
+          "modifiers": 0,
+          "delta_x": 0,
+          "delta_y": 120,
+          "force": 0
+        }
+      ],
+      "guard": {
+        "documents": [
+          {
+            "frame_id": "2F7A9C41D0E85B36A1C4F290E7B3D568",
+            "loader_id": "9B04E6A3C1D8F25747A0B9E3C6D1F482",
+            "url": "https://example.com/account"
+          },
+          {
+            "frame_id": "6D1C84E9A7F203B5C9E4D7A1B82F0C36",
+            "loader_id": "C7E2A9F5031B8D64E9A0C3F7D2B16E85",
+            "url": "https://widgets.example.net/embed"
+          }
+        ],
+        "exact": true,
+        "unseen": 0
+      },
+      "settle_ms": 150,
+      "timeout_ms": 5000
+    }
+  }
+}

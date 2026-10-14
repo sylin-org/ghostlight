@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0013",
+  "failure": "document_changed",
+  "message": "The page changed before input was sent.",
+  "dispatched": false,
+  "committed_urls": []
+}

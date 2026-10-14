@@ -1,0 +1,9 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0004",
+  "failure": "other",
+  "message": "The browser reported an unclassified error.",
+  "dispatched": true,
+  "committed_urls": [],
+  "tab": {"tab_id":12,"title":"Example Domain","url":"https://example.com/","active":true,"readiness":"complete"}
+}

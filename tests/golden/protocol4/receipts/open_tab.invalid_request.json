@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0002",
+  "failure": "invalid_request",
+  "message": "open_tab requires a url unless it adopts a tab.",
+  "dispatched": false,
+  "committed_urls": []
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "command_chunk",
+  "transfer_id": "chunk_1",
+  "correlation": "p4_c0ffee01",
+  "index": 0,
+  "count": 1,
+  "total_bytes": 89,
+  "sha256": "8512c2e6d75bf1a3438b841dd6e6b89c8078773b3bbb0530a0a9613e92861530",
+  "data": "eyJraW5kIjoicmVxdWVzdCIsImNvcnJlbGF0aW9uIjoicDRfYzBmZmVlMDEiLCJwcmltaXRpdmUiOnsibmFtZSI6Imxpc3RfdGFicyIsImFyZ3MiOnt9fX0="
+}

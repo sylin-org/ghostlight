@@ -1,0 +1,10 @@
+{
+  "kind": "hello_accepted",
+  "service_epoch": "service_7b1e",
+  "service_version": "2.0.0",
+  "control_state": "active",
+  "assets": {
+    "id": "e043d38ed1adf5d6940c51becd14d1005e5228d7a5f28824078e5520b7e21a22",
+    "source": "\"use strict\";\nconst ID = __ghostlightAssetId;\nglobalThis.__ghostlightFixtureRuntime = Object.freeze({ id: ID });\n"
+  }
+}
