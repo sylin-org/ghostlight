@@ -34,13 +34,14 @@ if ($hashes[0] -ne $hashes[1]) { throw "Identical input produced different archi
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($archives[0])
 $seen = @{}
-$fixedTime = [System.DateTimeOffset]::Parse("2000-01-01T00:00:00Z")
+# A ZIP entry stores DOS local clock fields, so compare the stored clock, not an instant.
+$fixedClock = [datetime]::new(2000, 1, 1, 0, 0, 0)
 try {
     foreach ($entry in $zip.Entries) {
         if ($entry.FullName -notmatch '^ghostlight-v1\.2\.3-x86_64-pc-windows-msvc/[^/]+$') {
             throw "Unexpected archive path: $($entry.FullName)"
         }
-        if ($entry.LastWriteTime.ToUnixTimeSeconds() -ne $fixedTime.ToUnixTimeSeconds()) {
+        if ($entry.LastWriteTime.DateTime -ne $fixedClock) {
             throw "Unexpected timestamp: $($entry.FullName)"
         }
         $name = $entry.Name
