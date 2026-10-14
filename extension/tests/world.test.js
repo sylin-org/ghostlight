@@ -237,6 +237,38 @@ test("race cancels pending losers and reports them skipped", async () => {
   assert.equal(fx.dispatched, true);
 });
 
+test("a renderer that answers neither CALL nor CANCEL still times out within the deadline", async () => {
+  const { chrome, world } = await ready();
+  chrome.handlers["Runtime.callFunctionOn"] = (target, params) => (params.functionDeclaration === World.SHIMS.CALL
+    || params.functionDeclaration === World.SHIMS.CANCEL
+    ? new Promise(() => {})
+    : { result: { value: true } });
+  const started = Date.now();
+  const result = await world.callPrimitive(callArgs([box], { timeout_ms: 50 }), effects(), "p4_hung");
+  assert.ok(Date.now() - started < 500);
+  assert.equal(result.answers[0].code, "timeout");
+  assert.equal(result.answers[0].started, true);
+  assert.ok(chrome.calls.some((call) => call.params.functionDeclaration === World.SHIMS.CANCEL));
+});
+
+test("race returns the winner while a hung loser never answers CANCEL", async () => {
+  const { chrome, world } = await ready();
+  chrome.handlers["Runtime.callFunctionOn"] = (target, params) => {
+    if (params.functionDeclaration === World.SHIMS.CANCEL) return new Promise(() => {});
+    if (params.functionDeclaration !== World.SHIMS.CALL) return { result: { value: true } };
+    if (params.objectId === `global:${TOP}`) return new Promise(() => {});
+    return new Promise((resolve) => setTimeout(() => resolve({ result: { value: { ok: true, value: "child" } } }), 5));
+  };
+  const calls = [
+    { frame: top, message: { kind: "observe", until_satisfied: true } },
+    { frame: child, message: { kind: "observe", until_satisfied: true } }
+  ];
+  const started = Date.now();
+  const result = await world.callPrimitive(callArgs(calls, { mode: "race" }), effects(), "p4_hung_race");
+  assert.ok(Date.now() - started < 500);
+  assert.deepEqual(result.answers, [{ status: "skipped" }, { status: "returned", envelope: { ok: true, value: "child" } }]);
+});
+
 test("sequence skips every call after the first answer that is not ok", async () => {
   const { chrome, world } = await ready();
   chrome.handlers["Runtime.callFunctionOn"] = () => ({ result: { value: { ok: false, error: { code: "stale_locator", message: "stale" } } } });

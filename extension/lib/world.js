@@ -270,12 +270,12 @@
     }
 
     /**
-     * Sends CANCEL for one in-flight entry, best effort, and marks its token cancelled so a call that
-     * has not reached the page yet never starts.
+     * Marks one in-flight entry's token cancelled, so a call that has not reached the page yet never
+     * starts, and sends CANCEL best effort without waiting: a busy renderer may never answer it.
      */
-    async function cancelToken(entry) {
+    function cancelToken(entry) {
       cancelledTokens.add(entry.token);
-      await cdp(entry.session, METHOD.CALL_FUNCTION,
+      cdp(entry.session, METHOD.CALL_FUNCTION,
         { objectId: entry.global, functionDeclaration: SHIMS.CANCEL, arguments: [{ value: entry.token }] }).catch(() => {});
     }
 
@@ -309,7 +309,7 @@
     }
 
     // Races a started CDP call with the tab's dialog watch and the deadline. On the deadline the
-    // cancel thunk runs first, then the call answers timeout; both outcomes count as started.
+    // cancel thunk fires and the call answers timeout at once; both outcomes count as started.
     async function raceDialogAndDeadline(tabId, deadline, call, cancel) {
       call.catch(() => {});
       const dialog = watchForDialog(tabId);
@@ -325,7 +325,7 @@
         ]);
         if (winner.dialog) throw callFailure(CALL.DIALOG_OPEN, true, "A JavaScript dialog opened during the call.");
         if (winner.expired) {
-          await cancel();
+          cancel();
           throw callFailure(CALL.TIMEOUT, true, "The call did not finish before its deadline.");
         }
         return winner.reply;
@@ -464,7 +464,7 @@
       for (const token of losers) cancelledTokens.add(token);
       const pending = Array.from(inflight.values(), (entries) => Array.from(entries)).flat()
         .filter((entry) => losers.has(entry.token));
-      await Promise.all(pending.map(cancelToken));
+      pending.forEach(cancelToken);
       return answers;
     }
 
