@@ -497,12 +497,24 @@ impl<'a> Link<'a> {
 
     /// Dispatch input steps, bounded by what the deadline leaves.
     ///
+    /// A successful answer counts as an effect from its own facts, not from the receipt's
+    /// `dispatched` flag, which is also set when only the precondition answered: a step was
+    /// dispatched, a dialog or an unknown reason stopped the steps, or the precondition, of the
+    /// class `precondition`, shows it changed the page. A precondition the page refused
+    /// before any of that is a plain failure.
+    ///
     /// # Errors
     ///
     /// Returns the receipt's failure.
-    pub fn input(&mut self, mut input: wire::Input) -> Result<wire::InputDone, BrowserError> {
+    pub fn input(
+        &mut self,
+        mut input: wire::Input,
+        precondition: EffectClass,
+    ) -> Result<wire::InputDone, BrowserError> {
         input.timeout_ms = input.timeout_ms.min(self.budget_ms());
-        self.send(input)
+        let (done, _) = self.exchange(input)?;
+        self.effect_started |= input_acted(&done, precondition);
+        Ok(done)
     }
 
     /// The tab as the browser last reported it: from the command's last receipt when it named
@@ -735,6 +747,17 @@ fn acted(answer: &wire::CallAnswer) -> bool {
         wire::CallAnswer::Skipped => false,
         wire::CallAnswer::Unknown => true,
     }
+}
+
+/// Whether input that was answered changed the page: a step was dispatched, a dialog or an
+/// unknown reason stopped it, or an effect-class precondition shows it ran.
+fn input_acted(done: &wire::InputDone, precondition: EffectClass) -> bool {
+    done.completed_steps > 0
+        || matches!(
+            done.stopped,
+            Some(wire::InputStop::Dialog { .. } | wire::InputStop::Other)
+        )
+        || (precondition == EffectClass::Effect && done.precondition.as_ref().is_some_and(acted))
 }
 
 /// A failure code as the wire spells it, for a failure that came without a message.

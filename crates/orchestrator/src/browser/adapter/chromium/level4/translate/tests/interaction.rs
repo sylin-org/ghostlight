@@ -533,15 +533,36 @@ fn a_modified_key_drops_its_text() {
     );
 }
 
+/// An input the extension reports as the real one does for a refused precondition: the receipt
+/// says it dispatched, because the precondition answered, but no step was sent.
+fn precondition_refused(code: &'static str) -> impl Fn(&wire::Primitive) -> Out + Send + 'static {
+    move |_| Out::Effect(json!({"completed_steps": 0, "precondition": refused(code)}))
+}
+
 #[test]
 fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
-    let (port, _fake) = rig(page(), |_| {
-        Out::Value(json!({"completed_steps": 0, "precondition": refused("focus_lost")}))
-    });
+    let (port, _fake) = rig(page(), precondition_refused("focus_lost"));
     let mut bound = all_open();
     bound.subjects = vec!["C.c1".into()];
     let error = call(&port, scoped(bound, press(None, "Tab", &[]))).unwrap_err();
     assert_eq!(error, BrowserError::Primitive("focus_lost".into()));
+}
+
+#[test]
+fn a_stale_locator_refuses_the_key_press_with_nothing_sent() {
+    let (port, _fake) = rig(page(), precondition_refused("stale_locator"));
+    let error = call(&port, scoped(all_open(), press(Some(NESTED), "Enter", &[]))).unwrap_err();
+    assert_eq!(error, BrowserError::Primitive("stale_locator".into()));
+}
+
+#[test]
+fn a_focus_that_moved_refuses_the_text_with_nothing_sent() {
+    let (port, _fake) = rig(
+        focus_held_by(&["C"]),
+        precondition_refused("no_focused_control"),
+    );
+    let error = call(&port, scoped(all_open(), type_focused(false))).unwrap_err();
+    assert_eq!(error, BrowserError::Primitive("no_focused_control".into()));
 }
 
 /// Typing into the focused control with the focus held by `holders`, each answering its

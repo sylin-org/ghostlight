@@ -27,9 +27,9 @@ use super::scope::{PlannedCall, Scope};
 use super::tree::FrameTree;
 use super::wire::{
     CallAnswer, CallFailure, CallMode, DocumentGuard, FrameRef, Input, InputDone, InputStep,
-    InputStop, Point, WorldCall,
+    InputStop, Point,
 };
-use super::world::{self, Hit, OwnerProbe};
+use super::world::{self, EffectClass, Hit, OwnerProbe};
 use crate::browser::adapter::{BrowserCommand, PhysicalActionSubject};
 use crate::browser::BrowserError;
 
@@ -230,23 +230,38 @@ pub enum OnDialog {
     EffectUnknown,
 }
 
+/// Input ready to send, with what its precondition can have changed.
+pub struct PlannedInput {
+    /// The primitive's arguments.
+    input: Input,
+    /// What the precondition can have changed in the page, which says whether a precondition
+    /// the page answered counts as an effect.
+    precondition_effect: EffectClass,
+}
+
 /// The input for `steps` on a tab, bounded by what the deadline leaves.
 #[must_use]
 pub fn input_for(
     l: &Link<'_>,
     tab_id: u64,
-    precondition: Option<WorldCall>,
+    precondition: Option<PlannedCall>,
     steps: Vec<InputStep>,
     guard: Option<DocumentGuard>,
     settle_ms: u64,
-) -> Input {
-    Input {
-        tab_id,
-        precondition,
-        steps,
-        guard,
-        settle_ms,
-        timeout_ms: l.budget_ms(),
+) -> PlannedInput {
+    let precondition_effect = precondition
+        .as_ref()
+        .map_or(EffectClass::Read, |plan| plan.effect);
+    PlannedInput {
+        input: Input {
+            tab_id,
+            precondition: precondition.map(|plan| plan.call),
+            steps,
+            guard,
+            settle_ms,
+            timeout_ms: l.budget_ms(),
+        },
+        precondition_effect,
     }
 }
 
@@ -262,12 +277,16 @@ pub fn input_for(
 /// Returns the failure of the `input` primitive, and the failures above.
 pub fn send_input(
     l: &mut Link<'_>,
-    input: Input,
+    planned: PlannedInput,
     on_dialog: OnDialog,
 ) -> Result<Option<CallAnswer>, BrowserError> {
+    let PlannedInput {
+        input,
+        precondition_effect,
+    } = planned;
     let steps = input.steps.len();
     let preconditioned = input.precondition.is_some();
-    let done = l.input(input)?;
+    let done = l.input(input, precondition_effect)?;
     let InputDone {
         precondition,
         completed_steps,

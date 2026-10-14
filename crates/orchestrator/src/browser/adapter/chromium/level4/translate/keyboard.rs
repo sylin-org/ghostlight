@@ -143,13 +143,10 @@ pub fn type_focused(
             settled::<Value>(l, answer)?;
         }
     }
-    let precondition = reach
-        .get()
-        .call(
-            &holder,
-            world::verify_focused_text(request.allow_credentials),
-        )?
-        .call;
+    let precondition = reach.get().call(
+        &holder,
+        world::verify_focused_text(request.allow_credentials),
+    )?;
     let input = input_for(
         l,
         request.tab_id,
@@ -202,12 +199,12 @@ pub fn press_key(
         Some(locator) => {
             let target = Locator::decode(locator)?;
             let plan = reach.get().call(&target.doc, world::focus(&target.local))?;
-            (Some(target.doc), Some(plan.call))
+            (Some(target.doc), Some(plan))
         }
         None => match reach.get().subjects().first() {
             Some(subject) => {
                 let plan = reach.get().call(subject, world::require_focused())?;
-                (Some(subject.clone()), Some(plan.call))
+                (Some(subject.clone()), Some(plan))
             }
             None => (None, None),
         },
