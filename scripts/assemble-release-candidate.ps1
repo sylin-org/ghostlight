@@ -111,20 +111,6 @@ $specifications = @(
         name = "ghostlight-$Version.tgz"
     },
     [ordered]@{
-        kind = "native-package"
-        target = "x86_64-pc-windows-msvc"
-        directory = "native-x86_64-pc-windows-msvc"
-        pattern = "*-setup.exe"
-        name = "ghostlight-v$Version-x86_64-pc-windows-msvc-setup.exe"
-    },
-    [ordered]@{
-        kind = "native-package"
-        target = "x86_64-unknown-linux-gnu"
-        directory = "native-x86_64-unknown-linux-gnu"
-        pattern = "*.deb"
-        name = "ghostlight-v$Version-x86_64-unknown-linux-gnu.deb"
-    },
-    [ordered]@{
         kind = "browser-adapter"
         target = "chromium-store"
         directory = "chrome-extension"
@@ -154,15 +140,6 @@ foreach ($rawTarget in $rawTargets) {
             pattern = $name
             name = $name
         }
-    }
-    $portableExtension = if ($rawTarget.target -eq "x86_64-pc-windows-msvc") { ".zip" } else { ".tar.gz" }
-    $portableName = "ghostlight-v$Version-$($rawTarget.target)$portableExtension"
-    $specifications += [ordered]@{
-        kind = "portable-package"
-        target = $rawTarget.target
-        directory = "native-$($rawTarget.target)"
-        pattern = $portableName
-        name = $portableName
     }
 }
 

@@ -46,7 +46,6 @@ $distribution = Get-Content -LiteralPath (Join-Path $repo "docs/business/DISTRIB
 $directorySubmissions = Get-Content -LiteralPath (
     Join-Path $repo "docs/business/DIRECTORY-SUBMISSIONS.md"
 ) -Raw
-$scoop = Read-JsonFile -Path (Join-Path $repo "packaging/scoop/ghostlight.json")
 $siteFiles = Get-ChildItem -LiteralPath (Join-Path $repo "site") -File -Recurse
 $siteText = ($siteFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
 
@@ -88,9 +87,6 @@ Assert-Contains -Text $trustFaq -Needle "adapter serves $adapter" -Label "trust 
 Assert-Contains -Text $distribution -Needle "ghostlight@$release" -Label "distribution runbook"
 Assert-Contains -Text $distribution -Needle "v$release is active" -Label "distribution runbook"
 Assert-Contains -Text $directorySubmissions -Needle "org.sylin/ghostlight`` $release" -Label "directory submissions"
-Assert-Equal -Actual $scoop.version -Expected $release -Label "Scoop/public release"
-Assert-Contains -Text $scoop.architecture.'64bit'.url -Needle "/v$release/" -Label "Scoop asset URL"
-Assert-Contains -Text $scoop.architecture.'64bit'.extract_dir -Needle "v$release-" -Label "Scoop extract directory"
 if ($siteText -notmatch [regex]::Escape("https://sylin.org/ghostlight/")) {
     throw "site sources do not point at the canonical Ghostlight page"
 }

@@ -65,7 +65,6 @@ if (lane === "all") {
   await run("extension", process.execPath, ["--test", ...extensionTests.map(path => `tests/${path}`)], join(root, "extension"));
   await node("npm-launcher", "packaging/npm/test/launcher.test.js");
   await node("mcpb-launcher", "packaging/mcpb/test/launcher.test.js");
-  await run("portable-package", "pwsh", ["-NoProfile", "-File", "tests/portable-package.ps1"]);
   if (process.platform === "linux") await node("shell-installer", "tests/installer-shell.mjs");
   await node("policy-grammar", "tests/policy-grammar.mjs");
 }

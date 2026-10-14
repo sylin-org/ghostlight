@@ -85,10 +85,7 @@ by the runner.
 | `acceptance/guest/consumer.sh` | Enter a prepared `debian` or `ubuntu` consumer root; mount candidate packages and these tracked upgrade scripts read-only. First argument selects the image; remaining arguments are the guest command. |
 | `acceptance/guest/upgrade.sh` | Forward package upgrade with retained initialized MCP; run only inside `consumer.sh`. Uses `upgrade-user.py` beside it. |
 
-The prepared rootfs/build directories are not bundled with the tests. The Ubuntu baseline
-build uses the existing repository packaging scripts. The existing
-`scripts/check-debian-package-lifecycle.sh` remains the package-lifecycle entry used by CI;
-stage the current repository source in the guest build tree before invoking it there.
+The prepared rootfs/build directories are not bundled with the tests.
 
 ```bash
 # Recovery: use the dedicated running browser and that installation's XDG environment.

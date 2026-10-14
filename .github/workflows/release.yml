@@ -93,7 +93,7 @@ jobs:
       - shell: pwsh
         run: ./scripts/check-repository-integrity.ps1
 
-  native-packages:
+  release-binaries:
     needs: quality-gate
     strategy:
       fail-fast: false
@@ -101,12 +101,8 @@ jobs:
         include:
           - os: windows-2025
             target: x86_64-pc-windows-msvc
-            bundles: nsis
-            package_platform: windows
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundles: deb
-            package_platform: linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -122,8 +118,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
-      - name: Install the pinned Tauri bundler
-        run: cargo install tauri-cli --version 2.11.0 --locked
       - name: Build all three executable shores once
         run: cargo build --workspace --release --locked --target ${{ matrix.target }}
       - name: Verify Windows fixed-path replacement and downloader
@@ -143,72 +137,12 @@ jobs:
           foreach ($name in @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')) {
             Copy-Item -LiteralPath "target/${{ matrix.target }}/release/$name$extension" -Destination "$output/$name-${{ matrix.target }}$extension"
           }
-      - name: Build the portable package-manager archive
-        shell: pwsh
-        run: ./scripts/package-portable.ps1 -TargetTriple ${{ matrix.target }} -BinaryDirectory target/${{ matrix.target }}/release -OutputDirectory dist/portable-${{ matrix.target }}
-      - name: Stage exact Tauri sidecars
-        shell: pwsh
-        run: ./scripts/stage-tauri-sidecars.ps1 -TargetTriple ${{ matrix.target }}
-      - name: Build the native candidate
-        working-directory: crates/orchestrator
-        run: cargo tauri build --config tauri.release.conf.json --bundles ${{ matrix.bundles }} --target ${{ matrix.target }} --ci --no-sign
-      - name: Verify Windows package contents
-        if: matrix.package_platform == 'windows'
-        shell: pwsh
-        run: |
-          $artifact = Get-ChildItem -LiteralPath target/${{ matrix.target }}/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1 -ExpandProperty FullName
-          ./scripts/check-native-package.ps1 -Platform windows -Artifact $artifact
-      - name: Verify Debian package contents
-        if: matrix.package_platform == 'linux'
-        shell: pwsh
-        run: |
-          $artifact = Get-ChildItem -LiteralPath target/${{ matrix.target }}/release/bundle/deb -Filter '*.deb' | Select-Object -First 1 -ExpandProperty FullName
-          ./scripts/finalize-debian-package.ps1 -Artifact $artifact
-          ./scripts/check-native-package.ps1 -Platform linux -Artifact $artifact
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/
-            dist/raw-${{ matrix.target }}/
-            dist/portable-${{ matrix.target }}/
+          path: dist/raw-${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 7
-
-  linux-package-smoke:
-    needs: native-packages
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - distribution: debian-12
-            image: debian:12
-          - distribution: ubuntu-24.04
-            image: ubuntu:24.04
-    container: ${{ matrix.image }}
-    env:
-      DEBIAN_FRONTEND: noninteractive
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: native-x86_64-unknown-linux-gnu
-          path: candidate
-      - name: Verify Debian package lifecycle on ${{ matrix.distribution }}
-        shell: bash
-        run: |
-          set -x
-          artifact=$(find "$PWD/candidate" -type f -name '*.deb' -print -quit)
-          test -n "$artifact"
-          apt-get update
-          apt-get install -y binutils desktop-file-utils jq procps xvfb
-          echo "MARKER: apt finished ok"
-          ls -la scripts/check-debian-package-lifecycle.sh
-          bash -x ./scripts/check-debian-package-lifecycle.sh \
-            "$artifact" \
-            "${{ matrix.distribution }}" \
-            "${{ github.sha }}"
 
   extension-artifact:
     needs: quality-gate
@@ -226,7 +160,7 @@ jobs:
           retention-days: 7
 
   candidate-bundle:
-    needs: [supply-chain, quality-gate, native-packages, extension-artifact, linux-package-smoke]
+    needs: [supply-chain, quality-gate, release-binaries, extension-artifact]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -288,9 +222,6 @@ jobs:
             dist/release-candidate/assets/*
             dist/release-candidate/release-candidate.json
             dist/release-candidate/SHA256SUMS
-      - name: Prepare package-manager metadata from candidate hashes
-        shell: pwsh
-        run: ./scripts/prepare-package-manager-metadata.ps1 -CandidateDirectory dist/release-candidate
       - uses: actions/upload-artifact@v7
         with:
           name: release-candidate
@@ -307,11 +238,5 @@ jobs:
         with:
           name: claude-desktop-mcpb
           path: dist/release-candidate/assets/*.mcpb
-          if-no-files-found: error
-          retention-days: 14
-      - uses: actions/upload-artifact@v7
-        with:
-          name: package-manager-metadata
-          path: dist/package-manager-metadata/
           if-no-files-found: error
           retention-days: 14
