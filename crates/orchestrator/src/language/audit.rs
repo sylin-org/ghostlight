@@ -3,7 +3,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::composition::CompositionProgress;
-use super::outcome::{BlockedReason, BrowserRecoveryReason, Outcome, Refusal, WorkspaceReason};
+use super::outcome::{
+    BlockedReason, BrowserRecoveryReason, CheckFailure, Outcome, Refusal, WorkspaceReason,
+};
 
 /// The explicitly permitted language projection of one terminal result.
 ///
@@ -114,6 +116,7 @@ pub enum AuditRefusal {
     NoDialogVisible,
     RecordingUnavailable,
     RecordingExportFailed,
+    ActionUnconfirmed { cause: CheckFailure },
 }
 
 impl Outcome {
@@ -181,6 +184,9 @@ impl Refusal {
             Self::NoDialogVisible => AuditRefusal::NoDialogVisible,
             Self::RecordingUnavailable => AuditRefusal::RecordingUnavailable,
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,
+            Self::ActionUnconfirmed { cause, .. } => {
+                AuditRefusal::ActionUnconfirmed { cause: *cause }
+            }
         };
         AuditProjection {
             unconfirmed_history_steps: 0,

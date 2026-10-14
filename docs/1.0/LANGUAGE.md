@@ -235,20 +235,32 @@ Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 
 ### `browser_inspect`
 
-Inspect semantic controls or page structure and return fresh target handles. Shortest call: `{}`.
+Inspect semantic controls or page structure. The `controls`, `structure`, and `all` scopes return
+fresh target handles; the `document` scope returns the page outline as a tree. Shortest call: `{}`.
 
 Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `document`, default
-`controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12;
-optional `max_items` from 1 to 200, default 80. Capability: `read`.
+`controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12,
+default 6; optional `max_items` from 1 to 200, default 80. Capability: `read`.
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, semantic role,
-bounded accessible name, state, and credential-class flag. Selectors are not exposed. A
-`document` scope returns one bounded structure-only composed tree, records it under a snapshot
-handle that is superseded per tab, and reports a structural diff against the current prior
-snapshot when one exists. Without a root, the tree includes open shadow roots, assigned slots, and
-http(s) embedded frames in stable order under one 400-node ceiling. A root limits it to that
-target's composed subtree. Editable values, hidden content, closed roots, and frame identity are
-never returned.
+bounded accessible name, state, and credential-class flag. Selectors are not exposed.
+
+A `document` scope returns no target handles. Its facts are `tab`, `document_generation`,
+`tree`, `nodes`, `truncated`, `snapshot`, and sometimes `diff`. `tree` is one bounded
+structure-only composed tree. Each node has a `kind` of `control`, `heading`, or `container`, a
+`label` of at most 120 characters, and a `children` array. Without a root, the tree includes open
+shadow roots, assigned slots, and http(s) embedded frames in stable order under one 400-node
+ceiling. A root limits it to that target's composed subtree. Editable values, hidden content,
+closed roots, and frame identity are never returned. A summary reads, for example:
+`Returned the document tree: 283 nodes.`
+
+The tree is also recorded under a `snapshot` handle, superseded per tab. When the previous
+snapshot of that tab, in the same document, used the same `root` and `max_depth`, the result adds
+`diff` and the summary counts the differences. Trees of another root or depth are never compared,
+because they differ without the page changing. `diff` compares nodes by position and counts
+`added`, `removed`, and `changed` nodes. Its `paths` list up to 50 positions in the returned
+`tree`: `/` is the root and `/1/0` is the first child of the root's second child. A path names a
+new node, a node whose kind or label changed, or a node that lost children.
 
 ### `browser_find`
 
@@ -383,7 +395,31 @@ Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 The optional `expect` on click, fill, type, and key calls uses one condition: `load_ready` with no
 value, or `url_contains`, `text_present`, or `text_absent` with a required non-empty `value` of at
 most 2,000 characters. Lookup and postcondition Read requirements are admitted with the complete
-request before an effect. A later observation failure preserves the effect already applied.
+request before an effect. The check runs after the action for at most 2 seconds.
+
+When the check does not confirm the expectation, the action still happened. The result keeps
+`effect: applied`, `repeat_safe: false`, and the action's own facts, and adds a `reason`. The
+summary is the action's sentence followed by why the check fell short:
+
+| Check | Status | `reason` | Summary after the action's sentence |
+| --- | --- | --- | --- |
+| Ran, condition false | `failed` | `expectation_unmet` | `The expected condition did not hold afterward.` |
+| Caller cancelled | `cancelled` | `cancelled` | `The expected condition was not checked because the call was cancelled.` |
+| Out of time | `failed` | `deadline` | `The expected condition was not checked because the call ran out of time.` |
+| Browser disconnected | `failed` | `browser_disconnected` | `The expected condition was not checked because the browser disconnected.` |
+| No browser reachable | `failed` | `browser_unavailable` | `The expected condition was not checked because Ghostlight could not reach the browser.` |
+| Page access unverified | `failed` | `document_unavailable` | `The expected condition was not checked because access to the page could not be verified.` |
+| Browser could not check | `failed` | `browser_refused` | `The expected condition was not checked because the browser could not run the check.` |
+| Policy refused the check | `blocked` | the policy reason | `The expected condition was not checked.` and the policy sentence |
+| User attention required | `attention_required` | `runtime_attention` | `The expected condition was not checked because the browser job requires user attention.` |
+
+The next step is `Check the page with browser_read or browser_inspect before repeating; the action
+already happened.` A policy refusal points to `policy_explain` instead. An attention hold, a
+history-storage refusal, and an unreadable policy give no step. Pause and Stop put their fixed
+directive first, then the action's sentence and `The expected condition was not checked.`, with no
+next step. History records `action_unconfirmed` with the same cause, and a flow treats the step by
+that cause: a Pause, Stop, cancellation, or deadline during the check stops the flow as it would
+for any step.
 
 ### `browser_drag`
 

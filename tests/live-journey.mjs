@@ -411,6 +411,7 @@ try {
   }));
   assert.equal(inspected.status, "succeeded", JSON.stringify(inspected));
   assert.ok(inspected.facts.nodes > 0, JSON.stringify(inspected));
+  assert.ok(Array.isArray(inspected.facts.tree?.children), JSON.stringify(inspected));
 
   const projectMatches = structured(await request("tools/call", {
     name: "browser_find",

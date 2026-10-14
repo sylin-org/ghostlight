@@ -47,8 +47,8 @@ use crate::language::{
     self,
     audit::AuditProjection,
     outcome::{
-        ActionSubject, BlockedReason, BrowserRecoveryReason, Observed, Outcome, Refusal,
-        TargetRole, WorkspaceReason,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, CheckFailure, Observed, Outcome,
+        Refusal, TargetRole, WorkspaceReason,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -805,8 +805,11 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Check one optional postcondition after an applied effect. A failed
-    /// expectation leaves the effect applied, failed, and never repeat-safe.
+    /// Check one optional postcondition after an applied effect.
+    ///
+    /// A check that does not confirm the expectation never erases the acknowledged action. The
+    /// result stays applied and never repeat-safe, and one typed refusal names both the action
+    /// and why the check fell short, for the caller and the audit alike.
     #[allow(clippy::too_many_arguments)]
     fn finish_with_expectation(
         &self,
@@ -821,6 +824,19 @@ impl ApplicationExecutor {
         facts: Value,
         expect: Option<&crate::language::Postcondition>,
     ) -> Terminal {
+        let Some(expectation) = expect else {
+            return self.action_success(
+                context,
+                lease,
+                decision,
+                landing_requirements,
+                selected,
+                physical,
+                commits,
+                outcome,
+                facts,
+            );
+        };
         // Govern and retain the landed action before attempting a separate observation.
         let applied = self.action_success(
             context,
@@ -830,76 +846,78 @@ impl ApplicationExecutor {
             selected,
             physical,
             commits,
-            outcome,
+            outcome.clone(),
             facts,
         );
         if applied.result.status != Status::Succeeded {
             return applied;
         }
-        if let Some(expectation) = expect {
-            let remaining = context.deadline.saturating_duration_since(Instant::now());
-            let budget = remaining
-                .min(std::time::Duration::from_millis(2_000))
-                .as_millis() as u64;
-            match self.dispatch(
-                context,
-                BrowserCommand::Observe {
-                    tab_id: selected.physical_id,
-                    condition: expectation.condition.clone(),
-                    value: expectation.value.clone(),
-                    locator: None,
-                    timeout_ms: budget,
-                },
-            ) {
-                Ok(BrowserOutcome::Observed { satisfied, .. }) => {
-                    if !satisfied {
-                        let mut steps = applied.result.next_steps.clone();
-                        steps.push(
-                            "The effect was applied, but the expected condition did not hold. Inspect the page before repeating.".into(),
-                        );
-                        return Terminal {
-                            result: InvocationResult::new(
-                                context.invocation,
-                                Status::Failed,
-                                Effect::Applied,
-                                readiness(selected.readiness),
-                                false,
-                                &applied.result.summary,
-                                applied.result.facts,
-                                steps,
-                            ),
-                            decision,
-                            physical_id: Some(selected.physical_id),
-                            observed: applied.observed,
-                            audit: applied.audit,
-                        };
-                    }
-                }
-                Ok(_) => {
-                    let mut failed =
-                        self.protocol_failure(context, decision, Some(selected.physical_id));
-                    failed.result.effect = Effect::Applied;
-                    failed.result.repeat_safe = false;
-                    failed.result.next_steps =
-                        vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
-                    return failed;
-                }
-                Err(error) => {
-                    let human_control = matches!(error, BrowserError::RuntimeControl(_));
-                    let mut failed =
-                        self.browser_failure(context, decision, error, Some(selected.physical_id));
-                    // Observation failure cannot erase the acknowledged action.
-                    failed.result.effect = Effect::Applied;
-                    failed.result.repeat_safe = false;
-                    if !human_control {
-                        failed.result.next_steps =
-                            vec![language::control::APPLIED_BEFORE_CHECK_FAILURE.into()];
-                    }
-                    return failed;
-                }
-            }
+        let remaining = context.deadline.saturating_duration_since(Instant::now());
+        let budget = remaining
+            .min(std::time::Duration::from_millis(2_000))
+            .as_millis() as u64;
+        let (cause, decision) = match self.dispatch(
+            context,
+            BrowserCommand::Observe {
+                tab_id: selected.physical_id,
+                condition: expectation.condition.clone(),
+                value: expectation.value.clone(),
+                locator: None,
+                timeout_ms: budget,
+            },
+        ) {
+            Ok(BrowserOutcome::Observed {
+                satisfied: true, ..
+            }) => return applied,
+            Ok(BrowserOutcome::Observed {
+                satisfied: false, ..
+            }) => (CheckFailure::Unmet, decision),
+            Ok(_) => (CheckFailure::BrowserRefused, decision),
+            Err(error) => unchecked(&error, decision),
+        };
+        self.unconfirmed(context, decision, applied, outcome, cause)
+    }
+
+    /// Report an applied action whose requested check did not confirm the expected page state.
+    ///
+    /// Everything is built once from the typed refusal: the summary keeps the action's own
+    /// sentence, the facts keep the action's facts, and the audit keeps both.
+    fn unconfirmed(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        applied: Terminal,
+        action: Outcome,
+        cause: CheckFailure,
+    ) -> Terminal {
+        let refusal = Refusal::ActionUnconfirmed {
+            action: Box::new(action),
+            cause,
+        };
+        let mut facts = applied.result.facts;
+        if let Value::Object(object) = &mut facts {
+            object.insert(
+                "reason".into(),
+                json!(unconfirmed_reason(cause, decision.reason)),
+            );
         }
-        applied
+        let summary = refusal.summary();
+        Terminal {
+            result: InvocationResult::new(
+                context.invocation,
+                unconfirmed_status(cause),
+                Effect::Applied,
+                applied.result.readiness,
+                false,
+                &summary,
+                with_denial_facts(decision, facts),
+                refusal.next_steps(),
+            ),
+            decision,
+            physical_id: applied.physical_id,
+            observed: refusal.observed(),
+            audit: refusal.audit(),
+        }
     }
 
     /// Resolve one typed semantic selector through a single adapter query.
@@ -1396,20 +1414,10 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
         effect: Effect,
         repeat_safe: bool,
-        mut facts: Value,
+        facts: Value,
         blocked_host: Option<String>,
     ) -> Terminal {
-        if let Value::Object(object) = &mut facts {
-            if let Some(denial_id) = decision.denial_id() {
-                object.insert("denial_id".into(), Value::String(denial_id));
-            }
-            if let Some(rule) = decision.policy_rule() {
-                object.insert("policy_rule".into(), Value::String(rule.into()));
-            }
-            if let Some(mode) = decision.policy_mode() {
-                object.insert("policy_mode".into(), Value::String(mode.into()));
-            }
-        }
+        let facts = with_denial_facts(decision, facts);
         let attention = decision.reason == ReasonCode::RuntimeAttention;
         let refusal = if attention {
             Refusal::AttentionRequired
@@ -2151,6 +2159,97 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::RuntimeAttention => {
             BlockedReason::Unspecified
         }
+    }
+}
+
+/// Add the policy explanation a refusing decision carries to a result's facts.
+fn with_denial_facts(decision: Decision, mut facts: Value) -> Value {
+    if let Value::Object(object) = &mut facts {
+        if let Some(denial_id) = decision.denial_id() {
+            object.insert("denial_id".into(), Value::String(denial_id));
+        }
+        if let Some(rule) = decision.policy_rule() {
+            object.insert("policy_rule".into(), Value::String(rule.into()));
+        }
+        if let Some(mode) = decision.policy_mode() {
+            object.insert("policy_mode".into(), Value::String(mode.into()));
+        }
+    }
+    facts
+}
+
+/// Why a postcondition check that failed in the browser did not confirm its applied action,
+/// and the decision the result reports.
+///
+/// A check refused by a human control or by authority reports that refusing decision; every
+/// other failure keeps the decision that admitted the action.
+fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decision) {
+    match error {
+        BrowserError::DocumentAccess(refused) => (governed_check(refused.reason), *refused),
+        BrowserError::RuntimeControl(reason) => {
+            (governed_check(*reason), Decision::refused(*reason))
+        }
+        BrowserError::DocumentUnavailable => (CheckFailure::DocumentUnavailable, admitted),
+        BrowserError::CancelledBeforeDispatch | BrowserError::CancelledAfterDispatch => {
+            (CheckFailure::Cancelled, admitted)
+        }
+        BrowserError::DeadlineBeforeDispatch | BrowserError::DeadlineAfterDispatch => {
+            (CheckFailure::DeadlineExpired, admitted)
+        }
+        BrowserError::DisconnectedBeforeDispatch | BrowserError::DisconnectedAfterDispatch => {
+            (CheckFailure::Disconnected, admitted)
+        }
+        BrowserError::UnknownBrowser(_)
+        | BrowserError::BrowserPinned
+        | BrowserError::AmbiguousBrowser(_)
+        | BrowserError::RecoveryManual { .. }
+        | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
+        BrowserError::Primitive(_)
+        | BrowserError::LocalInterlock(_)
+        | BrowserError::EffectUnknown(_)
+        | BrowserError::Protocol(_)
+        | BrowserError::Authentication
+        | BrowserError::Incompatible { .. }
+        | BrowserError::CapabilityVersion { .. } => (CheckFailure::BrowserRefused, admitted),
+    }
+}
+
+/// The check failure for a check that governance refused.
+const fn governed_check(reason: ReasonCode) -> CheckFailure {
+    match reason {
+        ReasonCode::RuntimeAttention => CheckFailure::AttentionRequired,
+        other => CheckFailure::Blocked(blocked_reason(other)),
+    }
+}
+
+/// The terminal status of an applied action whose check did not confirm it.
+const fn unconfirmed_status(cause: CheckFailure) -> Status {
+    match cause {
+        CheckFailure::Blocked(_) => Status::Blocked,
+        CheckFailure::AttentionRequired => Status::AttentionRequired,
+        CheckFailure::Cancelled => Status::Cancelled,
+        CheckFailure::Unmet
+        | CheckFailure::DeadlineExpired
+        | CheckFailure::Disconnected
+        | CheckFailure::BrowserUnavailable
+        | CheckFailure::DocumentUnavailable
+        | CheckFailure::BrowserRefused => Status::Failed,
+    }
+}
+
+/// The structured `reason` fact of an applied action whose check did not confirm it.
+///
+/// A governed refusal keeps the governance reason every other refusal reports.
+const fn unconfirmed_reason(cause: CheckFailure, governed: ReasonCode) -> &'static str {
+    match cause {
+        CheckFailure::Unmet => "expectation_unmet",
+        CheckFailure::Blocked(_) | CheckFailure::AttentionRequired => governed.as_str(),
+        CheckFailure::Cancelled => "cancelled",
+        CheckFailure::DeadlineExpired => "deadline",
+        CheckFailure::Disconnected => "browser_disconnected",
+        CheckFailure::BrowserUnavailable => "browser_unavailable",
+        CheckFailure::DocumentUnavailable => "document_unavailable",
+        CheckFailure::BrowserRefused => "browser_refused",
     }
 }
 

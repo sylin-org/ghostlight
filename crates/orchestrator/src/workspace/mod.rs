@@ -115,6 +115,18 @@ impl SnapshotHandle {
     }
 }
 
+/// What one document-tree snapshot covered: its optional subtree root and its depth.
+///
+/// Two snapshots are comparable only when they cover the same thing. A shallower or differently
+/// rooted tree differs from the last one without the page having changed at all.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotScope {
+    /// The target handle the tree was rooted at, or none for the whole document.
+    pub root: Option<String>,
+    /// How many levels the tree was allowed to reach.
+    pub max_depth: usize,
+}
+
 /// One stored semantic document-tree snapshot for a controlled tab.
 #[derive(Clone, Debug)]
 pub struct SnapshotState {
@@ -122,6 +134,8 @@ pub struct SnapshotState {
     pub tab: TabHandle,
     /// Document generation observed.
     pub generation: u64,
+    /// Root and depth the tree covered.
+    pub scope: SnapshotScope,
     /// Bounded structure-only tree.
     pub tree: serde_json::Value,
 }
@@ -973,11 +987,11 @@ impl WorkspaceLease {
         Ok(())
     }
 
-    /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
-    /// Store one semantic tree for a tab, superseding any earlier snapshot.
+    /// Store one semantic tree for a tab, superseding any earlier snapshot of that tab.
     pub fn register_snapshot(
         &self,
         tab: &SelectedTab,
+        scope: SnapshotScope,
         tree: serde_json::Value,
     ) -> Result<SnapshotHandle, WorkspaceError> {
         let mut state = self.store.lock();
@@ -1001,15 +1015,20 @@ impl WorkspaceLease {
             SnapshotState {
                 tab: tab.handle.clone(),
                 generation: known.generation,
+                scope,
                 tree,
             },
         );
         Ok(handle)
     }
 
-    /// Return the current-generation tree for a tab, if one is recorded.
+    /// Return the current-generation tree for a tab, if one is recorded for the same scope.
     #[must_use]
-    pub fn previous_snapshot(&self, tab: &SelectedTab) -> Option<serde_json::Value> {
+    pub fn previous_snapshot(
+        &self,
+        tab: &SelectedTab,
+        scope: &SnapshotScope,
+    ) -> Option<serde_json::Value> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
         let known = workspace.tabs.get(&tab.handle)?;
@@ -1019,7 +1038,11 @@ impl WorkspaceLease {
         workspace
             .snapshots
             .values()
-            .find(|snapshot| snapshot.tab == tab.handle && snapshot.generation == known.generation)
+            .find(|snapshot| {
+                snapshot.tab == tab.handle
+                    && snapshot.generation == known.generation
+                    && &snapshot.scope == scope
+            })
             .map(|snapshot| snapshot.tree.clone())
     }
 
@@ -1082,6 +1105,7 @@ impl WorkspaceLease {
             .map(|(_, image)| (image.mime_type.clone(), image.data.clone()))
     }
 
+    /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
     pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = state
@@ -1884,36 +1908,58 @@ mod tests {
         let workspace = admit_in_browser(&store);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let whole = super::SnapshotScope {
+            root: None,
+            max_depth: 6,
+        };
         let _first = lease
-            .register_snapshot(&tab, serde_json::json!({"n":1}))
+            .register_snapshot(&tab, whole.clone(), serde_json::json!({"n":1}))
             .unwrap();
         assert_eq!(
-            lease.previous_snapshot(&tab),
+            lease.previous_snapshot(&tab, &whole),
             Some(serde_json::json!({"n":1})),
             "the just-registered tree is the current one"
         );
         let _second = lease
-            .register_snapshot(&tab, serde_json::json!({"n":2}))
+            .register_snapshot(&tab, whole.clone(), serde_json::json!({"n":2}))
             .unwrap();
         assert_eq!(
-            lease.previous_snapshot(&tab),
+            lease.previous_snapshot(&tab, &whole),
             Some(serde_json::json!({"n":2})),
             "a new snapshot supersedes the earlier one per tab"
+        );
+        let shallower = super::SnapshotScope {
+            root: None,
+            max_depth: 4,
+        };
+        let rooted = super::SnapshotScope {
+            root: Some("target_one".into()),
+            max_depth: 6,
+        };
+        assert_eq!(
+            lease.previous_snapshot(&tab, &shallower),
+            None,
+            "a tree of another depth is not comparable"
+        );
+        assert_eq!(
+            lease.previous_snapshot(&tab, &rooted),
+            None,
+            "a tree of another root is not comparable"
         );
         let landed = lease
             .apply_landing(&tab.handle, &physical(7, "https://example.com"))
             .unwrap();
         assert_eq!(
-            lease.previous_snapshot(&landed),
+            lease.previous_snapshot(&landed, &whole),
             None,
             "commit stales snapshots"
         );
         assert!(lease
-            .register_snapshot(&landed, serde_json::json!({}))
+            .register_snapshot(&landed, whole.clone(), serde_json::json!({}))
             .is_ok());
         lease.confirm_tab_closed(&landed.handle).unwrap();
         assert_eq!(
-            lease.previous_snapshot(&landed),
+            lease.previous_snapshot(&landed, &whole),
             None,
             "closure removes snapshots"
         );
@@ -1921,7 +1967,7 @@ mod tests {
         let other_lease = store.acquire(&other).unwrap();
         let stranger = other_lease.add_tab(&physical(9, "about:blank")).unwrap();
         assert_eq!(
-            other_lease.previous_snapshot(&stranger),
+            other_lease.previous_snapshot(&stranger, &whole),
             None,
             "a foreign workspace never sees another workspace's snapshots"
         );

@@ -745,6 +745,7 @@ try {
   }));
   assert.equal(treeFirst.status, "succeeded");
   assert.match(treeFirst.facts.snapshot, /^snapshot_/);
+  assert.equal(treeFirst.facts.tree.children[0].label, "Example Domain");
   const treeSecond = structured(await mcp.request("tools/call", {
     name: "browser_inspect",
     arguments: { scope: "document", max_depth: 4 }

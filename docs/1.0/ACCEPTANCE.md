@@ -109,7 +109,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    It excludes hidden content, editable values, and closed shadow roots. Explicit article mode
    returns a useful top-document article or falls back to that same composed page read.
    Inspect, find, accessible-name fallback, and text wait use the same composed semantics. A
-   rootless document tree includes embedded frames under one 400-node ceiling.
+   rootless document tree includes embedded frames under one 400-node ceiling. A document-scope
+   inspection returns that tree to the caller, and its diff paths are positions in it.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,
    viewport, and zoom still match; stale views fail before pointer or region-capture dispatch. A
    bounded region returns a magnified image and fresh view, and a second region chains from it.
@@ -483,7 +484,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 4. Control arriving after preparation or during writer queuing prevents the next command. Queued
    cancellation/deadline also sends no command and leaves no pending receipt. Applied and uncertain
    receipts keep their facts when controls change after dispatch; postcondition refusal preserves
-   the previously acknowledged action.
+   the previously acknowledged action. Its summary names that action before saying why the check
+   did not confirm it, and never says nothing happened.
 5. Human Pause/Stop and explicit global attention still prevent the next browser effect. Resume
    permits new requests without replay or permission changes. Page feedback contains no buttons,
    focusable elements, or input-intercepting layers, even when its stylesheet is unavailable.

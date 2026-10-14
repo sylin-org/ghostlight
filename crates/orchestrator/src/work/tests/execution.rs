@@ -3569,3 +3569,233 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
         |c| matches!(c, BrowserCommand::Observe { condition, .. } if condition == "visual_settle")
     ));
 }
+
+/// A document inspection hands the model the tree its summary describes, and a later
+/// inspection of the same scope reports differences at positions in the tree it returns.
+#[test]
+fn document_inspection_returns_the_tree_it_describes() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    let page = json!({"kind":"container","label":"","children":[
+        {"kind":"heading","label":"Account settings","children":[]},
+        {"kind":"container","label":"Profile","children":[
+            {"kind":"control","label":"Save profile","children":[]}
+        ]}
+    ]});
+    browser.push(Ok(BrowserOutcome::DocumentTree {
+        tab_id: 7,
+        tree: page.to_string(),
+        truncated: false,
+    }));
+    let first = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"scope":"document"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(first.status, Status::Succeeded, "{}", first.summary);
+    assert_eq!(first.facts["tree"], page);
+    assert_eq!(
+        first.facts.pointer("/tree/children/1/children/0/label"),
+        Some(&json!("Save profile")),
+        "the label the page shows reaches the model"
+    );
+    assert_eq!(first.facts["nodes"], 4);
+    assert!(first.facts["snapshot"]
+        .as_str()
+        .is_some_and(|handle| handle.starts_with("snapshot_")));
+    assert!(first.facts.get("diff").is_none());
+    assert_eq!(first.summary, "Returned the document tree: 4 nodes.");
+
+    let changed = json!({"kind":"container","label":"","children":[
+        {"kind":"heading","label":"Account settings","children":[]},
+        {"kind":"container","label":"Profile","children":[
+            {"kind":"control","label":"Saved","children":[]}
+        ]},
+        {"kind":"control","label":"Undo","children":[]}
+    ]});
+    browser.push(Ok(BrowserOutcome::DocumentTree {
+        tab_id: 7,
+        tree: changed.to_string(),
+        truncated: false,
+    }));
+    let second = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"scope":"document"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(second.status, Status::Succeeded, "{}", second.summary);
+    assert_eq!(
+        second.facts["diff"],
+        json!({"added":1,"removed":0,"changed":1,"paths":["/1/0","/2"]})
+    );
+    for path in second.facts["diff"]["paths"].as_array().unwrap() {
+        let position = path.as_str().unwrap().replace('/', "/children/");
+        assert!(
+            second.facts["tree"].pointer(&position).is_some(),
+            "{path} is a position in the returned tree"
+        );
+    }
+    assert_eq!(
+        second.summary,
+        "Returned the document tree: 5 nodes, 2 differences from the previous snapshot."
+    );
+
+    let shallow = json!({"kind":"container","label":"","children":[
+        {"kind":"heading","label":"Account settings","children":[]}
+    ]});
+    browser.push(Ok(BrowserOutcome::DocumentTree {
+        tab_id: 7,
+        tree: shallow.to_string(),
+        truncated: false,
+    }));
+    let third = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"scope":"document","max_depth":2}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(third.status, Status::Succeeded, "{}", third.summary);
+    assert!(
+        third.facts.get("diff").is_none(),
+        "a tree of another depth is not compared with the last one"
+    );
+    assert_eq!(third.facts["tree"], shallow);
+}
+
+/// One focused typing call with an expectation, whose check meets `check`.
+fn typed_with_expectation(
+    check: Result<BrowserOutcome, BrowserError>,
+) -> (crate::work::result::InvocationResult, Arc<MemoryAudit>) {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "textbox".into(),
+            role: "textbox".into(),
+            name: "Message".into(),
+            state: vec![],
+            credential_class: false,
+        }],
+    }));
+    browser.push(Ok(BrowserOutcome::Typed {
+        tab: tab(7, "https://example.com/"),
+        character_count: 4,
+        subject: None,
+        committed_urls: vec![],
+    }));
+    browser.push(check);
+    let result = executor.execute(
+        &workspace,
+        "browser_type_text",
+        json!({"text":"sent","focused":true,"expect":{"condition":"text_present","value":"done"}}),
+        None,
+        &CancellationToken::default(),
+    );
+    (result, audit)
+}
+
+/// A check that does not confirm an applied action keeps the action in the summary, the facts,
+/// and the audit, never claims nothing happened, and never invites a blind repeat.
+#[test]
+fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
+    const TYPED: &str = "Typed 4 characters into the \"Message\" text field on example.com.";
+    const LOOK_FIRST: &str = "Check the page with browser_read or browser_inspect before repeating; the action already happened.";
+    let cases = [
+        (
+            Ok(BrowserOutcome::Observed {
+                tab_id: 7,
+                satisfied: false,
+                elapsed_ms: 2_000,
+                readiness: BrowserReadiness::Complete,
+            }),
+            Status::Failed,
+            "expectation_unmet",
+            format!("{TYPED} The expected condition did not hold afterward."),
+            json!({"reason":"action_unconfirmed","cause":"unmet"}),
+        ),
+        (
+            Err(BrowserError::CancelledBeforeDispatch),
+            Status::Cancelled,
+            "cancelled",
+            format!(
+                "{TYPED} The expected condition was not checked because the call was cancelled."
+            ),
+            json!({"reason":"action_unconfirmed","cause":"cancelled"}),
+        ),
+        (
+            Err(BrowserError::DisconnectedBeforeDispatch),
+            Status::Failed,
+            "browser_disconnected",
+            format!(
+                "{TYPED} The expected condition was not checked because the browser disconnected."
+            ),
+            json!({"reason":"action_unconfirmed","cause":"disconnected"}),
+        ),
+        (
+            Err(BrowserError::RecoveryManual {
+                browsers: vec!["Chromium".into()],
+            }),
+            Status::Failed,
+            "browser_unavailable",
+            format!(
+                "{TYPED} The expected condition was not checked because Ghostlight could not reach the browser."
+            ),
+            json!({"reason":"action_unconfirmed","cause":"browser_unavailable"}),
+        ),
+    ];
+    for (check, status, reason, summary, refusal) in cases {
+        let (result, audit) = typed_with_expectation(check);
+        assert_eq!(result.status, status, "{}", result.summary);
+        assert_eq!(result.effect, Effect::Applied, "{}", result.summary);
+        assert!(!result.repeat_safe, "{}", result.summary);
+        assert_eq!(result.summary, summary);
+        assert_eq!(result.next_steps, vec![LOOK_FIRST]);
+        assert_eq!(result.facts["reason"], reason);
+        assert_eq!(result.facts["typed"], true, "the action's facts stay");
+        assert_eq!(result.facts["character_count"], 4);
+        let records = audit.0.lock().unwrap();
+        let record = records.last().unwrap();
+        assert_eq!(record.effect, "applied");
+        assert_eq!(record.summary, summary, "the audit keeps the same account");
+        assert_eq!(
+            serde_json::to_value(&record.refusal_facts).unwrap(),
+            refusal
+        );
+    }
+    let (confirmed, _) = typed_with_expectation(Ok(BrowserOutcome::Observed {
+        tab_id: 7,
+        satisfied: true,
+        elapsed_ms: 10,
+        readiness: BrowserReadiness::Complete,
+    }));
+    assert_eq!(confirmed.status, Status::Succeeded);
+    assert_eq!(confirmed.summary, TYPED);
+}

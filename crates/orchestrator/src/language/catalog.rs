@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use crate::governance::AuthoritySnapshot;
 
 use super::{
-    DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS,
-    MIN_TIMEOUT_MS, NAMED_KEYS,
+    DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
+    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -85,7 +85,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_inspect",
             "Inspect page",
-            "Inspect semantic controls or page structure and receive fresh target_ handles for later actions. With scope document it also snapshots structure and diffs it against the previous snapshot of that tab.",
+            "Inspect semantic controls or page structure. Scopes controls, structure, and all return fresh target_ handles for later actions. Scope document returns the page outline as one bounded tree of kinds and labels, without handles, and diffs it against the previous document snapshot of the same root and depth.",
             inspect_schema(),
             Hints::browser_read(),
         ),
@@ -541,7 +541,7 @@ fn inspect_schema() -> Value {
                     enumeration(
                         &["controls", "structure", "all", "document"],
                         Some("controls"),
-                        "What semantic facts to return. Document returns one bounded hierarchical tree plus a snapshot handle and a diff when a prior snapshot exists.",
+                        "What semantic facts to return. Document returns a tree of {kind, label, children} nodes, a snapshot handle, and, when the previous snapshot used the same root and max_depth, a diff whose paths are positions in that tree.",
                     ),
                 ),
                 (
@@ -553,7 +553,15 @@ fn inspect_schema() -> Value {
                 ),
                 (
                     "max_depth",
-                    integer(1, 12, None, "Optional bounded depth for document scope."),
+                    // No schema default: the decoder refuses max_depth outside document scope.
+                    integer(
+                        1,
+                        12,
+                        None,
+                        &format!(
+                            "Levels the document scope tree may reach; {DEFAULT_DOCUMENT_DEPTH} when omitted."
+                        ),
+                    ),
                 ),
                 (
                     "max_items",
@@ -726,8 +734,8 @@ fn click_schema() -> Value {
                                 "Screenshot view that defines these coordinates; take one first if you have none.",
                             ),
                         ),
-                        ("x", coordinate("Horizontal CSS coordinate in the view.")),
-                        ("y", coordinate("Vertical CSS coordinate in the view.")),
+                        ("x", coordinate(IMAGE_X)),
+                        ("y", coordinate(IMAGE_Y)),
                     ],
                 ),
                 vec!["view", "x", "y"],
@@ -805,8 +813,8 @@ fn scroll_schema() -> Value {
                             "Screenshot view that defines these coordinates; take one first if you have none.",
                         ),
                     ),
-                    ("x", coordinate("Horizontal CSS coordinate in the view.")),
-                    ("y", coordinate("Vertical CSS coordinate in the view.")),
+                    ("x", coordinate(IMAGE_X)),
+                    ("y", coordinate(IMAGE_Y)),
                     ("ticks", integer(1, 10, None, "Wheel ticks to send.")),
                     ("timeout_ms", timeout()),
                 ],
@@ -846,8 +854,8 @@ fn hover_schema() -> Value {
                             "Screenshot view that defines these coordinates; take one first if you have none.",
                         ),
                     ),
-                    ("x", coordinate("Horizontal CSS coordinate in the view.")),
-                    ("y", coordinate("Vertical CSS coordinate in the view.")),
+                    ("x", coordinate(IMAGE_X)),
+                    ("y", coordinate(IMAGE_Y)),
                     ("timeout_ms", timeout()),
                 ],
                 vec!["view", "x", "y"],
@@ -1040,10 +1048,10 @@ fn drag_schema() -> Value {
                         "view",
                         handle("view_", "Screenshot view that defines both points; take one first if you have none."),
                     ),
-                    ("start_x", coordinate("Horizontal source coordinate.")),
-                    ("start_y", coordinate("Vertical source coordinate.")),
-                    ("end_x", coordinate("Horizontal destination coordinate.")),
-                    ("end_y", coordinate("Vertical destination coordinate.")),
+                    ("start_x", coordinate("Horizontal source pixel in the view's screenshot image.")),
+                    ("start_y", coordinate("Vertical source pixel in the view's screenshot image.")),
+                    ("end_x", coordinate("Horizontal destination pixel in the view's screenshot image.")),
+                    ("end_y", coordinate("Vertical destination pixel in the view's screenshot image.")),
                     ("tab", tab()),
                     ("timeout_ms", timeout()),
                 ],
@@ -1201,8 +1209,8 @@ fn upload_schema() -> Value {
                     "view",
                     handle("view_","Current screenshot view that defines the drop coordinates; requires source_image."),
                 ),
-                ("x", coordinate("Horizontal CSS coordinate in the view.")),
-                ("y", coordinate("Vertical CSS coordinate in the view.")),
+                ("x", coordinate(IMAGE_X)),
+                ("y", coordinate(IMAGE_Y)),
                 ("tab", tab()),
                 ("timeout_ms", timeout()),
             ],
@@ -1564,6 +1572,13 @@ fn timeout() -> Value {
 fn timeout_with_default(default: u64) -> Value {
     json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default,"description":"Maximum call time in milliseconds."})
 }
+
+/// A pointer x coordinate. Views map image pixels through their own scale, which is not 1 for
+/// full-page and magnified captures, so page CSS pixels would land in the wrong place.
+const IMAGE_X: &str = "Horizontal pixel in the view's screenshot image, from its left edge.";
+
+/// A pointer y coordinate, in the same image pixels as `IMAGE_X`.
+const IMAGE_Y: &str = "Vertical pixel in the view's screenshot image, from its top edge.";
 
 fn coordinate(description: &str) -> Value {
     json!({"type":"number","minimum":0,"maximum":1_000_000,"description":description})

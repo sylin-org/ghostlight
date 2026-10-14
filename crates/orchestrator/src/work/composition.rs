@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::governance::Decision;
 use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
-use crate::language::outcome::{BlockedReason, Outcome, WorkspaceReason};
+use crate::language::outcome::{BlockedReason, CheckFailure, Outcome, WorkspaceReason};
 
 use super::result::Readiness;
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
@@ -231,6 +231,7 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
         Some(A::ConnectionLost | A::BrowserStopped { reconnect: true }) => {
             StepCause::ConnectionLost
         }
+        Some(A::ActionUnconfirmed { cause }) => unconfirmed_cause(*cause),
         _ => match terminal.result.status {
             Status::Succeeded => return None,
             Status::Blocked => StepCause::PolicyBlocked,
@@ -240,6 +241,27 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
             Status::Unknown => StepCause::Unconfirmed,
         },
     })
+}
+
+/// The flow cause of an applied child whose requested check did not confirm it.
+///
+/// It is the cause the check would have had on its own, so a Pause, Stop, cancellation, or
+/// deadline during a check still stops the flow the way it stops any other step.
+const fn unconfirmed_cause(cause: CheckFailure) -> StepCause {
+    match cause {
+        CheckFailure::Blocked(BlockedReason::AuditUnavailable) => StepCause::AuditUnavailable,
+        CheckFailure::Blocked(BlockedReason::Hold) => StepCause::Paused,
+        CheckFailure::Blocked(BlockedReason::SessionEnded) => StepCause::SessionEnded,
+        CheckFailure::Blocked(_) => StepCause::PolicyBlocked,
+        CheckFailure::AttentionRequired => StepCause::AttentionRequired,
+        CheckFailure::Cancelled => StepCause::Cancelled,
+        CheckFailure::DeadlineExpired => StepCause::Deadline,
+        CheckFailure::Disconnected => StepCause::ConnectionLost,
+        CheckFailure::Unmet
+        | CheckFailure::BrowserUnavailable
+        | CheckFailure::DocumentUnavailable
+        | CheckFailure::BrowserRefused => StepCause::Failed,
+    }
 }
 
 #[cfg(test)]

@@ -508,7 +508,17 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
     assert_eq!(result.status, Status::Blocked, "{}", result.summary);
     assert_eq!(result.effect, Effect::Applied);
     assert!(!result.repeat_safe);
+    assert_eq!(
+        result.summary,
+        format!(
+            "{} Typed 4 characters into the \"Message\" text field on example.com. The expected condition was not checked.",
+            crate::language::outcome::HUMAN_PAUSE_DIRECTIVE
+        ),
+        "the pause directive comes first and the applied action follows it"
+    );
+    assert!(result.next_steps.is_empty(), "a pause suggests no retry");
     assert_eq!(result.facts["reason"], ReasonCode::RuntimeHold.as_str());
+    assert_eq!(result.facts["typed"], true, "the action's facts stay");
     assert_eq!(browser.calls().len(), 3);
     assert_eq!(audit.0.lock().unwrap().last().unwrap().effect, "applied");
 }

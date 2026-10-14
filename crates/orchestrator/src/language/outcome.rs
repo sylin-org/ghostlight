@@ -228,11 +228,14 @@ pub enum Outcome {
     /// Invalid child inputs prevented entering the ordinary executor.
     StepNotStarted,
 
-    /// One bounded document-tree observation was recorded.
+    /// One bounded document tree was returned to the caller and recorded as a snapshot.
+    ///
+    /// `differences` is present only when the previous snapshot covered the same root and depth,
+    /// because a tree of another scope differs without the page changing.
     DocumentInspected {
         nodes: usize,
         truncated: bool,
-        compared: bool,
+        differences: Option<usize>,
     },
     /// One controlled tab was brought into view.
     TabActivated { host: Option<String> },
@@ -383,13 +386,18 @@ impl Outcome {
             Self::DocumentInspected {
                 nodes,
                 truncated: _,
-                compared,
+                differences,
             } => {
-                let counted = counted(*nodes, "node", "nodes");
-                if *compared {
-                    format!("Compared the document tree: {counted}.")
-                } else {
-                    format!("Recorded the document tree: {counted}.")
+                let returned = format!(
+                    "Returned the document tree: {}",
+                    counted(*nodes, "node", "nodes")
+                );
+                match differences {
+                    None => format!("{returned}."),
+                    Some(differences) => format!(
+                        "{returned}, {} from the previous snapshot.",
+                        counted_or_none(*differences, "difference", "differences")
+                    ),
                 }
             }
             Self::CompositionRan(progress) => progress.summary(),
@@ -891,6 +899,112 @@ pub enum BrowserRecoveryReason {
     HandshakeTimeout,
 }
 
+/// Why the condition a caller asked Ghostlight to check after an applied action was not
+/// confirmed.
+///
+/// The action already happened in every case. The cause only says why the check that was meant
+/// to follow it did not confirm the page state the caller expected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckFailure {
+    /// The page was checked, and the expected condition did not hold.
+    Unmet,
+    /// A human control or configured authority refused the check.
+    Blocked(BlockedReason),
+    /// Runtime control requires the user before more browser work.
+    AttentionRequired,
+    /// The caller cancelled before the check finished.
+    Cancelled,
+    /// The call ran out of time before the check finished.
+    DeadlineExpired,
+    /// The browser disconnected before the check finished.
+    Disconnected,
+    /// Ghostlight could not reach a browser to run the check.
+    BrowserUnavailable,
+    /// Access to the page could not be verified for the check.
+    DocumentUnavailable,
+    /// The browser could not run the check or answered outside the contract.
+    BrowserRefused,
+}
+
+/// The one recovery step after an action whose check did not confirm it.
+///
+/// A repeat may apply the action twice, so the step is to look first.
+const CHECK_BEFORE_REPEATING: &str =
+    "Check the page with browser_read or browser_inspect before repeating; the action already happened.";
+
+/// Sentence for an applied action whose check never ran.
+const CHECK_NOT_RUN: &str = "The expected condition was not checked";
+
+/// Render an applied action followed by the reason its requested check did not confirm it.
+///
+/// The action sentence always stays, because the action really happened. Pause and Stop keep
+/// their fixed directives first (ADR-0126); the effect facts follow them.
+fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
+    let done = action.summary();
+    match cause {
+        CheckFailure::Unmet => {
+            format!("{done} The expected condition did not hold afterward.")
+        }
+        CheckFailure::Blocked(BlockedReason::Hold) => {
+            format!("{HUMAN_PAUSE_DIRECTIVE} {done} {CHECK_NOT_RUN}.")
+        }
+        CheckFailure::Blocked(BlockedReason::SessionEnded) => {
+            format!("{HUMAN_STOP_DIRECTIVE} {done} {CHECK_NOT_RUN}.")
+        }
+        CheckFailure::Blocked(reason) => {
+            format!("{done} {CHECK_NOT_RUN}. {}", blocked(reason, &None))
+        }
+        CheckFailure::AttentionRequired => {
+            format!("{done} {CHECK_NOT_RUN} because the browser job requires user attention.")
+        }
+        CheckFailure::Cancelled => {
+            format!("{done} {CHECK_NOT_RUN} because the call was cancelled.")
+        }
+        CheckFailure::DeadlineExpired => {
+            format!("{done} {CHECK_NOT_RUN} because the call ran out of time.")
+        }
+        CheckFailure::Disconnected => {
+            format!("{done} {CHECK_NOT_RUN} because the browser disconnected.")
+        }
+        CheckFailure::BrowserUnavailable => {
+            format!("{done} {CHECK_NOT_RUN} because Ghostlight could not reach the browser.")
+        }
+        CheckFailure::DocumentUnavailable => {
+            format!("{done} {CHECK_NOT_RUN} because access to the page could not be verified.")
+        }
+        CheckFailure::BrowserRefused => {
+            format!("{done} {CHECK_NOT_RUN} because the browser could not run the check.")
+        }
+    }
+}
+
+/// Recovery for an applied action whose check did not confirm it.
+///
+/// Human controls, the history requirement, and attention stay step-free, as their own refusals
+/// are. A policy refusal points to the policy. Everything else says to look before repeating.
+fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
+    match cause {
+        CheckFailure::Blocked(
+            BlockedReason::Hold
+            | BlockedReason::SessionEnded
+            | BlockedReason::AuditUnavailable
+            | BlockedReason::InvalidAuthority,
+        )
+        | CheckFailure::AttentionRequired => vec![],
+        CheckFailure::Blocked(reason) => {
+            Refusal::AuthorityBlocked { reason, host: None }.next_steps()
+        }
+        CheckFailure::Unmet
+        | CheckFailure::Cancelled
+        | CheckFailure::DeadlineExpired
+        | CheckFailure::Disconnected
+        | CheckFailure::BrowserUnavailable
+        | CheckFailure::DocumentUnavailable
+        | CheckFailure::BrowserRefused => vec![CHECK_BEFORE_REPEATING.into()],
+    }
+}
+
 /// Human-only status for an admitted job still waiting for earlier work.
 pub const WAITING_FOR_WORK: &str = "Waiting for earlier browser work";
 
@@ -972,6 +1086,16 @@ pub enum Refusal {
     RecordingUnavailable,
     /// Retained recording frames could not produce a bounded GIF.
     RecordingExportFailed,
+    /// The action was applied, but the condition the caller asked to check was not confirmed.
+    ///
+    /// The job did complete its effect. What it could not do is confirm the expected page state
+    /// afterward, so the account names both the action and why the check fell short.
+    ActionUnconfirmed {
+        /// The applied action, in its own words.
+        action: Box<Outcome>,
+        /// Why the check did not confirm it.
+        cause: CheckFailure,
+    },
 }
 
 impl Refusal {
@@ -1060,6 +1184,9 @@ impl Refusal {
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
             Self::RecordingUnavailable => "That recording is no longer available.",
             Self::RecordingExportFailed => "The recording could not be turned into a replay.",
+            Self::ActionUnconfirmed { action, cause } => {
+                return unconfirmed_summary(action, *cause);
+            }
         }
         .into()
     }
@@ -1198,6 +1325,7 @@ impl Refusal {
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
                     .into(),
             ],
+            Self::ActionUnconfirmed { cause, .. } => unconfirmed_next_steps(*cause),
             _ => vec![],
         }
     }
@@ -1210,6 +1338,8 @@ impl Refusal {
                 host: host.clone(),
                 ..Observed::default()
             },
+            // The action happened, so its measurements stand beside the sentence that names it.
+            Self::ActionUnconfirmed { action, .. } => action.observed(),
             _ => Observed::default(),
         }
     }
@@ -1596,9 +1726,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, CaptureKind, Observed, Outcome, Refusal, SavedTo, TargetNoun,
-        TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
-        TARGET_LABEL_MAX_CHARS,
+        ActionSubject, BlockedReason, CaptureKind, CheckFailure, Observed, Outcome, Refusal,
+        SavedTo, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
+        HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::workspace::WorkspaceError;
 
@@ -1616,6 +1746,30 @@ mod tests {
             (
                 Outcome::TabsListed { count: 0 },
                 "Listed 0 tabs in this session.",
+            ),
+            (
+                Outcome::DocumentInspected {
+                    nodes: 283,
+                    truncated: false,
+                    differences: None,
+                },
+                "Returned the document tree: 283 nodes.",
+            ),
+            (
+                Outcome::DocumentInspected {
+                    nodes: 283,
+                    truncated: false,
+                    differences: Some(0),
+                },
+                "Returned the document tree: 283 nodes, no differences from the previous snapshot.",
+            ),
+            (
+                Outcome::DocumentInspected {
+                    nodes: 1,
+                    truncated: false,
+                    differences: Some(6),
+                },
+                "Returned the document tree: 1 node, 6 differences from the previous snapshot.",
             ),
             (
                 Outcome::WorkspacesListed { count: 2 },
@@ -2196,6 +2350,108 @@ mod tests {
         }
     }
 
+    /// An action that happened stays in the account when its check falls short, and nothing in
+    /// that account says the action did not happen or invites a blind repeat.
+    #[test]
+    fn unconfirmed_actions_keep_the_action_and_say_why_the_check_fell_short() {
+        let action = Outcome::TargetClicked {
+            host: Some("example.com".into()),
+            subject: ActionSubject::from_page("button", "Save", true),
+        };
+        let check = "Check the page with browser_read or browser_inspect before repeating; the action already happened.";
+        let cases = [
+            (
+                CheckFailure::Unmet,
+                "Clicked the \"Save\" button on example.com. The expected condition did not hold afterward.",
+                vec![check],
+            ),
+            (
+                CheckFailure::Cancelled,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the call was cancelled.",
+                vec![check],
+            ),
+            (
+                CheckFailure::Disconnected,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser disconnected.",
+                vec![check],
+            ),
+            (
+                CheckFailure::BrowserUnavailable,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because Ghostlight could not reach the browser.",
+                vec![check],
+            ),
+            (
+                CheckFailure::DeadlineExpired,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the call ran out of time.",
+                vec![check],
+            ),
+            (
+                CheckFailure::DocumentUnavailable,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because access to the page could not be verified.",
+                vec![check],
+            ),
+            (
+                CheckFailure::BrowserRefused,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser could not run the check.",
+                vec![check],
+            ),
+            (
+                CheckFailure::Blocked(BlockedReason::Hold),
+                "The user paused Ghostlight. Wait for further instructions. Clicked the \"Save\" button on example.com. The expected condition was not checked.",
+                vec![],
+            ),
+            (
+                CheckFailure::Blocked(BlockedReason::SessionEnded),
+                "The user asked to interrupt the process. Wait for further instructions. Clicked the \"Save\" button on example.com. The expected condition was not checked.",
+                vec![],
+            ),
+            (
+                CheckFailure::Blocked(BlockedReason::Host),
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked. Blocked: that host is not allowed.",
+                vec!["Call policy_explain to see what this session may do."],
+            ),
+            (
+                CheckFailure::AttentionRequired,
+                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser job requires user attention.",
+                vec![],
+            ),
+        ];
+        for (cause, summary, steps) in cases {
+            let refusal = Refusal::ActionUnconfirmed {
+                action: Box::new(action.clone()),
+                cause,
+            };
+            assert_eq!(refusal.summary(), summary, "{cause:?}");
+            assert_eq!(refusal.next_steps(), steps, "{cause:?}");
+            for false_claim in ["before anything happened", "repeat the call", "nothing"] {
+                assert!(
+                    !refusal.summary().contains(false_claim),
+                    "{cause:?} says {false_claim}"
+                );
+            }
+            assert_eq!(refusal.observed(), action.observed(), "{cause:?}");
+            let audit = refusal.audit();
+            assert_eq!(audit.summary(), summary, "{cause:?}");
+            assert_eq!(
+                audit.refusal(),
+                Some(&crate::language::audit::AuditRefusal::ActionUnconfirmed { cause }),
+                "{cause:?}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(
+                Refusal::ActionUnconfirmed {
+                    action: Box::new(action.clone()),
+                    cause: CheckFailure::Blocked(BlockedReason::Hold),
+                }
+                .audit()
+                .refusal()
+            )
+            .unwrap(),
+            json!({"reason":"action_unconfirmed","cause":{"blocked":"hold"}})
+        );
+    }
+
     /// A policy attention hold keeps its own words rather than borrowing the person's pause.
     #[test]
     fn attention_is_not_worded_as_a_human_pause() {
@@ -2625,7 +2881,7 @@ mod tests {
             Outcome::DocumentInspected {
                 nodes: 0,
                 truncated: false,
-                compared: false,
+                differences: None,
             }
             .next_steps(),
             vec!["Wait for the page to finish loading with browser_wait, or inspect without a root selector."]
@@ -2671,7 +2927,7 @@ mod tests {
             Outcome::DocumentInspected {
                 nodes: 200,
                 truncated: true,
-                compared: false,
+                differences: None,
             }
             .next_steps(),
             vec!["Narrow the subtree root or depth to capture the rest."]

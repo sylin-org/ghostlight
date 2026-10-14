@@ -4,7 +4,6 @@ pub mod audit;
 pub mod audit_health;
 pub mod capability_map;
 pub mod composition;
-pub mod control;
 pub mod coverage;
 pub mod environment;
 pub mod history;
@@ -30,6 +29,8 @@ const MIN_TIMEOUT_MS: u64 = 100;
 const MAX_TIMEOUT_MS: u64 = 30_000;
 pub(super) const DEFAULT_FILL_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
 pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
+/// How many levels a document-scope inspection reaches when the call names no `max_depth`.
+pub const DEFAULT_DOCUMENT_DEPTH: usize = 6;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
