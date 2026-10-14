@@ -148,11 +148,7 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
         if harness.private_view {
-            println!(
-                "MCP client: {} -- {} -- Windows gives the app this terminal runs in its own                  view of this configuration.",
-                harness.name,
-                container::NOT_VISIBLE
-            );
+            println!("{}", container::client_cannot_see_line(&harness.name));
             continue;
         }
         println!(

@@ -73,10 +73,11 @@ manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install
 A client entry Ghostlight does not own, such as an `npx` launcher, is reported and left alone.
 On Windows the one manifest lives in `manifests`, which no app container redirects, and each
 browser's `HKCU` value names it; a value is written only when it differs from what is read
-(`install/native_host.rs`). A process whose ancestor runs from a `WindowsApps` directory is inside
-that app's container, where registry and `AppData` writes reach only that app. There the install
-(`install/container.rs`) writes the manifest, leaves those redirected registrations unwritten, and
-reports them with the one command that finishes them from a regular terminal,
+(`install/native_host.rs`). A process whose ancestor is a packaged app, and whose probe write below
+`%LOCALAPPDATA%` lands in that app's private copy, is inside that app's container, where registry
+and `AppData` writes reach only that app (a packaged terminal that is not redirected is not). There
+the install (`install/container.rs`) writes the manifest, leaves those redirected registrations
+unwritten, except the configuration of the container's own app, and reports them with the one command that finishes them from a regular terminal,
 `<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see. An install
 outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts`
 and removes that directory when it is empty.

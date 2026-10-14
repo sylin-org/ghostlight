@@ -267,15 +267,26 @@ differ, this section wins.
   because those browsers read the file itself.
 - **Read first.** A registry value is written only when it differs from what is read, so an
   install inside a container that finds the right value registered writes nothing.
-- **Container rule.** A process is inside an app container when an ancestor's executable lies
-  under a `WindowsApps` directory (the parent chain is walked to 16 levels through `win-peer`).
-  Inside one, the install does everything else but leaves each registration that needs a
-  redirected write unwritten: a browser's `HKCU` value, an MCP client configuration under
-  `%APPDATA%` or `%LOCALAPPDATA%`, the Start-menu shortcut and the installed-apps key. Its report
-  names the browser and client registrations it left and the one command that finishes them from
-  a regular terminal, `<home>/bin/ghostlight.exe install`. `doctor` there says it cannot see what
-  other apps see, instead of reporting registered. An uninstall inside a container is refused
-  with the command to run, because it could only change the private view.
+- **Container rule.** A packaged ancestor alone does not make a container: Windows Terminal,
+  Store PowerShell and other packaged apps run in the open. The parent chain (walked to 16
+  levels through `win-peer`) names the packaged apps the process descends from, meaning images
+  directly below a package directory of `<drive>:\Program Files\WindowsApps` (or
+  `<drive>:\WindowsApps`); the per-user `%LOCALAPPDATA%\Microsoft\WindowsApps` alias directory
+  does not count. The process is inside the container of the first such app for which the effect
+  is confirmed: the install writes a probe file below `%LOCALAPPDATA%`, removes it afterwards,
+  and finds it also in `%LOCALAPPDATA%\Packages\<family>\LocalCache\Local`, where `<family>`
+  is the package name and publisher id of the package directory. Inside one, the install does
+  everything else but leaves each registration that needs a redirected write unwritten: a
+  browser's `HKCU` value, an MCP client configuration under `%APPDATA%` or `%LOCALAPPDATA%`,
+  the Start-menu shortcut and the installed-apps key. A client that is the container's own app
+  is the exception, because the private view is the one it reads: Claude Desktop's
+  configuration is written normally inside Claude's container and left private inside any
+  other. Its report names the browser, client and Start-menu registrations that were out of
+  date and left, and the one command that finishes them from a regular terminal,
+  `<home>/bin/ghostlight.exe install`; this holds for `ghostlight native-host install` too.
+  `doctor` there says it cannot see what other apps see, instead of reporting registered. An
+  uninstall inside a container is refused with the command to run, because it could only
+  change the private view.
 - **Migration.** Outside a container, an existing manifest in
   `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts` is rewritten into `manifests/`, the registry
   values are repointed, the old manifest is removed once no browser names it, and the old

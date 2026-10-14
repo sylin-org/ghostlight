@@ -41,6 +41,8 @@ use uuid::Uuid;
 use container::{AppContainer, Residence};
 
 const SERVER_NAME: &str = "ghostlight";
+/// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
+const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 /// File in the state directory recording where each MCP client's configuration was found.
 const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
 // Codex filters its stdio child's environment. Linux demand-start needs the invoking
@@ -480,10 +482,18 @@ struct PrivateView {
 }
 
 impl HarnessContext {
-    /// The app whose private view holds `path`, when this process writes there.
-    fn private_to(&self, path: &Path) -> Option<&AppContainer> {
+    /// The app whose private view holds the configuration of `definition`, when this process
+    /// writes there and the client is not that app itself: an app reads the very view it
+    /// writes, so its own configuration is written like any other.
+    fn private_to(&self, definition: &HarnessDefinition) -> Option<&AppContainer> {
         let view = self.private_view.as_ref()?;
-        let path = comparable(path);
+        if definition
+            .own_package
+            .is_some_and(|package| view.container.is_app(package))
+        {
+            return None;
+        }
+        let path = comparable(&definition.path);
         view.roots
             .iter()
             .map(|root| comparable(root))
@@ -606,9 +616,18 @@ struct HarnessDefinition {
     located_stale: bool,
     executables: &'static [&'static str],
     dialect: ConfigDialect,
+    /// The package name of the packaged app that reads this configuration, when the client is
+    /// one. Inside that app's own container the private view is the one the client reads.
+    own_package: Option<&'static str>,
 }
 
 impl HarnessDefinition {
+    /// The same definition, for a client that is the packaged app `package`.
+    fn packaged_as(mut self, package: &'static str) -> Self {
+        self.own_package = Some(package);
+        self
+    }
+
     fn accepts_config_path(&self, path: &Path) -> bool {
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             return false;
@@ -707,7 +726,8 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             claude_desktop,
             &[],
             ConfigDialect::Json(JsonDialect::McpServers),
-        ),
+        )
+        .packaged_as(CLAUDE_DESKTOP_PACKAGE),
         row(
             "cursor",
             "cursor",
@@ -992,6 +1012,7 @@ fn row(
         located_stale: false,
         executables,
         dialect,
+        own_package: None,
     }
 }
 
@@ -1082,7 +1103,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_uninstall: state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
         can_locate: true,
-        private_view: context.private_to(&definition.path).is_some(),
+        private_view: context.private_to(definition).is_some(),
         config_path: definition.path.to_string_lossy().into_owned(),
         connector_command: context.connector.to_string_lossy().into_owned(),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
@@ -1393,7 +1414,7 @@ fn refuse_private(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<(), HarnessError> {
-    match context.private_to(&definition.path) {
+    match context.private_to(definition) {
         Some(container) => Err(HarnessError::PrivateView(container.app.clone())),
         None => Ok(()),
     }
@@ -2496,7 +2517,8 @@ pub enum HarnessError {
     InvalidPath(PathBuf),
     /// The change would reach only the private view of an app container.
     #[error(
-        "Windows keeps this configuration private to {0}, so a change made from here would not          reach other apps; run Ghostlight's install from a regular terminal"
+        "Windows keeps this configuration private to {0}, so a change made from here would not \
+         reach other apps; run Ghostlight's install from a regular terminal"
     )]
     PrivateView(String),
 }
@@ -3967,19 +3989,26 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
-    fn inside_an_app_container_appdata_clients_are_private_and_profile_clients_are_not() {
-        let directory = temporary("private-view");
-        let mut context = context(&directory);
+    /// A context run from inside the container of the app `package`, whose `AppData` is the
+    /// directory `config`, with a Claude Desktop configuration present.
+    fn inside_container(directory: &Path, package: &str) -> (HarnessContext, PathBuf) {
+        let mut context = context(directory);
         context.private_view = Some(PrivateView {
             container: AppContainer {
-                app: "Claude".into(),
+                app: package.into(),
             },
             roots: vec![directory.join("config")],
         });
         let desktop = context.roaming.join("Claude/claude_desktop_config.json");
         fs::create_dir_all(desktop.parent().unwrap()).unwrap();
         fs::write(&desktop, r#"{"mcpServers":{}}"#).unwrap();
+        (context, desktop)
+    }
+
+    #[test]
+    fn inside_another_apps_container_an_appdata_client_is_private_and_a_profile_client_is_not() {
+        let directory = temporary("private-view");
+        let (context, desktop) = inside_container(&directory, "OpenAI.Codex");
         let before = fs::read(&desktop).unwrap();
         let registry = HarnessRegistry::with_context(context);
 
@@ -3998,7 +4027,7 @@ mod tests {
         let refused = registry
             .apply("claude-desktop", HarnessAction::Install)
             .unwrap_err();
-        assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "Claude"));
+        assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex"));
         assert_eq!(fs::read(&desktop).unwrap(), before);
         assert!(
             registry
@@ -4006,6 +4035,30 @@ mod tests {
                 .unwrap()
                 .changed
         );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn inside_its_own_container_a_packaged_client_is_written_like_any_other() {
+        let directory = temporary("own-container");
+        let (context, desktop) = inside_container(&directory, "Claude");
+        let registry = HarnessRegistry::with_context(context);
+
+        let claude = registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-desktop")
+            .unwrap();
+        assert!(!claude.private_view);
+        assert!(
+            registry
+                .apply("claude-desktop", HarnessAction::Install)
+                .unwrap()
+                .changed
+        );
+        let value: Value = serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
+        assert!(value["mcpServers"].get("ghostlight").is_some());
 
         fs::remove_dir_all(directory).unwrap();
     }

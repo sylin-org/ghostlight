@@ -57,12 +57,9 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         );
         print_native_host_report(&result.report);
         kept_private.container = result.report.private_view.clone();
-        kept_private.registrations.extend(
-            result
-                .private
-                .iter()
-                .map(|name| format!("{name} browser connection")),
-        );
+        kept_private
+            .registrations
+            .extend(private_browser_registrations(&result.private));
         install_usable = result.report.browsers.iter().any(|browser| {
             (install_browser_ids
                 .as_ref()
@@ -200,6 +197,14 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// How the report names the browsers whose registry value an install left unwritten.
+fn private_browser_registrations(browsers: &[String]) -> Vec<String> {
+    browsers
+        .iter()
+        .map(|name| format!("{name} browser connection"))
+        .collect()
 }
 
 /// Finish the setup: when registrations were left unwritten because an app container keeps them
@@ -422,18 +427,35 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
 
     ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
-    let (verb, changed, report) = match command {
-        NativeHostCommand::Check => ("checked", false, registry.check()?),
+    let (verb, changed, report, private) = match command {
+        NativeHostCommand::Check => ("checked", false, registry.check()?, Vec::new()),
         NativeHostCommand::Install => {
             let result = registry.install()?;
-            ("installed", result.changed, result.report)
+            let verb = if result.private.is_empty() {
+                "installed"
+            } else {
+                "prepared"
+            };
+            (verb, result.changed, result.report, result.private)
         }
         NativeHostCommand::Uninstall => {
             let result = registry.uninstall()?;
-            ("uninstalled", result.changed, result.report)
+            ("uninstalled", result.changed, result.report, Vec::new())
         }
     };
     println!("Ghostlight native host {verb}; changed: {changed}");
+    if let Some(container) = &report.private_view {
+        print_native_host_report(&report);
+        if !private.is_empty() {
+            let registrations = private_browser_registrations(&private);
+            for line in
+                container::kept_private_lines(container, &registrations, &Layout::current()?)
+            {
+                println!("{line}");
+            }
+        }
+        return Ok(());
+    }
     println!("Connector: {}", report.connector.display());
     for browser in report.browsers {
         let state = match browser.state {
@@ -477,7 +499,7 @@ mod tests {
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 
-    use super::select_install_browsers;
+    use super::{private_browser_registrations, select_install_browsers};
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
@@ -540,6 +562,14 @@ mod tests {
         assert_eq!(
             select_install_browsers(&windows, &SetupOptions::default()).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn a_browser_left_private_is_named_as_its_connection() {
+        assert_eq!(
+            private_browser_registrations(&["Google Chrome".to_owned()]),
+            ["Google Chrome browser connection"]
         );
     }
 }

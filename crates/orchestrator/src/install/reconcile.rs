@@ -24,6 +24,8 @@ use super::layout::Layout;
 use super::migration::RegistrationKind;
 use super::native_host::{NativeHostRegistry, NativeHostState, NATIVE_HOST_DIR_VARIABLE};
 use super::user_assets::UserAssets;
+#[cfg(windows)]
+use super::windows_entry::{WindowsEntryChange, INSTALLED_APPS_ENTRY, START_MENU_SHORTCUT};
 use super::{HarnessAction, HarnessRegistry, HarnessState};
 
 /// A registration the next reconcile will write.
@@ -290,7 +292,8 @@ fn reconcile_platform(
 /// Write the Start-menu shortcut and the Uninstall key.
 ///
 /// Inside an app container both would land in that app's private view, so neither is written;
-/// the next install from a regular terminal writes them.
+/// each one that is out of date is named in [`ReconcileReport::kept_private`], and the next
+/// install from a regular terminal writes it.
 #[cfg(windows)]
 fn reconcile_windows(
     layout: &Layout,
@@ -298,13 +301,41 @@ fn reconcile_windows(
     residence: &Residence,
     report: &mut ReconcileReport,
 ) {
+    reconcile_entries(
+        residence,
+        report,
+        || super::windows_entry::plan(layout, version),
+        || super::windows_entry::reconcile(layout, version),
+    );
+}
+
+/// Apply `apply` to the Windows entries, or, inside an app container, only name what `plan` says
+/// is out of date.
+#[cfg(windows)]
+fn reconcile_entries(
+    residence: &Residence,
+    report: &mut ReconcileReport,
+    plan: impl FnOnce() -> std::io::Result<WindowsEntryChange>,
+    apply: impl FnOnce() -> std::io::Result<WindowsEntryChange>,
+) {
     if residence.container().is_some() {
+        match plan() {
+            Ok(change) => {
+                if change.shortcut {
+                    report.kept_private.push(START_MENU_SHORTCUT.to_owned());
+                }
+                if change.uninstall_key {
+                    report.kept_private.push(INSTALLED_APPS_ENTRY.to_owned());
+                }
+            }
+            Err(error) => report.failures.push(format!("Start menu: {error}")),
+        }
         return;
     }
-    match super::windows_entry::reconcile(layout, version) {
+    match apply() {
         Ok(change) => {
             if change.shortcut {
-                report.platform.push("Start-menu shortcut".to_owned());
+                report.platform.push(START_MENU_SHORTCUT.to_owned());
             }
             if change.nsis_removed {
                 report
@@ -312,7 +343,7 @@ fn reconcile_windows(
                     .push("installed-apps entry of an earlier installer removed".to_owned());
             }
             if change.uninstall_key {
-                report.platform.push("installed-apps entry".to_owned());
+                report.platform.push(INSTALLED_APPS_ENTRY.to_owned());
             }
         }
         Err(error) => report.failures.push(format!("Start menu: {error}")),
@@ -483,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn inside_a_container_a_client_under_appdata_is_reported_private_and_left_alone() {
+    fn inside_another_apps_container_a_client_under_appdata_is_reported_private_and_left_alone() {
         let fixture = Fixture::new();
         let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
         let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
@@ -494,7 +525,7 @@ mod tests {
         let before = fs::read(&owned).unwrap();
 
         let report = fixture
-            .private_registrations("Claude")
+            .private_registrations("OpenAI.Codex")
             .reconcile(&fixture.layout, "2.0.0");
 
         assert!(report.failures.is_empty(), "{report:?}");
@@ -503,10 +534,108 @@ mod tests {
         assert_eq!(
             report.container,
             Some(AppContainer {
-                app: "Claude".into()
+                app: "OpenAI.Codex".into()
             })
         );
         assert_eq!(fs::read(&owned).unwrap(), before);
+    }
+
+    #[test]
+    fn inside_its_own_container_a_packaged_client_is_rewritten() {
+        let fixture = Fixture::new();
+        let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
+        let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        Fixture::write_json(
+            &owned,
+            &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
+        );
+
+        let report = fixture
+            .private_registrations("Claude")
+            .reconcile(&fixture.layout, "2.0.0");
+
+        assert!(report.failures.is_empty(), "{report:?}");
+        assert_eq!(report.clients_rewritten, ["Claude Desktop"]);
+        assert!(report.kept_private.is_empty(), "{report:?}");
+        assert_eq!(report.container, None);
+    }
+
+    #[cfg(windows)]
+    mod windows_entries {
+        use std::io;
+
+        use super::super::super::windows_entry::WindowsEntryChange;
+        use super::super::*;
+
+        const STALE: WindowsEntryChange = WindowsEntryChange {
+            shortcut: false,
+            uninstall_key: true,
+            nsis_removed: false,
+        };
+
+        fn container() -> Residence {
+            Residence::AppContainer(AppContainer {
+                app: "Claude".into(),
+            })
+        }
+
+        #[test]
+        fn inside_a_container_a_stale_entry_is_named_and_never_written() {
+            let mut report = ReconcileReport::default();
+            reconcile_entries(
+                &container(),
+                &mut report,
+                || {
+                    Ok(WindowsEntryChange {
+                        shortcut: true,
+                        ..STALE
+                    })
+                },
+                || panic!("a container must not write its private view"),
+            );
+            assert_eq!(
+                report.kept_private,
+                ["Start-menu shortcut", "installed-apps entry"]
+            );
+            assert!(report.platform.is_empty(), "{report:?}");
+        }
+
+        #[test]
+        fn inside_a_container_current_entries_name_nothing() {
+            let mut report = ReconcileReport::default();
+            reconcile_entries(
+                &container(),
+                &mut report,
+                || Ok(WindowsEntryChange::default()),
+                || panic!("a container must not write its private view"),
+            );
+            assert!(report.kept_private.is_empty(), "{report:?}");
+        }
+
+        #[test]
+        fn inside_a_container_an_unreadable_entry_is_a_failure() {
+            let mut report = ReconcileReport::default();
+            reconcile_entries(
+                &container(),
+                &mut report,
+                || Err(io::Error::other("no registry")),
+                || panic!("a container must not write its private view"),
+            );
+            assert_eq!(report.failures, ["Start menu: no registry"]);
+        }
+
+        #[test]
+        fn outside_a_container_the_entries_are_written_and_reported() {
+            let mut report = ReconcileReport::default();
+            reconcile_entries(
+                &Residence::Regular,
+                &mut report,
+                || panic!("a regular install writes without planning"),
+                || Ok(STALE),
+            );
+            assert_eq!(report.platform, ["installed-apps entry"]);
+            assert!(report.kept_private.is_empty(), "{report:?}");
+        }
     }
 
     #[test]

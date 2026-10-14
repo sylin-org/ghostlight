@@ -31,6 +31,12 @@ const SHORTCUT_EXTENSION: &str = "lnk";
 /// The command the installed-apps entry runs to remove Ghostlight's registrations.
 const UNINSTALL_ARGUMENT: &str = "uninstall";
 
+/// What the report calls the Start-menu shortcut.
+pub const START_MENU_SHORTCUT: &str = "Start-menu shortcut";
+
+/// What the report calls the Uninstall key.
+pub const INSTALLED_APPS_ENTRY: &str = "installed-apps entry";
+
 /// Uninstall-key value names.
 mod value {
     pub const DISPLAY_NAME: &str = "DisplayName";
@@ -53,19 +59,14 @@ pub struct WindowsEntryChange {
     pub nsis_removed: bool,
 }
 
-/// Point the Start-menu shortcut and the Uninstall key at the service in `layout`'s `bin`.
-///
-/// Entries that already name it are left alone.
-pub fn reconcile(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
+/// What [`reconcile`] would change, without writing anything.
+pub fn plan(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
     let executable = layout.service_executable();
     let mut change = WindowsEntryChange::default();
     if let Some(shortcut) = shortcut_path() {
         let target = ghostlight_win_peer::item_id_list(&executable)?;
         let bytes = shortcut_bytes(&target, &executable, layout.home());
-        if fs::read(&shortcut).ok().as_deref() != Some(bytes.as_slice()) {
-            atomic_replace(&shortcut, &bytes)?;
-            change.shortcut = true;
-        }
+        change.shortcut = fs::read(&shortcut).ok().as_deref() != Some(bytes.as_slice());
     }
     let uninstall = uninstall_command(&executable);
     let current = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(UNINSTALL_KEY, KEY_READ);
@@ -73,18 +74,42 @@ pub fn reconcile(layout: &Layout, version: &str) -> io::Result<WindowsEntryChang
         .as_ref()
         .ok()
         .and_then(|key| key.get_value(value::UNINSTALL_STRING).ok());
-    if let Some(recorded) = &recorded {
-        if *recorded != uninstall {
-            RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(UNINSTALL_KEY)?;
-            change.nsis_removed = true;
-        }
-    }
+    change.nsis_removed = recorded
+        .as_ref()
+        .is_some_and(|recorded| *recorded != uninstall);
     let version_recorded: Option<String> = current
         .ok()
         .and_then(|key| key.get_value(value::DISPLAY_VERSION).ok());
-    if change.nsis_removed || recorded.is_none() || version_recorded.as_deref() != Some(version) {
-        write_uninstall_key(layout, &executable, &uninstall, version)?;
-        change.uninstall_key = true;
+    change.uninstall_key =
+        change.nsis_removed || recorded.is_none() || version_recorded.as_deref() != Some(version);
+    Ok(change)
+}
+
+/// Point the Start-menu shortcut and the Uninstall key at the service in `layout`'s `bin`.
+///
+/// Entries that already name it are left alone.
+pub fn reconcile(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
+    let change = plan(layout, version)?;
+    let executable = layout.service_executable();
+    if change.shortcut {
+        if let Some(shortcut) = shortcut_path() {
+            let target = ghostlight_win_peer::item_id_list(&executable)?;
+            atomic_replace(
+                &shortcut,
+                &shortcut_bytes(&target, &executable, layout.home()),
+            )?;
+        }
+    }
+    if change.nsis_removed {
+        RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(UNINSTALL_KEY)?;
+    }
+    if change.uninstall_key {
+        write_uninstall_key(
+            layout,
+            &executable,
+            &uninstall_command(&executable),
+            version,
+        )?;
     }
     Ok(change)
 }
