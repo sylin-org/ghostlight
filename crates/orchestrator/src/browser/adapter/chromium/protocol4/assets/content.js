@@ -798,7 +798,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       cancelled: () => ctx.signal.cancelled
     });
 
-    if (message.condition === "visual_settle" || message.condition === "layout_stable") {
+    if (message.condition === "visual_settle") {
       const targetElement = message.locator ? locators.get(message.locator) : document;
       const visual = await sensor.settleVisual(targetElement, settleOptions(message.timeout_ms));
       if (!visual.settled) return unmet(readiness());

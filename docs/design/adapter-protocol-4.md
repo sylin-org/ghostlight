@@ -2082,7 +2082,7 @@ fn observe(l: &mut Link, s: &mut Scope, tab: u64, condition: &str, value: Option
            timeout_ms: u64) -> Result<BrowserOutcome, BrowserError> {
     let call_ms = timeout_ms + CALL_MARGIN_MS;                 // the page loop owns the timeout; this is a backstop
     let (satisfied, elapsed, readiness) = match condition {
-        "visual_settle" | "layout_stable" => observe_one(l, s, tab, s.doc_or_top(&locator)?, condition, &value, &locator, call_ms)?,
+        "visual_settle"                    => observe_one(l, s, tab, s.doc_or_top(&locator)?, condition, &value, &locator, call_ms)?,
         "load_ready" | "url_contains"     => observe_one(l, s, tab, s.top(), condition, &value, &None, call_ms)?,
         "target_present" | "target_absent" => observe_one(l, s, tab, s.doc_of(&locator)?, condition, &value, &locator, call_ms)?,
         "text_present" => {                                    // the first satisfied document wins; the rest get CANCEL by token

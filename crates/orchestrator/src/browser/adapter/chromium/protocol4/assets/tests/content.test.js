@@ -1422,7 +1422,7 @@ test("a cancel token ends observe", async () => {
 
 test("a cancel token ends a visual observe", async () => {
   const harness = contentHarness();
-  const reply = await cancelled(harness, { kind: "observe", condition: "layout_stable", timeout_ms: 60_000 }, "t-visual");
+  const reply = await cancelled(harness, { kind: "observe", condition: "visual_settle", timeout_ms: 60_000 }, "t-visual");
   assert.equal(reply.error?.code, "cancelled");
   assert.equal(harness.dom.pendingTimers(), 0);
 });
