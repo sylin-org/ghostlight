@@ -226,3 +226,26 @@ installation.
   output visible, but an interactive shell does not wait for it; the npm launcher remains the
   route that returns exit codes.
 - macOS remains deferred for want of test hardware, as MEMORY records.
+
+## Owner review amendment (2026-10-14)
+
+The owner reviewed the decisions that change promises. Where this section and the text above
+differ, this section wins.
+
+- **Decision 16, channels.** WinGet stays. Its portable package works as a carrier: running
+  `ghostlight install` through the WinGet alias installs into `~/.ghostlight/bin`, and after
+  `winget upgrade` the next launch or install through the alias carries the newer version
+  forward under the same no-downgrade rule. NSIS, Debian packages, Scoop, the separate portable
+  download and the Homebrew template stay retired. MCPB retires after its final 2.0 release.
+- **Decision 18 is withdrawn.** Managed policy keeps its HTTPS fetch, signatures, rollback
+  protection, cache, Passport and authoring commands. The fetch runs only on the refresher
+  thread, never on the invocation path, and the ownership check on the machine policy file
+  stays. The owner's definition: phone home means communication outside the user's or the
+  administrator's intent. An administrator-configured policy fetch is intended communication,
+  so it is not phone home. The dependency savings in the Consequences shrink accordingly.
+- **Decision 22, Flatpak.** The Flatpak route stays until the owner decides. ADR-0165 is not
+  superseded yet.
+- **Confirmed as written:** the governance knob removals (Decision 19), MCP in the service
+  with connectors that handshake and start the service when it is not up (Decisions 2, 11 and
+  17), Quit, child tabs, session continuity, the strict break and the small removals.
+

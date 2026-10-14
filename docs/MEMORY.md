@@ -273,9 +273,10 @@ the owner wants, and what this project learned the hard way.
 - **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
   preserve-tabs setting. Either refusal keeps the tab visible, and manual closure stays the user's.
 - **Never phone home.** No telemetry, activation, update ping, audit upload, or hidden vendor
-  dependency. An administrator-configured signed policy fetch from the organization's own file or
-  HTTPS source is the explicit opt-in exception; it never contacts Ghostlight or another vendor
-  endpoint.
+  dependency. The owner defines phone home as communication outside the user's or the
+  administrator's intent, not HTTP access as such (2026-10-14). An administrator-configured signed
+  policy fetch from the organization's own file or HTTPS source is intended communication; it
+  never contacts Ghostlight or another vendor endpoint.
 - **Outward changes wait for the owner.** Local edits, tests, and commits are normal. Pushes,
   merges, tags, releases, store actions, and anything public are not.
 - **Full integration means the active live graph.** An isolated target and every automated gate can
