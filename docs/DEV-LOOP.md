@@ -70,13 +70,21 @@ launch.
 | Changed area | Rebuild | Refresh |
 | --- | --- | --- |
 | Orchestrator domain, workbench, or bundled UI | `cargo build -p ghostlight` | Restart `ghostlight`; no relay or extension change |
-| MCP connector protocol lifecycle | `cargo build -p ghostlight-mcp-connector` | Reconnect the MCP server in the harness |
-| Browser connector relay lifecycle | `cargo build -p ghostlight-browser-connector` | Reload the extension so Chromium respawns the native host |
+| MCP connector protocol lifecycle | `cargo build -p ghostlight-mcp-connector` | Reach `bin` (see below), then reconnect the MCP server in the harness |
+| Browser connector relay lifecycle | `cargo build -p ghostlight-browser-connector` | Reach `bin` (see below), then reload the extension so Chromium respawns the native host |
 | Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
+
+Rebuilding does not deploy a connector. The installer replaces the connectors in `bin` only when the
+relay revision differs from the one `bin/install.json` records (ADR-0197 Decision 14). Under one
+relay revision, a connector source change reaches an installed home only through a revision change
+or a forced replacement. To force one, remove `~/.ghostlight/bin/install.json` and run
+`pwsh scripts/dev-loop.ps1 -Plan` first; the plan must list the connector replacements before you
+run the loop for real. The record is rewritten once the new service publishes. Until the connectors
+are replaced, the old ones keep running the old code.
 
 An extension reload invalidates content-script receivers in already-open pages. The current
 adapter does not bootstrap them back into those documents. Refresh a disposable verification tab
