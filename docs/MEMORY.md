@@ -108,6 +108,12 @@ the owner wants, and what this project learned the hard way.
   `with_authorized_optional_target`, ADR-0176/ADR-0177), modular CLI decomposition (`cli/`, ADR-0177),
   and centralized catalog invariants (`CATALOG_TOOL_COUNT`) keep developer extension clean and error-free.
 
+- **The agent decides agent-facing experience.** On 2026-10-14 the owner delegated every decision
+  about what agents see to the agent, as the audience: tool result content and size, matching
+  rules, refusal wording and next steps, and catalog descriptions. Use the agent's own experience
+  as evidence and record each decision in an ADR. Governance, truthfulness, privacy and the trust
+  claims are unchanged and stay the owner's. The test: an agent never needs an extra call to learn
+  what a control accepts or what its action changed, and a mistake costs one call.
 
 - **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
   optional information, and unavailable nonessential components. Use safe defaults and bounded
