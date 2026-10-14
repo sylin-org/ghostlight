@@ -35,7 +35,10 @@
   const TARGET_IFRAME = "iframe";
   const DIALOG_UNKNOWN = "unknown";
 
-  // A coded failure: an Error whose `code` is a protocol 4 receipt failure code.
+  /**
+   * Builds a coded failure: an Error whose `code` is a protocol 4 receipt failure code.
+   * Callers throw or reject with it so the worker can report the code unchanged.
+   */
   function failure(code, message) {
     return Object.assign(new Error(message), { code });
   }
@@ -70,7 +73,10 @@
     // ordinary focus until the service confirms that browser work is active.
     let focusEmulationEnabled = false;
 
-    // Sends one CDP command, refusing any method outside the allowlist.
+    /**
+     * Sends one CDP command to `target` and returns its result. A method outside CDP_ALLOW rejects
+     * with a `browser_refused` failure and nothing reaches Chrome.
+     */
     function cdp(target, method, params) {
       if (!allowed.has(method)) {
         return Promise.reject(failure(CODE_BROWSER_REFUSED, `CDP method ${method} is not allowed`));
@@ -258,6 +264,11 @@
       if (!state.retained && state.leases === 0 && !state.dialog) await detachSession(tabId, state);
     }
 
+    /**
+     * Takes one lease on a tab, attaching and preparing the debugger session if it is not attached.
+     * Every successful acquire must be paired with exactly one release. A failed acquire gives its
+     * lease back and rejects, so the caller owes no release.
+     */
     async function acquire(tabId) {
       const state = tabState(tabId);
       state.leases += 1;
@@ -270,12 +281,20 @@
       }
     }
 
+    /**
+     * Marks a tab as controlled and attaches it. A retained tab keeps its session, and its focus
+     * emulation when enabled, until unretain, forget or detachAll, independent of leases.
+     */
     async function retain(tabId) {
       const state = tabState(tabId);
       state.retained = true;
       await enqueue(tabId, state, () => ensureAttached(tabId, state));
     }
 
+    /**
+     * Ends control of a tab. Focus emulation is turned off, and the session detaches once no lease
+     * and no open dialog remain. Does nothing for a tab that is not tracked.
+     */
     async function unretain(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
@@ -286,6 +305,11 @@
       });
     }
 
+    /**
+     * Sets whether controlled (retained) tabs emulate focus, and applies it to every attached tab now.
+     * Rejects with an AggregateError of every tab that could not be updated; such a tab has released
+     * its session rather than keep an override whose state is unknown.
+     */
     async function setFocusEmulationEnabled(enabled) {
       focusEmulationEnabled = Boolean(enabled);
       const results = await Promise.allSettled(Array.from(tabs, ([tabId, state]) =>
@@ -294,6 +318,10 @@
       if (errors.length) throw new AggregateError(errors, "Could not update controlled-tab focus.");
     }
 
+    /**
+     * Gives back one lease taken by acquire. When it was the last use (no lease, no retention, no
+     * open dialog) the session detaches, awaiting onRelease first. Does nothing without a lease.
+     */
     async function release(tabId) {
       const state = tabs.get(tabId);
       if (!state || state.leases === 0) return;
@@ -301,10 +329,18 @@
       await enqueue(tabId, state, () => settle(tabId, state));
     }
 
+    /**
+     * Records that a JavaScript dialog is open on a tab, as `{ type, message, sessionId }`. An open
+     * dialog keeps the session attached until closeDialog, so the dialog can still be answered.
+     */
     function openDialog(tabId, { type, message = "", sessionId = null } = {}) {
       tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, sessionId };
     }
 
+    /**
+     * Clears the open dialog of a tab and detaches the session if nothing else needs it.
+     * Does nothing for a tab that is not tracked.
+     */
     async function closeDialog(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
@@ -312,13 +348,20 @@
       await enqueue(tabId, state, () => settle(tabId, state));
     }
 
+    /**
+     * Returns a copy of the open dialog of a tab as `{ type, message, sessionId }`, or null when
+     * none is open. Changing the copy does not change the recorded dialog.
+     */
     function currentDialog(tabId) {
       const dialog = tabs.get(tabId)?.dialog;
       return dialog ? { ...dialog } : null;
     }
 
-    // The only path that sends `<domain>.enable`, Runtime.enable included. Returns true when it
-    // enabled the domain and false when it was already enabled.
+    /**
+     * Enables an opt-in CDP domain on the root session, attaching first if needed. This is the only
+     * path that sends `<domain>.enable`, Runtime.enable included. Resolves true when it enabled the
+     * domain and false when the domain was already enabled.
+     */
     async function enableDomain(tabId, domain) {
       const state = tabState(tabId);
       return enqueue(tabId, state, async () => {
@@ -330,6 +373,11 @@
       });
     }
 
+    /**
+     * Disables a domain enabled by enableDomain and forgets it, even when the command fails. The Page
+     * domain stays enabled for the life of the attachment. Does nothing when the tab is not attached
+     * or the domain is not enabled.
+     */
     async function disableDomain(tabId, domain) {
       const state = tabs.get(tabId);
       if (!state || domain === "Page") return;
@@ -343,6 +391,11 @@
       });
     }
 
+    /**
+     * Records that Chrome ended the attachment from outside (chrome.debugger.onDetach). It only
+     * forgets the attachment's state: it sends nothing to Chrome and does not call onRelease. Leases,
+     * retention and the open dialog are kept, so the next acquire attaches again.
+     */
     function detached(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
@@ -350,6 +403,11 @@
       prune(tabId, state);
     }
 
+    /**
+     * Drops every record of a tab that closed. Like detached it sends nothing and does not call
+     * onRelease, and it also discards leases, retention and the open dialog. Work already queued for
+     * the tab fails rather than attach again.
+     */
     function forget(tabId) {
       const state = tabs.get(tabId);
       if (state) {
@@ -359,6 +417,12 @@
       tabs.delete(tabId);
     }
 
+    /**
+     * Releases every debugger session, awaiting onRelease for each and turning focus emulation off.
+     * This is terminal: it clears leases, retention and open dialogs, and refuses queued attaches.
+     * Rejects with an AggregateError when any session could not be detached; those tabs stay tracked
+     * for a retry.
+     */
     async function detachAll() {
       const results = await Promise.allSettled(Array.from(tabs, async ([tabId, state]) => {
         state.retained = false;
@@ -375,25 +439,35 @@
       if (errors.length) throw new AggregateError(errors, "Could not release every debugger session.");
     }
 
+    /**
+     * Returns how many tabs currently have an attached debugger session.
+     */
     function attachedCount() {
       return Array.from(tabs.values()).filter((state) => state.attached).length;
     }
 
-    // The root session of an attached tab, or null.
+    /**
+     * Returns the root session of an attached tab, or null when the tab is not attached.
+     */
     function rootSession(tabId) {
       const state = tabs.get(tabId);
       return state?.attached ? state.root : null;
     }
 
-    // The child (iframe) sessions currently attached under a tab.
+    /**
+     * Returns the child (iframe) sessions currently attached under a tab, or an empty list.
+     */
     function childSessions(tabId) {
       const state = tabs.get(tabId);
       return state?.attached ? Array.from(state.children.values()) : [];
     }
 
-    // Visits the root and child sessions of every attached tab, a tab at a time and behind that
-    // tab's pending lifecycle work. The visitor may use cdp() but must not call back into the
-    // lifecycle. Every session is visited even when one visit fails.
+    /**
+     * Visits the root and child sessions of every attached tab, a tab at a time and behind that
+     * tab's pending lifecycle work. The visitor may use cdp() but must not call back into the
+     * lifecycle. Every session is visited even when one visit fails; failures are then rejected
+     * together as one AggregateError.
+     */
     async function forEachSession(visit) {
       const results = await Promise.allSettled(Array.from(tabs, ([tabId, state]) =>
         state.attached ? enqueue(tabId, state, async () => {
