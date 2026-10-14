@@ -52,7 +52,8 @@ ghostlight call browser_tabs '{"action":"close","tab":"tab_a1b2"}'
 ```
 
 Ghostlight keys the session on the process that called it, identified by its process id and start
-time. A program that spawns `ghostlight call` repeatedly gets the same treatment: one session for as
+time. A command can be forwarded through other Ghostlight executables on its way to the service;
+those hops are skipped, and the owner is the first process above them that is not Ghostlight. A program that spawns `ghostlight call` repeatedly gets the same treatment: one session for as
 long as that program runs.
 
 Tabs live as long as their session, and a tab you open in one shell is not visible from another.
@@ -70,6 +71,10 @@ $env:GHOSTLIGHT_SESSION = "acme-deploy-$PID"
 ```
 
 That key is a convenience, not a credential: it identifies a session, never a permission.
+
+The same applies to `npx`: each `npx ghostlight` call starts a fresh Node process that runs
+Ghostlight as its child, so consecutive calls get different sessions. For continuity across them, set
+`GHOSTLIGHT_SESSION`, or call the installed `ghostlight` command directly.
 
 For a fixed list of calls, `--stdin` still takes one `<tool> <json>` per line:
 
