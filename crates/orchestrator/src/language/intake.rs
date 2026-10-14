@@ -1,9 +1,10 @@
 //! What Ghostlight says on its MCP intake.
 //!
-//! Three kinds of words live here: the messages of the JSON-RPC errors the MCP session engine
-//! answers itself, the sentences of the failure templates a connector sends when it cannot
-//! reach the service, and the sentence the service answers to work that arrives during a quit.
-//! The connector authors no words, so all three come from this module.
+//! Four kinds of words live here: the refusals of a relay opening, the messages of the JSON-RPC
+//! errors the MCP session engine answers itself, the sentences of the failure templates a
+//! connector sends when it cannot reach the service, and the sentence the service answers to work
+//! that arrives during a quit. The connector authors no words, so all of them come from this
+//! module.
 
 /// Longest message a JSON-RPC error carries, in characters.
 const MAX_ERROR_MESSAGE_CHARS: usize = 500;
@@ -14,6 +15,48 @@ pub const SHUTTING_DOWN_CODE: &str = "shutting_down";
 /// What the service says to an invocation that arrives after a quit has begun.
 pub const SHUTTING_DOWN_MESSAGE: &str =
     "Ghostlight is quitting and takes no new work. Nothing was sent. Try the call again in a moment.";
+
+/// Why the service refused a relay opening, so the peer can tell the person.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpeningRefusal {
+    /// The token did not match this service.
+    Authentication,
+    /// The relay revision, stream kind or control operation is not one this service speaks.
+    Unsupported,
+    /// The opening could not be read.
+    Malformed,
+    /// The service is at its limit of open sessions.
+    Capacity,
+    /// The service is quitting.
+    ShuttingDown,
+    /// Configured authority does not admit this intake channel. Carries the channel name.
+    ChannelNotAdmitted(&'static str),
+}
+
+impl OpeningRefusal {
+    /// The sentence the refusal carries.
+    #[must_use]
+    pub fn message(self) -> String {
+        match self {
+            Self::Authentication => "The token does not match this service.".into(),
+            Self::Unsupported => {
+                "This Ghostlight service does not speak what the connection asked for. Update Ghostlight on this computer."
+                    .into()
+            }
+            Self::Malformed => "The connection did not open the way Ghostlight expects.".into(),
+            Self::Capacity => {
+                "Ghostlight has too many open sessions right now. Try again in a moment.".into()
+            }
+            Self::ShuttingDown => {
+                "Ghostlight is quitting and takes no new connections. Try again in a moment."
+                    .into()
+            }
+            Self::ChannelNotAdmitted(channel) => {
+                format!("Configured authority does not admit the {channel} intake channel.")
+            }
+        }
+    }
+}
 
 /// A request the MCP session engine answers with a JSON-RPC error instead of forwarding it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +191,24 @@ mod tests {
         assert!(SHUTTING_DOWN_MESSAGE.is_ascii());
         assert!(SHUTTING_DOWN_MESSAGE.contains("Nothing was sent"));
         assert!(SHUTTING_DOWN_MESSAGE.ends_with('.'));
+    }
+
+    #[test]
+    fn every_opening_refusal_is_a_plain_ascii_sentence() {
+        use super::OpeningRefusal;
+
+        for refusal in [
+            OpeningRefusal::Authentication,
+            OpeningRefusal::Unsupported,
+            OpeningRefusal::Malformed,
+            OpeningRefusal::Capacity,
+            OpeningRefusal::ShuttingDown,
+            OpeningRefusal::ChannelNotAdmitted("cli"),
+        ] {
+            let message = refusal.message();
+            assert!(message.is_ascii());
+            assert!(message.ends_with('.'));
+        }
     }
 
     #[test]

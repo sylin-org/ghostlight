@@ -18,7 +18,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         println!("The active Ghostlight installation is preserved; this package owns no active registrations.");
         return Ok(());
     }
-    ghostlight_bridge::runtime::runtime_discovery()?;
+    ghostlight_relay::home::home()?;
     let native_hosts = NativeHostRegistry::discover();
     let mut install_usable = false;
     let initial_browser_report = native_hosts.check()?;
@@ -374,7 +374,7 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
         println!("The active Ghostlight browser registration is preserved.");
         return Ok(());
     }
-    ghostlight_bridge::runtime::runtime_discovery()?;
+    ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
     let (verb, changed, report, migration) = match command {
         NativeHostCommand::Check => ("checked", false, registry.check()?, None),

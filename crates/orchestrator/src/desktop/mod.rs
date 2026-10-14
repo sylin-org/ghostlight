@@ -142,7 +142,7 @@ pub fn run(startup: Startup) -> Result<()> {
         }
     }
     let host = Arc::new(ServiceHost::start_waiting(
-        &ghostlight_bridge::runtime::runtime_file()?,
+        &ghostlight_relay::home::home()?,
         startup.lease_wait,
     )?);
     if let Some(deadline) = startup.discovery_deadline {

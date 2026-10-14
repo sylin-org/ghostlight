@@ -61,7 +61,7 @@ impl FlatpakRegistry {
             || std::env::var_os("XDG_DATA_HOME")
                 .is_some_and(|root| Path::new(&root) != home.join(".local/share"))
             || std::env::var_os("GHOSTLIGHT_NATIVE_HOST_DIR").is_some()
-            || std::env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_some()
+            || std::env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some()
         {
             return Err(invalid("Flatpak setup requires the host's home-resident installation and default data/runtime roots"));
         }

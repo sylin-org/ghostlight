@@ -1,0 +1,50 @@
+//! A private Ghostlight home for tests that reach the service the way a peer does.
+//!
+//! A peer finds the service through `relay::home()`, which a test can only redirect with the
+//! process-wide `GHOSTLIGHT_TEST_HOME`. Tests that rely on it hold one shared lock for their whole
+//! run, so two of them never point the variable at different homes at once.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+use ghostlight_relay::home::TEST_HOME_VARIABLE;
+
+/// Serializes every test that sets the home variable.
+static HOME: Mutex<()> = Mutex::new(());
+
+/// A temporary home the relay resolves to while this value lives.
+pub(crate) struct TestHome {
+    directory: PathBuf,
+    _exclusive: MutexGuard<'static, ()>,
+}
+
+impl TestHome {
+    /// Create a fresh home named after `name` and point the relay at it.
+    pub(crate) fn new(name: &str) -> Self {
+        let exclusive = HOME
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-home-{name}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::env::set_var(TEST_HOME_VARIABLE, &directory);
+        Self {
+            directory,
+            _exclusive: exclusive,
+        }
+    }
+
+    /// The home directory.
+    pub(crate) fn path(&self) -> &Path {
+        &self.directory
+    }
+}
+
+impl Drop for TestHome {
+    fn drop(&mut self) {
+        std::env::remove_var(TEST_HOME_VARIABLE);
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}

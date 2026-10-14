@@ -56,6 +56,11 @@ impl Drain {
         !std::mem::replace(&mut state.quitting, true)
     }
 
+    /// Whether a quit has begun.
+    pub fn is_quitting(&self) -> bool {
+        lock(&self.state).quitting
+    }
+
     /// Wait until nothing is in flight or the grace elapses. Returns whether the drain emptied.
     pub fn wait_idle(&self, grace: Duration) -> bool {
         let state = lock(&self.state);

@@ -24,8 +24,8 @@ pub fn install_download(destination: &Path) -> anyhow::Result<()> {
         "The installation destination must be absolute"
     );
     anyhow::ensure!(
-        env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_none(),
-        "Package installation cannot use an isolated runtime override"
+        env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_none(),
+        "Package installation cannot use an isolated test home"
     );
     let current = env::current_exe()?;
     let source = current
@@ -255,7 +255,7 @@ fn retire_versioned_siblings(previous: &Path, destination: &Path) -> io::Result<
 
 /// Select this executable set while preserving development custody during package installation.
 pub fn select(selection: Selection) -> io::Result<Option<Installation>> {
-    if env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_some() {
+    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some() {
         // Explicit fixtures retain their private election; never edit the production record.
         return Ok(None);
     }
@@ -272,7 +272,7 @@ pub fn select(selection: Selection) -> io::Result<Option<Installation>> {
 
 /// An inactive package may remove its artifacts, but cannot unregister the user's active route.
 pub fn owns_registration() -> io::Result<bool> {
-    if env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_some() {
+    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some() {
         return Ok(true);
     }
     let runtime = installation::production_runtime()?;

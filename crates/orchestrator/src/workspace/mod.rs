@@ -829,6 +829,27 @@ impl WorkspaceStore {
         tabs
     }
 
+    /// Every tab handle this workspace holds with its physical tab id, sorted by handle.
+    ///
+    /// Read without a lease, so a session can describe its tabs while its own work runs.
+    #[must_use]
+    pub fn tab_bindings(&self, workspace: &str) -> Vec<(String, u64)> {
+        let mut bindings: Vec<(String, u64)> = self
+            .lock()
+            .workspaces
+            .get(workspace)
+            .map(|state| {
+                state
+                    .tabs
+                    .iter()
+                    .map(|(handle, tab)| (handle.as_str().to_owned(), tab.physical_id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        bindings.sort();
+        bindings
+    }
+
     /// Bind a workspace to the browser its work belongs to.
     ///
     /// The first binding wins for the life of the workspace. Re-binding the same browser is the

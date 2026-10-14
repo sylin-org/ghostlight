@@ -1,64 +1,55 @@
-//! Local service runtime endpoint status reporting.
+//! Local service status reporting.
 //!
-//! This module inspects the local Ghostlight service runtime file and queries
-//! endpoint reachability without modifying machine state or starting background services.
+//! This module reads the relay runtime file the service publishes and asks the service for its
+//! readiness over a control stream. It never changes machine state and never starts a service.
 
-use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::PathBuf;
-use std::time::Duration;
 
-/// What the local service endpoint looks like right now.
+/// What the local service looks like right now.
 #[derive(Clone, Debug)]
 pub struct RuntimeObservation {
-    /// Path to the local runtime endpoint JSON file.
+    /// Path to the relay runtime file.
     pub path: PathBuf,
-    /// Reported service version, if runtime file exists.
+    /// Reported service version, if a runtime file names a service.
     pub version: Option<String>,
-    /// Major protocol version of the service bridge.
-    pub service_bridge_major: Option<u16>,
-    /// Major protocol version of the browser relay.
-    pub browser_relay_major: Option<u16>,
-    /// Whether the TCP service port responds to probe connections.
+    /// Relay revision the service speaks, if a runtime file names a service.
+    pub relay: Option<u16>,
+    /// Whether the service answered a readiness control opening.
     pub running: bool,
 }
 
-/// Observe the current status of the local Ghostlight service endpoint.
+/// Observe the current status of the local Ghostlight service.
 pub fn observe_runtime() -> anyhow::Result<RuntimeObservation> {
-    let path = ghostlight_bridge::runtime::runtime_file()?;
-    Ok(match ghostlight_bridge::runtime::read_runtime(&path) {
-        Ok(runtime) => {
-            let running = TcpStream::connect_timeout(
-                &SocketAddrV4::new(Ipv4Addr::LOCALHOST, runtime.service_port).into(),
-                Duration::from_millis(250),
-            )
-            .is_ok();
-            RuntimeObservation {
+    let path = ghostlight_relay::home::runtime_file()?;
+    Ok(
+        match ghostlight_relay::runtime::RuntimeFile::read(&path)
+            .ok()
+            .flatten()
+        {
+            Some(runtime) => RuntimeObservation {
                 path,
                 version: Some(runtime.service_version),
-                service_bridge_major: Some(runtime.service_bridge_major),
-                browser_relay_major: Some(runtime.browser_relay_major),
-                running,
-            }
-        }
-        Err(_) => RuntimeObservation {
-            path,
-            version: None,
-            service_bridge_major: None,
-            browser_relay_major: None,
-            running: false,
+                relay: Some(runtime.relay),
+                running: crate::cli::client::readiness().is_ok(),
+            },
+            None => RuntimeObservation {
+                path,
+                version: None,
+                relay: None,
+                running: false,
+            },
         },
-    })
+    )
 }
 
-/// The `status --json` document. Its shape is consumed by scripts and does not change here.
+/// The `status --json` document scripts read.
 pub fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
     let Some(version) = observation.version.as_deref() else {
         return serde_json::json!({ "running": false });
     };
     serde_json::json!({
         "version": version,
-        "service_bridge_major": observation.service_bridge_major,
-        "browser_relay_major": observation.browser_relay_major,
+        "relay": observation.relay,
         "running": observation.running,
     })
 }
@@ -71,12 +62,12 @@ pub fn render_runtime_status(observation: &RuntimeObservation, json: bool, idle_
     }
     match observation.version.as_deref() {
         Some(version) => println!(
-            "Service: {} -- version {} -- bridge {} -- {}",
+            "Service: {} -- version {} -- relay {} -- {}",
             observation.path.display(),
             version,
             observation
-                .service_bridge_major
-                .map_or_else(String::new, |major| major.to_string()),
+                .relay
+                .map_or_else(String::new, |relay| relay.to_string()),
             if observation.running {
                 "running"
             } else {

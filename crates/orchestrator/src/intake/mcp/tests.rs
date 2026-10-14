@@ -3,6 +3,7 @@ use std::path::Path;
 use ghostlight_bridge::service::{
     ServiceContent, ServiceRequest, ServiceResponse, ToolAnnotations, ToolDefinition,
 };
+use ghostlight_relay::templates::{Failure, FailureTemplates};
 use serde_json::{json, Value};
 
 use super::{
@@ -433,6 +434,17 @@ fn failure_templates_have_the_relay_fixture_shape() {
             keys
         };
         assert_eq!(keys(&templates[failure]), keys(&fixture[failure]));
+    }
+    let ours: FailureTemplates = serde_json::from_value(templates).unwrap();
+    let pinned: FailureTemplates = serde_json::from_value(fixture).unwrap();
+    assert_eq!(ours.relay, pinned.relay);
+    for failure in [Failure::CutOff, Failure::Expired] {
+        for method in ["tools/call", "tools/list"] {
+            let ours = ours.template(failure, method).expect("a template");
+            let pinned = pinned.template(failure, method).expect("a pinned template");
+            assert_eq!(ours.get("result").is_some(), pinned.get("result").is_some());
+            assert_eq!(ours["error"]["code"], pinned["error"]["code"]);
+        }
     }
 }
 

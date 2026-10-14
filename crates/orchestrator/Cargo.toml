@@ -19,6 +19,7 @@ fips204 = "0.4"
 fs2.workspace = true
 getrandom = "0.2"
 ghostlight-bridge = { path = "../bridge" }
+ghostlight-relay = { path = "../relay" }
 ghostlight-win-peer = { path = "../win-peer" }
 jsonc-parser = { version = "=0.26.3", features = ["cst", "serde"] }
 serde.workspace = true

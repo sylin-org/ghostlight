@@ -3,9 +3,10 @@
 //! This module coordinates process activation, single-instance workbench window
 //! presentation, runtime readiness waiting, policy inspection, and local `call` execution.
 
-use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use ghostlight_relay::home::TEST_HOME_VARIABLE;
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -30,7 +31,7 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
     if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
         anyhow::bail!("Ghostlight is being updated; it will be available when deployment finishes");
     }
-    if std::env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_none() {
+    if std::env::var_os(TEST_HOME_VARIABLE).is_none() {
         let runtime = ghostlight_bridge::installation::production_runtime()?;
         let selection = ghostlight_bridge::installation::read(&runtime)?;
         if selection.as_ref().is_none_or(|record| {
@@ -53,16 +54,15 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
         // process must exit at the lifetime lease instead of revealing the winner's UI.
         return crate::desktop::run(crate::desktop::Startup::interactive());
     }
-    let runtime = ghostlight_bridge::runtime::runtime_file()?;
-    match crate::service::request_workbench_activation(&runtime) {
+    match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
-        Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
+        Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
         Err(_) => {}
     }
     match crate::desktop::run(crate::desktop::Startup::interactive()) {
         Ok(()) => Ok(()),
         Err(start_error) if start_error.is::<crate::service::AuthorityAlreadyRunning>() => {
-            finish_activation(wait_for_workbench_activation(&runtime), Some(start_error))
+            finish_activation(wait_for_workbench_activation(), Some(start_error))
         }
         Err(start_error) => Err(start_error),
     }
@@ -96,34 +96,45 @@ pub fn desktop_bus_start(bus_type: Option<&std::ffi::OsStr>) -> bool {
     bus_type.is_some_and(|value| value == "session")
 }
 
-/// Request an existing Ghostlight service or newly demand-started service to reveal its window.
+/// Request an existing Ghostlight service or newly started service to reveal its window.
 pub fn open_desktop() -> anyhow::Result<()> {
-    use ghostlight_bridge::lifecycle::StartDisposition;
-
-    let runtime = ghostlight_bridge::runtime::runtime_file()?;
-    match crate::service::request_workbench_activation(&runtime) {
+    match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
-        Ok(false) => return finish_activation(wait_for_workbench_activation(&runtime), None),
+        Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
         Err(_) => {}
     }
-    if ghostlight_bridge::lifecycle::request_orchestrator_start()?
-        == StartDisposition::DeploymentInProgress
-    {
+    if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
         anyhow::bail!("Ghostlight is being updated; open it again when the update finishes");
     }
-    finish_activation(wait_for_workbench_activation(&runtime), None)
+    start_service()?;
+    finish_activation(wait_for_workbench_activation(), None)
+}
+
+/// Start `ghostlight serve` from this executable in the Ghostlight home, without waiting for it.
+///
+/// The lease makes a start that meets a running service harmless: it exits quietly.
+pub fn start_service() -> anyhow::Result<()> {
+    let home = ghostlight_relay::home::home()?;
+    std::fs::create_dir_all(&home)?;
+    let mut child =
+        ghostlight_relay::spawn::build_command(&std::env::current_exe()?, &home).spawn()?;
+    // Collect the exit status so a start that lost the lease race does not linger.
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Wait until the workbench presentation attaches and activates or times out.
-pub fn wait_for_workbench_activation(runtime: &Path) -> ActivationState {
-    wait_for_workbench_activation_until(runtime, Instant::now() + WORKBENCH_ACTIVATION_TIMEOUT)
+pub fn wait_for_workbench_activation() -> ActivationState {
+    wait_for_workbench_activation_until(Instant::now() + WORKBENCH_ACTIVATION_TIMEOUT)
 }
 
 /// Wait until the workbench presentation activates or the given deadline expires.
-pub fn wait_for_workbench_activation_until(runtime: &Path, deadline: Instant) -> ActivationState {
+pub fn wait_for_workbench_activation_until(deadline: Instant) -> ActivationState {
     let mut presentation_seen = false;
     loop {
-        match crate::service::request_workbench_activation(runtime) {
+        match crate::cli::client::activate_workbench() {
             Ok(true) => return ActivationState::Activated,
             Ok(false) => presentation_seen = true,
             Err(_) => {}
@@ -157,8 +168,8 @@ pub fn finish_activation(
 
 /// Invoke one tool, or a batch of them, against the local authority.
 ///
-/// Demand-start applies here exactly as it does to a connector: a script that runs before anything
-/// else has started gets an authority rather than an error.
+/// A script that runs before anything else has started gets a service rather than an error: the
+/// command line starts `serve` the way a connector does.
 pub fn run_call() -> anyhow::Result<()> {
     let arguments: Vec<String> = std::env::args()
         .skip(1)
@@ -172,21 +183,15 @@ pub fn run_call() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
-    let runtime = match ghostlight_bridge::runtime::runtime_file() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(1);
+    if crate::cli::client::readiness().is_err() {
+        if ghostlight_bridge::lifecycle::production_deployment_in_progress()? {
+            anyhow::bail!("Ghostlight is being updated; retry when deployment finishes");
         }
-    };
-    if ghostlight_bridge::lifecycle::request_orchestrator_start()?
-        == ghostlight_bridge::lifecycle::StartDisposition::DeploymentInProgress
-    {
-        anyhow::bail!("Ghostlight is being updated; retry when deployment finishes");
+        start_service()?;
+        wait_for_service()?;
     }
-    wait_for_runtime(&runtime)?;
     let mut out = std::io::stdout().lock();
-    let code = crate::cli::run(command, &runtime, &mut out);
+    let code = crate::cli::run(command, &mut out);
     std::process::exit(code);
 }
 
@@ -196,11 +201,11 @@ pub fn run_policy(command: &crate::governance::inspection::Command) -> anyhow::R
     crate::governance::inspection::run(command, &mut out)
 }
 
-/// Wait until the local runtime file indicates readiness.
-pub fn wait_for_runtime(runtime: &Path) -> anyhow::Result<()> {
+/// Wait until a service answers a readiness control opening.
+pub fn wait_for_service() -> anyhow::Result<()> {
     let deadline = Instant::now() + SERVICE_READY_TIMEOUT;
     while Instant::now() < deadline {
-        if crate::service::request_readiness(runtime).is_ok() {
+        if crate::cli::client::readiness().is_ok() {
             return Ok(());
         }
         thread::sleep(ACTIVATION_RETRY_DELAY);
@@ -228,12 +233,11 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir(&directory).unwrap();
-        let runtime = directory.join("runtime.json");
-        let running = crate::service::ServiceHost::start(&runtime).unwrap();
+        let running = crate::service::ServiceHost::start(&directory).unwrap();
 
         let started = Instant::now();
         let contended =
-            crate::service::ServiceHost::start_waiting(&runtime, Duration::from_millis(200))
+            crate::service::ServiceHost::start_waiting(&directory, Duration::from_millis(200))
                 .err()
                 .expect("the lease is held");
         assert!(
@@ -252,7 +256,7 @@ mod tests {
             drop(running);
         });
         let taken =
-            crate::service::ServiceHost::start_waiting(&runtime, Duration::from_secs(5)).unwrap();
+            crate::service::ServiceHost::start_waiting(&directory, Duration::from_secs(5)).unwrap();
         release.join().unwrap();
         drop(taken);
         std::fs::remove_dir_all(directory).unwrap();
@@ -295,20 +299,13 @@ mod tests {
             }
         }
 
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-delayed-presentation-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        let runtime = directory.join("runtime.json");
-        let host = crate::service::ServiceHost::start(&runtime).unwrap();
+        let home = crate::service::test_home::TestHome::new("delayed-presentation");
+        let host = crate::service::ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        assert!(!crate::service::request_workbench_activation(&runtime).unwrap());
+        assert!(!crate::cli::client::activate_workbench().unwrap());
         let timeout_started = std::time::Instant::now();
-        let timeout = wait_for_workbench_activation_until(
-            &runtime,
-            timeout_started + Duration::from_millis(100),
-        );
+        let timeout =
+            wait_for_workbench_activation_until(timeout_started + Duration::from_millis(100));
         assert_eq!(timeout, ActivationState::Unavailable);
         assert!(timeout_started.elapsed() < Duration::from_secs(1));
         let message = finish_activation(timeout, None).unwrap_err().to_string();
@@ -323,10 +320,10 @@ mod tests {
             std::thread::sleep(Duration::from_secs(2));
             workbench.attach_presentation(delayed_presentation);
         });
-        let result = wait_for_workbench_activation(&runtime);
+        let result = wait_for_workbench_activation();
         ready.join().unwrap();
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
+        drop(home);
         assert_eq!(result, ActivationState::Activated);
         assert_eq!(presentation.0.load(Ordering::SeqCst), 1);
     }

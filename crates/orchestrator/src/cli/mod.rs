@@ -1,9 +1,11 @@
 //! The command-line intake: one local edge for scripts and programs.
 //!
-//! This is an edge in the same shape as the MCP connector (ADR-0105 Decision 1). It owns argument
-//! parsing, rendering, and exit codes, and makes no product decision: every call crosses the same
-//! service bridge, executor, governance facade, and completion path a model's call does.
+//! The command line is an MCP client of the service (ADR-0105 Decision 1, ADR-0197 Decision 17).
+//! It owns argument parsing, rendering, and exit codes, and makes no product decision: every call
+//! crosses the same relay listener, MCP session, executor, governance facade, and completion path
+//! a model's call does.
 
+pub mod client;
 pub mod desktop;
 pub mod diagnostics;
 pub mod doctor;
@@ -19,15 +21,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use ghostlight_bridge::client::{ClientError, ServiceClient};
-use ghostlight_bridge::service::{IntakeChannel, ServiceContent};
 use serde_json::Value;
 
-/// The label controlled tabs are grouped under for scripted work.
-///
-/// One stable label per channel, not one per calling program: the tab strip has a fixed budget of
-/// attention, so a script's tabs group together instead of multiplying groups (ADR-0105).
-const CLI_CLIENT_LABEL: &str = "ghostlight call";
+use client::{ClientError, McpClient};
 
 /// Terminal status to process exit code.
 ///
@@ -130,21 +126,16 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
 }
 
 /// Run one command against the local service and return the process exit code.
-pub fn run(command: Command, runtime_file: &Path, out: &mut impl Write) -> i32 {
-    let mut client = match ServiceClient::connect(
-        runtime_file,
-        CLI_CLIENT_LABEL,
-        IntakeChannel::Cli,
-        session::marker(),
-    ) {
+pub fn run(command: Command, out: &mut impl Write) -> i32 {
+    let mut client = match McpClient::connect(session::marker()) {
         Ok(client) => client,
         Err(error) => return report_transport(&error),
     };
     match command {
-        Command::Catalog => match client.catalog() {
+        Command::Catalog => match client.tool_names() {
             Ok(tools) => {
                 for tool in tools {
-                    let _ = writeln!(out, "{}", tool.name);
+                    let _ = writeln!(out, "{tool}");
                 }
                 EXIT_SUCCEEDED
             }
@@ -198,16 +189,16 @@ pub fn run(command: Command, runtime_file: &Path, out: &mut impl Write) -> i32 {
 struct Captures(usize);
 
 fn invoke_once(
-    client: &mut ServiceClient,
+    client: &mut McpClient,
     tool: &str,
     input: Value,
     rendering: &Rendering,
     captures: &mut Captures,
     out: &mut impl Write,
 ) -> i32 {
-    match client.invoke(tool, input, None) {
+    match client.call(tool, input) {
         Ok(invocation) => {
-            for item in &invocation.content {
+            for item in &invocation.images {
                 match rendering.output.as_deref() {
                     Some(path) => {
                         let path = numbered(path, captures.0);
@@ -237,9 +228,8 @@ fn invoke_once(
     }
 }
 
-/// Decode one bounded content item to disk.
-fn write_content(item: &ServiceContent, path: &Path) -> std::io::Result<()> {
-    let ServiceContent::Image { data, .. } = item;
+/// Decode one bounded base64 content item to disk.
+fn write_content(data: &str, path: &Path) -> std::io::Result<()> {
     let bytes = BASE64
         .decode(data)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;

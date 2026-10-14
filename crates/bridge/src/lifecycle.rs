@@ -959,20 +959,4 @@ mod tests {
         );
         fs::remove_dir_all(directory).expect("temporary directory is removed");
     }
-
-    #[test]
-    fn both_connectors_recover_through_the_shared_lifecycle_seam() {
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("bridge has a workspace crates directory");
-        for relative in [
-            "mcp-connector/src/service_session.rs",
-            "browser-connector/src/main.rs",
-        ] {
-            let source = fs::read_to_string(workspace.join(relative))
-                .expect("connector source is available");
-            assert!(source.contains("request_orchestrator_start()"));
-            assert!(!source.contains("Command::new"));
-        }
-    }
 }

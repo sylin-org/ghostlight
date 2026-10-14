@@ -19,6 +19,8 @@ use base64::Engine as _;
 use ghostlight_bridge::service::{
     ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
 };
+use ghostlight_relay::templates::DEFAULT_TEMPLATE;
+use ghostlight_relay::RELAY;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -35,10 +37,6 @@ pub const SUPPORTED_REVISIONS: [&str; 4] =
     ["2024-11-05", "2025-03-26", "2025-06-18", LATEST_REVISION];
 /// The MCP revision whose stateless `server/discover` request this engine answers.
 pub const DISCOVERY_REVISION: &str = "2026-07-28";
-/// Relay protocol revision the failure templates are written for.
-pub const TEMPLATES_RELAY: u16 = 3;
-/// Key of the failure template used for any method without its own entry.
-pub const DEFAULT_TEMPLATE: &str = "default";
 
 const JSONRPC_VERSION: &str = "2.0";
 const SERVICE_ID_PREFIX: &str = "mcp_";
@@ -668,7 +666,7 @@ pub fn negotiate(requested: &str) -> &'static str {
 #[must_use]
 pub fn failure_templates() -> Value {
     json!({
-        "relay": TEMPLATES_RELAY,
+        "relay": RELAY,
         "cut_off": failure_entries(ConnectorFailure::CutOff),
         "expired": failure_entries(ConnectorFailure::Expired),
     })

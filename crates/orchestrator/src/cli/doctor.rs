@@ -59,11 +59,11 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     }
     let runtime = observe_runtime()?;
     let readiness = if runtime.running {
-        crate::service::request_readiness(&runtime.path).ok()
+        crate::cli::client::readiness().ok()
     } else {
         None
     };
-    let diagnostics = crate::diagnostics::observe(&ghostlight_bridge::runtime::runtime_file()?);
+    let diagnostics = crate::diagnostics::observe(&runtime.path);
     Ok(DoctorObservation {
         installation: ghostlight_bridge::installation::read(&runtime.path)?,
         // Same module as the install summary, so the two can never describe this machine

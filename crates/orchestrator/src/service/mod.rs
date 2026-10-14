@@ -1,48 +1,71 @@
-//! Persistent service lifecycle and generic bridge session handling.
+//! The persistent service: its lifetime, its one relay listener and the sessions it serves.
+//!
+//! [`ServiceHost`] holds the lease, prepares the executor and the browser port, and publishes the
+//! relay protocol 3 runtime file once the desktop is ready (ADR-0166, ADR-0197 Decision 3). Every
+//! connection then opens with one relay opening: an `mcp` stream is one MCP client session served
+//! by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter connection, and a
+//! `control` stream answers one operation.
 
 mod admission;
 pub mod lifetime;
+#[cfg(test)]
+pub(crate) mod test_home;
 
+use std::collections::BTreeMap;
 use std::env;
-use std::io::BufReader;
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+use std::ffi::OsString;
+use std::fs;
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::browser::adapter::{BrowserCommand, BrowserEvent};
-use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
-use anyhow::{bail, Context, Result};
-use ghostlight_bridge::framing::{read_json_line, write_json_line};
-use ghostlight_bridge::lifecycle::ServiceLease;
-use ghostlight_bridge::relay::{BrowserRelayRequest, BrowserRelayResponse, BROWSER_RELAY_MAJOR};
-use ghostlight_bridge::runtime::{read_runtime, write_runtime, RuntimeEndpoint};
+use anyhow::{Context, Result};
 use ghostlight_bridge::service::{
     IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
-    SERVICE_BRIDGE_MAJOR,
 };
+use ghostlight_relay::home::{LEASE_FILE_NAME, RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
+use ghostlight_relay::opening::{ControlOp, McpFrame, Stream};
+use ghostlight_relay::runtime::RuntimeFile;
+use ghostlight_relay::server::Lease;
+use ghostlight_relay::templates::FailureTemplates;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
+use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
+use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, RelayBrowserPort,
 };
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{GovernanceFacade, JsonlAuditSink};
+use crate::intake::listener::{self, Judgement};
+use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::language::catalog_for;
-use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
+use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
+use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
-use crate::workbench::{ReadinessSummary, WorkbenchFacade, WorkbenchProjection};
-use crate::workspace::{ReleasedTabs, WorkspaceStore};
+use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
+use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
 
-use admission::{Capacity, Job, Permit, QueueBudget, Refused, SessionQueue};
-use lifetime::{DiscoveryWatch, Drain};
+/// Prefix of the per-service secret every opening presents.
+const TOKEN_PREFIX: &str = "runtime_";
+
+/// Suffix of the sibling file the failure templates are written through.
+const TEMPORARY_SUFFIX: &str = ".tmp";
+
+/// Longest a resumed session waits for one browser to list its tabs.
+const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
+
+use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
+use lifetime::{DiscoveryWatch, Drain, QUIT_GRACE};
 
 /// The desktop's request to leave its event loop, installed once the desktop exists.
 pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
@@ -50,10 +73,8 @@ pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
 /// How often a start that waits for the service lease asks for it again.
 const LEASE_POLL: Duration = Duration::from_millis(50);
 
-/// A running local service host. Dropping it requests listener shutdown.
+/// A running local service host. Dropping it stops the listener and withdraws discovery.
 pub struct ServiceHost {
-    /// Prepared authenticated endpoint, private until desktop readiness is published.
-    pub endpoint: RuntimeEndpoint,
     /// Typed in-process application boundary for the disposable desktop workbench.
     pub workbench: WorkbenchFacade,
     /// The process-diagnostics hub this authority owns.
@@ -62,11 +83,12 @@ pub struct ServiceHost {
     audit: Arc<AuditRecorder>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
-    runtime_path: PathBuf,
-    drain: Arc<Drain>,
-    quit_signal: Arc<Mutex<Option<QuitSignal>>>,
+    home: PathBuf,
+    port: u16,
+    token: String,
+    quit: Quit,
     discovery: Arc<DiscoveryWatch>,
-    _lease: ServiceLease,
+    _lease: Lease,
 }
 
 /// Another authority owns this runtime; a competing explicit Open may await its presentation.
@@ -74,29 +96,21 @@ pub struct ServiceHost {
 #[error("another Ghostlight orchestrator already owns this runtime")]
 pub struct AuthorityAlreadyRunning;
 
-enum ServiceOpening {
-    Workspace {
-        client_label: String,
-        channel: IntakeChannel,
-        session: Option<SessionMarker>,
-    },
-    WorkbenchActivation,
-    ReadinessInspection,
-}
-
 impl ServiceHost {
-    /// Prepare the authenticated service under its lifetime lease without publishing discovery.
-    /// The desktop must call `publish_ready` only after its native interaction route is ready.
-    pub fn start(path: &Path) -> Result<Self> {
-        Self::start_waiting(path, Duration::ZERO)
+    /// Prepare the service in the Ghostlight home `home` under its lifetime lease, without
+    /// publishing discovery. The desktop must call `publish_ready` only after its native
+    /// interaction route is ready.
+    pub fn start(home: &Path) -> Result<Self> {
+        Self::start_waiting(home, Duration::ZERO)
     }
 
     /// Like [`ServiceHost::start`], but a held lease is asked for again until `lease_wait` has
     /// passed. A `serve` start uses this so a service that is about to exit does not make its
     /// successor give up.
-    pub fn start_waiting(path: &Path, lease_wait: Duration) -> Result<Self> {
-        let diagnostics = DiagnosticsHub::birth(path);
-        Self::start_with_diagnostics(path, Arc::clone(&diagnostics), lease_wait).inspect_err(
+    pub fn start_waiting(home: &Path, lease_wait: Duration) -> Result<Self> {
+        let runtime_path = home.join(RUNTIME_FILE_NAME);
+        let diagnostics = DiagnosticsHub::birth(&runtime_path);
+        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), lease_wait).inspect_err(
             |error| {
                 // Meeting the running service is how a racing start ends, not a failure.
                 if !error.is::<AuthorityAlreadyRunning>() {
@@ -112,25 +126,16 @@ impl ServiceHost {
     }
 
     fn start_with_diagnostics(
-        path: &Path,
+        home: &Path,
         diagnostics: Arc<DiagnosticsHub>,
         lease_wait: Duration,
     ) -> Result<Self> {
-        let lease = acquire_lease(path, lease_wait)?;
-        ghostlight_bridge::installation::verify_serving_executable(path)?;
-        let service_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-            .context("bind service bridge")?;
-        let browser_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-            .context("bind browser bridge")?;
-        let token = format!("runtime_{}", Uuid::new_v4().simple());
-        let endpoint = RuntimeEndpoint {
-            service_port: service_listener.local_addr()?.port(),
-            browser_port: browser_listener.local_addr()?.port(),
-            token: token.clone(),
-            service_bridge_major: SERVICE_BRIDGE_MAJOR,
-            browser_relay_major: BROWSER_RELAY_MAJOR,
-            service_version: env!("CARGO_PKG_VERSION").into(),
-        };
+        let lease = acquire_lease(&home.join(LEASE_FILE_NAME), lease_wait)?;
+        let runtime_path = home.join(RUNTIME_FILE_NAME);
+        ghostlight_bridge::installation::verify_serving_executable(&runtime_path)?;
+        let relay_listener = listener::bind().context("bind the relay listener")?;
+        let port = relay_listener.local_addr()?.port();
+        let token = format!("{TOKEN_PREFIX}{}", Uuid::new_v4().simple());
 
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::from_environment();
@@ -160,7 +165,7 @@ impl ServiceHost {
             .map(PathBuf::from)
             .map(Ok)
             .unwrap_or_else(|| {
-                ghostlight_bridge::installation::state_directory(path)
+                ghostlight_bridge::installation::state_directory(&runtime_path)
                     .map(|directory| directory.join("audit.jsonl"))
             })?;
         let projection = WorkbenchProjection::default();
@@ -191,7 +196,11 @@ impl ServiceHost {
         }));
 
         let stop = Arc::new(AtomicBool::new(false));
-        let drain = Arc::new(Drain::default());
+        let quit = Quit {
+            drain: Arc::new(Drain::default()),
+            signal: Arc::default(),
+            diagnostics: Arc::clone(&diagnostics),
+        };
         let audit_stop = stop.clone();
         let audit_for_thread = Arc::clone(&audit);
         let audit_thread = std::thread::spawn(move || {
@@ -199,56 +208,63 @@ impl ServiceHost {
                 audit_for_thread.wait_for_recovery(&audit_stop);
             }
         });
-        let service_thread = spawn_service_listener(
-            service_listener,
-            Arc::clone(&stop),
+        let intake = Arc::new(Intake {
+            token: token.clone(),
             executor,
             workspaces,
-            browser_port.clone(),
-            workbench.clone(),
-            governance.clone(),
-            endpoint.token.clone(),
-            Arc::clone(&diagnostics),
-            Arc::clone(&drain),
-        );
-        let browser_thread = spawn_browser_listener(
-            browser_listener,
-            Arc::clone(&stop),
-            Arc::clone(&browser),
-            endpoint.token.clone(),
-        );
+            browser_port,
+            browser: Arc::clone(&browser),
+            workbench: workbench.clone(),
+            governance,
+            diagnostics: Arc::clone(&diagnostics),
+            quit: quit.clone(),
+            sessions: Capacity::new(admission::SESSIONS),
+            budget: QueueBudget::default(),
+            stop: Arc::clone(&stop),
+        });
+        let listener_thread = spawn_listener(relay_listener, intake);
         Ok(Self {
-            endpoint,
             workbench,
             diagnostics,
             browser,
             audit,
             stop,
-            threads: vec![service_thread, browser_thread, audit_thread],
-            runtime_path: path.into(),
-            drain,
-            quit_signal: Arc::default(),
+            threads: vec![listener_thread, audit_thread],
+            home: home.into(),
+            port,
+            token,
+            quit,
             discovery: Arc::default(),
             _lease: lease,
         })
     }
 
     /// Publish discovery after the desktop event loop has established an interaction route.
+    ///
+    /// The failure templates go first, so a connector that finds this service can already answer
+    /// for it when it goes away; then the runtime file names the listener and its token.
     pub fn publish_ready(&self) -> Result<()> {
         // Relays that served an earlier service find this one from here on, so a call with no
         // browser waits for them from this moment, not from construction.
         self.browser.endpoint_published();
-        write_runtime(&self.runtime_path, &self.endpoint)
-            .context("publish desktop-ready endpoint")?;
+        write_templates(&self.home.join(TEMPLATES_FILE_NAME))
+            .context("publish the failure templates")?;
+        RuntimeFile::new(
+            self.port,
+            self.token.clone(),
+            env!("CARGO_PKG_VERSION").into(),
+        )
+        .write(&self.home.join(RUNTIME_FILE_NAME))
+        .context("publish desktop-ready discovery")?;
         self.discovery.settle();
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
             &format!(
-                "desktop_ready=true service_port={} browser_port={} service_major={} browser_major={}",
-                self.endpoint.service_port, self.endpoint.browser_port,
-                self.endpoint.service_bridge_major, self.endpoint.browser_relay_major
+                "desktop_ready=true port={} relay={}",
+                self.port,
+                ghostlight_relay::RELAY
             ),
         );
         Ok(())
@@ -280,17 +296,63 @@ impl ServiceHost {
 
     /// Install the request the desktop makes to leave its event loop with status 0.
     pub fn install_quit_signal(&self, signal: QuitSignal) {
-        *lock(&self.quit_signal) = Some(signal);
+        *lock(&self.quit.signal) = Some(signal);
     }
 
     /// Begin a quit: refuse new work, let in-flight invocations finish for up to `grace`, then ask
     /// the desktop to exit. Returns at once; a second call while a quit is under way does nothing.
     pub fn begin_quit(&self, grace: Duration) {
+        self.quit.begin(grace);
+    }
+
+    /// The process-diagnostics hub this authority owns.
+    #[must_use]
+    pub fn diagnostics(&self) -> Arc<DiagnosticsHub> {
+        Arc::clone(&self.diagnostics)
+    }
+
+    fn join(&mut self) {
+        self.discovery.settle();
+        self.stop.store(true, Ordering::SeqCst);
+        self.audit.wake();
+        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.port));
+        for handle in self.threads.drain(..) {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for ServiceHost {
+    fn drop(&mut self) {
+        self.join();
+        let runtime_path = self.home.join(RUNTIME_FILE_NAME);
+        if RuntimeFile::read(&runtime_path)
+            .ok()
+            .flatten()
+            .is_some_and(|current| current.token == self.token)
+        {
+            let _ = fs::remove_file(&runtime_path);
+        }
+    }
+}
+
+/// How the service ends on request: refuse new work, drain what runs, then leave the desktop.
+#[derive(Clone)]
+struct Quit {
+    drain: Arc<Drain>,
+    signal: Arc<Mutex<Option<QuitSignal>>>,
+    diagnostics: Arc<DiagnosticsHub>,
+}
+
+impl Quit {
+    /// Begin a quit unless one is under way, and ask the desktop to exit once the work in flight
+    /// has finished or `grace` has passed.
+    fn begin(&self, grace: Duration) {
         if !self.drain.begin_quit() {
             return;
         }
         let drain = Arc::clone(&self.drain);
-        let signal = Arc::clone(&self.quit_signal);
+        let signal = Arc::clone(&self.signal);
         let diagnostics = Arc::clone(&self.diagnostics);
         let spawned = thread::Builder::new()
             .name("ghostlight-quit-drain".into())
@@ -316,423 +378,413 @@ impl ServiceHost {
             );
         }
     }
-
-    /// The process-diagnostics hub this authority owns.
-    #[must_use]
-    pub fn diagnostics(&self) -> Arc<DiagnosticsHub> {
-        Arc::clone(&self.diagnostics)
-    }
-
-    fn join(&mut self) {
-        self.discovery.settle();
-        self.stop.store(true, Ordering::SeqCst);
-        self.audit.wake();
-        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.endpoint.service_port));
-        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.endpoint.browser_port));
-        for handle in self.threads.drain(..) {
-            let _ = handle.join();
-        }
-    }
 }
 
-impl Drop for ServiceHost {
-    fn drop(&mut self) {
-        self.join();
-        if ghostlight_bridge::runtime::read_runtime(&self.runtime_path)
-            .is_ok_and(|current| current.token == self.endpoint.token)
-        {
-            let _ = std::fs::remove_file(&self.runtime_path);
-        }
+/// Write the failure templates connectors answer with while the service is away.
+fn write_templates(path: &Path) -> Result<()> {
+    let templates: FailureTemplates =
+        serde_json::from_value(failure_templates()).context("shape the failure templates")?;
+    let bytes = serde_json::to_vec(&templates)?;
+    let mut temporary = OsString::from(path.as_os_str());
+    temporary.push(TEMPORARY_SUFFIX);
+    let temporary = PathBuf::from(temporary);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
-}
-
-/// Ask an already-running authenticated service to reveal its attached desktop workbench.
-pub fn request_workbench_activation(path: &Path) -> Result<bool> {
-    let (mut stream, endpoint) = connect_running_service(path)?;
-    write_json_line(
-        &mut stream,
-        &ServiceRequest::ActivateWorkbench {
-            major: SERVICE_BRIDGE_MAJOR,
-            token: endpoint.token,
-        },
-    )
-    .context("request workbench activation")?;
-    let mut reader = BufReader::new(stream);
-    match read_json_line::<ServiceResponse>(&mut reader).context("read workbench activation")? {
-        Some(ServiceResponse::WorkbenchActivated { available }) => Ok(available),
-        Some(ServiceResponse::Error { message, .. }) => bail!(message),
-        _ => bail!("service returned an invalid workbench activation response"),
-    }
-}
-
-/// Read readiness from an already-running authority without starting it or opening a session.
-pub fn request_readiness(path: &Path) -> Result<ReadinessSummary> {
-    let (mut stream, endpoint) = connect_running_service(path)?;
-    write_json_line(
-        &mut stream,
-        &ServiceRequest::InspectReadiness {
-            major: SERVICE_BRIDGE_MAJOR,
-            token: endpoint.token,
-        },
-    )
-    .context("request readiness inspection")?;
-    let mut reader = BufReader::new(stream);
-    match read_json_line::<ServiceResponse>(&mut reader).context("read readiness inspection")? {
-        Some(ServiceResponse::Readiness { value }) => {
-            serde_json::from_value(value).context("decode readiness inspection")
-        }
-        Some(ServiceResponse::Error { message, .. }) => bail!(message),
-        _ => bail!("service returned an invalid readiness inspection response"),
-    }
-}
-
-fn connect_running_service(path: &Path) -> Result<(TcpStream, RuntimeEndpoint)> {
-    let endpoint = read_runtime(path).context("read current Ghostlight runtime")?;
-    if endpoint.service_bridge_major != SERVICE_BRIDGE_MAJOR {
-        bail!("running Ghostlight service bridge is incompatible");
-    }
-    let stream = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.service_port))
-        .context("connect current Ghostlight service")?;
-    stream.set_nodelay(true)?;
-    Ok((stream, endpoint))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spawn_service_listener(
-    listener: TcpListener,
-    stop: Arc<AtomicBool>,
-    executor: Arc<ApplicationExecutor>,
-    workspaces: WorkspaceStore,
-    browser: Arc<dyn BrowserPort>,
-    workbench: WorkbenchFacade,
-    governance: GovernanceFacade,
-    token: String,
-    diagnostics: Arc<DiagnosticsHub>,
-    drain: Arc<Drain>,
-) -> JoinHandle<()> {
-    let handshakes = Capacity::new(admission::HANDSHAKES);
-    let sessions = Capacity::new(admission::SESSIONS);
-    let budget = QueueBudget::default();
-    thread::Builder::new()
-        .name("ghostlight-service-listener".into())
-        .spawn(move || {
-            while !stop.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        if stop.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        let Some(handshake) = handshakes.acquire(1) else {
-                            continue;
-                        };
-                        let sessions = sessions.clone();
-                        let budget = budget.clone();
-                        let session_stop = stop.clone();
-                        let executor = Arc::clone(&executor);
-                        let workspaces = workspaces.clone();
-                        let browser = Arc::clone(&browser);
-                        let workbench = workbench.clone();
-                        let governance = governance.clone();
-                        let token = token.clone();
-                        let diagnostics = Arc::clone(&diagnostics);
-                        let drain = Arc::clone(&drain);
-                        let _ = thread::Builder::new()
-                            .name("ghostlight-mcp-session".into())
-                            .spawn(move || {
-                                if serve_session(
-                                    stream,
-                                    executor,
-                                    workspaces,
-                                    browser,
-                                    workbench,
-                                    governance,
-                                    &token,
-                                    diagnostics,
-                                    handshake,
-                                    sessions,
-                                    budget,
-                                    drain,
-                                    session_stop,
-                                ).is_err() {
-                                    eprintln!("MCP service session ended after an invalid or interrupted exchange.");
-                                }
-                            });
-                    }
-                    Err(_) => {
-                        if stop.load(Ordering::SeqCst) {
-                            break;
-                        }
-                    }
-                }
-            }
-        })
-        .expect("service listener thread starts")
-}
-
-fn spawn_browser_listener(
-    listener: TcpListener,
-    stop: Arc<AtomicBool>,
-    browser: Arc<RelayBrowserPort>,
-    token: String,
-) -> JoinHandle<()> {
-    let handshakes = Capacity::new(admission::HANDSHAKES);
-    thread::Builder::new()
-        .name("ghostlight-browser-listener".into())
-        .spawn(move || {
-            while !stop.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        if stop.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        let Some(handshake) = handshakes.acquire(1) else {
-                            continue;
-                        };
-                        let browser = Arc::clone(&browser);
-                        let token = token.clone();
-                        let session_stop = stop.clone();
-                        let _ = thread::Builder::new()
-                            .name("ghostlight-browser-session".into())
-                            .spawn(move || {
-                                let _handshake = handshake;
-                                if serve_browser_relay(stream, &browser, &token, session_stop).is_err() {
-                                    eprintln!("Browser relay ended after an invalid or interrupted exchange.");
-                                }
-                            });
-                    }
-                    Err(_) => {
-                        if stop.load(Ordering::SeqCst) {
-                            break;
-                        }
-                    }
-                }
-            }
-        })
-        .expect("browser listener thread starts")
-}
-
-fn serve_browser_relay(
-    stream: TcpStream,
-    browser: &Arc<RelayBrowserPort>,
-    expected_token: &str,
-    stop: Arc<AtomicBool>,
-) -> Result<()> {
-    stream.set_nonblocking(false)?;
-    stream.set_nodelay(true)?;
-    let opening = Instant::now() + EXCHANGE_TIMEOUT;
-    let mut reader = SocketReader::new(stream.try_clone()?).interrupted_by(stop);
-    let writer = SocketWriter::new(stream.try_clone()?)?;
-    let Some(request) = reader.native::<BrowserRelayRequest>(Some(opening))? else {
-        return Ok(());
-    };
-    let BrowserRelayRequest::Hello { major, token } = request;
-    if token != expected_token {
-        writer.native(&BrowserRelayResponse::Rejected {
-            code: "authentication_failed".into(),
-            message: "Runtime authentication failed.".into(),
-        })?;
-        return Ok(());
-    }
-    if major != BROWSER_RELAY_MAJOR {
-        writer.native(&BrowserRelayResponse::Rejected {
-            code: "incompatible_relay".into(),
-            message: format!(
-                "Browser relay major {major} is incompatible with required {BROWSER_RELAY_MAJOR}."
-            ),
-        })?;
-        return Ok(());
-    }
-    writer.native(&BrowserRelayResponse::Accepted {
-        major: BROWSER_RELAY_MAJOR,
+    fs::write(&temporary, bytes)?;
+    fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = fs::remove_file(&temporary);
     })?;
-    browser
-        .attach_reader(stream, reader, opening)
-        .map_err(anyhow::Error::msg)
+    Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn serve_session(
-    stream: TcpStream,
+/// Everything a relay connection needs from the service.
+struct Intake {
+    token: String,
     executor: Arc<ApplicationExecutor>,
     workspaces: WorkspaceStore,
-    browser: Arc<dyn BrowserPort>,
+    browser_port: Arc<dyn BrowserPort>,
+    browser: Arc<RelayBrowserPort>,
     workbench: WorkbenchFacade,
     governance: GovernanceFacade,
-    expected_token: &str,
     diagnostics: Arc<DiagnosticsHub>,
-    handshake: Permit,
+    quit: Quit,
     sessions: Capacity,
     budget: QueueBudget,
-    drain: Arc<Drain>,
     stop: Arc<AtomicBool>,
+}
+
+/// Accept relay connections until the service stops, each on its own thread.
+///
+/// A connection holds one of a few pre-authentication slots until its opening is judged, so
+/// local processes that connect and say nothing cannot exhaust the service.
+fn spawn_listener(listener: TcpListener, intake: Arc<Intake>) -> JoinHandle<()> {
+    let handshakes = Capacity::new(admission::HANDSHAKES);
+    thread::Builder::new()
+        .name("ghostlight-relay-listener".into())
+        .spawn(move || {
+            while !intake.stop.load(Ordering::SeqCst) {
+                let Ok((connection, _)) = listener.accept() else {
+                    continue;
+                };
+                if intake.stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Some(handshake) = handshakes.acquire(1) else {
+                    continue;
+                };
+                let intake = Arc::clone(&intake);
+                let _ = thread::Builder::new()
+                    .name("ghostlight-relay-connection".into())
+                    .spawn(move || {
+                        let mut connection = connection;
+                        let _ = connection.set_nodelay(true);
+                        let judgement = listener::judge(
+                            &mut connection,
+                            &intake.token,
+                            intake.quit.drain.is_quitting(),
+                        );
+                        drop(handshake);
+                        serve_connection(connection, judgement, &intake);
+                    });
+            }
+        })
+        .expect("relay listener thread starts")
+}
+
+/// Serve one judged connection to its end.
+fn serve_connection(mut connection: TcpStream, judgement: Judgement, intake: &Arc<Intake>) {
+    match judgement {
+        Judgement::Drop => {}
+        Judgement::Refuse(refusal) => listener::refuse(&mut connection, refusal),
+        Judgement::Admit(Stream::Browser) => {
+            if listener::accept(&mut connection).is_ok() {
+                // The first frame on the stream is the extension's own hello.
+                let _ = intake.browser.attach(connection);
+            }
+        }
+        Judgement::Admit(Stream::Control { op }) => serve_control(connection, op, intake),
+        Judgement::Admit(Stream::Mcp {
+            channel,
+            session,
+            resume,
+        }) => {
+            if serve_mcp(connection, intake, &channel, session, resume.as_deref()).is_err() {
+                eprintln!("MCP session ended after an invalid or interrupted exchange.");
+            }
+        }
+        Judgement::Admit(Stream::Unknown) => {
+            listener::refuse(&mut connection, OpeningRefusal::Unsupported)
+        }
+    }
+}
+
+/// Answer one control operation and close.
+fn serve_control(mut connection: TcpStream, op: ControlOp, intake: &Intake) {
+    let value = match op {
+        ControlOp::Readiness => {
+            serde_json::to_value(intake.workbench.snapshot().readiness).unwrap_or(Value::Null)
+        }
+        ControlOp::ActivateWorkbench => {
+            json!({ listener::control::AVAILABLE: intake.workbench.reveal().is_ok() })
+        }
+        ControlOp::Quit => {
+            intake.quit.begin(QUIT_GRACE);
+            json!({ listener::control::QUITTING: true })
+        }
+        ControlOp::Unknown => {
+            listener::refuse(&mut connection, OpeningRefusal::Unsupported);
+            return;
+        }
+    };
+    if listener::accept(&mut connection).is_ok() {
+        let _ = listener::answer_control(&mut connection, value);
+    }
+}
+
+/// Serve one MCP client session on an accepted `mcp` stream.
+///
+/// The opening names the channel and, for the command line, the process that owns the session.
+/// A resume token continues an earlier session: its revision, client and owned tabs come back,
+/// and tabs the browser no longer has stay stale.
+fn serve_mcp(
+    mut connection: TcpStream,
+    intake: &Arc<Intake>,
+    channel: &str,
+    session: Option<Value>,
+    resume: Option<&str>,
 ) -> Result<()> {
-    stream.set_nonblocking(false)?;
-    stream.set_nodelay(true)?;
-    // Capture the connection quadruple before the stream moves into the writer; the observed
-    // peer is resolved after hello, where stage-2 attribution belongs.
-    let observed_local = stream.local_addr().ok();
-    let observed_peer = stream.peer_addr().ok();
-    let reader_stream = stream.try_clone()?;
-    let mut reader = SocketReader::new(reader_stream).interrupted_by(stop);
-    let writer = Arc::new(SocketWriter::new(stream)?);
-    let Some(request) = reader.json::<ServiceRequest>(Some(Instant::now() + EXCHANGE_TIMEOUT))?
-    else {
+    let Some(_session_permit) = intake.sessions.acquire(1) else {
+        listener::refuse(&mut connection, OpeningRefusal::Capacity);
         return Ok(());
     };
-    let (major, token, opening) = match request {
-        ServiceRequest::ActivateWorkbench { major, token } => {
-            (major, token, ServiceOpening::WorkbenchActivation)
-        }
-        ServiceRequest::InspectReadiness { major, token } => {
-            (major, token, ServiceOpening::ReadinessInspection)
-        }
-        ServiceRequest::Hello {
-            major,
-            token,
-            client_label,
-            channel,
-            session,
-        } => (
-            major,
-            token,
-            ServiceOpening::Workspace {
-                client_label,
-                channel,
-                session,
-            },
-        ),
-        _ => {
-            write_response(
-                &writer,
-                &ServiceResponse::Error {
-                    id: None,
-                    code: "hello_required".into(),
-                    message: "Service hello must be the first message.".into(),
-                },
-            );
+    let marker = match session.map(serde_json::from_value::<SessionMarker>) {
+        None => None,
+        Some(Ok(marker)) => Some(marker),
+        Some(Err(_)) => {
+            listener::refuse(&mut connection, OpeningRefusal::Malformed);
             return Ok(());
         }
     };
-    if token != expected_token {
-        write_response(
-            &writer,
-            &ServiceResponse::Error {
-                id: None,
-                code: "authentication_failed".into(),
-                message: "Runtime authentication failed.".into(),
-            },
-        );
-        return Ok(());
-    }
-    if major != SERVICE_BRIDGE_MAJOR {
-        write_response(
-            &writer,
-            &ServiceResponse::Error {
-                id: None,
-                code: "incompatible_bridge".into(),
-                message: format!(
-                    "Bridge major {major} is incompatible with required {SERVICE_BRIDGE_MAJOR}."
-                ),
-            },
-        );
-        return Ok(());
-    }
-    drop(handshake);
-    let (client_label, channel, session) = match opening {
-        ServiceOpening::WorkbenchActivation => {
-            write_response(
-                &writer,
-                &ServiceResponse::WorkbenchActivated {
-                    available: workbench.reveal().is_ok(),
-                },
-            );
-            return Ok(());
-        }
-        ServiceOpening::ReadinessInspection => {
-            let value = serde_json::to_value(workbench.snapshot().readiness)
-                .context("serialize readiness inspection")?;
-            write_response(&writer, &ServiceResponse::Readiness { value });
-            return Ok(());
-        }
-        ServiceOpening::Workspace {
-            client_label,
-            channel,
-            session,
-        } => (client_label, channel, session),
-    };
-    let Some(_session_permit) = sessions.acquire(1) else {
-        write_response(
-            &writer,
-            &ServiceResponse::Error {
-                id: None,
-                code: "service_capacity".into(),
-                message: "Connection capacity is temporarily full.".into(),
-            },
-        );
-        return Ok(());
-    };
+    let intake_channel = crate::intake::intake_channel(channel);
     // Admission, before any workspace exists: an authority layer may decline an intake entirely.
-    let admission = governance.admits_channel(channel);
-    if !admission.allowed {
-        write_response(
-            &writer,
-            &ServiceResponse::Error {
-                id: None,
-                code: admission.reason.as_str().into(),
-                message: format!(
-                    "Configured authority does not admit the {} intake channel.",
-                    channel.as_str()
-                ),
-            },
+    if !intake.governance.admits_channel(intake_channel).allowed {
+        listener::refuse(
+            &mut connection,
+            OpeningRefusal::ChannelNotAdmitted(intake_channel.as_str()),
         );
         return Ok(());
     }
-    // Before opening anything, release workspaces whose owner is gone and close the tabs they
-    // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
-    reap_finished_sessions(&workspaces, browser.as_ref());
-    // Evidence belongs to this connection. Workspace continuity never replaces it.
-    let connection = Arc::new(crate::provenance::ConnectionEvidence::observe(
-        &client_label,
-        channel,
+    let resumed = resume
+        .and_then(|token| ResumeState::decode(token).ok())
+        .map(|mut state| {
+            if state.channel.is_empty() {
+                state.channel = channel.into();
+            }
+            state
+        });
+    listener::accept(&mut connection)?;
+    connection.set_nonblocking(false)?;
+    let observed_local = connection.local_addr().ok();
+    let observed_peer = connection.peer_addr().ok();
+    let mut reader =
+        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
+    let writer = Arc::new(SocketWriter::new(connection)?);
+    let opening = Opening {
+        channel: intake_channel,
+        marker,
         observed_local,
         observed_peer,
-    ));
-    drop(client_label);
-    let workspace = workspaces.connect(connection.clone(), session);
-    write_response(
-        &writer,
-        &ServiceResponse::HelloAccepted {
-            major: SERVICE_BRIDGE_MAJOR,
-            session: workspace.as_str().into(),
-            server: crate::intake::server_profile(),
-        },
-    );
-    diagnostics.sink().emit(
-        ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
-        ghostlight_bridge::diagnostics::Level::Info,
-        None,
-        &format!(
-            "{} via {}",
-            connection
-                .attribution()
-                .connection_id
-                .as_deref()
-                .unwrap_or_default(),
-            channel.as_str()
+    };
+
+    let (wire, mut live) = match resumed {
+        Some(state) => {
+            let owned_tabs = state.owned_tabs.clone();
+            let wire = Arc::new(McpWire::new(
+                Arc::clone(&writer),
+                McpSession::resumed(state),
+            ));
+            let live = LiveSession::open(intake, &wire, &opening)?;
+            restore_tabs(intake, &live.workspace, &owned_tabs);
+            wire.publish_resume(&intake.workspaces, &live.workspace);
+            (wire, Some(live))
+        }
+        None => (
+            Arc::new(McpWire::new(Arc::clone(&writer), McpSession::new(channel))),
+            None,
         ),
-    );
-    let queue = Arc::new(SessionQueue::new(budget, drain));
-    let mut workers = Vec::new();
-    let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
-    let catalog_watch_stop = Arc::new(AtomicBool::new(false));
-    let catalog_watch = {
-        let queue = queue.clone();
-        let executor = executor.clone();
-        let workspace = workspace.clone();
-        let governance = governance.clone();
-        let writer = Arc::clone(&writer);
-        let published = Arc::clone(&published_catalog);
-        let stop = Arc::clone(&catalog_watch_stop);
+    };
+
+    // Every way this connection can end has to reach the teardown below. A reset socket, an
+    // oversized frame and one malformed frame are all ordinary ways for a client to go away.
+    let served = (|| -> Result<()> {
+        while let Some(frame) = reader.native::<McpFrame>(None)? {
+            let McpFrame::Message { line } = frame else {
+                continue;
+            };
+            let steps = wire.accept(&line);
+            let opened = live.is_none() && wire.is_initialized();
+            if opened {
+                live = Some(LiveSession::open(intake, &wire, &opening)?);
+            }
+            for step in steps {
+                match step {
+                    Step::Reply(reply) => wire.send(&reply),
+                    Step::Forward(request) => {
+                        if let Some(live) = &live {
+                            if !live.handle(intake, &wire, request) {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            if let (true, Some(live)) = (opened, &live) {
+                wire.publish_resume(&intake.workspaces, &live.workspace);
+            }
+        }
+        Ok(())
+    })();
+
+    writer.close();
+    if let Some(live) = live {
+        live.close(intake);
+    }
+    served
+}
+
+/// What an `mcp` opening said about its session.
+struct Opening {
+    channel: IntakeChannel,
+    marker: Option<SessionMarker>,
+    observed_local: Option<std::net::SocketAddr>,
+    observed_peer: Option<std::net::SocketAddr>,
+}
+
+/// One session's engine and the stream its lines go out on.
+struct McpWire {
+    writer: Arc<SocketWriter>,
+    session: Mutex<McpSession>,
+    resume: Mutex<Option<String>>,
+}
+
+impl McpWire {
+    fn new(writer: Arc<SocketWriter>, session: McpSession) -> Self {
+        Self {
+            writer,
+            session: Mutex::new(session),
+            resume: Mutex::new(None),
+        }
+    }
+
+    fn accept(&self, line: &str) -> Vec<Step> {
+        lock(&self.session).accept(line)
+    }
+
+    fn is_initialized(&self) -> bool {
+        lock(&self.session).is_initialized()
+    }
+
+    fn client_label(&self) -> String {
+        lock(&self.session).client_label().to_owned()
+    }
+
+    fn bind_session(&self, workspace: &WorkspaceId) {
+        lock(&self.session).bind_session(workspace.as_str());
+    }
+
+    /// Write one MCP line to the client.
+    fn send(&self, line: &Value) {
+        let _ = self.writer.native(&McpFrame::Message {
+            line: line.to_string(),
+        });
+    }
+
+    /// Render one answer from the session queue and write its lines.
+    fn render(&self, response: ServiceResponse) {
+        let lines = lock(&self.session).render(response);
+        for line in &lines {
+            self.send(line);
+        }
+    }
+
+    /// Hand the connector a fresh resume token when what it would restore has changed.
+    fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
+        let browser = workspaces.browser_of(workspace.as_str());
+        let owned_tabs = browser
+            .map(|browser_id| {
+                workspaces
+                    .tab_bindings(workspace.as_str())
+                    .into_iter()
+                    .map(|(handle, tab_id)| OwnedTab {
+                        browser_id: browser_id.clone(),
+                        tab_id,
+                        handle,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(state) = lock(&self.session).resume_state(owned_tabs, None) else {
+            return;
+        };
+        let token = state.encode();
+        let mut last = lock(&self.resume);
+        if last.as_deref() == Some(token.as_str()) {
+            return;
+        }
+        if self
+            .writer
+            .native(&McpFrame::Resume {
+                token: token.clone(),
+            })
+            .is_ok()
+        {
+            *last = Some(token);
+        }
+    }
+}
+
+/// The workspace, queue and workers of a session that has been initialized.
+struct LiveSession {
+    workspace: WorkspaceId,
+    connection: Arc<ConnectionEvidence>,
+    queue: Arc<SessionQueue>,
+    workers: Vec<JoinHandle<()>>,
+    watch: Option<JoinHandle<()>>,
+    watch_stop: Arc<AtomicBool>,
+    published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>>,
+}
+
+impl LiveSession {
+    /// Open the session's workspace and start its workers and its catalog watch.
+    fn open(intake: &Arc<Intake>, wire: &Arc<McpWire>, opening: &Opening) -> Result<Self> {
+        // Before opening anything, release workspaces whose owner is gone and close the tabs they
+        // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
+        reap_finished_sessions(&intake.workspaces, intake.browser_port.as_ref());
+        // Evidence belongs to this connection. Workspace continuity never replaces it.
+        let connection = Arc::new(ConnectionEvidence::observe(
+            &wire.client_label(),
+            opening.channel,
+            opening.observed_local,
+            opening.observed_peer,
+        ));
+        let workspace = intake
+            .workspaces
+            .connect(connection.clone(), opening.marker.clone());
+        wire.bind_session(&workspace);
+        intake.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            &format!(
+                "{} via {}",
+                connection
+                    .attribution()
+                    .connection_id
+                    .as_deref()
+                    .unwrap_or_default(),
+                opening.channel.as_str()
+            ),
+        );
+        let queue = Arc::new(SessionQueue::new(
+            intake.budget.clone(),
+            Arc::clone(&intake.quit.drain),
+        ));
+        let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
+        let watch_stop = Arc::new(AtomicBool::new(false));
+        let mut live = Self {
+            workspace,
+            connection,
+            queue,
+            workers: Vec::new(),
+            watch: None,
+            watch_stop,
+            published_catalog,
+        };
+        live.watch = Some(live.spawn_watch(intake, wire)?);
+        for independent in [false, true] {
+            let worker = live.spawn_worker(intake, wire, independent);
+            match worker {
+                Ok(worker) => live.workers.push(worker),
+                Err(error) => {
+                    live.close(intake);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(live)
+    }
+
+    /// The once-a-second thread that advances cancelled work, keeps waiting work visible and
+    /// tells the client when policy changes the catalog it was given.
+    fn spawn_watch(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>) -> Result<JoinHandle<()>> {
+        let queue = Arc::clone(&self.queue);
+        let executor = Arc::clone(&intake.executor);
+        let workspace = self.workspace.clone();
+        let governance = intake.governance.clone();
+        let wire = Arc::clone(wire);
+        let published = Arc::clone(&self.published_catalog);
+        let stop = Arc::clone(&self.watch_stop);
         thread::Builder::new()
             .name("ghostlight-policy-catalog".into())
             .spawn(move || {
@@ -748,8 +800,7 @@ fn serve_session(
                     let Some(previous) = lock(&published).clone() else {
                         continue;
                     };
-                    let snapshot = governance.snapshot();
-                    let current = catalog_for(&snapshot);
+                    let current = catalog_for(&governance.snapshot());
                     if current == previous {
                         continue;
                     }
@@ -764,177 +815,201 @@ fn serve_session(
                     };
                     if changed {
                         generation = generation.wrapping_add(1);
-                        write_response(
-                            &writer,
-                            &ServiceResponse::CatalogChanged {
-                                generation,
-                                tools: current,
-                            },
-                        );
+                        wire.render(ServiceResponse::CatalogChanged {
+                            generation,
+                            tools: current,
+                        });
                     }
                 }
             })
-    };
+            .context("start the session watch")
+    }
 
-    // Every way this connection can end has to reach the teardown below. A reset socket, an
-    // oversized frame, and one malformed line are all ordinary ways for a client to go away, and
-    // each of them used to leave through `?` before the release ran. The workspace and every tab
-    // it held then survived with nothing able to collect them: an unowned workspace has no owning
-    // process to look up, so the reaper cannot see it either.
-    let served = (|| -> Result<()> {
-        if catalog_watch.is_err() {
-            bail!("session watcher could not start");
-        }
-        for independent in [false, true] {
-            let queue = queue.clone();
-            let executor = executor.clone();
-            let workspace = workspace.clone();
-            let writer = writer.clone();
-            workers.push(
-                thread::Builder::new()
-                    .name("ghostlight-session-work".into())
-                    .spawn(move || {
-                        while let Some(job) = queue.next(independent) {
-                            let result = executor.execute_prepared(
-                                &workspace,
+    /// One bounded worker: ordinary work, or the independent lane that keeps controls moving.
+    fn spawn_worker(
+        &self,
+        intake: &Arc<Intake>,
+        wire: &Arc<McpWire>,
+        independent: bool,
+    ) -> Result<JoinHandle<()>> {
+        let queue = Arc::clone(&self.queue);
+        let executor = Arc::clone(&intake.executor);
+        let workspace = self.workspace.clone();
+        let workspaces = intake.workspaces.clone();
+        let wire = Arc::clone(wire);
+        thread::Builder::new()
+            .name("ghostlight-session-work".into())
+            .spawn(move || {
+                while let Some(job) = queue.next(independent) {
+                    let result = executor.execute_prepared(
+                        &workspace,
+                        &job.prepared,
+                        &job.cancellation,
+                        false,
+                    );
+                    deliver_result(&wire, &job.id, result);
+                    wire.publish_resume(&workspaces, &workspace);
+                    queue.complete(&job.id);
+                }
+            })
+            .context("start bounded session worker")
+    }
+
+    /// Serve one request the engine forwarded. Returns false when the session must end.
+    fn handle(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>, request: ServiceRequest) -> bool {
+        match request {
+            ServiceRequest::Catalog => {
+                let tools = catalog_for(&intake.governance.snapshot());
+                wire.render(ServiceResponse::Catalog {
+                    tools: tools.clone(),
+                });
+                *lock(&self.published_catalog) = Some(tools);
+            }
+            ServiceRequest::Invoke {
+                id,
+                tool,
+                input,
+                deadline_ms,
+            } => {
+                // Bound retained payloads as well as queue count. Decoding occurs once at intake.
+                let bytes = serde_json::to_vec(&input).map_or(0, |input| input.len())
+                    + id.len()
+                    + tool.len()
+                    + QUEUED_METADATA_BYTES;
+                let job = Job {
+                    id,
+                    prepared: Arc::new(PreparedInvocation::new(
+                        &tool,
+                        input,
+                        deadline_ms,
+                        Some(self.connection.clone()),
+                    )),
+                    cancellation: CancellationToken::default(),
+                };
+                match self.queue.admit(job.clone(), bytes) {
+                    Ok(()) => {}
+                    Err(Refused::Duplicate) => wire.render(ServiceResponse::Error {
+                        id: Some(job.id),
+                        code: "duplicate_request".into(),
+                        message: "Request id is already active.".into(),
+                    }),
+                    Err(Refused::Full) => match self.queue.begin_unqueued() {
+                        Ok(_flight) => {
+                            let result = intake.executor.execute_prepared(
+                                &self.workspace,
                                 &job.prepared,
                                 &job.cancellation,
-                                false,
+                                true,
                             );
-                            deliver_result(&writer, &job.id, result);
-                            queue.complete(&job.id);
+                            deliver_result(wire, &job.id, result);
+                            wire.publish_resume(&intake.workspaces, &self.workspace);
                         }
-                    })
-                    .context("start bounded session worker")?,
+                        Err(_) => refuse_while_quitting(wire, job.id),
+                    },
+                    Err(Refused::ShuttingDown) => refuse_while_quitting(wire, job.id),
+                    Err(Refused::Closed) => return false,
+                }
+            }
+            ServiceRequest::Cancel { id } => self.queue.cancel(&id),
+            ServiceRequest::Hello { .. }
+            | ServiceRequest::ActivateWorkbench { .. }
+            | ServiceRequest::InspectReadiness { .. } => {}
+        }
+        true
+    }
+
+    /// Stop the workers, detach the connection, and release a workspace nobody owns.
+    fn close(self, intake: &Intake) {
+        self.watch_stop.store(true, Ordering::SeqCst);
+        self.queue.stop();
+        if let Some(watch) = self.watch {
+            let _ = watch.join();
+        }
+        for worker in self.workers {
+            let _ = worker.join();
+        }
+        intake.workspaces.disconnect(
+            &self.workspace,
+            self.connection
+                .attribution()
+                .connection_id
+                .as_deref()
+                .unwrap_or_default(),
+        );
+        // A workspace with an owner outlives this connection: the caller is still there and its
+        // next call must reach the same tabs. It is released when its owner is gone, not when a
+        // socket is.
+        if !intake.workspaces.is_owned(&self.workspace) {
+            let released = intake.workspaces.release(&self.workspace);
+            cleanup_released_tabs(
+                self.workspace.as_str(),
+                &released,
+                intake.browser_port.as_ref(),
+                &intake.workspaces,
             );
         }
-        while let Some(request) = reader.json::<ServiceRequest>(None)? {
-            match request {
-                ServiceRequest::Catalog => {
-                    let snapshot = governance.snapshot();
-                    let tools = catalog_for(&snapshot);
-                    write_response(
-                        &writer,
-                        &ServiceResponse::Catalog {
-                            tools: tools.clone(),
-                        },
-                    );
-                    *lock(&published_catalog) = Some(tools);
-                }
-                ServiceRequest::Invoke {
-                    id,
-                    tool,
-                    input,
-                    deadline_ms,
-                } => {
-                    // Bound retained payloads as well as queue count. Decoding occurs once at intake.
-                    let bytes = serde_json::to_vec(&input)?.len()
-                        + id.len()
-                        + tool.len()
-                        + QUEUED_METADATA_BYTES;
-                    let job = Job {
-                        id,
-                        prepared: Arc::new(PreparedInvocation::new(
-                            &tool,
-                            input,
-                            deadline_ms,
-                            Some(connection.clone()),
-                        )),
-                        cancellation: CancellationToken::default(),
-                    };
-                    match queue.admit(job.clone(), bytes) {
-                        Ok(()) => {}
-                        Err(Refused::Duplicate) => write_response(
-                            &writer,
-                            &ServiceResponse::Error {
-                                id: Some(job.id),
-                                code: "duplicate_request".into(),
-                                message: "Request id is already active.".into(),
-                            },
-                        ),
-                        Err(Refused::Full) => match queue.begin_unqueued() {
-                            Ok(_flight) => {
-                                let result = executor.execute_prepared(
-                                    &workspace,
-                                    &job.prepared,
-                                    &job.cancellation,
-                                    true,
-                                );
-                                deliver_result(&writer, &job.id, result);
-                            }
-                            Err(_) => refuse_while_quitting(&writer, job.id),
-                        },
-                        Err(Refused::ShuttingDown) => refuse_while_quitting(&writer, job.id),
-                        Err(Refused::Closed) => break,
-                    }
-                }
-                ServiceRequest::Cancel { id } => queue.cancel(&id),
-                ServiceRequest::Hello { .. }
-                | ServiceRequest::ActivateWorkbench { .. }
-                | ServiceRequest::InspectReadiness { .. } => write_response(
-                    &writer,
-                    &ServiceResponse::Error {
-                        id: None,
-                        code: "duplicate_hello".into(),
-                        message: "Session is already established.".into(),
-                    },
-                ),
+        intake.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            self.workspace.as_str(),
+        );
+    }
+}
+
+/// Bind a resumed session's tabs again, checking each browser once for the tabs it still has.
+///
+/// A tab the browser no longer lists, or one another session now controls, is not bound: its
+/// handle answers as stale, which is the truth after a restart.
+fn restore_tabs(intake: &Intake, workspace: &WorkspaceId, owned: &[OwnedTab]) {
+    let mut by_browser: BTreeMap<&str, Vec<&OwnedTab>> = BTreeMap::new();
+    for tab in owned {
+        by_browser.entry(&tab.browser_id).or_default().push(tab);
+    }
+    for (browser, tabs) in by_browser {
+        let cancelled = AtomicBool::new(false);
+        let Ok(BrowserOutcome::Tabs { tabs: live }) = intake.browser_port.call(
+            browser,
+            workspace.as_str(),
+            BrowserCommand::ListTabs,
+            Instant::now() + RESTORE_DEADLINE,
+            &cancelled,
+        ) else {
+            continue;
+        };
+        if intake
+            .workspaces
+            .pin_browser(workspace.as_str(), browser)
+            .is_err()
+        {
+            continue;
+        }
+        let Ok(lease) = intake.workspaces.acquire(workspace) else {
+            continue;
+        };
+        for tab in tabs {
+            if let Some(physical) = live.iter().find(|live| live.tab_id == tab.tab_id) {
+                let _ = lease.restore_tab(&tab.handle, physical);
             }
         }
-        Ok(())
-    })();
-
-    catalog_watch_stop.store(true, Ordering::SeqCst);
-    writer.close();
-    queue.stop();
-    if let Ok(watch) = catalog_watch {
-        let _ = watch.join();
     }
-    for worker in workers {
-        let _ = worker.join();
-    }
-    workspaces.disconnect(
-        &workspace,
-        connection
-            .attribution()
-            .connection_id
-            .as_deref()
-            .unwrap_or_default(),
-    );
-    // A workspace with an owner outlives this connection: the caller is still there and its next
-    // call must reach the same tabs. It is released when its owner is gone, not when a socket is.
-    if !workspaces.is_owned(&workspace) {
-        let released = workspaces.release(&workspace);
-        cleanup_released_tabs(workspace.as_str(), &released, browser.as_ref(), &workspaces);
-    }
-    diagnostics.sink().emit(
-        ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
-        ghostlight_bridge::diagnostics::Level::Info,
-        None,
-        workspace.as_str(),
-    );
-    served
 }
 
 /// Answer an invocation that arrived after a quit began.
-fn refuse_while_quitting(writer: &SocketWriter, id: String) {
-    write_response(
-        writer,
-        &ServiceResponse::Error {
-            id: Some(id),
-            code: SHUTTING_DOWN_CODE.into(),
-            message: SHUTTING_DOWN_MESSAGE.into(),
-        },
-    );
+fn refuse_while_quitting(wire: &McpWire, id: String) {
+    wire.render(ServiceResponse::Error {
+        id: Some(id),
+        code: SHUTTING_DOWN_CODE.into(),
+        message: SHUTTING_DOWN_MESSAGE.into(),
+    });
 }
 
-/// Take the service lease, asking again until `wait` has passed while another process holds it.
-fn acquire_lease(path: &Path, wait: Duration) -> Result<ServiceLease> {
+/// Take the service lease at `path`, asking again until `wait` has passed while another process
+/// holds it.
+fn acquire_lease(path: &Path, wait: Duration) -> Result<Lease> {
     let give_up = Instant::now() + wait;
     loop {
-        if let Some(lease) =
-            ServiceLease::try_acquire(path).context("open the orchestrator service lease")?
-        {
+        if let Some(lease) = Lease::try_acquire(path).context("open the service lease")? {
             return Ok(lease);
         }
         let remaining = give_up.saturating_duration_since(Instant::now());
@@ -944,7 +1019,6 @@ fn acquire_lease(path: &Path, wait: Duration) -> Result<ServiceLease> {
         thread::sleep(LEASE_POLL.min(remaining));
     }
 }
-
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     for released in workspaces.reap(&owner_alive) {
@@ -1023,32 +1097,24 @@ fn owner_alive(marker: &SessionMarker) -> bool {
         .is_some_and(|process| process.start_time() == *started_at)
 }
 
-fn write_response(writer: &SocketWriter, response: &ServiceResponse) {
-    let _ = writer.json(response);
-}
-
-fn deliver_result(
-    writer: &SocketWriter,
-    id: &str,
-    mut result: crate::work::result::InvocationResult,
-) {
+/// Hand one finished invocation to the session as a result, or end the stream when the result
+/// cannot be encoded.
+fn deliver_result(wire: &McpWire, id: &str, mut result: crate::work::result::InvocationResult) {
     let text = result.model_text();
     let is_error = result.is_error();
     let content = std::mem::take(&mut result.content);
     match serde_json::to_value(&result) {
-        Ok(value) => write_response(
-            writer,
-            &ServiceResponse::Result {
-                id: id.into(),
-                text,
-                result: value,
-                is_error,
-                content,
-            },
-        ),
-        Err(_) => writer.close(),
+        Ok(value) => wire.render(ServiceResponse::Result {
+            id: id.into(),
+            text,
+            result: value,
+            is_error,
+            content,
+        }),
+        Err(_) => wire.writer.close(),
     }
 }
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -1100,28 +1166,32 @@ impl BrowserEventSink for ServiceBrowserEvents {
 
 #[cfg(test)]
 mod tests {
-    use std::io::BufReader;
     use std::net::TcpStream;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use crate::browser::adapter::BrowserCommand;
-    use ghostlight_bridge::framing::{read_json_line, write_json_line};
-    use ghostlight_bridge::service::{
-        IntakeChannel, ServiceRequest, ServiceResponse, SERVICE_BRIDGE_MAJOR,
-    };
+    use ghostlight_bridge::service::IntakeChannel;
+    use ghostlight_relay::client::{self, REPLY_DEADLINE};
+    use ghostlight_relay::frame;
+    use ghostlight_relay::home::{RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
+    use ghostlight_relay::opening::{ControlOp, McpFrame, RefusalCode, Reply, Stream};
+    use ghostlight_relay::runtime::RuntimeFile;
+    use ghostlight_relay::templates::FailureTemplates;
+    use serde_json::{json, Value};
 
+    use super::test_home::TestHome;
+    use crate::browser::adapter::BrowserCommand;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
+    use crate::cli::client as cli_client;
+    use crate::intake::mcp::ResumeState;
     use crate::workbench::{
         WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
     use crate::workspace::ReleasedTabs;
 
-    use super::{
-        cleanup_released_tabs, request_readiness, request_workbench_activation, ServiceHost,
-    };
+    use super::{cleanup_released_tabs, ServiceHost};
 
     fn runtime_path(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let directory = std::env::temp_dir().join(format!(
@@ -1144,7 +1214,6 @@ mod tests {
         use crate::work::{ApplicationExecutor, CancellationToken};
         use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
         use crate::workspace::WorkspaceStore;
-        use serde_json::json;
 
         let (directory, _) = runtime_path("passive-browsing");
         let policy = directory.join("policy.json");
@@ -1433,116 +1502,399 @@ mod tests {
         assert_eq!(reusable_example_tab(&workspaces), None);
     }
 
-    #[test]
-    fn incompatible_service_bridge_fails_before_catalog() {
-        let (directory, path) = runtime_path("incompatible");
-        let host = ServiceHost::start(&path).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
-        write_json_line(
-            &mut stream,
-            &ServiceRequest::Hello {
-                major: SERVICE_BRIDGE_MAJOR + 1,
-                token: host.endpoint.token.clone(),
-                client_label: "test".into(),
-                channel: IntakeChannel::Mcp,
+    /// The token every test service presents in its runtime file.
+    const TEST_TOKEN: &str = "runtime_test";
+
+    /// The MCP channel a connector names.
+    const CONNECTOR_CHANNEL: &str = "npm";
+
+    /// How long a test waits for the service to answer.
+    const PATIENCE: Duration = Duration::from_secs(10);
+
+    /// A relay listener over a fake browser, found through the test home's runtime file.
+    struct Served {
+        intake: Arc<super::Intake>,
+        browser: Arc<FakeBrowser>,
+        relay: Arc<crate::browser::RelayBrowserPort>,
+        port: u16,
+        listener: Option<thread::JoinHandle<()>>,
+        quit_requested: std::sync::mpsc::Receiver<()>,
+    }
+
+    impl Drop for Served {
+        fn drop(&mut self) {
+            self.intake.stop.store(true, Ordering::SeqCst);
+            let _ = TcpStream::connect(("127.0.0.1", self.port));
+            if let Some(listener) = self.listener.take() {
+                let _ = listener.join();
+            }
+        }
+    }
+
+    /// Page assets a protocol-4 fake can be accepted with.
+    fn test_assets() -> Arc<crate::browser::adapter::chromium::level4::wire::Assets> {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+
+        let source = "\"use strict\";\n".to_owned();
+        let mut id = String::new();
+        for byte in Sha256::digest(source.as_bytes()) {
+            write!(&mut id, "{byte:02x}").unwrap();
+        }
+        Arc::new(crate::browser::adapter::chromium::level4::wire::Assets { id, source })
+    }
+
+    /// Serve the relay listener over a fake browser and publish it in `home`.
+    fn serve_fake(home: &TestHome) -> Served {
+        use crate::audit::{AuditRecorder, JsonlAuditSink};
+        use crate::governance::GovernanceFacade;
+        use crate::presentation::{BrowserPresentation, PresentationReactor};
+        use crate::work::ApplicationExecutor;
+        use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
+        use crate::workspace::WorkspaceStore;
+
+        let browser = Arc::new(FakeBrowser::default());
+        let relay = Arc::new(crate::browser::RelayBrowserPort::new("service_test".into()));
+        relay.set_protocol4_assets(test_assets());
+        let workspaces = WorkspaceStore::default();
+        let governance = GovernanceFacade::new(None, None);
+        let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
+        let projection = WorkbenchProjection::default();
+        let audit = Arc::new(AuditRecorder::new(
+            Arc::new(JsonlAuditSink::new(&home.path().join("audit.jsonl"))),
+            projection.clone(),
+        ));
+        let executor = Arc::new(ApplicationExecutor::new(
+            governance.clone(),
+            workspaces.clone(),
+            browser.clone(),
+            PresentationReactor::new(Arc::new(BrowserPresentation::new(
+                browser.clone(),
+                workspaces.clone(),
+            ))),
+            projection.clone(),
+            audit,
+            diagnostics.clone(),
+        ));
+        let workbench = WorkbenchFacade::new(
+            projection,
+            workspaces.clone(),
+            governance.clone(),
+            relay.clone(),
+            diagnostics.clone(),
+        );
+        let quit = super::Quit {
+            drain: Arc::default(),
+            signal: Arc::default(),
+            diagnostics: diagnostics.clone(),
+        };
+        let (signal, quit_requested) = std::sync::mpsc::channel();
+        *super::lock(&quit.signal) = Some(Arc::new(move || {
+            let _ = signal.send(());
+        }));
+        let intake = Arc::new(super::Intake {
+            token: TEST_TOKEN.into(),
+            executor,
+            workspaces,
+            browser_port: browser.clone(),
+            browser: relay.clone(),
+            workbench,
+            governance,
+            diagnostics,
+            quit,
+            sessions: super::Capacity::new(super::admission::SESSIONS),
+            budget: super::QueueBudget::default(),
+            stop: Arc::default(),
+        });
+        let listener = crate::intake::listener::bind().unwrap();
+        let port = listener.local_addr().unwrap().port();
+        RuntimeFile::new(port, TEST_TOKEN.into(), "2.0.0".into())
+            .write(&home.path().join(RUNTIME_FILE_NAME))
+            .unwrap();
+        let thread = super::spawn_listener(listener, intake.clone());
+        Served {
+            intake,
+            browser,
+            relay,
+            port,
+            listener: Some(thread),
+            quit_requested,
+        }
+    }
+
+    /// Open an `mcp` stream the way the MCP connector does.
+    fn open_mcp(resume: Option<String>) -> TcpStream {
+        let (socket, reply) = client::connect(
+            Stream::Mcp {
+                channel: CONNECTOR_CHANNEL.into(),
                 session: None,
+                resume,
+            },
+            REPLY_DEADLINE,
+        )
+        .unwrap();
+        assert!(matches!(reply, Reply::Accepted { .. }), "{reply:?}");
+        socket.set_read_timeout(Some(PATIENCE)).unwrap();
+        socket
+    }
+
+    fn send_line(socket: &mut TcpStream, line: Value) {
+        frame::write_frame(
+            socket,
+            &McpFrame::Message {
+                line: line.to_string(),
             },
         )
         .unwrap();
-        let mut reader = BufReader::new(stream);
-        let response: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
-        assert!(
-            matches!(response, ServiceResponse::Error { code, .. } if code == "incompatible_bridge")
+    }
+
+    /// Read frames until the response to `id`, collecting the resume tokens on the way.
+    fn response(socket: &mut TcpStream, id: u64) -> (Value, Vec<String>) {
+        let mut tokens = Vec::new();
+        loop {
+            match frame::read_frame::<McpFrame>(socket).unwrap().unwrap() {
+                McpFrame::Message { line } => {
+                    let message: Value = serde_json::from_str(&line).unwrap();
+                    if message["id"] == json!(id) {
+                        return (message, tokens);
+                    }
+                }
+                McpFrame::Resume { token } => tokens.push(token),
+                McpFrame::Unknown => {}
+            }
+        }
+    }
+
+    fn initialize(socket: &mut TcpStream) -> (Value, Vec<String>) {
+        send_line(
+            socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "relay test", "version": "1"}
+                }
+            }),
         );
-        drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
+        let answered = response(socket, 1);
+        send_line(
+            socket,
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        );
+        answered
+    }
+
+    /// Wait until `condition` holds or the patience runs out.
+    fn eventually(condition: impl Fn() -> bool) {
+        let until = Instant::now() + PATIENCE;
+        while !condition() {
+            assert!(Instant::now() < until, "the condition never held");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
-    fn readiness_inspection_is_read_only_and_opens_no_session() {
-        let (directory, path) = runtime_path("readiness-inspection");
-        let host = ServiceHost::start(&path).unwrap();
+    fn an_mcp_session_initializes_lists_tools_and_calls_one() {
+        let home = TestHome::new("mcp-session");
+        let served = serve_fake(&home);
+        let mut socket = open_mcp(None);
+
+        let (initialized, tokens) = initialize(&mut socket);
+        assert_eq!(initialized["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
+
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        );
+        let (listed, later) = response(&mut socket, 2);
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        assert!(tools.iter().any(|tool| tool["name"] == "browser_tabs"));
+        assert!(tools.iter().all(|tool| tool.get("outputSchema").is_none()));
+        let resumed: Vec<String> = tokens.into_iter().chain(later).collect();
+        let state =
+            ResumeState::decode(resumed.first().expect("a resume token after initialize")).unwrap();
+        assert_eq!(state.revision, "2025-06-18");
+        assert_eq!(state.client_label, "relay test");
+
+        send_line(
+            &mut socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
+            }),
+        );
+        let (called, _) = response(&mut socket, 3);
+        let result = &called["result"];
+        assert!(
+            result["structuredContent"]["status"].is_string(),
+            "{called}"
+        );
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(served.intake.workspaces.summaries().len(), 1);
+
+        drop(socket);
+        eventually(|| served.intake.workspaces.summaries().is_empty());
+    }
+
+    #[test]
+    fn a_wrong_token_is_refused_and_opens_nothing() {
+        let home = TestHome::new("bad-token");
+        let served = serve_fake(&home);
+        RuntimeFile::new(served.port, "runtime_wrong".into(), "2.0.0".into())
+            .write(&home.path().join(RUNTIME_FILE_NAME))
+            .unwrap();
+
+        let (_, reply) = client::connect(Stream::Browser, REPLY_DEADLINE).unwrap();
+        assert!(
+            matches!(
+                reply,
+                Reply::Refused {
+                    code: RefusalCode::AuthenticationFailed,
+                    ..
+                }
+            ),
+            "{reply:?}"
+        );
+        assert!(served.relay.connected_browsers().is_empty());
+        assert!(served.intake.workspaces.summaries().is_empty());
+    }
+
+    #[test]
+    fn a_resume_token_restores_the_session_and_stales_a_missing_tab() {
+        use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalTab};
+        use crate::intake::mcp::OwnedTab;
+
+        let home = TestHome::new("resume");
+        let served = serve_fake(&home);
+        // The browser still has tab 7; tab 8 closed while the service was away.
+        served.browser.push(Ok(BrowserOutcome::Tabs {
+            tabs: vec![PhysicalTab {
+                tab_id: 7,
+                url: "https://example.com/".into(),
+                title: "Example".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            }],
+        }));
+        let token = ResumeState {
+            revision: "2025-06-18".into(),
+            client_label: "returning client".into(),
+            channel: String::new(),
+            session_key: Some("workspace_earlier".into()),
+            owned_tabs: vec![
+                OwnedTab {
+                    browser_id: FAKE_BROWSER.into(),
+                    tab_id: 7,
+                    handle: "tab_kept".into(),
+                },
+                OwnedTab {
+                    browser_id: FAKE_BROWSER.into(),
+                    tab_id: 8,
+                    handle: "tab_gone".into(),
+                },
+            ],
+            recording: None,
+        }
+        .encode();
+
+        let mut socket = open_mcp(Some(token));
+        let McpFrame::Resume { token } =
+            frame::read_frame::<McpFrame>(&mut socket).unwrap().unwrap()
+        else {
+            panic!("a resumed session hands back a fresh token first");
+        };
+        let state = ResumeState::decode(&token).unwrap();
+        assert_eq!(state.revision, "2025-06-18");
+        assert_eq!(state.client_label, "returning client");
+        assert_eq!(state.channel, CONNECTOR_CHANNEL);
+        assert_eq!(
+            state.owned_tabs,
+            vec![OwnedTab {
+                browser_id: FAKE_BROWSER.into(),
+                tab_id: 7,
+                handle: "tab_kept".into(),
+            }]
+        );
+        assert_eq!(served.browser.calls(), vec![BrowserCommand::ListTabs]);
+        let summaries = served.intake.workspaces.summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].client_label, "returning client");
+
+        // A resumed session is initialized already: a tools call is served without initialize.
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}),
+        );
+        let (listed, _) = response(&mut socket, 9);
+        assert!(listed["result"]["tools"].is_array(), "{listed}");
+    }
+
+    #[test]
+    fn readiness_is_read_only_and_opens_no_session() {
+        let home = TestHome::new("readiness");
+        let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let before = host.workbench.snapshot();
 
-        let observed = request_readiness(&path).unwrap();
+        let observed = cli_client::readiness().unwrap();
         let after = host.workbench.snapshot();
 
         assert_eq!(observed, before.readiness);
         assert_eq!(after.readiness, before.readiness);
         assert!(after.sessions.is_empty());
         assert_eq!(after.history, before.history);
-
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn readiness_inspection_never_starts_an_absent_service() {
-        let (directory, path) = runtime_path("readiness-no-start");
-
-        assert!(request_readiness(&path).is_err());
-        assert!(!path.exists());
-
-        std::fs::remove_dir_all(directory).unwrap();
+    fn readiness_never_starts_an_absent_service() {
+        let home = TestHome::new("readiness-absent");
+        assert!(cli_client::readiness().is_err());
+        assert!(!home.path().join(RUNTIME_FILE_NAME).exists());
     }
 
     /// Open one MCP session, end the connection the given way, and report the sessions left.
     fn sessions_after(name: &str, goodbye: impl FnOnce(&mut TcpStream)) -> usize {
-        let (directory, path) = runtime_path(name);
-        let host = ServiceHost::start(&path).unwrap();
+        let home = TestHome::new(name);
+        let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
-        write_json_line(
-            &mut stream,
-            &ServiceRequest::Hello {
-                major: SERVICE_BRIDGE_MAJOR,
-                token: host.endpoint.token.clone(),
-                client_label: "leak-probe".into(),
-                channel: IntakeChannel::Mcp,
-                session: None,
-            },
-        )
-        .unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let accepted: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
-        assert!(matches!(accepted, ServiceResponse::HelloAccepted { .. }));
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
         assert_eq!(
             host.workbench.snapshot().sessions.len(),
             1,
             "the probe session must exist before the connection ends"
         );
 
-        goodbye(&mut stream);
-        drop(reader);
-        drop(stream);
+        goodbye(&mut socket);
+        drop(socket);
 
         // The session teardown runs on the connection's own thread, so give it a moment.
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline && !host.workbench.snapshot().sessions.is_empty() {
             thread::sleep(Duration::from_millis(25));
         }
-        let remaining = host.workbench.snapshot().sessions.len();
-        drop(host);
-        let _ = std::fs::remove_dir_all(directory);
-        remaining
+        host.workbench.snapshot().sessions.len()
     }
 
     #[test]
     fn a_client_that_goes_away_badly_still_releases_its_session() {
         // The negative control: a tidy goodbye has always worked, so if this were the only case
-        // the assertion below would prove nothing about the path that actually leaked.
+        // the assertion below would prove nothing about the error path.
         assert_eq!(sessions_after("goodbye-clean", |_| {}), 0);
 
-        // One malformed line ends the connection through the error path. Before the teardown was
-        // made unconditional this leaked the workspace and every tab it held, and nothing could
-        // collect it afterwards: an unowned workspace has no owning process for the reaper.
+        // One frame that is not JSON ends the connection through the error path. The workspace
+        // and every tab it held must still be released: an unowned workspace has no owning
+        // process for the reaper.
         assert_eq!(
-            sessions_after("goodbye-malformed", |stream| {
-                use std::io::Write;
-                let _ = stream.write_all(b"{ not json at all\n");
-                let _ = stream.flush();
+            sessions_after("goodbye-malformed", |socket| {
+                frame::write_frame_raw(socket, b"{ not json at all").unwrap();
             }),
             0,
             "a session must not outlive the connection that opened it"
@@ -1551,36 +1903,39 @@ mod tests {
 
     #[test]
     fn prepared_service_keeps_discovery_private_until_desktop_ready() {
-        let (directory, path) = runtime_path("desktop-readiness");
-        let host = ServiceHost::start(&path).unwrap();
-        assert!(!path.exists());
-        assert!(request_readiness(&path).is_err());
-        let contender = ServiceHost::start(&path).err().unwrap();
+        let home = TestHome::new("desktop-readiness");
+        let runtime = home.path().join(RUNTIME_FILE_NAME);
+        let host = ServiceHost::start(home.path()).unwrap();
+        assert!(!runtime.exists());
+        assert!(cli_client::readiness().is_err());
+        let contender = ServiceHost::start(home.path()).err().unwrap();
         assert!(contender.is::<super::AuthorityAlreadyRunning>());
         host.publish_ready().unwrap();
-        assert_eq!(
-            ghostlight_bridge::runtime::read_runtime(&path)
-                .unwrap()
-                .token,
-            host.endpoint.token
-        );
-        assert!(request_readiness(&path).is_ok());
+        let published = RuntimeFile::read(&runtime).unwrap().unwrap();
+        assert_eq!(published.token, host.token);
+        assert_eq!(published.port, host.port);
+        assert_eq!(published.relay, ghostlight_relay::RELAY);
+        assert!(published.token.starts_with("runtime_"));
+        let templates = FailureTemplates::read(&home.path().join(TEMPLATES_FILE_NAME))
+            .unwrap()
+            .expect("failure templates are published with discovery");
+        assert_eq!(templates.relay, ghostlight_relay::RELAY);
+        assert!(cli_client::readiness().is_ok());
         drop(host);
-        assert!(!path.exists());
-        let unpublished = ServiceHost::start(&path).unwrap();
+        assert!(!runtime.exists());
+        let unpublished = ServiceHost::start(home.path()).unwrap();
         drop(unpublished);
         assert!(
-            !path.exists(),
+            !runtime.exists(),
             "failed desktop setup leaves no discovery behind"
         );
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn service_lease_prevents_concurrent_authorities() {
-        let (directory, path) = runtime_path("singleton");
-        let first = ServiceHost::start(&path).unwrap();
-        let second = ServiceHost::start(&path)
+        let (directory, _) = runtime_path("singleton");
+        let first = ServiceHost::start(&directory).unwrap();
+        let second = ServiceHost::start(&directory)
             .err()
             .expect("second authority is rejected");
         let detail = format!("{second:#}");
@@ -1589,7 +1944,7 @@ mod tests {
             "{detail}"
         );
         drop(first);
-        let replacement = ServiceHost::start(&path).unwrap();
+        let replacement = ServiceHost::start(&directory).unwrap();
         drop(replacement);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -1613,16 +1968,58 @@ mod tests {
 
     #[test]
     fn authenticated_activation_reveals_the_existing_workbench() {
-        let (directory, path) = runtime_path("activation");
-        let host = ServiceHost::start(&path).unwrap();
+        let home = TestHome::new("activation");
+        let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        assert!(!request_workbench_activation(&path).unwrap());
+        assert!(!cli_client::activate_workbench().unwrap());
         let reveals = Arc::new(RevealCounter::default());
         host.workbench.attach_presentation(reveals.clone());
-        assert!(request_workbench_activation(&path).unwrap());
+        assert!(cli_client::activate_workbench().unwrap());
         assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_browser_stream_carries_an_extension_to_the_browser_port() {
+        use crate::browser::adapter::chromium::level4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::level4::fake::Reply as FakeReply;
+
+        let home = TestHome::new("browser-stream");
+        let served = serve_fake(&home);
+        // Stand in for the browser connector: carry the extension's bytes over a browser stream.
+        let native = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = native.local_addr().unwrap();
+        let carrier = thread::spawn(move || {
+            let (extension, _) = native.accept().unwrap();
+            let (service, reply) = client::connect(Stream::Browser, REPLY_DEADLINE).unwrap();
+            assert!(matches!(reply, Reply::Accepted { .. }), "{reply:?}");
+            let mut to_service = (extension.try_clone().unwrap(), service.try_clone().unwrap());
+            let mut to_extension = (service, extension);
+            thread::spawn(move || {
+                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
+            });
+            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
+        });
+        let fake = FakeExtension::connect(
+            address,
+            &FakeExtension::hello("browser_relayed"),
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            }),
+        );
+        let accepted = fake.wait(|seen| !seen.frames.is_empty());
+        assert_eq!(accepted.frames[0]["kind"], "hello_accepted");
+        drop(accepted);
+        eventually(|| {
+            served
+                .relay
+                .connected_browsers()
+                .iter()
+                .any(|browser| browser.id == "browser_relayed")
+        });
+        fake.close();
+        drop(fake);
+        let _ = carrier.join();
     }
 
     #[test]
@@ -1667,80 +2064,95 @@ mod tests {
         );
     }
 
-    /// A host that signals through a channel instead of a desktop, with its published endpoint.
-    fn quittable_host(
-        name: &str,
-    ) -> (
-        std::path::PathBuf,
-        ServiceHost,
-        std::sync::mpsc::Receiver<()>,
-    ) {
-        let (directory, path) = runtime_path(name);
-        let host = ServiceHost::start(&path).unwrap();
+    /// A host that signals through a channel instead of a desktop.
+    fn quittable_host(name: &str) -> (TestHome, ServiceHost, std::sync::mpsc::Receiver<()>) {
+        let home = TestHome::new(name);
+        let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let (quit, quit_requested) = std::sync::mpsc::channel();
         host.install_quit_signal(Arc::new(move || {
             let _ = quit.send(());
         }));
-        (directory, host, quit_requested)
+        (home, host, quit_requested)
     }
 
     #[test]
     fn a_quit_answers_new_invocations_with_shutting_down() {
         use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 
-        let (directory, host, quit_requested) = quittable_host("quit-refuses");
-        let mut stream = TcpStream::connect(("127.0.0.1", host.endpoint.service_port)).unwrap();
-        write_json_line(
-            &mut stream,
-            &ServiceRequest::Hello {
-                major: SERVICE_BRIDGE_MAJOR,
-                token: host.endpoint.token.clone(),
-                client_label: "quit-probe".into(),
-                channel: IntakeChannel::Mcp,
-                session: None,
-            },
-        )
-        .unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let accepted: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
-        assert!(matches!(accepted, ServiceResponse::HelloAccepted { .. }));
+        let (_home, host, quit_requested) = quittable_host("quit-refuses");
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
 
         host.begin_quit(Duration::from_secs(5));
         quit_requested
             .recv_timeout(Duration::from_secs(5))
             .expect("an idle service asks the desktop to exit at once");
 
-        write_json_line(
-            &mut stream,
-            &ServiceRequest::Invoke {
-                id: "late".into(),
-                tool: "browser_tabs".into(),
-                input: serde_json::json!({"action": "list"}),
-                deadline_ms: None,
+        send_line(
+            &mut socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
+            }),
+        );
+        let (refused, _) = response(&mut socket, 2);
+        assert_eq!(
+            refused["error"]["message"],
+            format!("{SHUTTING_DOWN_CODE}: {SHUTTING_DOWN_MESSAGE}")
+        );
+
+        // A quitting service takes no new connection either.
+        let (_, reply) = client::connect(
+            Stream::Control {
+                op: ControlOp::Readiness,
             },
+            REPLY_DEADLINE,
         )
         .unwrap();
-        let refused: ServiceResponse = read_json_line(&mut reader).unwrap().unwrap();
-        assert_eq!(
-            refused,
-            ServiceResponse::Error {
-                id: Some("late".into()),
-                code: SHUTTING_DOWN_CODE.into(),
-                message: SHUTTING_DOWN_MESSAGE.into(),
-            }
+        assert!(
+            matches!(
+                reply,
+                Reply::Refused {
+                    code: RefusalCode::ShuttingDown,
+                    ..
+                }
+            ),
+            "{reply:?}"
         );
-        drop(reader);
-        drop(stream);
+        drop(socket);
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_quit_over_control_answers_and_drains() {
+        let home = TestHome::new("quit-control");
+        let served = serve_fake(&home);
+        let running = served.intake.quit.drain.admit().unwrap();
+
+        let answer = cli_client::control(ControlOp::Quit).unwrap();
+        assert_eq!(answer, json!({"quitting": true}));
+        assert!(
+            served
+                .quit_requested
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "the desktop is not asked to exit while work is in flight"
+        );
+        drop(running);
+        served
+            .quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the desktop is asked to exit once the work finishes");
     }
 
     #[test]
     fn a_quit_waits_for_work_in_flight_and_then_asks_the_desktop_to_exit() {
-        let (directory, host, quit_requested) = quittable_host("quit-drains");
+        let (_home, host, quit_requested) = quittable_host("quit-drains");
         // The fake executor: an invocation the service has admitted and not yet finished.
-        let running = host.drain.admit().unwrap();
+        let running = host.quit.drain.admit().unwrap();
 
         host.begin_quit(Duration::from_secs(30));
         assert!(
@@ -1760,13 +2172,12 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("the desktop is asked to exit once the work finishes");
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn a_quit_stops_waiting_for_work_after_the_grace() {
-        let (directory, host, quit_requested) = quittable_host("quit-bound");
-        let _stuck = host.drain.admit().unwrap();
+        let (_home, host, quit_requested) = quittable_host("quit-bound");
+        let _stuck = host.quit.drain.admit().unwrap();
 
         let started = Instant::now();
         host.begin_quit(Duration::from_millis(200));
@@ -1775,13 +2186,12 @@ mod tests {
             .expect("the desktop is asked to exit when the grace ends");
         assert!(started.elapsed() >= Duration::from_millis(200));
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn a_start_that_never_publishes_discovery_stops_by_itself() {
-        let (directory, path) = runtime_path("discovery-stalls");
-        let host = ServiceHost::start(&path).unwrap();
+        let (directory, _) = runtime_path("discovery-stalls");
+        let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
         host.expect_discovery_by(Instant::now() + Duration::from_millis(100), move || {
             let _ = expired.send(());
@@ -1794,8 +2204,8 @@ mod tests {
 
     #[test]
     fn publishing_discovery_cancels_the_stop() {
-        let (directory, path) = runtime_path("discovery-published");
-        let host = ServiceHost::start(&path).unwrap();
+        let (directory, _) = runtime_path("discovery-published");
+        let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
         host.expect_discovery_by(Instant::now() + Duration::from_millis(200), move || {
             let _ = expired.send(());
