@@ -1,7 +1,7 @@
 //! Reading, inspection, discovery, and screenshot execution.
 
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
-use ghostlight_bridge::service::ServiceContent;
+use crate::intake::session::ServiceContent;
 use serde_json::{json, Value};
 
 use crate::governance::Capability;

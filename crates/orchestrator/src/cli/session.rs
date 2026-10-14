@@ -5,7 +5,7 @@
 
 use std::env;
 
-use ghostlight_bridge::service::SessionMarker;
+use crate::intake::session::SessionMarker;
 use sysinfo::{get_current_pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// The environment variable a caller sets to pin its own session.
@@ -66,7 +66,7 @@ fn caller() -> Option<SessionMarker> {
 #[cfg(test)]
 mod tests {
     use super::{caller, marker, SESSION_VARIABLE};
-    use ghostlight_bridge::service::SessionMarker;
+    use crate::intake::session::SessionMarker;
 
     #[test]
     fn the_caller_is_this_process_parent() {

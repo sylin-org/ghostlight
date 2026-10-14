@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browser::adapter::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
-use ghostlight_bridge::service::IntakeChannel;
+use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

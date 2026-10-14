@@ -1113,7 +1113,7 @@ fn an_observation_has_one_place_for_a_host_and_none_for_the_rest_of_a_url() {
 
 #[test]
 fn naming_a_channel_is_how_a_layer_takes_control_of_it() {
-    use ghostlight_bridge::service::IntakeChannel;
+    use crate::intake::session::IntakeChannel;
 
     let unconfigured = GovernanceFacade::new(None, None);
     for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
@@ -1162,7 +1162,7 @@ fn naming_a_channel_is_how_a_layer_takes_control_of_it() {
 
 #[test]
 fn a_local_layer_cannot_readmit_a_channel_managed_authority_refused() {
-    use ghostlight_bridge::service::IntakeChannel;
+    use crate::intake::session::IntakeChannel;
 
     let managed = temporary("channel-managed");
     fs::write(
@@ -1201,7 +1201,7 @@ fn a_local_layer_cannot_readmit_a_channel_managed_authority_refused() {
 
 #[test]
 fn an_unknown_channel_name_is_a_typo_not_a_silent_pass() {
-    use ghostlight_bridge::service::IntakeChannel;
+    use crate::intake::session::IntakeChannel;
 
     let path = temporary("channel-typo");
     fs::write(

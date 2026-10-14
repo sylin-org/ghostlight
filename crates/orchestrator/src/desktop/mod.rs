@@ -1096,7 +1096,7 @@ mod tests {
             summary: "Read 1,240 words from example.com.".into(),
             duration_ms: 1200,
             observed: sample_observation(),
-            channel: Some(ghostlight_bridge::service::IntakeChannel::Mcp),
+            channel: Some(crate::intake::session::IntakeChannel::Mcp),
             browser: None,
         };
 

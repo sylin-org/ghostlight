@@ -8,8 +8,9 @@
 
 pub mod listener;
 pub mod mcp;
+pub mod session;
 
-use ghostlight_bridge::service::{IntakeChannel, ServerProfile};
+use crate::intake::session::{IntakeChannel, ServerProfile};
 
 use crate::language::SERVER_INSTRUCTIONS;
 

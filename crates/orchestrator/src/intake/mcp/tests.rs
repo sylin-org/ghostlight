@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use ghostlight_bridge::service::{
+use crate::intake::session::{
     ServiceContent, ServiceRequest, ServiceResponse, ToolAnnotations, ToolDefinition,
 };
 use ghostlight_relay::templates::{Failure, FailureTemplates};

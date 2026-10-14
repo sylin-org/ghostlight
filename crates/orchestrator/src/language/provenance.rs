@@ -1,6 +1,6 @@
 //! Human connection details authored from observed evidence, separate from caller claims.
 
-use ghostlight_bridge::service::IntakeChannel;
+use crate::intake::session::IntakeChannel;
 use serde::Serialize;
 
 use crate::provenance::{Attribution, PeerObservation, SignatureStatus};

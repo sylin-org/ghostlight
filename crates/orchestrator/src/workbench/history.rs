@@ -259,9 +259,9 @@ mod tests {
 
     #[test]
     fn live_group_claims_stay_in_memory_while_restored_receipts_keep_observed_evidence() {
+        use crate::intake::session::IntakeChannel;
         use crate::provenance::{ConnectionEvidence, PeerObservation};
         use crate::workbench::WorkbenchProjection;
-        use ghostlight_bridge::service::IntakeChannel;
         let connection = ConnectionEvidence::with_peer(
             "PRIVATE_REPORTED_APPLICATION",
             IntakeChannel::Mcp,

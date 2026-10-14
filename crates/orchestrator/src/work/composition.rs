@@ -276,8 +276,8 @@ mod tests {
     use crate::governance::GovernanceFacade;
     use crate::language::outcome::{Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
 
+    use crate::intake::session::IntakeChannel;
     use crate::workspace::WorkspaceStore;
-    use ghostlight_bridge::service::IntakeChannel;
 
     fn child(status: Status, effect: Effect, refusal: Option<Refusal>) -> Terminal {
         let audit = refusal.map_or_else(|| Outcome::TabsListed { count: 0 }.audit(), |r| r.audit());

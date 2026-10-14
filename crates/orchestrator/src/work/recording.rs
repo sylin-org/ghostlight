@@ -5,7 +5,7 @@ use crate::browser::adapter::{
     RecordingDestination, RecordingState, RecordingStopReason, RECORDING_LOCAL_MAX_BYTES,
     RECORDING_TRANSFER_MAX_BYTES,
 };
-use ghostlight_bridge::service::ServiceContent;
+use crate::intake::session::ServiceContent;
 use serde_json::json;
 
 use crate::governance::{Capability, CapabilitySet, Decision};

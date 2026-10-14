@@ -9,9 +9,9 @@ use crate::browser::adapter::{
     ViewportGeometry,
 };
 
+use crate::intake::session::{IntakeChannel, SessionMarker};
 use crate::language::outcome::TargetRole;
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
-use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
@@ -1795,7 +1795,7 @@ mod tests {
     use crate::browser::adapter::{
         BrowserReadiness, CaptureScope, ObservedTarget, PhysicalTab, ViewportGeometry,
     };
-    use ghostlight_bridge::service::{IntakeChannel, SessionMarker};
+    use crate::intake::session::{IntakeChannel, SessionMarker};
 
     use crate::language::outcome::TargetRole;
 

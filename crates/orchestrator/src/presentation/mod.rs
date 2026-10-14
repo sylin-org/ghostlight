@@ -502,9 +502,9 @@ mod tests {
     ) {
         use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
         use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
+        use crate::intake::session::IntakeChannel;
         use crate::provenance::{ConnectionEvidence, PeerObservation};
         use crate::workspace::WorkspaceStore;
-        use ghostlight_bridge::service::IntakeChannel;
 
         let store = WorkspaceStore::default();
         let workspace = store.connect(

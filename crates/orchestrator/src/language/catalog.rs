@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use ghostlight_bridge::service::{ToolAnnotations, ToolDefinition};
+use crate::intake::session::{ToolAnnotations, ToolDefinition};
 use serde_json::{json, Map, Value};
 
 use crate::governance::AuthoritySnapshot;

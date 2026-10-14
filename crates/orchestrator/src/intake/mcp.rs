@@ -14,11 +14,11 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
-use ghostlight_bridge::service::{
+use crate::intake::session::{
     ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use ghostlight_relay::templates::DEFAULT_TEMPLATE;
 use ghostlight_relay::RELAY;
 use serde::{Deserialize, Serialize};

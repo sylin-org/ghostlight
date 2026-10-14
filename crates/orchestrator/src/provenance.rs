@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ghostlight_bridge::service::IntakeChannel;
+use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

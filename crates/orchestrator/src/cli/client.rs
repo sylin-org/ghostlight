@@ -7,7 +7,7 @@
 
 use std::net::TcpStream;
 
-use ghostlight_bridge::service::SessionMarker;
+use crate::intake::session::SessionMarker;
 use ghostlight_relay::client::{self, ConnectError, REPLY_DEADLINE};
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::opening::{ControlOp, ControlResult, McpFrame, Reply, Stream};

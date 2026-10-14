@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use ghostlight_bridge::service::{
+use crate::intake::session::{
     IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
 };
+use anyhow::{Context, Result};
 use ghostlight_relay::home::{LEASE_FILE_NAME, RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
 use ghostlight_relay::opening::{ControlOp, McpFrame, Stream};
 use ghostlight_relay::runtime::RuntimeFile;
@@ -911,9 +911,6 @@ impl LiveSession {
                 }
             }
             ServiceRequest::Cancel { id } => self.queue.cancel(&id),
-            ServiceRequest::Hello { .. }
-            | ServiceRequest::ActivateWorkbench { .. }
-            | ServiceRequest::InspectReadiness { .. } => {}
         }
         true
     }
@@ -1172,7 +1169,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use ghostlight_bridge::service::IntakeChannel;
+    use crate::intake::session::IntakeChannel;
     use ghostlight_relay::client::{self, REPLY_DEADLINE};
     use ghostlight_relay::frame;
     use ghostlight_relay::home::{RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};

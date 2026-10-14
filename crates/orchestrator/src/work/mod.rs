@@ -2618,12 +2618,12 @@ mod tests {
         RuntimeControlIntent, RuntimeControlState, ViewportGeometry, RECORDING_LOCAL_MAX_BYTES,
         RECORDING_TRANSFER_MAX_BYTES,
     };
-    use ghostlight_bridge::service::ServiceContent;
+    use crate::intake::session::ServiceContent;
     use serde_json::json;
 
     use crate::browser::recovery::RecoveryCandidate;
     use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
-    use ghostlight_bridge::service::IntakeChannel;
+    use crate::intake::session::IntakeChannel;
 
     use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
     use crate::install::browser_package::BrowserPackage;

@@ -1,9 +1,9 @@
 //! Original connection evidence survives queue refusal and loss of the workspace itself.
 
 use super::*;
+use crate::intake::session::SessionMarker;
 use crate::provenance::{ConnectionEvidence, PeerObservation};
 use crate::work::PreparedInvocation;
-use ghostlight_bridge::service::SessionMarker;
 
 #[test]
 fn queued_refusals_keep_original_evidence_after_another_peer_and_workspace_release() {

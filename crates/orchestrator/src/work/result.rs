@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use ghostlight_bridge::service::ServiceContent;
+use crate::intake::session::ServiceContent;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;

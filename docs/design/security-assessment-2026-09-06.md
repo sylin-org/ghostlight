@@ -77,7 +77,7 @@ without owning policy. The Windows peer-observation crate is a narrow platform s
 
 - [Service startup](../../crates/orchestrator/src/service/mod.rs) binds two ephemeral IPv4
   loopback listeners and publishes a random runtime token. Both listeners use that token.
-- [Runtime discovery](../../crates/bridge/src/runtime.rs) applies Unix mode `0600` when creating
+- [Runtime discovery](../../crates/relay/src/runtime.rs) applies Unix mode `0600` when creating
   its temporary file. Windows access relies on the directory/file ACLs inherited by this path;
   this review did not independently test installed ACLs or cross-user access.
 - Service hello verifies the token and protocol major before workspace admission. This proves

@@ -5,7 +5,7 @@
 
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -60,23 +60,14 @@ pub enum Selection {
     Restore,
 }
 
-/// Canonical user control root, outside package-specific AppData and sandbox XDG remapping.
+/// Canonical user control root: the Ghostlight home.
 pub fn control_directory() -> io::Result<PathBuf> {
-    let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    let home = env::var_os(variable)
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute());
-    home.map(|p| p.join(".ghostlight")).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "Ghostlight cannot locate this user's home directory",
-        )
-    })
+    ghostlight_relay::home::home()
 }
 
-/// Production runtime location. Only explicit runtime overrides create isolated test contexts.
+/// The runtime file in the Ghostlight home, beside which the installation record lives.
 pub fn production_runtime() -> io::Result<PathBuf> {
-    Ok(control_directory()?.join("ghostlight-runtime.json"))
+    ghostlight_relay::home::runtime_file()
 }
 
 /// Read selection without registering, downloading or starting anything.
@@ -212,7 +203,7 @@ pub fn select_locked(
         },
         policy_directory: initial_policy_directory,
     });
-    let lease = crate::lifecycle::ServiceLease::try_acquire(runtime)?;
+    let lease = service_lease(runtime)?;
     match selection {
         Selection::Bootstrap | Selection::Release => {
             validate_siblings(&directory)?;
@@ -247,25 +238,31 @@ pub fn select_locked(
     }
     validate_siblings(record.directory())?;
     let bytes = serde_json::to_vec_pretty(&record).map_err(io::Error::other)?;
-    crate::runtime::write_private_document(&record_path(runtime), &bytes)?;
+    write_private_document(&record_path(runtime), &bytes)?;
     Ok(record)
 }
 
 /// Resolve and, only if absent, establish this user's installation from trusted siblings.
-/// The caller retains the lock through its startup exchange; the selected child only reads it.
-pub fn startup_selection() -> io::Result<(Option<File>, crate::runtime::RuntimeDiscovery)> {
-    let mut discovery = crate::runtime::runtime_discovery()?;
-    if env::var_os("GHOSTLIGHT_RUNTIME_FILE").is_some() {
-        return Ok((None, discovery));
+/// The caller retains the returned lock through its startup; a test home takes no selection.
+pub fn startup_selection() -> io::Result<Option<File>> {
+    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_some() {
+        return Ok(None);
     }
-    let guard = lock(&discovery.path)?;
+    let runtime = production_runtime()?;
+    let guard = lock(&runtime)?;
     let current = env::current_exe()?;
     let directory = current
         .parent()
         .ok_or_else(|| invalid("executable has no directory"))?;
-    let selected = select_locked(&discovery.path, directory, Selection::Bootstrap)?;
-    discovery.service_directory = Some(selected.directory().to_path_buf());
-    Ok((Some(guard), discovery))
+    select_locked(&runtime, directory, Selection::Bootstrap)?;
+    Ok(Some(guard))
+}
+
+/// The service lease beside `runtime`: `Some` when no service holds it.
+fn service_lease(runtime: &Path) -> io::Result<Option<ghostlight_relay::server::Lease>> {
+    ghostlight_relay::server::Lease::try_acquire(
+        &runtime.with_file_name(ghostlight_relay::home::LEASE_FILE_NAME),
+    )
 }
 
 /// Verify the selected local executable set before accepting deployment custody.
@@ -291,9 +288,8 @@ pub fn validate_siblings(directory: &Path) -> io::Result<()> {
 
 /// Resolve the selected executable for setup and diagnosis, without creating a selection.
 pub fn selected_executable() -> io::Result<PathBuf> {
-    let discovery = crate::runtime::runtime_discovery()?;
-    Ok(discovery
-        .service_directory
+    let selected = read(&production_runtime()?)?.map(|record| record.directory().to_path_buf());
+    Ok(selected
         .or_else(|| {
             env::current_exe()
                 .ok()
@@ -317,8 +313,12 @@ pub fn state_directory(runtime: &Path) -> io::Result<PathBuf> {
 }
 
 /// Refuse publication from a superseded executable after acquiring the lifetime lease.
+///
+/// A test home has no selection to verify against.
 pub fn verify_serving_executable(runtime: &Path) -> io::Result<()> {
-    if production_runtime().is_ok_and(|path| path == runtime) {
+    if env::var_os(ghostlight_relay::home::TEST_HOME_VARIABLE).is_none()
+        && production_runtime().is_ok_and(|path| path == runtime)
+    {
         let record = read(runtime)?
             .ok_or_else(|| invalid("Ghostlight installation has not been selected"))?;
         let current = env::current_exe()?;
@@ -374,6 +374,39 @@ fn record_path(runtime: &Path) -> PathBuf {
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+/// Publish a private local document atomically, readable only by the current user where the
+/// platform supports it.
+fn write_private_document(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "record path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+    #[cfg(target_os = "windows")]
+    let mut file = ghostlight_win_peer::create_private_file(&temporary)?;
+    #[cfg(not(target_os = "windows"))]
+    let mut file = {
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(&temporary)?
+    };
+    let published = (|| {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        // Both supported platforms replace atomically. A failure keeps the old record.
+        fs::rename(&temporary, path)
+    })();
+    if published.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    published
 }
 
 #[cfg(test)]
@@ -482,9 +515,7 @@ mod tests {
         let new = fixture(&root, "new");
         let guard = lock(&runtime).unwrap();
         let first = select_locked(&runtime, &old, Selection::Release).unwrap();
-        let lease = crate::lifecycle::ServiceLease::try_acquire(&runtime)
-            .unwrap()
-            .unwrap();
+        let lease = service_lease(&runtime).unwrap().unwrap();
         let staged = select_locked(&runtime, &new, Selection::Release).unwrap();
         assert_eq!(staged.directory(), first.directory());
         assert_eq!(

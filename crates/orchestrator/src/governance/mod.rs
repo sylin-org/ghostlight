@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
-use ghostlight_bridge::service::IntakeChannel;
+use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
