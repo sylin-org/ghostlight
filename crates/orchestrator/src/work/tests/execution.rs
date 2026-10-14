@@ -329,7 +329,7 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
     assert_eq!(before.status, Status::Failed);
     assert!(before
         .summary
-        .contains("ran out of time before reaching the browser"));
+        .contains("ran out of time before anything changed in the browser"));
     assert!(!before.summary.contains("disconnected"));
     assert_eq!(before.facts["reason"], "deadline");
     assert_eq!(before.facts["phase"], "before_dispatch");

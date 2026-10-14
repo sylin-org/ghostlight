@@ -1271,7 +1271,7 @@ impl Refusal {
                 before_dispatch, ..
             } => {
                 if *before_dispatch {
-                    "The job ran out of time before reaching the browser."
+                    "The job ran out of time before anything changed in the browser."
                 } else {
                     "Sent, but the job ran out of time before the browser confirmed."
                 }
@@ -2840,7 +2840,7 @@ Changes are \"unsaved\".".into()),
                     before_dispatch: true,
                     timeout_adjustable: true,
                 },
-                "The job ran out of time before reaching the browser.",
+                "The job ran out of time before anything changed in the browser.",
             ),
             (
                 Refusal::DeadlineExpired {

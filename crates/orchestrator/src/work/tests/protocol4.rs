@@ -334,7 +334,7 @@ fn a_read_that_was_cancelled_or_ran_out_of_time_changed_nothing() {
         (
             wire::Failure::Timeout,
             Status::Failed,
-            "The job ran out of time before reaching the browser.",
+            "The job ran out of time before anything changed in the browser.",
             "deadline",
         ),
     ] {
