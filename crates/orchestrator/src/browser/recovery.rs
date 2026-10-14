@@ -251,7 +251,7 @@ impl RecoveryMechanism for SystemRecoveryMechanism {
                 ),
             ))
         })?;
-        let environment = ghostlight_bridge::session::graphical_session_environment()
+        let environment = crate::browser::session::graphical_session_environment()
             .map_err(|error| {
                 MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
             })?

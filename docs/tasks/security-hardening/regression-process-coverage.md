@@ -103,7 +103,7 @@ The deterministic admission tests `duplicates_keep_the_original_token_and_queued
 `bursts_are_fifo_and_full_work_preserves_controls_and_another_session`, and
 `memory_and_connection_reservations_release_on_every_exit` live in
 [`service/admission.rs`](../../../crates/orchestrator/src/service/admission.rs).
-[`bridge/transport.rs`](../../../crates/bridge/src/transport.rs) covers fixed incomplete-frame
+[`bridge/transport.rs`](../../../crates/orchestrator/src/browser/transport.rs) covers fixed incomplete-frame
 clocks, buffered partial frames, writer deadline/close independence, stalled delivery, and idle
 shutdown. The bundled workbench browser journey proves waiting stays beneath running work and the
 same invocation promotes without a duplicate row; it does not simulate operating-system load.

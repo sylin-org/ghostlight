@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::framing::{self, FrameError};
+use ghostlight_bridge::framing::{self, FrameError};
 
 /// Total time allowed to authenticate or finish a frame once its first byte arrives.
 pub const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);

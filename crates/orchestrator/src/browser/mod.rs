@@ -2,6 +2,8 @@
 
 pub mod adapter;
 pub mod recovery;
+pub mod session;
+pub mod transport;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -18,11 +20,9 @@ use crate::browser::adapter::{
     ADAPTER_PROTOCOL_MAJOR, COMMAND_CHUNK_PAYLOAD_BYTES, COMMAND_TRANSFER_MAX_BYTES,
     COMMAND_TRANSFER_MAX_CHUNKS,
 };
+use crate::browser::transport::{SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT};
 use base64::Engine as _;
 use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
-use ghostlight_bridge::transport::{
-    SocketReader, SocketWriter, DELIVERY_TIMEOUT, EXCHANGE_TIMEOUT,
-};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;

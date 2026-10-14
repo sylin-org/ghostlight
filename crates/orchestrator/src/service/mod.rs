@@ -12,6 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::browser::adapter::{BrowserCommand, BrowserEvent};
+use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use anyhow::{bail, Context, Result};
 use ghostlight_bridge::framing::{read_json_line, write_json_line};
 use ghostlight_bridge::lifecycle::ServiceLease;
@@ -21,7 +22,6 @@ use ghostlight_bridge::service::{
     IntakeChannel, ServerProfile, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
     SERVICE_BRIDGE_MAJOR,
 };
-use ghostlight_bridge::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
