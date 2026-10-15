@@ -302,7 +302,10 @@ the owner wants, and what this project learned the hard way.
   home on the owner's machine: two of anything invites "which service is this adapter talking
   to?" A deploy replaces the live installation in place; if it breaks, the owner restores. Do
   not hedge with parallel deployments. Journeys that start their own service run on the test
-  machines or in CI only (owner, 2026-10-15).
+  machines or in CI only (owner, 2026-10-15). In the product too, Ghostlight is zero or one:
+  status says it is running or not, never a count. The small processes agents and browsers
+  launch are its connections and are named as such; the window is its window. Anything else
+  running from Ghostlight is a fault that doctor names with its fix.
 - **Browser support means full ordinary-session capability.** Do not ship a partial adapter under a
   browser-support label. Every advertised Ghostlight job must work in the user's visible,
   authenticated, already-running browser without a headless mode, disposable profile, managed
