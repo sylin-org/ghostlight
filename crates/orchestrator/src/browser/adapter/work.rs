@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::documents;
+use crate::language::field_echo::ChoiceMatch;
 
 /// The service's internal browser work vocabulary, by its executor name.
 pub type Work = BrowserCommand;
@@ -103,6 +104,51 @@ pub struct PhysicalActionSubject {
     pub name: String,
 }
 
+/// What a fill gives one control, as the page receives it.
+///
+/// A JSON boolean stays a boolean so a radio can tell it from a label that reads `true`. A list
+/// is for a multiple select. Text is everything else, numbers included.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PhysicalValue {
+    /// Checkbox or radio truth.
+    Flag(bool),
+    /// Literal text, a select option, or a number written out.
+    Text(String),
+    /// The options a multiple select ends up holding.
+    Choices(Vec<String>),
+}
+
+impl PhysicalValue {
+    /// The text a control that takes one value is given: the text itself, or the word for a
+    /// boolean. A list has none.
+    #[must_use]
+    pub fn text(&self) -> Option<String> {
+        match self {
+            Self::Text(text) => Some(text.clone()),
+            Self::Flag(flag) => Some(flag.to_string()),
+            Self::Choices(_) => None,
+        }
+    }
+
+    /// The part of the value a sentence about one entry quotes: the entry of a list at `index`,
+    /// or the whole value written out, a list joined by commas.
+    #[must_use]
+    pub fn quoted(&self, index: Option<usize>) -> String {
+        match (self, index) {
+            (Self::Choices(items), Some(index)) => items.get(index).cloned().unwrap_or_default(),
+            (Self::Choices(items), None) => items.join(", "),
+            (other, _) => other.text().unwrap_or_default(),
+        }
+    }
+}
+
+impl From<&str> for PhysicalValue {
+    fn from(text: &str) -> Self {
+        Self::Text(text.to_owned())
+    }
+}
+
 /// A physical fill value sent only after credential preflight.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,7 +156,7 @@ pub struct PhysicalField {
     /// Browser-local locator.
     pub locator: String,
     /// Input value, never retained in receipts or diagnostics.
-    pub value: String,
+    pub value: PhysicalValue,
 }
 
 /// What the page holds in one filled field after the fill, as the page reports it.
@@ -126,6 +172,10 @@ pub struct FieldNow {
     /// Whether the page holds the given value in another format, such as a masked phone number.
     #[serde(default)]
     pub tolerated: bool,
+    /// How the given value matched a choice when it was not the option's exact text, value or
+    /// label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched: Option<ChoiceMatch>,
 }
 
 /// One physical point in page CSS coordinates.

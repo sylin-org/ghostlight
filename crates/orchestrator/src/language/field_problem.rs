@@ -188,6 +188,9 @@ pub struct FieldProblem {
     /// The constraints the control declares.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub limits: Map<String, Value>,
+    /// Which entry of a given list the problem is about, when the value was a list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_index: Option<usize>,
     /// The name of the choice group a radio belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -405,7 +408,7 @@ impl RejectedField {
                 ),
             },
             FieldProblemKind::MultipleValues => {
-                format!("{} takes one option, not a list.", self.subject_phrase())
+                format!("{} takes one value, not a list.", self.subject_phrase())
             }
             FieldProblemKind::NotBoolean => match self.quoted_given() {
                 Some(given) => format!(
@@ -559,6 +562,9 @@ impl RejectedField {
             FieldProblemKind::OptionMissing => {
                 format!("Repeat browser_fill_form with {target} set to one of the offered options.")
             }
+            FieldProblemKind::OptionAmbiguous if self.is_radio() => {
+                format!("Repeat with true for {target}, which sets that radio itself.")
+            }
             FieldProblemKind::OptionAmbiguous => {
                 format!("Repeat with the option's value for {target}.")
             }
@@ -567,7 +573,7 @@ impl RejectedField {
                     .into()
             }
             FieldProblemKind::MultipleValues => {
-                format!("Repeat browser_fill_form with {target} set to a single option.")
+                format!("Repeat browser_fill_form with {target} set to a single value.")
             }
             FieldProblemKind::NotBoolean => format!("Repeat with true or false for {target}."),
             FieldProblemKind::Format => {
@@ -1084,7 +1090,7 @@ mod tests {
         );
         assert_eq!(
             many.summary(),
-            "Nothing was changed. The \"Role\" dropdown takes one option, not a list."
+            "Nothing was changed. The \"Role\" dropdown takes one value, not a list."
         );
         let flag = one(
             json!({"field": 0, "problem": "not_boolean"}),
@@ -1471,7 +1477,7 @@ mod tests {
         };
         assert_eq!(
             refusal.summary(),
-            "Nothing was changed: 3 of 5 fields cannot take their values. The \"Role\" dropdown has no option \"x\". It offers: A, B. The \"Agree\" checkbox takes true or false, not \"maybe\". The \"Team\" dropdown takes one option, not a list."
+            "Nothing was changed: 3 of 5 fields cannot take their values. The \"Role\" dropdown has no option \"x\". It offers: A, B. The \"Agree\" checkbox takes true or false, not \"maybe\". The \"Team\" dropdown takes one value, not a list."
         );
         let steps = refusal.next_steps();
         assert_eq!(steps.len(), 2);

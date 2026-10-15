@@ -651,6 +651,8 @@ pub enum FormFieldValue {
     Number(f64),
     /// Literal text, select option value or label.
     Text(String),
+    /// The options a multiple select ends up holding.
+    Choices(Vec<String>),
 }
 
 /// Input for grouped form filling.
@@ -2003,8 +2005,15 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
         if let Some(selector) = &field.selector {
             validate_selector(selector)?;
         }
-        if let FormFieldValue::Text(text) = &field.value {
-            validate_text_allow_empty(text, 8_000, "field value")?;
+        match &field.value {
+            FormFieldValue::Text(text) => validate_text_allow_empty(text, 8_000, "field value")?,
+            FormFieldValue::Choices(choices) => {
+                validate_range(choices.len(), 0, 100, "field values")?;
+                for choice in choices {
+                    validate_text_allow_empty(choice, 8_000, "field value")?;
+                }
+            }
+            FormFieldValue::Flag(_) | FormFieldValue::Number(_) => {}
         }
     }
     Ok(())

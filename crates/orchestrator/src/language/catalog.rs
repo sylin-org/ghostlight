@@ -721,7 +721,7 @@ fn fill_schema() -> Value {
             vec![
                 (
                     "fields",
-                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Empty string clears. Checkboxes and radios take booleans; numeric inputs take numbers.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"}]}},"required":["value"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Empty string clears. Checkboxes and radios take booleans; numeric inputs take numbers; a multi-select takes a list.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100}]}},"required":["value"]}}),
                 ),
                 ("tab", tab()),
                 (
@@ -2000,6 +2000,37 @@ mod tests {
                 {"type":"boolean","default":false}
             ]})
         );
+    }
+
+    #[test]
+    fn the_fill_value_admits_a_bounded_list_of_options_and_nothing_else_does() {
+        let fill = tool_schema("browser_fill_form");
+        let fields = property(&fill, "fields").expect("fields property");
+        let value = &fields["items"]["properties"]["value"];
+        let list = value["anyOf"]
+            .as_array()
+            .and_then(|branches| branches.iter().find(|branch| branch["type"] == "array"))
+            .expect("a list branch");
+        assert_eq!(
+            list,
+            &json!({"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100})
+        );
+
+        let call = |value: Value| {
+            let field = json!({"target":"target_1","value":value});
+            crate::language::decode("browser_fill_form", json!({"fields":[field]}))
+        };
+        assert!(call(json!(["Alpha", "Beta"])).is_ok());
+        assert!(call(json!([])).is_ok());
+        assert!(call(json!(vec!["x"; 100])).is_ok());
+        assert!(call(json!(vec!["x"; 101])).is_err());
+        assert!(call(json!(["x".repeat(8_001)])).is_err());
+        assert!(call(json!([1, 2])).is_err());
+        assert!(call(json!([["nested"]])).is_err());
+        assert!(call(json!({"a": 1})).is_err());
+
+        let typing = json!({"target":"target_1","text":["x"]});
+        assert!(crate::language::decode("browser_type_text", typing).is_err());
     }
 
     #[test]

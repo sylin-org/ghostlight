@@ -909,6 +909,128 @@ fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
 }
 
 #[test]
+fn a_normalized_match_is_echoed_with_the_value_the_caller_gave() {
+    let verify = returned(json!({"retained": true, "fields": [
+        {"field": 0, "now": "Administrator", "matched": "normalized"}
+    ]}));
+    let (executor, _fake, workspace, audit) =
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "administrator"}]}),
+    );
+
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(
+        result.summary,
+        "Filled 1 field on example.com: Role = Administrator (matched \"administrator\")."
+    );
+    assert_eq!(
+        result.facts["fields"],
+        json!([{"target": role, "now": "Administrator", "match": "normalized"}])
+    );
+    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    for private in ["Administrator", "administrator", "normalized", "Role"] {
+        assert!(!recorded.contains(private), "{private} reached the audit");
+    }
+}
+
+#[test]
+fn a_normalized_match_without_target_names_keeps_the_given_value_out_of_the_sentence() {
+    let policy = temporary_policy("fill-match-names");
+    fs::write(
+        &policy,
+        all_open_policy_with(
+            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let verify = returned(json!({"retained": true, "fields": [
+        {"field": 0, "now": "Administrator", "matched": "normalized"}
+    ]}));
+    let (executor, _fake, workspace) = opened_under(
+        verifying_form(verify),
+        GovernanceFacade::new(Some(policy.clone()), None),
+    );
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "PRIVATE_GIVEN"}]}),
+    );
+
+    assert_eq!(result.summary, "Filled 1 field on example.com.");
+    assert_eq!(result.facts["fields"][0]["match"], "normalized");
+    assert!(!result.model_text().contains("PRIVATE_GIVEN"));
+    assert!(!result.facts.to_string().contains("PRIVATE_GIVEN"));
+    let _ = fs::remove_file(policy);
+}
+
+#[test]
+fn a_list_reaches_the_page_as_a_list_and_a_boolean_stays_a_boolean() {
+    let prepared: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let record = prepared.clone();
+    let verify = returned(json!({"retained": true, "fields": []}));
+    let (executor, _fake, workspace) = opened(form_page(move |world| {
+        match world.message["kind"].as_str() {
+            Some("prepare_fill") => {
+                record.lock().unwrap().push(world.message["fields"].clone());
+                Some(returned(
+                    json!({"prepared": true, "field_kinds": ["local", "local"]}),
+                ))
+            }
+            Some("fill_local") => Some(returned(json!({"filled": true}))),
+            Some("verify_fill_retained") => Some(verify.clone()),
+            _ => None,
+        }
+    }));
+    let (role, agree) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": ["Alpha", "beta"]}, {"target": agree, "value": true}]}),
+    );
+
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    let seen = prepared.lock().unwrap();
+    assert_eq!(seen[0][0]["value"], json!(["Alpha", "beta"]));
+    assert_eq!(seen[0][1]["value"], json!(true));
+}
+
+#[test]
+fn a_refused_entry_of_a_list_quotes_that_entry_and_not_the_whole_list() {
+    let detail = json!({"problems": [
+        {"field": 0, "problem": "option_missing", "value_index": 1, "options": ["Alpha", "Beta"]}
+    ]});
+    let (executor, _fake, workspace) = opened(refusing_form(detail));
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": ["Beta", "Delta"]}]}),
+    );
+
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert_eq!(
+        result.summary,
+        "Nothing was changed. The \"Role\" dropdown has no option \"Delta\". It offers: Alpha, Beta."
+    );
+    assert_eq!(result.facts["problems"][0]["value_index"], 1);
+    assert!(!result.facts.to_string().contains("Delta"));
+}
+
+#[test]
 fn a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice() {
     let verify = json!({"status": "returned", "envelope": {"ok": false, "error": {
         "code": "not_retained",

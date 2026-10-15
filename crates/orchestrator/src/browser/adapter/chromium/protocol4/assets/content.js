@@ -37,13 +37,32 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // The words a refused fill names a field problem with. The service decodes the same closed list.
   const FIELD_PROBLEMS = Object.freeze({
     optionMissing: "option_missing",
+    optionAmbiguous: "option_ambiguous",
     optionDisabled: "option_disabled",
+    multipleValues: "multiple_values",
+    notBoolean: "not_boolean",
     reverted: "reverted"
   });
   // The problems that make a fill refuse with the option code; any other refuses as not fillable.
-  const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionDisabled]);
+  const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionAmbiguous, FIELD_PROBLEMS.optionDisabled]);
+  // What a refusal says when the service cannot read its detail, by the first problem it names.
+  const PROBLEM_MESSAGES = Object.freeze({
+    [FIELD_PROBLEMS.optionMissing]: "select option not found",
+    [FIELD_PROBLEMS.optionAmbiguous]: "select option is ambiguous",
+    [FIELD_PROBLEMS.optionDisabled]: "select option not found (option is disabled)",
+    [FIELD_PROBLEMS.multipleValues]: "target takes one value, not a list",
+    [FIELD_PROBLEMS.notBoolean]: "target takes true or false"
+  });
+  const NOT_FILLABLE_MESSAGE = "target is not fillable";
+  // How a fill value matched a choice when it was not the exact text, value or label.
+  const MATCH_NORMALIZED = "normalized";
+  // The words a checkbox or radio takes besides the booleans, compared without case.
+  const BOOLEAN_WORDS = new Map([
+    ["true", true], ["yes", true], ["on", true], ["1", true], ["checked", true],
+    ["false", false], ["no", false], ["off", false], ["0", false], ["unchecked", false]
+  ]);
   // How many options that contain the refused value a refusal lists when the select is long.
-  const CONTAINING_MAX = 5;
+  const CONTAINING_MAX = 8;
   // Input types whose retained value a fill reads back whether or not it matches what was given.
   const ECHOED_INPUT_TYPES = new Set(["date", "time", "datetime-local", "month", "week", "number", "range", "color"]);
   // What an input mask adds or moves without changing what was typed: white space, brackets, hyphens
@@ -360,9 +379,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       const parent = option.parentNode;
       const group = parent && tagOf(parent) === "optgroup" ? parent : null;
       return {
+        option,
         text: oneLine(option.text),
         value: String(option.value ?? ""),
-        disabled: option.disabled === true || group?.disabled === true,
+        disabled: optionDisabled(option),
         group
       };
     });
@@ -898,35 +918,63 @@ ${line}` : line;
     return { typed: true, subject: prepared.subject };
   }
 
-  function selectOption(element, value) {
-    return Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
-  }
-
-  // The option that a fill value names, or none: its value or its text, exactly.
-  function checkFillElement(element, value, allowCredentials = false) {
-    requireActionable(element, "fill");
-    if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
-    if (element instanceof HTMLSelectElement) {
-      const option = selectOption(element, value);
-      return { option, problem: optionProblem(element, value, option) };
-    }
-    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
-      throw new AssetError("not_fillable", "target is not fillable");
-    }
-    return { option: null, problem: null };
-  }
-
   function optionDisabled(option) {
     const parent = option.parentNode;
     return option.disabled === true || (Boolean(parent) && tagOf(parent) === "optgroup" && parent.disabled === true);
   }
 
+  function normalizedChoice(value) {
+    return oneLine(String(value).normalize("NFC")).toLowerCase();
+  }
+
+  // The entries a fill value names, each entry holding the strings it answers to. Tier one is
+  // exact on any of them. Only when tier one finds none does tier two compare both sides after
+  // NFC, trimming, white space collapse and case folding. Never a prefix, a substring or the
+  // closest. An empty value names nothing here: callers that give it a meaning handle it first.
+  function matchEntries(entries, value) {
+    if (value === "") return { hits: [], tier: "exact" };
+    const exact = entries.filter((entry) => entry.keys.includes(value));
+    if (exact.length) return { hits: exact, tier: "exact" };
+    const needle = normalizedChoice(value);
+    if (!needle) return { hits: [], tier: MATCH_NORMALIZED };
+    return { hits: entries.filter((entry) => entry.keys.some((key) => normalizedChoice(key) === needle)), tier: MATCH_NORMALIZED };
+  }
+
+  // Whether a fill value is a boolean or one of the closed words for one. Undefined otherwise.
+  function booleanOf(value) {
+    return typeof value === "boolean" ? value : BOOLEAN_WORDS.get(String(value).toLowerCase());
+  }
+
+  function isMultipleSelect(element) {
+    return element instanceof HTMLSelectElement && (element.multiple === true || element.getAttribute("multiple") !== null);
+  }
+
+  // What an option answers to: its value, its text and its label.
+  function selectKeys(option) {
+    const label = typeof option.label === "string" ? option.label : "";
+    return [String(option.value ?? ""), String(option.text ?? ""), label].filter((key) => key !== "");
+  }
+
+  // The enabled options whose text contains the refused value, for a select too long to list.
+  function optionsContaining(select, value) {
+    const needle = normalizedChoice(value);
+    if (!needle) return [];
+    return selectChoiceList(select)
+      .filter((choice) => !choice.disabled && normalizedChoice(choice.text).includes(needle))
+      .slice(0, CONTAINING_MAX)
+      .map((choice) => shared.bounded(choice.text, OPTION_TEXT_MAX));
+  }
+
   // Why a select cannot take a value, in a form that lists what would work. The refused value is
   // never echoed back, and a credential-class select lists nothing.
-  function optionProblem(select, value, option) {
-    if (option) return optionDisabled(option) ? { problem: FIELD_PROBLEMS.optionDisabled } : null;
-    const problem = { problem: FIELD_PROBLEMS.optionMissing };
-    if (credentialClass(select)) return problem;
+  function selectProblem(select, kind, value, hits = []) {
+    const problem = { problem: kind };
+    if (credentialClass(select) || kind === FIELD_PROBLEMS.optionDisabled) return problem;
+    if (kind === FIELD_PROBLEMS.optionAmbiguous) {
+      const choices = selectChoiceList(select);
+      problem.options = hits.map((hit) => choiceEntry(choices.find((choice) => choice.option === hit.option), true));
+      return problem;
+    }
     const listed = selectChoices(select, "item");
     problem.options = listed.options;
     if (listed.optionsTotal) {
@@ -937,27 +985,157 @@ ${line}` : line;
     return problem;
   }
 
-  function foldedText(value) {
-    return oneLine(value).normalize("NFC").toLowerCase();
+  // The option one string names in a select, or the problem that says why none. An empty string
+  // names the empty placeholder and no other text does.
+  function resolveOption(select, value) {
+    const placeholder = selectPlaceholder(select);
+    if (value === "") {
+      if (!placeholder) return { problem: selectProblem(select, FIELD_PROBLEMS.optionMissing, value) };
+      return optionDisabled(placeholder) ? { problem: selectProblem(select, FIELD_PROBLEMS.optionDisabled, value) } : { option: placeholder };
+    }
+    const entries = Array.from(select.options ?? [])
+      .filter((option) => option !== placeholder)
+      .map((option) => ({ option, keys: selectKeys(option) }));
+    const { hits, tier } = matchEntries(entries, value);
+    if (hits.length > 1) return { problem: selectProblem(select, FIELD_PROBLEMS.optionAmbiguous, value, hits) };
+    if (!hits.length) return { problem: selectProblem(select, FIELD_PROBLEMS.optionMissing, value) };
+    if (optionDisabled(hits[0].option)) return { problem: selectProblem(select, FIELD_PROBLEMS.optionDisabled, value) };
+    return { option: hits[0].option, normalized: tier === MATCH_NORMALIZED };
   }
 
-  // The enabled options whose text contains the refused value, for a select too long to list.
-  function optionsContaining(select, value) {
-    const needle = foldedText(value);
-    if (!needle) return [];
-    return selectChoiceList(select)
-      .filter((choice) => !choice.disabled && foldedText(choice.text).includes(needle))
-      .slice(0, CONTAINING_MAX)
-      .map((choice) => shared.bounded(choice.text, OPTION_TEXT_MAX));
+  // What a fill value does to a select: the set of options it names, exactly. A single select
+  // takes one string, a multiple select an array of them or one string for just that option.
+  function resolveSelect(select, value) {
+    const multiple = isMultipleSelect(select);
+    const listed = Array.isArray(value);
+    const chosen = [];
+    let normalized = false;
+    for (const [index, item] of (listed ? value : [value]).entries()) {
+      const found = resolveOption(select, String(item));
+      if (found.problem) return { problem: listed ? { ...found.problem, value_index: index } : found.problem };
+      chosen.push(found.option);
+      normalized = normalized || found.normalized === true;
+    }
+    const wanted = new Set(chosen);
+    const placeholder = selectPlaceholder(select);
+    const cleared = chosen.length === 1 && chosen[0] === placeholder;
+    return {
+      normalized,
+      apply() {
+        if (multiple) for (const option of Array.from(select.options)) option.selected = wanted.has(option);
+        else chosen[0].selected = true;
+      },
+      holds() {
+        const held = Array.from(select.selectedOptions ?? []);
+        return held.length === wanted.size && held.every((option) => wanted.has(option));
+      },
+      reading() {
+        if (cleared && this.holds()) return "";
+        const texts = Array.from(select.selectedOptions ?? []).map((option) => oneLine(option.text));
+        return shared.bounded(texts.join(", "), VALUE_MAX);
+      }
+    };
+  }
+
+  // What a fill value does to a checkbox: it sets the box, never toggles it.
+  function resolveCheckbox(box, value) {
+    const wanted = booleanOf(value);
+    if (wanted === undefined) return { problem: { problem: FIELD_PROBLEMS.notBoolean } };
+    return {
+      normalized: false,
+      apply() { setNativeChecked(box, wanted); },
+      holds() { return box.checked === wanted; },
+      reading() { return box.checked ? "checked" : "unchecked"; }
+    };
+  }
+
+  // The radios that share this one's group: the same name, form owner and root.
+  function radioGroup(radio) {
+    const name = radio.getAttribute("name");
+    if (!name) return [radio];
+    const owner = radio.form ?? null;
+    const members = Array.from(radio.getRootNode().querySelectorAll?.("input") ?? [])
+      .filter((member) => inputType(member) === "radio" && member.getAttribute("name") === name && (member.form ?? null) === owner);
+    return members.includes(radio) ? members : [radio, ...members];
+  }
+
+  // Why no radio of a group answers to a value: the group and the labels that would.
+  function radioProblem(radio, members, kind, hits = []) {
+    const problem = { problem: kind };
+    if (credentialClass(radio) || kind === FIELD_PROBLEMS.optionDisabled) return problem;
+    const shown = (kind === FIELD_PROBLEMS.optionAmbiguous ? hits.map((hit) => hit.element) : members).slice(0, OPTIONS_MAX);
+    problem.options = shown.map((member) => choiceEntry({ text: oneLine(accessibleName(member)), value: "", disabled: isDisabled(member) }, false));
+    if (kind === FIELD_PROBLEMS.optionMissing && members.length > OPTIONS_MAX) problem.options_total = members.length;
+    const group = controlGroup(radio);
+    if (group) problem.group = group;
+    return problem;
+  }
+
+  // What a fill value does to a radio. A JSON boolean applies to this radio. A string names the
+  // radio of the group whose label it matches, and that radio is the one set; a string that names
+  // none but is a boolean word applies to this radio.
+  function resolveRadio(radio, value) {
+    let target = radio;
+    let wanted = typeof value === "boolean" ? value : true;
+    let normalized = false;
+    if (typeof value !== "boolean") {
+      const members = radioGroup(radio);
+      const labelled = members.map((member) => ({ element: member, keys: [oneLine(accessibleName(member))].filter(Boolean) }));
+      const { hits, tier } = matchEntries(labelled, value);
+      if (hits.length > 1) return { problem: radioProblem(radio, members, FIELD_PROBLEMS.optionAmbiguous, hits) };
+      if (hits.length === 1) {
+        target = hits[0].element;
+        normalized = tier === MATCH_NORMALIZED;
+        if (isDisabled(target)) return { problem: radioProblem(radio, members, FIELD_PROBLEMS.optionDisabled) };
+      } else {
+        wanted = booleanOf(value);
+        if (wanted === undefined) return { problem: radioProblem(radio, members, FIELD_PROBLEMS.optionMissing) };
+      }
+    }
+    return {
+      normalized,
+      apply() { setNativeChecked(target, wanted); },
+      holds() { return target.checked === wanted; },
+      reading() {
+        if (target === radio) return radio.checked ? "checked" : "unchecked";
+        return target.checked ? oneLine(accessibleName(target)) : "unchecked";
+      }
+    };
+  }
+
+  // What a fill value does to a native choice control, or null for a control that is not one.
+  // One function backs the check before a fill, the fill itself and the check that the page kept
+  // it, so they cannot disagree. A result with a `problem` changes nothing.
+  function resolveChoice(element, value) {
+    const kind = element instanceof HTMLSelectElement ? "select"
+      : element instanceof HTMLInputElement && element.type === "checkbox" ? "checkbox"
+      : element instanceof HTMLInputElement && element.type === "radio" ? "radio"
+      : null;
+    if (!kind) return null;
+    if (Array.isArray(value) && !isMultipleSelect(element)) return { problem: { problem: FIELD_PROBLEMS.multipleValues } };
+    if (kind === "select") return resolveSelect(element, value);
+    return kind === "checkbox" ? resolveCheckbox(element, value) : resolveRadio(element, value);
+  }
+
+  // How a fill value lands on a control: the choice it resolves to, or the problem that says why
+  // it cannot. A control that is not a native choice has neither, unless a list was given to it.
+  function checkFillElement(element, value, allowCredentials = false) {
+    requireActionable(element, "fill");
+    if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
+    if (!(element instanceof HTMLSelectElement || element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
+      throw new AssetError("not_fillable", NOT_FILLABLE_MESSAGE);
+    }
+    const resolved = resolveChoice(element, value);
+    if (resolved) return { choice: resolved.problem ? null : resolved, problem: resolved.problem ?? null };
+    if (Array.isArray(value)) return { choice: null, problem: { problem: FIELD_PROBLEMS.multipleValues } };
+    return { choice: null, problem: null };
   }
 
   // The refusal for one or more fields that cannot take their values. The detail is what the
   // service turns into a sentence: it never holds the value the caller gave.
   function fieldProblemsError(problems, withDetail) {
     const options = problems.every((problem) => OPTION_PROBLEMS.has(problem.problem));
-    const disabled = problems[0].problem === FIELD_PROBLEMS.optionDisabled;
-    let message = options ? "select option not found" : "target is not fillable";
-    if (options && disabled) message += " (option is disabled)";
+    let message = PROBLEM_MESSAGES[problems[0].problem] ?? NOT_FILLABLE_MESSAGE;
     if (problems.length > 1) message += ` (${problems.length} fields refused)`;
     return new AssetError(options ? "option_missing" : "not_fillable", message, withDetail ? boundedDetail(problems) : undefined);
   }
@@ -986,9 +1164,9 @@ ${line}` : line;
   }
 
   function validateFillElement(element, value, allowCredentials = false) {
-    const { option, problem } = checkFillElement(element, value, allowCredentials);
+    const { choice, problem } = checkFillElement(element, value, allowCredentials);
     if (problem) throw fieldProblemsError([problem], false);
-    return option;
+    return choice;
   }
 
   // This is a read-only plan. Every known invalid field and submit target must be found
@@ -1017,17 +1195,15 @@ ${line}` : line;
 
   function fillControlValue(element) {
     if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) return element.checked;
+    if (isMultipleSelect(element)) return JSON.stringify(Array.from(element.selectedOptions ?? []).map((option) => option.value));
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return element.value;
     if (element.isContentEditable) return element.textContent ? (element.innerText ?? element.textContent) : "";
     return element.textContent ?? "";
   }
 
+  // What a text or typed control holds once the value is in. A native choice is checked by its
+  // resolution instead.
   function expectedFillValue(element, value) {
-    if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
-      return ["true", "1", "yes", "on"].includes(String(value).toLowerCase());
-    }
-    // A select reports the resolved option's value, so a label the caller used still matches.
-    if (element instanceof HTMLSelectElement) return selectOption(element, value)?.value ?? String(value);
     // The textarea API and contenteditable innerText normalize both CRLF and lone CR to LF.
     return (element instanceof HTMLTextAreaElement || element.isContentEditable)
       ? String(value).replace(/\r\n?/g, "\n")
@@ -1049,15 +1225,9 @@ ${line}` : line;
 
   // What the page holds in a filled control, in words that can be said. Undefined for a
   // credential-class control, which never shows what it holds.
-  function heldNow(element) {
+  function heldNow(element, choice = null) {
     if (credentialClass(element)) return undefined;
-    if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
-      return element.checked ? "checked" : "unchecked";
-    }
-    if (element instanceof HTMLSelectElement) {
-      const chosen = Array.from(element.selectedOptions ?? []).map((option) => oneLine(option.text));
-      return shared.bounded(chosen.join(", "), VALUE_MAX);
-    }
+    if (choice) return choice.reading();
     return outwardValue(element)?.value;
   }
 
@@ -1066,9 +1236,9 @@ ${line}` : line;
   function fillStanding(fields, allowCredentials = false) {
     return fields.map((field, index) => {
       const element = resolve(field.locator);
-      if (checkFillElement(element, field.value, allowCredentials).problem) {
-        return { index, element, state: "changed", reacted: true };
-      }
+      const { choice, problem } = checkFillElement(element, field.value, allowCredentials);
+      if (problem) return { index, element, state: "changed", reacted: true };
+      if (choice) return { index, element, choice, state: choice.holds() ? "held" : "changed" };
       const held = fillControlValue(element);
       const expected = expectedFillValue(element, field.value);
       if (held === expected) return { index, element, state: "held" };
@@ -1082,11 +1252,14 @@ ${line}` : line;
   // echoed, and a credential-class control never is.
   function fillEchoes(standing) {
     const echoes = [];
-    for (const { index, element, state } of standing) {
+    for (const { index, element, choice, state } of standing) {
       if (credentialClass(element) || (state === "held" && !echoedControl(element))) continue;
-      const now = heldNow(element);
+      const now = heldNow(element, choice);
       if (now === undefined) continue;
-      echoes.push(state === "reformatted" ? { field: index, now, tolerated: true } : { field: index, now });
+      const echo = { field: index, now };
+      if (state === "reformatted") echo.tolerated = true;
+      if (choice?.normalized) echo.matched = MATCH_NORMALIZED;
+      echoes.push(echo);
     }
     return echoes;
   }
@@ -1096,8 +1269,8 @@ ${line}` : line;
   function revertedError(standing) {
     const problems = standing
       .filter(({ state }) => state === "changed")
-      .map(({ index, element, reacted }) => {
-        const now = reacted ? undefined : heldNow(element);
+      .map(({ index, element, choice, reacted }) => {
+        const now = reacted ? undefined : heldNow(element, choice);
         return now === undefined ? { field: index, problem: FIELD_PROBLEMS.reverted } : { field: index, problem: FIELD_PROBLEMS.reverted, now };
       });
     return new AssetError("not_retained", "target did not retain filled value", problems.length ? { problems } : undefined);
@@ -1179,16 +1352,10 @@ ${line}` : line;
   // focus_text_field, so this refuses them before it looks at anything else.
   function fillLocalElement(element, value, allowCredentials = false) {
     if (isTextual(element)) throw new AssetError("invalid_request", "text target requires browser input");
-    const option = validateFillElement(element, value, allowCredentials);
+    const choice = validateFillElement(element, value, allowCredentials);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
-    if (element instanceof HTMLSelectElement) {
-      element.value = option.value;
-    } else if (element.type === "checkbox" || element.type === "radio") {
-      setNativeChecked(element, ["true", "1", "yes", "on"].includes(String(value).toLowerCase()));
-    } else {
-      setNativeValue(element, value);
-    }
+    if (choice) choice.apply(); else setNativeValue(element, String(value));
     element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }

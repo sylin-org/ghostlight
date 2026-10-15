@@ -1042,7 +1042,7 @@ test("focus_text_field refuses a control that does not take browser text input",
   harness.input.setAttribute("aria-label", "Agree");
   const locator = await harness.locatorOf("Agree");
 
-  const refused = await harness.send({ kind: "focus_text_field", field: { locator, value: "x" } });
+  const refused = await harness.send({ kind: "focus_text_field", field: { locator, value: "true" } });
 
   assert.equal(refused.error.code, "not_editable");
   assert.equal(harness.document.activeElement, null);
@@ -2020,12 +2020,12 @@ test("a long select reports its count and the options that contain the refused v
   options.push({ value: "x", text: "Region retired", disabled: true });
   labelledSelect(harness, "Region", options);
 
-  const refused = await prepareRefusal(harness, [["Region", "region 1"]]);
+  const refused = await prepareRefusal(harness, [["Region", "gion 1"]]);
 
   const [problem] = refused.error.detail.problems;
   assert.equal(problem.options.length, 25);
   assert.equal(problem.options_total, 31);
-  assert.deepEqual(problem.containing, ["Region 1", "Region 10", "Region 11", "Region 12", "Region 13"]);
+  assert.deepEqual(problem.containing, ["Region 1", "Region 10", "Region 11", "Region 12", "Region 13", "Region 14", "Region 15", "Region 16"]);
   const none = (await prepareRefusal(harness, [["Region", "Atlantis"]])).error.detail.problems[0];
   assert.equal("containing" in none, false);
 });
@@ -2086,6 +2086,297 @@ test("a select whose chosen option the page disabled afterwards is not retained"
   const retained = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value: "Beta" }], stable_ms: 10, poll_ms: 5, limit_ms: 50 });
 
   assert.equal(retained.error.code, "not_retained");
+});
+
+// ---- choices match exactly, then uniquely --------------------------------------------------------
+
+/** Fill one choice control and read back what the page reports it holds. */
+async function fillChoice(harness, label, value) {
+  const locator = await harness.locatorOf(label);
+  const filled = await harness.send({ kind: "fill_local", field: { locator, value }, allow_credentials: false });
+  const verified = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value }], stable_ms: 10, poll_ms: 5, limit_ms: 100 });
+  return { filled, verified };
+}
+
+/** A visible radio button labelled `label` in the radio group `group`, inside `parent` when given. */
+function groupedRadio(harness, label, group, props = {}, parent = null) {
+  const radio = harness.newInput(label, { type: "radio", checked: false, ...props });
+  radio.setAttribute("name", group);
+  if (parent) {
+    radio.remove();
+    parent.appendChild(radio);
+  }
+  return radio;
+}
+
+const TEAMS = [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta" }, { value: "c", text: "Gamma" }];
+
+test("a value that is exactly an option's text, value or label picks it without a match note", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta", label: "The second" }]);
+  for (const [value, held] of [["Beta", "b"], ["a", "a"], ["The second", "b"]]) {
+    const { filled, verified } = await fillChoice(harness, "Team", value);
+    assert.equal(filled.ok, true, value);
+    assert.equal(team.value, held, value);
+    assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: held === "a" ? "Alpha" : "Beta" }] }, value);
+  }
+});
+
+test("a value that differs only in case, spacing or Unicode form picks the one option and says it matched", async () => {
+  const harness = contentHarness();
+  const role = labelledSelect(harness, "Role", [{ value: "dev", text: "Developer" }, { value: "adm", text: "Administrator" }, { value: "caf", text: "Caf\u00e9 owner" }]);
+  for (const [value, held, text] of [["administrator", "adm", "Administrator"], ["  ADMINISTRATOR\t", "adm", "Administrator"], ["cafe\u0301   OWNER", "caf", "Caf\u00e9 owner"]]) {
+    role.value = "dev";
+    const { filled, verified } = await fillChoice(harness, "Role", value);
+    assert.equal(filled.ok, true, value);
+    assert.equal(role.value, held, value);
+    assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: text, matched: "normalized" }] }, value);
+  }
+});
+
+test("a value that names no option exactly or after normalizing is never matched by part of it", async () => {
+  const harness = contentHarness();
+  const role = labelledSelect(harness, "Role", ROLES);
+  for (const value of ["Admin", "istrator", "Administrato", "Administratr"]) {
+    const refused = await prepareRefusal(harness, [["Role", value]]);
+    assert.deepEqual(refused.error.detail.problems.map((problem) => problem.problem), ["option_missing"], value);
+  }
+  assert.equal(role.value, "dev");
+});
+
+test("two options that exactly name a value are refused with their values", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", [{ value: "a", text: "Other" }, { value: "b", text: "Other" }, { value: "c", text: "Third" }]);
+
+  const refused = await prepareRefusal(harness, [["Team", "Other"]]);
+
+  assert.equal(refused.error.code, "option_missing");
+  assert.deepEqual(refused.error.detail.problems, [{
+    field: 0,
+    problem: "option_ambiguous",
+    options: [{ text: "Other", value: "a" }, { text: "Other", value: "b" }]
+  }]);
+  assert.equal(team.value, "a");
+  assert.equal((await prepareRefusal(harness, [["Team", "b"]])).ok, true);
+});
+
+test("a value is ambiguous when two options match only after normalizing, and exact wins first", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Team", [{ value: "a", text: "Other" }, { value: "b", text: "OTHER" }]);
+
+  const refused = await prepareRefusal(harness, [["Team", "other"]]);
+
+  assert.equal(refused.error.detail.problems[0].problem, "option_ambiguous");
+  assert.equal((await prepareRefusal(harness, [["Team", "OTHER"]])).ok, true);
+});
+
+test("a normalized match on a disabled option is refused as disabled and changes nothing", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta", disabled: true }]);
+
+  const refused = await prepareRefusal(harness, [["Team", "beta"]]);
+
+  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "option_disabled" }]);
+  assert.equal(team.value, "a");
+});
+
+test("an empty string picks the empty placeholder and no other text does", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", [{ value: "", text: "Choose a team" }, ...TEAMS]);
+  team.value = "b";
+
+  const { filled, verified } = await fillChoice(harness, "Team", "");
+
+  assert.equal(filled.ok, true);
+  assert.equal(team.value, "");
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "" }] });
+  for (const value of ["Choose a team", "choose a team"]) {
+    const refused = await prepareRefusal(harness, [["Team", value]]);
+    assert.equal(refused.error.detail.problems[0].problem, "option_missing", value);
+  }
+  const plain = labelledSelect(harness, "Plain", TEAMS);
+  assert.equal((await prepareRefusal(harness, [["Plain", ""]])).error.detail.problems[0].problem, "option_missing");
+  assert.equal(plain.value, "a");
+});
+
+test("a multiple select takes a list and holds exactly that set", async () => {
+  const harness = contentHarness();
+  const tags = labelledSelect(harness, "Tags", [{ value: "a", text: "Alpha", selected: true }, { value: "b", text: "Beta" }, { value: "c", text: "Gamma" }], { multiple: true });
+
+  const { filled, verified } = await fillChoice(harness, "Tags", ["Gamma", "beta"]);
+
+  assert.equal(filled.ok, true);
+  assert.deepEqual(tags.options.map((option) => option.selected === true), [false, true, true]);
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Beta, Gamma", matched: "normalized" }] });
+  const cleared = await fillChoice(harness, "Tags", []);
+  assert.equal(cleared.filled.ok, true);
+  assert.deepEqual(tags.options.map((option) => option.selected === true), [false, false, false]);
+});
+
+test("a list with one bad entry is refused with that entry's position and nothing changes", async () => {
+  const harness = contentHarness();
+  const tags = labelledSelect(harness, "Tags", [{ value: "a", text: "Alpha", selected: true }, { value: "b", text: "Beta" }, { value: "c", text: "Gamma", disabled: true }], { multiple: true });
+
+  const missing = await prepareRefusal(harness, [["Tags", ["Beta", "Delta"]]]);
+  assert.deepEqual(missing.error.detail.problems.map(({ problem, value_index: index }) => [problem, index]), [["option_missing", 1]]);
+  const disabled = await prepareRefusal(harness, [["Tags", ["Beta", "Gamma"]]]);
+  assert.deepEqual(disabled.error.detail.problems, [{ field: 0, problem: "option_disabled", value_index: 1 }]);
+  assert.deepEqual(tags.options.map((option) => option.selected === true), [true, false, false]);
+});
+
+test("a single string on a multiple select selects only that option", async () => {
+  const harness = contentHarness();
+  const tags = labelledSelect(harness, "Tags", [{ value: "a", text: "Alpha", selected: true }, { value: "b", text: "Beta" }], { multiple: true });
+
+  const { filled, verified } = await fillChoice(harness, "Tags", "Beta");
+
+  assert.equal(filled.ok, true);
+  assert.deepEqual(tags.options.map((option) => option.selected === true), [false, true]);
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Beta" }] });
+});
+
+test("a list given to a control that takes one value is refused as multiple values", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", TEAMS);
+  const box = harness.newInput("Agree", { type: "checkbox", checked: false });
+  textInput(harness, { label: "Name", value: "kept" });
+
+  for (const label of ["Team", "Agree", "Name"]) {
+    const refused = await prepareRefusal(harness, [[label, ["x", "y"]]]);
+    assert.equal(refused.error.code, "not_fillable", label);
+    assert.match(refused.error.message, /one value, not a list/, label);
+    assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "multiple_values" }], label);
+  }
+  assert.equal(team.value, "a");
+  assert.equal(box.checked, false);
+  assert.equal(harness.input.value, "kept");
+});
+
+test("a checkbox is set from a boolean or a closed word and never toggled", async () => {
+  const harness = contentHarness();
+  const box = harness.newInput("Agree", { type: "checkbox", checked: false });
+  const checked = ["true", "TRUE", "Yes", "on", "1", "Checked", true];
+  const unchecked = ["false", "No", "OFF", "0", "unchecked", false];
+  for (const value of checked) {
+    box.checked = true;
+    const { filled, verified } = await fillChoice(harness, "Agree", value);
+    assert.equal(filled.ok, true, String(value));
+    assert.equal(box.checked, true, String(value));
+    assert.deepEqual(verified.value.fields, [{ field: 0, now: "checked" }], String(value));
+  }
+  for (const value of unchecked) {
+    box.checked = false;
+    const { filled } = await fillChoice(harness, "Agree", value);
+    assert.equal(filled.ok, true, String(value));
+    assert.equal(box.checked, false, String(value));
+  }
+});
+
+test("a checkbox given any other word is refused as not boolean and keeps its state", async () => {
+  const harness = contentHarness();
+  const box = harness.newInput("Agree", { type: "checkbox", checked: true });
+  for (const value of ["maybe", "", "y", "enabled", " yes"]) {
+    const refused = await prepareRefusal(harness, [["Agree", value]]);
+    assert.equal(refused.error.code, "not_fillable", value);
+    assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "not_boolean" }], value);
+    const local = await harness.send({ kind: "fill_local", field: { locator: await harness.locatorOf("Agree"), value }, allow_credentials: false });
+    assert.equal(local.error.code, "not_fillable", value);
+  }
+  assert.equal(box.checked, true);
+  assert.deepEqual(box.events, []);
+});
+
+test("a radio is chosen by the label of a sibling in its group", async () => {
+  const harness = contentHarness();
+  const free = groupedRadio(harness, "Free", "plan", { checked: true });
+  const pro = groupedRadio(harness, "Pro", "plan");
+  const other = groupedRadio(harness, "Pro", "other");
+
+  const { filled, verified } = await fillChoice(harness, "Free", "pro");
+
+  assert.equal(filled.ok, true);
+  assert.equal(pro.checked, true);
+  assert.equal(other.checked, false);
+  assert.deepEqual(pro.events, []);
+  assert.deepEqual(free.events, ["input", "change"]);
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Pro", matched: "normalized" }] });
+});
+
+test("a radio given a boolean word that names no label applies it to the targeted radio", async () => {
+  const harness = contentHarness();
+  const free = groupedRadio(harness, "Free", "plan");
+  const pro = groupedRadio(harness, "Pro", "plan", { checked: true });
+  for (const value of ["yes", "true", true, "on"]) {
+    free.checked = false;
+    const { filled, verified } = await fillChoice(harness, "Free", value);
+    assert.equal(filled.ok, true, String(value));
+    assert.equal(free.checked, true, String(value));
+    assert.deepEqual(verified.value.fields, [{ field: 0, now: "checked" }], String(value));
+  }
+  assert.equal(pro.checked, true);
+});
+
+test("a JSON boolean applies to the targeted radio even when a sibling is labelled with the word", async () => {
+  const harness = contentHarness();
+  const yes = groupedRadio(harness, "True", "flag");
+  const no = groupedRadio(harness, "False", "flag");
+
+  const { filled } = await fillChoice(harness, "False", true);
+
+  assert.equal(filled.ok, true);
+  assert.equal(no.checked, true);
+  assert.equal(yes.checked, false);
+  const named = await fillChoice(harness, "False", "true");
+  assert.equal(named.filled.ok, true);
+  assert.equal(yes.checked, true);
+});
+
+test("a radio given an unknown string is refused with its group and the labels that would work", async () => {
+  const harness = contentHarness();
+  const fieldset = harness.element("fieldset");
+  const legend = harness.element("legend");
+  legend.append(harness.text("Plan"));
+  fieldset.append(legend);
+  harness.document.body.append(fieldset);
+  const free = groupedRadio(harness, "Free", "plan", {}, fieldset);
+  groupedRadio(harness, "Pro", "plan", {}, fieldset);
+  groupedRadio(harness, "Locked", "plan", { disabled: true }, fieldset);
+
+  const refused = await prepareRefusal(harness, [["Free", "Enterprise"]]);
+
+  assert.equal(refused.error.code, "option_missing");
+  const [problem] = refused.error.detail.problems;
+  assert.equal(problem.problem, "option_missing");
+  assert.deepEqual(problem.options, ["Free", "Pro", { text: "Locked", disabled: true }]);
+  assert.equal(problem.group, "Plan");
+  assert.equal(free.checked, false);
+  const locked = await prepareRefusal(harness, [["Free", "locked"]]);
+  assert.deepEqual(locked.error.detail.problems.map((entry) => entry.problem), ["option_disabled"]);
+});
+
+test("a radio label shared by two radios of the group is ambiguous", async () => {
+  const harness = contentHarness();
+  groupedRadio(harness, "Same", "plan");
+  groupedRadio(harness, "Same", "plan");
+
+  const refused = await prepareRefusal(harness, [["Same", "same"]]);
+
+  assert.deepEqual(refused.error.detail.problems.map((entry) => entry.problem), ["option_ambiguous"]);
+});
+
+test("the check before a fill, the fill and the retained check agree on every choice", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Role", ROLES);
+  harness.newInput("Agree", { type: "checkbox", checked: false });
+  const fields = [["Role", "ADMINISTRATOR"], ["Agree", "yes"]];
+  const wire = [];
+  for (const [label, value] of fields) wire.push({ locator: await harness.locatorOf(label), value });
+
+  assert.equal((await harness.send({ kind: "prepare_fill", fields: wire, visual_settle: false })).ok, true);
+  for (const field of wire) await harness.send({ kind: "fill_local", field, allow_credentials: false });
+  const verified = await harness.send({ kind: "verify_fill_retained", fields: wire, stable_ms: 10, poll_ms: 5, limit_ms: 100 });
+
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Administrator", matched: "normalized" }, { field: 1, now: "checked" }] });
 });
 
 // ---- coded throw sites ---------------------------------------------------------------------------
@@ -2217,7 +2508,7 @@ function effectScenarios(harness) {
       }],
       ["focus_text_field", "not_editable", async () => {
         textField("Check", { type: "checkbox" });
-        return { kind: "focus_text_field", field: { locator: await locatorFor("Check"), value: "x" }, allow_credentials: false };
+        return { kind: "focus_text_field", field: { locator: await locatorFor("Check"), value: "true" }, allow_credentials: false };
       }],
       ["focus_text_field", "credential_authorization_required", async () => {
         textField("Pass", { type: "password" });

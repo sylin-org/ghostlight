@@ -520,7 +520,7 @@ fn listed_tools() -> Vec<ToolDefinition> {
 ///
 /// The budget ratchets down. A later change raises it only by the measured size of a clause its
 /// new behavior needs, and the commit that raises it says so.
-const CATALOG_BUDGET_CHARS: usize = 30_800;
+const CATALOG_BUDGET_CHARS: usize = 31_000;
 
 /// Tools that carry the most guidance get their own cap on the serialized tool object, so one
 /// tool cannot grow while the whole stays under budget.

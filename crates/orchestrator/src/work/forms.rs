@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField,
+    PhysicalValue,
 };
 use crate::browser::BrowserError;
 use crate::governance::Decision;
@@ -94,7 +95,7 @@ impl ApplicationExecutor {
             }
             resolved.push((target, form_field_wire(&field.value)));
         }
-        let given: Vec<(String, String)> = resolved
+        let given: Vec<(String, PhysicalValue)> = resolved
             .iter()
             .map(|(target, value)| (target.handle.as_str().to_owned(), value.clone()))
             .collect();
@@ -250,7 +251,7 @@ impl ApplicationExecutor {
         decision: Decision,
         physical_id: u64,
         problems: Vec<FieldProblem>,
-        given: &[(String, String)],
+        given: &[(String, PhysicalValue)],
         described: &[ObservedTarget],
     ) -> Terminal {
         let Some(rejected) = rejected_fields(context, problems, given, described) else {
@@ -280,7 +281,7 @@ impl ApplicationExecutor {
         physical_id: u64,
         set: usize,
         problems: Vec<FieldProblem>,
-        given: &[(String, String)],
+        given: &[(String, PhysicalValue)],
         described: &[ObservedTarget],
     ) -> Terminal {
         let Some(reverted) = rejected_fields(context, problems, given, described) else {
@@ -1243,7 +1244,7 @@ fn credential_control(
 fn rejected_fields(
     context: &InvocationContext<'_>,
     problems: Vec<FieldProblem>,
-    given: &[(String, String)],
+    given: &[(String, PhysicalValue)],
     described: &[ObservedTarget],
 ) -> Option<Vec<RejectedField>> {
     let preserve = context.snapshot.preserves_target_names();
@@ -1258,7 +1259,7 @@ fn rejected_fields(
             target: target.clone(),
             role: TargetRole::classify(&observed.role),
             name: observed.name.clone(),
-            given: value.clone(),
+            given: value.quoted(problem.value_index),
             credential: observed.credential_class,
             follows_choice,
         };
@@ -1273,24 +1274,29 @@ fn rejected_fields(
 fn held_fields(
     context: &InvocationContext<'_>,
     held: &[FieldNow],
-    given: &[(String, String)],
+    given: &[(String, PhysicalValue)],
     described: &[ObservedTarget],
 ) -> Option<Vec<HeldField>> {
     let preserve = context.snapshot.preserves_target_names();
     let mut fields = Vec::with_capacity(held.len());
     for reading in held {
-        let ((target, _), observed) = (given.get(reading.field)?, described.get(reading.field)?);
+        let ((target, value), observed) =
+            (given.get(reading.field)?, described.get(reading.field)?);
         if observed.credential_class {
             continue;
         }
-        fields.push(HeldField::new(
+        let held = HeldField::new(
             target,
             TargetRole::classify(&observed.role),
             &observed.name,
             &reading.now,
             reading.tolerated,
             preserve,
-        ));
+        );
+        fields.push(match reading.matched {
+            Some(how) => held.matched(how, &value.quoted(None)),
+            None => held,
+        });
     }
     Some(fields)
 }
@@ -1303,22 +1309,21 @@ const fn is_choice(role: TargetRole) -> bool {
     )
 }
 
-fn form_field_wire(value: &crate::language::FormFieldValue) -> String {
+/// What a field's value is on the wire: a boolean stays a boolean, a list stays a list, and a
+/// number is written out as text.
+fn form_field_wire(value: &crate::language::FormFieldValue) -> PhysicalValue {
     match value {
-        crate::language::FormFieldValue::Text(text) => text.clone(),
-        crate::language::FormFieldValue::Flag(flag) => {
-            if *flag {
-                "true".into()
-            } else {
-                "false".into()
-            }
+        crate::language::FormFieldValue::Text(text) => PhysicalValue::Text(text.clone()),
+        crate::language::FormFieldValue::Flag(flag) => PhysicalValue::Flag(*flag),
+        crate::language::FormFieldValue::Choices(choices) => {
+            PhysicalValue::Choices(choices.clone())
         }
         crate::language::FormFieldValue::Number(number) => {
-            if number.fract() == 0.0 && number.abs() < 1.0e15 {
+            PhysicalValue::Text(if number.fract() == 0.0 && number.abs() < 1.0e15 {
                 format!("{}", *number as i64)
             } else {
                 number.to_string()
-            }
+            })
         }
     }
 }

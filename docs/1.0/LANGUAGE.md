@@ -453,7 +453,8 @@ Fill one or more form controls. It does not submit unless `submit_target` is pre
 
 Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
 exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
-for checkboxes and radios, or a finite number for numeric inputs; optional `tab`; optional
+for checkboxes and radios, a finite number for numeric inputs, or a list of up to 100 bounded strings
+for a multiple select; optional `tab`; optional
 `submit_target`; optional `timeout_ms`; optional `expect` postcondition; optional
 `user_authorized_credentials`, default `false`.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
@@ -473,6 +474,28 @@ Semantic selectors and target handles can address the same ordinary controls, in
 outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.
 An explicit `submit_target` is still checked against the first resolved field's containing form.
 
+How a value picks a choice (ADR-0198 Decisions 8 and 9). One page routine decides it for the check
+before the fill, the fill, and the check that the page kept the value, so they cannot disagree. For
+a select, an option answers to its value, its text and its label. A value that is exactly one of
+those picks that option. If two or more options answer to it exactly, the fill is refused with
+their values. Only when no option answers exactly does the page compare again after Unicode
+composition, trimming, white space collapse and case folding on both sides. One match picks it, and
+the result says so: `Filled 1 field on example.com: Role = Administrator (matched "administrator").`
+The facts carry `"match":"normalized"`. No match, or several, is refused with the options. There is
+no prefix, substring or closest match, and Ghostlight never picks an option the value does not
+name. An option that is disabled, or inside a disabled option group, is refused as disabled. An
+empty string picks the empty placeholder option, and the result reads `no value`; no other text
+picks a placeholder. A multiple select takes a list, each entry resolved by these rules, and ends
+up holding exactly that set; an empty list clears it. A single string on a multiple select picks
+only that option. A list given to any control that takes one value is refused. A checkbox takes a
+boolean or one of `true`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `checked`, `unchecked`
+without regard to case, sets that state and never toggles it. Any other word is refused and
+nothing changes. A radio takes a boolean for itself. A string is matched, by the select rules,
+against the labels of the radios in its group (same name, form owner and root) and picks the radio
+it names, which may be a sibling of the target. A string that names no label but is one of the
+boolean words applies to the target radio. Any other string is refused with the group and its
+labels.
+
 A fill that cannot take its values refuses before any edit and says what would succeed
 (ADR-0198 Decisions 8 and 10). The page checks every field first, so one refused call names every
 field that cannot take its value, never only the first. The result has status `failed`, effect
@@ -490,9 +513,9 @@ The clauses by problem word:
 | `option_missing`, a longer list, or a list the page sent without its options | `... has no option "<v>" among its 195 options.` and `Options containing "<v>": X, Y.` when any | `Read target_... with browser_read to list all its options.` |
 | `option_missing`, after an earlier choice field in the call | the clause above, then `Its options can depend on earlier fields.` | `Fill the earlier fields first, then repeat for target_....` |
 | `option_missing` on a radio button | `The "<group>" choice has no option "<v>". It offers: Standard, Express.` | `Repeat with one of the offered labels for target_....` |
-| `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` | `Repeat with the option's value for target_....` |
+| `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` For a list, `<v>` is the entry that matched twice. | `Repeat with the option's value for target_....` On a radio: `Repeat with true for target_..., which sets that radio itself.` |
 | `option_disabled` | `The option "<v>" of the "<n>" dropdown is disabled.` | `Choose an enabled option, or inspect the form for the field that enables it.` |
-| `multiple_values` | `The "<n>" dropdown takes one option, not a list.` | `Repeat browser_fill_form with target_... set to a single option.` |
+| `multiple_values` | `The "<n>" dropdown takes one value, not a list.` | `Repeat browser_fill_form with target_... set to a single value.` |
 | `not_boolean` | `The "<n>" checkbox takes true or false, not "<v>".` | `Repeat with true or false for target_....` |
 | `format` | `The "<n>" date field takes YYYY-MM-DD, not "<v>".` and `Allowed: 2026-10-01 to 2026-12-31.` when the control declares limits | `Repeat browser_fill_form with target_... set to a corrected value.` |
 | `wrong_tool`, a file input | `The "<n>" field is a file input.` | `Attach the file with browser_upload on target_....` |
@@ -532,8 +555,11 @@ are bounded to 40 characters on one line, and readings the summary has no room f
 (`N readings more in the facts`). With it off the summary is `Filled 3 fields on example.com.` The
 facts carry every reading either way, because the fill was authorized to read the document:
 `"fields":[{"target":"target_12","now":"Administrator"},{"target":"target_9","now":"(555) 123-4567"}]`.
-A checkbox or radio button reads `checked` or `unchecked`. The audit keeps `Filled 3 fields on
-example.com.` and no name or value.
+A checkbox or radio button reads `checked` or `unchecked`. A radio picked through a sibling's label
+reads that label. A choice the page matched only after normalizing reads `Role = Administrator
+(matched "administrator")` with the value the caller gave, and its fact adds `"match":"normalized"`;
+an exact match carries no mark. The audit keeps `Filled 3 fields on example.com.` and no name or
+value.
 
 When the page changes a field back after the fill set it, the fill is partly applied and says so.
 The result has status `failed`, effect `partial`, and is not safe to repeat. The summary is `Set 2

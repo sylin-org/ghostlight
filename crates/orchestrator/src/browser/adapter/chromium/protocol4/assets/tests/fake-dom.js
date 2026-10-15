@@ -403,12 +403,35 @@ function createFakeDom({ top = true } = {}) {
         }
         return { tagName: "OPTION", nodeType: 1, ...option, group: undefined, parentNode: parent };
       });
-      element.value = options[0].value;
+      // A single select holds the option a test or a fill marked `selected`, else the first
+      // option with the value it was given. Marking an option clears the others, and assigning a
+      // value clears every mark, as the browser does.
+      for (const option of element.options) {
+        let marked = option.selected === true;
+        Object.defineProperty(option, "selected", {
+          enumerable: true,
+          get: () => marked,
+          set: (next) => {
+            marked = Boolean(next);
+            if (marked && element.multiple !== true) for (const other of element.options) if (other !== option) other.selected = false;
+          }
+        });
+      }
+      let held = options[0].value;
+      const marked = () => element.options.find((option) => option.selected === true);
+      Object.defineProperty(element, "value", {
+        configurable: true,
+        get: () => marked()?.value ?? held,
+        set: (value) => {
+          held = value;
+          for (const option of element.options) option.selected = false;
+        }
+      });
       Object.defineProperty(element, "selectedOptions", {
         configurable: true,
         get: () => element.multiple === true
           ? element.options.filter((option) => option.selected === true)
-          : element.options.filter((option) => option.value === element.value).slice(0, 1)
+          : [marked() ?? element.options.find((option) => option.value === held)].filter(Boolean)
       });
       return element;
     },

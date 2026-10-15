@@ -219,11 +219,15 @@ pub fn fill(
                     let focus = reach
                         .get()
                         .call(&group.doc, world::focus_text_field(field, credentials))?;
+                    let text = field
+                        .value
+                        .text()
+                        .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))?;
                     let input = input_for(
                         l,
                         tab_id,
                         Some(focus),
-                        keys::replace_text(&field.value),
+                        keys::replace_text(&text),
                         reach.guard(),
                         0,
                     )

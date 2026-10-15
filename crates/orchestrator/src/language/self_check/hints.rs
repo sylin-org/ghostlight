@@ -1020,6 +1020,12 @@ fn rejected_fill_samples() -> Vec<Refusal> {
             false,
         ),
         (
+            json!({"problem": "option_ambiguous", "options": ["Yes", "Yes"], "group": "Subscribe"}),
+            TargetRole::Radio,
+            false,
+            false,
+        ),
+        (
             json!({"problem": "option_disabled"}),
             TargetRole::Combobox,
             false,

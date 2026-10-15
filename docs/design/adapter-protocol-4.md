@@ -1622,13 +1622,14 @@ dropped first, then `containing`. A problem that loses its options this way gain
 with the number it held, so the service never reads a dropped list as an empty select.
 
 **Fill echo and reverted fields.** `verify_fill_retained` compares each field with what was given and
-answers `{retained:true, fields:[{field, now?, tolerated?}]}` once every field has held its value for
+answers `{retained:true, fields:[{field, now?, tolerated?, matched?}]}` once every field has held its value for
 `stable_ms` (ADR-0198 Decision 11). `fields` lists only the entries worth reading back: `now` is the
 page's value (`outwardValue`, bounded to 80 characters; a checkbox or radio reads `checked` or
-`unchecked`; a select reads its chosen option text, the empty placeholder included) for a select, a
+`unchecked`; a select reads its chosen option text, the empty placeholder included unless the fill just picked it, which reads empty) for a select, a
 radio, a checkbox and the `date`, `time`, `datetime-local`, `month`, `week`, `number`, `range` and
 `color` inputs, and for a text field whose value differs from the given one only in formatting, which
-also sets `tolerated:true`. Formatting is white space, `(`, `)`, `-` and `/`, compared case-folded on
+also sets `tolerated:true`. A choice that matched only after normalizing sets `matched:"normalized"`.
+Formatting is white space, `(`, `)`, `-` and `/`, compared case-folded on
 both sides; `.` and `,` are significant. A credential-class control is never listed. When `limit_ms`
 passes with changed fields, the call fails with `not_retained` and the detail
 `{problems:[{field, problem:"reverted", now?}]}`, one entry for each changed field. `now` is left out
@@ -1636,6 +1637,10 @@ for a credential-class control and for a field whose option the page disabled. A
 detail means no field could be named, and any other failure of the call is a real failure. The service
 reports the first as a partly applied fill and the others as an unknown effect, and does not rewrite
 one into the other.
+
+A field `value` is a string, a boolean (a checkbox or radio takes it as such) or, for a multiple select,
+an array of strings. The page resolves it with one routine (`resolveChoice`) for the check, the edit and
+the retained check. A problem for an entry of an array carries `value_index`, the entry's position.
 
 The code stays `option_missing` when every problem is an option problem and `not_fillable`
 otherwise, and the message keeps its prefix (`select option not found`, `target is not fillable`),
@@ -1720,7 +1725,7 @@ Every kind is built only by a typed constructor in `world.rs`.
 | `verify_focused_text{allow_credentials}` | Content | Read | | today |
 | `box{locator}` | Content | Read | | today |
 | `prepare_fill{fields, allow_credentials, submit_locator?}` | Content | Read | yes | carries `settle_ms` and `visual_settle` like the other settling calls: false skips the stability wait, a spent budget with true rechecks values once for 50 ms, otherwise it waits for stable values up to `settle_ms`; cancellable |
-| `verify_fill_retained{fields, allow_credentials, stable_ms:250, poll_ms:25, limit_ms}` | Content | Read | | **new**; ok `{retained, fields:[{field, now?, tolerated?}]}` when stable, else `not_retained` with a `reverted` detail; replaces the worker loop `service-worker.js:1700-1728` |
+| `verify_fill_retained{fields, allow_credentials, stable_ms:250, poll_ms:25, limit_ms}` | Content | Read | | **new**; ok `{retained, fields:[{field, now?, tolerated?, matched?}]}` when stable, else `not_retained` with a `reverted` detail; replaces the worker loop `service-worker.js:1700-1728` |
 | `observe{condition, value?, locator?, timeout_ms, until_satisfied}` | Content | Read | | changed: with `until_satisfied` it throws `unsatisfied` at its timeout (race mode) |
 | `activate{locator}` | Content | Prepare | | today: scroll into view, rect and subject |
 | `hover{locator}` | Content | Prepare | | today |

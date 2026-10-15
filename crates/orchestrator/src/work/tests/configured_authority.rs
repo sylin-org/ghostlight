@@ -181,7 +181,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     );
                     assert!(
                         matches!(requested.last(), Some(BrowserCommand::Fill { fields, submit_locator, .. })
-                        if fields.len() == 1 && fields[0].locator == "standalone-editor" && fields[0].value == "PRIVATE_DRAFT"
+                        if fields.len() == 1 && fields[0].locator == "standalone-editor" && fields[0].value == crate::browser::adapter::PhysicalValue::from("PRIVATE_DRAFT")
                             && submit_locator.as_deref() == if submit { Some("explicit-submit") } else { None }),
                         "{label}: only an explicit submit target permits submission"
                     );

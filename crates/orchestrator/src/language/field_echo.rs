@@ -7,7 +7,11 @@
 //! string. The facts always carry the reading, because the fill was authorized to read the
 //! document. Audit never holds either: the audit projection of a fill is the sentence without
 //! its readings.
+//!
+//! A choice the page matched only after normalizing the given value says so (ADR-0198 Decision 8),
+//! in the facts as `match` and in the sentence as the value that was given.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::field_problem::page_text;
@@ -22,6 +26,29 @@ const READINGS_MAX_CHARS: usize = 260;
 /// What a sentence says a field holds when it holds nothing.
 const NO_VALUE: &str = "no value";
 
+/// The fact key that says how a given value matched a choice.
+const MATCH_KEY: &str = "match";
+
+/// How a given value matched a choice when it was not the option's exact text, value or label.
+/// An exact match is the unremarkable case and carries no mark.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChoiceMatch {
+    /// The value matched after Unicode composition, trimming, white space collapse and case
+    /// folding, and only one option did.
+    Normalized,
+}
+
+impl ChoiceMatch {
+    /// The word the facts use for this match.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normalized => "normalized",
+        }
+    }
+}
+
 /// One filled field and what the page holds in it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HeldField {
@@ -29,6 +56,7 @@ pub struct HeldField {
     subject: ActionSubject,
     now: String,
     tolerated: bool,
+    matched: Option<(ChoiceMatch, String)>,
 }
 
 impl HeldField {
@@ -49,13 +77,27 @@ impl HeldField {
             subject: ActionSubject::with_role(role, name, preserve_names),
             now: now.to_owned(),
             tolerated,
+            matched: None,
         }
     }
 
-    /// The fact that describes this field: its handle and what it holds.
+    /// Say the page matched this choice by `how`, and which value the caller gave. The given
+    /// value reaches a sentence only with the name, and never the facts.
+    #[must_use]
+    pub fn matched(mut self, how: ChoiceMatch, given: &str) -> Self {
+        self.matched = Some((how, given.to_owned()));
+        self
+    }
+
+    /// The fact that describes this field: its handle, what it holds, and how a choice matched
+    /// when it did not match exactly.
     #[must_use]
     pub fn fact(&self) -> Value {
-        json!({"target": self.target, "now": self.now})
+        let mut fact = json!({"target": self.target, "now": self.now});
+        if let (Some((how, _)), Value::Object(members)) = (&self.matched, &mut fact) {
+            members.insert(MATCH_KEY.into(), json!(how.as_str()));
+        }
+        fact
     }
 
     /// The field's name as a sentence may say it, when the snapshot lets it be named.
@@ -76,12 +118,20 @@ impl HeldField {
         }
     }
 
-    /// How a choice or typed control reads: `Role = Administrator`.
+    /// How a choice or typed control reads: `Role = Administrator`, and after a normalized match
+    /// `Role = Administrator (matched "administrator")`.
     fn assignment(&self) -> Option<String> {
         if self.tolerated {
             return None;
         }
-        Some(format!("{} = {}", self.name()?, self.value()))
+        let mut reading = format!("{} = {}", self.name()?, self.value());
+        if let Some((_, given)) = &self.matched {
+            reading.push_str(&format!(
+                " (matched \"{}\")",
+                page_text(given, NOW_MAX_CHARS)
+            ));
+        }
+        Some(reading)
     }
 
     /// How a reformatted text field reads: `Phone now reads "(555) 123-4567"`.
