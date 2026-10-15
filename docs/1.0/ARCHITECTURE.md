@@ -91,8 +91,8 @@ first; an original and a copy that both changed are kept, the original set aside
 beside each copy records what was copied, so an install that fails before this step is finished
 by the next one by the same rule),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
-start `bin/ghostlight serve`, and write `install.json` only once a service answers a control
-status with an instance other than the one it replaced. The quit is a control `quit` for
+start `bin/ghostlight serve --reason update`, and write `install.json` only once a service answers
+a control status with an instance other than the one it replaced. The quit is a control `quit` for
 replacement, and the installer waits up to 10 s for `run/service.lock` to be free; an earlier
 development build that cannot be asked, or an installed image that still runs, is stopped by its
 exact image.
@@ -101,22 +101,43 @@ the old connector stops, and an old registration would start the 1.x connector a
 When the service starts from `bin` or the marked build, it registers any browser that has no
 registration yet.
 
-On Windows the orchestrator refuses to start with an elevated token. It then acquires an
-operating-system lock on `run/service.lock` before opening any state or initializing the desktop.
-The lock, held until exit, admits the single local authority, and the endpoint's first-instance
-flag is a second refusal. Concurrent launch losers exit before creating a second tray.
+Every start of the service is `serve --reason <word>`, and the reason is one of six: `agent` (the
+MCP connector, at its own start and for each held request), `browser` (the browser connector,
+once, at its own start), `command` (`call`, when no service answers), `person` (`open` and a bare
+launch), `recover` (the shell, after a loss without goodbye) and `update` (the installer). `serve`
+requires the reason. `status`, `doctor`, `help` and `--version` never start the service. In
+order, `serve` refuses an image other than `bin/ghostlight` (or the marked development build),
+refuses an elevated Windows token, applies the quit latch, takes the operating-system lock on
+`run/service.lock`, and only then opens state. The lock is held until exit and admits the single
+local authority; the endpoint's first-instance flag is a second refusal. A start that finds the
+lock held exits 0 at once and touches nothing, because the service that holds it answers the
+starter's own connection; only an `update` start waits, up to 30 s, so the service it replaces
+can finish leaving. A service that is not accepting openings within 30 s of taking the lock exits
+with a nonzero status and a diagnostics event, so a stalled start never blocks the next one. The
+desktop binds the endpoint only after native Ready has established its interaction route
+(ADR-0166).
 
-A connector that finds no service starts `bin/ghostlight serve` detached and keeps connecting on
-its backoff schedule. A `serve` that loses the lock exits quietly, and one that has not bound its
-endpoint within 30 seconds exits, so a stalled start never blocks the next one. The desktop
-binds the endpoint only after native Ready has established its interaction route (ADR-0166).
+A person's Quit (the tray, the workbench, or control `quit` with reason `quit`) writes the latch
+`state/quit` before the service finishes in-flight work and exits. While it exists a `browser` or
+`recover` start exits 0 with a diagnostics event before it takes the lock, and any other start
+deletes it after taking the lock and serves. So after Quit a browser restart does not bring
+Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
+closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
+or `uninstall`. The MCP connector answers its outstanding requests as cut off on every goodbye.
+After `quit` it holds nothing and starts the service again only for the next request. After
+`replace` it holds lines and reconnects without starting the service for up to the hold limit,
+and then behaves as after a lost connection. After `uninstall` it exits. The browser connector
+tells the extension the service is away after `quit` or `replace`, waits, never starts the
+service, and exits when a service accepts again; after `uninstall` it exits at once. A stream that
+ends with no goodbye is a crash and is handled as before.
 
-A no-argument launch first asks a running service to reveal its workbench, then otherwise starts
-the complete desktop authority, creates its tray, and backgrounds the workbench: minimized on
-Windows and hidden on Linux. The explicit local-human `ghostlight open` intent sends the same
-control `show` request; when no service answers it starts `bin/ghostlight serve`, waits for its
-endpoint, then reveals it. The request admits no workspace and adds no listener. No
-supported launch can create an authority that refuses presentation by design.
+A no-argument launch and the explicit local-human `ghostlight open` intent send control `show` to
+a running service. When no service answers, they start `bin/ghostlight serve --reason person`
+detached, wait for it to accept an opening, and send `show`, retrying until the window is shown
+or 15 s have passed. Nothing serves in the foreground. The service creates its tray and
+backgrounds the workbench: minimized on Windows and hidden on Linux. The request admits no
+workspace and adds no listener. No supported launch can create an authority that refuses
+presentation by design.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
 disposable workbench, and native minimize remains compositor-owned. Windows Open focuses or
@@ -124,7 +145,8 @@ restores the existing window and rebuilds it when absent. Wayland cannot report 
 client's minimized state, so Linux Open coalesces, destroys any existing view, waits for Tauri's
 destroyed event, and rebuilds from the canonical configuration. On Linux, abnormal WebKit renderer
 termination discards that exact window after the signal callback; the next explicit Open creates a
-fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority.
+fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority, and
+it holds (see above).
 On Windows, each long-lived Ghostlight process also owns a hidden top-level session-listener
 window. It accepts `WM_QUERYENDSESSION`; terminal session notification disarms ordinary desktop
 retention and arms a bounded process-exit fallback before asking the native event loop to exit.

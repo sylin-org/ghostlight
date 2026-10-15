@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use ghostlight_relay::endpoint::pair;
 use ghostlight_relay::frame;
 use ghostlight_relay::protocol::{McpFrame, Opening, Program, Reply, Role, Templates};
-use ghostlight_relay::BACKOFF_FIRST;
 use ghostlight_relay::RELAY;
+use ghostlight_relay::{BACKOFF_FIRST, HOLD_LIMIT};
 use serde_json::{json, Value};
 
 use super::*;
@@ -32,6 +32,8 @@ struct Accepted {
     opening: Opening,
     writer: Connection,
     received: Arc<Mutex<Vec<String>>>,
+    /// Set once the connector closed its end.
+    closed: Arc<AtomicBool>,
 }
 
 /// A relay-4 service the test switches on and off.
@@ -41,6 +43,10 @@ struct FakeState {
     /// When set, the next connection is accepted and then closed at once.
     drop_next: AtomicBool,
     starts: AtomicU32,
+    /// The reason of every start, in order.
+    reasons: Mutex<Vec<StartReason>>,
+    /// Connection attempts, whether or not the service was up.
+    attempts: AtomicU32,
     /// The templates the accepted reply carries.
     templates: Mutex<Option<Templates>>,
     accepted: Mutex<Vec<Accepted>>,
@@ -53,6 +59,8 @@ impl FakeState {
             start_brings_up: AtomicBool::new(start_brings_up),
             drop_next: AtomicBool::new(false),
             starts: AtomicU32::new(0),
+            reasons: Mutex::new(Vec::new()),
+            attempts: AtomicU32::new(0),
             templates: Mutex::new(Some(golden_templates())),
             accepted: Mutex::new(Vec::new()),
         })
@@ -61,23 +69,27 @@ impl FakeState {
     /// Take the service end of a new connection: record the opening and the lines received.
     fn serve(&self, connection: Connection, opening: Opening) {
         let received = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicBool::new(false));
         if self.drop_next.swap(false, Ordering::SeqCst) {
             connection.shutdown();
         } else {
             let mut reader = connection.try_clone().unwrap();
             let sink = Arc::clone(&received);
+            let ended = Arc::clone(&closed);
             thread::spawn(move || {
                 while let Ok(Some(frame)) = frame::read_frame::<McpFrame>(&mut reader) {
                     if let McpFrame::Message { line } = frame {
                         sink.lock().unwrap().push(line);
                     }
                 }
+                ended.store(true, Ordering::SeqCst);
             });
         }
         self.accepted.lock().unwrap().push(Accepted {
             opening,
             writer: connection,
             received,
+            closed,
         });
     }
 
@@ -99,11 +111,24 @@ impl FakeState {
             .unwrap_or_default()
     }
 
+    /// Whether the connector has closed its end of connection `index`.
+    fn closed(&self, index: usize) -> bool {
+        let accepted = self.accepted.lock().unwrap();
+        accepted
+            .get(index)
+            .is_some_and(|one| one.closed.load(Ordering::SeqCst))
+    }
+
     /// Send a frame on the newest connection.
     fn send(&self, frame: &McpFrame) {
         let mut accepted = self.accepted.lock().unwrap();
         let newest = accepted.last_mut().unwrap();
         frame::write_frame(&mut newest.writer, frame).unwrap();
+    }
+
+    /// Switch the service on again.
+    fn bring_up(&self) {
+        self.up.store(true, Ordering::SeqCst);
     }
 
     /// Switch the service off and close every connection.
@@ -120,6 +145,7 @@ struct FakeService(Arc<FakeState>);
 
 impl Service for FakeService {
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
+        self.0.attempts.fetch_add(1, Ordering::SeqCst);
         if !self.0.up.load(Ordering::SeqCst) {
             return Err(ConnectError::NoService);
         }
@@ -130,7 +156,8 @@ impl Service for FakeService {
         Ok((client, reply))
     }
 
-    fn start(&self) -> io::Result<()> {
+    fn start(&self, reason: StartReason) -> io::Result<()> {
+        self.0.reasons.lock().unwrap().push(reason);
         self.0.starts.fetch_add(1, Ordering::SeqCst);
         if self.0.start_brings_up.load(Ordering::SeqCst) {
             self.0.up.store(true, Ordering::SeqCst);
@@ -303,7 +330,14 @@ impl Harness {
     /// Close stdin and wait for the connector to end.
     fn close(&mut self) -> io::Result<()> {
         self.input.take();
-        self.done.take().unwrap().join().unwrap()
+        self.finish()
+    }
+
+    /// Wait for the connector to end without closing stdin.
+    fn finish(&mut self) -> io::Result<()> {
+        let done = self.done.take().unwrap();
+        self.wait(|| done.is_finished());
+        done.join().unwrap()
     }
 }
 
@@ -539,6 +573,103 @@ fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
     harness.advance(BACKOFF_FIRST);
     harness.wait(|| harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(3), "tools/call")]);
+    assert_eq!(
+        *harness.fake.reasons.lock().unwrap(),
+        [StartReason::Agent, StartReason::Agent],
+        "an agent start, at the connector's own start and for the held request"
+    );
+}
+
+/// Send the service's goodbye on the newest connection and wait until the connector has acted
+/// on it by closing its end.
+fn say_goodbye(harness: &Harness, reason: GoodbyeReason) {
+    let connection = harness.fake.connections() - 1;
+    harness.fake.send(&McpFrame::Goodbye { reason });
+    harness.wait(|| harness.fake.closed(connection));
+}
+
+#[test]
+fn after_a_quit_goodbye_requests_are_answered_nothing_is_held_and_the_next_request_starts_it() {
+    let harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Quit);
+    assert_eq!(
+        harness.answer(&json!(1))["result"]["content"][0]["text"],
+        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating."),
+        "the outstanding request is answered from the cut_off template"
+    );
+
+    for _ in 0..4 {
+        harness.advance(Duration::from_secs(60));
+        harness.settle();
+    }
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "idle");
+    assert_eq!(harness.fake.connections(), 1);
+
+    harness.fake.start_brings_up.store(true, Ordering::SeqCst);
+    harness.send(&request(&json!(2), "tools/call"));
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
+    harness.advance(BACKOFF_FIRST);
+    harness.wait(|| harness.fake.received(1).len() == 1);
+    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
+}
+
+#[test]
+fn after_a_replace_goodbye_lines_are_held_and_the_connector_reconnects_without_starting() {
+    let harness = Harness::connected(true);
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Replace);
+    harness.send(&request(&json!(7), "tools/call"));
+    harness.settle();
+    for _ in 0..3 {
+        let before = harness.fake.attempts.load(Ordering::SeqCst);
+        harness.advance(BACKOFF_FIRST * 4);
+        harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) > before);
+    }
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        0,
+        "the installer starts the replacement, not the connector"
+    );
+
+    harness.fake.bring_up();
+    harness.advance(BACKOFF_FIRST * 10);
+    harness.wait(|| harness.fake.received(1).len() == 1);
+    assert_eq!(harness.fake.received(1), [request(&json!(7), "tools/call")]);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_replacement_that_does_not_come_back_within_the_hold_limit_is_a_lost_service() {
+    let harness = Harness::connected(true);
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Replace);
+    harness.settle();
+    harness.advance(HOLD_LIMIT + Duration::from_secs(1));
+    harness.settle();
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "idle");
+
+    harness.send(&request(&json!(3), "tools/call"));
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
+}
+
+#[test]
+fn after_an_uninstall_goodbye_requests_are_answered_and_the_connector_exits() {
+    let mut harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    say_goodbye(&harness, GoodbyeReason::Uninstall);
+    harness.finish().unwrap();
+    assert_eq!(
+        harness.answer(&json!(1))["result"]["isError"],
+        json!(true),
+        "the outstanding request is answered before the connector ends"
+    );
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
 
 #[test]

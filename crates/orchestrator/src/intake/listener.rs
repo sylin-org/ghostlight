@@ -19,6 +19,7 @@ use crate::language::intake::OpeningRefusal;
 
 /// The values control operations answer with.
 pub mod control {
+    use ghostlight_relay::protocol::StartReason;
     use serde::{Deserialize, Serialize};
 
     /// The answer to `status`: which service answered, and which start of it.
@@ -30,6 +31,8 @@ pub mod control {
         pub instance: String,
         /// The service's process id.
         pub pid: u32,
+        /// Why this service was started.
+        pub started_by: StartReason,
     }
 
     /// The answer to `show`: whether a window was there to come forward.

@@ -194,7 +194,12 @@ fn mcp_and_control_fixtures_round_trip() {
     assert_eq!(
         result,
         ControlResult::Result {
-            value: json!({"service": "2.0.0", "instance": "9f3a61c2d0b84e17", "pid": 18244})
+            value: json!({
+                "service": "2.0.0",
+                "instance": "9f3a61c2d0b84e17",
+                "pid": 18244,
+                "started_by": "agent"
+            })
         }
     );
 }

@@ -1,19 +1,66 @@
-//! How a service's life ends: the quit drain and the discovery deadline.
+//! How a service's life begins and ends: what a start reason allows, the quit drain and the
+//! readiness limit.
 //!
-//! A quit refuses new work, lets what is in flight finish within a bound, and then asks the
-//! desktop to exit. A `serve` start that never becomes discoverable stops by itself. Both are
-//! small state machines with no knowledge of the executor, the sockets or the desktop, so each is
-//! tested alone.
+//! A start for an update waits for the previous service to leave; every other start gives way to
+//! a service that is already there. A quit refuses new work, lets what is in flight finish within
+//! a bound, and then asks the desktop to exit. A start that never becomes ready stops by itself.
+//! Each is a small state machine with no knowledge of the executor, the sockets or the desktop,
+//! so each is tested alone.
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use ghostlight_relay::protocol::StartReason;
+
 /// How long a quit lets in-flight invocations finish before the service exits anyway.
 pub const QUIT_GRACE: Duration = Duration::from_secs(10);
 
-/// How long a `serve` start may take to publish discovery before it stops by itself.
-pub const DISCOVERY_WINDOW: Duration = Duration::from_secs(30);
+/// How long an update start waits for the previous service to release `run/service.lock`: the
+/// installer's quit lets the old service drain first.
+pub const UPDATE_LOCK_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a service may take, from the moment it holds the lock, to accept openings before it
+/// stops by itself.
+pub const READY_LIMIT: Duration = Duration::from_secs(30);
+
+/// How often a ready watch looks at its clock.
+const READY_POLL: Duration = Duration::from_millis(250);
+
+/// How long a start with `reason` asks for a held service lock before it gives way.
+///
+/// Only an update waits. Any other start finds another service already serving, and that
+/// service is the answer to the starter's own connection.
+#[must_use]
+pub fn lock_wait(reason: StartReason) -> Duration {
+    match reason {
+        StartReason::Update => UPDATE_LOCK_WAIT,
+        _ => Duration::ZERO,
+    }
+}
+
+/// Whether the quit latch stops a start with `reason`. A browser or a recovering shell must not
+/// bring back a Ghostlight the person quit; any other start clears the latch and serves.
+#[must_use]
+pub fn refused_by_quit_latch(reason: StartReason) -> bool {
+    matches!(reason, StartReason::Browser | StartReason::Recover)
+}
+
+/// The source of the current time for the ready watch.
+pub trait Clock: Send + Sync + 'static {
+    /// The current instant.
+    fn now(&self) -> Instant;
+}
+
+/// The real clock.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
 
 /// A quit has begun, so no new invocation is admitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,15 +134,15 @@ impl Drop for InFlight {
     }
 }
 
-/// Watches for discovery to be published within a deadline.
+/// Watches for the service to accept openings within a deadline.
 #[derive(Default)]
-pub struct DiscoveryWatch {
+pub struct ReadyWatch {
     settled: Mutex<bool>,
     changed: Condvar,
 }
 
-impl DiscoveryWatch {
-    /// Stop watching: discovery was published, or the service is going away.
+impl ReadyWatch {
+    /// Stop watching: the service is ready, or it is going away.
     pub fn settle(&self) {
         *lock(&self.settled) = true;
         self.changed.notify_all();
@@ -107,19 +154,31 @@ impl DiscoveryWatch {
         deadline: Instant,
         on_expiry: impl FnOnce() + Send + 'static,
     ) -> std::io::Result<()> {
+        self.arm_by(Arc::new(SystemClock), deadline, on_expiry)
+    }
+
+    /// Like [`ReadyWatch::arm`], with the deadline judged by `clock`.
+    pub fn arm_by(
+        self: &Arc<Self>,
+        clock: Arc<dyn Clock>,
+        deadline: Instant,
+        on_expiry: impl FnOnce() + Send + 'static,
+    ) -> std::io::Result<()> {
         let watch = Arc::clone(self);
         thread::Builder::new()
-            .name("ghostlight-discovery-deadline".into())
+            .name("ghostlight-ready-limit".into())
             .spawn(move || {
-                let settled = lock(&watch.settled);
-                let (settled, _) = watch
-                    .changed
-                    .wait_timeout_while(
-                        settled,
-                        deadline.saturating_duration_since(Instant::now()),
-                        |settled| !*settled,
-                    )
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut settled = lock(&watch.settled);
+                while !*settled && clock.now() < deadline {
+                    let wait = deadline
+                        .saturating_duration_since(clock.now())
+                        .min(READY_POLL);
+                    settled = watch
+                        .changed
+                        .wait_timeout_while(settled, wait, |settled| !*settled)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0;
+                }
                 if !*settled {
                     drop(settled);
                     on_expiry();
@@ -172,8 +231,8 @@ mod tests {
     }
 
     #[test]
-    fn the_deadline_fires_when_discovery_is_never_published() {
-        let watch = Arc::new(DiscoveryWatch::default());
+    fn the_deadline_fires_when_the_service_is_never_ready() {
+        let watch = Arc::new(ReadyWatch::default());
         let (expired, fired) = mpsc::channel();
         watch
             .arm(Instant::now() + Duration::from_millis(50), move || {
@@ -184,8 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn the_deadline_does_not_fire_after_discovery_is_published() {
-        let watch = Arc::new(DiscoveryWatch::default());
+    fn the_deadline_does_not_fire_after_the_service_is_ready() {
+        let watch = Arc::new(ReadyWatch::default());
         let (expired, fired) = mpsc::channel();
         watch
             .arm(Instant::now() + Duration::from_millis(150), move || {
@@ -198,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_watch_settled_before_it_is_armed_never_fires() {
-        let watch = Arc::new(DiscoveryWatch::default());
+        let watch = Arc::new(ReadyWatch::default());
         watch.settle();
         let (expired, fired) = mpsc::channel();
         watch
@@ -207,5 +266,98 @@ mod tests {
             })
             .unwrap();
         assert!(fired.recv_timeout(Duration::from_millis(300)).is_err());
+    }
+
+    /// A clock the test moves by hand.
+    struct FakeClock(Mutex<Instant>);
+
+    impl FakeClock {
+        fn advance(&self, by: Duration) {
+            *lock(&self.0) += by;
+        }
+    }
+
+    impl Clock for Arc<FakeClock> {
+        fn now(&self) -> Instant {
+            *lock(&self.0)
+        }
+    }
+
+    #[test]
+    fn a_service_that_is_not_ready_within_the_limit_of_taking_the_lock_stops() {
+        let taken = Instant::now();
+        let clock = Arc::new(FakeClock(Mutex::new(taken)));
+        let watch = Arc::new(ReadyWatch::default());
+        let (expired, fired) = mpsc::channel();
+        watch
+            .arm_by(
+                Arc::new(Arc::clone(&clock)),
+                taken + READY_LIMIT,
+                move || {
+                    let _ = expired.send(());
+                },
+            )
+            .unwrap();
+
+        clock.advance(READY_LIMIT - Duration::from_secs(1));
+        assert!(
+            fired.recv_timeout(Duration::from_millis(600)).is_err(),
+            "one second inside the limit"
+        );
+        clock.advance(Duration::from_secs(1));
+        assert!(
+            fired.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the limit is reached"
+        );
+    }
+
+    #[test]
+    fn a_service_that_is_ready_inside_the_limit_is_left_alone() {
+        let taken = Instant::now();
+        let clock = Arc::new(FakeClock(Mutex::new(taken)));
+        let watch = Arc::new(ReadyWatch::default());
+        let (expired, fired) = mpsc::channel();
+        watch
+            .arm_by(
+                Arc::new(Arc::clone(&clock)),
+                taken + READY_LIMIT,
+                move || {
+                    let _ = expired.send(());
+                },
+            )
+            .unwrap();
+        clock.advance(READY_LIMIT - Duration::from_secs(1));
+        watch.settle();
+        clock.advance(READY_LIMIT);
+        assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
+    }
+
+    #[test]
+    fn only_an_update_start_waits_for_a_held_lock() {
+        assert_eq!(lock_wait(StartReason::Update), UPDATE_LOCK_WAIT);
+        for reason in [
+            StartReason::Agent,
+            StartReason::Browser,
+            StartReason::Command,
+            StartReason::Person,
+            StartReason::Recover,
+        ] {
+            assert_eq!(lock_wait(reason), Duration::ZERO, "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_browser_or_recover_start_is_refused_by_the_quit_latch() {
+        for reason in [StartReason::Browser, StartReason::Recover] {
+            assert!(refused_by_quit_latch(reason), "{reason:?}");
+        }
+        for reason in [
+            StartReason::Agent,
+            StartReason::Command,
+            StartReason::Person,
+            StartReason::Update,
+        ] {
+            assert!(!refused_by_quit_latch(reason), "{reason:?}");
+        }
     }
 }

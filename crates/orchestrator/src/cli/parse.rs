@@ -5,11 +5,14 @@
 
 use std::ffi::OsString;
 
+use ghostlight_relay::protocol::StartReason;
+use ghostlight_relay::spawn::REASON_OPTION;
+
 /// Every subcommand a person is offered, in help order.
 ///
 /// This is the list the shell completions must match. `native-host` is deliberately absent: it is
-/// the package-facing registration seam, and `serve` is the start connectors make. Neither is
-/// something to suggest at a prompt.
+/// the package-facing registration seam, and `serve` is the start Ghostlight's own programs make.
+/// Neither is something to suggest at a prompt.
 pub const SUBCOMMANDS: &[&str] = &[
     "open",
     "install",
@@ -29,9 +32,10 @@ pub enum LaunchMode {
     DeploymentInstall(crate::install::deployment::Request),
     /// Start or activate the desktop workbench.
     Desktop,
-    /// Start the service and its backgrounded desktop for a connector. It never reveals a window,
-    /// exits quietly when another service is running, and stops by itself if it stalls.
-    Serve,
+    /// Start the service and its backgrounded desktop for the stated reason. It never reveals a
+    /// window, exits quietly when another service is running or when Quit holds the start back,
+    /// and stops by itself if it stalls.
+    Serve(StartReason),
     /// Explicit local-human intent to make the workbench visible.
     Open,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
@@ -92,6 +96,21 @@ pub enum NativeHostCommand {
     Install,
     /// Remove the native messaging host registration.
     Uninstall,
+}
+
+/// How `serve` is used.
+const SERVE_USAGE: &str =
+    "usage: ghostlight serve --reason <agent|browser|command|person|recover|update>";
+
+/// Read the arguments after `serve`: exactly `--reason` and one of the six start reasons.
+fn serve_reason(arguments: &[OsString]) -> anyhow::Result<StartReason> {
+    match arguments {
+        [option, word] if option == REASON_OPTION => word
+            .to_str()
+            .and_then(StartReason::parse)
+            .ok_or_else(|| anyhow::anyhow!("{SERVE_USAGE}")),
+        _ => anyhow::bail!("{SERVE_USAGE}"),
+    }
 }
 
 /// How `deployment install` is used.
@@ -228,10 +247,7 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         .first()
         .is_some_and(|argument| argument == "serve")
     {
-        if arguments.len() != 1 {
-            anyhow::bail!("usage: ghostlight serve");
-        }
-        Ok(LaunchMode::Serve)
+        Ok(LaunchMode::Serve(serve_reason(&arguments[1..])?))
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         Ok(LaunchMode::Call)
     } else if arguments
@@ -332,7 +348,7 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
 /// Render the CLI help text.
 pub fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve                   Start the service without a window (connectors run this)\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     )
 }
@@ -344,7 +360,10 @@ pub fn print_help() {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::path::PathBuf;
+
+    use ghostlight_relay::protocol::StartReason;
 
     use super::{help_text, launch_mode, LaunchMode, NativeHostCommand, SetupOptions, SUBCOMMANDS};
 
@@ -478,11 +497,48 @@ mod tests {
     }
 
     #[test]
+    fn serve_requires_one_of_the_six_start_reasons() {
+        let serve = |rest: &[&str]| {
+            launch_mode(
+                std::iter::once("serve")
+                    .chain(rest.iter().copied())
+                    .map(OsString::from),
+            )
+        };
+        for (word, reason) in [
+            ("agent", StartReason::Agent),
+            ("browser", StartReason::Browser),
+            ("command", StartReason::Command),
+            ("person", StartReason::Person),
+            ("recover", StartReason::Recover),
+            ("update", StartReason::Update),
+        ] {
+            assert_eq!(
+                serve(&["--reason", word]).unwrap(),
+                LaunchMode::Serve(reason)
+            );
+        }
+        for refused in [
+            &[][..],
+            &["--reason"],
+            &["--reason", "unknown"],
+            &["--reason", "Agent"],
+            &["agent"],
+            &["--reason", "agent", "--now"],
+            &["--now", "agent"],
+        ] {
+            let error = serve(refused).unwrap_err().to_string();
+            assert!(
+                error.starts_with("usage: ghostlight serve --reason"),
+                "{refused:?}"
+            );
+        }
+    }
+
+    #[test]
     fn launch_modes_keep_desktop_and_call_intents_distinct() {
         assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
         assert_eq!(launch_mode(["open".into()]).unwrap(), LaunchMode::Open);
-        assert_eq!(launch_mode(["serve".into()]).unwrap(), LaunchMode::Serve);
-        assert!(launch_mode(["serve".into(), "--now".into()]).is_err());
         assert!(help_text().contains("ghostlight serve"));
         assert!(!SUBCOMMANDS.contains(&"serve"));
         assert!(launch_mode(["--headless".into()]).is_err());

@@ -1,4 +1,4 @@
-//! Tests of the backoff schedule.
+//! Tests of the backoff schedule and the arguments a service is started with.
 
 use super::*;
 
@@ -23,4 +23,20 @@ fn a_reset_returns_to_the_first_wait() {
     backoff.reset();
     assert_eq!(backoff.next_wait(), BACKOFF_FIRST);
     assert_eq!(backoff.next_wait(), BACKOFF_FIRST * 2);
+}
+
+#[test]
+fn a_service_is_started_with_serve_and_the_reason_word() {
+    for reason in [
+        StartReason::Agent,
+        StartReason::Browser,
+        StartReason::Command,
+        StartReason::Person,
+        StartReason::Recover,
+        StartReason::Update,
+    ] {
+        let arguments = serve_arguments(reason);
+        assert_eq!(arguments, ["serve", "--reason", reason.as_str()]);
+        assert_eq!(StartReason::parse(reason.as_str()), Some(reason));
+    }
 }

@@ -8,11 +8,17 @@
 //!
 //! The first frame the browser sends is the extension's hello. The connector holds it, drops
 //! every later frame until a service has accepted the stream, and sends the held hello first.
-//! Before that first connection it starts the service on the [`Backoff`] schedule. After it the
-//! connector never starts the service: when the stream ends it tells the browser once with
+//! Before that first connection it starts the service once, as a `browser` start, and keeps
+//! connecting on the [`Backoff`] schedule without starting it again. After the first connection
+//! the connector never starts the service: when the stream ends it tells the browser once with
 //! [`BACKEND_UNAVAILABLE`], drops what the browser sends, and probes with a read-only control
 //! opening. When a service answers it returns [`Ended::ServiceReturned`] and the process exits,
 //! so the extension reconnects with a fresh hello on a new port.
+//!
+//! A service that ends the stream on purpose says goodbye first (ADR-0199 Decision 10). The
+//! goodbye is not the browser's frame and is never passed on. After `quit` and `replace` the
+//! connector behaves as it does for a lost service. After `uninstall` it returns
+//! [`Ended::ServiceUninstalled`] at once and the process exits.
 //!
 //! Two threads carry the frames, one per direction, and the calling thread decides what happens
 //! next from the events they send. Correlation ids, command names and payloads are never read
@@ -28,7 +34,9 @@ use std::time::{Duration, Instant};
 use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame;
 use ghostlight_relay::log::Event as LogEvent;
-use ghostlight_relay::protocol::{Control, Edge, Opening, Program, Reply, Role};
+use ghostlight_relay::protocol::{
+    goodbye_in, Control, Edge, GoodbyeReason, Opening, Program, Reply, Role, StartReason,
+};
 use ghostlight_relay::spawn::Backoff;
 use ghostlight_relay::OPENING_DEADLINE;
 
@@ -44,6 +52,9 @@ const _: () = assert!(
 /// The one frame the connector writes to the browser itself, sent once when the service is lost.
 pub const BACKEND_UNAVAILABLE: &[u8] = br#"{"kind":"backend_unavailable"}"#;
 
+/// Why this connector starts the service: a browser needs it.
+const START_REASON: StartReason = StartReason::Browser;
+
 /// The start of the origin Chrome passes a native-messaging host as its first argument.
 const EXTENSION_ORIGIN_PREFIX: &str = "chrome-extension://";
 
@@ -52,8 +63,8 @@ pub trait Service: Send + Sync + 'static {
     /// Connect to the running service and present `opening`.
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
 
-    /// Start the service without waiting for it to be ready.
-    fn start(&self) -> io::Result<()>;
+    /// Start the service for `reason` without waiting for it to be ready.
+    fn start(&self, reason: StartReason) -> io::Result<()>;
 }
 
 /// Where diagnostics go: one closed event and a short, content-free detail.
@@ -90,6 +101,8 @@ pub enum Event {
     ParentGone,
     /// The service connection ended and the browser has been told.
     ServiceLost,
+    /// The service said goodbye because Ghostlight is being removed.
+    ServiceUninstalled,
 }
 
 /// Why [`run`] returned. Every one of them is a clean exit.
@@ -101,6 +114,8 @@ pub enum Ended {
     ParentGone,
     /// A service accepted an opening after the connection was lost.
     ServiceReturned,
+    /// The service said goodbye because Ghostlight is being removed.
+    ServiceUninstalled,
 }
 
 impl Ended {
@@ -111,6 +126,7 @@ impl Ended {
             Self::BrowserGone => "browser_gone",
             Self::ParentGone => "parent_gone",
             Self::ServiceReturned => "service_returned",
+            Self::ServiceUninstalled => "service_uninstalled",
         }
     }
 }
@@ -251,11 +267,15 @@ impl Port {
             Err(ended) => return Ok(ended),
         };
         let mut backoff = Backoff::new();
+        let mut started = false;
         let socket = loop {
             if let Some(socket) = self.open_stream(&hello) {
                 break socket;
             }
-            self.start_service();
+            if !started {
+                started = true;
+                self.start_service();
+            }
             if let Some(ended) = self.pause(backoff.next_wait())? {
                 return Ok(ended);
             }
@@ -329,6 +349,7 @@ impl Port {
         match event {
             Event::Hello(hello) => Ok(Waited::Hello(hello)),
             Event::ServiceLost => Ok(Waited::Lost),
+            Event::ServiceUninstalled => Ok(Waited::Ended(Ended::ServiceUninstalled)),
             Event::InputClosed | Event::OutputClosed => Ok(Waited::Ended(Ended::BrowserGone)),
             Event::ParentGone => {
                 (self.environment.log)(LogEvent::ParentGone, "");
@@ -362,11 +383,11 @@ impl Port {
         }
     }
 
-    /// Ask for the service to start after a failed attempt, logging the outcome.
+    /// Ask for the service to start after the first failed attempt, logging the outcome.
     fn start_service(&self) {
         let log = self.environment.log;
-        log(LogEvent::ServiceStartAttempted, "");
-        if let Err(error) = self.environment.service.start() {
+        log(LogEvent::ServiceStartAttempted, START_REASON.as_str());
+        if let Err(error) = self.environment.service.start(START_REASON) {
             log(LogEvent::ServiceStartFailed, &error.to_string());
         }
     }
@@ -396,16 +417,27 @@ impl Port {
     }
 
     /// Carry service frames to the browser on their own thread. When the connection ends the
-    /// thread tells the browser once and then tells the port.
+    /// thread tells the browser once and then tells the port. A goodbye is read, not carried: an
+    /// `uninstall` ends the port at once, and any other reason is logged with the end of the
+    /// stream.
     fn carry_service(&self, mut socket: Connection, mut output: impl Write + Send + 'static) {
         let shared = Arc::clone(&self.shared);
         let events = self.events.clone();
         let log = self.environment.log;
         thread::spawn(move || {
+            let mut goodbye = None;
             let cause = loop {
                 match frame::read_frame_raw(&mut socket) {
                     Ok(Some(payload)) => {
-                        if frame::write_frame_raw(&mut output, &payload).is_err() {
+                        if let Some(reason) = goodbye_in(&payload) {
+                            goodbye = Some(reason);
+                            if ends_the_port(reason) {
+                                socket.shutdown();
+                                shared.lose();
+                                let _ = events.send(Event::ServiceUninstalled);
+                                return;
+                            }
+                        } else if frame::write_frame_raw(&mut output, &payload).is_err() {
                             let _ = events.send(Event::OutputClosed);
                             return;
                         }
@@ -420,6 +452,7 @@ impl Port {
             if shared.is_ending() {
                 return;
             }
+            let cause = goodbye.map_or(cause, |reason| reason.as_str().to_owned());
             log(LogEvent::ServiceDisconnected, &cause);
             let event = match frame::write_frame_raw(&mut output, BACKEND_UNAVAILABLE) {
                 Ok(()) => Event::ServiceLost,
@@ -428,6 +461,12 @@ impl Port {
             let _ = events.send(event);
         });
     }
+}
+
+/// Whether a goodbye with `reason` means the service is gone for good, so the port ends at once
+/// instead of waiting for a service to return.
+fn ends_the_port(reason: GoodbyeReason) -> bool {
+    matches!(reason, GoodbyeReason::Uninstall | GoodbyeReason::SessionEnd)
 }
 
 /// The program a connector presents itself as: the frozen edge, at this build.

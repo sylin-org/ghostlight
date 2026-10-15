@@ -15,6 +15,7 @@ use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link,
 use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
 use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use ghostlight_relay::endpoint::Connection as RelayConnection;
+use ghostlight_relay::protocol::{goodbye_frame, GoodbyeReason};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -685,6 +686,22 @@ impl RelayBrowserPort {
             .into_iter()
             .next()
             .map(|browser| browser.id)
+    }
+
+    /// Tell every attached browser stream that the service is closing it on purpose.
+    ///
+    /// The goodbye is the relay's fixed bytes, not an adapter frame: the browser edge reads it
+    /// and never passes it to the extension. A stream that cannot take it is closed.
+    pub fn say_goodbye(&self, reason: GoodbyeReason) {
+        let writers: Vec<Arc<SocketWriter>> = lock(&self.adapters)
+            .connections
+            .values()
+            .map(|connection| Arc::clone(&connection.line.writer))
+            .collect();
+        let farewell = goodbye_frame(reason);
+        for writer in writers {
+            let _ = writer.raw(&farewell);
+        }
     }
 
     /// Negotiate and attach one already-authenticated browser-relay stream.

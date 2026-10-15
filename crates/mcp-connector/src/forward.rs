@@ -13,6 +13,14 @@
 //! and is sent without them, or not at all when nothing is left. So a late answer to a service
 //! that went away never reaches the next one, which may have reused the id.
 //!
+//! The service says goodbye before it closes the stream on purpose, and the connector acts on the
+//! reason (ADR-0199 Decision 10). After `quit` every outstanding request is answered as cut off
+//! and nothing is held: the next request starts the service again, as an `agent` start. After
+//! `replace` lines are held and the connector reconnects without starting the service for up to
+//! [`HOLD_LIMIT`], and then behaves as after a lost connection. After `uninstall` outstanding
+//! requests are answered and the connector exits. A stream that ends with no goodbye is a crash
+//! and behaves as a lost connection.
+//!
 //! Everything runs on one loop over [`Event`]s. Threads only read: one for stdin, one per service
 //! connection, and one per connection attempt. Time comes from an injected [`Clock`] so the bounds
 //! can be tested without waiting for them.
@@ -28,10 +36,11 @@ use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame;
 use ghostlight_relay::log::Event as LogEvent;
 use ghostlight_relay::protocol::{
-    failure_response, Edge, Failure, McpFrame, Opening, Program, Reply, Role, Templates,
+    failure_response, Edge, Failure, GoodbyeReason, McpFrame, Opening, Program, Reply, Role,
+    StartReason, Templates,
 };
 use ghostlight_relay::spawn::Backoff;
-use ghostlight_relay::MAX_FRAME_BYTES;
+use ghostlight_relay::{HOLD_LIMIT, MAX_FRAME_BYTES};
 use serde_json::{json, Value};
 
 use crate::hold::{HeldLine, Hold, Request};
@@ -55,13 +64,16 @@ mod rpc {
     pub const PING: &str = "ping";
 }
 
+/// Why this connector starts the service: an agent needs it.
+const START_REASON: StartReason = StartReason::Agent;
+
 /// The service the connector talks to: how to open a stream and how to start it.
 pub trait Service: Send + Sync + 'static {
     /// Connect to the running service and present `opening`.
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
 
-    /// Start the service without waiting for it to be ready.
-    fn start(&self) -> io::Result<()>;
+    /// Start the service for `reason` without waiting for it to be ready.
+    fn start(&self, reason: StartReason) -> io::Result<()>;
 }
 
 /// The source of the current time for every bound the connector keeps.
@@ -172,6 +184,9 @@ struct Forwarder<W: Write> {
     ever_connected: bool,
     /// Whether a connection attempt is running.
     attempting: bool,
+    /// While a service that said `replace` is expected back, until when. Attempts made before
+    /// then do not start the service.
+    replacing_until: Option<Instant>,
     /// When the next connection attempt may run. Read only while there is no link and no
     /// attempt, and set whenever a link ends, so a held request always has one coming.
     next_attempt: Instant,
@@ -200,6 +215,7 @@ impl<W: Write> Forwarder<W> {
             generation: 0,
             ever_connected: false,
             attempting: false,
+            replacing_until: None,
             next_attempt: now,
             backoff: Backoff::new(),
             resume: None,
@@ -210,10 +226,16 @@ impl<W: Write> Forwarder<W> {
         }
     }
 
-    /// Whether the session needs a service now: before its first connection, and while a
-    /// request is held. Never while idle.
+    /// Whether the session needs a service now: before its first connection, while a request is
+    /// held and while a replacement is expected. Never while idle.
     fn wants_service(&self) -> bool {
-        !self.ever_connected || self.hold.has_request()
+        !self.ever_connected || self.hold.has_request() || self.replacement_expected()
+    }
+
+    /// Whether a service that said `replace` is still expected back.
+    fn replacement_expected(&self) -> bool {
+        self.replacing_until
+            .is_some_and(|until| self.environment.clock.now() < until)
     }
 
     /// Expire held lines and start a due connection attempt.
@@ -262,7 +284,7 @@ impl<W: Write> Forwarder<W> {
             }
             Event::Frame(generation, frame) => {
                 if self.is_current(generation) {
-                    self.service_frame(frame)?;
+                    return self.service_frame(frame);
                 }
             }
             Event::Gone(generation) => {
@@ -284,9 +306,11 @@ impl<W: Write> Forwarder<W> {
         self.link.is_some() && generation == self.generation
     }
 
-    /// Start one connection attempt on its own thread. A failed attempt starts the service.
+    /// Start one connection attempt on its own thread. A failed attempt starts the service,
+    /// except while a replacement is expected: the installer starts that one.
     fn attempt(&mut self) {
         self.attempting = true;
+        let starts = !self.replacement_expected();
         let service = Arc::clone(&self.environment.service);
         let events = self.events.clone();
         let log = self.environment.log;
@@ -304,12 +328,16 @@ impl<W: Write> Forwarder<W> {
                         .code
                         .map_or_else(String::new, |code| format!("{code:?}"));
                     log(LogEvent::OpeningRefused, &detail);
-                    start(service.as_ref(), log);
+                    if starts {
+                        start(service.as_ref(), log);
+                    }
                     Event::AttemptFailed
                 }
                 Err(error) => {
                     log(LogEvent::ConnectFailed, &error.to_string());
-                    start(service.as_ref(), log);
+                    if starts {
+                        start(service.as_ref(), log);
+                    }
                     Event::AttemptFailed
                 }
             };
@@ -325,6 +353,7 @@ impl<W: Write> Forwarder<W> {
         }
         self.backoff.reset();
         self.ever_connected = true;
+        self.replacing_until = None;
         let reader = match socket.try_clone() {
             Ok(reader) => reader,
             Err(error) => {
@@ -425,8 +454,9 @@ impl<W: Write> Forwarder<W> {
         Ok(())
     }
 
-    /// One frame from the service: pass a line to the client, or keep a resume token.
-    fn service_frame(&mut self, frame: McpFrame) -> io::Result<()> {
+    /// One frame from the service: pass a line to the client, keep a resume token, or act on a
+    /// goodbye.
+    fn service_frame(&mut self, frame: McpFrame) -> io::Result<Flow> {
         match frame {
             McpFrame::Message { line } => {
                 let inspection = Inspection::of(&line);
@@ -436,13 +466,30 @@ impl<W: Write> Forwarder<W> {
                 for key in &inspection.responses {
                     self.client_requests.remove(key);
                 }
-                self.write_line(line.as_bytes())
+                self.write_line(line.as_bytes())?;
             }
-            McpFrame::Resume { token } => {
-                self.resume = Some(token);
-                Ok(())
+            McpFrame::Resume { token } => self.resume = Some(token),
+            McpFrame::Goodbye { reason } => return self.goodbye(reason),
+            McpFrame::Unknown => {}
+        }
+        Ok(Flow::Continue)
+    }
+
+    /// The service is closing this stream on purpose.
+    ///
+    /// Every outstanding request is answered as cut off in each case. `quit` and an unknown
+    /// reason then leave the connector idle until a request needs the service. `replace` expects
+    /// the next service for [`HOLD_LIMIT`]. `uninstall` and `session_end` end the connector.
+    fn goodbye(&mut self, reason: GoodbyeReason) -> io::Result<Flow> {
+        (self.environment.log)(LogEvent::ServiceDisconnected, reason.as_str());
+        self.disconnect()?;
+        match reason {
+            GoodbyeReason::Replace => {
+                self.replacing_until = Some(self.environment.clock.now() + HOLD_LIMIT);
+                Ok(Flow::Continue)
             }
-            McpFrame::Goodbye { .. } | McpFrame::Unknown => Ok(()),
+            GoodbyeReason::Uninstall | GoodbyeReason::SessionEnd => Ok(Flow::Exit),
+            GoodbyeReason::Quit | GoodbyeReason::Unknown => Ok(Flow::Continue),
         }
     }
 
@@ -496,8 +543,8 @@ impl<W: Write> Forwarder<W> {
 
 /// Start the service after a failed attempt, logging the outcome.
 fn start(service: &dyn Service, log: Log) {
-    log(LogEvent::ServiceStartAttempted, "");
-    if let Err(error) = service.start() {
+    log(LogEvent::ServiceStartAttempted, START_REASON.as_str());
+    if let Err(error) = service.start(START_REASON) {
         log(LogEvent::ServiceStartFailed, &error.to_string());
     }
 }

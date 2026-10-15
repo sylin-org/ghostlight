@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
+use ghostlight_relay::protocol::StartReason;
 
 use crate::cli::parse::{self, LaunchMode};
 use crate::install::entry::{self, canonical_path, Entry, Facts, Role};
@@ -36,8 +37,10 @@ pub trait Launcher {
     /// Run `executable` with `arguments` and inherited standard streams, wait for it, and
     /// return its exit code.
     fn run(&self, executable: &Path, arguments: &[OsString]) -> io::Result<i32>;
-    /// Start `executable serve` detached with `home` as its working directory, without waiting.
-    fn serve_detached(&self, executable: &Path, home: &Path) -> io::Result<()>;
+    /// Start `executable serve --reason <reason>` detached with `home` as its working directory,
+    /// without waiting.
+    fn serve_detached(&self, executable: &Path, home: &Path, reason: StartReason)
+        -> io::Result<()>;
     /// Install this executable's package as a release into the home of `layout`.
     fn install(&self, layout: &Layout) -> Result<()>;
 }
@@ -52,8 +55,13 @@ impl Launcher for ProcessLauncher {
         Ok(status.code().unwrap_or(EXIT_WITHOUT_CODE))
     }
 
-    fn serve_detached(&self, executable: &Path, home: &Path) -> io::Result<()> {
-        ghostlight_relay::spawn::spawn_serve(executable, home).map(|_| ())
+    fn serve_detached(
+        &self,
+        executable: &Path,
+        home: &Path,
+        reason: StartReason,
+    ) -> io::Result<()> {
+        ghostlight_relay::spawn::spawn_serve(executable, home, reason).map(|_| ())
     }
 
     fn install(&self, layout: &Layout) -> Result<()> {
@@ -98,11 +106,13 @@ pub fn start(
     };
     match entry::decide(&current_exe, role, marker.as_ref(), &facts) {
         Entry::Run => Ok(Start::Dispatch(parsed?)),
-        Entry::Forward(target) if role == Role::Serve => {
-            launcher.serve_detached(&target, layout.home())?;
-            Ok(Start::Exit(0))
-        }
-        Entry::Forward(target) => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
+        Entry::Forward(target) => match parsed {
+            Ok(LaunchMode::Serve(reason)) => {
+                launcher.serve_detached(&target, layout.home(), reason)?;
+                Ok(Start::Exit(0))
+            }
+            _ => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
+        },
         Entry::CarrierInstall => {
             launcher.install(layout)?;
             Ok(Start::Exit(
@@ -117,7 +127,7 @@ pub fn start(
 fn role_of(mode: &LaunchMode) -> Role {
     match mode {
         LaunchMode::DeploymentInstall(_) => Role::Deployment,
-        LaunchMode::Serve => Role::Serve,
+        LaunchMode::Serve(_) => Role::Serve,
         LaunchMode::Doctor { .. }
         | LaunchMode::Status { .. }
         | LaunchMode::Help
@@ -162,7 +172,7 @@ mod tests {
     #[derive(Debug, Eq, PartialEq)]
     enum Call {
         Run(PathBuf, Vec<OsString>),
-        Serve(PathBuf),
+        Serve(PathBuf, StartReason),
         Install(PathBuf),
     }
 
@@ -177,10 +187,15 @@ mod tests {
             Ok(FORWARDED_EXIT)
         }
 
-        fn serve_detached(&self, executable: &Path, _home: &Path) -> io::Result<()> {
+        fn serve_detached(
+            &self,
+            executable: &Path,
+            _home: &Path,
+            reason: StartReason,
+        ) -> io::Result<()> {
             self.0
                 .borrow_mut()
-                .push(Call::Serve(executable.to_path_buf()));
+                .push(Call::Serve(executable.to_path_buf(), reason));
             Ok(())
         }
 
@@ -274,13 +289,29 @@ mod tests {
     }
 
     #[test]
-    fn serve_is_forwarded_detached_and_the_parent_exits_zero() {
+    fn serve_is_forwarded_detached_with_its_reason_and_the_parent_exits_zero() {
+        let home = Home::new();
+        let installed = home.installed();
+        let development = home.development();
+        for reason in [
+            StartReason::Agent,
+            StartReason::Browser,
+            StartReason::Update,
+        ] {
+            let (result, calls) = home.start(&installed, &["serve", "--reason", reason.as_str()]);
+            assert_eq!(result.unwrap(), Start::Exit(0));
+            assert_eq!(calls, vec![Call::Serve(development.clone(), reason)]);
+        }
+    }
+
+    #[test]
+    fn serve_without_a_reason_is_a_usage_error_the_development_build_reports() {
         let home = Home::new();
         let installed = home.installed();
         let development = home.development();
         let (result, calls) = home.start(&installed, &["serve"]);
-        assert_eq!(result.unwrap(), Start::Exit(0));
-        assert_eq!(calls, vec![Call::Serve(development)]);
+        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+        assert_eq!(calls, vec![Call::Run(development, os(&["serve"]))]);
     }
 
     #[test]
@@ -352,7 +383,7 @@ mod tests {
         let home = Home::new();
         let carrier = home.carrier();
         home.installed();
-        let (result, calls) = home.start(&carrier, &["serve"]);
+        let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
         let error = result.unwrap_err();
         assert!(error.is::<entry::Refusal>(), "{error}");
         assert!(calls.is_empty());
@@ -363,7 +394,10 @@ mod tests {
         let home = Home::new();
         let installed = home.installed();
         for (arguments, mode) in [
-            (&["serve"][..], LaunchMode::Serve),
+            (
+                &["serve", "--reason", "person"][..],
+                LaunchMode::Serve(StartReason::Person),
+            ),
             (&["open"], LaunchMode::Open),
         ] {
             let (result, calls) = home.start(&installed, arguments);

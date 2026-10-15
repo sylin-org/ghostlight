@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ghostlight_relay::endpoint::pair;
 use ghostlight_relay::frame;
-use ghostlight_relay::protocol::{RefusalCode, Role};
+use ghostlight_relay::protocol::{goodbye_frame, RefusalCode, Role};
 use ghostlight_relay::{MAX_FRAME_BYTES, RELAY};
 
 use super::*;
@@ -34,6 +34,10 @@ struct FakeState {
     /// How many openings to refuse before accepting.
     refusals: AtomicU32,
     starts: AtomicU32,
+    /// The reason of every start, in order.
+    reasons: Mutex<Vec<StartReason>>,
+    /// Browser openings the connector tried, whether or not the service was up.
+    attempts: AtomicU32,
     /// Control openings the connector tried, whether or not the service was up.
     probes: AtomicU32,
     openings: Mutex<Vec<Opening>>,
@@ -136,6 +140,8 @@ impl Service for FakeService {
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
         if opening.role == Role::Control {
             self.0.probes.fetch_add(1, Ordering::SeqCst);
+        } else {
+            self.0.attempts.fetch_add(1, Ordering::SeqCst);
         }
         if !self.0.up.load(Ordering::SeqCst) {
             return Err(ConnectError::NoService);
@@ -143,7 +149,8 @@ impl Service for FakeService {
         Ok(self.0.answer(opening)?)
     }
 
-    fn start(&self) -> io::Result<()> {
+    fn start(&self, reason: StartReason) -> io::Result<()> {
+        self.0.reasons.lock().unwrap().push(reason);
         self.0.starts.fetch_add(1, Ordering::SeqCst);
         if self.0.start_brings_up.load(Ordering::SeqCst) {
             self.0.up.store(true, Ordering::SeqCst);
@@ -308,6 +315,28 @@ fn the_service_is_started_before_the_first_connection_and_not_after_it_is_found(
     harness.wait(|| harness.fake.received(0).len() == 1);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
     assert_eq!(harness.fake.roles(), [Role::Browser]);
+    assert_eq!(
+        *harness.fake.reasons.lock().unwrap(),
+        [StartReason::Browser]
+    );
+    harness.chrome_closes();
+    harness.finish().unwrap();
+}
+
+#[test]
+fn a_service_that_stays_down_is_started_once_and_connected_to_when_it_appears() {
+    let mut harness = Harness::start(false, false);
+    harness.chrome_sends(b"hello");
+    harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) >= 3);
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        1,
+        "a browser start is made once, at the connector's own start"
+    );
+    harness.fake.bring_up();
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
     harness.chrome_closes();
     harness.finish().unwrap();
 }
@@ -485,4 +514,41 @@ fn only_a_first_argument_that_names_an_extension_is_an_origin() {
         None
     );
     assert_eq!(extension_origin(None), None);
+}
+
+#[test]
+fn quit_and_replace_goodbyes_are_not_forwarded_and_are_a_lost_service() {
+    for reason in [GoodbyeReason::Quit, GoodbyeReason::Replace] {
+        let mut harness = Harness::connected(b"hello");
+        harness.fake.send(&goodbye_frame(reason));
+        harness.fake.go_down();
+        harness.wait(|| harness.chrome_receives().len() == 1);
+        harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
+        assert_eq!(
+            harness.chrome_receives(),
+            [BACKEND_UNAVAILABLE.to_vec()],
+            "{reason:?}: Chrome is told the service is away and sees no goodbye"
+        );
+        assert_eq!(
+            harness.fake.starts.load(Ordering::SeqCst),
+            0,
+            "{reason:?}: nothing is started while waiting"
+        );
+        harness.fake.bring_up();
+        assert_eq!(
+            harness.finish().unwrap(),
+            Ended::ServiceReturned,
+            "{reason:?}"
+        );
+    }
+}
+
+#[test]
+fn an_uninstall_goodbye_ends_the_run_at_once_without_telling_chrome() {
+    let mut harness = Harness::connected(b"hello");
+    harness.fake.send(&goodbye_frame(GoodbyeReason::Uninstall));
+    assert_eq!(harness.finish().unwrap(), Ended::ServiceUninstalled);
+    assert!(harness.chrome_receives().is_empty());
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.fake.roles(), [Role::Browser], "no probe follows");
 }

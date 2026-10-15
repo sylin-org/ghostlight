@@ -44,7 +44,7 @@ when the old one stops starts the new one. At the 2.0 break it then stops the 1.
 again for a few rounds for any that respawned. It asks the running service to quit, which gives
 in-flight calls 10 s. If it is still running, that exact image is stopped. It then removes the
 copied 1.x originals, archives the 1.x audit log, deletes the 1.x lifecycle files, the installation record last, starts
-`bin/ghostlight serve`, and waits up to 30 s for a service that answers a control status with a
+`bin/ghostlight serve --reason update`, and waits up to 30 s for a service that answers a control status with a
 new instance. Nothing needs stopping by
 hand. A connector that was not replaced keeps running and reconnects.
 

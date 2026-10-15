@@ -5,8 +5,13 @@
 //! 9). Every connection then opens with one relay opening: an `mcp` stream is one MCP client
 //! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
 //! connection, and a `control` stream answers one operation.
+//!
+//! A start carries the reason it was made for (ADR-0199 Decision 10). The reason decides what a
+//! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
+//! latch, and every quit says goodbye on each live stream before the service exits ([`Quit`]).
 
 mod admission;
+pub mod latch;
 pub mod lifetime;
 pub mod lock;
 #[cfg(test)]
@@ -16,7 +21,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
@@ -26,7 +31,9 @@ use crate::intake::session::{
 };
 use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::{Connection, Endpoint, Listener};
-use ghostlight_relay::protocol::{self, Control, McpFrame, Reply, Role, Templates};
+use ghostlight_relay::protocol::{
+    self, Control, GoodbyeReason, McpFrame, QuitReason, Reply, Role, StartReason, Templates,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -45,7 +52,7 @@ use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::intake::MCP_CHANNEL;
 use crate::language::catalog_for;
-use crate::language::environment::ELEVATED_SERVICE;
+use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 use crate::language::outcome::DialogKind;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -73,7 +80,7 @@ const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
 const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
-use lifetime::{DiscoveryWatch, Drain, QUIT_GRACE};
+use lifetime::{Drain, ReadyWatch, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
 
 /// The desktop's request to leave its event loop, installed once the desktop exists.
@@ -81,6 +88,27 @@ pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
 
 /// How often a start that waits for the service lock asks for it again.
 const LOCK_POLL: Duration = Duration::from_millis(50);
+
+/// What a start asks of the service lock: who started it and how long it waits for a held lock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StartTerms {
+    /// Why the service is being started.
+    pub reason: StartReason,
+    /// How long to keep asking for the lock while another process holds it.
+    pub lock_wait: Duration,
+}
+
+impl StartTerms {
+    /// The terms of a start for `reason`: an update waits for the previous service to leave, any
+    /// other start asks once.
+    #[must_use]
+    pub fn for_reason(reason: StartReason) -> Self {
+        Self {
+            reason,
+            lock_wait: lifetime::lock_wait(reason),
+        }
+    }
+}
 
 /// A running local service host. Dropping it stops the listener and releases the service lock.
 pub struct ServiceHost {
@@ -97,7 +125,8 @@ pub struct ServiceHost {
     intake: Arc<Intake>,
     bound: Mutex<Option<Bound>>,
     quit: Quit,
-    discovery: Arc<DiscoveryWatch>,
+    ready: Arc<ReadyWatch>,
+    lock_taken: Instant,
     _lock: ServiceLock,
 }
 
@@ -112,37 +141,63 @@ struct Bound {
 #[error("another Ghostlight orchestrator already owns this runtime")]
 pub struct AuthorityAlreadyRunning;
 
+/// The person quit Ghostlight, and this start is one that Quit holds back.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", QUIT_HELD)]
+pub struct QuitLatched;
+
 impl ServiceHost {
     /// Prepare the service in the Ghostlight home `home` under its lifetime lock, without
     /// binding the endpoint and without the elevation check a production start makes.
     #[cfg(test)]
     pub(crate) fn start(home: &Path) -> Result<Self> {
-        Self::start_with_token(home, Duration::ZERO, || Ok(false))
+        Self::start_with_token(
+            home,
+            StartTerms {
+                reason: StartReason::Agent,
+                lock_wait: Duration::ZERO,
+            },
+            || Ok(false),
+        )
     }
 
-    /// Prepare the service in the Ghostlight home `home` under its lifetime lock, without
-    /// binding the endpoint. The desktop must call `publish_ready` only after its native
-    /// interaction route is ready.
+    /// Prepare the service in the Ghostlight home `home` for a start made for `reason`, under its
+    /// lifetime lock, without binding the endpoint. The desktop must call `publish_ready` only
+    /// after its native interaction route is ready.
     ///
-    /// A held lock is asked for again until `lock_wait` has passed, so a service that is about to
-    /// exit does not make its successor give up. A process whose token is elevated is refused
-    /// before it takes the lock.
-    pub fn start_waiting(home: &Path, lock_wait: Duration) -> Result<Self> {
-        Self::start_with_token(home, lock_wait, ghostlight_win_peer::is_elevated)
+    /// In order: a process whose token is elevated is refused; a browser or recover start is
+    /// refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start that
+    /// finds it held gives way ([`AuthorityAlreadyRunning`]) except an update, which asks again
+    /// for [`lifetime::UPDATE_LOCK_WAIT`] so the service it replaces can finish leaving; and only
+    /// then does any other start clear the latch and open state.
+    pub fn start_waiting(home: &Path, reason: StartReason) -> Result<Self> {
+        Self::start_with_token(
+            home,
+            StartTerms::for_reason(reason),
+            ghostlight_win_peer::is_elevated,
+        )
     }
 
-    /// Like [`ServiceHost::start_waiting`], with the answer to "is this process elevated" given by
-    /// `elevated`.
+    /// Like [`ServiceHost::start_waiting`], with the terms spelled out and the answer to "is this
+    /// process elevated" given by `elevated`.
     pub(crate) fn start_with_token(
         home: &Path,
-        lock_wait: Duration,
+        terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
         let diagnostics = DiagnosticsHub::birth(home);
-        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), lock_wait, elevated)
-            .inspect_err(|error| {
-                // Meeting the running service is how a racing start ends, not a failure.
-                if !error.is::<AuthorityAlreadyRunning>() {
+        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), terms, elevated).inspect_err(
+            |error| {
+                // Meeting the running service is how a racing start ends, not a failure, and a
+                // start Quit holds back is a decision, not a fault.
+                if error.is::<QuitLatched>() {
+                    diagnostics.sink().emit(
+                        ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
+                        ghostlight_bridge::diagnostics::Level::Info,
+                        None,
+                        &format!("{}: {QUIT_HELD}", terms.reason.as_str()),
+                    );
+                } else if !error.is::<AuthorityAlreadyRunning>() {
                     diagnostics.sink().emit(
                         ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
                         ghostlight_bridge::diagnostics::Level::Error,
@@ -150,20 +205,26 @@ impl ServiceHost {
                         &format!("service startup: {error:#}"),
                     );
                 }
-            })
+            },
+        )
     }
 
     fn start_with_diagnostics(
         home: &Path,
         diagnostics: Arc<DiagnosticsHub>,
-        lock_wait: Duration,
+        terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
         refuse_when_elevated(elevated().context("read the process token")?)?;
-        let lock = acquire_lock(
-            &install::layout::Layout::new(home).service_lock(),
-            lock_wait,
-        )?;
+        let layout = install::layout::Layout::new(home);
+        if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
+            return Err(QuitLatched.into());
+        }
+        let lock = acquire_lock(&layout.service_lock(), terms.lock_wait)?;
+        let lock_taken = Instant::now();
+        if !lifetime::refused_by_quit_latch(terms.reason) {
+            latch::clear(&layout.quit_latch()).context("clear the quit latch")?;
+        }
         if let Ok(executable) = env::current_exe() {
             remove_old_images_beside(&executable);
             register_missing_browsers(home, &executable);
@@ -214,11 +275,11 @@ impl ServiceHost {
         }));
 
         let stop = Arc::new(AtomicBool::new(false));
-        let quit = Quit {
-            drain: Arc::new(Drain::default()),
-            signal: Arc::default(),
-            diagnostics: Arc::clone(&diagnostics),
-        };
+        let quit = Quit::new(
+            Arc::clone(&diagnostics),
+            layout.quit_latch(),
+            Arc::clone(&browser),
+        );
         let refresher = spawn_refresher(governance.clone(), Arc::clone(&stop))?;
         let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
@@ -230,6 +291,7 @@ impl ServiceHost {
         });
         let intake = Arc::new(Intake {
             instance: format!("{INSTANCE_PREFIX}{}", Uuid::new_v4().simple()),
+            started_by: terms.reason,
             templates: failure_templates(),
             executor,
             workspaces,
@@ -255,7 +317,8 @@ impl ServiceHost {
             intake,
             bound: Mutex::new(None),
             quit,
-            discovery: Arc::default(),
+            ready: Arc::default(),
+            lock_taken,
             _lock: lock,
         })
     }
@@ -277,7 +340,7 @@ impl ServiceHost {
             Arc::new(Listener::bind_first(&self.home).context("bind the relay endpoint")?);
         let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
         *bound = Some(Bound { listener, thread });
-        self.discovery.settle();
+        self.ready.settle();
         let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
@@ -292,18 +355,24 @@ impl ServiceHost {
         Ok(())
     }
 
+    /// When this service must be accepting openings by: [`READY_LIMIT`] after it took the lock.
+    #[must_use]
+    pub fn ready_deadline(&self) -> Instant {
+        self.lock_taken + READY_LIMIT
+    }
+
     /// Stop this process by itself if the endpoint has not been bound by `deadline`.
     ///
     /// `publish_ready` cancels the deadline. On expiry the service records a diagnostics event and
     /// calls `on_expiry`, which ends the process. A start that stalls therefore never holds the
     /// service lock against the starts that follow it.
-    pub fn expect_discovery_by(
+    pub fn expect_ready_by(
         &self,
         deadline: Instant,
         on_expiry: impl FnOnce() + Send + 'static,
     ) -> Result<()> {
         let diagnostics = Arc::clone(&self.diagnostics);
-        self.discovery
+        self.ready
             .arm(deadline, move || {
                 diagnostics.sink().emit(
                     ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
@@ -313,7 +382,7 @@ impl ServiceHost {
                 );
                 on_expiry();
             })
-            .context("start the discovery deadline")
+            .context("start the ready limit")
     }
 
     /// Install the request the desktop makes to leave its event loop with status 0.
@@ -321,10 +390,17 @@ impl ServiceHost {
         *lock(&self.quit.signal) = Some(signal);
     }
 
-    /// Begin a quit: refuse new work, let in-flight invocations finish for up to `grace`, then ask
-    /// the desktop to exit. Returns at once; a second call while a quit is under way does nothing.
-    pub fn begin_quit(&self, grace: Duration) {
-        self.quit.begin(grace);
+    /// Begin a quit for `reason`: refuse new work, let in-flight invocations finish for up to
+    /// `grace`, say goodbye on every stream, then ask the desktop to exit. Returns at once; a
+    /// second call while a quit is under way does nothing.
+    pub fn begin_quit(&self, reason: QuitReason, grace: Duration) {
+        self.quit.begin(reason, grace);
+    }
+
+    /// The handle the desktop uses for a person's Quit from the tray or the workbench.
+    #[must_use]
+    pub fn quit_handle(&self) -> Quit {
+        self.quit.clone()
     }
 
     /// The process-diagnostics hub this authority owns.
@@ -334,7 +410,8 @@ impl ServiceHost {
     }
 
     fn join(&mut self) {
-        self.discovery.settle();
+        self.ready.settle();
+        lock(&self.quit.signal).take();
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
         self.refresher.unpark();
@@ -354,24 +431,58 @@ impl Drop for ServiceHost {
     }
 }
 
-/// How the service ends on request: refuse new work, drain what runs, then leave the desktop.
+/// How the service ends on request: refuse new work, drain what runs, say goodbye, then leave
+/// the desktop.
+///
+/// A person's Quit also sets the quit latch first, so a browser that restarts does not bring
+/// Ghostlight back. A replacement or an uninstall leaves it alone.
 #[derive(Clone)]
-struct Quit {
+pub struct Quit {
     drain: Arc<Drain>,
     signal: Arc<Mutex<Option<QuitSignal>>>,
     diagnostics: Arc<DiagnosticsHub>,
+    latch: PathBuf,
+    farewell: Arc<Farewell>,
 }
 
 impl Quit {
-    /// Begin a quit unless one is under way, and ask the desktop to exit once the work in flight
-    /// has finished or `grace` has passed.
-    fn begin(&self, grace: Duration) {
+    /// A quit that sets `latch` for a person's Quit and says goodbye on the MCP streams it is
+    /// given and on the streams of `browser`.
+    fn new(
+        diagnostics: Arc<DiagnosticsHub>,
+        latch: PathBuf,
+        browser: Arc<RelayBrowserPort>,
+    ) -> Self {
+        Self {
+            drain: Arc::new(Drain::default()),
+            signal: Arc::default(),
+            diagnostics,
+            latch,
+            farewell: Arc::new(Farewell::new(browser)),
+        }
+    }
+
+    /// Begin a quit for `reason` unless one is under way: set the latch for a person's Quit,
+    /// refuse new work, and once the work in flight has finished or `grace` has passed, say
+    /// goodbye on every stream and ask the desktop to exit.
+    pub fn begin(&self, reason: QuitReason, grace: Duration) {
         if !self.drain.begin_quit() {
             return;
+        }
+        if reason == QuitReason::Quit {
+            if let Err(error) = latch::set(&self.latch) {
+                self.diagnostics.sink().emit(
+                    ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                    ghostlight_bridge::diagnostics::Level::Error,
+                    None,
+                    &format!("the quit latch could not be written: {error}"),
+                );
+            }
         }
         let drain = Arc::clone(&self.drain);
         let signal = Arc::clone(&self.signal);
         let diagnostics = Arc::clone(&self.diagnostics);
+        let farewell = Arc::clone(&self.farewell);
         let spawned = thread::Builder::new()
             .name("ghostlight-quit-drain".into())
             .spawn(move || {
@@ -380,8 +491,13 @@ impl Quit {
                     ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
                     ghostlight_bridge::diagnostics::Level::Info,
                     None,
-                    &format!("quit: drained={drained} in_flight={}", drain.in_flight()),
+                    &format!(
+                        "quit: reason={} drained={drained} in_flight={}",
+                        goodbye_for(reason).as_str(),
+                        drain.in_flight()
+                    ),
                 );
+                farewell.say(goodbye_for(reason));
                 let signal = lock(&signal).clone();
                 if let Some(signal) = signal {
                     signal();
@@ -396,12 +512,78 @@ impl Quit {
             );
         }
     }
+
+    /// Record `writer` as a live MCP stream until the returned guard is dropped, so a quit says
+    /// goodbye on it.
+    fn enroll(&self, writer: Arc<SocketWriter>) -> Enrolled {
+        self.farewell.enroll(writer)
+    }
+}
+
+/// The goodbye a quit for `reason` sends.
+fn goodbye_for(reason: QuitReason) -> GoodbyeReason {
+    match reason {
+        QuitReason::Quit => GoodbyeReason::Quit,
+        QuitReason::Replace => GoodbyeReason::Replace,
+        QuitReason::Uninstall => GoodbyeReason::Uninstall,
+        QuitReason::Unknown => GoodbyeReason::Unknown,
+    }
+}
+
+/// The live streams a quit says goodbye on before the service closes them.
+struct Farewell {
+    mcp: Mutex<BTreeMap<u64, Arc<SocketWriter>>>,
+    next: AtomicU64,
+    browser: Arc<RelayBrowserPort>,
+}
+
+impl Farewell {
+    fn new(browser: Arc<RelayBrowserPort>) -> Self {
+        Self {
+            mcp: Mutex::new(BTreeMap::new()),
+            next: AtomicU64::new(0),
+            browser,
+        }
+    }
+
+    /// Record one MCP stream until the guard is dropped.
+    fn enroll(self: &Arc<Self>, writer: Arc<SocketWriter>) -> Enrolled {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        lock(&self.mcp).insert(id, writer);
+        Enrolled {
+            farewell: Arc::clone(self),
+            id,
+        }
+    }
+
+    /// Say goodbye with `reason` on every MCP stream and every browser stream.
+    fn say(&self, reason: GoodbyeReason) {
+        let writers: Vec<Arc<SocketWriter>> = lock(&self.mcp).values().cloned().collect();
+        for writer in writers {
+            let _ = writer.native(&McpFrame::Goodbye { reason });
+        }
+        self.browser.say_goodbye(reason);
+    }
+}
+
+/// One MCP stream recorded for the goodbye. Dropping it forgets the stream.
+struct Enrolled {
+    farewell: Arc<Farewell>,
+    id: u64,
+}
+
+impl Drop for Enrolled {
+    fn drop(&mut self) {
+        lock(&self.farewell.mcp).remove(&self.id);
+    }
 }
 
 /// Everything a relay connection needs from the service.
 struct Intake {
     /// The value that changes on every start of this service.
     instance: String,
+    /// Why this service was started.
+    started_by: StartReason,
     /// The failure sentences every accepted `mcp` stream is handed.
     templates: Templates,
     executor: Arc<ApplicationExecutor>,
@@ -502,14 +684,15 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
             service: env!("CARGO_PKG_VERSION").into(),
             instance: intake.instance.clone(),
             pid: std::process::id(),
+            started_by: intake.started_by,
         })
         .unwrap_or(Value::Null),
         Some(Control::Show) => serde_json::to_value(control::Shown {
             shown: intake.workbench.reveal().is_ok(),
         })
         .unwrap_or(Value::Null),
-        Some(Control::Quit { .. }) => {
-            intake.quit.begin(QUIT_GRACE);
+        Some(Control::Quit { reason }) => {
+            intake.quit.begin(reason, QUIT_GRACE);
             serde_json::to_value(control::Quitting { quitting: true }).unwrap_or(Value::Null)
         }
         Some(Control::Unknown) | None => {
@@ -565,6 +748,7 @@ fn serve_mcp(
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
+    let _enrolled = intake.quit.enroll(Arc::clone(&writer));
     let opening = Opening {
         channel: intake_channel,
         marker,
@@ -1312,8 +1496,8 @@ mod tests {
     use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
     use ghostlight_relay::frame;
     use ghostlight_relay::protocol::{
-        self, Control, Edge, McpFrame, Opening as RelayOpening, Program, QuitReason, RefusalCode,
-        Reply, Role,
+        self, Control, Edge, GoodbyeReason, McpFrame, Opening as RelayOpening, Program, QuitReason,
+        RefusalCode, Reply, Role, StartReason,
     };
     use serde_json::{json, Value};
 
@@ -1330,7 +1514,14 @@ mod tests {
     };
     use crate::workspace::ReleasedTabs;
 
-    use super::{cleanup_released_tabs, ServiceHost};
+    use super::{
+        cleanup_released_tabs, AuthorityAlreadyRunning, QuitLatched, ServiceHost, StartTerms,
+    };
+
+    /// The terms of an agent start, which asks for the lock once.
+    fn agent() -> StartTerms {
+        StartTerms::for_reason(StartReason::Agent)
+    }
 
     /// A fresh directory to serve from, which the test removes.
     fn temp_home(name: &str) -> std::path::PathBuf {
@@ -1790,17 +1981,18 @@ mod tests {
             relay.clone(),
             diagnostics.clone(),
         );
-        let quit = super::Quit {
-            drain: Arc::default(),
-            signal: Arc::default(),
-            diagnostics: diagnostics.clone(),
-        };
+        let quit = super::Quit::new(
+            diagnostics.clone(),
+            home.path().join("state").join("quit"),
+            relay.clone(),
+        );
         let (signal, quit_requested) = std::sync::mpsc::channel();
         *super::lock(&quit.signal) = Some(Arc::new(move || {
             let _ = signal.send(());
         }));
         let intake = Arc::new(super::Intake {
             instance: TEST_INSTANCE.into(),
+            started_by: StartReason::Agent,
             templates: failure_templates(),
             executor,
             workspaces,
@@ -2005,6 +2197,7 @@ mod tests {
                 service: env!("CARGO_PKG_VERSION").into(),
                 instance: TEST_INSTANCE.into(),
                 pid: std::process::id(),
+                started_by: StartReason::Agent,
             }
         );
         drop(served);
@@ -2379,10 +2572,178 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    /// The terms of a start for `reason` that waits `lock_wait` for a held lock.
+    fn waiting(reason: StartReason, lock_wait: Duration) -> StartTerms {
+        StartTerms { reason, lock_wait }
+    }
+
+    /// Start for `terms` in `directory` with a token that is not elevated.
+    fn start_for(directory: &std::path::Path, terms: StartTerms) -> anyhow::Result<ServiceHost> {
+        ServiceHost::start_with_token(directory, terms, || Ok(false))
+    }
+
+    /// Every file and directory under `root`, as paths relative to it.
+    fn files_under(root: &std::path::Path) -> std::collections::BTreeSet<std::path::PathBuf> {
+        let mut found = std::collections::BTreeSet::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(&directory)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path.clone());
+                }
+                found.insert(path.strip_prefix(root).unwrap().to_path_buf());
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn a_start_that_finds_the_lock_held_gives_way_at_once_and_touches_no_state() {
+        let directory = temp_home("lock-held-gives-way");
+        let layout = crate::install::layout::Layout::new(&directory);
+        let holder = start_for(&directory, agent()).unwrap();
+        super::latch::set(&layout.quit_latch()).unwrap();
+        let before = files_under(&directory);
+
+        for reason in [
+            StartReason::Agent,
+            StartReason::Command,
+            StartReason::Person,
+            StartReason::Update,
+        ] {
+            let started = Instant::now();
+            let terms = StartTerms {
+                reason,
+                lock_wait: Duration::ZERO,
+            };
+            let error = start_for(&directory, terms)
+                .err()
+                .expect("the lock is held");
+            assert!(error.is::<AuthorityAlreadyRunning>(), "{reason:?}");
+            assert!(started.elapsed() < Duration::from_secs(1), "{reason:?}");
+            assert!(
+                super::latch::is_set(&layout.quit_latch()),
+                "{reason:?}: a start that gives way leaves the latch alone"
+            );
+        }
+        assert_eq!(files_under(&directory), before, "no state was opened");
+        drop(holder);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_update_start_takes_the_lock_when_the_old_service_releases_it_within_the_wait() {
+        let directory = temp_home("update-waits");
+        let holder = start_for(&directory, agent()).unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            drop(holder);
+        });
+        let started = Instant::now();
+        let taken = start_for(&directory, waiting(StartReason::Update, PATIENCE)).unwrap();
+        assert!(
+            started.elapsed() >= Duration::from_millis(100),
+            "it waited for the holder"
+        );
+        release.join().unwrap();
+        drop(taken);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_update_start_gives_up_when_the_lock_is_still_held_after_its_wait() {
+        let directory = temp_home("update-gives-up");
+        let holder = start_for(&directory, agent()).unwrap();
+        let started = Instant::now();
+        let error = start_for(
+            &directory,
+            waiting(StartReason::Update, Duration::from_millis(200)),
+        )
+        .err()
+        .expect("the lock stays held");
+        assert!(error.is::<AuthorityAlreadyRunning>());
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        drop(holder);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_browser_or_recover_start_is_refused_while_the_latch_is_set_and_never_takes_the_lock() {
+        let directory = temp_home("latch-refuses");
+        let layout = crate::install::layout::Layout::new(&directory);
+        super::latch::set(&layout.quit_latch()).unwrap();
+        for reason in [StartReason::Browser, StartReason::Recover] {
+            let error = start_for(&directory, StartTerms::for_reason(reason))
+                .err()
+                .expect("Quit holds this start back");
+            assert!(error.is::<QuitLatched>(), "{reason:?}");
+            assert!(
+                super::latch::is_set(&layout.quit_latch()),
+                "{reason:?}: the latch stays"
+            );
+            assert!(
+                !layout.run().exists(),
+                "{reason:?}: the lock was never taken"
+            );
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_browser_start_serves_when_no_quit_is_held() {
+        let directory = temp_home("latch-clear");
+        let started = start_for(&directory, StartTerms::for_reason(StartReason::Browser));
+        assert!(started.is_ok());
+        drop(started);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn any_other_start_clears_the_latch_after_taking_the_lock_and_serves() {
+        for reason in [
+            StartReason::Agent,
+            StartReason::Command,
+            StartReason::Person,
+            StartReason::Update,
+        ] {
+            let directory = temp_home("latch-cleared");
+            let layout = crate::install::layout::Layout::new(&directory);
+            super::latch::set(&layout.quit_latch()).unwrap();
+            let started = start_for(&directory, StartTerms::for_reason(reason)).unwrap();
+            assert!(!super::latch::is_set(&layout.quit_latch()), "{reason:?}");
+            drop(started);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_service_reports_the_reason_it_was_started_for() {
+        let home = TestHome::new("started-by");
+        let host = start_for(
+            home.path(),
+            StartTerms {
+                reason: StartReason::Person,
+                lock_wait: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        host.publish_ready().unwrap();
+        assert_eq!(
+            cli_client::status().unwrap().started_by,
+            StartReason::Person
+        );
+        drop(host);
+    }
+
     #[test]
     fn a_service_started_with_an_elevated_token_refuses_before_it_takes_any_state() {
         let directory = temp_home("elevated");
-        let refused = ServiceHost::start_with_token(&directory, Duration::ZERO, || Ok(true))
+        let refused = ServiceHost::start_with_token(&directory, agent(), || Ok(true))
             .err()
             .expect("an elevated start is refused");
         assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
@@ -2390,13 +2751,13 @@ mod tests {
             !directory.join("run").exists(),
             "no lock, run directory or socket was made"
         );
-        let unreadable = ServiceHost::start_with_token(&directory, Duration::ZERO, || {
+        let unreadable = ServiceHost::start_with_token(&directory, agent(), || {
             Err(std::io::Error::other("no token"))
         })
         .err()
         .expect("a token that cannot be read is refused");
         assert!(format!("{unreadable:#}").contains("no token"));
-        let started = ServiceHost::start_with_token(&directory, Duration::ZERO, || Ok(false));
+        let started = ServiceHost::start_with_token(&directory, agent(), || Ok(false));
         assert!(started.is_ok());
         drop(started);
         std::fs::remove_dir_all(directory).unwrap();
@@ -2528,6 +2889,151 @@ mod tests {
         (home, host, quit_requested)
     }
 
+    /// Read frames from `socket` until a goodbye arrives and return its reason.
+    fn goodbye_on(socket: &mut Connection) -> GoodbyeReason {
+        loop {
+            match frame::read_frame::<McpFrame>(socket).unwrap() {
+                Some(McpFrame::Goodbye { reason }) => return reason,
+                Some(_) => {}
+                None => panic!("the stream closed with no goodbye"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_persons_quit_sets_the_latch_and_a_replacement_or_uninstall_does_not() {
+        for (reason, latched) in [
+            (QuitReason::Quit, true),
+            (QuitReason::Replace, false),
+            (QuitReason::Uninstall, false),
+        ] {
+            let (home, host, quit_requested) = quittable_host("quit-latch");
+            let latch = home.path().join("state").join("quit");
+            assert!(!super::latch::is_set(&latch));
+            host.begin_quit(reason, Duration::from_secs(5));
+            quit_requested
+                .recv_timeout(Duration::from_secs(5))
+                .expect("an idle service asks the desktop to exit");
+            assert_eq!(super::latch::is_set(&latch), latched, "{reason:?}");
+            drop(host);
+        }
+    }
+
+    #[test]
+    fn a_quit_over_control_with_reason_quit_sets_the_latch_before_it_answers() {
+        let home = TestHome::new("quit-control-latch");
+        let served = serve_fake(&home);
+        cli_client::control(Control::Quit {
+            reason: QuitReason::Quit,
+        })
+        .unwrap();
+        assert!(super::latch::is_set(
+            &home.path().join("state").join("quit")
+        ));
+        served
+            .quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the desktop is asked to exit");
+    }
+
+    #[test]
+    fn a_quit_says_goodbye_on_an_mcp_stream_before_the_service_closes_it() {
+        for (reason, goodbye) in [
+            (QuitReason::Quit, GoodbyeReason::Quit),
+            (QuitReason::Replace, GoodbyeReason::Replace),
+            (QuitReason::Uninstall, GoodbyeReason::Uninstall),
+        ] {
+            let home = TestHome::new("quit-goodbye");
+            let served = serve_fake(&home);
+            let mut socket = open_mcp(None);
+            initialize(&mut socket);
+
+            let answer = cli_client::control(Control::Quit { reason }).unwrap();
+            assert_eq!(answer, json!({"quitting": true}));
+            assert_eq!(goodbye_on(&mut socket), goodbye);
+            served
+                .quit_requested
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the desktop is asked to exit after the goodbye");
+        }
+    }
+
+    #[test]
+    fn a_quit_says_goodbye_after_in_flight_work_and_before_the_desktop_exits() {
+        let home = TestHome::new("quit-goodbye-order");
+        let served = serve_fake(&home);
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+        let running = served.intake.quit.drain.admit().unwrap();
+
+        cli_client::control(Control::Quit {
+            reason: QuitReason::Quit,
+        })
+        .unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        while let Ok(Some(frame)) = frame::read_frame::<McpFrame>(&mut socket) {
+            assert!(
+                !matches!(frame, McpFrame::Goodbye { .. }),
+                "no goodbye while work is in flight"
+            );
+        }
+        assert!(served.quit_requested.try_recv().is_err());
+
+        socket.set_read_timeout(Some(PATIENCE)).unwrap();
+        drop(running);
+        assert_eq!(goodbye_on(&mut socket), GoodbyeReason::Quit);
+    }
+
+    #[test]
+    fn a_quit_says_goodbye_on_a_browser_stream_with_the_fixed_bytes() {
+        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
+
+        let home = TestHome::new("quit-browser-goodbye");
+        let served = serve_fake(&home);
+        let (native, extension) = pair().unwrap();
+        let carrier = thread::spawn(move || {
+            let (service, reply) = dial(&opening(Role::Browser));
+            assert!(reply.accepted, "{reply:?}");
+            service.set_read_timeout(None).unwrap();
+            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
+            let mut to_extension = (service, native);
+            thread::spawn(move || {
+                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
+            });
+            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
+        });
+        let fake = FakeExtension::connect(
+            extension,
+            &FakeExtension::hello("browser_goodbye"),
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            }),
+        );
+        drop(fake.wait(|seen| !seen.frames.is_empty()));
+        eventually(|| served.relay.is_connected());
+
+        served.relay.say_goodbye(GoodbyeReason::Uninstall);
+        let seen = fake.wait(|seen| {
+            seen.frames
+                .iter()
+                .any(|frame| frame.get("goodbye").is_some())
+        });
+        let goodbye = seen
+            .frames
+            .iter()
+            .find(|frame| frame.get("goodbye").is_some())
+            .cloned()
+            .unwrap();
+        assert_eq!(goodbye, json!({"goodbye": "uninstall"}));
+        drop(seen);
+        fake.close();
+        drop(fake);
+        let _ = carrier.join();
+    }
+
     #[test]
     fn a_quit_answers_new_invocations_with_shutting_down() {
         use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
@@ -2536,7 +3042,7 @@ mod tests {
         let mut socket = open_mcp(None);
         initialize(&mut socket);
 
-        host.begin_quit(Duration::from_secs(5));
+        host.begin_quit(QuitReason::Quit, Duration::from_secs(5));
         quit_requested
             .recv_timeout(Duration::from_secs(5))
             .expect("an idle service asks the desktop to exit at once");
@@ -2597,7 +3103,7 @@ mod tests {
         // The fake executor: an invocation the service has admitted and not yet finished.
         let running = host.quit.drain.admit().unwrap();
 
-        host.begin_quit(Duration::from_secs(30));
+        host.begin_quit(QuitReason::Quit, Duration::from_secs(30));
         assert!(
             quit_requested
                 .recv_timeout(Duration::from_millis(300))
@@ -2605,7 +3111,7 @@ mod tests {
             "the desktop is not asked to exit while work is in flight"
         );
         // A second quit while one is under way changes nothing.
-        host.begin_quit(Duration::ZERO);
+        host.begin_quit(QuitReason::Quit, Duration::ZERO);
         assert!(quit_requested
             .recv_timeout(Duration::from_millis(100))
             .is_err());
@@ -2623,7 +3129,7 @@ mod tests {
         let _stuck = host.quit.drain.admit().unwrap();
 
         let started = Instant::now();
-        host.begin_quit(Duration::from_millis(200));
+        host.begin_quit(QuitReason::Quit, Duration::from_millis(200));
         quit_requested
             .recv_timeout(Duration::from_secs(5))
             .expect("the desktop is asked to exit when the grace ends");
@@ -2632,11 +3138,11 @@ mod tests {
     }
 
     #[test]
-    fn a_start_that_never_publishes_discovery_stops_by_itself() {
-        let directory = temp_home("discovery-stalls");
+    fn a_start_that_never_becomes_ready_stops_by_itself() {
+        let directory = temp_home("ready-stalls");
         let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
-        host.expect_discovery_by(Instant::now() + Duration::from_millis(100), move || {
+        host.expect_ready_by(Instant::now() + Duration::from_millis(100), move || {
             let _ = expired.send(());
         })
         .unwrap();
@@ -2646,11 +3152,11 @@ mod tests {
     }
 
     #[test]
-    fn publishing_discovery_cancels_the_stop() {
-        let directory = temp_home("discovery-published");
+    fn becoming_ready_cancels_the_stop() {
+        let directory = temp_home("ready-published");
         let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
-        host.expect_discovery_by(Instant::now() + Duration::from_millis(200), move || {
+        host.expect_ready_by(Instant::now() + Duration::from_millis(200), move || {
             let _ = expired.send(());
         })
         .unwrap();

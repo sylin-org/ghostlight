@@ -1,10 +1,15 @@
-//! Desktop workbench lifecycle, window activation, and local execution runners.
+//! Opening Ghostlight, serving, and the commands that need the service.
 //!
-//! This module coordinates process activation, single-instance workbench window
-//! presentation, runtime readiness waiting, policy inspection, and local `call` execution.
+//! Nothing here serves in the foreground except `serve` itself. A person's start (`open` or a
+//! bare launch) and a script's `call` find the service through a control opening, and when none
+//! answers they start one detached, as a `person` or a `command` start (ADR-0199 Decision 10),
+//! and then wait for it: `open` until the window is shown, `call` until the service is ready.
 
+use std::io;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use ghostlight_relay::protocol::StartReason;
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -24,49 +29,62 @@ pub enum ActivationState {
     Unreachable,
 }
 
-/// Start the orchestrator desktop application or activate an existing running instance.
-pub fn start_or_activate_desktop() -> anyhow::Result<()> {
-    match crate::cli::client::activate_workbench() {
-        Ok(true) => return Ok(()),
-        Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
-        Err(_) => {}
-    }
-    match crate::desktop::run(crate::desktop::Startup::interactive()) {
-        Ok(()) => Ok(()),
-        Err(start_error) if start_error.is::<crate::service::AuthorityAlreadyRunning>() => {
-            finish_activation(wait_for_workbench_activation(), Some(start_error))
-        }
-        Err(start_error) => Err(start_error),
+/// How the command line starts the service when none answers.
+pub trait Starter {
+    /// Start the service for `reason` without waiting for it.
+    fn start(&self, reason: StartReason) -> io::Result<()>;
+}
+
+/// The real starter: `bin/ghostlight serve --reason <reason>`, detached.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Detached;
+
+impl Starter for Detached {
+    fn start(&self, reason: StartReason) -> io::Result<()> {
+        ghostlight_relay::spawn::start_service(reason)
     }
 }
 
-/// Start the service and its backgrounded desktop for a connector, then run until quit.
+/// Run the service and its backgrounded desktop in this process, for a start made for `reason`,
+/// until a quit.
 ///
-/// This is the start an edge makes, so it differs from a human start in three ways. It never
-/// reveals a window. It exits 0 without a word when another service holds the lock, once it has
-/// asked for the lock for a second. And it stops by itself, with a nonzero status and a
-/// diagnostics event, when the endpoint is not bound within the discovery window.
-pub fn serve() -> anyhow::Result<()> {
-    let started = Instant::now();
-    settle_serve(crate::desktop::run(crate::desktop::Startup::serve(started)))
+/// The service never reveals a window on its own. It exits 0 without a word when another service
+/// already serves or when Quit holds a browser or recover start back, and it stops by itself,
+/// with a nonzero status and a diagnostics event, when it is not accepting openings in time.
+pub fn serve(reason: StartReason) -> anyhow::Result<()> {
+    settle_serve(crate::desktop::run(reason))
 }
 
-/// Turn how a `serve` start ended into its exit: finding the service already running is success.
+/// Turn how a `serve` start ended into its exit: finding the service already running, or being
+/// held back by Quit, is success.
 pub fn settle_serve(ended: anyhow::Result<()>) -> anyhow::Result<()> {
     match ended {
-        Err(error) if error.is::<crate::service::AuthorityAlreadyRunning>() => Ok(()),
+        Err(error)
+            if error.is::<crate::service::AuthorityAlreadyRunning>()
+                || error.is::<crate::service::QuitLatched>() =>
+        {
+            Ok(())
+        }
         other => other,
     }
 }
 
-/// Request an existing Ghostlight service or newly started service to reveal its window.
+/// Bring Ghostlight's window forward, starting the service first when none answers.
+///
+/// A bare launch and `open` are a person's start: the service is started as a `person` start,
+/// which a Quit does not hold back.
 pub fn open_desktop() -> anyhow::Result<()> {
+    open_with(&Detached)
+}
+
+/// Like [`open_desktop`], starting the service through `starter`.
+pub fn open_with(starter: &dyn Starter) -> anyhow::Result<()> {
     match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
         Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
         Err(_) => {}
     }
-    ghostlight_relay::spawn::start_service()?;
+    starter.start(StartReason::Person)?;
     finish_activation(wait_for_workbench_activation(), None)
 }
 
@@ -114,7 +132,7 @@ pub fn finish_activation(
 /// Invoke one tool, or a batch of them, against the local authority.
 ///
 /// A script that runs before anything else has started gets a service rather than an error: the
-/// command line starts `serve` the way a connector does.
+/// command line starts one as a `command` start.
 pub fn run_call() -> anyhow::Result<()> {
     let arguments: Vec<String> = std::env::args()
         .skip(1)
@@ -128,13 +146,20 @@ pub fn run_call() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
-    if crate::cli::client::readiness().is_err() {
-        ghostlight_relay::spawn::start_service()?;
-        wait_for_service()?;
-    }
+    reach_service(&Detached)?;
     let mut out = std::io::stdout().lock();
     let code = crate::cli::run(command, &mut out);
     std::process::exit(code);
+}
+
+/// Make sure a service answers, starting one as a `command` start through `starter` when none
+/// does.
+pub fn reach_service(starter: &dyn Starter) -> anyhow::Result<()> {
+    if crate::cli::client::readiness().is_err() {
+        starter.start(StartReason::Command)?;
+        wait_for_service()?;
+    }
+    Ok(())
 }
 
 /// Run local policy governance inspection commands.
@@ -157,75 +182,98 @@ pub fn wait_for_service() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
     use super::*;
+    use crate::workbench::{
+        WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+    };
 
     #[test]
-    fn serve_exits_quietly_while_another_service_holds_the_lock() {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-serve-decision-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        let running = crate::service::ServiceHost::start(&directory).unwrap();
-
-        let started = Instant::now();
-        let contended = crate::service::ServiceHost::start_with_token(
-            &directory,
-            Duration::from_millis(200),
-            || Ok(false),
-        )
-        .err()
-        .expect("the lock is held");
-        assert!(
-            started.elapsed() >= Duration::from_millis(200),
-            "a serve start asks for the lock for its whole wait"
-        );
-        assert!(settle_serve(Err(contended)).is_ok());
-
-        // Only a held lock is success; any other end of a start is still an error.
+    fn serve_settles_a_refusal_to_start_as_success_and_any_other_failure_as_failure() {
+        assert!(settle_serve(Err(crate::service::AuthorityAlreadyRunning.into())).is_ok());
+        assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
         assert!(settle_serve(Err(anyhow::anyhow!("native desktop construction failed"))).is_err());
         assert!(settle_serve(Ok(())).is_ok());
+    }
 
-        // A lock released inside the wait is taken, not reported as held.
-        let release = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            drop(running);
-        });
-        let taken = crate::service::ServiceHost::start_with_token(
-            &directory,
-            Duration::from_secs(5),
-            || Ok(false),
-        )
-        .unwrap();
-        release.join().unwrap();
-        drop(taken);
-        std::fs::remove_dir_all(directory).unwrap();
+    /// A starter that starts a real service in the test home and remembers why it was asked.
+    struct StartsAService {
+        home: std::path::PathBuf,
+        reasons: RefCell<Vec<StartReason>>,
+        host: RefCell<Option<crate::service::ServiceHost>>,
+        reveals: Arc<Reveals>,
+    }
+
+    /// Counts the times the workbench was asked to come forward.
+    #[derive(Default)]
+    struct Reveals(AtomicUsize);
+
+    impl WorkbenchPresentationPort for Reveals {
+        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn notify(&self, _: WorkbenchNotification) -> Result<(), WorkbenchPresentationError> {
+            Ok(())
+        }
+    }
+
+    impl StartsAService {
+        fn new(home: &crate::service::test_home::TestHome) -> Self {
+            Self {
+                home: home.path().to_path_buf(),
+                reasons: RefCell::default(),
+                host: RefCell::default(),
+                reveals: Arc::default(),
+            }
+        }
+    }
+
+    impl Starter for StartsAService {
+        fn start(&self, reason: StartReason) -> io::Result<()> {
+            self.reasons.borrow_mut().push(reason);
+            let host = crate::service::ServiceHost::start(&self.home).map_err(io::Error::other)?;
+            host.publish_ready().map_err(io::Error::other)?;
+            host.workbench.attach_presentation(self.reveals.clone());
+            *self.host.borrow_mut() = Some(host);
+            Ok(())
+        }
     }
 
     #[test]
-    fn a_serve_start_waits_for_the_lock_and_a_human_start_does_not() {
-        let started = Instant::now();
-        let serve = crate::desktop::Startup::serve(started);
-        assert_eq!(serve.lock_wait, Duration::from_secs(1));
+    fn open_with_no_service_starts_one_for_a_person_and_shows_it() {
+        let home = crate::service::test_home::TestHome::new("open-starts");
+        let starter = StartsAService::new(&home);
+        open_with(&starter).unwrap();
+        assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
+        assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 1);
+
+        // With a service already answering, open starts nothing and shows it again.
+        open_with(&starter).unwrap();
+        assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
+        assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_call_with_no_service_starts_one_as_a_command_start() {
+        let home = crate::service::test_home::TestHome::new("call-starts");
+        let starter = StartsAService::new(&home);
+        reach_service(&starter).unwrap();
+        assert_eq!(*starter.reasons.borrow(), [StartReason::Command]);
+        reach_service(&starter).unwrap();
         assert_eq!(
-            serve.discovery_deadline,
-            Some(started + crate::service::lifetime::DISCOVERY_WINDOW)
+            *starter.reasons.borrow(),
+            [StartReason::Command],
+            "a service that answers is not started again"
         );
-        let human = crate::desktop::Startup::interactive();
-        assert_eq!(human.lock_wait, Duration::ZERO);
-        assert!(human.discovery_deadline.is_none());
     }
 
     #[test]
     fn open_waits_for_delayed_native_presentation_and_reveals_once() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
-
-        use crate::workbench::{
-            WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
-        };
-
         struct DelayedPresentation(AtomicUsize);
 
         impl WorkbenchPresentationPort for DelayedPresentation {

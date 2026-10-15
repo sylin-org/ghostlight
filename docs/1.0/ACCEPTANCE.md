@@ -40,8 +40,14 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
      processes renegotiate and complete new work without replaying the interrupted effect.
 13. After either connector fails to find the service, it uses the one shared lifecycle seam to
-     start only the exact sibling `ghostlight` executable with no application arguments and
-     continues its existing reconnect loop.
+     start only the exact sibling `ghostlight` executable as `serve --reason <word>` (`agent` for
+     the MCP connector, `browser` for the browser connector) and continues its existing reconnect
+     loop. The MCP connector starts it again for each held request; the browser connector starts
+     it once, at its own start, and never while waiting. `serve` without a reason is a usage
+     error, a start that finds the lock held exits 0 at once, and only an `update` start waits for
+     it. Quit holds until an agent request, a command that needs Ghostlight, or a person starts
+     it; a browser restart does not bring it back. Before it closes its streams the service says
+     goodbye (`quit`, `replace` or `uninstall`), and each connector acts on the reason.
 14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
      indefinitely.
     Package downloads use one permanent bin directory across releases. Verify all three
@@ -55,10 +61,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     cooldown. Failed children are reaped, discovery remains unpublished, and corrected
     desktop context recovers automatically. Only lease contention waits for
     another authority's workbench (ADR-0166).
-16. An explicit `ghostlight open` reveals the existing authenticated authority's workbench without
-    a new listener or workspace. When absent, it asks the shared lifecycle seam to start the same
-    no-argument sibling used by connectors, then activates it. No supported launch creates an
-    authority that refuses presentation by design.
+16. An explicit `ghostlight open`, and a launch with no arguments, reveal the existing
+    authenticated authority's workbench without a new listener or workspace. When absent, they ask
+    the shared lifecycle seam to start the sibling as `serve --reason person`, wait for an accepted
+    opening, and send control `show`. Nothing serves in the foreground. No supported launch creates
+    an authority that refuses presentation by design.
 17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
     unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
     becomes unavailable, while a silent browser operation stays available when its independent

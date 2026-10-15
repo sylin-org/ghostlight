@@ -209,6 +209,18 @@ impl SocketWriter {
         self.native_until(value, Instant::now() + DELIVERY_TIMEOUT)
     }
 
+    /// Send one frame whose payload is already bytes, within the bounded delivery budget.
+    pub fn raw(&self, payload: &[u8]) -> Result<(), FrameError> {
+        let result = self
+            .until(Instant::now() + DELIVERY_TIMEOUT)
+            .map_err(FrameError::from)
+            .and_then(|mut writer| frame::write_frame_raw(&mut writer, payload));
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
+
     /// Send a native frame with a caller-supplied total deadline (also used for human controls).
     pub fn native_until<T: Serialize>(
         &self,

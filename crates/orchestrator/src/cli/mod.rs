@@ -282,9 +282,8 @@ fn report_transport(error: &ClientError) -> i32 {
 pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
     match mode {
         parse::LaunchMode::DeploymentInstall(request) => deployment::run(&request),
-        parse::LaunchMode::Desktop => desktop::start_or_activate_desktop(),
-        parse::LaunchMode::Serve => desktop::serve(),
-        parse::LaunchMode::Open => desktop::open_desktop(),
+        parse::LaunchMode::Desktop | parse::LaunchMode::Open => desktop::open_desktop(),
+        parse::LaunchMode::Serve(reason) => desktop::serve(reason),
         parse::LaunchMode::Call => desktop::run_call(),
         parse::LaunchMode::Diagnostics(command) => diagnostics::run(&command),
         parse::LaunchMode::Policy(command) => desktop::run_policy(&command),

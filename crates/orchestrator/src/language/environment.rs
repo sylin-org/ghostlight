@@ -21,6 +21,10 @@ const KERNEL_RELEASE_PATH: &str = "/proc/sys/kernel/osrelease";
 /// What the service says when it is started with an elevated Windows token.
 pub const ELEVATED_SERVICE: &str = "Ghostlight does not run with administrator rights. Start it from a regular terminal or from the Start menu.";
 
+/// What the service records when a browser or recovery start finds that the person quit
+/// Ghostlight, and so does not bring it back.
+pub const QUIT_HELD: &str = "Ghostlight was quit, so this start did not bring it back.";
+
 /// One row of the environment table.
 ///
 /// Rows are distinguished only where Ghostlight has something different to say. A desktop shell

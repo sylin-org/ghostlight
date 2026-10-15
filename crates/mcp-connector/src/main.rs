@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::home;
 use ghostlight_relay::log::{self, Component, Event as LogEvent};
-use ghostlight_relay::protocol::{self, Opening, Reply};
+use ghostlight_relay::protocol::{self, Opening, Reply, StartReason};
 use ghostlight_relay::spawn;
 use ghostlight_relay::watchdog::ParentWatchdog;
 use ghostlight_relay::OPENING_DEADLINE;
@@ -32,8 +32,8 @@ impl Service for InstalledService {
         protocol::connect(&home::home()?, opening, Instant::now() + OPENING_DEADLINE)
     }
 
-    fn start(&self) -> io::Result<()> {
-        spawn::start_service()
+    fn start(&self, reason: StartReason) -> io::Result<()> {
+        spawn::start_service(reason)
     }
 }
 

@@ -104,8 +104,9 @@ The edge parses no MCP. It forwards lines, answers outstanding requests from the
 when the service goes away, and holds new lines for a bounded time while it starts the service.
 
 **`browser`.** The stream carries the adapter protocol untouched in both directions. The edge
-holds the extension's first frame, opens the stream, sends that frame and then pumps bytes. The
-only frame that is not the adapter's is the goodbye (section 6). While the service is away the edge
+holds the extension's first frame, opens the stream, sends that frame and then pumps bytes. When
+no service answers, it starts one once, as a `browser` start, and keeps connecting. The only frame
+that is not the adapter's is the goodbye (section 6). While the service is away the edge
 writes the adapter's `backend_unavailable` frame to the extension and never starts the service
 while it waits.
 
@@ -120,7 +121,8 @@ while it waits.
 
 An accepted control opening is answered by one frame, `{"kind": "result", "value": ...}`, and the
 stream closes. The value is the service's to define. The 2.0 service answers `readiness` with its
-readiness summary, `status` with `{service, instance, pid}`, `show` with `{shown}` (whether a
+readiness summary, `status` with `{service, instance, pid, started_by}` (`started_by` is the start
+reason the service was started with), `show` with `{shown}` (whether a
 window came forward) and `quit` with `{quitting: true}`. An operation this revision does not know
 is refused as `unsupported`.
 
@@ -141,19 +143,26 @@ What each peer does:
 
 | Reason | MCP edge | Browser edge | Shell |
 |---|---|---|---|
-| `quit` | Answers held lines, then exits. | Waits. It does not start the service. | Exits. |
-| `replace` | Holds lines and reconnects. | Recycles: exits so the extension reconnects with a fresh hello. | Shows Updating. |
-| `uninstall` | Exits. | Exits. | Exits. |
+| `quit` | Answers every outstanding request from the `cut_off` template and holds nothing. The next request starts the service again, as an `agent` start. | Tells the extension the service is away, waits, never starts the service, and exits when a service accepts again. | Exits. |
+| `replace` | Answers outstanding requests as cut off, then holds lines and reconnects without starting the service for up to the hold limit. After that it behaves as after a lost connection. | As for `quit`: it exits when a service accepts again, so the extension reconnects with a fresh hello. | Shows Updating. |
+| `uninstall` | Answers outstanding requests as cut off, then exits. | Exits at once. | Exits. |
 | `session_end` | Exits. | Exits. | Exits. |
 
+The service sends the goodbye after in-flight work has finished and before it closes the streams.
 A stream that ends without a goodbye is a crash: MCP edges answer cut-off requests from the templates and resume by
 token; browser edges exit on the next accepted opening.
 
 ## 7. Start reasons
 
 Every start of the service carries a reason: `agent`, `browser`, `command`, `person`, `recover` or
-`update`. The service writes `state/quit` when it quits; while that file exists a `browser` or
-`recover` start is refused, and any other start deletes it.
+`update`. A starter passes it as `serve --reason <word>`; `serve` without one of the six is a usage
+error. The service writes `state/quit` when a person quits (the tray, the workbench, or control
+`quit` with reason `quit`), before it exits. In order, a starting service refuses a wrong image
+and an elevated token, then, for a `browser` or `recover` start, exits 0 at once while that file
+exists. It then takes `run/service.lock`: a start that finds the lock held exits 0 at once, except
+`update`, which waits up to 30 s. Only after it holds the lock does any other start delete the
+file and open state. A service that is not accepting openings within 30 s of taking the lock
+exits with a nonzero status.
 
 | Reason | Who uses it | After a quit |
 |---|---|---|

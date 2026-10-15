@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use ghostlight_relay::home::{SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE};
 use ghostlight_relay::private;
-use ghostlight_relay::protocol::{Control, QuitReason};
+use ghostlight_relay::protocol::{Control, QuitReason, StartReason};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -151,7 +151,8 @@ pub trait ProcessControl {
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
     /// Whether any process runs one of `images`.
     fn is_running(&self, images: &[PathBuf]) -> bool;
-    /// Start `bin/ghostlight serve` in `layout`'s home, detached, without waiting for it.
+    /// Start `bin/ghostlight serve --reason update` in `layout`'s home, detached, without waiting
+    /// for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
     /// Wait up to 30 s for the service of `layout`'s home to answer an accepted control status
     /// whose instance is not `previous`.
@@ -209,8 +210,12 @@ impl ProcessControl for SystemProcessControl {
     }
 
     fn start_serve(&self, layout: &Layout) -> io::Result<()> {
-        ghostlight_relay::spawn::spawn_serve(&layout.service_executable(), layout.home())
-            .map(|_| ())
+        ghostlight_relay::spawn::spawn_serve(
+            &layout.service_executable(),
+            layout.home(),
+            StartReason::Update,
+        )
+        .map(|_| ())
     }
 
     fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> bool {
@@ -1799,6 +1804,7 @@ mod tests {
                         service: "2.0.0".to_owned(),
                         instance: "instance_new".to_owned(),
                         pid: std::process::id(),
+                        started_by: StartReason::Update,
                     },
                 )
                 .unwrap();

@@ -28,6 +28,10 @@ pub const INSTALL_LOCK_NAME: &str = "install.lock";
 /// Directory of the service's own state: audit log, harness locations, handoff marker.
 pub const STATE_DIRECTORY_NAME: &str = "state";
 
+/// The quit latch under the state directory: a person's Quit writes it, and a browser or recover
+/// start that finds it does not bring Ghostlight back.
+pub const QUIT_LATCH_NAME: &str = "quit";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
 
@@ -147,6 +151,12 @@ impl Layout {
         self.home.join(STATE_DIRECTORY_NAME)
     }
 
+    /// The quit latch: `home/state/quit`.
+    #[must_use]
+    pub fn quit_latch(&self) -> PathBuf {
+        self.state().join(QUIT_LATCH_NAME)
+    }
+
     /// The user policy directory: `home/policy`.
     #[must_use]
     pub fn policy(&self) -> PathBuf {
@@ -190,6 +200,7 @@ mod tests {
         assert_eq!(layout.run(), home.join("run"));
         assert_eq!(layout.service_lock(), home.join("run").join("service.lock"));
         assert_eq!(layout.state(), home.join("state"));
+        assert_eq!(layout.quit_latch(), home.join("state").join("quit"));
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));
     }

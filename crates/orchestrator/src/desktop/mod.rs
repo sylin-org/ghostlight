@@ -5,9 +5,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use ghostlight_relay::protocol::{QuitReason, StartReason};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
@@ -22,8 +22,8 @@ use crate::governance::effective::EffectiveAuthority;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSetupResult, HarnessSummary,
 };
-use crate::service::lifetime::DISCOVERY_WINDOW;
-use crate::service::ServiceHost;
+use crate::service::lifetime::QUIT_GRACE;
+use crate::service::{Quit, ServiceHost};
 use crate::workbench::{
     PolicyPreview, SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink,
     WorkbenchFacade, WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
@@ -37,43 +37,14 @@ const SEARCH_QUERY_LIMIT: usize = 120;
 const POLICY_DOCUMENT_LIMIT: usize = 256 * 1024;
 /// Single channel the disposable workbench listens on for sequenced orchestrator changes.
 const CHANGE_EVENT: &str = "ghostlight://change";
-/// How long a `serve` start keeps asking for the service lock while another process holds it.
-const SERVE_LOCK_WAIT: Duration = Duration::from_secs(1);
-/// The status a `serve` start exits with when it never bound its endpoint.
-pub const DISCOVERY_STALLED_EXIT: i32 = 3;
-
-/// How a desktop process was asked to start.
-#[derive(Clone, Copy, Debug)]
-pub struct Startup {
-    /// How long to keep asking for the service lock while another process holds it.
-    pub lock_wait: Duration,
-    /// When the endpoint must be bound by. A start that misses it stops by itself.
-    pub discovery_deadline: Option<Instant>,
-}
-
-impl Startup {
-    /// A person asked for Ghostlight: take the lock or yield at once, and wait for nothing.
-    #[must_use]
-    pub const fn interactive() -> Self {
-        Self {
-            lock_wait: Duration::ZERO,
-            discovery_deadline: None,
-        }
-    }
-
-    /// An edge asked for the service: wait briefly for the lock, and stop by itself if the
-    /// endpoint is not bound within the discovery window of `process_start`.
-    #[must_use]
-    pub fn serve(process_start: Instant) -> Self {
-        Self {
-            lock_wait: SERVE_LOCK_WAIT,
-            discovery_deadline: Some(process_start + DISCOVERY_WINDOW),
-        }
-    }
-}
+/// The status a `serve` start exits with when it never bound its endpoint in time.
+pub const READY_STALLED_EXIT: i32 = 3;
 
 struct DesktopState {
     workbench: WorkbenchFacade,
+    /// A person's Quit from the tray or the workbench goes through the service, which sets the
+    /// quit latch and says goodbye before the desktop exits.
+    quit: Quit,
     window_lifecycle: Mutex<WindowLifecycle>,
 }
 
@@ -119,18 +90,21 @@ impl WorkbenchEventSink for NativeEvents {
     }
 }
 
-/// Start the orchestrator and its backgrounded desktop workbench in one process.
-pub fn run(startup: Startup) -> Result<()> {
+/// Start the service and its backgrounded desktop in this process, for a start made for `reason`.
+///
+/// The process stops by itself, with [`READY_STALLED_EXIT`], when it is not accepting openings
+/// within the ready limit of taking the service lock.
+pub fn run(reason: StartReason) -> Result<()> {
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
 
     let host = Arc::new(ServiceHost::start_waiting(
         &ghostlight_relay::home::home()?,
-        startup.lock_wait,
+        reason,
     )?);
-    if let Some(deadline) = startup.discovery_deadline {
-        host.expect_discovery_by(deadline, || std::process::exit(DISCOVERY_STALLED_EXIT))?;
-    }
+    host.expect_ready_by(host.ready_deadline(), || {
+        std::process::exit(READY_STALLED_EXIT)
+    })?;
     let ready_host = Arc::clone(&host);
     let workbench = host.workbench.clone();
     let setup_workbench = workbench.clone();
@@ -147,6 +121,7 @@ pub fn run(startup: Startup) -> Result<()> {
         .plugin(tauri_plugin_opener::init())
         .manage(DesktopState {
             workbench,
+            quit: host.quit_handle(),
             window_lifecycle: Mutex::new(WindowLifecycle::default()),
         })
         .invoke_handler(tauri::generate_handler![
@@ -304,7 +279,7 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
             "open" => reveal_from_tray(app),
             "hold" => apply_tray_intent(app, WorkbenchRuntimeIntent::Hold),
             "resume" => apply_tray_intent(app, WorkbenchRuntimeIntent::Resume),
-            "quit" => app.exit(0),
+            "quit" => quit_by_person(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -814,9 +789,17 @@ fn open_destination(destination: WorkbenchDestination, app: AppHandle) -> Result
         .map_err(|error| error.to_string())
 }
 
+/// A person's Quit: the service sets the latch, finishes what is in flight, says goodbye on every
+/// stream and then asks this desktop to exit.
+fn quit_by_person(app: &AppHandle) {
+    app.state::<DesktopState>()
+        .quit
+        .begin(QuitReason::Quit, QUIT_GRACE);
+}
+
 #[tauri::command]
 fn quit_ghostlight(app: AppHandle) {
-    app.exit(0);
+    quit_by_person(&app);
 }
 
 fn validate_search_query(query: &str) -> Result<(), String> {
