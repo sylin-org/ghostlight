@@ -45,15 +45,17 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   });
   // The problems that make a fill refuse with the option code; any other refuses as not fillable.
   const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionAmbiguous, FIELD_PROBLEMS.optionDisabled]);
-  // What a refusal says when the service cannot read its detail, by the first problem it names.
-  const PROBLEM_MESSAGES = Object.freeze({
-    [FIELD_PROBLEMS.optionMissing]: "select option not found",
-    [FIELD_PROBLEMS.optionAmbiguous]: "select option is ambiguous",
-    [FIELD_PROBLEMS.optionDisabled]: "select option not found (option is disabled)",
-    [FIELD_PROBLEMS.multipleValues]: "target takes one value, not a list",
-    [FIELD_PROBLEMS.notBoolean]: "target takes true or false"
-  });
+  // What a refusal says when the service cannot read its detail. The prefix follows the code, so
+  // a service that predates the detail reads the failure the same way. A lone problem adds its
+  // own words after the prefix.
+  const OPTION_MESSAGE = "select option not found";
   const NOT_FILLABLE_MESSAGE = "target is not fillable";
+  const PROBLEM_WORDS = Object.freeze({
+    [FIELD_PROBLEMS.optionAmbiguous]: "option is ambiguous",
+    [FIELD_PROBLEMS.optionDisabled]: "option is disabled",
+    [FIELD_PROBLEMS.multipleValues]: "takes one value, not a list",
+    [FIELD_PROBLEMS.notBoolean]: "takes true or false"
+  });
   // How a fill value matched a choice when it was not the exact text, value or label.
   const MATCH_NORMALIZED = "normalized";
   // The words a checkbox or radio takes besides the booleans, compared without case.
@@ -1021,6 +1023,7 @@ ${line}` : line;
     const cleared = chosen.length === 1 && chosen[0] === placeholder;
     return {
       normalized,
+      element: select,
       apply() {
         if (multiple) for (const option of Array.from(select.options)) option.selected = wanted.has(option);
         else chosen[0].selected = true;
@@ -1043,6 +1046,7 @@ ${line}` : line;
     if (wanted === undefined) return { problem: { problem: FIELD_PROBLEMS.notBoolean } };
     return {
       normalized: false,
+      element: box,
       apply() { setNativeChecked(box, wanted); },
       holds() { return box.checked === wanted; },
       reading() { return box.checked ? "checked" : "unchecked"; }
@@ -1072,8 +1076,8 @@ ${line}` : line;
   }
 
   // What a fill value does to a radio. A JSON boolean applies to this radio. A string names the
-  // radio of the group whose label it matches, and that radio is the one set; a string that names
-  // none but is a boolean word applies to this radio.
+  // radio of the group whose label it matches, and that radio is the one set, focused and told of
+  // the change; a string that names none but is a boolean word applies to this radio.
   function resolveRadio(radio, value) {
     let target = radio;
     let wanted = typeof value === "boolean" ? value : true;
@@ -1094,18 +1098,24 @@ ${line}` : line;
     }
     return {
       normalized,
+      element: target,
       apply() { setNativeChecked(target, wanted); },
       holds() { return target.checked === wanted; },
-      reading() {
-        if (target === radio) return radio.checked ? "checked" : "unchecked";
-        return target.checked ? oneLine(accessibleName(target)) : "unchecked";
+      // What the addressed radio holds. A radio picked through a sibling's label is not the one
+      // that changed, so its own reading never claims the sibling's label.
+      reading() { return radio.checked ? "checked" : "unchecked"; },
+      // The sibling picked in the addressed radio's place and the group, once the page holds it.
+      picked() {
+        if (target === radio || !target.checked) return undefined;
+        return { label: shared.bounded(oneLine(accessibleName(target)), OPTION_TEXT_MAX), group: controlGroup(radio) };
       }
     };
   }
 
   // What a fill value does to a native choice control, or null for a control that is not one.
   // One function backs the check before a fill, the fill itself and the check that the page kept
-  // it, so they cannot disagree. A result with a `problem` changes nothing.
+  // it, so they cannot disagree. A result with a `problem` changes nothing. Its `element` is the
+  // control the fill changes: a sibling when a radio is picked by another radio's label.
   function resolveChoice(element, value) {
     const kind = element instanceof HTMLSelectElement ? "select"
       : element instanceof HTMLInputElement && element.type === "checkbox" ? "checkbox"
@@ -1126,6 +1136,7 @@ ${line}` : line;
       throw new AssetError("not_fillable", NOT_FILLABLE_MESSAGE);
     }
     const resolved = resolveChoice(element, value);
+    if (resolved && !resolved.problem && resolved.element !== element) requireActionable(resolved.element, "fill");
     if (resolved) return { choice: resolved.problem ? null : resolved, problem: resolved.problem ?? null };
     if (Array.isArray(value)) return { choice: null, problem: { problem: FIELD_PROBLEMS.multipleValues } };
     return { choice: null, problem: null };
@@ -1135,8 +1146,9 @@ ${line}` : line;
   // service turns into a sentence: it never holds the value the caller gave.
   function fieldProblemsError(problems, withDetail) {
     const options = problems.every((problem) => OPTION_PROBLEMS.has(problem.problem));
-    let message = PROBLEM_MESSAGES[problems[0].problem] ?? NOT_FILLABLE_MESSAGE;
-    if (problems.length > 1) message += ` (${problems.length} fields refused)`;
+    let message = options ? OPTION_MESSAGE : NOT_FILLABLE_MESSAGE;
+    const words = problems.length > 1 ? `${problems.length} fields refused` : PROBLEM_WORDS[problems[0].problem];
+    if (words) message += ` (${words})`;
     return new AssetError(options ? "option_missing" : "not_fillable", message, withDetail ? boundedDetail(problems) : undefined);
   }
 
@@ -1259,6 +1271,11 @@ ${line}` : line;
       const echo = { field: index, now };
       if (state === "reformatted") echo.tolerated = true;
       if (choice?.normalized) echo.matched = MATCH_NORMALIZED;
+      const picked = choice?.picked?.();
+      if (picked) {
+        echo.picked = picked.label;
+        if (picked.group) echo.group = picked.group;
+      }
       echoes.push(echo);
     }
     return echoes;
@@ -1353,11 +1370,12 @@ ${line}` : line;
   function fillLocalElement(element, value, allowCredentials = false) {
     if (isTextual(element)) throw new AssetError("invalid_request", "text target requires browser input");
     const choice = validateFillElement(element, value, allowCredentials);
-    element.scrollIntoView({ block: "center", inline: "center" });
-    element.focus({ preventScroll: true });
+    const changed = choice?.element ?? element;
+    changed.scrollIntoView({ block: "center", inline: "center" });
+    changed.focus({ preventScroll: true });
     if (choice) choice.apply(); else setNativeValue(element, String(value));
-    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    changed.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    changed.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 
   function requireActionable(element, intent) {

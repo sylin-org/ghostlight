@@ -563,7 +563,8 @@ impl RejectedField {
                 format!("Repeat browser_fill_form with {target} set to one of the offered options.")
             }
             FieldProblemKind::OptionAmbiguous if self.is_radio() => {
-                format!("Repeat with true for {target}, which sets that radio itself.")
+                "Find the radio you mean with browser_find, then fill that radio's own handle with true."
+                    .into()
             }
             FieldProblemKind::OptionAmbiguous => {
                 format!("Repeat with the option's value for {target}.")
@@ -1123,6 +1124,21 @@ mod tests {
             vec![format!(
                 "Repeat with one of the offered labels for {HANDLE}."
             )]
+        );
+    }
+
+    #[test]
+    fn two_radios_with_one_label_send_the_model_to_the_radio_it_means() {
+        let problem = json!({"field": 0, "problem": "option_ambiguous",
+            "options": ["Yes", "Yes"], "group": "Subscribe"});
+        let refusal = one(problem, TargetRole::Radio, "No", "yes", true);
+        assert_eq!(
+            refusal.summary(),
+            "Nothing was changed. \"yes\" matches 2 options of the \"Subscribe\" radio button: Yes, Yes."
+        );
+        assert_eq!(
+            refusal.next_steps(),
+            vec!["Find the radio you mean with browser_find, then fill that radio's own handle with true.".to_owned()]
         );
     }
 

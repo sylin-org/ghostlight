@@ -10,6 +10,10 @@
 //!
 //! A choice the page matched only after normalizing the given value says so (ADR-0198 Decision 8),
 //! in the facts as `match` and in the sentence as the value that was given.
+//!
+//! A radio picked through a sibling's label is not the radio the handle names, and that radio now
+//! reads `unchecked`. Its fact keeps that reading and adds `picked` and `group`, and its sentence
+//! speaks of the group (`Plan = Pro`) or, with no group name, of the pick (`Pro is checked`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -28,6 +32,10 @@ const NO_VALUE: &str = "no value";
 
 /// The fact key that says how a given value matched a choice.
 const MATCH_KEY: &str = "match";
+/// The fact key that names the sibling radio a fill picked in the addressed radio's place.
+const PICKED_KEY: &str = "picked";
+/// The fact key that names the choice group of a radio picked through a sibling.
+const GROUP_KEY: &str = "group";
 
 /// How a given value matched a choice when it was not the option's exact text, value or label.
 /// An exact match is the unremarkable case and carries no mark.
@@ -49,6 +57,13 @@ impl ChoiceMatch {
     }
 }
 
+/// The sibling radio a fill picked in place of the one addressed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Picked {
+    label: String,
+    group: Option<String>,
+}
+
 /// One filled field and what the page holds in it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HeldField {
@@ -56,7 +71,9 @@ pub struct HeldField {
     subject: ActionSubject,
     now: String,
     tolerated: bool,
+    named: bool,
     matched: Option<(ChoiceMatch, String)>,
+    picked: Option<Picked>,
 }
 
 impl HeldField {
@@ -77,8 +94,22 @@ impl HeldField {
             subject: ActionSubject::with_role(role, name, preserve_names),
             now: now.to_owned(),
             tolerated,
+            named: preserve_names,
             matched: None,
+            picked: None,
         }
+    }
+
+    /// Say the fill picked the sibling radio labelled `label`, in the group `group` when it has a
+    /// name, rather than the radio this field addressed. The field's own reading stays as the
+    /// page gave it.
+    #[must_use]
+    pub fn picked(mut self, label: &str, group: Option<&str>) -> Self {
+        self.picked = Some(Picked {
+            label: label.to_owned(),
+            group: group.map(str::to_owned),
+        });
+        self
     }
 
     /// Say the page matched this choice by `how`, and which value the caller gave. The given
@@ -94,8 +125,16 @@ impl HeldField {
     #[must_use]
     pub fn fact(&self) -> Value {
         let mut fact = json!({"target": self.target, "now": self.now});
-        if let (Some((how, _)), Value::Object(members)) = (&self.matched, &mut fact) {
-            members.insert(MATCH_KEY.into(), json!(how.as_str()));
+        if let Value::Object(members) = &mut fact {
+            if let Some((how, _)) = &self.matched {
+                members.insert(MATCH_KEY.into(), json!(how.as_str()));
+            }
+            if let Some(picked) = &self.picked {
+                members.insert(PICKED_KEY.into(), json!(picked.label));
+                if let Some(group) = &picked.group {
+                    members.insert(GROUP_KEY.into(), json!(group));
+                }
+            }
         }
         fact
     }
@@ -118,13 +157,34 @@ impl HeldField {
         }
     }
 
+    /// How a radio picked through a sibling reads: `Plan = Pro` in a named group, `Pro is checked`
+    /// without one. Page names reach a sentence only when the snapshot preserves them.
+    fn pick(&self, picked: &Picked) -> Option<String> {
+        if !self.named {
+            return None;
+        }
+        let label = page_text(&picked.label, NOW_MAX_CHARS);
+        let group = picked
+            .group
+            .as_deref()
+            .map(|group| page_text(group, NAME_MAX_CHARS))
+            .filter(|group| !group.is_empty());
+        Some(match group {
+            Some(group) => format!("{group} = {label}"),
+            None => format!("{label} is checked"),
+        })
+    }
+
     /// How a choice or typed control reads: `Role = Administrator`, and after a normalized match
     /// `Role = Administrator (matched "administrator")`.
     fn assignment(&self) -> Option<String> {
         if self.tolerated {
             return None;
         }
-        let mut reading = format!("{} = {}", self.name()?, self.value());
+        let mut reading = match &self.picked {
+            Some(picked) => self.pick(picked)?,
+            None => format!("{} = {}", self.name()?, self.value()),
+        };
         if let Some((_, given)) = &self.matched {
             reading.push_str(&format!(
                 " (matched \"{}\")",
@@ -234,6 +294,47 @@ mod tests {
         let readings = readings(&held);
         assert_eq!(readings.after_clause(), Some("Role = Administrator"));
         assert_eq!(readings.trailing(), " Phone now reads \"(555) 123-4567\".");
+    }
+
+    #[test]
+    fn a_radio_picked_through_a_sibling_speaks_of_the_group_not_the_addressed_radio() {
+        let held = [field(TargetRole::Radio, "Free", "unchecked", false, true)
+            .matched(ChoiceMatch::Normalized, "pro")
+            .picked("Pro", Some("Plan"))];
+        assert_eq!(
+            readings(&held).after_clause(),
+            Some("Plan = Pro (matched \"pro\")")
+        );
+        assert_eq!(
+            facts(&held),
+            Some(json!([{
+                "target": HANDLE,
+                "now": "unchecked",
+                "match": "normalized",
+                "picked": "Pro",
+                "group": "Plan"
+            }]))
+        );
+        let ungrouped =
+            [field(TargetRole::Radio, "Free", "unchecked", false, true).picked("Pro", None)];
+        assert_eq!(readings(&ungrouped).after_clause(), Some("Pro is checked"));
+        assert_eq!(
+            facts(&ungrouped),
+            Some(json!([{"target": HANDLE, "now": "unchecked", "picked": "Pro"}]))
+        );
+        let unnamed =
+            [field(TargetRole::Radio, "Free", "unchecked", false, false)
+                .picked("Pro", Some("Plan"))];
+        assert_eq!(readings(&unnamed).after_clause(), None);
+        assert_eq!(
+            facts(&unnamed),
+            Some(json!([{
+                "target": HANDLE,
+                "now": "unchecked",
+                "picked": "Pro",
+                "group": "Plan"
+            }]))
+        );
     }
 
     #[test]

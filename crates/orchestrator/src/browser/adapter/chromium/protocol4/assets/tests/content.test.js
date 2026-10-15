@@ -2098,10 +2098,24 @@ async function fillChoice(harness, label, value) {
   return { filled, verified };
 }
 
-/** A visible radio button labelled `label` in the radio group `group`, inside `parent` when given. */
+/**
+ * A visible radio button labelled `label` in the radio group `group`, inside `parent` when given.
+ * Checking it unchecks the others of its group, as a browser does.
+ */
 function groupedRadio(harness, label, group, props = {}, parent = null) {
   const radio = harness.newInput(label, { type: "radio", checked: false, ...props });
   radio.setAttribute("name", group);
+  let held = radio.checked === true;
+  Object.defineProperty(radio, "checked", {
+    get: () => held,
+    set: (value) => {
+      held = value === true;
+      if (!held) return;
+      for (const other of harness.document.querySelectorAll("input")) {
+        if (other !== radio && other.type === "radio" && other.getAttribute("name") === group) other.checked = false;
+      }
+    }
+  });
   if (parent) {
     radio.remove();
     parent.appendChild(radio);
@@ -2297,9 +2311,41 @@ test("a radio is chosen by the label of a sibling in its group", async () => {
   assert.equal(filled.ok, true);
   assert.equal(pro.checked, true);
   assert.equal(other.checked, false);
+  assert.deepEqual(pro.events, ["input", "change"]);
+  assert.deepEqual(free.events, []);
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "unchecked", matched: "normalized", picked: "Pro" }] });
+});
+
+test("a radio picked by a sibling's label reports the group and not the addressed radio's state", async () => {
+  const harness = contentHarness();
+  const fieldset = harness.element("fieldset");
+  const legend = harness.element("legend");
+  legend.append(harness.text("Plan"));
+  fieldset.append(legend);
+  harness.document.body.append(fieldset);
+  groupedRadio(harness, "Free", "plan", { checked: true }, fieldset);
+  groupedRadio(harness, "Pro", "plan", {}, fieldset);
+
+  const { verified } = await fillChoice(harness, "Free", "Pro");
+
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "unchecked", picked: "Pro", group: "Plan" }] });
+});
+
+test("a sibling radio that cannot be acted on refuses the fill and nothing changes", async () => {
+  const harness = contentHarness();
+  const free = groupedRadio(harness, "Free", "plan", { checked: true });
+  const pro = groupedRadio(harness, "Pro", "plan");
+  pro.hidden = true;
+
+  const refused = await prepareRefusal(harness, [["Free", "Pro"]]);
+  const local = await harness.send({ kind: "fill_local", field: { locator: await harness.locatorOf("Free"), value: "Pro" }, allow_credentials: false });
+
+  assert.equal(refused.error.code, "not_visible");
+  assert.equal(local.error.code, "not_visible");
+  assert.equal(free.checked, true);
+  assert.equal(pro.checked, false);
   assert.deepEqual(pro.events, []);
-  assert.deepEqual(free.events, ["input", "change"]);
-  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Pro", matched: "normalized" }] });
+  assert.deepEqual(free.events, []);
 });
 
 test("a radio given a boolean word that names no label applies it to the targeted radio", async () => {
@@ -2313,7 +2359,7 @@ test("a radio given a boolean word that names no label applies it to the targete
     assert.equal(free.checked, true, String(value));
     assert.deepEqual(verified.value.fields, [{ field: 0, now: "checked" }], String(value));
   }
-  assert.equal(pro.checked, true);
+  assert.equal(pro.checked, false);
 });
 
 test("a JSON boolean applies to the targeted radio even when a sibling is labelled with the word", async () => {
@@ -2377,6 +2423,25 @@ test("the check before a fill, the fill and the retained check agree on every ch
   const verified = await harness.send({ kind: "verify_fill_retained", fields: wire, stable_ms: 10, poll_ms: 5, limit_ms: 100 });
 
   assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "Administrator", matched: "normalized" }, { field: 1, now: "checked" }] });
+});
+
+test("a refusal that mixes option problems with others is not fillable and says so in both code and message", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Role", ROLES);
+  harness.newInput("Agree", { type: "checkbox", checked: false });
+
+  const mixed = await prepareRefusal(harness, [["Role", "Engineer"], ["Agree", "maybe"]]);
+  assert.equal(mixed.error.code, "not_fillable");
+  assert.equal(mixed.error.message, "target is not fillable (2 fields refused)");
+  assert.deepEqual(mixed.error.detail.problems.map((problem) => problem.problem), ["option_missing", "not_boolean"]);
+
+  const lone = await prepareRefusal(harness, [["Agree", "maybe"]]);
+  assert.equal(lone.error.code, "not_fillable");
+  assert.equal(lone.error.message, "target is not fillable (takes true or false)");
+
+  const options = await prepareRefusal(harness, [["Role", "Engineer"]]);
+  assert.equal(options.error.code, "option_missing");
+  assert.equal(options.error.message, "select option not found");
 });
 
 // ---- coded throw sites ---------------------------------------------------------------------------

@@ -442,7 +442,10 @@ fn what_the_page_holds_comes_back_by_place_in_the_call() {
             })),
             (Some("verify_fill_retained"), Some("T")) => returned(json!({
                 "retained": true,
-                "fields": [{"field": 1, "now": "Express", "matched": "normalized"}]
+                "fields": [
+                    {"field": 0, "now": "unchecked", "picked": "Pro", "group": "Plan"},
+                    {"field": 1, "now": "Express", "matched": "normalized"}
+                ]
             })),
             _ => answer(world),
         }
@@ -472,16 +475,28 @@ fn what_the_page_holds_comes_back_by_place_in_the_call() {
         held,
         [
             FieldNow {
+                field: 0,
+                now: "unchecked".into(),
+                tolerated: false,
+                matched: None,
+                picked: Some("Pro".into()),
+                group: Some("Plan".into())
+            },
+            FieldNow {
                 field: 1,
                 now: "(555) 123-4567".into(),
                 tolerated: true,
-                matched: None
+                matched: None,
+                picked: None,
+                group: None
             },
             FieldNow {
                 field: 2,
                 now: "Express".into(),
                 tolerated: false,
-                matched: Some(ChoiceMatch::Normalized)
+                matched: Some(ChoiceMatch::Normalized),
+                picked: None,
+                group: None
             },
         ]
     );

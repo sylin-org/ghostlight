@@ -1293,8 +1293,12 @@ fn held_fields(
             reading.tolerated,
             preserve,
         );
-        fields.push(match reading.matched {
+        let held = match reading.matched {
             Some(how) => held.matched(how, &value.quoted(None)),
+            None => held,
+        };
+        fields.push(match &reading.picked {
+            Some(label) => held.picked(label, reading.group.as_deref()),
             None => held,
         });
     }

@@ -513,7 +513,7 @@ The clauses by problem word:
 | `option_missing`, a longer list, or a list the page sent without its options | `... has no option "<v>" among its 195 options.` and `Options containing "<v>": X, Y.` when any | `Read target_... with browser_read to list all its options.` |
 | `option_missing`, after an earlier choice field in the call | the clause above, then `Its options can depend on earlier fields.` | `Fill the earlier fields first, then repeat for target_....` |
 | `option_missing` on a radio button | `The "<group>" choice has no option "<v>". It offers: Standard, Express.` | `Repeat with one of the offered labels for target_....` |
-| `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` For a list, `<v>` is the entry that matched twice. | `Repeat with the option's value for target_....` On a radio: `Repeat with true for target_..., which sets that radio itself.` |
+| `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` For a list, `<v>` is the entry that matched twice. | `Repeat with the option's value for target_....` On a radio: `Find the radio you mean with browser_find, then fill that radio's own handle with true.` |
 | `option_disabled` | `The option "<v>" of the "<n>" dropdown is disabled.` | `Choose an enabled option, or inspect the form for the field that enables it.` |
 | `multiple_values` | `The "<n>" dropdown takes one value, not a list.` | `Repeat browser_fill_form with target_... set to a single value.` |
 | `not_boolean` | `The "<n>" checkbox takes true or false, not "<v>".` | `Repeat with true or false for target_....` |
@@ -556,7 +556,10 @@ are bounded to 40 characters on one line, and readings the summary has no room f
 facts carry every reading either way, because the fill was authorized to read the document:
 `"fields":[{"target":"target_12","now":"Administrator"},{"target":"target_9","now":"(555) 123-4567"}]`.
 A checkbox or radio button reads `checked` or `unchecked`. A radio picked through a sibling's label
-reads that label. A choice the page matched only after normalizing reads `Role = Administrator
+is not the radio the handle names, so the handle keeps its own reading and the fact adds the pick:
+`{"target":"target_12","now":"unchecked","picked":"Pro","group":"Plan"}`. The sentence speaks of
+the group, `Plan = Pro`, or `Pro is checked` when the group has no name, and only when names are
+preserved. The page focuses the picked radio and sends it the input and change events. A choice the page matched only after normalizing reads `Role = Administrator
 (matched "administrator")` with the value the caller gave, and its fact adds `"match":"normalized"`;
 an exact match carries no mark. The audit keeps `Filled 3 fields on example.com.` and no name or
 value.

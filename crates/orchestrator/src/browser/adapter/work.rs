@@ -176,6 +176,13 @@ pub struct FieldNow {
     /// label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matched: Option<ChoiceMatch>,
+    /// The label of the sibling radio the fill picked in this radio's place, when the value
+    /// named another radio of the group. The field's own `now` then reads `unchecked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picked: Option<String>,
+    /// The name of the choice group of a radio picked through a sibling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// One physical point in page CSS coordinates.
