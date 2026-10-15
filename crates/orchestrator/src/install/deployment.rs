@@ -287,6 +287,18 @@ const STRAY_STOP_WAIT: Duration = Duration::from_secs(5);
 /// The text the swap puts before the number in the name of an image it moves aside.
 const MOVED_ASIDE_MARKER: &str = ".old-";
 
+/// What Linux appends to the executable path of a process whose file has been removed.
+const REMOVED_IMAGE_MARKER: &str = " (deleted)";
+
+/// The executable a process runs, as the process table reports it, without the marker Linux
+/// adds once the file has been removed, so a process whose image a deploy deleted keeps its name.
+fn running_image(reported: &Path) -> PathBuf {
+    reported
+        .to_str()
+        .and_then(|text| text.strip_suffix(REMOVED_IMAGE_MARKER))
+        .map_or_else(|| reported.to_path_buf(), PathBuf::from)
+}
+
 /// The processes of this home that an older installation left running.
 ///
 /// `service_pid` is the service that answers, when one does: its image is never a stray. The
@@ -304,11 +316,11 @@ pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayPr
         .processes()
         .values()
         .filter_map(|process| {
-            let image = process.exe()?;
+            let image = running_image(process.exe()?);
             let pid = process.pid().as_u32();
-            classify(image, pid, layout, service_pid, own_pid).map(|kind| StrayProcess {
+            classify(&image, pid, layout, service_pid, own_pid).map(|kind| StrayProcess {
                 pid,
-                image: image.to_path_buf(),
+                image,
                 kind,
             })
         })
@@ -410,7 +422,7 @@ pub fn stop_strays(strays: &[StrayProcess]) -> Vec<StrayProcess> {
                 process.status() != sysinfo::ProcessStatus::Zombie
                     && process
                         .exe()
-                        .is_some_and(|exe| same_path(exe, &stray.image))
+                        .is_some_and(|exe| same_path(&running_image(exe), &stray.image))
             })
     };
     refresh(&mut system);
@@ -2449,6 +2461,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_process_whose_file_was_removed_is_still_named_by_its_image() {
+        let (_scratch, layout) = stray_home();
+        let [connector, _] = retired_connector_names();
+        let removed_connector = layout.bin().join(format!("{connector} (deleted)"));
+        let removed_service = layout
+            .bin()
+            .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1 (deleted)"));
+        let connector_image = running_image(&removed_connector);
+        let service_image = running_image(&removed_service);
+        assert_eq!(connector_image, layout.bin().join(&connector));
+        assert_eq!(
+            kind_of(&layout, &connector_image, 7010, None),
+            Some(StrayKind::RetiredConnector)
+        );
+        assert_eq!(
+            kind_of(&layout, &service_image, 7011, Some(7012)),
+            Some(StrayKind::ReplacedService)
+        );
+        let present = layout.bin().join(&connector);
+        assert_eq!(running_image(&present), present);
     }
 
     #[test]
