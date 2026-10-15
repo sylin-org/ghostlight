@@ -1,5 +1,8 @@
 # lightbox-legacy batch: LEDGER
 
+2026-10-14: CLOSED. T1-T5 migrated, all 27 rows DONE; the legacy tests, wrappers and CI job were
+retired 2026-07-14, and the harness itself with the 0.8 layer (ADR-0143). Do not resume.
+
 ## RESUME HERE
 
 T1 added isolated process orchestration and migrated the control/Console cluster. T2 migrated the

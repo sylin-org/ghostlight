@@ -1,3 +1,9 @@
+CLOSED: D1-D10 complete 2026-08-29. The standing rules are ADR-0145 Decision 4 (content-free
+records, pinned by a schema test), Decision 5 (a sink fault never disturbs the product; MCP
+connector stdout is protocol only) and Decision 8 (only a person creates or removes
+diagnostics.on). A new record field updates the schema pin, and the commit message says why the
+field is content-free.
+
 # process-diagnostics BOOTSTRAP
 
 The batch that gives every Ghostlight process one place to say what happened: a shared local

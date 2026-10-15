@@ -1,3 +1,7 @@
+CLOSED. The review this batch waited on cleared and G2 closed 2026-08-26 (RELEASE-CHECKLIST); the
+freeze was dropped in 16ccf057. Invariant 1 (extension byte floor b9a017a1) expired and does not
+bind current work; the other invariants only restate AGENTS.md.
+
 # Pre-freeze debt batch -- ground rules
 
 Created 2026-08-24. The owner promoted four `STATUS.md` "Owed" items into the window between

@@ -6,6 +6,8 @@ executor resumes from RESUME HERE with no other context.
 
 ## RESUME HERE
 
+(2026-10-14 note: batch complete; H9 landed as 375810a, see below.)
+
 **H8 is DONE (af1d0f8). H9 (installer auto-start) is NEXT.** H8 landed the local web API's
 `channels.webapi.from` policy in full, plus a real (if deliberately minimal) HTTP/1.1 + WebSocket
 listener wired into the standalone service. Governance side (the single sanctioned

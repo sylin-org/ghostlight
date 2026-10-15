@@ -6,6 +6,11 @@ blocking a stage.
 
 ## RESUME HERE
 
+2026-10-14: CLOSED, not resumable. ADR-0107 superseded the profile and rollout plan; the targeted
+crates were removed in bf4f4724. Its surviving invariants (clientInfo and fingerprints are
+presentation-only; WorkspaceHandle is the bearer authority; language, semantics and mechanisms stay
+separate) remain in force through ADR-0101 and ADR-0096. Ledger kept as history.
+
 - State: ACTIVE; ADR-0101 authorizes the staged implementation and R4 is complete.
 - Current stage: R5 -- native surface and readiness.
 - Next action: define the strict native profile and its supported packs, then make navigation

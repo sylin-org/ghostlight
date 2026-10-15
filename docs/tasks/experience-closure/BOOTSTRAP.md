@@ -21,6 +21,8 @@ batch also closes the developer-first entry work and refreshes the agent-browser
   state is introduced.
 - ASCII only. New governance source uses `LicenseRef-Ghostlight-Commercial`; other new source uses
   `Apache-2.0 OR MIT`.
+  (Superseded by ADR-0140: all source is Apache-2.0 OR MIT; do not use
+  LicenseRef-Ghostlight-Commercial.)
 
 ## Work sequence
 

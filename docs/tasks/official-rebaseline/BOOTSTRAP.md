@@ -31,6 +31,9 @@ test fail, the implementation is wrong (or the tree drifted -> STOP), not the or
 - One task = one commit (some tasks may use two commits: the code change, then a
   `docs(rebaseline): ledger T<n>` commit -- the task prompt says which). Conventional commit
   messages, no attribution. Never `git push` unless the human explicitly asks.
+  (Historical, superseded: current commits carry the Co-Authored-By trailer and the DCO
+  Signed-off-by line; see AGENTS.md and CONTRIBUTING.md. Push, merge and release remain the
+  owner's call per AGENTS.md Boundaries.)
 - Never touch the NEVER list (below) except where a task prompt names the sanctioned exception.
 - Never skip hooks, never `--no-verify`, never force-anything.
 

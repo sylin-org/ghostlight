@@ -4,8 +4,7 @@ One task = one commit. RESUME HERE is always the first open task.
 
 ## RESUME HERE
 
-All four tasks are closed. Next: the G0 freeze, then the G1 pipeline (see
-docs/RELEASE-CHECKLIST.md).
+All four tasks are closed. Batch closed; the freeze it pointed at was dropped (16ccf057).
 
 ## Tasks
 
