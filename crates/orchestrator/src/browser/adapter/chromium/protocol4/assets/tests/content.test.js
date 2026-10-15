@@ -3845,3 +3845,47 @@ test("shadow content comes out where its host sits in the page", async () => {
   const cut = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 2, visual_settle: false });
   assert.deepEqual(cut.value.targets.map((target) => target.name), ["One", "Two"]);
 });
+
+test("a dialog scopes its own header and footer, so they are not the page's", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const modal = wrapper(harness, body, "dialog");
+  labelledButton(harness, wrapper(harness, modal, "header"), "Modal close");
+  labelledButton(harness, wrapper(harness, modal, "footer"), "Modal save");
+  const alert = wrapper(harness, body, "div", { role: "alertdialog" });
+  labelledButton(harness, wrapper(harness, alert, "header"), "Alert close");
+  labelledButton(harness, wrapper(harness, alert, "footer"), "Alert ok");
+  labelledButton(harness, wrapper(harness, body, "header"), "Page head");
+  labelledButton(harness, wrapper(harness, body, "footer"), "Page foot");
+  harness.setBody(body);
+
+  const items = await itemsByName(harness, "controls");
+  const areas = Object.fromEntries(Object.entries(items).map(([name, item]) => [name, item.area ?? null]));
+
+  assert.deepEqual(areas, {
+    "Modal close": "dialog",
+    "Modal save": "dialog",
+    "Alert close": "dialog",
+    "Alert ok": "dialog",
+    "Page head": "header",
+    "Page foot": "footer"
+  });
+});
+
+test("every targets answer reports how many forms the document holds, kept or not", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const first = wrapper(harness, body, "form");
+  nativeControl(harness, first, "In first", "input", { type: "text" });
+  nativeControl(harness, wrapper(harness, body, "form"), "In second", "input", { type: "text" });
+  nativeControl(harness, wrapper(harness, body, "form"), "In third", "input", { type: "text" });
+  harness.setBody(body);
+
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 1, visual_settle: false });
+  assert.equal(inspected.value.targets.length, 1);
+  assert.equal(inspected.value.forms, 3);
+  const found = await harness.send({ kind: "find", text: "In first", find_kind: "control", max_results: 5 });
+  assert.equal(found.value.forms, 3);
+  const semantic = await harness.send({ kind: "query_semantic", name: "In first", exact: true });
+  assert.equal(semantic.value.forms, 3);
+});

@@ -355,8 +355,8 @@ decision 19):
 
 | Key | Meaning |
 |---|---|
-| `area` | The page area that holds the item: `header`, `nav`, `aside`, `footer`, `dialog` or `search`. A native `header` or `footer` is a page area only when no `article`, `aside`, `main`, `nav` or `section` contains it. Absence means page content. |
-| `form` | The number of the form that owns the item, counted from 1 over the forms of the page in the order they appear. The `form` attribute counts, and so does a control inside a component that sits in a form. Absence means no form owns the item. |
+| `area` | The page area that holds the item: `header`, `nav`, `aside`, `footer`, `dialog` or `search`. A native `header` or `footer` is a page area only when no `article`, `aside`, `main`, `nav`, `section` or dialog contains it; inside a dialog it reports `dialog`. Absence means page content. |
+| `form` | The number of the form that owns the item, counted from 1 over the forms of the page in the order they appear, frames included, so a number keeps naming the same form from one call to the next. The `form` attribute counts, and so does a control inside a component that sits in a form. Absence means no form owns the item. |
 
 Items come out in the order the page shows them, including content inside components, before
 `max_items` cuts the list.

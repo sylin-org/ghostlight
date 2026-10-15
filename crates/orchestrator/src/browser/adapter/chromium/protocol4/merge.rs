@@ -21,6 +21,8 @@ pub struct DocumentTargets {
     pub targets: Vec<ObservedTarget>,
     /// Whether the document found more than it returned.
     pub truncated: bool,
+    /// How many forms the document holds, whatever its targets kept.
+    pub forms: u32,
 }
 
 /// Targets folded under one ceiling.
@@ -35,9 +37,9 @@ pub struct MergedTargets {
 /// Fold the targets of every document, top first, under one ceiling. The first documents win
 /// their share first.
 ///
-/// Each document numbers its forms from 1. The fold renumbers them so one number names one form
-/// in the merged answer: a document's ordinals are offset by the forms counted before it, and
-/// a document counts the highest ordinal it reported, kept or cut.
+/// Each document numbers its forms from 1. The fold renumbers them page-wide so one number names
+/// one form whatever each answer kept: a document's ordinals are offset by the number of forms
+/// the documents before it hold.
 #[must_use]
 pub fn targets(
     per_document: impl IntoIterator<Item = DocumentTargets>,
@@ -47,12 +49,6 @@ pub fn targets(
     let mut over = false;
     let mut forms_before = 0;
     for document in per_document {
-        let forms_here = document
-            .targets
-            .iter()
-            .filter_map(|target| target.form)
-            .max()
-            .unwrap_or(0);
         for mut target in document.targets {
             if merged.len() >= maximum {
                 over = true;
@@ -61,7 +57,7 @@ pub fn targets(
             target.form = target.form.map(|ordinal| ordinal + forms_before);
             merged.push(target);
         }
-        forms_before += forms_here;
+        forms_before += document.forms;
         over = over || document.truncated;
     }
     MergedTargets {

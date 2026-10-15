@@ -15,6 +15,7 @@ fn found(locators: &[&str], truncated: bool) -> DocumentTargets {
     DocumentTargets {
         targets: locators.iter().map(|locator| target(locator)).collect(),
         truncated,
+        forms: 0,
     }
 }
 
@@ -118,9 +119,10 @@ fn a_document_that_found_more_than_it_returned_makes_the_merge_over() {
     assert!(merged.over);
 }
 
-fn in_forms(forms: &[Option<u32>]) -> DocumentTargets {
+/// A document that holds `forms` forms and kept targets in the given ones.
+fn in_forms(forms: u32, kept: &[Option<u32>]) -> DocumentTargets {
     DocumentTargets {
-        targets: forms
+        targets: kept
             .iter()
             .enumerate()
             .map(|(index, form)| ObservedTarget {
@@ -129,6 +131,7 @@ fn in_forms(forms: &[Option<u32>]) -> DocumentTargets {
             })
             .collect(),
         truncated: false,
+        forms,
     }
 }
 
@@ -140,9 +143,9 @@ fn form_ordinals(merged: &MergedTargets) -> Vec<Option<u32>> {
 fn form_ordinals_are_renumbered_across_documents() {
     let merged = targets(
         [
-            in_forms(&[Some(1), None, Some(2), Some(1)]),
-            in_forms(&[Some(1), Some(2)]),
-            in_forms(&[None, Some(1)]),
+            in_forms(2, &[Some(1), None, Some(2), Some(1)]),
+            in_forms(2, &[Some(1), Some(2)]),
+            in_forms(1, &[None, Some(1)]),
         ],
         20,
     );
@@ -162,11 +165,34 @@ fn form_ordinals_are_renumbered_across_documents() {
 }
 
 #[test]
+fn forms_the_answer_did_not_keep_still_count_for_the_documents_after_them() {
+    let cut_early = targets([in_forms(3, &[Some(1)]), in_forms(1, &[Some(1)])], 5);
+    assert_eq!(form_ordinals(&cut_early), [Some(1), Some(4)]);
+    let kept_all = targets(
+        [
+            in_forms(3, &[Some(1), Some(2), Some(3)]),
+            in_forms(1, &[Some(1)]),
+        ],
+        5,
+    );
+    assert_eq!(
+        form_ordinals(&kept_all),
+        [Some(1), Some(2), Some(3), Some(4)]
+    );
+}
+
+#[test]
 fn a_cut_target_still_counts_its_form_for_the_documents_after_it() {
-    let merged = targets([in_forms(&[Some(1), Some(2)]), in_forms(&[Some(1)])], 1);
+    let merged = targets(
+        [in_forms(2, &[Some(1), Some(2)]), in_forms(1, &[Some(1)])],
+        1,
+    );
     assert_eq!(form_ordinals(&merged), [Some(1)]);
     assert!(merged.over);
-    let wide = targets([in_forms(&[Some(1), Some(2)]), in_forms(&[Some(1)])], 3);
+    let wide = targets(
+        [in_forms(2, &[Some(1), Some(2)]), in_forms(1, &[Some(1)])],
+        3,
+    );
     assert_eq!(form_ordinals(&wide), [Some(1), Some(2), Some(3)]);
 }
 

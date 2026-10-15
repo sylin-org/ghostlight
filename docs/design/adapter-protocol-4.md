@@ -1781,8 +1781,13 @@ Any target, control or not, also carries these structure keys when they apply (A
 
 | Key | Holds |
 |---|---|
-| `area` | The landmark the target sits in: `header`, `nav`, `aside`, `footer`, `dialog` or `search`, absent for page content. The page finds it by walking the composed tree to the nearest landmark element or ARIA landmark role. A `header` or `footer` element counts only when no `article`, `aside`, `main`, `nav` or `section` contains it. The service drops any other word. |
+| `area` | The landmark the target sits in: `header`, `nav`, `aside`, `footer`, `dialog` or `search`, absent for page content. The page finds it by walking the composed tree to the nearest landmark element or ARIA landmark role. A `header` or `footer` element counts only when no `article`, `aside`, `main`, `nav`, `section` or dialog (the `dialog` element, or role `dialog` or `alertdialog`) contains it; inside a dialog it reports `dialog`. The service drops any other word. |
 | `form` | The 1-based ordinal of the form that owns the target, counted over the forms of its own document in composed order. The owner is the browser's `form` property, which honors the `form` attribute, else the nearest form around the target in the composed tree, which reaches a control in a shadow root. A form is its own owner. The service renumbers ordinals across documents so one number names one form in a merged answer. |
+
+The `inspect`, `find` and `query_semantic` answers also carry `forms`, the number of forms the
+document holds, whatever the answer kept. The service offsets each document's ordinals by the
+`forms` of the documents before it, so a form's number is page-wide and does not change with what
+an answer kept.
 
 Matches from shadow roots come out in composed tree order, where the host sits, before any cap
 cuts the list.

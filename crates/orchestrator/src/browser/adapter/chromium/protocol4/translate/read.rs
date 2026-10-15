@@ -155,6 +155,7 @@ fn targets(
         value::<Targets>(answer).ok().map(|found| DocumentTargets {
             targets: rescope(doc, found.targets),
             truncated: found.truncated,
+            forms: found.forms,
         })
     });
     let merged = merge::targets(found, maximum);

@@ -58,9 +58,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     ["dialog", "dialog"],
     ["search", "search"]
   ]);
-  // A header or footer inside one of these belongs to that section, not to the page (HTML-AAM).
-  const SECTIONING_TAGS = new Set(["article", "aside", "main", "nav", "section"]);
-  const SECTIONING_ROLES = new Set(["article", "complementary", "main", "navigation", "region"]);
+  // A header or footer inside one of these belongs to that section or dialog, not to the page
+  // (HTML-AAM, with a dialog scoping its own header and footer).
+  const SECTIONING_TAGS = new Set(["article", "aside", "dialog", "main", "nav", "section"]);
+  const SECTIONING_ROLES = new Set(["alertdialog", "article", "complementary", "dialog", "main", "navigation", "region"]);
   // The words a refused fill names a field problem with. The service decodes the same closed list.
   const FIELD_PROBLEMS = Object.freeze({
     optionMissing: "option_missing",
@@ -384,6 +385,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return area;
   }
 
+  // Whether a section or dialog contains the element, so a header or footer is not the page's.
   function insideSection(element) {
     for (let node = composedParent(element); node; node = composedParent(node)) {
       if (node.nodeType !== 1) continue;
@@ -426,14 +428,24 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return null;
   }
 
-  // The 1-based place of the element's form among the document's forms in composed order, or 0.
-  function formOrdinal(element, view) {
-    const owner = formOwner(element);
-    if (!owner) return 0;
+  // The document's forms in composed order, each with its 1-based ordinal, counted on first use.
+  function documentForms(view) {
     if (!view.forms) {
       view.forms = new Map(queryAll("form").map((form, index) => [form, index + 1]));
     }
-    return view.forms.get(owner) ?? 0;
+    return view.forms;
+  }
+
+  // The 1-based place of the element's form among the document's forms in composed order, or 0.
+  function formOrdinal(element, view) {
+    const owner = formOwner(element);
+    return owner ? documentForms(view).get(owner) ?? 0 : 0;
+  }
+
+  // How many forms the document holds, whatever the answer kept, so the service can number the
+  // forms of the documents after this one page-wide.
+  function formCount(view) {
+    return documentForms(view).size;
   }
 
   function oneLine(value) {
@@ -905,7 +917,11 @@ ${line}` : line;
   function inspect(kind, maximum) {
     const pool = candidates(kind).filter((element) => element.isConnected);
     const view = observationView();
-    return { targets: pool.slice(0, maximum).map((element) => observation(element, view)), truncated: pool.length > maximum };
+    return {
+      targets: pool.slice(0, maximum).map((element) => observation(element, view)),
+      truncated: pool.length > maximum,
+      forms: formCount(view)
+    };
   }
 
   // The parent in the composed tree: a slotted node's slot, else its parent, and a shadow
@@ -948,6 +964,7 @@ ${line}` : line;
     return {
       targets: kept.slice(0, maximum).map((hit) => observation(hit.element, view)),
       truncated: kept.length > maximum || pool.length > 3000,
+      forms: formCount(view),
     };
   }
 
@@ -976,7 +993,7 @@ ${line}` : line;
         if (matches.length > 8) break;
       }
     }
-    return { targets: matches.slice(0, 8), truncated: matches.length > 8 || pool.length > 3000 };
+    return { targets: matches.slice(0, 8), truncated: matches.length > 8 || pool.length > 3000, forms: formCount(view) };
   }
 
   function extractArticle(maxChars) {

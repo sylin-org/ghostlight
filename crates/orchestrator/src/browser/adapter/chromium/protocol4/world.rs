@@ -829,6 +829,10 @@ pub struct Targets {
     /// Whether more targets existed than were returned.
     #[serde(default)]
     pub truncated: bool,
+    /// How many forms the document holds, whatever the answer kept. Absent when the message
+    /// does not number forms.
+    #[serde(default)]
+    pub forms: u32,
 }
 
 /// One node of a structure tree.

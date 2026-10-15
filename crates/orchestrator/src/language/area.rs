@@ -8,15 +8,15 @@
 /// A landmark region of a page, as the page reports it for one item.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PageArea {
-    /// The page banner: a header that belongs to the page rather than to one section.
+    /// The page banner: a header that belongs to the page rather than to one section or dialog.
     Header,
     /// A navigation region.
     Nav,
     /// A complementary region, such as a sidebar.
     Aside,
-    /// The page footer: a footer that belongs to the page rather than to one section.
+    /// The page footer: a footer that belongs to the page rather than to one section or dialog.
     Footer,
-    /// A dialog.
+    /// A dialog, and the header and footer inside it.
     Dialog,
     /// A search region.
     Search,
