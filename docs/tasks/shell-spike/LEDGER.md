@@ -5,9 +5,8 @@ as a standalone crate in `crates/desktop`. It proves the window, the tray and th
 can live outside the service, render only pages served from memory through a private scheme, and
 link no network client. It runs in parallel with the seams lane, depends on no other workspace
 crate and is not wired to the service. After the seams lane lands, the shell lane moves this
-ledger into `docs/tasks/break-2.0/` and the network guard into `tests/guards/`. ADR-0199 is
-cited here by its draft path, `docs/adr/0199-one-service-thin-shells.md`, in prose only: the seams
-lane files it, and it is linked once that commit exists.
+ledger into `docs/tasks/break-2.0/` and the network guard into `tests/guards/`. The decision is
+[ADR-0199](../../adr/0199-one-service-thin-shells.md).
 
 ## Toolkit decision
 

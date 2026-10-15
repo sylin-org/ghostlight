@@ -1,6 +1,5 @@
 // Network-crate guard for the window process (ADR-0028, never phone home; ADR-0197 connector
-// source lock amendment; ADR-0199 Decision 1, draft path
-// scratchpad/arch2/ADR-0199.md until the seams lane files it).
+// source lock amendment; ADR-0199 Decision 21, docs/adr/0199-one-service-thin-shells.md).
 //
 // ghostlight-desktop renders pages it serves from memory through a private scheme and opens no
 // network port, so no network client may be in its normal dependency tree on any supported
