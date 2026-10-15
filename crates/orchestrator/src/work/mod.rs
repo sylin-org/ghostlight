@@ -2730,7 +2730,7 @@ mod tests {
     ) {
         let browser = Arc::new(FakeBrowser::default());
         let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
         let audit = Arc::new(MemoryAudit::default());
         let mut executor = ApplicationExecutor::new(
             governance,

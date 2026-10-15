@@ -208,10 +208,9 @@ its own evidence across queue waits, workspace sharing, composed children, prepa
 and refusal. The workspace lists active connections independently; closing one removes only its
 live details. Receipt storage receives a bounded attribution projection with no reported application
 text, while the bounded live human projection receives that claim separately. Restored history
-never borrows a current session's identity. Windows observes the remote TCP endpoint owner; Linux
-reports this observation as unsupported. Signatures remain unchecked and provenance grants no
-additional authority. Historical basenames from the earlier endpoint lookup are not promoted into
-remote-peer evidence.
+never borrows a current session's identity. The service does not identify the program on the other
+end of a connection, and provenance grants no authority. Audit lines with extra attribution
+fields still read; the extra fields are ignored.
 
 The service edge bridge uses versioned newline-delimited JSON on an authenticated loopback
 connection. The browser relay and adapter protocol use Chromium's four-byte little-endian length

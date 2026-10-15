@@ -137,7 +137,7 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
     )
     .unwrap();
     let (executor, browser, workspaces, one, audit) = fixture_with_governance(policy.facade());
-    let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp, None);
+    let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp);
     let notices = Arc::new(Notices::default());
     executor.workbench.attach_presentation(notices.clone());
     let refused = json!({"on_error":"continue","steps":[

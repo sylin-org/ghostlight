@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f01b-peer-observation.
+Next: f01c-yaml-copy-setup.
 
 ## Landed
 
@@ -107,6 +107,7 @@ Next: f01b-peer-observation.
 |---|---|---|
 | f00-adrs | ADR-0199 is filed and indexed with Decisions 1 to 23 and the owner's 2026-10-15 rulings (2.0 waits for the frozen set only, the shell ships in the service's build and is not frozen, the extension opens its setup page only when the service is absent, one-shot commands in 2.0). ADR-0198 gains its dispositions amendment. The ADR index gains the 0199 row and the status notes of the ADRs 0199 touches. This ledger starts, and switch.md points here. | see `git log` |
 | f01a-flatpak | The Flatpak route and its D-Bus activation are gone (ADR-0197 D22, ADR-0165 superseded): `install/flatpak.rs`, `bridge/src/desktop_activation.rs`, `LaunchMode::FlatpakNativeHost` with its parsing and `run_flatpak_native_host`, `desktop_bus_start` and its `DBUS_STARTER_BUS_TYPE` branch, the desktop's activation-name claim, and bridge's Linux dependencies (`zbus`, `async-io`, `futures-lite`). `native-host ... --flatpak-chromium` is an ordinary usage error. The break migration gains one leftover step, `retire_flatpak_route`: it removes the Flatpak manifest and the D-Bus registration only when their content names Ghostlight, restores the override file only when it still holds the record's `permission_after`, then deletes the custody record, writes no grant, and reports each step. | see `git log` |
+| f01b-peer-observation | Observed peer identity is gone (ADR-0197 D22, ADR-0161 stage 2 superseded). `Attribution` keeps `connection_id`, `observed_at_ms` and `channel`; `PeerObservation`, `SignatureStatus`, `observe`, `with_peer`, `observed_executable`, `AuditRecord.peer_image` and `with_peer_image` are removed, `ConnectionEvidence::new(label, channel)` replaces them and `Attribution::legacy` takes only the channel. `Attribution` no longer denies unknown fields, so lines that carry `provenance.peer`, `provenance.signature` or a top-level `peer_image` still read. `ConnectionDetails` keeps the connection id, the live reported application, the channel and one explanation sentence per case, authored in `language/provenance.rs`; the workbench's observation and signature rows and "Observed executable" are gone. `ghostlight-win-peer` loses `table.rs`, `image.rs`, `identify_connection`, `identify_addresses`, `PeerIdentity` and their tests, and its module doc describes what remains. `tests/provenance-journey.mjs` keeps its identity and channel checks. ARCHITECTURE and ACCEPTANCE no longer claim observed executables. | see `git log` |
 
 ## Owed live checks
 
@@ -118,6 +119,11 @@ them.
   removes or restores each file and prints one line per file; a second install prints none.
   `cargo clippy -p ghostlight --target x86_64-unknown-linux-gnu` was not run (the orchestrator
   needs the GTK and WebKit system libraries); the removed Linux-only code left no references.
+- f01b: on Windows, `node tests/provenance-journey.mjs` against a built tree (it starts the
+  service, so only the coordinator runs it) passes with no executable or signature in any
+  receipt's provenance, and `tests/workbench-history-browser.mjs` passes against the new
+  connection fixtures. `node tests/workbench-surface.mjs` was run and passes (it starts no
+  Ghostlight program).
 
 ## Notes
 
@@ -143,3 +149,16 @@ them.
   install sentences.
 - Where ADR-0199's draft differed from the approved text, the ADR as filed wins: the edge has a
   carrier check and three rules and knows no verb, and 2.0.0 waits for the frozen set only.
+- f01b: the tree differed from the spec in four places. (1) `image.rs` could not simply go:
+  `ancestor_images` (the installer's container check) uses `full_image_path`, so that one
+  function moved into `process.rs` on its existing handle guard and `image.rs`, with its
+  `bounded_name`, is deleted. (2) `docs/trust/*.md` and `docs/guides/siem-integration.md` made no
+  peer claim and the audit-line example never listed `peer_image`, so only `docs/1.0/ARCHITECTURE.md`
+  and `docs/1.0/ACCEPTANCE.md` changed; ADR-0161 already carries the supersession note. (3) The
+  workbench's client label no longer falls back to an observed executable when a restored receipt
+  has no reported application; it shows the short workspace id, like any other missing claim.
+  (4) The browser fixtures `tests/workbench-preview-server.mjs`, `workbench-surface.mjs` and
+  `workbench-history-browser.mjs` carried the removed row and now carry the new explanation
+  sentences. `ghostlight-mcp-connector`'s `a_held_request_left_by_a_service_that_died_mid_flush_still_starts_one`
+  failed once under a full-workspace test load and passed on every rerun; it is timing-sensitive
+  and untouched by this slice.

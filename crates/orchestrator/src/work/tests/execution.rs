@@ -3220,7 +3220,7 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     let workspace_b = executor
         .workspaces
-        .admit("Workspace B".into(), IntakeChannel::Mcp, None);
+        .admit("Workspace B".into(), IntakeChannel::Mcp);
 
     // Open a tab in Workspace B
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -3263,7 +3263,7 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     let workspace_b = executor
         .workspaces
-        .admit("Workspace B".into(), IntakeChannel::Mcp, None);
+        .admit("Workspace B".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
         tab: tab(42, "https://example.com/"),
@@ -3365,9 +3365,7 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
     for label in ["", "\u{202e}\u{200b}\u{0007}"] {
         let (executor, browser, _, workspace_a, _) = fixture();
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
-        let workspace_b = executor
-            .workspaces
-            .admit(label.into(), IntakeChannel::Mcp, None);
+        let workspace_b = executor.workspaces.admit(label.into(), IntakeChannel::Mcp);
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,
             tab: tab(42, "https://example.com/"),
@@ -3569,7 +3567,7 @@ fn cross_workspace_tab_discovery_stress_permutations() {
     for (index, name) in names.iter().enumerate() {
         let ws = executor
             .workspaces
-            .admit((*name).into(), IntakeChannel::Mcp, None);
+            .admit((*name).into(), IntakeChannel::Mcp);
         let pid = u64::try_from(100 + index).unwrap();
         browser.push(Ok(BrowserOutcome::TabOpened {
             reused: false,

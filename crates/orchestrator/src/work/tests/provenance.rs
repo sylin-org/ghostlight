@@ -2,18 +2,15 @@
 
 use super::*;
 use crate::intake::session::SessionMarker;
-use crate::provenance::{ConnectionEvidence, PeerObservation};
+use crate::provenance::ConnectionEvidence;
 use crate::work::PreparedInvocation;
 
 #[test]
-fn queued_refusals_keep_original_evidence_after_another_peer_and_workspace_release() {
+fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace_release() {
     let (executor, browser, store, _, audit) = fixture();
-    let first = Arc::new(ConnectionEvidence::with_peer(
+    let first = Arc::new(ConnectionEvidence::new(
         "PRIVATE_FIRST_CLAIM",
         IntakeChannel::Mcp,
-        PeerObservation::Observed {
-            executable: "first.exe".into(),
-        },
     ));
     let marker = SessionMarker::Declared {
         key: "shared".into(),
@@ -23,12 +20,9 @@ fn queued_refusals_keep_original_evidence_after_another_peer_and_workspace_relea
         .into_iter()
         .map(|tool| PreparedInvocation::new(tool, json!({}), None, Some(first.clone())))
         .collect();
-    let second = Arc::new(ConnectionEvidence::with_peer(
+    let second = Arc::new(ConnectionEvidence::new(
         "PRIVATE_SECOND_CLAIM",
         IntakeChannel::Cli,
-        PeerObservation::Observed {
-            executable: "second.exe".into(),
-        },
     ));
     assert_eq!(store.connect(second, Some(marker)), workspace);
     store.release(&workspace);
@@ -48,7 +42,6 @@ fn queued_refusals_keep_original_evidence_after_another_peer_and_workspace_relea
     for record in records.iter() {
         assert_eq!(record.provenance.as_ref(), Some(first.attribution()));
         assert_eq!(record.channel, Some(IntakeChannel::Mcp));
-        assert_eq!(record.peer_image.as_deref(), Some("first.exe"));
     }
     assert!(!serde_json::to_string(&*records)
         .unwrap()

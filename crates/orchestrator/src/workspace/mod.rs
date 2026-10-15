@@ -672,20 +672,8 @@ impl WorkspaceStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn admit(
-        &self,
-        label: String,
-        channel: IntakeChannel,
-        peer_image: Option<String>,
-    ) -> WorkspaceId {
-        let peer = peer_image.map_or(
-            crate::provenance::PeerObservation::NotRecorded,
-            |executable| crate::provenance::PeerObservation::Observed { executable },
-        );
-        self.connect(
-            Arc::new(ConnectionEvidence::with_peer(&label, channel, peer)),
-            None,
-        )
+    pub(crate) fn admit(&self, label: String, channel: IntakeChannel) -> WorkspaceId {
+        self.connect(Arc::new(ConnectionEvidence::new(&label, channel)), None)
     }
 
     #[cfg(test)]
@@ -694,14 +682,9 @@ impl WorkspaceStore {
         label: String,
         channel: IntakeChannel,
         marker: SessionMarker,
-        peer_image: Option<String>,
     ) -> WorkspaceId {
-        let peer = peer_image.map_or(
-            crate::provenance::PeerObservation::NotRecorded,
-            |executable| crate::provenance::PeerObservation::Observed { executable },
-        );
         self.connect(
-            Arc::new(ConnectionEvidence::with_peer(&label, channel, peer)),
+            Arc::new(ConnectionEvidence::new(&label, channel)),
             Some(marker),
         )
     }
@@ -1999,7 +1982,7 @@ mod tests {
     /// Nothing physical exists in a workspace until its first crossing binds it to a browser, so
     /// a test that exercises physical tabs starts from the same state.
     fn admit_in_browser(store: &WorkspaceStore) -> WorkspaceId {
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         store
             .pin_browser(workspace.as_str(), TEST_BROWSER)
             .expect("a fresh workspace binds to its first browser");
@@ -2025,20 +2008,12 @@ mod tests {
     }
 
     #[test]
-    fn connection_details_stay_plural_and_detach_only_the_closing_peer() {
-        use crate::provenance::{ConnectionEvidence, PeerObservation};
+    fn connection_details_stay_plural_and_detach_only_the_closing_connection() {
+        use crate::provenance::ConnectionEvidence;
         use std::sync::Arc;
         let store = WorkspaceStore::default();
-        let first = Arc::new(ConnectionEvidence::with_peer(
-            "first",
-            IntakeChannel::Mcp,
-            PeerObservation::Unavailable,
-        ));
-        let second = Arc::new(ConnectionEvidence::with_peer(
-            "second",
-            IntakeChannel::Cli,
-            PeerObservation::UnsupportedPlatform,
-        ));
+        let first = Arc::new(ConnectionEvidence::new("first", IntakeChannel::Mcp));
+        let second = Arc::new(ConnectionEvidence::new("second", IntakeChannel::Cli));
         let owner = SessionMarker::Declared {
             key: "shared".into(),
         };
@@ -2064,10 +2039,8 @@ mod tests {
     #[test]
     fn one_caller_resumes_its_own_workspace_and_a_recycled_pid_does_not() {
         let store = WorkspaceStore::default();
-        let first =
-            store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100), None);
-        let again =
-            store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100), None);
+        let first = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
+        let again = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
         assert_eq!(
             first, again,
             "the same caller must reach the same workspace"
@@ -2075,12 +2048,11 @@ mod tests {
 
         // The negative control, and the reason identity is not pid plus name: a recycled pid
         // running the same program must not inherit the dead session's tabs.
-        let recycled =
-            store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 200), None);
+        let recycled = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 200));
         assert_ne!(first, recycled);
 
         // A connection with no marker is bound to that connection, as the MCP edge expects.
-        let bound = store.admit("codex".into(), IntakeChannel::Mcp, None);
+        let bound = store.admit("codex".into(), IntakeChannel::Mcp);
         assert!(!store.is_owned(&bound));
         assert!(store.is_owned(&first));
     }
@@ -2088,8 +2060,7 @@ mod tests {
     #[test]
     fn a_workspace_outlives_its_connection_and_dies_with_its_owner() {
         let store = WorkspaceStore::default();
-        let owned =
-            store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100), None);
+        let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
         store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
         let lease = store.acquire(&owned).unwrap();
         let tab = lease
@@ -2121,8 +2092,7 @@ mod tests {
     #[test]
     fn work_in_flight_is_never_reaped_underneath_itself() {
         let store = WorkspaceStore::default();
-        let owned =
-            store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100), None);
+        let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
         let lease = store.acquire(&owned).unwrap();
         assert!(
             store.reap(&|_| false).is_empty(),
@@ -2152,7 +2122,7 @@ mod tests {
         browser: &str,
         tabs: &[(u64, &str)],
     ) -> WorkspaceId {
-        let workspace = store.admit(client.into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit(client.into(), IntakeChannel::Mcp);
         store.pin_browser(workspace.as_str(), browser).unwrap();
         let lease = store.acquire(&workspace).unwrap();
         for (id, url) in tabs {
@@ -2305,8 +2275,7 @@ mod tests {
     fn released_tabs_leave_the_pool_when_closed_committed_taken_or_disconnected() {
         const SHELL: &str = "shell";
         let store = WorkspaceStore::default();
-        let owned =
-            store.resume_or_admit(SHELL.into(), IntakeChannel::Cli, marker(4312, 100), None);
+        let owned = store.resume_or_admit(SHELL.into(), IntakeChannel::Cli, marker(4312, 100));
         store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
         let lease = store.acquire(&owned).unwrap();
         for id in [1, 2, 3, 4, 5] {
@@ -2677,8 +2646,8 @@ mod tests {
     #[test]
     fn handles_are_owned_and_targets_expire_on_commit() {
         let store = WorkspaceStore::default();
-        let first = store.admit("first".into(), IntakeChannel::Mcp, None);
-        let second = store.admit("second".into(), IntakeChannel::Mcp, None);
+        let first = store.admit("first".into(), IntakeChannel::Mcp);
+        let second = store.admit("second".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&first).unwrap();
         let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
         let tab = lease
@@ -2718,9 +2687,9 @@ mod tests {
     #[test]
     fn another_workspace_is_named_only_by_its_client_label() {
         let store = WorkspaceStore::default();
-        let caller = store.admit("caller".into(), IntakeChannel::Mcp, None);
-        let labeled = store.admit("Codex".into(), IntakeChannel::Mcp, None);
-        let unlabeled = store.admit(String::new(), IntakeChannel::Mcp, None);
+        let caller = store.admit("caller".into(), IntakeChannel::Mcp);
+        let labeled = store.admit("Codex".into(), IntakeChannel::Mcp);
+        let unlabeled = store.admit(String::new(), IntakeChannel::Mcp);
         let handles = |workspace: &WorkspaceId, physical_id: u64| {
             let lease = store.acquire(workspace).unwrap();
             let tab = lease
@@ -2766,7 +2735,7 @@ mod tests {
     #[test]
     fn page_authored_roles_are_narrowed_before_target_state_is_stored() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(1, "https://example.com")).unwrap();
         let targets = lease
@@ -2792,7 +2761,7 @@ mod tests {
     #[test]
     fn omission_selects_only_an_unambiguous_tab() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
         let first = lease.add_tab(&physical(1, "about:blank")).unwrap();
@@ -2815,7 +2784,7 @@ mod tests {
     #[test]
     fn screenshot_views_map_coordinates_and_expire_on_commit() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
         let tab = lease

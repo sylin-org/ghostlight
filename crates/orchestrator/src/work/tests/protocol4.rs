@@ -173,7 +173,7 @@ fn opened_audited(
     );
     port.attach(listener.accept().unwrap().0).unwrap();
     let workspaces = WorkspaceStore::default();
-    let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
+    let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
     let mut executor = ApplicationExecutor::new(
         governance,
         workspaces,

@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn between_step_limits_do_not_fabricate_attempts_or_lose_prior_effects() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let snapshot = GovernanceFacade::new(None, None).snapshot();
         for cancelled in [true, false] {
             let token = super::super::CancellationToken::default();
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn the_parent_aggregates_limited_children_and_qualifies_its_summary() {
         let store = WorkspaceStore::default();
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let snapshot = GovernanceFacade::new(None, None).snapshot();
         let token = super::super::CancellationToken::default();
         let context = InvocationContext {

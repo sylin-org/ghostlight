@@ -50,7 +50,7 @@ fn later_session_of(
     earlier: &crate::workspace::WorkspaceId,
 ) -> crate::workspace::WorkspaceId {
     let client = workspaces.client_label(earlier).unwrap();
-    workspaces.admit(client, IntakeChannel::Mcp, None)
+    workspaces.admit(client, IntakeChannel::Mcp)
 }
 
 fn navigate(
@@ -228,14 +228,14 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
     let (executor, browser, workspaces, _, _) = fixture();
     // The sample scripts open example.com and exit. Preserve-tabs keeps their tab open, and it
     // stays in the "Ghostlight - ghostlight call" group.
-    let scripts = workspaces.admit("ghostlight call".into(), IntakeChannel::Mcp, None);
+    let scripts = workspaces.admit("ghostlight call".into(), IntakeChannel::Mcp);
     open_at(&executor, &browser, &scripts, 7, "https://example.com/a");
     let scripts_again = later_session_of(&workspaces, &scripts);
     assert_eq!(release_kept_open(&workspaces, &scripts), vec![7]);
 
     // A Claude Code session opening the same host gets a fresh tab in its own group. Reusing
     // tab 7 would leave a tab it controls under the group title of the scripts.
-    let agent = workspaces.admit("Claude Code".into(), IntakeChannel::Mcp, None);
+    let agent = workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
@@ -306,7 +306,7 @@ fn chrome_and_edge_tabs_with_the_same_id_are_different_tabs() {
     );
     assert_eq!(in_chrome.status, Status::Succeeded, "{}", in_chrome.summary);
 
-    let edge = workspaces.admit("edge".into(), IntakeChannel::Mcp, None);
+    let edge = workspaces.admit("edge".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
         tab: tab(5, "https://example.org/"),
@@ -335,7 +335,7 @@ fn a_tab_refused_after_the_browser_opened_it_reports_the_effect() {
     open_at(&executor, &browser, &owner, 5, "https://example.com/");
 
     // An adapter hands back a tab another session in the same browser already controls.
-    let other = workspaces.admit("other".into(), IntakeChannel::Mcp, None);
+    let other = workspaces.admit("other".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
         tab: tab(5, "https://example.com/"),

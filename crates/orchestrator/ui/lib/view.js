@@ -108,7 +108,7 @@
     /** Attribution belongs to the action's connection, including after disconnect or restart. */
     function clientFor(entry) {
       const evidence = entry.provenance;
-      if (evidence) return evidence.reported_application ?? evidence.observed_executable ?? shortId(entry.workspace);
+      if (evidence) return evidence.reported_application ?? shortId(entry.workspace);
       if (entry.settled) return shortId(entry.workspace);
       return sessionFor(entry.workspace)?.client_label ?? shortId(entry.workspace);
     }
@@ -199,12 +199,10 @@
       return entry.storage_detail ? `<p class="coverage-note">${escapeHtml(entry.storage_detail)}</p>` : "";
     }
 
-    /** Render authored connection evidence without treating a claim or an observation as trust. */
+    /** Render authored connection evidence without treating a claim as trust. */
     function connectionFields(evidence, historical) {
       const fields = [
         ["Reported application", evidence.reported_application ?? (historical ? "Not retained in history" : "Not reported")],
-        ["Observed executable", evidence.observed_executable ?? evidence.observation],
-        ["Signature", evidence.signature],
         ["Intake", evidence.channel]
       ];
       if (evidence.connection_id) fields.push(["Connection", shortId(evidence.connection_id)]);

@@ -206,19 +206,19 @@ try {
     snapshot.sessions[0].client_label = 'Later application';
     snapshot.sessions[0].connections = [
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',
-        reported_application: 'Later application', observed_executable: 'later-peer.exe' },
+        reported_application: 'Later application' },
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_unavailable',
-        reported_application: 'Another application', observed_executable: null,
-        observation: 'Could not identify this connection' }
+        reported_application: 'Another application',
+        explanation: 'A ghostlight call session is a local program.' }
     ];
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
   })()`);
-  await until(() => evaluate("document.querySelector('.session-connections').textContent.includes('later-peer.exe')"), "refreshed connection evidence");
+  await until(() => evaluate("document.querySelector('.session-connections').textContent.includes('Later application')"), "refreshed connection evidence");
   assert.equal(await evaluate("document.activeElement.matches('.session-connections > summary')"), true);
   assert.equal(await evaluate("document.querySelector('.session-connections').open"), true);
-  assert.equal(await evaluate("document.querySelector('.session-connections').textContent.includes('Could not identify this connection')"), true);
+  assert.equal(await evaluate("document.querySelector('.session-connections').textContent.includes('A ghostlight call session is a local program.')"), true);
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), true);
-  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('ghostlight-mcp-connector.exe')`), true);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('MCP client')`), true);
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Later application')`), false);
   assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
@@ -230,10 +230,10 @@ try {
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
       complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
         ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
-        reported_application: null, observed_executable: 'original-restored-peer.exe' } };
+        reported_application: null } };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
-      ...record, invocation: 'c1-legacy', provenance: null, peer_image: 'legacy-unverified.exe' } });
+      ...record, invocation: 'c1-legacy', provenance: null } });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
       ...record, invocation: 'c1-escaped', provenance: { ...record.provenance,
         reported_application: '<img src=x onerror="window.__C1_INJECTED__=true">' } } });
@@ -243,10 +243,8 @@ try {
   const escapedDetails = '[data-history-details="c1-escaped:connection"]';
   await until(() => evaluate(`!!document.querySelector('${restoredDetails}') && !!document.querySelector('${escapedDetails}')`), "restored and escaped connection records");
   assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Not retained in history')`), true);
-  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('original-restored-peer.exe')`), true);
   assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Later application')`), false);
   assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Connection details were not recorded.')`), true);
-  assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('legacy-unverified.exe')`), false);
   assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Later application')`), false);
   assert.equal(await evaluate(`document.querySelector('${escapedDetails}').textContent.includes('<img src=x')`), true);
   assert.equal(await evaluate(`document.querySelector('${escapedDetails} img') !== null || window.__C1_INJECTED__ === true`), false);

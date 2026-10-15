@@ -258,17 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn live_group_claims_stay_in_memory_while_restored_receipts_keep_observed_evidence() {
+    fn live_group_claims_stay_in_memory_while_restored_receipts_keep_connection_evidence() {
         use crate::intake::session::IntakeChannel;
-        use crate::provenance::{ConnectionEvidence, PeerObservation};
+        use crate::provenance::ConnectionEvidence;
         use crate::workbench::WorkbenchProjection;
-        let connection = ConnectionEvidence::with_peer(
-            "PRIVATE_REPORTED_APPLICATION",
-            IntakeChannel::Mcp,
-            PeerObservation::Observed {
-                executable: "connector.exe".into(),
-            },
-        );
+        let connection =
+            ConnectionEvidence::new("PRIVATE_REPORTED_APPLICATION", IntakeChannel::Mcp);
         let first = child(1).with_provenance(Some(connection.attribution()));
         let mut parent = first.clone();
         parent.step = None;
@@ -316,10 +311,7 @@ mod tests {
         let history = restored.history();
         let details = history[0].provenance.as_ref().unwrap();
         assert_eq!(details.reported_application, None);
-        assert_eq!(
-            details.observed_executable.as_deref(),
-            Some("connector.exe")
-        );
+        assert_eq!(details.channel, IntakeChannel::Mcp);
         assert_eq!(
             details.connection_id,
             connection.attribution().connection_id
@@ -333,6 +325,43 @@ mod tests {
                 .as_ref(),
             Some(details)
         );
+    }
+
+    #[test]
+    fn connection_details_explain_each_case_in_one_sentence() {
+        use crate::intake::session::IntakeChannel;
+        use crate::provenance::ConnectionEvidence;
+
+        let mcp = ConnectionEvidence::new("Claude Code", IntakeChannel::Mcp);
+        let cli = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
+        let from_mcp = HistoryItem::from(child(1).with_provenance(Some(mcp.attribution())));
+        let from_cli = HistoryItem::from(child(1).with_provenance(Some(cli.attribution())));
+        let mut unidentified = child(1);
+        unidentified.channel = Some(IntakeChannel::Cli);
+        let from_history = HistoryItem::from(unidentified);
+
+        let mcp_details = from_mcp.provenance.unwrap();
+        let cli_details = from_cli.provenance.unwrap();
+        let old_details = from_history.provenance.unwrap();
+        assert_eq!(mcp_details.channel, IntakeChannel::Mcp);
+        assert_eq!(cli_details.channel, IntakeChannel::Cli);
+        assert_eq!(old_details.channel, IntakeChannel::Cli);
+        assert_eq!(mcp_details.connection_id, mcp.attribution().connection_id);
+        assert_eq!(cli_details.connection_id, cli.attribution().connection_id);
+        assert_eq!(old_details.connection_id, None);
+        let sentences = [
+            &mcp_details.explanation,
+            &cli_details.explanation,
+            &old_details.explanation,
+        ];
+        for sentence in sentences {
+            assert!(!sentence.is_empty());
+        }
+        assert_ne!(sentences[0], sentences[1]);
+        assert_ne!(sentences[0], sentences[2]);
+        assert_ne!(sentences[1], sentences[2]);
+        assert!(mcp_details.explanation.contains("MCP client"));
+        assert!(cli_details.explanation.contains("local program"));
     }
 
     #[test]

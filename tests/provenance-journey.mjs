@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 const root = resolve(import.meta.dirname, "..");
@@ -73,7 +73,7 @@ class McpPeer {
 }
 
 if (process.argv[2] === "--peer") {
-  // The copied executable gives the operating system a genuinely different direct peer image.
+  // A separate process is a genuinely separate connection to the same declared session.
   const peer = new Peer(Number(process.argv[3]));
   peer.onMessage = value => process.send(value);
   process.on("message", value => peer.send(value));
@@ -89,10 +89,8 @@ async function journey() {
   const audit = join(scratch, "audit.jsonl"), diagnostics = join(scratch, "diagnostics");
   const policy = join(scratch, "policy.json");
   const suffix = process.platform === "win32" ? ".exe" : "";
-  const alternateExecutable = join(scratch, `c1-secondary-peer${suffix}`);
   assert.equal(dirname(scratch), join(root, ".tmp"));
   assert.equal(dirname(runtime), binaries);
-  assert.equal(dirname(alternateExecutable), scratch);
   assert.ok(existsSync(join(binaries, `ghostlight${suffix}`)), "Build the workspace into GHOSTLIGHT_BIN_DIR first.");
   mkdirSync(scratch, { recursive: true });
   const privateCanaries = ["PRIVATE_C1_CLAIM_A", "PRIVATE_C1_CLAIM_B", "PRIVATE_C1_CLAIM_C", "PRIVATE_C1_SESSION", "PRIVATE_C1_PATH", "PRIVATE_C1_MCP_CLAIM"];
@@ -119,15 +117,12 @@ async function journey() {
     assert.ok(receipt, `Saved receipt for ${result.invocation}`);
     return receipt.provenance;
   }
-  function checkEvidence(evidence, channel, image) {
+  function checkEvidence(evidence, channel) {
     assert.ok(evidence, "New receipts carry connection provenance");
     assert.match(evidence.connection_id, /^connection_/);
     assert.ok(Number.isSafeInteger(evidence.observed_at_ms) && evidence.observed_at_ms > 0);
     assert.equal(evidence.channel, channel);
-    assert.equal(evidence.signature, "not_checked");
-    assert.deepEqual(evidence.peer, process.platform === "win32"
-      ? { state: "observed", executable: image.toLowerCase() }
-      : { state: "unsupported_platform" });
+    assert.deepEqual(Object.keys(evidence).sort(), ["channel", "connection_id", "observed_at_ms"]);
   }
   function checkGroup(result, evidence, expectedCount) {
     const receipts = group(result);
@@ -135,7 +130,7 @@ async function journey() {
     for (const receipt of receipts) {
       assert.deepEqual(receipt.provenance, evidence);
       assert.equal(receipt.channel, evidence.channel, "legacy channel agrees with connection evidence");
-      assert.equal(receipt.peer_image, evidence.peer.executable, "legacy image agrees with connection evidence");
+      assert.equal("peer_image" in receipt, false, "receipts no longer name a peer executable");
     }
     return receipts;
   }
@@ -152,8 +147,8 @@ async function journey() {
     start(join(binaries, `ghostlight${suffix}`), [], { env: environment });
     await until(() => { try { return JSON.parse(readFileSync(runtime)).service_port; } catch { return false; } }, "isolated service starts");
     const endpoint = JSON.parse(readFileSync(runtime));
-    async function client(label, channel = "mcp", alternate = false) {
-      const child = alternate ? start(alternateExecutable, [import.meta.filename, "--peer", String(endpoint.service_port)],
+    async function client(label, channel = "mcp", separateProcess = false) {
+      const child = separateProcess ? start(process.execPath, [import.meta.filename, "--peer", String(endpoint.service_port)],
         { stdio: ["ignore", "ignore", "pipe", "ipc"] }) : null;
       const peer = new Peer(endpoint.service_port, false, child); peers.push(peer);
       peer.send({ kind: "hello", major: 2, token: endpoint.token, client_label: label, channel, session: marker });
@@ -197,19 +192,18 @@ async function journey() {
     const opened = await a.result(a.invoke("browser_navigate", { url: "https://sylin.org/" }));
     assert.equal(opened.status, "succeeded", JSON.stringify(opened));
     const evidenceA = provenance(opened);
-    checkEvidence(evidenceA, "mcp", basename(process.execPath));
+    checkEvidence(evidenceA, "mcp");
     holdNextRead = true;
     const inFlight = a.invoke("browser_read");
     await until(() => heldRead, "A read dispatched before B joins");
     const queuedA = a.invoke("browser_read");
 
-    copyFileSync(process.execPath, alternateExecutable);
     const b = await client(privateCanaries[1], "cli", true);
-    assert.equal(b.session, a.session, "two different peers share the declared workspace");
+    assert.equal(b.session, a.session, "two different connections share the declared workspace");
     const explainedB = await b.result(b.invoke("policy_explain"));
     assert.equal(explainedB.status, "succeeded");
     const evidenceB = provenance(explainedB);
-    checkEvidence(evidenceB, "cli", basename(alternateExecutable));
+    checkEvidence(evidenceB, "cli");
     assert.notEqual(evidenceB.connection_id, evidenceA.connection_id);
     heldRead();
     const completedA = await a.result(inFlight);
@@ -219,7 +213,7 @@ async function journey() {
     assert.equal(completedQueuedA.status, "succeeded");
     checkGroup(completedQueuedA, evidenceA, 1);
     checkGroup(explainedB, evidenceB, 1);
-    console.log("PASS different same-session peers retain per-connection executable and channel attribution during in-flight and queued work");
+    console.log("PASS different same-session connections retain per-connection identity and channel attribution during in-flight and queued work");
 
     const invalidFlow = await a.result(a.invoke("browser_flow", { steps: [
       { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
@@ -251,7 +245,7 @@ async function journey() {
     const explainedC = await c.result(c.invoke("policy_explain"));
     assert.equal(explainedC.status, "succeeded");
     const evidenceC = provenance(explainedC);
-    checkEvidence(evidenceC, "cli", basename(alternateExecutable));
+    checkEvidence(evidenceC, "cli");
     assert.notEqual(evidenceC.connection_id, evidenceB.connection_id, "reconnect observes fresh connection evidence");
     assert.notEqual(evidenceC.connection_id, evidenceA.connection_id);
     assert.ok(evidenceC.observed_at_ms >= evidenceB.observed_at_ms);
@@ -266,7 +260,7 @@ async function journey() {
     const explainedMcp = (await mcp.request("tools/call", { name: "policy_explain", arguments: {} })).structuredContent;
     assert.equal(explainedMcp.status, "succeeded");
     const evidenceMcp = provenance(explainedMcp);
-    checkEvidence(evidenceMcp, "mcp", `ghostlight-mcp-connector${suffix}`);
+    checkEvidence(evidenceMcp, "mcp");
     assert.notEqual(evidenceMcp.connection_id, evidenceA.connection_id);
     checkGroup(explainedMcp, evidenceMcp, 1);
     const saved = readFileSync(audit, "utf8"), diagnostic = diagnosticText(diagnostics);
@@ -276,10 +270,10 @@ async function journey() {
       assert.equal(saved.includes(canary), false, `${canary} absent from audit`);
       assert.equal(diagnostic.includes(canary), false, `${canary} absent from diagnostics`);
     }
-    assert.equal(saved.includes(JSON.stringify(alternateExecutable).slice(1, -1)), false, "full executable paths stay out of audit");
+    assert.equal(saved.includes(JSON.stringify(process.execPath).slice(1, -1)), false, "full executable paths stay out of audit");
     console.log("PASS reconnect refreshes evidence; surviving peers retain theirs; raw application claims, session keys and paths stay out of durable records");
-    console.log("PASS actual MCP initialization records the connector executable; its application claim stays out of connector and service diagnostics");
-    console.log(`provenance journey ok: ${records().length} real service receipts, ${process.platform === "win32" ? "three OS-observed executable images" : "explicit unsupported-platform evidence"}, no signature trust inferred`);
+    console.log("PASS actual MCP initialization records an mcp connection; its application claim stays out of connector and service diagnostics");
+    console.log(`provenance journey ok: ${records().length} real service receipts, per-connection identity and channel only`);
   } catch (error) {
     process.stderr.write(output); throw error;
   } finally {

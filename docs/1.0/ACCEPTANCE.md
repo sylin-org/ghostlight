@@ -596,22 +596,20 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 
 ## Connection reporting (ADR-0161)
 
-- A real Windows cross-process fixture identifies the remote connecting executable, including two
-  different peers sharing one workspace and the actual MCP connector. A same-process loopback
-  pair alone cannot prove endpoint direction.
+- Two different connections sharing one workspace, and the actual MCP connector, each receive their
+  own service-issued connection identity and channel. No executable or signature is observed.
 - Active, queued, composed, preparation-failed, cancelled, capacity-refused, and invalid work keep
-  their original connection evidence. A later peer or released workspace cannot rewrite it.
+  their original connection evidence. A later connection or released workspace cannot rewrite it.
 - Each reconnect gets new evidence. Session details retain plural active connections and remove
   only the closed one. Action details remain associated with their original connection.
 - Raw reported application names remain in bounded live human details only. Serialized audit and
   enabled service/connector diagnostics exclude unique claim sentinels. Durable history retains
-  bounded evidence after restart; earlier basenames do not establish a remote executable.
-- Human details distinguish reported application, observed executable, and unchecked signatures.
-  Unavailable, unsupported, and missing historical evidence stay explicit. Details are quiet by
-  default, escape claims, preserve expansion/focus on refresh, and fit a narrow workbench.
+  bounded evidence after restart; history written before connection identities existed says so.
+- Human details show the reported application, the connection and its channel, with one sentence
+  that says what the connection does and does not establish. Details are quiet by default, escape
+  claims, preserve expansion/focus on refresh, and fit a narrow workbench.
 
-This foundation adds no signature/hash verifier or identity admission. Linux observation remains
-unsupported; source portability does not replace a live Linux runtime check.
+This foundation adds no executable observation, signature/hash verifier or identity admission.
 
 ## Consolidated tool surface (ADR-0162)
 

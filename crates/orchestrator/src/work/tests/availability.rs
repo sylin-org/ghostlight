@@ -57,7 +57,7 @@ fn relay_fixture(
     crate::workspace::WorkspaceId,
 ) {
     let workspaces = WorkspaceStore::default();
-    let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
+    let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
     let audit = Arc::new(MemoryAudit::default());
     let mut executor = ApplicationExecutor::new(
         governance,

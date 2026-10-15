@@ -546,16 +546,12 @@ fn serve_mcp(
         });
     listener::accept(&mut connection)?;
     connection.set_nonblocking(false)?;
-    let observed_local = connection.local_addr().ok();
-    let observed_peer = connection.peer_addr().ok();
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
     let opening = Opening {
         channel: intake_channel,
         marker,
-        observed_local,
-        observed_peer,
     };
 
     let (wire, mut live) = match resumed {
@@ -624,8 +620,6 @@ fn serve_mcp(
 struct Opening {
     channel: IntakeChannel,
     marker: Option<SessionMarker>,
-    observed_local: Option<std::net::SocketAddr>,
-    observed_peer: Option<std::net::SocketAddr>,
 }
 
 /// One session's engine and the stream its lines go out on.
@@ -739,11 +733,9 @@ impl LiveSession {
         // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
         reap_finished_sessions(&intake.workspaces, intake.browser_port.as_ref());
         // Evidence belongs to this connection. Workspace continuity never replaces it.
-        let connection = Arc::new(ConnectionEvidence::observe(
+        let connection = Arc::new(ConnectionEvidence::new(
             &wire.client_label(),
             opening.channel,
-            opening.observed_local,
-            opening.observed_peer,
         ));
         let workspace = intake
             .workspaces
@@ -1306,7 +1298,7 @@ mod tests {
         std::fs::write(&policy, r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
         let governance = GovernanceFacade::new(Some(policy), None);
         let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp, None);
+        let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
         workspaces
             .pin_browser(workspace.as_str(), FAKE_BROWSER)
             .unwrap();
@@ -1447,7 +1439,7 @@ mod tests {
     ) -> ReleasedTabs {
         use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
 
-        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp, None);
+        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp);
         workspaces
             .pin_browser(workspace.as_str(), FAKE_BROWSER)
             .unwrap();
@@ -1545,7 +1537,7 @@ mod tests {
         use crate::workspace::WorkspaceStore;
 
         let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("dialogs".into(), IntakeChannel::Mcp, None);
+        let workspace = workspaces.admit("dialogs".into(), IntakeChannel::Mcp);
         workspaces
             .pin_browser(workspace.as_str(), FAKE_BROWSER)
             .unwrap();

@@ -515,8 +515,7 @@ const provenanceChecks = [];
 {
   const evidence = {
     connection_id: "connection_original", reported_application: "Original <script>claim</script>",
-    channel: "mcp", observed_executable: "original-peer.exe", observation: "Observed locally",
-    signature: "Not checked", explanation: "Only this connection's executable was observed; the application remains unverified."
+    channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
   };
   const laterSession = { id: "shared-workspace", client_label: "Later application", channel: "cli" };
   const connectionView = sandbox.globalThis.GhostlightView.create({ sessionFor: () => laterSession });
@@ -528,14 +527,14 @@ const provenanceChecks = [];
   connectionView.hero(entries.entryFromOperation(operation), false);
   let html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["live action attribution uses its own connection and escapes the claim",
-    html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("original-peer.exe")
+    html.includes("Original &lt;script&gt;claim&lt;/script&gt;")
       && !html.includes("Later application") && !html.includes("<script>claim")]);
   const restored = { ...record, provenance: { ...evidence, reported_application: null } };
   connectionView.hero(entries.entryFromRecord(restored), false);
   html = nodes.get("hero-body").innerHTML;
-  provenanceChecks.push(["restored history keeps observed attribution without borrowing a current claim",
-    html.includes("Not retained in history") && html.includes('<div class="hero-meta"><span>original-peer.exe</span>')
-      && !html.includes("Later application") && html.includes("Not checked")]);
+  provenanceChecks.push(["restored history keeps its connection without borrowing a current claim",
+    html.includes("Not retained in history") && html.includes("connection_original")
+      && !html.includes("Later application") && html.includes("MCP client")]);
   connectionView.hero(entries.entryFromRecord({ ...record, provenance: null, channel: null }), false);
   html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["legacy history names missing evidence without borrowing current-session identity",
@@ -549,13 +548,13 @@ const provenanceChecks = [];
       && !html.includes('data-history-details="provenance-work:connection" open')]);
   const sessions = [{ ...laterSession, tab_count: 2, active_operations: 0, connections: [evidence,
     { ...evidence, connection_id: "connection_other", reported_application: "Second application",
-      observed_executable: null, observation: "Unavailable on this platform" }] }];
+      channel: "cli", explanation: "A ghostlight call session is a local program." }] }];
   const sessionSnapshot = { ...snapshot(), sessions };
   connectionView.collections(sessionSnapshot, new Set());
   html = nodes.get("connections").innerHTML;
-  provenanceChecks.push(["shared sessions retain every connection with authored unavailable evidence",
+  provenanceChecks.push(["shared sessions retain every connection with its authored explanation",
     html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("Second application")
-      && html.includes("Unavailable on this platform") && !html.includes("trusted")
+      && html.includes("A ghostlight call session is a local program.") && !html.includes("trusted")
       && !html.includes('data-history-details="sessions:connections" open')]);
   documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "sessions:connections" }, open: true,
     classList: { contains: () => false } } });

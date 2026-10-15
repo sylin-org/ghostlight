@@ -1311,10 +1311,9 @@ impl From<AuditRecord> for HistoryItem {
             .as_ref()
             .map(|evidence| evidence.details())
             .or_else(|| {
-                value.channel.map(|channel| {
-                    crate::provenance::Attribution::legacy(channel, value.peer_image.as_deref())
-                        .details()
-                })
+                value
+                    .channel
+                    .map(|channel| crate::provenance::Attribution::legacy(channel).details())
             });
         let requirements = value.requirements();
         let capability = requirements.label();

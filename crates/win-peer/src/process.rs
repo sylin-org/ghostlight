@@ -1,10 +1,12 @@
 //! Windows parent identity and liveness through the audited FFI boundary.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::mem;
+use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use crate::{image, ProcessIdentity};
+use crate::ProcessIdentity;
 
 type Handle = *mut core::ffi::c_void;
 
@@ -13,6 +15,8 @@ const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x0000_1000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const WAIT_TIMEOUT: u32 = 0x0000_0102;
 const MAX_PATH: usize = 260;
+/// UTF-16 units reserved for one image path query.
+const IMAGE_PATH_UNITS: usize = 1024;
 
 #[repr(C)]
 struct FileTime {
@@ -46,6 +50,12 @@ extern "system" {
         exit: *mut FileTime,
         kernel: *mut FileTime,
         user: *mut FileTime,
+    ) -> i32;
+    fn QueryFullProcessImageNameW(
+        process: Handle,
+        flags: u32,
+        exe_name: *mut u16,
+        size_pointer: &mut u32,
     ) -> i32;
     fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
     fn CloseHandle(handle: Handle) -> i32;
@@ -131,12 +141,26 @@ pub(super) fn ancestor_images(limit: usize) -> Vec<PathBuf> {
         if parent_identity.created > child_identity.created {
             break;
         }
-        if let Some(image) = image::full_image_path(parent) {
+        if let Some(image) = full_image_path(parent) {
             images.push(image);
         }
         child = parent;
     }
     images
+}
+
+/// A process image's full path. Never logged, never audited.
+fn full_image_path(process_id: u32) -> Option<PathBuf> {
+    let process = OwnedHandle::process(process_id, PROCESS_QUERY_LIMITED_INFORMATION)?;
+    let mut wide = [0u16; IMAGE_PATH_UNITS];
+    let mut size = wide.len() as u32;
+    // SAFETY: process is a valid query handle; wide outlives the call and size names its exact
+    // length in UTF-16 units.
+    let ok = unsafe { QueryFullProcessImageNameW(process.0, 0, wide.as_mut_ptr(), &mut size) };
+    if ok == 0 || size == 0 || size as usize > wide.len() {
+        return None;
+    }
+    Some(PathBuf::from(OsString::from_wide(&wide[..size as usize])))
 }
 
 pub(super) fn identity(process_id: u32) -> Option<ProcessIdentity> {

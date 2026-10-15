@@ -490,16 +490,12 @@ mod tests {
         use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
         use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
         use crate::intake::session::IntakeChannel;
-        use crate::provenance::{ConnectionEvidence, PeerObservation};
+        use crate::provenance::ConnectionEvidence;
         use crate::workspace::WorkspaceStore;
 
         let store = WorkspaceStore::default();
         let workspace = store.connect(
-            Arc::new(ConnectionEvidence::with_peer(
-                "client",
-                IntakeChannel::Mcp,
-                PeerObservation::Unavailable,
-            )),
+            Arc::new(ConnectionEvidence::new("client", IntakeChannel::Mcp)),
             None,
         );
         store.pin_browser(workspace.as_str(), FAKE_BROWSER).unwrap();

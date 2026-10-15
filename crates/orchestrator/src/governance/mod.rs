@@ -1864,12 +1864,6 @@ pub struct AuditRecord {
     /// Absent when the workspace was already gone by the time the record was written.
     #[serde(default)]
     pub channel: Option<IntakeChannel>,
-    /// The peer executable's observed file name beside that channel (ADR-0105 stage 2).
-    ///
-    /// Claimed and observed attribution stay separate fields; the name is the bounded lowercase
-    /// file name only, never the path, and it is never an authority input.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub peer_image: Option<String>,
     /// Bounded original-connection evidence; claimed labels never enter this durable type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<crate::provenance::Attribution>,
@@ -1928,7 +1922,6 @@ impl AuditRecord {
             duration_ms,
             observed: Observed::default(),
             channel: None,
-            peer_image: None,
             provenance: None,
             browser: None,
         }
@@ -1948,21 +1941,11 @@ impl AuditRecord {
         self
     }
 
-    /// Attach the observed peer image name beside the claimed channel (ADR-0105 stage 2).
-    #[must_use]
-    pub fn with_peer_image(mut self, peer_image: Option<String>) -> Self {
-        self.peer_image = peer_image;
-        self
-    }
-
-    /// Attach one immutable connection snapshot and align the legacy attribution fields.
+    /// Attach one immutable connection snapshot and align the channel.
     #[must_use]
     pub fn with_provenance(mut self, provenance: Option<&crate::provenance::Attribution>) -> Self {
         self.provenance = provenance.cloned();
         self.channel = provenance.map(|value| value.channel);
-        self.peer_image = provenance
-            .and_then(|value| value.observed_executable())
-            .map(str::to_owned);
         self
     }
 

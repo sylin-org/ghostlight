@@ -230,9 +230,10 @@ if (historyScenario) {
 for (const session of snapshot.sessions) {
   session.connections = [{
     connection_id: `connection_${session.id}`, reported_application: session.client_label,
-    channel: session.channel, observed_executable: session.channel === "cli" ? "ghostlight.exe" : "ghostlight-mcp-connector.exe",
-    observation: "Observed locally", signature: "Not checked",
-    explanation: "This identifies the executable connected to Ghostlight. It does not verify the reported application."
+    channel: session.channel,
+    explanation: session.channel === "cli"
+      ? "A ghostlight call session is a local program. Ghostlight does not verify the scripts and instructions it runs."
+      : "The application name is the MCP client's own claim. Ghostlight does not verify it."
   }];
 }
 const retainConnection = (record) => {
