@@ -4,8 +4,10 @@
 //! renders what the MCP edge hands to a client (ADR-0198 Decisions 21 and 22). It never adds a field and
 //! never changes a value; a reader treats an absent field as its default. `status`, `effect`,
 //! `repeat_safe`, `summary`, `invocation` and `facts.tab` are not in any rule, so they always stay.
-//! Inside `facts`, an item (any object with a string `target`) drops an empty `state` and a false
-//! `credential_class`, and a `facts.tree` node drops an empty `label` and an empty `children`.
+//! Inside `facts`, each entry of `items` and `matches`, the lists Ghostlight itself mints, drops an
+//! empty `state` and a false `credential_class`, and a `facts.tree` node drops an empty `label` and
+//! an empty `children`. Any other fact, such as the `value` a script returned, is page data and is
+//! never read as an item.
 
 use serde_json::{Map, Value};
 
@@ -70,9 +72,10 @@ const COVERAGE_LIMITATIONS: [&str; 5] = [
     "masked_regions",
 ];
 
-/// The key that marks an object as an addressable item, such as an inspect or find result, a form
-/// field, a submit control or a radio option.
-const ITEM_HANDLE: &str = "target";
+/// The `facts` keys that hold the addressable items Ghostlight mints: the controls of an inspect
+/// and the matches of a find. Nothing else in `facts` is read as an item, because a script result
+/// or a flow value can hold page data of any shape.
+const ITEM_LISTS: [&str; 2] = ["items", "matches"];
 
 /// Fields of an item omitted at their default. A present `value` of `""` is a fact and stays.
 const ITEM_OMISSIONS: [Omission; 2] = [
@@ -128,7 +131,14 @@ fn lean_envelope(envelope: &mut Value) {
         if let Some(tree) = facts.get_mut(TREE) {
             lean_tree(tree);
         }
-        facts.values_mut().for_each(lean_items);
+        for key in ITEM_LISTS {
+            let entries = facts.get_mut(key).and_then(Value::as_array_mut);
+            for item in entries.into_iter().flatten() {
+                if let Some(fields) = item.as_object_mut() {
+                    omit(fields, &ITEM_OMISSIONS);
+                }
+            }
+        }
     }
     let rows = fields
         .get_mut(FACTS)
@@ -141,20 +151,6 @@ fn lean_envelope(envelope: &mut Value) {
         if let Some(result) = row.get_mut(STEP_RESULT) {
             lean_envelope(result);
         }
-    }
-}
-
-/// Drop the defaults from every item at any depth in `value`, through arrays and objects.
-fn lean_items(value: &mut Value) {
-    match value {
-        Value::Object(fields) => {
-            if fields.get(ITEM_HANDLE).is_some_and(Value::is_string) {
-                omit(fields, &ITEM_OMISSIONS);
-            }
-            fields.values_mut().for_each(lean_items);
-        }
-        Value::Array(entries) => entries.iter_mut().for_each(lean_items),
-        _ => {}
     }
 }
 
@@ -348,22 +344,14 @@ mod tests {
     }
 
     #[test]
-    fn nested_items_are_dropped_too() {
-        let view = project(&json!({"facts": {"forms": [{"name": "login", "fields": [
-            {"target": "t1", "state": [], "credential_class": false, "value": ""},
-        ], "submit": [{"target": "t2", "state": [], "credential_class": false}]}]}}));
-        assert_eq!(
-            view,
-            json!({"facts": {"forms": [{"name": "login", "fields": [
-                {"target": "t1", "value": ""}], "submit": [{"target": "t2"}]}]}})
-        );
-    }
-
-    #[test]
-    fn an_object_without_a_string_target_keeps_its_fields() {
-        let envelope = json!({"facts": {"other": {"state": [], "credential_class": false},
-            "numeric": {"target": 3, "state": []}}});
+    fn page_data_that_looks_like_an_item_stays() {
+        let page_data = json!([{"href": "/a", "target": "_blank", "state": [],
+            "credential_class": false}]);
+        let envelope = json!({"facts": {"tab": "t", "value": page_data,
+            "other": {"target": "x", "state": []}}});
         assert_eq!(project(&envelope), envelope);
+        let flow = json!({"facts": {"steps": [{"position": 1, "result": envelope}]}});
+        assert_eq!(project(&flow), flow);
     }
 
     #[test]
