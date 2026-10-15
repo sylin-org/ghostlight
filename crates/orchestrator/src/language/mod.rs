@@ -54,7 +54,7 @@ const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 /// every tool shares, `tab` and `timeout_ms`, so no tool repeats it (ADR-0198 decision 26).
 pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. \
 Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is unambiguous. \
-Read a page with browser_read, and get handles for its controls from browser_find or browser_inspect. \
+Read a page with browser_read, and get handles for its controls from browser_find or browser_inspect, which also show what each form control accepts. \
 Act with those handles, for example with browser_click or browser_fill_form; timeout_ms bounds the whole call. \
 Handles expire when the page changes, so fetch fresh ones after navigation. \
 Every result states its effect and whether repeating it is safe.";

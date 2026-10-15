@@ -123,7 +123,7 @@ loop in six short sentences and names only catalog tools:
 > Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
 > browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
 > unambiguous. Read a page with browser_read, and get handles for its controls from browser_find or
-> browser_inspect. Act with those handles, for example with browser_click or browser_fill_form;
+> browser_inspect, which also show what each form control accepts. Act with those handles, for example with browser_click or browser_fill_form;
 > timeout_ms bounds the whole call. Handles expire when the page changes, so fetch fresh ones after
 > navigation. Every result states its effect and whether repeating it is safe.
 
@@ -391,7 +391,7 @@ Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `c
 default `any`; optional `max_results` from 1 to 50, default 20. Capability:
 `read`.
 
-Facts: `tab`, `document_generation`, and bounded ranked `matches` with target, role, name, and
+Facts: `tab`, `document_generation`, and bounded `matches` in document order with target, role, name, and
 state, and the same optional control keys as `browser_inspect` items. It answers once the page has been quiet for 300 ms, within the settle budget.
 
 ### `browser_screenshot`

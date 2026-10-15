@@ -520,26 +520,27 @@ fn listed_tools() -> Vec<ToolDefinition> {
 ///
 /// The budget ratchets down. A later change raises it only by the measured size of a clause its
 /// new behavior needs, and the commit that raises it says so.
-const CATALOG_BUDGET_CHARS: usize = 31_000;
+const CATALOG_BUDGET_CHARS: usize = 31_700;
 
 /// Tools that carry the most guidance get their own cap on the serialized tool object, so one
 /// tool cannot grow while the whole stays under budget.
 const TOOL_BUDGET_CHARS: [(&str, usize); 5] = [
-    ("browser_inspect", 1_250),
+    ("browser_inspect", 1_300),
     ("browser_find", 950),
-    ("browser_click", 2_200),
-    ("browser_fill_form", 2_700),
+    ("browser_click", 2_300),
+    ("browser_fill_form", 3_000),
     ("browser_read", 1_050),
 ];
 
 /// Governance phrases the trim must keep. Each one says something no name, type or bound does.
-const PINNED_PHRASES: [&str; 6] = [
+const PINNED_PHRASES: [&str; 7] = [
     "for this request",
     "admitted before the effect",
     "may cause an external effect",
     "needs write even for unsent drafts",
     "screenshot image",
     "Omit for load_ready, else required",
+    "refused before any field changes",
 ];
 
 #[test]

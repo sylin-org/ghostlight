@@ -84,14 +84,14 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_inspect",
             "Inspect page",
-            "Inspect controls or page structure for fresh target_ handles. Scope document returns the outline as a bounded tree, without handles.",
+            "Inspect controls or page structure for fresh target_ handles. Scope document returns the outline as a bounded tree, without handles. Form controls also carry their value and what they accept: options, type, limits, hint and group.",
             inspect_schema(),
             Hints::browser_read(),
         ),
         tool(
             "browser_find",
             "Find on page",
-            "Find ranked targets by visible or accessible text and get fresh target_ handles. Fastest when you know the label.",
+            "Find targets by visible or accessible text and get fresh target_ handles. Fastest when you know the label. Option text finds its dropdown.",
             find_schema(),
             Hints::browser_read(),
         ),
@@ -126,7 +126,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill 1 to 30 fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a select does not offer is refused before any field changes. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
+            "Fill 1 to 30 fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a control cannot take is refused before any field changes, with what it accepts. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
             with_expect(fill_schema()),
             Hints::browser_action(true),
         ),
@@ -628,7 +628,7 @@ fn semantic_selector() -> Value {
         "additionalProperties": false,
         "description": "Lookup needs read.",
         "properties": {
-            "name": {"type": "string", "minLength": 1, "maxLength": 500},
+            "name": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Accessible name, case-insensitive substring unless exact."},
             "role": {"type": "string", "enum": SEMANTIC_ROLES},
             "exact": {"type": "boolean", "default": false}
         },
@@ -721,7 +721,7 @@ fn fill_schema() -> Value {
             vec![
                 (
                     "fields",
-                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Empty string clears. Checkboxes and radios take booleans; numeric inputs take numbers; a multi-select takes a list.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100}]}},"required":["value"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Text replaces the current value; empty clears it. Select: an option's text or value as browser_inspect lists it; multi-select: an array. Checkbox: true or false (sets, never toggles). Radio: true selects it, or a sibling's label selects that one. Date and time: ISO, like 2026-10-14, 14:30, 2026-10-14T14:30. Number and range: within the control's limits.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100}]}},"required":["value"]}}),
                 ),
                 ("tab", tab()),
                 (
