@@ -46,7 +46,7 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
-Next: shell-spike-4.
+Next: shell-spike-5.
 
 `crates/desktop/Cargo.toml` declares every dependency the lane uses and may not change after
 shell-spike-1. A slice that needs another crate records a blocker instead.
@@ -58,6 +58,7 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 | shell-spike-1 | The `ghostlight-desktop` crate in the workspace (library only until shell-spike-7), its full dependency list, and `bundle.rs`: an in-memory content-addressed set of web files. Paths are plain relative ASCII paths of at most 128 bytes; file types come from a closed table (html, css, js, png, svg, json) and anything else is refused; at most 256 files and 8 MiB; the id is the SHA-256 over `<path>\0<file sha256>\n` lines in path order. `Bundle::service` refuses the reserved `_shell` first segment and `Bundle::shell` requires it. The network guard checks the shell's tree on Windows and Linux. | see `git log` |
 | shell-spike-2 | `scheme.rs` and `BundleSet`. The private `ghostlight` scheme (`https://ghostlight.localhost` on Windows, `ghostlight://localhost` elsewhere, both forms parsed everywhere by `request_path`), the fixed `CONTENT_POLICY` (`default-src 'none'`), `respond` (GET and HEAD only, 404, 405, security headers, the policy repeated as a meta element in every HTML page, 500 for HTML with no head), `allows_navigation`, and `harden`, the one place the webview settings are applied. `BundleSet` serves `_shell/` paths from the shell bundle and every other path from the service bundle. | see `git log` |
 | shell-spike-3 | `bridge.rs` and `web/bridge.js`: the one post-and-receive JSON bridge. `bridge.js` is injected into the main frame and defines the frozen, non-writable, non-configurable `window.ghostlightShell` (`post`, `listen`) and the hidden `__ghostlightShellDeliver`. `decode_page_message` takes only a JSON object of at most 1 MiB, `delivery_script` encodes the message as a JSON string literal inside the call, and `page_origin` sorts a URL into shell page, service page or foreign (foreign messages are dropped). | see `git log` |
+| shell-spike-4 | `tray.rs`: the tray built from a model. `TrayModel` (`tooltip`, `items`) and `TrayItem` (`id`, `label`, `enabled`) with `validate` (1 to 16 items, unique ids of `[a-z0-9_]{1,32}`, labels of 1 to 64 printable characters, a tooltip of at most 64), `icon_image` and `decode_rgba` (PNG to 8-bit RGBA), `Tray::build` and `Tray::show`, and `install_events` mapping a left-button-up click to `TrayEvent::Activate` and a menu choice to `TrayEvent::Item(id)`. The shell owns no item; Linux reports no clicks, so Open must be a menu item there. | see `git log` |
 
 ## Owed live checks
 
@@ -78,6 +79,14 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
   `window.ghostlightShell` exists before page scripts run on WebView2, that a posted object reaches
   the IPC handler with the page URL, that `evaluate_script` of a `delivery_script` reaches a
   listener, and that assigning `window.ghostlightShell` from a page does nothing.
+
+- shell-spike-4: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
+  warnings` and `cargo test -p ghostlight-desktop`.
+- shell-spike-4: live, once the event loop exists (shell-spike-5 or later): that `Tray::build` shows the
+  product icon and tooltip, that a right click lists the model's items in order with disabled ones
+  greyed, that a left click on Windows reports `Activate` and does not open the menu, that choosing
+  an item reports `Item(id)`, that `Tray::show` replaces the menu and tooltip, and that a Linux
+  indicator shows the menu but reports no click.
 
 ## Blockers
 

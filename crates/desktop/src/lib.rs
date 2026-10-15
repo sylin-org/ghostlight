@@ -23,3 +23,4 @@
 pub mod bridge;
 pub mod bundle;
 pub mod scheme;
+pub mod tray;
