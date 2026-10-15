@@ -42,6 +42,9 @@ local human
   console on Windows 11 24H2 and later. The release service image is a GUI-subsystem program, so
   a typed command attaches to its parent's console first and writes there and receives Ctrl-C
   itself; `serve`, the bare launch and `open` never attach.
+  On Windows each executable names itself in Task Manager: "Ghostlight connection" for the edge
+  (one per MCP client or browser), "Ghostlight" for the window and, because Tauri takes its
+  description from the product name, "Ghostlight" for the service too.
 - `extension` implements the full Chromium physical mechanism set, page-runtime installation,
   browser topology, content-free feedback, and the local toolbar/options experience.
 

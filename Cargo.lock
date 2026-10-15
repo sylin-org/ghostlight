@@ -1462,6 +1462,7 @@ name = "ghostlight"
 version = "4.0.0"
 dependencies = [
  "anyhow",
+ "embed-resource",
  "ghostlight-relay",
  "serde_json",
 ]

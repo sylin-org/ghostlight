@@ -14,5 +14,8 @@ anyhow.workspace = true
 ghostlight-relay = { path = "../relay" }
 serde_json.workspace = true
 
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.11"
+
 [lints]
 workspace = true

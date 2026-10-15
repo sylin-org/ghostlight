@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-11-status-and-doctor.
+Next: m1-11-status-and-doctor (m1-12-honest-names landed out of order).
 
 ## Landed
 
@@ -56,6 +56,7 @@ Next: m1-11-status-and-doctor.
 | m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; while it is off every watching stream ends with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
 | m1-09-desktop-role | The service serves relay protocol 4's `desktop` role to a shell of its own build: `S/intake/desktop.rs` holds the same-build frames (`workbench`, `goodbye`, `tray`), the shell is handed the workbench address and the bearer and is enrolled for the goodbye, and a tray click holds, resumes or quits. The installer places `ghostlight-desktop` beside every service image it places when the payload has one. Goldens in `tests/golden/desktop/`. | see `git log` |
 | m1-10-shell-webview | `ghostlight-desktop` is the Ghostlight window: a webview on the service's loopback workbench. It opens the relay `desktop` stream (`link.rs`), takes the address, the bearer and the tray from the `workbench` frame, hands the bearer to that origin's page only (`webview::access_script`) and keeps its web storage in `state/desktop-webview` under the home. The private scheme, the in-memory bundle, the page bridge and the spike page are gone; the shell depends on `ghostlight-relay` and nothing else in the workspace. | see `git log` |
+| m1-12-honest-names | The edge carries a version resource: FileDescription "Ghostlight connection", ProductName "Ghostlight", CompanyName "Sylin", FileVersion and ProductVersion 4.0.0 (the relay revision). `embed-resource` becomes a Windows build dependency of the edge. The window keeps "Ghostlight". | see `git log` |
 
 ## Route table
 
@@ -173,9 +174,22 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
 - m1-10, Linux (later): the same window over WebKitGTK, the clipboard copy, closing the window with and without a
   tray, and the renderer-lost recovery on Open.
 
+- m1-12, Windows: the edge with its description reaches `bin` only when the relay revision changes
+  or a pre-edge layout is replaced (`install/deployment.rs` `plan()`, `edge_changes`), so a development
+  install places it in `dev` while connections keep running `bin`'s edge. Check Properties, Details on
+  `dev/ghostlight.exe` ("Ghostlight connection"), force-replace `bin`'s edge once (owner answer Q4: no
+  new refresh rule; the DEV-LOOP step), and confirm Task Manager lists each connection as
+  "Ghostlight connection", the window as "Ghostlight" and the service by the description above.
+
 ## Blockers
 
-None.
+- m1-12, question for the coordinator: the service image's FileDescription is "Ghostlight" and cannot
+  be set from this lane. `tauri-build` 2.6.3 takes it from `productName` in
+  `crates/orchestrator/tauri.conf.json` (and ProductName from the same key); `WindowsAttributes` has no
+  description setter. The one-line change is `"productName": "Ghostlight service"`; it would also
+  change ProductName to "Ghostlight service" and any use of productName by Tauri at run time (the
+  window title is set separately, `"title": "Ghostlight"`). Until then ARCHITECTURE.md says the
+  service reads "Ghostlight".
 
 ## Notes
 
@@ -385,3 +399,8 @@ None.
   cannot be created also ends a shell with no tray. `Shell::start` returns whether the shell goes on.
 - Owner question: Theme and "Hold this screen" are not part of this milestone's "On this screen" group. Should
   either be added once the demo has been seen?
+
+- m1-12: built resources read from `.target-lane-shell-m1/debug`: `ghostlight.exe` FileDescription
+  "Ghostlight connection" (FileVersion 4.0.0), `ghostlight-desktop.exe` "Ghostlight",
+  `ghostlight-service.exe` "Ghostlight". The ledger's RESUME line still names m1-11 because that slice
+  has not landed.
