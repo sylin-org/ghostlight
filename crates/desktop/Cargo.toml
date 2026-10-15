@@ -1,0 +1,31 @@
+[package]
+name = "ghostlight-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "The Ghostlight window: one webview, a tray and notifications around pages the service sends"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+png = "0.18.1"
+tao = "=0.35.3"
+tray-icon = { version = "=0.24.2", default-features = false, features = ["gtk"] }
+wry = "=0.55.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "=0.18.2"
+webkit2gtk = "=2.0.2"
+libc = "0.2"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.11"
+
+[lints]
+workspace = true

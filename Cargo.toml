@@ -6,6 +6,7 @@ members = [
     "crates/mcp-connector",
     "crates/browser-connector",
     "crates/win-peer",
+    "crates/desktop",
 ]
 resolver = "2"
 
