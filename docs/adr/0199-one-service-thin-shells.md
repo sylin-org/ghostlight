@@ -589,3 +589,38 @@ check. Agents cannot open the page. "Others can watch" covers shared computers.
   the URL from the service.
 - Removing Tauri from the service, presence, idle exit and the rest of the shell track are
   planned after the owner sees this working, live.
+
+## Amendment (2026-10-15): the development channel lands in 2.0
+
+Owner decision, 2026-10-15. Decision 18 lands in 2.0 instead of 2.x. Decision 17's fold of
+`deployment install` into `install` stays in 2.x, so the channel rides on today's command.
+
+### Why
+
+While a development build lived in `~/.ghostlight/dev`, `bin/ghostlight-service` stayed the image
+of the last release-shaped install. The edge hands every typed command to that image, and it runs
+its own start-up code before it forwards to `dev`. A fix to that code, the console attach of the
+seams batch, never reached the owner's machine until `bin` was replaced by hand. Two copies of the
+service image also contradict the owner's rule: zero or one Ghostlight, replaced in place.
+
+### Decision
+
+- `scripts/dev-loop.ps1` builds in an isolated target and runs
+  `<target>/ghostlight-service deployment install --development`. It installs into `bin` the way a
+  release does: the service image every time, the edge when its relay revision differs from the
+  record or there is no record, and the shell when its build differs. A development install never
+  stops at "same version". `bin/install.json` records `"channel": "development"`.
+- A release carrier that finds the development channel runs the installed edge and never installs
+  over it. `deployment install --restore`, run from a release carrier (npm or the get scripts), is
+  the one way back and the one allowed move down: it installs that carrier's payload into `bin`
+  and records the release channel. Restore is no longer offline.
+- `~/.ghostlight/dev`, the `development` marker and the forwarding rule are deleted. A deploy that
+  finds them stops the images in `dev`, then removes the directory and the marker, after `bin`
+  holds the new images.
+
+### Consequences
+
+- One copy of each image exists on the machine. A development deploy replaces the live Ghostlight
+  and its early start-up code at once.
+- Going back to a release needs a release carrier, so a network fetch or a downloaded get script.
+- The entry rule loses a branch, and the doctor report and `status` lose the development marker.
