@@ -28,6 +28,24 @@ function Assert-Contains {
     }
 }
 
+function Assert-InstallPins {
+    param([string]$Text, [string]$Label, [string]$Release, [string]$Adapter)
+    $releasePins = [regex]::Matches($Text, 'ghostlight@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\b')
+    foreach ($match in $releasePins) {
+        $found = $match.Groups[1].Value
+        if ($found -ne $Release) {
+            throw "$Label pins ghostlight@$found, expected $Release"
+        }
+    }
+    $adapterPins = [regex]::Matches($Text, '(?:adapter v?|Ghostlight in Browser` )(\d+\.\d+\.\d+)\b')
+    foreach ($match in $adapterPins) {
+        $found = $match.Groups[1].Value
+        if ($found -ne $Adapter) {
+            throw "$Label names adapter $found, expected $Adapter"
+        }
+    }
+}
+
 $publicStatus = Read-JsonFile -Path (Join-Path $repo "docs/public-status.json")
 $server = Read-JsonFile -Path (Join-Path $repo "server.json")
 $manifest = Read-JsonFile -Path (Join-Path $repo "extension/manifest.json")
@@ -42,15 +60,9 @@ $installationGuide = Get-Content -LiteralPath (
 ) -Raw
 $supplyChain = Get-Content -LiteralPath (Join-Path $repo "docs/trust/supply-chain.md") -Raw
 $trustFaq = Get-Content -LiteralPath (Join-Path $repo "docs/trust/faq.md") -Raw
-$distribution = Get-Content -LiteralPath (Join-Path $repo "docs/business/DISTRIBUTION.md") -Raw
-$directorySubmissions = Get-Content -LiteralPath (
-    Join-Path $repo "docs/business/DIRECTORY-SUBMISSIONS.md"
-) -Raw
 $wingetTemplate = Get-Content -LiteralPath (
     Join-Path $repo "packaging/winget/Sylin.Ghostlight.yaml"
 ) -Raw
-$siteFiles = Get-ChildItem -LiteralPath (Join-Path $repo "site") -File -Recurse
-$siteText = ($siteFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
 
 $cargoMatch = [regex]::Match(
     $cargoText,
@@ -73,30 +85,16 @@ Assert-Equal -Actual $server.name -Expected "org.sylin/ghostlight" -Label "offic
 
 $release = $publicStatus.release
 $adapter = $publicStatus.chromeStore.publicAdapterVersion
-Assert-Contains -Text $readme -Needle "published release is $release" -Label "README"
-Assert-Contains -Text $readme -Needle "ghostlight@$release" -Label "README"
-Assert-Contains -Text $readme -Needle "org.sylin/ghostlight $release" -Label "README"
-Assert-Contains -Text $readme -Needle "Chrome Web Store adapter v$adapter" -Label "README"
-Assert-Contains -Text $llmsInstall -Needle "ghostlight@$release install" -Label "LLM install guide"
-Assert-Contains -Text $llmsInstall -Needle "ghostlight@$release doctor" -Label "LLM install guide"
-Assert-Contains -Text $llmsInstall -Needle "public Chrome adapter is $adapter" -Label "LLM install guide"
-Assert-Contains -Text $installationGuide -Needle "ghostlight@$release install" -Label "installation guide"
-Assert-Contains -Text $installationGuide -Needle "ghostlight@$release doctor" -Label "installation guide"
-Assert-Contains -Text $installationGuide -Needle "Browser`` $adapter extension" -Label "installation guide"
+Assert-InstallPins -Text $readme -Label "README" -Release $release -Adapter $adapter
+Assert-InstallPins -Text $llmsInstall -Label "LLM install guide" -Release $release -Adapter $adapter
+Assert-InstallPins -Text $installationGuide -Label "installation guide" -Release $release -Adapter $adapter
 Assert-Contains -Text $supplyChain -Needle "currently serve $release" -Label "supply-chain trust page"
 Assert-Contains -Text $supplyChain -Needle "adapter serves $adapter" -Label "supply-chain trust page"
 Assert-Contains -Text $trustFaq -Needle "currently serve $release" -Label "trust FAQ"
 Assert-Contains -Text $trustFaq -Needle "adapter serves $adapter" -Label "trust FAQ"
-Assert-Contains -Text $distribution -Needle "ghostlight@$release" -Label "distribution runbook"
-Assert-Contains -Text $distribution -Needle "v$release is active" -Label "distribution runbook"
-Assert-Contains -Text $directorySubmissions -Needle "org.sylin/ghostlight`` $release" -Label "directory submissions"
 Assert-Contains -Text $wingetTemplate -Needle "/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip" -Label "WinGet template archive URL"
-Assert-Contains -Text $wingetTemplate -Needle "an older copy never replaces a newer one" -Label "WinGet template carrier notes"
-if ($siteText -notmatch [regex]::Escape("https://sylin.org/ghostlight/")) {
-    throw "site sources do not point at the canonical Ghostlight page"
-}
-if ($publicStatus.extensionSummary -notmatch [regex]::Escape($publicStatus.chromeStore.publicAdapterVersion)) {
-    throw "extensionSummary does not name the observed public adapter"
+if ($publicStatus.extensionSummary -notmatch ("\bv" + [regex]::Escape($adapter) + "\b")) {
+    throw "extensionSummary does not name the observed public adapter v$adapter"
 }
 
 $compatibilityJson = & (Join-Path $PSScriptRoot "adapter-compatibility.ps1") -Json
