@@ -36,12 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # The action does not infer the repository pin when given a moving channel. Keep this
-      # immutable action revision and explicit toolchain aligned with rust-toolchain.toml.
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: "1.95.0"
-          components: rustfmt
+      - run: rustup toolchain install
+      - run: rustc --version
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
 
@@ -58,10 +54,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: "1.95.0"
-          components: clippy
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
@@ -116,9 +109,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: "1.95.0"
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: journeys-${{ matrix.os }}
@@ -173,9 +164,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: "1.95.0"
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: browser-${{ matrix.os }}
@@ -217,9 +206,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: "1.95.0"
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Install dependency policy tools
         run: |
