@@ -17,9 +17,10 @@
 //!
 //! On Windows the command is the installed `bin` directory on the per-user `Path` (see
 //! [`super::user_path`]). Install appends that one entry, uninstall removes only it, and each
-//! change is announced so terminals opened afterwards see it. Inside an app container the registry
-//! write would land in that app's private view, so the entry is neither read nor written and the
-//! state is [`CommandPathState::PrivateView`].
+//! change is announced so terminals opened afterwards see it. Inside an app container a registry
+//! write would land in that app's private view, so the entry is read and never written: an entry
+//! already there is [`CommandPathState::Current`], and a missing one is
+//! [`CommandPathState::PrivateView`], to be added from a regular terminal.
 
 use std::env;
 use std::fs;
@@ -30,7 +31,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use thiserror::Error;
 
-use super::container::{AppContainer, Residence, NOT_VISIBLE};
+use super::container::{AppContainer, Residence};
 use super::user_path::{self, PathValue, UserPathStore};
 
 /// The command name a person types.
@@ -59,8 +60,8 @@ pub enum CommandPathState {
     Updatable,
     /// Something not owned by Ghostlight occupies the location.
     NeedsAttention,
-    /// An app container keeps the entry private, so this process can neither see nor set the real
-    /// one.
+    /// The entry is missing and this process runs in an app container, which keeps a change made
+    /// here private to that app.
     PrivateView,
 }
 
@@ -260,18 +261,20 @@ fn inspect_user_path(
             executable,
         });
     };
-    let (state, detail) = if let Some(container) = &context.container {
-        (
-            CommandPathState::PrivateView,
-            format!(
-                "{NOT_VISIBLE}: Windows gives {} its own view of the user PATH.",
-                container.app
-            ),
-        )
-    } else if on_user_path(context, store, directory)? {
+    let (state, detail) = if on_user_path(context, store, directory)? {
         (
             CommandPathState::Current,
             format!("{} is on your PATH.", directory.display()),
+        )
+    } else if let Some(container) = &context.container {
+        (
+            CommandPathState::PrivateView,
+            format!(
+                "{} is not on your PATH. Windows keeps a change made from {} private to that app.                  To add it, run this from a regular terminal: {} {FIXING_SUBCOMMAND}",
+                directory.display(),
+                container.app,
+                executable.display()
+            ),
         )
     } else {
         (
@@ -408,7 +411,8 @@ fn apply_uninstall(
     if !matches!(
         before.state,
         CommandPathState::Current | CommandPathState::Updatable
-    ) {
+    ) || context.container.is_some()
+    {
         return Ok(unchanged(before));
     }
     if let (Some(store), Some(directory)) = (&context.user_path, context.bin_directory()) {
@@ -876,20 +880,47 @@ mod tests {
             assert_eq!(store.text().as_deref(), Some(original));
         }
 
-        #[test]
-        fn inside_an_app_container_the_path_is_never_read_or_written() {
-            let store = FakeUserPath::holding(r"C:\Windows", true);
-            let mut context = windows(&store);
+        fn in_container(store: &Arc<FakeUserPath>) -> CommandPathContext {
+            let mut context = windows(store);
             context.container = Some(AppContainer {
                 app: "Claude".to_owned(),
             });
+            context
+        }
+
+        #[test]
+        fn inside_an_app_container_an_entry_already_there_is_current_and_nothing_is_written() {
+            let store = FakeUserPath::holding(r"C:\Windows;%USERPROFILE%\.ghostlight\bin", true);
+            let context = in_container(&store);
+
+            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
+            let installed = apply_install(&context).unwrap();
+            assert!(!installed.changed);
+            assert_eq!(installed.report.state, CommandPathState::Current);
+            let removed = apply_uninstall(&context).unwrap();
+            assert!(!removed.changed);
+            assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+            assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                store.text().as_deref(),
+                Some(r"C:\Windows;%USERPROFILE%\.ghostlight\bin")
+            );
+        }
+
+        #[test]
+        fn inside_an_app_container_a_missing_entry_is_kept_private_and_nothing_is_written() {
+            let store = FakeUserPath::holding(r"C:\Windows", true);
+            let context = in_container(&store);
 
             let report = inspect(&context).unwrap();
             assert_eq!(report.state, CommandPathState::PrivateView);
             assert!(report.detail.contains("Claude"));
-            assert!(!apply_install(&context).unwrap().changed);
+            let installed = apply_install(&context).unwrap();
+            assert!(!installed.changed);
+            assert_eq!(installed.report.state, CommandPathState::PrivateView);
             assert!(!apply_uninstall(&context).unwrap().changed);
             assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+            assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
             assert_eq!(store.text().as_deref(), Some(r"C:\Windows"));
         }
     }

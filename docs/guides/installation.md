@@ -180,7 +180,7 @@ On Windows the browsers' registration names one manifest, `~/.ghostlight/manifes
 Windows runs the processes of an MSIX-packaged app, Claude desktop and Codex among them, in that
 app's container, where registry and `AppData` writes are visible only to that app. An install run
 from such a terminal writes everything else and says which registrations it left, the PATH entry
-among them; run
+among them while it is missing; run
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
 installs from inside the container only rewrite the manifest.
 
