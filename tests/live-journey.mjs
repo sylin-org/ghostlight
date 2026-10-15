@@ -307,7 +307,6 @@ try {
   assert.equal(parentFill.facts.steps[0].id, "step_1");
   const openScreenshot = structured(await request("tools/call", { name: "browser_screenshot", arguments: { tab: localTab } }, 30000));
   assert.equal(openScreenshot.status, "succeeded", JSON.stringify(openScreenshot));
-  assert.ok(!openScreenshot.facts.coverage || !openScreenshot.facts.coverage.masked_regions);
   assert.equal(await tabEvidence("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
   assert.equal(typeof await tabEvidence("document.title"), "string");
   check("all-open embedded content remains readable, editable, capturable, and scriptable through the installed native host");

@@ -213,7 +213,7 @@ const script = [
 // A stable H4 scenario exercises the real bundled view with bounded synthetic receipts.
 const historyScenario = process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h4";
 if (historyScenario) {
-  const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed }], request_restricted: false, request_evaluated: false }], truncated: false });
+  const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed }] }], truncated: false });
   const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
   snapshot.operations = [];
   snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: Date.now(), duration_ms: 920, observed: {}, steps: [

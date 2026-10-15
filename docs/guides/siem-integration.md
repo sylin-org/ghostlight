@@ -26,7 +26,7 @@ its bounded History view from the same file.
   "allowed": true,
   "reason": "permitted",
   "status": "succeeded",
-  "effect": "none",
+  "effect": "applied",
   "summary": "Navigated to example.com.",
   "permissions": {
     "checks": [

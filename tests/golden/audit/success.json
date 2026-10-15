@@ -10,7 +10,7 @@
   "allowed": true,
   "reason": "permitted",
   "status": "succeeded",
-  "effect": "none",
+  "effect": "applied",
   "summary": "Navigated to example.com.",
   "permissions": {
     "checks": [

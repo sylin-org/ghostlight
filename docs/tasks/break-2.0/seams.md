@@ -157,7 +157,9 @@ them.
   runs it) passes; `node tests/process-journey.mjs`, `tests/provenance-journey.mjs`,
   `tests/script-browser-journey.mjs`, `tests/local-resilience-journey.mjs` and
   `tests/cli-powershell-journey.mjs` pass (their fake browsers no longer send `masked_regions`).
-  `node --check` passes on all five.
+  `node --check` passes on all five. `node tests/live-journey.mjs` (it starts the service and a live
+  browser) and `node tests/workbench-history-browser.mjs` (it reads the preview fixture in
+  `tests/workbench-preview-server.mjs`) pass.
 
 ## Notes
 

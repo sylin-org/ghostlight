@@ -64,3 +64,62 @@ fn a_call_that_does_not_decode_matches_the_refusal_golden() {
         &golden_text(&rendered_result("browser_tabs", arguments, &result)),
     );
 }
+
+#[test]
+fn a_navigate_receipt_matches_the_audit_success_golden() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let handle = opened.facts["tab"].as_str().expect("an opened tab handle");
+    browser.push(Ok(BrowserOutcome::Navigated {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    let navigated = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","tab":handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(navigated.status, Status::Succeeded, "{navigated:?}");
+    let written = serde_json::to_value(
+        audit
+            .0
+            .lock()
+            .unwrap()
+            .last()
+            .expect("the navigate left a receipt"),
+    )
+    .unwrap();
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(crate::language::self_check::golden::repository_path(
+            "tests/golden/audit/success.json",
+        ))
+        .expect("the audit success golden exists"),
+    )
+    .unwrap();
+    for key in [
+        "tool",
+        "capabilities",
+        "allowed",
+        "status",
+        "effect",
+        "summary",
+    ] {
+        assert_eq!(
+            written[key], golden[key],
+            "the audit golden drifted on {key}"
+        );
+    }
+}

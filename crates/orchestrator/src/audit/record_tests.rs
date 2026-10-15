@@ -4,6 +4,7 @@ use super::*;
 use crate::governance::Capability;
 use crate::language::outcome::Outcome;
 use crate::language::self_check::golden::{check_golden_with, golden_text, repository_path};
+use crate::work::result::{Effect, Status};
 
 /// The environment variable that rewrites the audit line goldens instead of comparing them.
 const UPDATE_VARIABLE: &str = "GHOSTLIGHT_AUDIT_GOLDEN_UPDATE";
@@ -278,6 +279,14 @@ fn fixed(mut record: AuditRecord, duration_ms: u64) -> AuditRecord {
     record
 }
 
+/// A status or effect as the service writes it into the line.
+fn wire(value: impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .expect("a status or effect is a plain string")
+}
+
 /// The connection evidence a record carries, as the service attaches it.
 fn golden_connection() -> crate::provenance::ConnectionEvidence {
     crate::provenance::ConnectionEvidence::new(
@@ -308,8 +317,8 @@ fn navigate_succeeded() -> AuditRecord {
         CapabilitySet::READ,
         snapshot.id(),
         decision,
-        "succeeded",
-        "none",
+        &wire(Status::Succeeded),
+        &wire(Effect::Applied),
         &Outcome::PageNavigated {
             host: Some("example.com".into()),
         }
