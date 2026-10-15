@@ -16,37 +16,32 @@ and pending edits in Git stashes; never discard it to clean up branch names.
 
 ## Read this first (in order)
 
-1. [docs/MEMORY.md](docs/MEMORY.md) -- the cross-agent project memory: the owner's standing
-   working preferences, durable cross-cutting learnings, and a pointer index to everything below.
-   Read it first; it tells you where each kind of durable fact lives. Its sensitive/machine-local
-   counterpart is `local/NOTES.md` (gitignored).
-2. [docs/STATUS.md](docs/STATUS.md) -- where the project stands right now: version state,
-   open PRs, in-flight work, and the owed-items list. Read it before starting anything.
-3. [docs/1.0/INTENT.md](docs/1.0/INTENT.md),
-   [docs/1.0/LANGUAGE.md](docs/1.0/LANGUAGE.md),
-   [docs/1.0/ARCHITECTURE.md](docs/1.0/ARCHITECTURE.md), and
-   [docs/1.0/ACCEPTANCE.md](docs/1.0/ACCEPTANCE.md) -- the current implementation contract.
-4. [docs/adr/README.md](docs/adr/README.md) -- the ADR index. **Before touching a subsystem,
-   read its ADR(s).** ADRs are the authoritative record of every design decision; do not
-   re-litigate a decided question, and do not silently contradict one. To change a decision,
-   write a new ADR (or a marked amendment), never rewrite history.
-5. [docs/SPEC.md](docs/SPEC.md) -- the original design specification. Still the best deep
-   explanation of the governance model, but ADRs supersede it where they differ.
-6. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) -- read before any build/run/deploy work on a dev
-   machine. It starts with a "when code changes, do this" table.
-7. `local/MACHINE-STATE.md` and `local/NOTES.md` -- if present (both gitignored): machine-local
-   truth (which engine is running, install state, local gotchas) and sensitive/working memory
-   (owner context, credential *locations*, session handoffs). Do not read them without explicit
-   owner authorization. See [local/README.md](local/README.md).
-8. [CONTRIBUTING.md](CONTRIBUTING.md) -- test tiers, PR expectations, and the whole-repo
-   Apache-2.0 OR MIT / DCO contribution terms.
+1. [docs/MEMORY.md](docs/MEMORY.md) -- standing owner directives and durable learnings, with a
+   pointer to the documentation map.
+2. The current-state sections at the top of [docs/STATUS.md](docs/STATUS.md): in-flight work,
+   branch state, and any release in progress. Older dated sections are history; read them only
+   when relevant.
+3. Before changing a subsystem, read its ADRs (index: [docs/adr/README.md](docs/adr/README.md))
+   and the docs/1.0 contract that covers it ([INTENT](docs/1.0/INTENT.md),
+   [LANGUAGE](docs/1.0/LANGUAGE.md), [ARCHITECTURE](docs/1.0/ARCHITECTURE.md),
+   [ACCEPTANCE](docs/1.0/ACCEPTANCE.md)). ADRs are authoritative. Do not re-litigate or silently
+   contradict one. To change a decision, write a new ADR or a marked amendment, never rewrite
+   history.
 
-Larger work is organized as task batches under `docs/tasks/<batch>/`, each with a
-`BOOTSTRAP.md` (ground rules) and a `LEDGER.md` (durable progress, one task = one commit,
-a RESUME HERE section). If you are executing a batch, the ledger is the source of truth
-for what is done. [docs/tasks/README.md](docs/tasks/README.md) indexes all of them and says which
-predate the 1.0 internals rebuild, which is all but one: never take a file path or code excerpt
-from an old batch as current.
+Read on demand: [docs/SPEC.md](docs/SPEC.md) (deep governance rationale; ADRs win),
+[docs/DEV-LOOP.md](docs/DEV-LOOP.md) (required before any build/run/deploy on a dev machine),
+[CONTRIBUTING.md](CONTRIBUTING.md) (test tiers and PR expectations).
+
+Work split across concurrent agents or lanes, or run unattended across many sessions, may use a
+task batch under `docs/tasks/<batch>/`: a `BOOTSTRAP.md` (ground rules for that batch) and either
+one `LEDGER.md` or one ledger file per lane. The ledger is the record of what is done. Read its
+RESUME HERE block before you start, and update it in the same commit as the slice it advances.
+Process rules in an older batch's BOOTSTRAP bind only that batch. Other work tracks its state in
+`docs/STATUS.md`. [docs/tasks/README.md](docs/tasks/README.md) indexes the batches. Batch files
+describe the tree as it was when written; check the current tree before trusting any path or
+code excerpt in them. Tree facts and line numbers in any task file, including the active batch,
+are as-of-authoring hints: re-read the live tree and find code by name, signature or anchor text
+before editing.
 
 ## Authority and historical continuity
 
@@ -194,6 +189,8 @@ quietly pass against stale binaries and tell you nothing about your change.
   prose. Short sentences beat clause chains.
 - Commit messages: conventional commits, `<type>(<scope>): <description>` (scope optional).
   Types: feat, fix, refactor, docs, test, chore, perf, ci.
+- Sign off every commit (`git commit -s`); contributions are under the DCO and Apache-2.0 OR MIT
+  (CONTRIBUTING.md, ADR-0140).
 - One logical change per commit; every commit leaves a green tree.
 
 ## Boundaries -- never do these
