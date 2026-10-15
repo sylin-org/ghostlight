@@ -170,6 +170,11 @@ the owner wants, and what this project learned the hard way.
   interface's own behavior ("this page updates on its own", "you can close this"); let the change
   itself be the message. Fallback actions appear only when they become needed, never up front.
   Filler such as "That is it." goes.
+- **One visual language: sylin.org's.** Product surfaces (the setup page, the popup, the
+  Ghostlight window) use the site's kit: the night ground, the `#5eead4` accent, system fonts,
+  eyebrow labels, the 01/02/03 steps. The trading-card shape (the framed mascot card with its
+  version disc) is reserved for presenting Ghostlight as a product: the site, store listings,
+  About. Setup and status surfaces show the mascot alone (owner, 2026-10-14).
 - **Solve the immediate need, then reveal useful depth.** Lead Ghostlight with private, controlled
   browser access and legible agent activity. Its integrations across MCP clients, models and
   harnesses, and its configurable policies should be understandable optional depth. This is
