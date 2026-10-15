@@ -169,10 +169,11 @@ impl HarnessRegistry {
         let eligible: Vec<HarnessDefinition> = definitions(&self.inner.context)
             .into_iter()
             .filter(|definition| {
-                matches!(
-                    states.get(definition.id),
-                    Some(HarnessState::Available | HarnessState::Updatable)
-                )
+                !matches!(definition.dialect, ConfigDialect::Manual(_))
+                    && matches!(
+                        states.get(definition.id),
+                        Some(HarnessState::Available | HarnessState::Updatable)
+                    )
             })
             .collect();
 
@@ -649,13 +650,14 @@ impl HarnessDefinition {
 #[derive(Clone, Copy)]
 enum ConfigDialect {
     Json(JsonDialect),
-    Yaml(YamlDialect),
+    /// A client whose file Ghostlight never parses or writes: a person pastes the setup.
+    Manual(ManualDialect),
     CodexToml,
     OpenCode,
 }
 
 #[derive(Clone, Copy)]
-enum YamlDialect {
+enum ManualDialect {
     Goose,
     Continue,
 }
@@ -943,7 +945,7 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             Some("https://block.github.io/goose/docs/getting-started/installation/"),
             context.config.join("goose/config.yaml"),
             &["goose"],
-            ConfigDialect::Yaml(YamlDialect::Goose),
+            ConfigDialect::Manual(ManualDialect::Goose),
         ),
         row(
             "continue",
@@ -954,7 +956,7 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
             Some("https://docs.continue.dev/cli/quickstart"),
             context.home.join(".continue/config.yaml"),
             &["cn"],
-            ConfigDialect::Yaml(YamlDialect::Continue),
+            ConfigDialect::Manual(ManualDialect::Continue),
         ),
         row(
             "antigravity",
@@ -1042,6 +1044,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .iter()
             .any(|name| executable_on_path(context, name));
     let connector_ready = context.connector.is_file();
+    let manual = matches!(definition.dialect, ConfigDialect::Manual(_));
     let registration = registration_state(context, definition);
     let state = match &registration {
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
@@ -1061,6 +1064,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             "This configuration could not be parsed; it was left untouched.".into()
         }
         Err(_) => "This configuration could not be read; it was left untouched.".into(),
+        _ if manual => manual_setup_sentence(definition),
         _ => match state {
             HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
             HarnessState::Updatable => "Ghostlight's saved registration needs an update.".into(),
@@ -1098,7 +1102,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     if definition.located_stale {
         detail.push_str(" A previously located path is missing; the normal location is shown.");
     }
-    let can_fix = connector_ready && registration_can_fix(definition, &registration);
+    let can_fix = connector_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
     HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -1110,6 +1114,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         detail,
         evidence,
         can_install: connector_ready
+            && !manual
             && matches!(
                 state,
                 HarnessState::Available | HarnessState::NotDetected | HarnessState::Updatable
@@ -1127,22 +1132,6 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
                 context.connector.display()
             )
         }),
-    }
-}
-
-fn registration_can_fix(
-    definition: &HarnessDefinition,
-    registration: &Result<RegistrationState, HarnessError>,
-) -> bool {
-    if !matches!(registration, Ok(RegistrationState::Foreign(_))) {
-        return false;
-    }
-    match definition.dialect {
-        ConfigDialect::Yaml(dialect) => fs::read_to_string(&definition.path)
-            .ok()
-            .and_then(|source| owned_yaml_range(&source, dialect).ok().flatten())
-            .is_some(),
-        ConfigDialect::Json(_) | ConfigDialect::CodexToml | ConfigDialect::OpenCode => true,
     }
 }
 
@@ -1172,15 +1161,13 @@ fn registration_state(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<RegistrationState, HarnessError> {
-    if !definition.path.exists() {
+    if !definition.path.exists() || matches!(definition.dialect, ConfigDialect::Manual(_)) {
         return Ok(RegistrationState::Missing);
     }
     let source = fs::read_to_string(&definition.path).map_err(HarnessError::Read)?;
     match definition.dialect {
         ConfigDialect::CodexToml => inspect_toml(&source, &context.connector, context.windows),
-        ConfigDialect::Yaml(dialect) => {
-            inspect_yaml(&source, dialect, &context.connector, context.windows)
-        }
+        ConfigDialect::Manual(_) => Ok(RegistrationState::Missing),
         ConfigDialect::Json(dialect) => {
             inspect_json(&source, dialect, &context.connector, context.windows)
         }
@@ -1327,9 +1314,7 @@ fn apply_install(
     }
     let changed = match definition.dialect {
         ConfigDialect::CodexToml => edit_toml(&definition.path, &context.connector, true)?,
-        ConfigDialect::Yaml(dialect) => {
-            edit_yaml(&definition.path, &context.connector, dialect, true)?
-        }
+        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
         ConfigDialect::Json(dialect) => {
             edit_json(&definition.path, &context.connector, dialect, true)?
         }
@@ -1364,9 +1349,7 @@ fn apply_uninstall(
     refuse_private(context, definition)?;
     let changed = match definition.dialect {
         ConfigDialect::CodexToml => edit_toml(&definition.path, &context.connector, false)?,
-        ConfigDialect::Yaml(dialect) => {
-            edit_yaml(&definition.path, &context.connector, dialect, false)?
-        }
+        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
         ConfigDialect::Json(dialect) => {
             edit_json(&definition.path, &context.connector, dialect, false)?
         }
@@ -1404,7 +1387,7 @@ fn apply_fix(
     }
     let changed = match definition.dialect {
         ConfigDialect::CodexToml => fix_toml(&definition.path, &context.connector)?,
-        ConfigDialect::Yaml(dialect) => fix_yaml(&definition.path, &context.connector, dialect)?,
+        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
         ConfigDialect::Json(dialect) => fix_json(&definition.path, &context.connector, dialect)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
@@ -1614,380 +1597,6 @@ fn edit_toml_with(
     Ok(true)
 }
 
-fn inspect_yaml(
-    source: &str,
-    dialect: YamlDialect,
-    connector: &Path,
-    windows: bool,
-) -> Result<RegistrationState, HarnessError> {
-    if source.trim().is_empty() {
-        return Ok(RegistrationState::Missing);
-    }
-    let root: serde_yaml::Value =
-        serde_yaml::from_str(source).map_err(|error| HarnessError::Malformed(error.to_string()))?;
-    let entry = match dialect {
-        YamlDialect::Goose => yaml_value(&root, "extensions")
-            .and_then(|extensions| yaml_value(extensions, SERVER_NAME)),
-        YamlDialect::Continue => yaml_value(&root, "mcpServers")
-            .and_then(serde_yaml::Value::as_sequence)
-            .and_then(|servers| {
-                servers.iter().find(|entry| {
-                    yaml_value(entry, "name")
-                        .and_then(serde_yaml::Value::as_str)
-                        .is_some_and(|name| name.eq_ignore_ascii_case("Ghostlight"))
-                })
-            }),
-    };
-    let Some(entry) = entry else {
-        return Ok(RegistrationState::Missing);
-    };
-    let command_key = match dialect {
-        YamlDialect::Goose => "cmd",
-        YamlDialect::Continue => "command",
-    };
-    let command = yaml_value(entry, command_key)
-        .and_then(serde_yaml::Value::as_str)
-        .unwrap_or_default();
-    let args = yaml_value(entry, "args")
-        .and_then(serde_yaml::Value::as_sequence)
-        .and_then(|args| {
-            args.iter()
-                .map(serde_yaml::Value::as_str)
-                .collect::<Option<Vec<_>>>()
-        });
-    Ok(command_registration_state(
-        command,
-        args.as_deref(),
-        connector,
-        windows,
-    ))
-}
-
-fn edit_yaml(
-    path: &Path,
-    connector: &Path,
-    dialect: YamlDialect,
-    install: bool,
-) -> Result<bool, HarnessError> {
-    edit_yaml_with(
-        path,
-        connector,
-        dialect,
-        if install {
-            RegistrationEdit::Install
-        } else {
-            RegistrationEdit::Uninstall
-        },
-    )
-}
-
-fn fix_yaml(path: &Path, connector: &Path, dialect: YamlDialect) -> Result<bool, HarnessError> {
-    edit_yaml_with(path, connector, dialect, RegistrationEdit::Fix)
-}
-
-fn edit_yaml_with(
-    path: &Path,
-    connector: &Path,
-    dialect: YamlDialect,
-    intent: RegistrationEdit,
-) -> Result<bool, HarnessError> {
-    let original = read_or_empty(path)?;
-    let state = inspect_yaml(&original, dialect, connector, cfg!(target_os = "windows"))?;
-    let foreign = matches!(state, RegistrationState::Foreign(_));
-    if foreign && !intent.replaces_foreign() {
-        return Err(HarnessError::ForeignEntry);
-    }
-    if !foreign && intent.replaces_foreign() {
-        return Err(HarnessError::NotFixable);
-    }
-    if (intent == RegistrationEdit::Install && state == RegistrationState::Current)
-        || (!intent.installs() && state == RegistrationState::Missing)
-    {
-        return Ok(false);
-    }
-    if state != RegistrationState::Missing && owned_yaml_range(&original, dialect)?.is_none() {
-        return Err(HarnessError::Malformed(
-            "the Ghostlight YAML entry uses a shape that cannot be edited losslessly".into(),
-        ));
-    }
-    let rendered = edit_yaml_text(&original, connector, dialect, intent.installs())?;
-    replace_with_backup(path, rendered.as_bytes())?;
-    Ok(true)
-}
-
-fn yaml_value<'a>(root: &'a serde_yaml::Value, key: &str) -> Option<&'a serde_yaml::Value> {
-    root.as_mapping()?
-        .get(serde_yaml::Value::String(key.into()))
-}
-
-#[derive(Clone, Copy)]
-struct YamlLine<'a> {
-    start: usize,
-    end: usize,
-    indent: usize,
-    text: &'a str,
-}
-
-fn edit_yaml_text(
-    source: &str,
-    connector: &Path,
-    dialect: YamlDialect,
-    install: bool,
-) -> Result<String, HarnessError> {
-    if source.lines().any(|line| line.starts_with('\t')) {
-        return Err(HarnessError::Malformed(
-            "tab-indented YAML is not safe to edit automatically".into(),
-        ));
-    }
-    let newline = if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let mut rendered = source.to_owned();
-    if let Some((start, end)) = owned_yaml_range(source, dialect)? {
-        rendered.replace_range(start..end, "");
-    }
-    if !install {
-        return Ok(rendered);
-    }
-    match dialect {
-        YamlDialect::Goose => insert_goose_yaml(&rendered, connector, newline),
-        YamlDialect::Continue => insert_continue_yaml(&rendered, connector, newline),
-    }
-}
-
-fn yaml_lines(source: &str) -> Vec<YamlLine<'_>> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    for segment in source.split_inclusive('\n') {
-        let text = segment.trim_end_matches(['\r', '\n']);
-        lines.push(YamlLine {
-            start,
-            end: start + segment.len(),
-            indent: text.len() - text.trim_start_matches(' ').len(),
-            text,
-        });
-        start += segment.len();
-    }
-    if start < source.len() || source.is_empty() {
-        let text = &source[start..];
-        lines.push(YamlLine {
-            start,
-            end: source.len(),
-            indent: text.len() - text.trim_start_matches(' ').len(),
-            text,
-        });
-    }
-    lines
-}
-
-fn top_level_yaml_key(source: &str, key: &str) -> Option<usize> {
-    yaml_lines(source)
-        .iter()
-        .position(|line| line.indent == 0 && line.text.trim_end() == format!("{key}:"))
-}
-
-fn yaml_parent_end(lines: &[YamlLine<'_>], parent: usize) -> usize {
-    lines
-        .iter()
-        .skip(parent + 1)
-        .find(|line| {
-            let trimmed = line.text.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#') && line.indent == 0
-        })
-        .map_or_else(
-            || lines.last().map_or(0, |line| line.end),
-            |line| line.start,
-        )
-}
-
-fn owned_yaml_range(
-    source: &str,
-    dialect: YamlDialect,
-) -> Result<Option<(usize, usize)>, HarnessError> {
-    let lines = yaml_lines(source);
-    let key = match dialect {
-        YamlDialect::Goose => "extensions",
-        YamlDialect::Continue => "mcpServers",
-    };
-    let Some(parent) = top_level_yaml_key(source, key) else {
-        return Ok(None);
-    };
-    let parent_end = yaml_parent_end(&lines, parent);
-    let child_indent = lines
-        .iter()
-        .skip(parent + 1)
-        .take_while(|line| line.start < parent_end)
-        .filter(|line| {
-            let trimmed = line.text.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#') && line.indent > lines[parent].indent
-        })
-        .map(|line| line.indent)
-        .min();
-    let candidate = lines.iter().enumerate().skip(parent + 1).find(|(_, line)| {
-        if line.start >= parent_end {
-            return false;
-        }
-        if Some(line.indent) != child_indent {
-            return false;
-        }
-        let trimmed = line.text.trim();
-        match dialect {
-            YamlDialect::Goose => trimmed == "ghostlight:",
-            YamlDialect::Continue => trimmed
-                .strip_prefix("- name:")
-                .map(str::trim)
-                .map(|name| name.trim_matches(['\'', '"']))
-                .is_some_and(|name| name.eq_ignore_ascii_case("Ghostlight")),
-        }
-    });
-    let Some((index, line)) = candidate else {
-        return Ok(None);
-    };
-    let end = lines
-        .iter()
-        .skip(index + 1)
-        .find(|next| {
-            let trimmed = next.text.trim();
-            if trimmed.is_empty() {
-                return false;
-            }
-            next.indent <= line.indent
-                && (next.indent == 0
-                    || matches!(dialect, YamlDialect::Goose)
-                    || trimmed.starts_with("- "))
-        })
-        .map_or(parent_end, |next| next.start);
-    Ok(Some((line.start, end)))
-}
-
-fn insert_goose_yaml(
-    source: &str,
-    connector: &Path,
-    newline: &str,
-) -> Result<String, HarnessError> {
-    let block = indent_yaml(
-        &manual_yaml_setup(connector, YamlDialect::Goose),
-        0,
-        newline,
-    );
-    let lines = yaml_lines(source);
-    if let Some(parent) = top_level_yaml_key(source, "extensions") {
-        let mut child = manual_yaml_setup(connector, YamlDialect::Goose);
-        child = child
-            .strip_prefix("extensions:\n")
-            .expect("manual goose setup has one extensions root")
-            .to_owned();
-        let child = indent_yaml(&child, 0, newline);
-        return Ok(insert_yaml_block(
-            source,
-            yaml_parent_end(&lines, parent),
-            &child,
-            newline,
-        ));
-    }
-    if !source.trim().is_empty() {
-        let parsed: serde_yaml::Value = serde_yaml::from_str(source)
-            .map_err(|error| HarnessError::Malformed(error.to_string()))?;
-        if !parsed.is_mapping() {
-            return Err(HarnessError::Malformed(
-                "configuration root is not a YAML mapping".into(),
-            ));
-        }
-        if yaml_value(&parsed, "extensions").is_some() {
-            return Err(HarnessError::Malformed(
-                "extensions uses a YAML shape that cannot be edited losslessly".into(),
-            ));
-        }
-    }
-    Ok(insert_yaml_block(source, source.len(), &block, newline))
-}
-
-fn insert_continue_yaml(
-    source: &str,
-    connector: &Path,
-    newline: &str,
-) -> Result<String, HarnessError> {
-    let mut rendered = source.to_owned();
-    if rendered.trim().is_empty() {
-        return Ok(indent_yaml(
-            &manual_yaml_setup(connector, YamlDialect::Continue),
-            0,
-            newline,
-        ));
-    }
-    let parsed: serde_yaml::Value = serde_yaml::from_str(&rendered)
-        .map_err(|error| HarnessError::Malformed(error.to_string()))?;
-    if !parsed.is_mapping() {
-        return Err(HarnessError::Malformed(
-            "configuration root is not a YAML mapping".into(),
-        ));
-    }
-    if yaml_value(&parsed, "mcpServers").is_some()
-        && top_level_yaml_key(&rendered, "mcpServers").is_none()
-    {
-        return Err(HarnessError::Malformed(
-            "mcpServers uses a YAML shape that cannot be edited losslessly".into(),
-        ));
-    }
-    for (key, value) in [
-        ("name", "Local Config"),
-        ("version", "1.0.0"),
-        ("schema", "v1"),
-    ] {
-        if yaml_value(&parsed, key).is_none() {
-            rendered = insert_yaml_block(
-                &rendered,
-                rendered.len(),
-                &format!("{key}: {value}\n"),
-                newline,
-            );
-        }
-    }
-    let lines = yaml_lines(&rendered);
-    if let Some(parent) = top_level_yaml_key(&rendered, "mcpServers") {
-        let command = serde_json::to_string(&connector.to_string_lossy())
-            .expect("a path is representable as a YAML string");
-        let item = format!("  - name: Ghostlight\n    command: {command}\n    args: []\n");
-        return Ok(insert_yaml_block(
-            &rendered,
-            yaml_parent_end(&lines, parent),
-            &indent_yaml(&item, 0, newline),
-            newline,
-        ));
-    }
-    let command = serde_json::to_string(&connector.to_string_lossy())
-        .expect("a path is representable as a YAML string");
-    let block =
-        format!("mcpServers:\n  - name: Ghostlight\n    command: {command}\n    args: []\n");
-    Ok(insert_yaml_block(
-        &rendered,
-        rendered.len(),
-        &indent_yaml(&block, 0, newline),
-        newline,
-    ))
-}
-
-fn indent_yaml(source: &str, spaces: usize, newline: &str) -> String {
-    let prefix = " ".repeat(spaces);
-    source
-        .lines()
-        .map(|line| format!("{prefix}{line}{newline}"))
-        .collect()
-}
-
-fn insert_yaml_block(source: &str, at: usize, block: &str, newline: &str) -> String {
-    let mut rendered = String::with_capacity(source.len() + block.len() + newline.len());
-    rendered.push_str(&source[..at]);
-    if at > 0 && !rendered.ends_with('\n') {
-        rendered.push_str(newline);
-    }
-    rendered.push_str(block);
-    rendered.push_str(&source[at..]);
-    rendered
-}
-
 fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
     match dialect {
         JsonDialect::McpServers | JsonDialect::Copilot => root.get("mcpServers")?.get(SERVER_NAME),
@@ -2143,6 +1752,19 @@ fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
     values.iter().map(Value::as_str).collect()
 }
 
+/// The sentence a person reads for a client whose file Ghostlight never edits.
+fn manual_setup_sentence(definition: &HarnessDefinition) -> String {
+    let file = definition.path.file_name().map_or_else(
+        || "its configuration file".into(),
+        |name| name.to_string_lossy(),
+    );
+    format!("Ghostlight does not edit this client's file. Copy setup and paste it into {file}.")
+}
+
+fn manual_refusal(definition: &HarnessDefinition) -> HarnessError {
+    HarnessError::ManualSetup(manual_setup_sentence(definition))
+}
+
 fn manual_setup(
     context: &HarnessContext,
     definition: &HarnessDefinition,
@@ -2159,7 +1781,7 @@ fn manual_setup(
             Ok(document.to_string())
         }
         ConfigDialect::Json(dialect) => manual_json_setup(&context.connector, dialect),
-        ConfigDialect::Yaml(dialect) => Ok(manual_yaml_setup(&context.connector, dialect)),
+        ConfigDialect::Manual(dialect) => Ok(manual_yaml_setup(&context.connector, dialect)),
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             manual_json_setup(&context.connector, opencode_dialect(context, &source)?)
@@ -2184,14 +1806,14 @@ fn manual_json_setup(connector: &Path, dialect: JsonDialect) -> Result<String, H
         .map_err(|error| HarnessError::Malformed(error.to_string()))
 }
 
-fn manual_yaml_setup(connector: &Path, dialect: YamlDialect) -> String {
+fn manual_yaml_setup(connector: &Path, dialect: ManualDialect) -> String {
     let command = serde_json::to_string(&connector.to_string_lossy())
         .expect("a filesystem path is always representable as a JSON/YAML string");
     match dialect {
-        YamlDialect::Goose => format!(
+        ManualDialect::Goose => format!(
             "extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: {command}\n    args: []\n    envs: {{}}\n    timeout: 300\n"
         ),
-        YamlDialect::Continue => format!(
+        ManualDialect::Continue => format!(
             "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: {command}\n    args: []\n"
         ),
     }
@@ -2379,6 +2001,9 @@ fn write_location_overrides(
 }
 
 fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), HarnessError> {
+    if matches!(dialect, ConfigDialect::Manual(_)) {
+        return Ok(());
+    }
     let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
     match dialect {
         ConfigDialect::CodexToml => source
@@ -2386,9 +2011,7 @@ fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), Ha
             .map(|_| ())
             .map_err(|error| HarnessError::Malformed(error.to_string())),
         ConfigDialect::Json(_) | ConfigDialect::OpenCode => parse_jsonc(&source).map(|_| ()),
-        ConfigDialect::Yaml(_) => serde_yaml::from_str::<serde_yaml::Value>(&source)
-            .map(|_| ())
-            .map_err(|error| HarnessError::Malformed(error.to_string())),
+        ConfigDialect::Manual(_) => Ok(()),
     }
 }
 
@@ -2513,6 +2136,9 @@ pub enum HarnessError {
     /// The config is not structurally safe to edit.
     #[error("harness configuration is malformed: {0}")]
     Malformed(String),
+    /// The client's file is never edited by Ghostlight; the person pastes the setup.
+    #[error("{0}")]
+    ManualSetup(String),
     /// A foreign server uses Ghostlight's registration name.
     #[error("a foreign `ghostlight` entry is present; Ghostlight left it untouched")]
     ForeignEntry,
@@ -2549,11 +2175,10 @@ mod tests {
 
     use super::{
         bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
-        edit_yaml, fix_toml, fix_yaml, harness_roots, inspect, inspect_json, inspect_toml,
-        inspect_yaml, jsonc_options, manual_json_setup, replace_with_backup,
-        resolve_through_symlink, AppContainer, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView,
-        RegistrationState, YamlDialect, EVIDENCE_MAX_CHARS,
+        fix_toml, harness_roots, inspect, inspect_json, inspect_toml, jsonc_options,
+        manual_json_setup, replace_with_backup, resolve_through_symlink, AppContainer,
+        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
+        HarnessSummary, JsonDialect, PrivateView, RegistrationState, EVIDENCE_MAX_CHARS,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -3092,135 +2717,69 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
-    #[cfg(unix)]
     #[test]
-    fn goose_yaml_is_lossless_idempotent_and_mode_preserving() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = temporary("goose-yaml");
-        let path = directory.join("config.yaml");
-        let connector = connector(&directory);
-        let source =
-            "# keep goose notes\nprovider: local\nextensions:\n  sibling:\n    type: builtin\n";
-        fs::write(&path, source).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(edit_yaml(&path, &connector, YamlDialect::Goose, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        assert!(installed.contains("# keep goose notes"));
-        assert!(installed.contains("sibling:"));
-        assert_eq!(
-            inspect_yaml(&installed, YamlDialect::Goose, &connector, false).unwrap(),
-            RegistrationState::Current
-        );
-        assert!(!edit_yaml(&path, &connector, YamlDialect::Goose, true).unwrap());
-        assert_eq!(fs::read_to_string(&path).unwrap(), installed);
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o640
-        );
-        assert!(edit_yaml(&path, &connector, YamlDialect::Goose, false).unwrap());
-        let removed = fs::read_to_string(&path).unwrap();
-        assert!(removed.contains("# keep goose notes"));
-        assert!(removed.contains("sibling:"));
-        assert!(!removed.contains("ghostlight:"));
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn continue_yaml_preserves_siblings_comments_and_exact_no_op_bytes() {
-        let directory = temporary("continue-yaml");
-        let path = directory.join("config.yaml");
-        let connector = connector(&directory);
-        let source = "# keep continue notes\nname: Mine\nversion: 2.0.0\nschema: v1\nmcpServers:\n  - name: Sibling\n    command: sibling\n    args: []\n";
-        fs::write(&path, source).unwrap();
-        assert!(edit_yaml(&path, &connector, YamlDialect::Continue, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        assert!(installed.contains("# keep continue notes"));
-        assert!(installed.contains("name: Sibling"));
-        assert!(installed.contains("name: Ghostlight"));
-        assert_eq!(
-            inspect_yaml(&installed, YamlDialect::Continue, &connector, false).unwrap(),
-            RegistrationState::Current
-        );
-        assert!(!edit_yaml(&path, &connector, YamlDialect::Continue, true).unwrap());
-        assert_eq!(fs::read_to_string(&path).unwrap(), installed);
-        assert!(edit_yaml(&path, &connector, YamlDialect::Continue, false).unwrap());
-        let removed = fs::read_to_string(&path).unwrap();
-        assert!(removed.contains("# keep continue notes"));
-        assert!(removed.contains("name: Sibling"));
-        assert!(!removed.contains("name: Ghostlight"));
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn yaml_flow_shapes_are_refused_without_changing_bytes() {
-        let directory = temporary("yaml-flow-refusal");
-        let connector = connector(&directory);
-        for (name, source, dialect) in [
+    fn goose_and_continue_get_copy_setup_and_their_files_are_never_touched() {
+        for (id, relative, source) in [
             (
-                "goose.yaml",
-                "provider: local\nextensions: { sibling: { type: builtin } }\n",
-                YamlDialect::Goose,
+                "goose",
+                "config/goose/config.yaml",
+                "provider: keep\nextensions: {a: 1}\n",
             ),
             (
-                "continue.yaml",
-                "name: Mine\nversion: 1.0.0\nschema: v1\nmcpServers: []\n",
-                YamlDialect::Continue,
+                "continue",
+                "home/.continue/config.yaml",
+                "name: x\nmcpServers: [broken\n",
             ),
         ] {
-            let path = directory.join(name);
+            let directory = temporary("manual-clients");
+            let context = context(&directory);
+            let path = directory.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(&path, source).unwrap();
-            assert!(matches!(
-                edit_yaml(&path, &connector, dialect, true),
-                Err(HarnessError::Malformed(_))
-            ));
+
+            let registry = HarnessRegistry::with_context(context.clone());
+            let summary = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == id)
+                .expect("the client stays in the closed roster");
+            assert_eq!(summary.state, HarnessState::Available, "{id}");
+            assert!(!summary.can_install && !summary.can_fix && !summary.can_uninstall);
+            assert!(summary.detail.contains("Copy setup"), "{}", summary.detail);
+            assert!(summary
+                .manual_setup
+                .contains(&*context.connector.to_string_lossy().replace('\\', "\\\\")));
+
+            let result = registry.setup_detected().unwrap();
+            assert_eq!(result.set_up, 0);
             assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            for action in [
+                HarnessAction::Install,
+                HarnessAction::Fix,
+                HarnessAction::Uninstall,
+            ] {
+                assert!(matches!(
+                    registry.apply(id, action),
+                    Err(HarnessError::ManualSetup(_))
+                ));
+                assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            }
+            fs::remove_dir_all(directory).unwrap();
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn flow_style_owned_yaml_entry_is_not_rewritten_or_removed() {
-        let directory = temporary("yaml-flow-owned");
-        let path = directory.join("config.yaml");
-        let connector = connector(&directory);
-        let source = format!(
-            "extensions: {{ ghostlight: {{ type: stdio, cmd: {}, args: [] }} }}\n",
-            serde_json::to_string(&connector.to_string_lossy()).unwrap()
-        );
-        fs::write(&path, &source).unwrap();
-        assert!(matches!(
-            edit_yaml(&path, &connector, YamlDialect::Goose, false),
-            Err(HarnessError::Malformed(_))
-        ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn nested_ghostlight_yaml_names_belong_to_their_sibling() {
-        let directory = temporary("yaml-nested-sibling");
-        let connector = connector(&directory);
-        for (name, source, dialect, nested) in [
-            (
-                "goose.yaml",
-                "extensions:\n  sibling:\n    ghostlight:\n      keep: true\n",
-                YamlDialect::Goose,
-                "    ghostlight:\n      keep: true",
-            ),
-            (
-                "continue.yaml",
-                "mcpServers:\n  - name: Sibling\n    options:\n      children:\n        - name: Ghostlight\n          keep: true\n",
-                YamlDialect::Continue,
-                "        - name: Ghostlight\n          keep: true",
-            ),
-        ] {
-            let path = directory.join(name);
-            fs::write(&path, source).unwrap();
-            assert!(edit_yaml(&path, &connector, dialect, true).unwrap());
-            assert!(edit_yaml(&path, &connector, dialect, false).unwrap());
-            let removed = fs::read_to_string(&path).unwrap();
-            assert!(removed.contains(nested), "{name}: {removed}");
+    fn goose_and_continue_with_nothing_present_are_not_detected() {
+        let directory = temporary("manual-absent");
+        let registry = HarnessRegistry::with_context(context(&directory));
+        for id in ["goose", "continue"] {
+            let summary = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == id)
+                .unwrap();
+            assert_eq!(summary.state, HarnessState::NotDetected, "{id}");
+            assert!(!summary.can_install);
         }
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3515,8 +3074,8 @@ mod tests {
     }
 
     #[test]
-    fn explicit_fix_is_lossless_for_toml_and_yaml_dialects() {
-        let directory = temporary("fix-foreign-dialects");
+    fn explicit_fix_is_lossless_for_the_toml_dialect() {
+        let directory = temporary("fix-foreign-toml");
         let connector = connector(&directory);
 
         let toml = directory.join("config.toml");
@@ -3535,54 +3094,6 @@ mod tests {
             toml_source
         );
 
-        let yaml_cases = [
-            (
-                YamlDialect::Goose,
-                "provider: keep\nextensions:\n  sibling:\n    cmd: keep-me\n  ghostlight:\n    cmd: alien\n    args: [serve]\n",
-            ),
-            (
-                YamlDialect::Continue,
-                "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Sibling\n    command: keep-me\n  - name: Ghostlight\n    command: alien\n    args: [serve]\n",
-            ),
-        ];
-        for (index, (dialect, source)) in yaml_cases.into_iter().enumerate() {
-            let path = directory.join(format!("config-{index}.yaml"));
-            fs::write(&path, source).unwrap();
-            assert!(fix_yaml(&path, &connector, dialect).unwrap());
-            let fixed = fs::read_to_string(&path).unwrap();
-            assert!(fixed.contains("keep-me"));
-            assert_eq!(
-                inspect_yaml(&fixed, dialect, &connector, cfg!(windows)).unwrap(),
-                RegistrationState::Current
-            );
-            assert_eq!(
-                fs::read_to_string(path.with_extension("yaml.ghostlight-backup")).unwrap(),
-                source
-            );
-        }
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn fix_is_not_offered_when_a_foreign_yaml_entry_cannot_be_replaced_losslessly() {
-        let directory = temporary("fix-foreign-yaml-shape");
-        let context = context(&directory);
-        let definition = definitions(&context)
-            .into_iter()
-            .find(|definition| definition.id == "goose")
-            .expect("goose stays in the closed roster");
-        fs::create_dir_all(definition.path.parent().unwrap()).unwrap();
-        let source = "extensions: {ghostlight: {cmd: alien}}\n";
-        fs::write(&definition.path, source).unwrap();
-
-        let summary = inspect(&context, &definition);
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert!(!summary.can_fix);
-        assert!(matches!(
-            HarnessRegistry::with_context(context).apply("goose", HarnessAction::Fix),
-            Err(HarnessError::Malformed(_))
-        ));
-        assert_eq!(fs::read_to_string(&definition.path).unwrap(), source);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3759,13 +3270,6 @@ mod tests {
             inspect_toml(&toml_source, &expected_connector, false),
             Ok(RegistrationState::Foreign(Some(found)))
                 if found.contains("alien-tool serve")
-        ));
-
-        let yaml = "\nextensions:\n  ghostlight:\n    cmd: alien-yaml\n";
-        assert!(matches!(
-            inspect_yaml(yaml, YamlDialect::Goose, &expected_connector, false),
-            Ok(RegistrationState::Foreign(Some(found)))
-                if found.contains("alien-yaml")
         ));
 
         // An entry without any readable command discloses nothing.

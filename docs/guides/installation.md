@@ -61,6 +61,7 @@ MCP integrations supports these explicit user-level configurations:
 | Zed | `context_servers.ghostlight` in JSON or JSONC |
 | OpenCode | detected v1 `mcp.ghostlight` or v2 `mcp.servers.ghostlight` dialect |
 | Crush | `mcp.ghostlight` in JSON or JSONC |
+| goose, Continue | Copy setup: you paste the YAML entry into the client's file. Ghostlight never edits it. |
 
 **Check** is read-only. **Install** and **Uninstall** are explicit, serialized operations. They:
 
