@@ -81,11 +81,6 @@ pub fn service_executable() -> io::Result<PathBuf> {
     Ok(bin()?.join(SERVICE_EXECUTABLE_NAME))
 }
 
-/// Installed edge executable: `home/bin/ghostlight` (`ghostlight.exe` on Windows).
-pub fn edge_executable() -> io::Result<PathBuf> {
-    Ok(bin()?.join(EDGE_EXECUTABLE_NAME))
-}
-
 /// Diagnostics marker path: `home/diagnostics.on`.
 pub fn diagnostics_marker() -> io::Result<PathBuf> {
     Ok(home()?.join(DIAGNOSTICS_MARKER_NAME))
