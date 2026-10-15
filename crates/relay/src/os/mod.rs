@@ -1,10 +1,11 @@
 //! The relay's audited platform module (ADR-0199 Decisions 3, 5 and 10).
 //!
-//! Four things the frozen relay does have no safe standard-library form: starting the service
+//! Five things the frozen relay does have no safe standard-library form: starting the service
 //! with no inherited handles, watching a parent process by identity (Windows), the objects of
 //! the relay endpoint, which are Windows named pipes with their token checks and the user id of a
-//! Unix socket's peer, and hearing that the session is ending (a hidden window and the console
-//! handler on Windows, SIGTERM and SIGHUP on Linux). All of them call the operating system
+//! Unix socket's peer, hearing that the session is ending (a hidden window and the console
+//! handler on Windows, SIGTERM and SIGHUP on Linux), and naming the process's AppUserModelID for
+//! the desktop shell's window (Windows). All of them call the operating system
 //! directly, so this module is the only place in the crate allowed to use `unsafe`. The crate
 //! sets `unsafe_code = "deny"` in its manifest, and the expectation below lifts it for this
 //! module alone. Every foreign function is declared by hand against system libraries, with a
@@ -23,7 +24,8 @@
 #![expect(
     unsafe_code,
     reason = "the audited platform calls: process creation without inherited handles, Windows \
-              process identity and named pipes, Unix peer credentials, and the session-end               window and signal handlers"
+              process identity and named pipes, Unix peer credentials, the session-end window and \
+              signal handlers, and the AppUserModelID call"
 )]
 
 mod app_id;
