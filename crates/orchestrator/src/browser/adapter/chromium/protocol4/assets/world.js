@@ -17,9 +17,10 @@ const disposers = [];
 const tokens = new Map();
 const world = Object.freeze({ IS_TOP, EPOCH, onDispose: (fn) => disposers.push(fn) });
 class AssetError extends Error {
-  constructor(code, message) {
+  constructor(code, message, detail) {
     super(message);
     this.code = code;
+    if (detail !== undefined) this.detail = detail;
   }
 }
 const CODES = new Set([
@@ -47,10 +48,11 @@ const CODES = new Set([
   "page_exception"
 ]);
 /*@include page-shared.js sensor.js presentation-css.js presentation.js content.js*/
-const failure = (e) => ({
-  ok: false,
-  error: { code: CODES.has(e?.code) ? e.code : "page_exception", message: String(e?.message ?? e).slice(0, 500) }
-});
+const failure = (e) => {
+  const error = { code: CODES.has(e?.code) ? e.code : "page_exception", message: String(e?.message ?? e).slice(0, 500) };
+  if (e instanceof AssetError && e.detail !== undefined) error.detail = e.detail;
+  return { ok: false, error };
+};
 globalThis.__ghostlightRuntime = Object.freeze({
   id: ID,
   async call(message, { local, token, attachment, owner } = {}) {

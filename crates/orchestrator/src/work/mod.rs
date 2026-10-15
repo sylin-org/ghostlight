@@ -46,6 +46,7 @@ use crate::governance::{
 use crate::language::{
     self,
     audit::AuditProjection,
+    field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
         CheckFailure, Observed, Outcome, Refusal, TargetRole, WorkspaceReason,
@@ -545,8 +546,9 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         decision: Decision,
         selected: &SelectedTab,
+        control: ControlRef,
     ) -> Terminal {
-        let refusal = Refusal::CredentialAuthorization;
+        let refusal = Refusal::CredentialAuthorization { control };
         let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
@@ -2302,6 +2304,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::RecoveryManual { .. }
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
         BrowserError::Primitive(_)
+        | BrowserError::FieldsRejected { .. }
         | BrowserError::StaleView
         | BrowserError::LocalInterlock(_)
         | BrowserError::EffectUnknown(_)
@@ -2607,6 +2610,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::FieldsRejected { .. } => "field_value_rejected",
         BrowserError::DialogOpen => "dialog_open",
         BrowserError::StaleView => "stale_view",
         BrowserError::LocalInterlock(_) => "browser_local_interlock",

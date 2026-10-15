@@ -10,6 +10,7 @@ use super::*;
 use crate::browser::adapter::PhysicalField;
 use crate::browser::BrowserDispatch;
 use crate::governance::ReasonCode;
+use crate::language::field_problem::FieldProblemKind;
 
 /// A value the page sets itself; every other value is typed by the browser.
 const LOCAL_VALUE: &str = "on";
@@ -515,4 +516,80 @@ fn a_plan_without_one_kind_per_field_is_refused_before_any_edit() {
         BrowserError::Primitive("content primitive returned an invalid fill plan".into())
     );
     assert_eq!(primitives_order(&fake), ["call"]);
+}
+
+/// A page's refusal of a fill, naming the fields (by place in the document) it cannot take.
+fn rejected(problems: Value) -> Value {
+    json!({"status": "returned", "envelope": {"ok": false, "error": {
+        "code": "option_missing",
+        "message": "select option not found",
+        "detail": {"problems": problems}
+    }}})
+}
+
+#[test]
+fn fields_every_document_refused_come_back_together_named_by_their_place_in_the_call() {
+    let (port, fake) = rig(|world| {
+        let frame = world.frame.as_ref().map(|frame| frame.frame_id.as_str());
+        match (world.message["kind"].as_str(), frame) {
+            (Some("prepare_fill"), Some("C")) => rejected(json!([
+                {"field": 0, "problem": "option_missing", "options": ["A"]}
+            ])),
+            (Some("prepare_fill"), Some("T")) => rejected(json!([
+                {"field": 1, "problem": "option_disabled"}
+            ])),
+            _ => answer(world),
+        }
+    });
+    let error = call(
+        &port,
+        scoped(
+            all_open(),
+            fill(
+                vec![
+                    field("T:t1:locator_a1_1", LOCAL_VALUE),
+                    field("C:c1:locator_a1_2", LOCAL_VALUE),
+                    field("T:t1:locator_a1_3", LOCAL_VALUE),
+                ],
+                None,
+                10_000,
+            ),
+        ),
+    )
+    .unwrap_err();
+    let BrowserError::FieldsRejected { problems } = error else {
+        panic!("expected the refused fields, got {error:?}");
+    };
+    let places: Vec<(usize, FieldProblemKind)> = problems
+        .iter()
+        .map(|problem| (problem.field, problem.kind))
+        .collect();
+    assert_eq!(
+        places,
+        [
+            (1, FieldProblemKind::OptionMissing),
+            (2, FieldProblemKind::OptionDisabled)
+        ]
+    );
+    assert_eq!(primitives_order(&fake), ["call"], "no field was edited");
+}
+
+#[test]
+fn a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan() {
+    let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
+        Some("prepare_fill") => rejected(json!([{"field": 4, "problem": "option_missing"}])),
+        _ => answer(world),
+    });
+    let error = call(
+        &port,
+        scoped(
+            all_open(),
+            fill(vec![field("T:t1:locator_a1_1", LOCAL_VALUE)], None, 10_000),
+        ),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        BrowserError::Primitive("content primitive returned an invalid fill plan".into())
+    );
 }

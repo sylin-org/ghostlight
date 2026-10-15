@@ -105,7 +105,10 @@ impl InvocationResult {
             effect,
             readiness,
             repeat_safe,
-            summary: summary.chars().take(500).collect(),
+            summary: summary
+                .chars()
+                .take(crate::language::outcome::SUMMARY_MAX_CHARS)
+                .collect(),
             facts,
             next_steps,
             content: Vec::new(),

@@ -163,7 +163,8 @@ pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserErr
 ///
 /// # Errors
 ///
-/// Returns the asset's own failure as a plain failure, [`BrowserError::DocumentUnavailable`]
+/// Returns the asset's own failure as a plain failure, or as [`BrowserError::FieldsRejected`]
+/// when it named the fields a fill could not take, [`BrowserError::DocumentUnavailable`]
 /// when the document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog
 /// blocks the page, and [`BrowserError::Protocol`] for a value that
 /// does not have the kind's shape.
@@ -172,11 +173,16 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
         CallAnswer::Returned { .. } => match world::decode_answer(answer) {
             Some(Ok(value)) => serde_json::from_value(value)
                 .map_err(|error| BrowserError::Protocol(error.to_string())),
-            Some(Err(error)) => Err(BrowserError::Primitive(if error.message.is_empty() {
-                wire_name(&error.code)
-            } else {
-                error.message
-            })),
+            Some(Err(error)) => Err(match error.detail {
+                Some(detail) => BrowserError::FieldsRejected {
+                    problems: detail.problems,
+                },
+                None => BrowserError::Primitive(if error.message.is_empty() {
+                    wire_name(&error.code)
+                } else {
+                    error.message
+                }),
+            }),
             None => Err(BrowserError::Protocol(CALL_UNKNOWN.into())),
         },
         CallAnswer::Failed {

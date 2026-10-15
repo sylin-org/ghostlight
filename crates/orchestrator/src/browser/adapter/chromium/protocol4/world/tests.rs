@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::language::field_problem::FieldProblemKind;
 
 fn field(locator: &str, value: &str) -> PhysicalField {
     PhysicalField {
@@ -447,9 +448,62 @@ fn an_envelope_carries_a_value_or_a_coded_failure() {
             "error": {"code": "stale_locator", "message": "stale browser locator"}})),
         Err(AssetError {
             code: AssetErrorCode::StaleLocator,
-            message: "stale browser locator".into()
+            message: "stale browser locator".into(),
+            detail: None,
         })
     );
+}
+
+/// The envelope of a refused fill that names `problem` for its first field.
+fn refused_fill(problem: &str) -> Value {
+    json!({"ok": false, "error": {
+        "code": "option_missing",
+        "message": "select option not found",
+        "detail": {"problems": [
+            {"field": 0, "problem": problem, "options": ["Developer", "Other"]},
+            {"field": 2, "problem": "option_disabled"}
+        ]}
+    }})
+}
+
+#[test]
+fn a_refused_fill_carries_the_fields_it_could_not_take() {
+    let error = decode_envelope(&refused_fill("option_missing")).unwrap_err();
+    assert_eq!(error.code, AssetErrorCode::OptionMissing);
+    assert_eq!(error.message, "select option not found");
+    let detail = error.detail.expect("the detail decodes");
+    assert_eq!(detail.problems.len(), 2);
+    assert_eq!(detail.problems[0].field, 0);
+    assert_eq!(detail.problems[0].kind, FieldProblemKind::OptionMissing);
+    assert_eq!(detail.problems[0].options.len(), 2);
+    assert_eq!(detail.problems[1].field, 2);
+    assert_eq!(detail.problems[1].kind, FieldProblemKind::OptionDisabled);
+}
+
+#[test]
+fn a_problem_word_this_build_does_not_know_leaves_no_detail() {
+    let error = decode_envelope(&refused_fill("option_vanished")).unwrap_err();
+    assert_eq!(error.code, AssetErrorCode::OptionMissing);
+    assert_eq!(error.message, "select option not found");
+    assert_eq!(error.detail, None);
+}
+
+#[test]
+fn a_detail_that_is_not_a_list_of_problems_is_ignored() {
+    for detail in [
+        json!("text"),
+        json!({"problems": []}),
+        json!({"problems": [{"field": "0"}]}),
+        json!(null),
+    ] {
+        let envelope = json!({"ok": false, "error": {
+            "code": "not_fillable", "message": "target is not fillable", "detail": detail}});
+        assert_eq!(
+            decode_envelope(&envelope).unwrap_err().detail,
+            None,
+            "{envelope}"
+        );
+    }
 }
 
 #[test]

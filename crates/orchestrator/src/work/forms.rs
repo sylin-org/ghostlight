@@ -3,14 +3,17 @@
 use std::time::Instant;
 
 use crate::browser::adapter::{
-    BrowserCommand, BrowserOutcome, PhysicalActionSubject, PhysicalField,
+    BrowserCommand, BrowserOutcome, ObservedTarget, PhysicalActionSubject, PhysicalField,
 };
+use crate::browser::BrowserError;
+use crate::governance::Decision;
 use serde_json::{json, Value};
 
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet};
 use crate::language::{
-    outcome::{Outcome, Refusal},
+    field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
+    outcome::{Outcome, Refusal, TargetRole},
     FillForm, PressKey, RunScript, TypeText, UploadFiles, Wait,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
@@ -89,6 +92,10 @@ impl ApplicationExecutor {
             }
             resolved.push((target, form_field_wire(&field.value)));
         }
+        let given: Vec<(String, String)> = resolved
+            .iter()
+            .map(|(target, value)| (target.handle.as_str().to_owned(), value.clone()))
+            .collect();
         let selected = selected.expect("validated non-empty fields");
         let submit = match value.submit_target.as_deref() {
             Some(handle) => {
@@ -124,7 +131,7 @@ impl ApplicationExecutor {
         if let Some(target) = &submit {
             locators.push(target.locator.clone());
         }
-        match self.dispatch(
+        let described = match self.dispatch(
             context,
             BrowserCommand::DescribeTargets {
                 tab_id: selected.physical_id,
@@ -137,17 +144,23 @@ impl ApplicationExecutor {
                 if targets.len() != locators.len() {
                     return self.protocol_failure(context, decision, Some(tab_id));
                 }
-                if !value.user_authorized_credentials
-                    && targets.iter().any(|target| target.credential_class)
-                {
-                    return self.credential_guidance(context, decision, &selected);
+                if !value.user_authorized_credentials {
+                    if let Some(index) = targets.iter().position(|target| target.credential_class) {
+                        let control = credential_control(
+                            context,
+                            &targets[index],
+                            given.get(index).map(|(handle, _)| handle.as_str()),
+                        );
+                        return self.credential_guidance(context, decision, &selected, control);
+                    }
                 }
+                targets
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
-        }
+        };
         let fields = resolved
             .into_iter()
             .map(|(target, value)| PhysicalField {
@@ -175,10 +188,66 @@ impl ApplicationExecutor {
                 committed_urls,
             }) => self.finish_with_expectation(context, lease, decision, requirements, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted}), value.expect.as_ref()),
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+            Err(BrowserError::FieldsRejected { problems }) => self.fields_rejected(
+                context,
+                decision,
+                selected.physical_id,
+                problems,
+                &given,
+                &described,
+            ),
             Err(error) => {
                 self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         }
+    }
+
+    /// The refusal of a fill that the page declined before any edit, with what would succeed.
+    ///
+    /// Each problem names the field by its position in the call; the service pairs it with that
+    /// field's handle, given value and last observed role and name. A position the call does
+    /// not have is a page that disagrees with the contract.
+    fn fields_rejected(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        physical_id: u64,
+        problems: Vec<FieldProblem>,
+        given: &[(String, String)],
+        described: &[ObservedTarget],
+    ) -> Terminal {
+        let preserve = context.snapshot.preserves_target_names();
+        let mut rejected = Vec::with_capacity(problems.len());
+        for problem in problems {
+            let (Some((target, value)), Some(observed)) =
+                (given.get(problem.field), described.get(problem.field))
+            else {
+                return self.protocol_failure(context, decision, Some(physical_id));
+            };
+            let follows_choice = described[..problem.field]
+                .iter()
+                .any(|earlier| is_choice(TargetRole::classify(&earlier.role)));
+            let control = RejectedControl {
+                target: target.clone(),
+                role: TargetRole::classify(&observed.role),
+                name: observed.name.clone(),
+                given: value.clone(),
+                credential: observed.credential_class,
+                follows_choice,
+            };
+            rejected.push(RejectedField::new(problem, control, preserve));
+        }
+        let facts = field_problem::rejected_facts(&rejected);
+        self.failed(
+            context,
+            decision,
+            Some(physical_id),
+            Refusal::FieldValuesRejected {
+                fields: rejected,
+                total: given.len(),
+            },
+            facts,
+        )
     }
 
     pub(super) fn perform_type_text(
@@ -224,7 +293,9 @@ impl ApplicationExecutor {
                 if tab_id == selected.physical_id && targets.len() == 1 =>
             {
                 if targets[0].credential_class && !value.user_authorized_credentials {
-                    return self.credential_guidance(context, decision, &selected);
+                    let control =
+                        credential_control(context, &targets[0], Some(target.handle.as_str()));
+                    return self.credential_guidance(context, decision, &selected, control);
                 }
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -1031,7 +1102,8 @@ impl ApplicationExecutor {
                         if tab_id == selected.physical_id && targets.len() == 1 =>
                     {
                         if targets[0].credential_class && !value.user_authorized_credentials {
-                            return self.credential_guidance(context, decision, selected);
+                            let control = credential_control(context, &targets[0], None);
+                            return self.credential_guidance(context, decision, selected, control);
                         }
                         Some(PhysicalActionSubject {
                             role: targets[0].role.clone(),
@@ -1092,6 +1164,28 @@ impl ApplicationExecutor {
             },
         )
     }
+}
+
+/// The control a credential refusal names, from what the page last reported about it.
+fn credential_control(
+    context: &InvocationContext<'_>,
+    observed: &ObservedTarget,
+    handle: Option<&str>,
+) -> ControlRef {
+    ControlRef::new(
+        TargetRole::classify(&observed.role),
+        &observed.name,
+        handle,
+        context.snapshot.preserves_target_names(),
+    )
+}
+
+/// Whether answering this control can change the options another control offers.
+const fn is_choice(role: TargetRole) -> bool {
+    matches!(
+        role,
+        TargetRole::Combobox | TargetRole::ListBox | TargetRole::Radio
+    )
 }
 
 fn form_field_wire(value: &crate::language::FormFieldValue) -> String {

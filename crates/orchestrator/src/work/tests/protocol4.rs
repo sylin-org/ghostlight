@@ -618,3 +618,194 @@ fn a_fill_after_a_read_spent_the_budget_still_asks_the_page_to_settle() {
         .expect("a declined settle still prepares the fill");
     assert_eq!(prepare["visual_settle"], false);
 }
+
+/// The two controls the fill tests inspect: a dropdown and a checkbox, in document order.
+const DROPDOWN: &str = "locator_a1_1";
+const CHECKBOX: &str = "locator_a1_2";
+
+/// A page with a dropdown named Role and a checkbox named Agree whose fill the page refuses with
+/// `detail`, as one refused `prepare_fill` envelope.
+fn refusing_form(detail: Value) -> Fault {
+    Box::new(move |correlation, primitive| {
+        let wire::Primitive::Call(call) = primitive else {
+            return None;
+        };
+        let controls = [
+            json!({"locator": DROPDOWN, "role": "combobox", "name": "Role", "state": [],
+                "credential_class": false}),
+            json!({"locator": CHECKBOX, "role": "checkbox", "name": "Agree", "state": [],
+                "credential_class": false}),
+        ];
+        let answers: Vec<Value> = call
+            .calls
+            .iter()
+            .map(
+                |world| match world.message["kind"].as_str().unwrap_or_default() {
+                    "inspect" => returned(json!({"targets": controls, "truncated": false})),
+                    "describe" => returned(json!({"targets": world.message["locators"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|locator| controls
+                        .iter()
+                        .find(|control| control["locator"] == *locator)
+                        .cloned()
+                        .unwrap())
+                    .collect::<Vec<_>>()})),
+                    "prepare_fill" => json!({"status": "returned", "envelope": {"ok": false,
+                    "error": {"code": "option_missing", "message": "select option not found",
+                        "detail": detail}}}),
+                    _ => page(world),
+                },
+            )
+            .collect();
+        Some(FakeExtension::ok(correlation, json!({"answers": answers})))
+    })
+}
+
+/// The handles of the form's two controls, from an inspection.
+fn form_handles(
+    executor: &ApplicationExecutor,
+    workspace: &crate::workspace::WorkspaceId,
+) -> (String, String) {
+    let inspected = execute(executor, workspace, "browser_inspect", json!({}));
+    assert_eq!(inspected.status, Status::Succeeded, "{}", inspected.summary);
+    let handle = |index: usize| {
+        inspected.facts["items"][index]["target"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    (handle(0), handle(1))
+}
+
+#[test]
+fn a_refused_fill_lists_what_would_succeed_and_names_each_handle() {
+    let detail = json!({"problems": [
+        {"field": 0, "problem": "option_missing", "options": ["Developer", "Administrator", "Other"]},
+        {"field": 1, "problem": "not_boolean"}
+    ]});
+    let (executor, _fake, workspace, audit) =
+        opened_audited(refusing_form(detail), GovernanceFacade::new(None, None));
+    let (role, agree) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Engineer"}, {"target": agree, "value": "maybe"}]}),
+    );
+
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert!(result.repeat_safe);
+    assert_eq!(
+        result.summary,
+        "Nothing was changed: 2 of 2 fields cannot take their values. The \"Role\" dropdown has no option \"Engineer\". It offers: Developer, Administrator, Other. The \"Agree\" checkbox takes true or false, not \"maybe\"."
+    );
+    assert_eq!(
+        result.next_steps,
+        vec![
+            format!("Repeat browser_fill_form with {role} set to one of the offered options."),
+            format!("Repeat with true or false for {agree}.")
+        ]
+    );
+    assert_eq!(result.facts["reason"], "field_value_rejected");
+    assert_eq!(
+        result.facts["problems"],
+        json!([
+            {"field": 0, "target": role, "problem": "option_missing",
+             "options": ["Developer", "Administrator", "Other"]},
+            {"field": 1, "target": agree, "problem": "not_boolean"}
+        ])
+    );
+    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(recorded
+        .contains("Refused a form fill before any edit: 2 fields could not take their values."));
+    for private in ["Developer", "Engineer", "maybe", "Role", "Agree"] {
+        assert!(!recorded.contains(private), "{private} reached the audit");
+    }
+}
+
+#[test]
+fn a_refused_fill_without_target_names_speaks_in_unnamed_nouns() {
+    let policy = temporary_policy("fill-refusal-names");
+    fs::write(
+        &policy,
+        all_open_policy_with(
+            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let detail = json!({"problems": [
+        {"field": 0, "problem": "option_missing", "options": ["PRIVATE_OPTION"]}
+    ]});
+    let (executor, _fake, workspace) = opened_under(
+        refusing_form(detail),
+        GovernanceFacade::new(Some(policy.clone()), None),
+    );
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "PRIVATE_VALUE"}]}),
+    );
+
+    assert_eq!(
+        result.summary,
+        "Nothing was changed. A dropdown has no matching option."
+    );
+    assert_eq!(result.facts["problems"][0]["target"], role);
+    assert_eq!(
+        result.facts["problems"][0]["options"],
+        json!(["PRIVATE_OPTION"])
+    );
+    assert!(!result.facts.to_string().contains("PRIVATE_VALUE"));
+    assert!(!result.model_text().contains("PRIVATE"));
+    let _ = fs::remove_file(policy);
+}
+
+#[test]
+fn a_refusal_the_service_cannot_read_stays_the_browsers_own_sentence() {
+    let detail = json!({"problems": [{"field": 0, "problem": "option_vanished"}]});
+    let (executor, _fake, workspace) = opened(refusing_form(detail));
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Engineer"}]}),
+    );
+
+    assert_plain(
+        &result,
+        Status::Failed,
+        "The browser refused this job: select option not found.",
+        "browser_primitive_failed",
+    );
+}
+
+#[test]
+fn a_problem_for_a_field_the_call_does_not_have_is_an_invalid_plan() {
+    let detail = json!({"problems": [{"field": 7, "problem": "option_missing"}]});
+    let (executor, _fake, workspace) = opened(refusing_form(detail));
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Engineer"}]}),
+    );
+
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert_eq!(result.facts["reason"], "browser_primitive_failed");
+    assert_eq!(
+        result.facts["detail"],
+        "content primitive returned an invalid fill plan"
+    );
+}

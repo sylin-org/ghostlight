@@ -225,3 +225,62 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
         );
     }
 }
+
+#[test]
+fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forward() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    browser.push(Ok(BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![credential()],
+    }));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    let target = inspected.facts["items"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        tab_id: 7,
+        targets: vec![credential()],
+    }));
+
+    let result = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"fields":[{"target":target,"value":"PRIVATE_CREDENTIAL"}]}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(result.status, Status::Blocked);
+    assert_eq!(result.effect, Effect::None);
+    assert_eq!(
+        result.summary,
+        format!("Nothing was typed. The \"Password\" text field ({target}) is credential-class.")
+    );
+    assert_eq!(
+        result.next_steps,
+        vec!["If the user explicitly authorized it, repeat with user_authorized_credentials true; otherwise ask the user to type it."]
+    );
+    assert_eq!(result.facts["values_sent"], false);
+    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(!recorded.contains("Password"));
+    assert!(!recorded.contains("PRIVATE_CREDENTIAL"));
+}

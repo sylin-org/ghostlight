@@ -1554,13 +1554,16 @@ const EPOCH = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toS
 const disposers = [];
 const tokens = new Map();
 const world = Object.freeze({ IS_TOP, EPOCH, onDispose: (fn) => disposers.push(fn) });
-class AssetError extends Error { constructor(code, message) { super(message); this.code = code; } }
+class AssetError extends Error { constructor(code, message, detail) { super(message); this.code = code; if (detail !== undefined) this.detail = detail; } }
 const CODES = new Set([/* AssetErrorCode values; drift-tested against world.rs */]);
 /*@include page-shared.js sensor.js presentation-css.js presentation.js content.js*/
 // content.js defines, as closure bindings (never globals): dispatch(message, ctx), applyAmbient(local),
 // renderPresentation(signal, preferences); and registers its disposers with world.onDispose.
-const failure = (e) => ({ ok: false, error: { code: CODES.has(e?.code) ? e.code : "page_exception",
-                                              message: String(e?.message ?? e).slice(0, 500) } });
+const failure = (e) => {
+  const error = { code: CODES.has(e?.code) ? e.code : "page_exception", message: String(e?.message ?? e).slice(0, 500) };
+  if (e instanceof AssetError && e.detail !== undefined) error.detail = e.detail;
+  return { ok: false, error };
+};
 globalThis.__ghostlightRuntime = Object.freeze({
   id: ID,
   async call(message, { local, token, attachment, owner }) {
@@ -1596,8 +1599,33 @@ globalThis.__ghostlightRuntime = Object.freeze({
 
 ```
 { ok: true,  value: <JSON> }
-{ ok: false, error: { code: <AssetErrorCode>, message: <bounded 500> } }
+{ ok: false, error: { code: <AssetErrorCode>, message: <bounded 500>, detail?: <object> } }
 ```
+
+`detail` is optional and says what the code and message do not. The extension relays an envelope
+without reading it, so a detail needs no extension release. Today only a refused fill carries one
+(ADR-0198 Decisions 8 and 10).
+
+**Fill problems.** `prepareFill` checks every field before it throws, so one failed call reports
+all the fields that cannot take their value and nothing is edited. Its detail is
+`{problems:[{field, problem, options?, options_total?, containing?, expected?, limits?, group?, type?}]}`.
+`field` is the index into the `fields` the call carried. `problem` is a word from a closed
+vocabulary: `option_missing`, `option_ambiguous`, `option_disabled`, `multiple_values`,
+`not_boolean`, `format`, `wrong_tool`, `reverted`, `submit_not_owned`. The Rust enum
+`FieldProblemKind` in `language/field_problem.rs` owns the words, and a drift test checks that the
+words `content.js` names are among them. `options` lists what would succeed (25 entries of 60
+characters, with `options_total` when cut, a group as `{group, options}`, a disabled option as
+`{text, disabled:true}`); for a select too long to list, `containing` holds the enabled options
+whose text contains the refused value. A credential-class control lists none of these. The page
+never echoes the value the caller gave. The serialized detail stays within 4 KB: options are
+dropped first, then `containing`.
+
+The code stays `option_missing` when every problem is an option problem and `not_fillable`
+otherwise, and the message keeps its prefix (`select option not found`, `target is not fillable`),
+so a service that predates the detail still reads the failure. A service that does not know a
+problem word treats the whole detail as absent. Only `prepareFill` attaches a detail: the
+single-field paths (`fill_local`, `focus_text_field`) run after an edit may have started and throw
+the code and message alone.
 
 `AssetErrorCode` is closed and owned by `world.rs`:
 - `stale_locator`, `not_visible`, `disabled`, `read_only`, `not_editable`, `not_fillable`, `option_missing`;
@@ -1620,7 +1648,8 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   - `resolve`: `stale_locator`.
   - `requireActionable` (`:636-658`): `not_visible`, `disabled`, `read_only`.
   - `credentialAuthorizationError`: `credential_authorization_required`.
-  - `validateFillElement`: `not_fillable`, `option_missing`.
+  - `validateFillElement` and `prepareFill`: `not_fillable`, `option_missing`, with the optional
+    detail above.
   - `validateTextEditElement`: `not_editable`.
   - `requireUploadTarget`: `not_file_input`, `disabled`.
   - `prepareFill`: `submit_outside_form`.

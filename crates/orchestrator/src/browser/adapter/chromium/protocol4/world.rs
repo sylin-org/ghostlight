@@ -19,6 +19,7 @@ use super::wire::{CallAnswer, Point, Readiness};
 use crate::browser::adapter::{
     BrowserOutcome, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
 };
+use crate::language::field_problem::FieldProblems;
 use EffectClass::{Effect, Prepare, Read};
 use ScopeClass::{Content, Metadata};
 
@@ -48,6 +49,8 @@ const ERROR_FIELD: &str = "error";
 const CODE_FIELD: &str = "code";
 /// The failure member that carries its description.
 const MESSAGE_FIELD: &str = "message";
+/// The failure member that carries the optional detail a code does not say.
+const DETAIL_FIELD: &str = "detail";
 /// Longest description of a failure kept from the asset.
 const MESSAGE_MAX_CHARS: usize = 500;
 /// The description of an answer that is not an envelope.
@@ -667,6 +670,9 @@ pub struct AssetError {
     pub code: AssetErrorCode,
     /// The asset's bounded description, which may reach the model.
     pub message: String,
+    /// The fields a refused fill could not take, when the asset reported them and this build
+    /// knows every word it used. An unknown word leaves the failure as its code and message.
+    pub detail: Option<FieldProblems>,
 }
 
 impl AssetError {
@@ -674,11 +680,12 @@ impl AssetError {
         Self {
             code: AssetErrorCode::PageException,
             message: MALFORMED_ENVELOPE.to_owned(),
+            detail: None,
         }
     }
 }
 
-/// Decode one envelope: `{ok:true,value}` or `{ok:false,error:{code,message}}`.
+/// Decode one envelope: `{ok:true,value}` or `{ok:false,error:{code,message,detail?}}`.
 ///
 /// # Errors
 ///
@@ -703,7 +710,14 @@ pub fn decode_envelope(envelope: &Value) -> Result<Value, AssetError> {
                 .chars()
                 .take(MESSAGE_MAX_CHARS)
                 .collect();
-            Err(AssetError { code, message })
+            let detail = error
+                .and_then(|error| error.get(DETAIL_FIELD))
+                .and_then(FieldProblems::decode);
+            Err(AssetError {
+                code,
+                message,
+                detail,
+            })
         }
         None => Err(AssetError::malformed()),
     }

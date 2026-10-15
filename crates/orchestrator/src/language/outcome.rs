@@ -2,7 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::field_problem::{self, ControlRef, RejectedField};
 use crate::workspace::WorkspaceError;
+
+/// The most characters a result's summary keeps. Longer summaries are cut at this bound, so a
+/// summary that lists many things measures itself against it.
+pub const SUMMARY_MAX_CHARS: usize = 500;
 
 /// What a controller is told when a person has paused Ghostlight (ADR-0126 Decision 4).
 ///
@@ -162,6 +167,30 @@ impl ActionSubject {
     #[must_use]
     pub const fn unnamed(role: TargetRole) -> Self {
         Self { role, label: None }
+    }
+
+    /// Name an already narrowed role. The name is kept only when the governed snapshot
+    /// preserves target names.
+    #[must_use]
+    pub fn with_role(role: TargetRole, name: &str, preserve_name: bool) -> Self {
+        Self {
+            role,
+            label: if preserve_name {
+                one_line_bounded(name, TARGET_LABEL_MAX_CHARS)
+            } else {
+                None
+            },
+        }
+    }
+
+    /// The closed role of the element.
+    pub(super) const fn role(&self) -> TargetRole {
+        self.role
+    }
+
+    /// The bounded name, when the snapshot lets it be kept.
+    pub(super) fn label(&self) -> Option<&str> {
+        self.label.as_deref()
     }
 
     fn noun_phrase(&self) -> String {
@@ -1173,8 +1202,9 @@ pub enum Refusal {
     AttentionRequired,
     /// The browser-local physical safety setting refused the action.
     LocalInterlock,
-    /// Credential input requires the caller to acknowledge the user's explicit instruction.
-    CredentialAuthorization,
+    /// Credential input requires the caller to acknowledge the user's explicit instruction. It
+    /// names the control that asked.
+    CredentialAuthorization { control: ControlRef },
     /// The browser returned a receipt outside the negotiated contract.
     IncompatibleReceipt,
     /// The browser adapter predates the physical command meaning the service requires.
@@ -1190,6 +1220,13 @@ pub enum Refusal {
     },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
+    /// A form fill was refused before any edit because fields cannot take their values.
+    FieldValuesRejected {
+        /// Every field the page refused, with what would succeed.
+        fields: Vec<RejectedField>,
+        /// How many fields the call asked to fill.
+        total: usize,
+    },
     /// A required browser document could not be bound to current authority.
     DocumentUnavailable,
     /// The caller cancelled after the job started but before any browser command was sent.
@@ -1262,8 +1299,8 @@ impl Refusal {
             Self::AuthorityBlocked { reason, host } => return blocked(*reason, host),
             Self::AttentionRequired => "The browser job requires user attention.",
             Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
-            Self::CredentialAuthorization => {
-                "This field appears to contain credentials. Explicit user authorization is required for this input; the session remains available."
+            Self::CredentialAuthorization { control } => {
+                return format!("Nothing was typed. {} is credential-class.", control.phrase());
             }
             Self::IncompatibleReceipt => {
                 "The browser answered in a form Ghostlight does not recognize."
@@ -1273,6 +1310,9 @@ impl Refusal {
             }
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
+            }
+            Self::FieldValuesRejected { fields, total } => {
+                return field_problem::rejected_summary(fields, *total, SUMMARY_MAX_CHARS);
             }
             Self::DocumentUnavailable => "Document access could not be verified.",
             Self::DeadlineExpired {
@@ -1389,8 +1429,8 @@ impl Refusal {
                 "The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."
                     .into(),
             ],
-            Self::CredentialAuthorization => vec![
-                "If the user has explicitly authorized credential entry, repeat this request with user_authorized_credentials set to true. Otherwise ask for that instruction or let the user enter it directly."
+            Self::CredentialAuthorization { .. } => vec![
+                "If the user explicitly authorized it, repeat with user_authorized_credentials true; otherwise ask the user to type it."
                     .into(),
             ],
             // The extension and the service disagree about the bridge contract, whichever side
@@ -1415,6 +1455,7 @@ impl Refusal {
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
+            Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
             // Only advice the decoder will take: timeout_ms never grows past its maximum, and an
             // edge-supplied deadline ignores it. After dispatch the first job is learning whether
@@ -1828,7 +1869,7 @@ fn whole_seconds(duration_ms: u64) -> usize {
 
 /// Page-authored text as one bounded line: controls and direction overrides become spaces,
 /// double quotes become single ones, and anything over `max_chars` ends in an ellipsis.
-fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
+pub(super) fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
     let cleaned: String = value
         .chars()
         .map(|character| {
@@ -1856,14 +1897,14 @@ fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
     Some(bounded)
 }
 
-const fn article(noun: &str) -> &'static str {
+pub(super) const fn article(noun: &str) -> &'static str {
     match noun.as_bytes().first() {
         Some(b'a' | b'e' | b'i' | b'o' | b'u') => "an",
         _ => "a",
     }
 }
 
-fn counted(count: usize, singular: &str, plural: &str) -> String {
+pub(super) fn counted(count: usize, singular: &str, plural: &str) -> String {
     let noun = if count == 1 { singular } else { plural };
     format!("{} {noun}", grouped(count))
 }
@@ -1933,6 +1974,7 @@ mod tests {
         DialogKind, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
         HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
+    use crate::language::field_problem::ControlRef;
     use crate::workspace::WorkspaceError;
 
     #[test]
@@ -2750,8 +2792,10 @@ Changes are \"unsaved\".".into()),
                 "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
             ),
             (
-                Refusal::CredentialAuthorization,
-                "This field appears to contain credentials. Explicit user authorization is required for this input; the session remains available.",
+                Refusal::CredentialAuthorization {
+                    control: ControlRef::new(TargetRole::Textbox, "Password", Some("target_7k2nb5xe"), true),
+                },
+                "Nothing was typed. The \"Password\" text field (target_7k2nb5xe) is credential-class.",
             ),
             (
                 Refusal::IncompatibleReceipt,

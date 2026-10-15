@@ -30,6 +30,7 @@ use crate::language::catalog;
 use crate::language::composition::{
     CompositionProgress, EffectCounts, StepCause, StepCounts, StepIssue,
 };
+use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
     CheckFailure, DialogKind, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
@@ -390,11 +391,12 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
         Refusal::AttentionRequired => "AttentionRequired",
         Refusal::LocalInterlock => "LocalInterlock",
-        Refusal::CredentialAuthorization => "CredentialAuthorization",
+        Refusal::CredentialAuthorization { .. } => "CredentialAuthorization",
         Refusal::IncompatibleReceipt => "IncompatibleReceipt",
         Refusal::BrowserAdapterOutdated => "BrowserAdapterOutdated",
         Refusal::DeadlineExpired { .. } => "DeadlineExpired",
         Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
+        Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
         Refusal::DocumentUnavailable => "DocumentUnavailable",
         Refusal::CancelledBeforeDispatch => "CancelledBeforeDispatch",
         Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
@@ -434,6 +436,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "BrowserAdapterOutdated",
     "DeadlineExpired",
     "BrowserPrimitive",
+    "FieldValuesRejected",
     "DocumentUnavailable",
     "CancelledBeforeDispatch",
     "BrowserUnavailable",
@@ -865,7 +868,14 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::DeadlineBeforeStart,
         Refusal::AttentionRequired,
         Refusal::LocalInterlock,
-        Refusal::CredentialAuthorization,
+        Refusal::CredentialAuthorization {
+            control: ControlRef::new(
+                TargetRole::Textbox,
+                "Password",
+                Some("target_7k2nb5xe"),
+                true,
+            ),
+        },
         Refusal::IncompatibleReceipt,
         Refusal::BrowserAdapterOutdated,
         Refusal::BrowserPrimitive {
@@ -892,6 +902,7 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingHeld,
         Refusal::RecordingExportFailed,
     ];
+    samples.extend(rejected_fill_samples());
     for before_dispatch in [false, true] {
         for timeout_adjustable in [false, true] {
             samples.push(Refusal::DeadlineExpired {
@@ -925,6 +936,126 @@ fn refusal_samples() -> Vec<Refusal> {
         });
     }
     samples
+}
+
+/// One refused fill for each way a field can be refused, so every step it can author is read.
+fn rejected_fill_samples() -> Vec<Refusal> {
+    use serde_json::json;
+    let options = json!(["Developer", "Administrator", "Other"]);
+    let cases = [
+        (
+            json!({"problem": "option_missing", "options": options}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "option_missing", "options": options}),
+            TargetRole::Combobox,
+            false,
+            true,
+        ),
+        (
+            json!({"problem": "option_missing", "options": options}),
+            TargetRole::Combobox,
+            true,
+            false,
+        ),
+        (
+            json!({"problem": "option_missing", "options": options, "options_total": 195, "containing": ["Eng"]}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "option_missing", "options": ["Standard", "Express"], "group": "Shipping"}),
+            TargetRole::Radio,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "option_ambiguous", "options": [{"text": "Other", "value": "a"}, {"text": "Other", "value": "b"}]}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "option_disabled"}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "multiple_values"}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "not_boolean"}),
+            TargetRole::Checkbox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "format", "expected": "YYYY-MM-DD", "type": "date", "limits": {"min": "2026-10-01", "max": "2026-12-31"}}),
+            TargetRole::Textbox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "wrong_tool", "type": "file"}),
+            TargetRole::Textbox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "wrong_tool"}),
+            TargetRole::Button,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "wrong_tool"}),
+            TargetRole::Combobox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "reverted"}),
+            TargetRole::Textbox,
+            false,
+            false,
+        ),
+        (
+            json!({"problem": "submit_not_owned"}),
+            TargetRole::Button,
+            false,
+            false,
+        ),
+    ];
+    cases
+        .into_iter()
+        .map(|(mut problem, role, credential, follows_choice)| {
+            problem["field"] = json!(0);
+            let decoded = FieldProblems::decode(&json!({"problems": [problem]}))
+                .expect("a sample problem decodes")
+                .problems
+                .remove(0);
+            let control = RejectedControl {
+                target: "target_7k2nb5xe".into(),
+                role,
+                name: "Role".into(),
+                given: "Engineer".into(),
+                credential,
+                follows_choice,
+            };
+            Refusal::FieldValuesRejected {
+                fields: vec![RejectedField::new(decoded, control, true)],
+                total: 1,
+            }
+        })
+        .collect()
 }
 
 /// Every distinct next step Ghostlight can author.

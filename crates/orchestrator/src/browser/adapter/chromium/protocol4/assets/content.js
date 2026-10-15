@@ -34,6 +34,17 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const GROUP_MAX = 80;
   const ERROR_MAX = 120;
   const LIMIT_MAX = 120;
+  // The words a refused fill names a field problem with. The service decodes the same closed list.
+  const FIELD_PROBLEMS = Object.freeze({
+    optionMissing: "option_missing",
+    optionDisabled: "option_disabled"
+  });
+  // The problems that make a fill refuse with the option code; any other refuses as not fillable.
+  const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionDisabled]);
+  // How many options that contain the refused value a refusal lists when the select is long.
+  const CONTAINING_MAX = 5;
+  // The largest serialized detail a refusal carries. Options go first when it is over.
+  const PROBLEM_DETAIL_MAX = 4096;
   // How much of a rich editor's text is read to size it.
   const RICH_VALUE_READ_MAX = 10000;
   // Input types whose kind an agent cannot guess from the role, so the item says it.
@@ -335,11 +346,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return answer;
   }
 
-  // The options of a native select in document order, the placeholder set apart. A disabled optgroup disables its options.
-  function selectChoices(select, listing) {
-    const all = Array.from(select.options ?? []);
+  // The options of a native select in document order, the placeholder set apart. A disabled
+  // optgroup disables its options.
+  function selectChoiceList(select) {
     const placeholder = selectPlaceholder(select);
-    const choices = all.filter((option) => option !== placeholder).map((option) => {
+    return Array.from(select.options ?? []).filter((option) => option !== placeholder).map((option) => {
       const parent = option.parentNode;
       const group = parent && tagOf(parent) === "optgroup" ? parent : null;
       return {
@@ -349,6 +360,12 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
         group
       };
     });
+  }
+
+  // The choices as an observed item lists them, or as the line a targeted read ends with.
+  function selectChoices(select, listing) {
+    const placeholder = selectPlaceholder(select);
+    const choices = selectChoiceList(select);
     const found = { placeholder: placeholder ? oneLine(placeholder.text) : "" };
     if (listing === "read") {
       const names = choices.map((choice) => (choice.disabled ? `${choice.text} (disabled)` : choice.text));
@@ -879,25 +896,94 @@ ${line}` : line;
     return Array.from(element.options).find((candidate) => candidate.value === value || candidate.text === value);
   }
 
-  function validateFillElement(element, value, allowCredentials = false) {
+  // The option that a fill value names, or none: its value or its text, exactly.
+  function checkFillElement(element, value, allowCredentials = false) {
     requireActionable(element, "fill");
     if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (element instanceof HTMLSelectElement) {
       const option = selectOption(element, value);
-      if (!option) throw new AssetError("option_missing", "select option not found");
-      return option;
+      return { option, problem: optionProblem(element, value, option) };
     }
     if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
       throw new AssetError("not_fillable", "target is not fillable");
     }
-    return null;
+    return { option: null, problem: null };
+  }
+
+  function optionDisabled(option) {
+    const parent = option.parentNode;
+    return option.disabled === true || (Boolean(parent) && tagOf(parent) === "optgroup" && parent.disabled === true);
+  }
+
+  // Why a select cannot take a value, in a form that lists what would work. The refused value is
+  // never echoed back, and a credential-class select lists nothing.
+  function optionProblem(select, value, option) {
+    if (option) return optionDisabled(option) ? { problem: FIELD_PROBLEMS.optionDisabled } : null;
+    const problem = { problem: FIELD_PROBLEMS.optionMissing };
+    if (credentialClass(select)) return problem;
+    const listed = selectChoices(select, "item");
+    problem.options = listed.options;
+    if (listed.optionsTotal) {
+      problem.options_total = listed.optionsTotal;
+      const containing = optionsContaining(select, value);
+      if (containing.length) problem.containing = containing;
+    }
+    return problem;
+  }
+
+  function foldedText(value) {
+    return oneLine(value).normalize("NFC").toLowerCase();
+  }
+
+  // The enabled options whose text contains the refused value, for a select too long to list.
+  function optionsContaining(select, value) {
+    const needle = foldedText(value);
+    if (!needle) return [];
+    return selectChoiceList(select)
+      .filter((choice) => !choice.disabled && foldedText(choice.text).includes(needle))
+      .slice(0, CONTAINING_MAX)
+      .map((choice) => shared.bounded(choice.text, OPTION_TEXT_MAX));
+  }
+
+  // The refusal for one or more fields that cannot take their values. The detail is what the
+  // service turns into a sentence: it never holds the value the caller gave.
+  function fieldProblemsError(problems, withDetail) {
+    const options = problems.every((problem) => OPTION_PROBLEMS.has(problem.problem));
+    const disabled = problems[0].problem === FIELD_PROBLEMS.optionDisabled;
+    let message = options ? "select option not found" : "target is not fillable";
+    if (options && disabled) message += " (option is disabled)";
+    if (problems.length > 1) message += ` (${problems.length} fields refused)`;
+    return new AssetError(options ? "option_missing" : "not_fillable", message, withDetail ? boundedDetail(problems) : undefined);
+  }
+
+  // The detail within its size cap: options go first, then the lists of near matches.
+  function boundedDetail(problems) {
+    const detail = { problems: problems.map((problem) => ({ ...problem })) };
+    const fits = () => JSON.stringify(detail).length <= PROBLEM_DETAIL_MAX;
+    for (const key of ["options", "containing"]) {
+      if (fits()) break;
+      for (const problem of detail.problems) delete problem[key];
+    }
+    return detail;
+  }
+
+  function validateFillElement(element, value, allowCredentials = false) {
+    const { option, problem } = checkFillElement(element, value, allowCredentials);
+    if (problem) throw fieldProblemsError([problem], false);
+    return option;
   }
 
   // This is a read-only plan. Every known invalid field and submit target must be found
   // before an earlier field can be edited, including when the worker is preparing several frames.
+  // Every field whose value cannot be taken is reported together, with what would be accepted.
   function prepareFill(message) {
     const elements = message.fields.map((field) => resolve(field.locator));
-    elements.forEach((element, index) => validateFillElement(element, message.fields[index].value, message.allow_credentials));
+    const problems = [];
+    elements.forEach((element, index) => {
+      const { problem } = checkFillElement(element, message.fields[index].value, message.allow_credentials);
+      if (problem) problems.push({ field: index, ...problem });
+    });
+    if (problems.length) throw fieldProblemsError(problems, true);
     let submitElement = null;
     if (message.submit_locator) {
       submitElement = requireActionable(resolve(message.submit_locator), "activate");
@@ -934,7 +1020,7 @@ ${line}` : line;
   function fillValuesRetained(fields, allowCredentials = false) {
     return fields.every((field) => {
       const element = resolve(field.locator);
-      validateFillElement(element, field.value, allowCredentials);
+      if (checkFillElement(element, field.value, allowCredentials).problem) return false;
       return fillControlValue(element) === expectedFillValue(element, field.value);
     });
   }

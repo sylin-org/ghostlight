@@ -1924,6 +1924,169 @@ test("a locator for a removed element is stale_locator", async () => {
   assert.equal(await harness.codeOf({ kind: "box", locator }), "stale_locator");
 });
 
+// ---- a refused fill lists what would succeed ----------------------------------------------------
+
+const ROLES = [
+  { value: "dev", text: "Developer" },
+  { value: "adm", text: "Administrator" },
+  { value: "oth", text: "Other" }
+];
+
+/** The refusal of a prepare_fill over `fields`, given as [label, value] pairs. */
+async function prepareRefusal(harness, fields) {
+  const wire = [];
+  for (const [label, value] of fields) wire.push({ locator: await harness.locatorOf(label), value });
+  return harness.send({ kind: "prepare_fill", fields: wire, visual_settle: false });
+}
+
+test("a fill with two bad fields reports both at once and edits nothing", async () => {
+  const harness = contentHarness();
+  const role = labelledSelect(harness, "Role", ROLES);
+  textInput(harness, { label: "Name", value: "kept" });
+  const team = labelledSelect(harness, "Team", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta" }]);
+
+  const refused = await prepareRefusal(harness, [["Role", "Engineer"], ["Name", "Ada"], ["Team", "Gamma"]]);
+
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "option_missing");
+  assert.match(refused.error.message, /^select option not found/);
+  assert.deepEqual(refused.error.detail.problems, [
+    { field: 0, problem: "option_missing", options: ["Developer", "Administrator", "Other"] },
+    { field: 2, problem: "option_missing", options: ["Alpha", "Beta"] }
+  ]);
+  assert.equal(role.value, "dev");
+  assert.equal(team.value, "a");
+  assert.equal(harness.input.value, "kept");
+  assert.deepEqual(harness.input.events, []);
+  assert.deepEqual(harness.edits, []);
+});
+
+test("the refusal never echoes the value the caller gave", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Role", ROLES);
+
+  const refused = await prepareRefusal(harness, [["Role", "PRIVATE_GIVEN_VALUE"]]);
+
+  assert.equal(refused.error.code, "option_missing");
+  assert.ok(!JSON.stringify(refused).includes("PRIVATE_GIVEN_VALUE"));
+});
+
+test("the refusal lists an optgroup as a group and marks the options a fill would refuse", async () => {
+  const harness = contentHarness();
+  const retired = { label: "Retired", disabled: true };
+  labelledSelect(harness, "Team", [
+    { value: "all", text: "Everyone" },
+    { value: "eng", text: "Engineering", group: { label: "Staff" } },
+    { value: "old", text: "Archive", group: retired },
+    { value: "solo", text: "Solo", disabled: true }
+  ]);
+
+  const refused = await prepareRefusal(harness, [["Team", "Nobody"]]);
+
+  assert.deepEqual(refused.error.detail.problems, [{
+    field: 0,
+    problem: "option_missing",
+    options: [
+      "Everyone",
+      { group: "Staff", options: ["Engineering"] },
+      { group: "Retired", options: [{ text: "Archive", disabled: true }] },
+      { text: "Solo", disabled: true }
+    ]
+  }]);
+});
+
+test("a value that names a disabled option is refused as disabled, in a group or alone", async () => {
+  const harness = contentHarness();
+  const retired = { label: "Retired", disabled: true };
+  const team = labelledSelect(harness, "Team", [
+    { value: "all", text: "Everyone" },
+    { value: "old", text: "Archive", group: retired },
+    { value: "solo", text: "Solo", disabled: true }
+  ]);
+
+  for (const value of ["Archive", "old", "Solo", "solo"]) {
+    const refused = await prepareRefusal(harness, [["Team", value]]);
+    assert.equal(refused.error.code, "option_missing", value);
+    assert.match(refused.error.message, /^select option not found/);
+    assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "option_disabled" }], value);
+  }
+  assert.equal(team.value, "all");
+  assert.equal((await prepareRefusal(harness, [["Team", "Everyone"]])).ok, true);
+});
+
+test("a long select reports its count and the options that contain the refused value", async () => {
+  const harness = contentHarness();
+  const options = Array.from({ length: 30 }, (_, index) => ({ value: `v${index}`, text: `Region ${index}` }));
+  options.push({ value: "x", text: "Region retired", disabled: true });
+  labelledSelect(harness, "Region", options);
+
+  const refused = await prepareRefusal(harness, [["Region", "region 1"]]);
+
+  const [problem] = refused.error.detail.problems;
+  assert.equal(problem.options.length, 25);
+  assert.equal(problem.options_total, 31);
+  assert.deepEqual(problem.containing, ["Region 1", "Region 10", "Region 11", "Region 12", "Region 13"]);
+  const none = (await prepareRefusal(harness, [["Region", "Atlantis"]])).error.detail.problems[0];
+  assert.equal("containing" in none, false);
+});
+
+test("a credential-class select lists no options and echoes nothing", async () => {
+  const harness = contentHarness();
+  const token = labelledSelect(harness, "Token kind", ROLES);
+  token.setAttribute("name", "api_token");
+  const locator = await harness.locatorOf("Token kind");
+  const message = { kind: "prepare_fill", fields: [{ locator, value: "PRIVATE_GIVEN_VALUE" }], visual_settle: false };
+
+  assert.equal((await harness.send(message)).error.code, "credential_authorization_required");
+  const refused = await harness.send({ ...message, allow_credentials: true });
+
+  assert.equal(refused.error.code, "option_missing");
+  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "option_missing" }]);
+  assert.ok(!JSON.stringify(refused).includes("PRIVATE_GIVEN_VALUE"));
+  assert.ok(!JSON.stringify(refused).includes("Developer"));
+});
+
+test("the detail stays under 4 KB by dropping options first", async () => {
+  const harness = contentHarness();
+  const options = Array.from({ length: 25 }, (_, index) => ({ value: `v${index}`, text: `${"x".repeat(55)} ${index}` }));
+  const labels = ["One", "Two", "Three", "Four", "Five"];
+  for (const label of labels) labelledSelect(harness, label, options);
+
+  const refused = await prepareRefusal(harness, labels.map((label) => [label, "missing"]));
+
+  assert.ok(JSON.stringify(refused.error.detail).length <= 4096);
+  assert.deepEqual(refused.error.detail.problems.map((problem) => problem.field), [0, 1, 2, 3, 4]);
+  assert.ok(refused.error.detail.problems.every((problem) => problem.problem === "option_missing" && !("options" in problem)));
+});
+
+test("single-field paths refuse with the code and message alone, with no detail", async () => {
+  const harness = contentHarness();
+  labelledSelect(harness, "Role", ROLES);
+  const locator = await harness.locatorOf("Role");
+
+  for (const message of [
+    { kind: "fill_local", field: { locator, value: "Engineer" }, allow_credentials: false },
+    { kind: "focus_text_field", field: { locator, value: "Engineer" }, allow_credentials: false }
+  ]) {
+    const refused = await harness.send(message);
+    assert.equal(refused.error.code, "option_missing", message.kind);
+    assert.match(refused.error.message, /^select option not found/);
+    assert.equal("detail" in refused.error, false, message.kind);
+  }
+});
+
+test("a select whose chosen option the page disabled afterwards is not retained", async () => {
+  const harness = contentHarness();
+  const team = labelledSelect(harness, "Team", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta" }]);
+  const locator = await harness.locatorOf("Team");
+  team.value = "b";
+  team.options[1].disabled = true;
+
+  const retained = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value: "Beta" }], stable_ms: 10, poll_ms: 5, limit_ms: 50 });
+
+  assert.equal(retained.error.code, "not_retained");
+});
+
 // ---- coded throw sites ---------------------------------------------------------------------------
 
 test("every throw site carries its code and keeps its message", async () => {

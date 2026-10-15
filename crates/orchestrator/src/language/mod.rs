@@ -8,6 +8,7 @@ pub mod composition;
 pub mod control;
 pub mod coverage;
 pub mod environment;
+pub mod field_problem;
 pub mod history;
 pub mod intake;
 pub mod outcome;

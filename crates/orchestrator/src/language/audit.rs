@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::composition::CompositionProgress;
 use super::outcome::{
-    BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome, Refusal,
-    WorkspaceReason,
+    counted, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
+    Refusal, WorkspaceReason,
 };
 
 /// The explicitly permitted language projection of one terminal result.
@@ -99,6 +99,7 @@ pub enum AuditRefusal {
     BrowserAdapterOutdated,
     DeadlineExpired { before_dispatch: bool },
     BrowserPrimitiveFailed,
+    FieldValuesRejected,
     DocumentUnavailable,
     CancelledBeforeDispatch,
     BrowserUnavailable { cause: BrowserUnavailableReason },
@@ -165,7 +166,7 @@ impl Refusal {
             }
             Self::AttentionRequired => AuditRefusal::AttentionRequired,
             Self::LocalInterlock => AuditRefusal::LocalInterlock,
-            Self::CredentialAuthorization => AuditRefusal::CredentialAuthorization,
+            Self::CredentialAuthorization { .. } => AuditRefusal::CredentialAuthorization,
             Self::IncompatibleReceipt => AuditRefusal::IncompatibleReceipt,
             Self::BrowserAdapterOutdated => AuditRefusal::BrowserAdapterOutdated,
             Self::DeadlineExpired {
@@ -174,6 +175,7 @@ impl Refusal {
                 before_dispatch: *before_dispatch,
             },
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
+            Self::FieldValuesRejected { .. } => AuditRefusal::FieldValuesRejected,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
             Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
             Self::BrowserUnavailable { reason } => {
@@ -211,6 +213,20 @@ impl Refusal {
             summary: match self {
                 Self::BrowserPrimitive { .. } => {
                     "The browser could not complete this operation.".into()
+                }
+                // The count is the whole of it: names, options and values stay out of history.
+                Self::FieldValuesRejected { fields, .. } => format!(
+                    "Refused a form fill before any edit: {} could not take {}.",
+                    counted(fields.len(), "field", "fields"),
+                    if fields.len() == 1 {
+                        "its value"
+                    } else {
+                        "their values"
+                    },
+                ),
+                // A credential refusal names the control; history keeps only that one was refused.
+                Self::CredentialAuthorization { .. } => {
+                    "Refused credential input that the user had not authorized.".into()
                 }
                 _ => self.summary(),
             },

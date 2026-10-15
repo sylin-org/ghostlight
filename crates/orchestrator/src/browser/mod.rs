@@ -1112,6 +1112,12 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// The page refused a fill before any edit because fields cannot take their values.
+    #[error("form fields cannot take their values")]
+    FieldsRejected {
+        /// Every refused field, by its position in the call, with what would succeed.
+        problems: Vec<crate::language::field_problem::FieldProblem>,
+    },
     /// A JavaScript dialog blocks the page, so the renderer cannot take the work.
     #[error("a JavaScript dialog blocks the page")]
     DialogOpen,

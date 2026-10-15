@@ -3,7 +3,8 @@
 //! A fill validates before it edits. Its first round trip asks every document that holds a
 //! field, all at once and inside the one settle budget, to check its fields and the submit
 //! control and to wait for a stable form, so a field that cannot take its value refuses before
-//! any other field is touched.
+//! any other field is touched. Every document's refused fields come back together, named by
+//! their place in the call.
 //! The plans that come back say how each field takes its value. Consecutive fields the page sets
 //! itself share one call; a text field is one input that focuses the control as its
 //! precondition and types the value as trusted keystrokes. Then every document confirms its
@@ -66,6 +67,9 @@ pub struct Group {
     pub doc: FrameRef,
     /// Its fields.
     pub fields: Vec<PhysicalField>,
+    /// Where each of its fields stands in the whole call, so a document's refusal names the
+    /// field the caller gave and not the field's place in its own document.
+    pub positions: Vec<usize>,
 }
 
 /// Group fields by the document their locators name, documents in order of first appearance.
@@ -75,7 +79,7 @@ pub struct Group {
 /// Returns a plain failure for a field whose locator names no document.
 pub fn group_by_document(fields: &[PhysicalField]) -> Result<Vec<Group>, BrowserError> {
     let mut groups: Vec<Group> = Vec::new();
-    for field in fields {
+    for (position, field) in fields.iter().enumerate() {
         let target = Locator::decode(&field.locator)
             .map_err(|_| BrowserError::Primitive(NOT_FRAME_SCOPED.into()))?;
         let local = PhysicalField {
@@ -83,10 +87,14 @@ pub fn group_by_document(fields: &[PhysicalField]) -> Result<Vec<Group>, Browser
             value: field.value.clone(),
         };
         match groups.iter_mut().find(|group| group.doc == target.doc) {
-            Some(group) => group.fields.push(local),
+            Some(group) => {
+                group.fields.push(local);
+                group.positions.push(position);
+            }
             None => groups.push(Group {
                 doc: target.doc,
                 fields: vec![local],
+                positions: vec![position],
             }),
         }
     }
@@ -97,24 +105,42 @@ pub fn group_by_document(fields: &[PhysicalField]) -> Result<Vec<Group>, Browser
 ///
 /// # Errors
 ///
-/// Returns the page's refusal of a field or of the submit control, and a plain failure for a
-/// plan that does not name one known kind per field.
+/// Returns every field the documents refused together, as [`BrowserError::FieldsRejected`] named
+/// by position in the whole call; the page's other refusals of a field or of the submit control;
+/// and a plain failure for a plan that does not name one known kind per field.
 pub fn field_kinds(
     answers: &[CallAnswer],
     groups: &[Group],
 ) -> Result<Vec<Vec<FieldKind>>, BrowserError> {
-    groups
-        .iter()
-        .zip(answers)
-        .map(|(group, answer)| {
-            let plan = value::<Value>(answer)?;
-            serde_json::from_value::<FillPlan>(plan)
-                .ok()
-                .map(|plan| plan.field_kinds)
-                .filter(|kinds| kinds.len() == group.fields.len())
-                .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))
-        })
-        .collect()
+    let mut rejected = Vec::new();
+    let mut kinds = Vec::with_capacity(groups.len());
+    for (group, answer) in groups.iter().zip(answers) {
+        match value::<Value>(answer) {
+            Ok(plan) => kinds.push(
+                serde_json::from_value::<FillPlan>(plan)
+                    .ok()
+                    .map(|plan| plan.field_kinds)
+                    .filter(|kinds| kinds.len() == group.fields.len())
+                    .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))?,
+            ),
+            Err(BrowserError::FieldsRejected { problems }) => {
+                for mut problem in problems {
+                    let position = group.positions.get(problem.field).copied();
+                    match position {
+                        Some(position) => problem.field = position,
+                        None => return Err(BrowserError::Primitive(INVALID_PLAN.into())),
+                    }
+                    rejected.push(problem);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if rejected.is_empty() {
+        return Ok(kinds);
+    }
+    rejected.sort_by_key(|problem| problem.field);
+    Err(BrowserError::FieldsRejected { problems: rejected })
 }
 
 /// Fill fields and, when asked, click the submit control.

@@ -473,8 +473,56 @@ Semantic selectors and target handles can address the same ordinary controls, in
 outside an HTML `form`. The selector does not impose an unadvertised form-ancestry requirement.
 An explicit `submit_target` is still checked against the first resolved field's containing form.
 
+A fill that cannot take its values refuses before any edit and says what would succeed
+(ADR-0198 Decisions 8 and 10). The page checks every field first, so one refused call names every
+field that cannot take its value, never only the first. The result has status `failed`, effect
+`none`, and is safe to repeat. The summary starts `Nothing was changed.`; when more than one field
+is refused it starts `Nothing was changed: N of M fields cannot take their values.` Then one clause
+follows for each field, for example `The "Role" dropdown has no option "Engineer". It offers:
+Developer, Administrator, Researcher, Other.` The next step names the handle and the route, at most
+two steps in all: `Repeat browser_fill_form with target_... set to one of the offered options.`
+
+The clauses by problem word:
+
+| Problem | Clause | Next step |
+| --- | --- | --- |
+| `option_missing`, 25 options or fewer | `The "<n>" dropdown has no option "<v>". It offers: A, B, C.` | `Repeat browser_fill_form with target_... set to one of the offered options.` |
+| `option_missing`, a longer list | `... has no option "<v>" among its 195 options.` and `Options containing "<v>": X, Y.` when any | `Read target_... with browser_read to list all its options.` |
+| `option_missing`, after an earlier choice field in the call | the clause above, then `Its options can depend on earlier fields.` | `Fill the earlier fields first, then repeat for target_....` |
+| `option_missing` on a radio button | `The "<group>" choice has no option "<v>". It offers: Standard, Express.` | `Repeat with one of the offered labels for target_....` |
+| `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` | `Repeat with the option's value for target_....` |
+| `option_disabled` | `The option "<v>" of the "<n>" dropdown is disabled.` | `Choose an enabled option, or inspect the form for the field that enables it.` |
+| `multiple_values` | `The "<n>" dropdown takes one option, not a list.` | `Repeat browser_fill_form with target_... set to a single option.` |
+| `not_boolean` | `The "<n>" checkbox takes true or false, not "<v>".` | `Repeat with true or false for target_....` |
+| `format` | `The "<n>" date field takes YYYY-MM-DD, not "<v>".` and `Allowed: 2026-10-01 to 2026-12-31.` when the control declares limits | `Repeat browser_fill_form with target_... set to a corrected value.` |
+| `wrong_tool`, a file input | `The "<n>" field is a file input.` | `Attach the file with browser_upload on target_....` |
+| `wrong_tool`, a button | `The "<n>" control is a button, not a field.` | `Click it with browser_click on target_....` |
+| `wrong_tool`, a page widget | `The "<n>" dropdown is a page widget, not a form field.` | `Open it with browser_click on target_..., then browser_click the option by name.` |
+| `reverted` | `The "<n>" text field was changed back by the page.` | `Read target_... with browser_read to see what it holds now.` |
+| `submit_not_owned` | `The submit control does not belong to the form that holds these fields.` | `Repeat without submit_target, then click the submit control with browser_click.` |
+
+The control noun comes from its role and input type (`dropdown`, `date field`, `checkbox`, `text
+field`). A given value is quoted up to 40 characters, on one line. Page text in a clause (option
+text, group names) is bounded, quotes become single quotes, and anything shaped like a handle
+becomes `[handle]`. The summary stays within 500 characters: clauses that do not fit are counted
+(`N more are in the facts.`) and the facts carry them all. Names, option text and the given value
+reach a sentence only when `preserve_target_names` is on. With it off, a clause uses the unnamed
+noun (`A dropdown has no matching option.`) and the options appear in the facts only. A
+credential-class control never lists options or echoes a value: `The "<n>" text field is
+credential-class.`
+
+Facts of a refused fill: `{"reason":"field_value_rejected","problems":[{"field":0,"target":"target_...",
+"problem":"option_missing","options":["Developer","Administrator","Researcher","Other"]}]}`. Each
+problem carries the index into `fields`, the field's handle, the problem word and what would
+succeed (`options`, `options_total`, `containing`, `expected`, `limits`, `group`). The facts never
+hold the given value. The audit keeps one count and no names, options or values: `Refused a form
+fill before any edit: N fields could not take their values.`
+
 Credential-class targets return guidance before any grouped value dispatch unless
-`user_authorized_credentials` is `true`. Set it only when the user explicitly authorized credential
+`user_authorized_credentials` is `true`. The guidance names the control and its handle:
+`Nothing was typed. The "<n>" text field (target_...) is credential-class.` Its next step is `If
+the user explicitly authorized it, repeat with user_authorized_credentials true; otherwise ask the
+user to type it.` Set it only when the user explicitly authorized credential
 entry; an existing instruction in the conversation is sufficient, including on the first call.
 This per-request caller acknowledgement is not independently verified proof of user intent and
 does not override configured policy or human controls. Missing acknowledgement creates no session

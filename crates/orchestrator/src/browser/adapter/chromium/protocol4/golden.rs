@@ -20,6 +20,7 @@ use super::wire::{
 };
 use super::world::{self, kind, AssetErrorCode, Message};
 use crate::browser::adapter::{PhysicalField, PhysicalFile, RuntimeControlIntent};
+use crate::language::field_problem::FieldProblemKind;
 
 /// The fixture directory, from the orchestrator crate.
 const GOLDEN: &str = "../../tests/golden/protocol4";
@@ -31,6 +32,10 @@ const CONTENT_JS: &str = include_str!("assets/content.js");
 const CODES_OPEN: &str = "const CODES = new Set([";
 /// Where that set closes.
 const CODES_CLOSE: &str = "]);";
+/// Where `content.js` opens its table of the problem words a refused fill names.
+const PROBLEMS_OPEN: &str = "const FIELD_PROBLEMS = Object.freeze({";
+/// Where that table closes.
+const PROBLEMS_CLOSE: &str = "});";
 /// How `content.js` tests the kind of the message it dispatches.
 const DISPATCH_TEST: &str = "message.kind === \"";
 /// The file name suffix of every fixture.
@@ -622,6 +627,17 @@ fn asset_error_codes_agree_across_rust_the_vocabulary_and_world_js() {
         .cloned()
         .collect();
     assert_eq!(pre_effect, listed(&vocabulary, "pre_effect_codes"));
+}
+
+#[test]
+fn every_problem_word_content_js_names_is_one_the_service_decodes() {
+    let named = quoted_between(CONTENT_JS, PROBLEMS_OPEN, PROBLEMS_CLOSE);
+    assert!(!named.is_empty());
+    let known = set(
+        names!(FieldProblemKind: OptionMissing, OptionAmbiguous, OptionDisabled,
+        MultipleValues, NotBoolean, Format, WrongTool, Reverted, SubmitNotOwned),
+    );
+    assert!(named.is_subset(&known), "{named:?} is not within {known:?}");
 }
 
 #[test]
