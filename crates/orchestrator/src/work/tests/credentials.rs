@@ -31,10 +31,7 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 &CancellationToken::default(),
             );
             assert_eq!(opened.status, Status::Succeeded);
-            browser.push(Ok(BrowserOutcome::Targets {
-                tab_id: 7,
-                targets: vec![credential()],
-            }));
+            browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
             let inspected = executor.execute(
                 &workspace,
                 "browser_inspect",
@@ -242,10 +239,7 @@ fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forwar
         None,
         &CancellationToken::default(),
     );
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![credential()],
-    }));
+    browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",

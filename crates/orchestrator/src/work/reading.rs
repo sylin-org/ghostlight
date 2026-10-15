@@ -274,9 +274,9 @@ impl ApplicationExecutor {
                     _ => unreachable!("target operations are closed"),
                 };
                 match self.dispatch(context, command) {
-                    Ok(BrowserOutcome::Targets { tab_id, targets })
-                        if tab_id == selected.physical_id =>
-                    {
+                    Ok(BrowserOutcome::Targets {
+                        tab_id, targets, ..
+                    }) if tab_id == selected.physical_id => {
                         let mapped = match lease.register_targets(selected, &targets) {
                             Ok(mapped) => mapped,
                             Err(error) => return self.workspace_failure(context, error),

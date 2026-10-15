@@ -371,10 +371,7 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         credential_class: false,
         ..Default::default()
     };
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![save.clone()],
-    }));
+    browser.push(Ok(BrowserOutcome::targets(7, vec![save.clone()])));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -478,9 +475,9 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
 fn a_committed_document_in_the_same_origin_still_expires_handles() {
     let (executor, browser, _, workspace, _) = fixture();
     let tab_handle = open_at(&executor, &browser, &workspace, 7, "https://example.com/");
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "link-1".into(),
             role: "link".into(),
             name: "Next".into(),
@@ -488,7 +485,7 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",

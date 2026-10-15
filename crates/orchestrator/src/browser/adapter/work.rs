@@ -878,6 +878,13 @@ impl BrowserCommand {
     }
 }
 
+/// Per-call facts about a target listing, carried beside its items.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Listing {
+    /// The page's forms index, one content-free entry per form.
+    pub forms: Vec<serde_json::Value>,
+}
+
 /// The observed outcome of a physical primitive.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrowserOutcome {
@@ -927,6 +934,8 @@ pub enum BrowserOutcome {
     Targets {
         tab_id: u64,
         targets: Vec<ObservedTarget>,
+        /// Per-call facts about the listing beside its items.
+        listing: Listing,
     },
     /// One bounded hierarchical document tree.
     DocumentTree {
@@ -1090,6 +1099,17 @@ pub enum BrowserOutcome {
     Presented { rendered: bool },
     /// Dispatch occurred but the effect cannot be determined.
     EffectUnknown { reason: String },
+}
+
+impl BrowserOutcome {
+    /// Semantic targets with no listing facts beyond the items.
+    pub fn targets(tab_id: u64, targets: Vec<ObservedTarget>) -> Self {
+        Self::Targets {
+            tab_id,
+            targets,
+            listing: Listing::default(),
+        }
+    }
 }
 
 /// An asynchronous physical browser event.

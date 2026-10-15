@@ -978,7 +978,9 @@ impl ApplicationExecutor {
                 form_scope: false,
             },
         ) {
-            Ok(BrowserOutcome::Targets { tab_id, targets }) if tab_id == selected.physical_id => {
+            Ok(BrowserOutcome::Targets {
+                tab_id, targets, ..
+            }) if tab_id == selected.physical_id => {
                 if targets.len() != 1 {
                     let matched = targets.len();
                     let outcome = Outcome::SelectorUnresolved { matched };

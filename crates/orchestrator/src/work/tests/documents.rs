@@ -31,9 +31,9 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
     for enabled in [true, false] {
         let (executor, browser, _, workspace, _) = fixture();
         open(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 7,
-            targets: vec![ObservedTarget {
+        browser.push(Ok(BrowserOutcome::targets(
+            7,
+            vec![ObservedTarget {
                 locator: "0:doc_top:locator_button".into(),
                 role: "button".into(),
                 name: "Save".into(),
@@ -41,7 +41,7 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
                 credential_class: false,
                 ..Default::default()
             }],
-        }));
+        )));
         browser.push(Ok(BrowserOutcome::Activated {
             tab: tab(7, "https://example.com/"),
             subject: None,
@@ -172,9 +172,9 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
     let (executor, browser, _, workspace, audit) =
         fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
     open(&executor, &browser, &workspace);
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "heading".into(),
             role: "heading".into(),
             name: "Page".into(),
@@ -182,7 +182,7 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -313,9 +313,9 @@ fn permitted_target_survives_unrelated_exclusion_except_under_complete_page() {
             let (executor, browser, _, workspace, _) =
                 fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
             open(&executor, &browser, &workspace);
-            browser.push(Ok(BrowserOutcome::Targets {
-                tab_id: 7,
-                targets: vec![ObservedTarget {
+            browser.push(Ok(BrowserOutcome::targets(
+                7,
+                vec![ObservedTarget {
                     locator: "button".into(),
                     role: "button".into(),
                     name: "Continue".into(),
@@ -323,7 +323,7 @@ fn permitted_target_survives_unrelated_exclusion_except_under_complete_page() {
                     credential_class: false,
                     ..Default::default()
                 }],
-            }));
+            )));
             let observed = executor.execute(
                 &workspace,
                 "browser_inspect",
@@ -380,9 +380,9 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
         fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "field".into(),
             role: "textbox".into(),
             name: "Name".into(),
@@ -390,7 +390,7 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let observed = executor.execute(
         &workspace,
         "browser_inspect",

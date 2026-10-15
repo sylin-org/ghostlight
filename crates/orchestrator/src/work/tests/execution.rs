@@ -115,9 +115,9 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "0:doc_top:locator_button".into(),
             role: "button".into(),
             name: "Save".into(),
@@ -125,7 +125,7 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     browser.push(Err(BrowserError::Protocol(
         "expected document-bound receipt".into(),
     )));
@@ -178,9 +178,9 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
 
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "btn-1".into(),
             role: "button".into(),
             name: "Save".into(),
@@ -188,7 +188,7 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -223,9 +223,9 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
 
     // The page still has its Save button under a fresh locator. Clicking by the stale
     // handle fails -- with the live candidate riding in the facts.
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "btn-2".into(),
             role: "button".into(),
             name: "Save".into(),
@@ -233,7 +233,7 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let clicked = executor.execute(
         &workspace,
         "browser_click",
@@ -271,13 +271,10 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
 
     // One miss, then the control appears.
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![],
-    }));
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(7, vec![])));
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "b-1".into(),
             role: "button".into(),
             name: "Ready".into(),
@@ -285,7 +282,7 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let waited = executor.execute(
             &workspace,
             "browser_wait",
@@ -299,10 +296,7 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
 
     // A selector that never shows up inside its budget fails decisively.
     for _ in 0..5 {
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 7,
-            targets: vec![],
-        }));
+        browser.push(Ok(BrowserOutcome::targets(7, vec![])));
     }
     let missed = executor.execute(
             &workspace,
@@ -447,9 +441,9 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "name-1".into(),
             role: "textbox".into(),
             name: "Name".into(),
@@ -457,7 +451,7 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -2469,9 +2463,9 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
 
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "hostile-role".into(),
             role: "Save my document".into(),
             name: "private patient action".into(),
@@ -2479,7 +2473,7 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -2543,9 +2537,9 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "save".into(),
             role: "button".into(),
             name: "Save patient record".into(),
@@ -2553,7 +2547,7 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -2659,9 +2653,9 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "button-1".into(),
             role: "button".into(),
             name: "Go".into(),
@@ -2669,7 +2663,7 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -2809,10 +2803,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         credential_class: true,
         ..Default::default()
     };
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![credential.clone()],
-    }));
+    browser.push(Ok(BrowserOutcome::targets(7, vec![credential.clone()])));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -2987,9 +2978,9 @@ fn stale_target_fails_before_browser_dispatch() {
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "old".into(),
             role: "button".into(),
             name: "Old".into(),
@@ -2997,7 +2988,7 @@ fn stale_target_fails_before_browser_dispatch() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let inspected = executor.execute(
         &workspace,
         "browser_inspect",
@@ -3023,9 +3014,9 @@ fn stale_target_fails_before_browser_dispatch() {
     assert_eq!(navigated.status, Status::Succeeded);
     let before = browser.calls().len();
     // The live page still has a button answering to the old name.
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "new".into(),
             role: "button".into(),
             name: "Old".into(),
@@ -3033,7 +3024,7 @@ fn stale_target_fails_before_browser_dispatch() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let stale = executor.execute(
         &workspace,
         "browser_click",
@@ -3391,9 +3382,9 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
         );
         assert_eq!(opened.status, Status::Succeeded);
         let tab_b = opened.facts["tab"].as_str().unwrap().to_owned();
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 42,
-            targets: vec![ObservedTarget {
+        browser.push(Ok(BrowserOutcome::targets(
+            42,
+            vec![ObservedTarget {
                 locator: "btn-1".into(),
                 role: "button".into(),
                 name: "Save".into(),
@@ -3401,7 +3392,7 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
                 credential_class: false,
                 ..Default::default()
             }],
-        }));
+        )));
         let inspected = executor.execute(
             &workspace_b,
             "browser_inspect",
@@ -3717,13 +3708,10 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
 
     // Selector query misses once, then finds button
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![],
-    }));
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(7, vec![])));
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "btn-submit".into(),
             role: "button".into(),
             name: "Submit".into(),
@@ -3731,7 +3719,7 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
 
     // Follow-up visual settle succeeds
     browser.push(Ok(BrowserOutcome::Observed {
@@ -4025,9 +4013,9 @@ fn workspace_with_a_target() -> (
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "delete".into(),
             role: "button".into(),
             name: "Delete".into(),
@@ -4035,7 +4023,7 @@ fn workspace_with_a_target() -> (
             credential_class: false,
             ..Default::default()
         }],
-    }));
+    )));
     let found = executor.execute(
         &workspace,
         "browser_find",

@@ -161,10 +161,7 @@ fn targets(
     if merged.over {
         reach.scope().limit();
     }
-    Ok(BrowserOutcome::Targets {
-        tab_id,
-        targets: merged.targets,
-    })
+    Ok(BrowserOutcome::targets(tab_id, merged.targets))
 }
 
 /// Read one composed document: the top document's article when asked and found, otherwise the

@@ -42,10 +42,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         tab: tab(7, PAGE),
         committed_urls: vec![PAGE.into()],
     };
-    let targets = || BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![field("draft", "textbox")],
-    };
+    let targets = || BrowserOutcome::targets(7, vec![field("draft", "textbox")]);
     let describe = |submit| BrowserOutcome::TargetsDescribed {
         tab_id: 7,
         targets: if submit {
@@ -194,10 +191,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         &["read", "action"],
         json!({"selector":{"name":"Ordinary control","role":"button","exact":true}}),
         vec![
-            BrowserOutcome::Targets {
-                tab_id: 7,
-                targets: vec![field("submit", "button")],
-            },
+            BrowserOutcome::targets(7, vec![field("submit", "button")]),
             BrowserOutcome::Activated {
                 tab: tab(7, PAGE),
                 subject: None,
@@ -546,10 +540,10 @@ fn established(
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![field("draft", "textbox"), field("submit", "button")],
-    }));
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![field("draft", "textbox"), field("submit", "button")],
+    )));
     let inspected = executor.execute(
         workspace,
         "browser_inspect",

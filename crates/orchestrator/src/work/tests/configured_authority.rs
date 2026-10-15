@@ -85,10 +85,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 "value":"PRIVATE_DRAFT"
             }]});
             if submit {
-                browser.push(Ok(BrowserOutcome::Targets {
-                    tab_id: 7,
-                    targets: vec![button.clone()],
-                }));
+                browser.push(Ok(BrowserOutcome::targets(7, vec![button.clone()])));
                 let inspected = executor.execute(
                     &workspace,
                     "browser_inspect",
@@ -100,10 +97,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 arguments["submit_target"] = inspected.facts["items"][0]["target"].clone();
             }
             let before = browser.calls().len();
-            browser.push(Ok(BrowserOutcome::Targets {
-                tab_id: 7,
-                targets: vec![field.clone()],
-            }));
+            browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
             if expected != Status::Blocked || credential {
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
                     tab_id: 7,
@@ -231,10 +225,7 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
                 credential_class: credential,
                 ..Default::default()
             };
-            browser.push(Ok(BrowserOutcome::Targets {
-                tab_id: 7,
-                targets: vec![input.clone()],
-            }));
+            browser.push(Ok(BrowserOutcome::targets(7, vec![input.clone()])));
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
                 tab_id: 7,
                 targets: vec![input],
@@ -343,10 +334,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
             } else if location == "selector" {
                 input["selector"] = json!({"name":"Draft","role":"textbox","exact":true});
             } else {
-                browser.push(Ok(BrowserOutcome::Targets {
-                    tab_id: 7,
-                    targets: vec![field.clone()],
-                }));
+                browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
                 let inspected = executor.execute(
                     &workspace,
                     "browser_inspect",
@@ -359,10 +347,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
             let before = browser.calls().len();
             if request == "action" {
                 if location == "selector" {
-                    browser.push(Ok(BrowserOutcome::Targets {
-                        tab_id: 7,
-                        targets: vec![field.clone()],
-                    }));
+                    browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
                 }
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
                     tab_id: 7,
@@ -468,10 +453,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
             };
             let mut arguments = json!({"tab":opened.facts["tab"],"text":"PRIVATE_DRAFT","expect":{"condition":"load_ready"}});
             if location == "target" {
-                browser.push(Ok(BrowserOutcome::Targets {
-                    tab_id: 7,
-                    targets: vec![field.clone()],
-                }));
+                browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
                 let inspected = executor.execute(
                     &workspace,
                     "browser_inspect",
@@ -485,10 +467,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 arguments["focused"] = json!(true);
             } else {
                 arguments["selector"] = json!({"name":"Draft","role":"textbox","exact":true});
-                browser.push(Ok(BrowserOutcome::Targets {
-                    tab_id: 7,
-                    targets: vec![field.clone()],
-                }));
+                browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
             }
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
                 tab_id: 7,
@@ -619,10 +598,7 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             credential_class: false,
             ..Default::default()
         };
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 7,
-            targets: vec![field.clone()],
-        }));
+        browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
         let inspected = executor.execute(
             &workspace,
             "browser_inspect",

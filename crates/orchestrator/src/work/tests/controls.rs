@@ -46,10 +46,7 @@ fn inspect_and_find_pass_a_selects_value_hint_and_options_through() {
     ] {
         let (executor, browser, _, workspace, _) = fixture();
         open_page(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::Targets {
-            tab_id: 7,
-            targets: vec![role_select()],
-        }));
+        browser.push(Ok(BrowserOutcome::targets(7, vec![role_select()])));
 
         let result = executor.execute(
             &workspace,
@@ -78,15 +75,15 @@ fn inspect_and_find_pass_a_selects_value_hint_and_options_through() {
 fn a_control_without_the_new_keys_reads_as_before() {
     let (executor, browser, _, workspace, _) = fixture();
     open_page(&executor, &browser, &workspace);
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "0:doc_top:locator_go".into(),
             role: "button".into(),
             name: "Go".into(),
             ..Default::default()
         }],
-    }));
+    )));
 
     let result = executor.execute(
         &workspace,
@@ -109,9 +106,9 @@ fn a_control_without_the_new_keys_reads_as_before() {
 fn a_credential_class_item_shows_only_its_marker_even_if_the_adapter_sent_more() {
     let (executor, browser, _, workspace, _) = fixture();
     open_page(&executor, &browser, &workspace);
-    browser.push(Ok(BrowserOutcome::Targets {
-        tab_id: 7,
-        targets: vec![ObservedTarget {
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
             locator: "0:doc_top:locator_pw".into(),
             role: "textbox".into(),
             name: "Password".into(),
@@ -122,7 +119,7 @@ fn a_credential_class_item_shows_only_its_marker_even_if_the_adapter_sent_more()
             error: Some("is too short".into()),
             ..Default::default()
         }],
-    }));
+    )));
 
     let result = executor.execute(
         &workspace,
