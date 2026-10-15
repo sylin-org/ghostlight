@@ -44,13 +44,7 @@ Contributions are accepted under the [Developer Certificate of Origin](https://d
 sign off your commits (`git commit -s`). Inbound = outbound, everywhere, including
 `crates/orchestrator/src/governance/`.
 
-Practical expectations for PRs: `cargo fmt --all -- --check`,
-`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
-`npm test --prefix extension`, and
-`node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"` green; ASCII source and
-documentation; match the surrounding code's
-style; and protect each distinct contract once at its narrowest seam. For anything larger than a
-small fix, open a Discussion or Issue first so nobody builds the wrong thing.
+Practical expectations for PRs: CI (.github/workflows/ci.yml) green -- it runs the layers listed under Running tests locally plus formatting, clippy -D warnings and JavaScript syntax checks; ASCII source and documentation; match the surrounding code's style; and protect each distinct contract once at its narrowest seam. For anything larger than a small fix, open a Discussion or Issue first so nobody builds the wrong thing.
 
 ### The dev loop: seeing your changes live
 
@@ -62,20 +56,20 @@ and isolated process journey.
 
 ### Running tests locally
 
-The suite has three useful layers:
+CI runs these commands:
 
-- **In-process Rust contracts:** `cargo test --workspace`.
-- **Policy-free extension mechanisms:** `npm test --prefix extension`.
-- **Chromium page assets** (the JavaScript the service installs into pages):
-  `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"`.
-  It has no dependencies, so it needs no `npm install`.
-- **Real process topology:** build into `.target-ghostlight-1.0`, then run
-  `node tests/process-journey.mjs`. It keeps both relay processes alive through an orchestrator
-  interruption and proves they renegotiate without replaying the interrupted effect. The journey
-  looks for the executables in that directory; if you built somewhere else, say so with
-  `GHOSTLIGHT_BIN_DIR`, or it will pass against stale binaries and tell you nothing.
-  `node tests/provenance-journey.mjs` uses the same binary directory and proves cross-process
-  attribution, shared-session continuity, and claim confidentiality. Both run in platform CI.
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace`
+- `npm test --prefix extension`
+- `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"` (the page assets; no `npm install` needed)
+
+The process journeys in `tests/` use the executables in `.target-ghostlight-1.0`. If you built
+into another directory, set `GHOSTLIGHT_BIN_DIR`, or they pass against stale binaries and tell you
+nothing.
+
+`node tests/hardening-suite.mjs` with `GHOSTLIGHT_TEST_BROWSER` set runs every lane and fails on
+missing browser prerequisites. Journey details are in [docs/DEV-LOOP.md](docs/DEV-LOOP.md).
 
 Visible browser journeys and native tray/notification smoke tests remain release gates because a
 green unit suite cannot substitute for the user's actual desktop and browser.
@@ -85,13 +79,10 @@ installed Windows journey and the Linux release matrix. That journey briefly rem
 registrations and crashes the installed processes while keeping Chrome open; run it only on an
 idle development or dedicated acceptance installation.
 
-For the complete hardening regression suite, set `GHOSTLIGHT_TEST_BROWSER` to Chrome for Testing
-and run `node tests/hardening-suite.mjs`. It builds fresh binaries and runs Rust, extension,
-process, continuity, provenance, CLI, workbench, and real Chromium journeys. Missing browser
-prerequisites fail the run. The [coverage and execution guide](docs/tasks/security-hardening/regression-suite.md)
-maps every implemented session feature to its tests and separates installed acceptance from
-isolated fixtures. A browser or governance change must preserve allowed work as well as refusals;
-verify retained values and actual effects independently of the returned receipt.
+The [coverage and execution guide](docs/tasks/security-hardening/regression-suite.md) maps every
+implemented session feature to its tests. A browser or governance change must preserve allowed work
+as well as refusals; verify retained values and actual effects independently of the returned
+receipt.
 
 ## What not to report publicly
 
