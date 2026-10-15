@@ -14,7 +14,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use super::manifest::{self, ManifestError, RETIRED_SCHEMA, SCHEMA};
-use crate::install::record::atomic_replace;
+use crate::install::record::{atomic_replace, atomic_replace_keeping_access};
 use crate::language::migration::{self, Retired, RETIRED_SETTINGS};
 
 /// File-name suffix of the copy kept beside a migrated file.
@@ -98,7 +98,9 @@ pub fn migrate(text: &str, origin: &str) -> Result<Outcome, MigrateError> {
 /// Move one policy file to schema 4 in place.
 ///
 /// The original is copied to `<file>.schema3.bak` first, and the new document replaces the file in
-/// one step, so a failure leaves the original where it was. Returns the backup's path and what
+/// one step, so a failure leaves the original where it was. The backup is private to the user; the
+/// migrated file keeps the access the original had, because the file may be one other accounts
+/// read. Returns the backup's path and what
 /// moved, or `None` when the file already speaks schema 4.
 pub fn migrate_file(path: &Path) -> Result<Option<(PathBuf, Migration)>, MigrateError> {
     let original = fs::read(path).map_err(|error| {
@@ -123,7 +125,7 @@ pub fn migrate_file(path: &Path) -> Result<Option<(PathBuf, Migration)>, Migrate
         }
         Err(error) => return Err(unwritable(error)),
     }
-    atomic_replace(path, migration.document.as_bytes()).map_err(unwritable)?;
+    atomic_replace_keeping_access(path, migration.document.as_bytes()).map_err(unwritable)?;
     Ok(Some((backup, migration)))
 }
 
@@ -387,6 +389,23 @@ mod tests {
         assert!(manifest::parse(&migration.document, "moved").is_ok());
         assert_eq!(migrate_file(&path).unwrap(), None);
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(backup);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_migrated_file_keeps_its_access_and_its_backup_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temporary("access");
+        let original = format!(r#"{{"schema":3,"name":"mine","version":"1",{GRANTS}}}"#);
+        fs::write(&path, &original).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let (backup, _) = migrate_file(&path).unwrap().expect("the file moves");
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o644);
+        assert_eq!(mode(&backup), 0o600);
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(backup);
     }

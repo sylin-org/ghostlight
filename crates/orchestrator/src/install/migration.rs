@@ -49,6 +49,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
+use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
@@ -1001,7 +1002,7 @@ fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
         return Ok(());
     }
     if let Some(parent) = transfer.to.parent() {
-        fs::create_dir_all(parent).map_err(|source| MigrationError::Prepare {
+        private::create_dir_all(parent).map_err(|source| MigrationError::Prepare {
             path: parent.to_owned(),
             source,
         })?;
@@ -1072,15 +1073,7 @@ fn record_path(copy: &Path) -> PathBuf {
 
 /// Record that `sha256` is the content being copied to `copy`.
 fn record_copy(copy: &Path, sha256: &str) -> io::Result<()> {
-    let record = record_path(copy);
-    let mut temporary = record.as_os_str().to_owned();
-    temporary.push(format!(".{}.migrating", uuid::Uuid::new_v4().simple()));
-    let temporary = PathBuf::from(temporary);
-    let written = fs::write(&temporary, sha256).and_then(|()| fs::rename(&temporary, &record));
-    if written.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    written
+    record::atomic_replace(&record_path(copy), sha256.as_bytes())
 }
 
 /// The content an earlier run recorded as copied to `copy`, if it did.
@@ -1163,7 +1156,11 @@ fn archive_transfer(transfer: &Move) -> Result<(), MigrationError> {
         return remove_original(from);
     }
     if fs::rename(from, to).is_ok() {
-        return Ok(());
+        return private::restrict_file(to).map_err(|source| MigrationError::Move {
+            from: from.clone(),
+            to: to.clone(),
+            source,
+        });
     }
     copy_verified(from, to).map_err(|source| MigrationError::Move {
         from: from.clone(),
@@ -1199,16 +1196,20 @@ fn remove_original(path: &Path) -> Result<(), MigrationError> {
 }
 
 /// Copy `from` to `to` through a temporary file and publish it only if its hash matches.
+///
+/// The copy is a new file in the home, so it is private to the user whatever mode the original had.
 fn copy_verified(from: &Path, to: &Path) -> io::Result<()> {
     let mut temporary = to.as_os_str().to_owned();
     temporary.push(format!(".{}.migrating", uuid::Uuid::new_v4().simple()));
     let temporary = PathBuf::from(temporary);
     let published = (|| {
-        let mut target = File::create_new(&temporary)?;
+        let mut target = private::file_options()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
         io::copy(&mut File::open(from)?, &mut target)?;
         target.sync_all()?;
         drop(target);
-        fs::set_permissions(&temporary, fs::metadata(from)?.permissions())?;
         if record::sha256_file(from)? != record::sha256_file(&temporary)? {
             return Err(io::Error::other("the copy does not match the original"));
         }
@@ -1961,6 +1962,54 @@ mod tests {
         archive_audit(&plan).unwrap();
         assert!(!fixture.home.join(AUDIT_FILE_NAME).exists());
         assert_eq!(fs::read_to_string(archive).unwrap(), AUDIT);
+    }
+
+    /// Every path under `directory`, directories included.
+    #[cfg(unix)]
+    fn everything_under(directory: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            found.push(path.clone());
+            if path.is_dir() {
+                found.extend(everything_under(&path));
+            }
+        }
+        found
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn what_the_migration_creates_in_the_home_is_private_whatever_the_originals_were() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = development_custody();
+        let plan = fixture.plan();
+        for transfer in plan.transfers() {
+            fs::set_permissions(&transfer.from, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let assert_private = || {
+            for directory in ["policy", "state"] {
+                let directory = fixture.home.join(directory);
+                assert_eq!(mode(&directory), 0o700, "{}", directory.display());
+                for path in everything_under(&directory) {
+                    let expected = if path.is_dir() { 0o700 } else { 0o600 };
+                    assert_eq!(mode(&path), expected, "{}", path.display());
+                }
+            }
+        };
+
+        prepare(&plan).unwrap();
+        copy_state(&plan).unwrap();
+        assert!(everything_under(&fixture.home.join("state"))
+            .iter()
+            .any(|path| path.to_string_lossy().contains(COPY_BASE_SUFFIX)));
+        assert_private();
+        archive_audit(&plan).unwrap();
+        assert!(archive.is_file());
+        assert_private();
     }
 
     /// The 1.x user policy of `development_custody`.

@@ -43,3 +43,20 @@ pub fn create_dir_all(path: &Path) -> io::Result<()> {
     }
     builder.create(path)
 }
+
+/// Make an existing file readable only by the current user.
+///
+/// For a file that arrived by rename and so still has the mode it was created with. On Windows
+/// this does nothing.
+pub fn restrict_file(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(FILE_MODE))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}

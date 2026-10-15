@@ -10,6 +10,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use ghostlight_relay::private;
+
 /// Suffix of the copy being prepared.
 const NEW_SUFFIX: &str = ".new";
 
@@ -21,7 +23,8 @@ const OLD_MARKER: &str = ".old-";
 /// The source is copied to `name.new`, the current image is renamed to `name.old-<n>`, and the
 /// copy is renamed to `name`. If the last rename fails, the old image gets its name back, so a
 /// failed swap leaves the previous image in place. A missing current image is a first install.
-/// Missing directories are created.
+/// Missing directories are created, closed to other users on Unix; the image keeps the mode of the
+/// source.
 pub fn rename_swap(dir: &Path, name: &str, source: &Path) -> io::Result<()> {
     swap(dir, name, source, &|from, to| fs::rename(from, to))
 }
@@ -33,7 +36,7 @@ fn swap(
     source: &Path,
     rename: &dyn Fn(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
-    fs::create_dir_all(dir)?;
+    private::create_dir_all(dir)?;
     let target = dir.join(name);
     let prepared = dir.join(format!("{name}{NEW_SUFFIX}"));
     remove_if_present(&prepared)?;
@@ -149,6 +152,22 @@ mod tests {
         rename_swap(&bin, "ghostlight", &source).unwrap();
         assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"one");
         assert_eq!(names(&bin), ["ghostlight"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_directory_made_for_the_image_is_private_and_the_image_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new();
+        let source = scratch.path().join("payload");
+        fs::write(&source, b"one").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = scratch.path().join("bin");
+        rename_swap(&bin, "ghostlight", &source).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&bin), 0o700);
+        assert_eq!(mode(&bin.join("ghostlight")), 0o755);
     }
 
     #[test]

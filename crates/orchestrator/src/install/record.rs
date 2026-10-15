@@ -246,6 +246,25 @@ pub fn sha256_file(path: &Path) -> io::Result<String> {
 /// private-file call, and on Unix with mode 0600. Missing parent directories are created, closed
 /// to everyone else on Unix.
 pub fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, bytes, &|temporary, _| create_private(temporary))
+}
+
+/// Replace the file at `path` with `bytes`, atomically, for a file that is not Ghostlight's own.
+///
+/// Like [`atomic_replace`], but the new file has the access the old one had instead of being
+/// private: a policy file that other accounts must read stays readable by them. On Unix the new
+/// file gets the old file's mode; on Windows it inherits from its directory.
+pub fn atomic_replace_keeping_access(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, bytes, &create_like)
+}
+
+/// The shared steps of both replacements. `create` makes the new file at its first path argument,
+/// given the path being replaced as its second.
+fn replace(
+    path: &Path,
+    bytes: &[u8],
+    create: &dyn Fn(&Path, &Path) -> io::Result<File>,
+) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
@@ -254,7 +273,7 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     temporary.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     let temporary = Path::new(&temporary);
     let published = (|| {
-        let mut file = create_private(temporary)?;
+        let mut file = create(temporary, path)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
@@ -264,6 +283,20 @@ pub fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(temporary);
     }
     published
+}
+
+/// Create a new file with the access of `existing`, which it is about to replace.
+fn create_like(path: &Path, existing: &Path) -> io::Result<File> {
+    let file = File::options().create_new(true).write(true).open(path)?;
+    #[cfg(unix)]
+    {
+        file.set_permissions(fs::metadata(existing)?.permissions())?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = existing;
+    }
+    Ok(file)
 }
 
 /// Create a new file only the current user can read.

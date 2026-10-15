@@ -44,7 +44,8 @@ site traffic remains browser traffic.
   stores.
 - On Linux, the audit log, policy, state, runtime and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
-  closed to other users. A file that already existed keeps its mode.
+  closed to other users. That includes the files an upgrade from 1.x copies there. A file that
+  already existed keeps its mode.
 
 The governed host and optional bounded target name are the only page-derived audit text. Audit
 does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed
