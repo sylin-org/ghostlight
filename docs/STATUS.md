@@ -23,6 +23,14 @@ typed next steps, guards and the 2.0.0 version, the pristine pass and the docs.
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.
 
+Release posture (owner, 2026-10-14): the user base is three reachable people, and there is no
+public push until 2.0 is stable and delightful. 1.x gets no patch releases; its users are told
+directly. 2.0 freezes the seams (executables, relay and adapter protocols, policy schema, agent
+entries, install home) and ships to those users once it passes the bar: clean installs on
+Windows and the Linux test machines, a 1.x upgrade on another machine, and a week of daily use
+with no shutdown blocks and no second service. Internals are rebuilt lean in 2.x behind the
+frozen seams; the public push follows when the experience is ready.
+
 ## Only main and dev (2026-10-05)
 
 Main `86952a8a` contains the published 1.3.14 runtime and active contracts.
