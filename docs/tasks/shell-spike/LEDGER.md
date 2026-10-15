@@ -46,7 +46,7 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
-Next: shell-spike-6.
+Next: shell-spike-7.
 
 `crates/desktop/Cargo.toml` declares every dependency the lane uses and may not change after
 shell-spike-1. A slice that needs another crate records a blocker instead.
@@ -60,6 +60,7 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 | shell-spike-3 | `bridge.rs` and `web/bridge.js`: the one post-and-receive JSON bridge. `bridge.js` is injected into the main frame and defines the frozen, non-writable, non-configurable `window.ghostlightShell` (`post`, `listen`) and the hidden `__ghostlightShellDeliver`. `decode_page_message` takes only a JSON object of at most 1 MiB, `delivery_script` encodes the message as a JSON string literal inside the call, and `page_origin` sorts a URL into shell page, service page or foreign (foreign messages are dropped). | see `git log` |
 | shell-spike-4 | `tray.rs`: the tray built from a model. `TrayModel` (`tooltip`, `items`) and `TrayItem` (`id`, `label`, `enabled`) with `validate` (1 to 16 items, unique ids of `[a-z0-9_]{1,32}`, labels of 1 to 64 printable characters, a tooltip of at most 64), `icon_image` and `decode_rgba` (PNG to 8-bit RGBA), `Tray::build` and `Tray::show`, and `install_events` mapping a left-button-up click to `TrayEvent::Activate` and a menu choice to `TrayEvent::Item(id)`. The shell owns no item; Linux reports no clicks, so Open must be a menu item there. | see `git log` |
 | shell-spike-5 | `window.rs`: the window and its webview, moved unchanged from the Tauri glue. `WindowLifecycle` is the pure rule set (`Absent`, `Open`, `Replacing`; `OpenRequested`, `CloseRequested`, `Destroyed`, `RendererLost` give `Create`, `Focus` or `Destroy`): Windows focuses an open window, Linux destroys it and builds a fresh one after the destroyed event and coalesces Opens meanwhile (ADR-0120), a lost renderer discards the window and nothing rebuilds it (ADR-0119). `renderer_policy` and `apply_renderer_policy`, `prepare_identity` and `init_display` are the Linux startup helpers, no-ops on Windows. `ShellWindow::create` builds the tao window (title, 1180 by 760, minimum 880 by 620, centered by the pure `centered_origin`, product icons, Windows class `Ghostlight Window`) and the hardened wry webview with the private scheme, the IPC handler and the injected bridge; `focus`, `navigate`, `deliver`, `id` and, on Linux, `on_renderer_lost`. | see `git log` |
+| shell-spike-6 | `session.rs`: the end of the session (ADR-0199 Decisions 13 and 14). `SessionState` (clones share two flags) maps `SessionSignal` (`Query`, `Cancelled`, `Final`) to `SessionAct`: a query marks the session ending, a cancel lifts it unless the final signal came, the first final signal gives `ArmFallbackThenExit` and the state stays ending, a later one does nothing. `may_start_process` is false while ending; every later path that starts a process asks it first. `handle` arms, then exits. `arm_fallback_exit(FALLBACK_EXIT)` spawns the `ghostlight-desktop-exit` thread (1500 ms, `exit(0)`, at once if the thread cannot spawn). Sources: on Linux `install_unix_signals` maps SIGTERM, SIGHUP and SIGINT to `Final` on the GTK main context; on Windows the event loop maps its destroyed event to `Final` (`tao` answers the query with true). The query-time ending state on Windows arrives with relay's shared listener when the shell lane wires the shell, which replaces both sources. | see `git log` |
 
 ## Owed live checks
 
@@ -106,6 +107,14 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 - shell-spike-5: live on Linux under X11, once the event loop exists: that an Open presents and
   raises the new window both for the first create and for a replacement, and that the window is
   not left behind other windows.
+
+- shell-spike-6: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
+  warnings` and `cargo test -p ghostlight-desktop`. `install_unix_signals` is Linux-only and has
+  not been compiled on the coordinator's host.
+- shell-spike-6: live, once the event loop exists (shell-spike-7): that on Windows a logoff or
+  shutdown with the window open ends the process in under 2 s with no "this app is preventing"
+  screen; that on Linux SIGTERM, SIGHUP and SIGINT each end the process at once through the
+  fallback path and in under 2 s.
 
 ## Blockers
 
