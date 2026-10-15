@@ -1,8 +1,21 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh
+#
+# --restore installs this release over a development installation (a build the development loop
+# installed), whatever version it is: the one allowed move down. It runs the downloaded service
+# with `deployment install --restore` instead of `deployment install`:
+#   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh -s -- --restore
 
 set -eu
+
+restore=""
+for argument in "$@"; do
+  case "$argument" in
+    --restore) restore="--restore" ;;
+    *) echo "ghostlight: unknown option ${argument}" >&2; exit 2 ;;
+  esac
+done
 
 repository="sylin-org/ghostlight"
 case "$(uname -s)-$(uname -m)" in
@@ -85,7 +98,7 @@ done
 
 # The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
 # A failed download cannot partially replace a working installation.
-"$temporary/ghostlight" deployment install
+"$temporary/ghostlight" deployment install $restore
 
 ghostlight="$install_directory/ghostlight"
 echo "Ghostlight ${version} installed at ${install_directory}"

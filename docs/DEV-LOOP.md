@@ -15,31 +15,37 @@ and an agent-launched browser can share a redirected filesystem view and conceal
 
 `cargo build --workspace` builds the two executables: `ghostlight-service` (the service and its
 workbench) and `ghostlight` (the edge: the MCP relay, the browser relay and the front door that
-hands every other command to the service). Tests and gates run from any target directory. A build directory never serves on its own: `serve` runs only from
-`~/.ghostlight/bin` or from the development build the marker selects (ADR-0197 Decisions 10
-and 13).
+hands every other command to the service). Tests and gates run from any target directory. A build
+directory never serves on its own: `serve` runs only from `~/.ghostlight/bin` (ADR-0197
+Decisions 10 and 13).
 
 ## Deploying a build
 
 ```powershell
-pwsh scripts/dev-loop.ps1            # build, then install it as the development build
+pwsh scripts/dev-loop.ps1            # build, then install it into bin as the development channel
 pwsh scripts/dev-loop.ps1 -Plan      # build, then print what the install would do
-pwsh scripts/dev-loop.ps1 -Restore   # go back to the installed service; builds nothing
 ```
 
-The script builds in `.target-dev-loop` (`-Profile debug` for a debug build) and runs
-`<build>/ghostlight-service deployment install --development`. The installer takes
-`~/.ghostlight/install.lock` and checks the destinations of a 1.x migration first when it finds
-one, then copies the 1.x policy, managed-policy and client-location files into the home and leaves
-the originals for the 1.x service that is still running. It then
-rename-swaps the service and the edge into `~/.ghostlight/dev` and writes the marker
-`~/.ghostlight/development`. While the marker names an existing build, every other
-`ghostlight-service` forwards to it, and `bin/ghostlight-service serve` hands over to it. The edge
-lives in `bin`. It is replaced only when the build speaks another relay revision than
-`bin/install.json` records, or when `bin` still holds the layout before the edge, where the
-service image had the edge's name and two connector images sat beside it; the installer then
-stops those exact images, replaces them and deletes the connector files. At the 2.0 break the
-whole build goes into `bin` as well.
+There is zero or one Ghostlight on a machine, and a deploy replaces it in place (ADR-0199, the
+development channel amendment). The script builds in `.target-dev-loop` (`-Profile debug` for a
+debug build) and runs `<build>/ghostlight-service deployment install --development`. The
+installer takes `~/.ghostlight/install.lock` and checks the destinations of a 1.x migration first
+when it finds one, then copies the 1.x policy, managed-policy and client-location files into the
+home and leaves the originals for the 1.x service that is still running. It then rename-swaps the
+build into `~/.ghostlight/bin` the way a release install does:
+
+- The service image is replaced every time. A development install never stops at "same version"
+  and never refuses an older or a newer one.
+- The edge is replaced when `bin/install.json` is absent, records no edge, records another relay
+  revision than the build speaks, or when the edge in `bin` is missing or is not the one the record
+  names. Otherwise the edge stays and keeps running. The same holds for the shell when the build
+  has one: it is replaced when its file differs.
+- Once the new service publishes, `bin/install.json` is written with `"channel": "development"`.
+
+Nothing is written outside `bin`. `ghostlight doctor` and `ghostlight status` print
+`Channel: development` while the installation is a development build. A release package never
+installs over it: its carrier runs the installed service, and `deployment install` from a release
+package refuses and names the restore command.
 
 As soon as `bin` holds the executables, and before anything old is stopped, the installer
 reconciles every registration to name `bin`, so a browser or client that relaunches its host
@@ -51,6 +57,12 @@ installation record last, starts `bin/ghostlight-service serve --reason update`,
 30 s for a service that answers a control status with a new instance. Nothing needs stopping by
 hand. An edge that was not replaced keeps running and reconnects.
 
+Earlier development builds ran from `~/.ghostlight/dev`, selected by the marker
+`~/.ghostlight/development`, and `bin/ghostlight-service` stayed an old image that forwarded to
+them. A deploy that finds either one stops what runs from `dev` (the service first, by the quit,
+then any edge or shell), removes the directory and the marker, and reports an entry a running
+program kept; the next deploy removes it.
+
 Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
 the app's container, where registry and `%APPDATA%` writes reach only that app and no browser
 sees them. Run `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal. It
@@ -60,37 +72,47 @@ container: they rewrite only that manifest and report any registration they had 
 regular terminal.
 `doctor` inside a container cannot see what other apps see, and says so.
 
-`-Restore` runs `~/.ghostlight/bin/ghostlight-service deployment install --restore`. It is
-offline. It refuses when the edge in `bin` speaks another relay revision than the service there.
-Otherwise it removes the marker and restarts the installed service. `-Plan` with either form
-prints one JSON document: the migration plan, the swaps, the registrations to rewrite and the
-processes to stop. Nothing changes.
+Going back to a release needs a release carrier, because restore installs that carrier's own
+package. Run it from the carrier:
 
-Packages, npm and the get scripts run the same command without `--development`. A release refuses
-an older payload and does nothing for the same intact version. It writes `bin/install.json` only
-after the new service publishes, so a service that does not start is installed again on the next
-launch.
+```powershell
+npx ghostlight deployment install --restore                     # the npm package
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1))) -Restore
+curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh -s -- --restore
+```
+
+`--restore` takes the same optional payload directory as a release install. It installs that
+package into `bin` whatever version or channel is recorded (the one allowed move down), replaces
+the edge by the usual rule, restarts the service and records `"channel": "release"`. `-Plan` and
+`--plan` print one JSON document: the migration plan, the swaps, the registrations to rewrite, the
+processes to stop and the files to delete. Nothing changes.
+
+Packages, npm and the get scripts run the same command without `--development`. A release
+refuses an older payload, refuses a development installation, and does nothing for the same
+intact version. It writes `bin/install.json` only after the new service publishes, so a service
+that does not start is installed again on the next launch.
 
 ## What to restart
 
 | Changed area | Rebuild | Refresh |
 | --- | --- | --- |
-| Orchestrator domain, workbench, or bundled UI | `cargo build -p ghostlight-service` | Restart `ghostlight-service`; no relay or extension change |
-| Edge as the MCP relay | `cargo build -p ghostlight` | Reach `bin` (see below), then reconnect the MCP server in the harness |
-| Edge as the browser relay | `cargo build -p ghostlight` | Reach `bin` (see below), then reload the extension so Chromium respawns the native host |
+| Orchestrator domain, workbench, or bundled UI | `cargo build -p ghostlight-service` | Run the dev loop: it replaces the service in `bin` every time; no relay or extension change |
+| Edge as the MCP relay | `cargo build -p ghostlight` | Reach `bin` (a relay revision change or a forced replacement, see below), then reconnect the MCP server in the harness |
+| Edge as the browser relay | `cargo build -p ghostlight` | Reach `bin` (a relay revision change or a forced replacement, see below), then reload the extension so Chromium respawns the native host |
 | Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
 
-Rebuilding does not deploy the edge. The installer replaces the edge in `bin` only when the relay
-revision differs from the one `bin/install.json` records (ADR-0197 Decision 14). Under one relay
-revision, an edge source change reaches an installed home only through a revision change or a
-forced replacement. To force one, remove `~/.ghostlight/bin/install.json` and run
-`pwsh scripts/dev-loop.ps1 -Plan` first; the plan must list the edge among the swaps before you
-run the loop for real. The record is rewritten once the new service publishes. Until the edge is
-replaced, the old one keeps running the old code.
+Rebuilding does not deploy the edge by itself. A development deploy replaces the service in `bin`
+every time, and the edge only when the relay revision differs from the one `bin/install.json`
+records, there is no record, or the edge in `bin` is missing or is not the one the record names
+(ADR-0197 Decision 14). Under one relay revision, an edge source change reaches an installed home
+only through a revision change or a forced replacement. To force one, remove
+`~/.ghostlight/bin/install.json` and run `pwsh scripts/dev-loop.ps1 -Plan` first; the plan must
+list the edge among the swaps before you run the loop for real. The record is rewritten once the
+new service publishes. Until the edge is replaced, the old one keeps running the old code.
 
 An extension reload invalidates content-script receivers in already-open pages. The current
 adapter does not bootstrap them back into those documents. Refresh a disposable verification tab

@@ -3,11 +3,12 @@
 
 # Builds the workspace in an isolated target directory and hands the result to
 # `ghostlight-service deployment install --development`. The installer owns locking,
-# stopping running images, and copying. -Restore runs the installed binary's
-# `deployment install --restore` instead and builds nothing.
+# stopping running images, and copying: it installs the build into ~/.ghostlight/bin as the
+# development channel, replacing the one Ghostlight on the machine in place. Going back to a
+# release is a release carrier's `deployment install --restore` (npm or the get scripts), not
+# this script.
 [CmdletBinding()]
 param(
-    [switch]$Restore,
     [switch]$Plan,
     [ValidateSet("release", "debug")]
     [string]$Profile = "release",
@@ -39,13 +40,6 @@ function Invoke-Ghostlight {
     [Console]::Error.Write($errors.GetAwaiter().GetResult())
     $process.WaitForExit()
     exit $process.ExitCode
-}
-
-if ($Restore) {
-    $installed = Join-Path (Join-Path (Join-Path $HOME ".ghostlight") "bin") $exe
-    $restore = @("deployment", "install", "--restore")
-    if ($Plan) { $restore += "--plan" }
-    Invoke-Ghostlight -Binary $installed -Arguments $restore
 }
 
 $target = if ([System.IO.Path]::IsPathFullyQualified($TargetDirectory)) {

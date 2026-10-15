@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex
+#
+# -Restore installs this release over a development installation (a build the development loop
+# installed), whatever version it is: the one allowed move down. It runs the downloaded
+# service with `deployment install --restore` instead of `deployment install`. A piped script
+# takes no switch, so run it as a script block:
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1))) -Restore
+param([switch]$Restore)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -81,7 +88,9 @@ try {
     # The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
     # Windows GUI-subsystem executables need an explicit waited process for CLI commands.
     $candidate = Join-Path $downloadDirectory "ghostlight.exe"
-    $deploy = Start-Process -FilePath $candidate -ArgumentList @("deployment", "install") -WindowStyle Hidden -Wait -PassThru
+    $deployment = @("deployment", "install")
+    if ($Restore) { $deployment += "--restore" }
+    $deploy = Start-Process -FilePath $candidate -ArgumentList $deployment -WindowStyle Hidden -Wait -PassThru
     if ($deploy.ExitCode -ne 0) { throw "Ghostlight installation failed with exit code $($deploy.ExitCode)." }
 }
 finally {

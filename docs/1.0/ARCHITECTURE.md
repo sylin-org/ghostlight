@@ -68,27 +68,37 @@ directory `policy`, the Windows native-host manifest in `manifests`, and diagnos
 installs into `bin` (ADR-0197 Decision 13); registrations name the executables there.
 
 Before any command runs, `main` applies the entry rule (`install/entry.rs`, carried out by
-`cli/start.rs`). While the `development` marker names an existing build, every other copy
-forwards to it with the same arguments; a forwarded `serve` starts detached and the parent exits.
-Without a marker, only `bin/ghostlight-service` serves. Any other copy is a carrier: a command
+`cli/start.rs`). Only `bin/ghostlight-service` serves. Any other copy is a carrier: a command
 that uses the service installs from the carrier's own directory when the installed service is
 absent, older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version`
-never install. The edge's own verbs, `mcp` and a Chrome extension origin, are the exception to the
-marker: a service image that receives one hands it to `bin/ghostlight`, installing first when it
-is a carrier, because the development install keeps the edge in `bin` at its relay revision.
+never install. A carrier that finds the development channel in `bin/install.json` installs
+nothing and runs the installed service. The edge's own verbs, `mcp` and a Chrome extension
+origin, are handed to `bin/ghostlight`: a service image that receives one hands it over,
+installing first when it is a carrier and the installation is not the development channel.
 
-`deployment install` (`install/deployment.rs`) is the only writer of `bin` and `dev`
-(ADR-0197 Decisions 14 and 15). Under the install lock it checks the break migration's destinations
+`deployment install` (`install/deployment.rs`) is the only writer of `bin` (ADR-0197
+Decision 14 and the development channel amendment of ADR-0199). Under the install lock it checks
+the break migration's destinations
 (`install/migration.rs`) so a conflict changes nothing, copies the 1.x policy, managed-policy and
 client-location files into the home and leaves the originals in place (the 1.x service that is
 still running keeps reading its policy from them, and a service or client started by the next
 steps must find the copies), then compares `bin/install.json` with the
 payload: an older payload is refused, the same intact version is left alone, the service image is
 rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay revision
-changes or `bin` still holds the layout of an earlier development build, where the service image
-had the edge's name and two connector images sat beside it; the installer stops those exact
-images and deletes the connector files. `--development` swaps the service and the edge into `dev`
-and writes the marker; `--restore` removes it. As soon as `bin` holds the executables, and before anything old is stopped,
+changes, the edge in `bin` is missing or is not the one the record names, or `bin` still holds
+the layout of an earlier development build, where the service image had the edge's name and two
+connector images sat beside it; the installer stops those exact images and deletes the connector
+files. A release also refuses to install over the development channel and names the restore
+command. `--development` places the same files in `bin` the same way, but swaps the service
+every time, whatever version is installed, and records `"channel": "development"` in
+`install.json`. `--restore` installs this executable's own package the same way whatever is
+installed, records the release channel, and is the one allowed move down. It is not offline: the
+package it installs is a release carrier's, from npm or the get scripts. Earlier development
+builds ran from `~/.ghostlight/dev`, selected by the marker `~/.ghostlight/development`. An
+install that finds either stops what runs from there and removes both once `bin` holds the new
+executables; an entry a running program keeps is reported and removed by the next install.
+
+As soon as `bin` holds the executables, and before anything old is stopped,
 `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
@@ -121,16 +131,14 @@ development build that cannot be asked, or an installed image that still runs, i
 exact image.
 Registering first matters: a browser relaunches its host from the registration the moment the old
 one stops, and an old registration would start the 1.x connector again.
-When the service starts from `bin` or the marked build, it registers any browser that has no
-registration yet.
+When the service starts from `bin`, it registers any browser that has no registration yet.
 
 Every start of the service is `serve --reason <word>`, and the reason is one of six: `agent` (the
 MCP relay, at its own start and for each held request), `browser` (the browser relay, once, at
 its own start), `command` (`call`, when no service answers), `person` (`open` and a bare
 launch), `recover` (the shell, after a loss without goodbye) and `update` (the installer). `serve`
 requires the reason. `status`, `doctor`, `help` and `--version` never start the service. In
-order, `serve` refuses an image other than `bin/ghostlight-service` (or the marked development
-build),
+order, `serve` refuses an image other than `bin/ghostlight-service`,
 refuses an elevated Windows token, applies the quit latch, takes the operating-system lock on
 `run/service.lock`, and only then opens state. The lock is held until exit and admits the single
 local authority; the endpoint's first-instance flag is a second refusal. A start that finds the

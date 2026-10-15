@@ -442,8 +442,8 @@ Every one of these cost something to learn.
   on mismatch (2026-09-02, during the ADR-0150 verification): deploying to the npx stage means
   publishing a release, and verifying an unreleased connector belongs in a directory the launcher
   does not checksum. There is one fixed home per OS user (ADR-0197 Decision 10); journeys isolate
-  with the test-only GHOSTLIGHT_TEST_HOME, and an unreleased build runs from the development
-  marker's executable, not the npx cache.
+  with the test-only GHOSTLIGHT_TEST_HOME, and an unreleased build is installed into `bin` as the
+  development channel, not run from the npx cache.
 
 - **Cross-tree registration adoption requires a deliberate install.** Silent registration
   repair once adopted the machine toward whichever tree crossed the no-browser seam, which let
