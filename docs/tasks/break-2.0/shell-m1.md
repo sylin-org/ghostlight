@@ -63,7 +63,7 @@ every route but the pages and `/api/context`.
 | `/` and each file under `ui/` | GET, HEAD | page | page | page | none | (the private scheme) |
 | `/api/context` | GET | full | projected | product only | none | (new; Tauri command in m1-07) |
 | `/api/snapshot?parts=` | GET | all parts | projected | 403 | none | `workbench_snapshot` |
-| `/api/policy` | GET | full, with etag | projected, with etag | 403 | none | `workbench_policy` |
+| `/api/policy` | GET | full, with etag | projected, no etag | 403 | none | `workbench_policy` |
 | `/api/search` | POST | yes | yes | 403 | 5 per second | `workbench_search` |
 | `/api/policy/preview` | POST | yes | yes | 403 | 1 in flight, 10 per minute | `preview_user_policy` |
 | `/api/integrations/rescan` | POST | scans | cached roster, one scan per 5 s | 403 | coalesced | `refresh_harnesses` |
@@ -140,6 +140,8 @@ None.
 - m1-04: the policy etag hashes the user layer's document as the authority reports it, which is the
   document re-serialized by the policy parser, parsed again without its top-level `version` and
   written with sorted keys. A change of formatting or version keeps the tag.
+  Only Control receives the etag; a watcher's projected policy carries none, so the tag cannot
+  reveal the never-touch list.
 - m1-04: `GovernanceFacade::owning_user_policy` (test-only) became `pub(crate)` so the server tests can
   give a facade a user policy file of their own; `HarnessRegistry::isolated` and
   `WorkbenchFacade::with_harnesses` (test-only) keep the tests off this user's client configuration.
