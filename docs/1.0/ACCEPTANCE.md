@@ -208,6 +208,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     timing, rationale, and contacts without source address, credentials, keys, or rules.
 21. Authority changes update policy-aware catalog discovery and emit one MCP tool-list change;
     all-open remains the exact canonical 23-tool catalog.
+22. A hand edit to a policy file takes effect within about a second, a workbench edit at once, and
+    an administrator's HTTPS policy fetch never runs inside a tool call.
 
 ## Browser job journeys
 

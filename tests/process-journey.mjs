@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync
 import { dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
+import { policyRefreshed } from "./lib/policy-refresh.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
@@ -905,6 +906,7 @@ try {
   const readPolicy = JSON.parse(ordinaryPolicy);
   readPolicy.grants[0].allowed = ["read"];
   writeFileSync(policyFile, JSON.stringify(readPolicy));
+  await policyRefreshed();
   const blockedResponse = await mcp.request("tools/call", {
     name: "browser_flow", arguments: { steps: [
       { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
@@ -920,6 +922,7 @@ try {
   assert.equal(blockedFlow.summary, "Completed 1 of 3 steps. Step 2 blocked by policy.");
 
   writeFileSync(policyFile, ordinaryPolicy);
+  await policyRefreshed();
   const invalidResponse = await mcp.request("tools/call", {
     name: "browser_flow", arguments: { steps: [
       { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
@@ -1100,6 +1103,7 @@ try {
   const sitePolicy = JSON.parse(ordinaryPolicy);
   sitePolicy.grants[0].hosts = { allow: ["example.com"] };
   writeFileSync(policyFile, JSON.stringify(sitePolicy));
+  await policyRefreshed();
   const beforeRefusals = physicalCommands.length;
   const deniedResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
     on_error: "continue", steps: Array.from({ length: 6 }, (_, index) => ({
@@ -1119,6 +1123,7 @@ try {
   const permitted = structured(await troubled.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/", new_tab: true } }));
   assert.equal(permitted.status, "succeeded", "permitted work needs no resume after repeated refusals");
   writeFileSync(policyFile, ordinaryPolicy);
+  await policyRefreshed();
   assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
   assert.equal(structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
   const deniedRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
@@ -1159,6 +1164,7 @@ try {
   const requireAuditPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
   requireAuditPolicy.config.push({ key: "audit.availability", value: "require_audit", level: "mandatory" });
   writeFileSync(policyFile, JSON.stringify(requireAuditPolicy));
+  await policyRefreshed();
   const explainedHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
   assert.equal(explainedHealth.status, "succeeded");
   assert.equal(explainedHealth.facts.audit.mode, "require_audit");

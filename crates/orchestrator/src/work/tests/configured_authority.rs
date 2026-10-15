@@ -305,8 +305,9 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     {"id":"landing","hosts":{"allow":["landing.example"]},"allowed":[if destination_action {"action"} else {"read"}]}
                 ]
             })).unwrap()).unwrap();
+            let governance = GovernanceFacade::new(Some(policy.clone()), None);
             let (executor, browser, _, workspace, audit) =
-                fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+                fixture_with_governance(governance.clone());
             browser.push(Ok(BrowserOutcome::TabOpened {
                 reused: false,
                 tab: tab(7, "https://example.com/"),
@@ -365,6 +366,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     serde_json::from_slice(&fs::read(&policy).unwrap()).unwrap();
                 document["grants"][0]["allowed"] = json!(["read"]);
                 fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
+                governance.refresh_tick();
             }
             let result = executor.execute(
                 &workspace,

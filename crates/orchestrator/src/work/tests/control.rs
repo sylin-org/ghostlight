@@ -598,3 +598,39 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
         );
     }
 }
+
+#[test]
+fn an_authorization_publishes_no_control_state_and_a_hold_publishes_exactly_one() {
+    let (executor, browser, _, workspace, _) = fixture();
+    executor.governance.relay_runtime_state(browser.clone());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    for _ in 0..3 {
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            None,
+            &CancellationToken::default(),
+        );
+    }
+    assert!(
+        browser.control_states().is_empty(),
+        "authorizing work tells no adapter anything"
+    );
+
+    executor
+        .governance
+        .apply_runtime_intent(RuntimeControlIntent::Hold);
+    executor
+        .governance
+        .apply_runtime_intent(RuntimeControlIntent::Hold);
+    assert_eq!(
+        browser.control_states(),
+        [crate::browser::adapter::RuntimeControlState::Held],
+        "one change reaches the adapters once, however often it is asked for"
+    );
+}

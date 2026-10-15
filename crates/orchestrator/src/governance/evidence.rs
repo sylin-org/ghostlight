@@ -22,7 +22,10 @@ mod tests {
 
     #[test]
     fn positive_evidence_preserves_ordered_grants_and_every_layer() {
-        let mut snapshot = GovernanceFacade::new(None, None).snapshot();
+        let mut snapshot = GovernanceFacade::new(None, None)
+            .snapshot()
+            .as_ref()
+            .clone();
         for tier in [AuthorityTier::Managed, AuthorityTier::User] {
             snapshot.layers.push(PolicyLayer { tier, manifest: manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap() });
         }
@@ -57,7 +60,7 @@ mod tests {
     #[test]
     fn all_open_and_protected_denials_keep_their_actual_meaning() {
         let facade = GovernanceFacade::new(None, None);
-        let mut snapshot = facade.snapshot();
+        let mut snapshot = facade.snapshot().as_ref().clone();
         let (decision, open) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("http://localhost:3000/"));
         assert!(decision.allowed);

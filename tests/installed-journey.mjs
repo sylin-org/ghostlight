@@ -26,6 +26,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { policyRefreshed } from "./lib/policy-refresh.mjs";
 import { createScratch, installScratchNativeHost, launchChrome, removeScratch } from "./lib/cdp-pipe.mjs";
 
 const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -1077,6 +1078,7 @@ check("policy", "(25) policy_explain, and a user policy refusing the second orig
       schema: 4, name: "Installed journey", version: String(Date.now()),
       grants: [{ id: "first-origin", hosts: { allow: ["127.0.0.1"] }, allowed: ["read", "action", "write", "execute"] }]
     }));
+    await policyRefreshed();
     const refused = await t.call("browser_navigate", { url: `${t.B}/blank?policy-denied`, new_tab: true, browser: t.browser });
     assert.equal(refused.status, "blocked", `the second origin should be refused: ${JSON.stringify(refused)}`);
     assert.match(refused.summary, /localhost/i, refused.summary);
@@ -1085,6 +1087,7 @@ check("policy", "(25) policy_explain, and a user policy refusing the second orig
     const governed = await t.succeed("policy_explain", {});
     assert.match(JSON.stringify(governed.facts), /127\.0\.0\.1/);
     restore();
+    await policyRefreshed();
     await t.open(`${t.B}/blank?policy-after`);
     return refused.summary;
   } finally {

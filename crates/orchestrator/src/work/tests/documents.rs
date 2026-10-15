@@ -161,8 +161,8 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
 #[test]
 fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
     let path = policy_file(true);
-    let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
     open(&executor, &browser, &workspace);
     browser.push(Ok(BrowserOutcome::targets(
         7,
@@ -197,6 +197,7 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
         "key":crate::governance::SCREENSHOTS_ENABLED_KEY,"value":false,"level":"mandatory",
     }));
     fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    governance.refresh_tick();
     let prior = browser.calls().len();
     for arguments in [
         json!({}),

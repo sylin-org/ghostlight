@@ -543,7 +543,9 @@ fn a_control_confirmation_states_the_authority_and_never_browser_delivery() {
     // person hears the same thing, because the authority's state is the whole effect.
     for (connected, publish_fails) in [(true, false), (true, true), (false, false)] {
         let browser = ControlledBrowser::new(connected, publish_fails);
-        let facade = facade_over(GovernanceFacade::new(None, None), browser.clone());
+        let governance = GovernanceFacade::new(None, None);
+        governance.relay_runtime_state(browser.clone());
+        let facade = facade_over(governance, browser.clone());
         let result = facade.apply_runtime_intent(WorkbenchRuntimeIntent::Hold);
         assert_eq!(result.runtime_state, RuntimeControlState::Held);
         assert_eq!(result.message, expected);
@@ -596,10 +598,8 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
 
     let path = temporary_policy("retained");
     std::fs::write(&path, READ_ONLY_POLICY).unwrap();
-    let facade = facade_over(
-        GovernanceFacade::new(Some(path.clone()), None),
-        ControlledBrowser::new(true, false),
-    );
+    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
     let applied = facade.snapshot();
     assert_eq!(applied.readiness.state, Readiness::Ready);
     assert_eq!(
@@ -608,6 +608,7 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
     );
 
     std::fs::write(&path, "{half-written").unwrap();
+    governance.refresh_tick();
     let retained = facade.snapshot();
     // The last valid policy is still enforced, so nothing fails closed: the header stays Ready,
     // the Policy tab keeps its applied situation, and Status warns about the invalid edit.

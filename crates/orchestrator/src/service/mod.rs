@@ -19,7 +19,7 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread::{self, JoinHandle};
+use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
 use crate::intake::session::{
@@ -43,7 +43,7 @@ use crate::browser::{
     RelayBrowserPort,
 };
 use crate::diagnostics::DiagnosticsHub;
-use crate::governance::{GovernanceFacade, JsonlAuditSink};
+use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
 use crate::intake::listener::{self, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
@@ -93,6 +93,7 @@ pub struct ServiceHost {
     audit: Arc<AuditRecorder>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    refresher: Thread,
     home: PathBuf,
     port: u16,
     token: String,
@@ -156,8 +157,7 @@ impl ServiceHost {
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         browser
             .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
-        let _ = governance.runtime_decision();
-        let _ = browser_port.publish_control_state(governance.runtime_state());
+        governance.relay_runtime_state(browser_port.clone());
         let presentation = PresentationReactor::new(Arc::new(BrowserPresentation::new(
             browser_port.clone(),
             workspaces.clone(),
@@ -192,7 +192,6 @@ impl ServiceHost {
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
-            browser: browser_port.clone(),
         }));
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -201,6 +200,8 @@ impl ServiceHost {
             signal: Arc::default(),
             diagnostics: Arc::clone(&diagnostics),
         };
+        let refresher = spawn_refresher(governance.clone(), Arc::clone(&stop))?;
+        let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
         let audit_for_thread = Arc::clone(&audit);
         let audit_thread = std::thread::spawn(move || {
@@ -229,7 +230,8 @@ impl ServiceHost {
             browser,
             audit,
             stop,
-            threads: vec![listener_thread, audit_thread],
+            threads: vec![listener_thread, audit_thread, refresher],
+            refresher: refresher_thread,
             home: home.into(),
             port,
             token,
@@ -315,6 +317,7 @@ impl ServiceHost {
         self.discovery.settle();
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
+        self.refresher.unpark();
         let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.port));
         for handle in self.threads.drain(..) {
             let _ = handle.join();
@@ -707,6 +710,65 @@ impl McpWire {
     }
 }
 
+/// How often the refresher checks the policy files and the managed authority.
+const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Start the one thread that keeps published authority current until `stop` is set.
+///
+/// It is the only thread that reads policy files on a schedule or fetches the organization's
+/// policy, so no tool call ever waits on either.
+fn spawn_refresher(governance: GovernanceFacade, stop: Arc<AtomicBool>) -> Result<JoinHandle<()>> {
+    thread::Builder::new()
+        .name("ghostlight-policy-refresher".into())
+        .spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                governance.refresh_tick();
+                thread::park_timeout(REFRESH_INTERVAL);
+            }
+        })
+        .context("start the policy refresher")
+}
+
+/// The tool catalog one session's client was last given, with the authority it was built from.
+#[derive(Default)]
+struct AdvertisedCatalog(Mutex<Option<Advertised>>);
+
+struct Advertised {
+    authority: String,
+    tools: Vec<ToolDefinition>,
+}
+
+impl AdvertisedCatalog {
+    /// Build the catalog `authority` admits and remember it as what the client now has.
+    fn advertise(&self, authority: &AuthoritySnapshot) -> Vec<ToolDefinition> {
+        let tools = catalog_for(authority);
+        *lock(&self.0) = Some(Advertised {
+            authority: authority.id().to_owned(),
+            tools: tools.clone(),
+        });
+        tools
+    }
+
+    /// The catalog `authority` admits when it differs from the one given, and `None` otherwise.
+    ///
+    /// Nothing is compared until the client has asked for a catalog, and the catalog is rebuilt
+    /// only when the authority itself changed.
+    fn changed_by(&self, authority: &AuthoritySnapshot) -> Option<Vec<ToolDefinition>> {
+        let mut guard = lock(&self.0);
+        let advertised = guard.as_mut()?;
+        if advertised.authority == authority.id() {
+            return None;
+        }
+        advertised.authority = authority.id().to_owned();
+        let tools = catalog_for(authority);
+        if tools == advertised.tools {
+            return None;
+        }
+        advertised.tools.clone_from(&tools);
+        Some(tools)
+    }
+}
+
 /// The workspace, queue and workers of a session that has been initialized.
 struct LiveSession {
     workspace: WorkspaceId,
@@ -715,7 +777,7 @@ struct LiveSession {
     workers: Vec<JoinHandle<()>>,
     watch: Option<JoinHandle<()>>,
     watch_stop: Arc<AtomicBool>,
-    published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>>,
+    advertised: Arc<AdvertisedCatalog>,
 }
 
 impl LiveSession {
@@ -751,7 +813,7 @@ impl LiveSession {
             intake.budget.clone(),
             Arc::clone(&intake.quit.drain),
         ));
-        let published_catalog: Arc<Mutex<Option<Vec<ToolDefinition>>>> = Arc::new(Mutex::new(None));
+        let advertised = Arc::new(AdvertisedCatalog::default());
         let watch_stop = Arc::new(AtomicBool::new(false));
         let mut live = Self {
             workspace,
@@ -760,7 +822,7 @@ impl LiveSession {
             workers: Vec::new(),
             watch: None,
             watch_stop,
-            published_catalog,
+            advertised,
         };
         live.watch = Some(live.spawn_watch(intake, wire)?);
         for independent in [false, true] {
@@ -786,10 +848,10 @@ impl LiveSession {
         let workspace = self.workspace.clone();
         let governance = intake.governance.clone();
         let wire = Arc::clone(wire);
-        let published = Arc::clone(&self.published_catalog);
+        let advertised = Arc::clone(&self.advertised);
         let stop = Arc::clone(&self.watch_stop);
         thread::Builder::new()
-            .name("ghostlight-policy-catalog".into())
+            .name("ghostlight-session-watch".into())
             .spawn(move || {
                 let mut generation = 1_u64;
                 while !stop.load(Ordering::SeqCst) {
@@ -801,28 +863,9 @@ impl LiveSession {
                         executor.show_waiting(&workspace, &job.prepared);
                     }
                     restore_returned_tabs(&intake, &wire, &workspace);
-                    let Some(previous) = lock(&published).clone() else {
-                        continue;
-                    };
-                    let current = catalog_for(&governance.snapshot());
-                    if current == previous {
-                        continue;
-                    }
-                    let changed = {
-                        let mut published = lock(&published);
-                        if published.as_ref() == Some(&current) {
-                            false
-                        } else {
-                            *published = Some(current.clone());
-                            true
-                        }
-                    };
-                    if changed {
+                    if let Some(tools) = advertised.changed_by(&governance.snapshot()) {
                         generation = generation.wrapping_add(1);
-                        wire.render(ServiceResponse::CatalogChanged {
-                            generation,
-                            tools: current,
-                        });
+                        wire.render(ServiceResponse::CatalogChanged { generation, tools });
                     }
                 }
             })
@@ -863,11 +906,8 @@ impl LiveSession {
     fn handle(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>, request: ServiceRequest) -> bool {
         match request {
             ServiceRequest::Catalog => {
-                let tools = catalog_for(&intake.governance.snapshot());
-                wire.render(ServiceResponse::Catalog {
-                    tools: tools.clone(),
-                });
-                *lock(&self.published_catalog) = Some(tools);
+                let tools = self.advertised.advertise(&intake.governance.snapshot());
+                wire.render(ServiceResponse::Catalog { tools });
             }
             ServiceRequest::Invoke {
                 id,
@@ -1193,7 +1233,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct ServiceBrowserEvents {
     governance: GovernanceFacade,
     workspaces: WorkspaceStore,
-    browser: Arc<dyn BrowserPort>,
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
@@ -1209,8 +1248,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 .workspaces
                 .apply_browser_readiness(browser, tab_id, readiness),
             BrowserEvent::RuntimeControlRequested { intent } => {
-                let state = self.governance.apply_runtime_intent(intent);
-                let _ = self.browser.publish_control_state(state);
+                self.governance.apply_runtime_intent(intent);
             }
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id)
@@ -1327,7 +1365,6 @@ mod tests {
         let sink = super::ServiceBrowserEvents {
             governance: governance.clone(),
             workspaces: workspaces.clone(),
-            browser: browser.clone(),
         };
         let view = WorkbenchFacade::new(
             projection,
@@ -1547,7 +1584,6 @@ mod tests {
         let sink = super::ServiceBrowserEvents {
             governance: GovernanceFacade::new(None, None),
             workspaces: workspaces.clone(),
-            browser: Arc::new(FakeBrowser::default()),
         };
         let dialog = |tab_id, present, dialog_type: &str| BrowserEvent::DialogChanged {
             tab_id,
@@ -1584,7 +1620,6 @@ mod tests {
         let sink = super::ServiceBrowserEvents {
             governance: GovernanceFacade::new(None, None),
             workspaces: workspaces.clone(),
-            browser: Arc::new(FakeBrowser::default()),
         };
         let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
         // The person loaded a page in a tab Ghostlight left open: it is theirs again.
@@ -2471,6 +2506,64 @@ mod tests {
         host.publish_ready().unwrap();
         assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
         drop(host);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_session_watch_tells_the_client_only_when_a_policy_change_changes_the_catalog() {
+        use crate::governance::GovernanceFacade;
+
+        use super::AdvertisedCatalog;
+
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-service-catalog-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("policy.json");
+        let write = |name: &str, allowed: Value| {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&json!({
+                    "schema": 4,
+                    "name": name,
+                    "version": "1",
+                    "grants": [{"id": "all", "hosts": {"allow": ["*"]}, "allowed": allowed}]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write("rules", json!(["read", "action", "write", "execute"]));
+        let governance = GovernanceFacade::new(Some(path.clone()), None);
+        let advertised = AdvertisedCatalog::default();
+        assert!(
+            advertised.changed_by(&governance.snapshot()).is_none(),
+            "nothing is compared before the client has a catalog"
+        );
+        let given = advertised.advertise(&governance.snapshot());
+        assert!(advertised.changed_by(&governance.snapshot()).is_none());
+
+        write(
+            "renamed rules",
+            json!(["read", "action", "write", "execute"]),
+        );
+        governance.refresh_tick();
+        assert!(
+            advertised.changed_by(&governance.snapshot()).is_none(),
+            "a new policy that admits the same tools changes nothing the client sees"
+        );
+
+        write("narrower", json!(["read"]));
+        governance.refresh_tick();
+        let narrowed = advertised
+            .changed_by(&governance.snapshot())
+            .expect("a narrower policy changes the catalog");
+        assert!(narrowed.len() < given.len());
+        assert!(
+            advertised.changed_by(&governance.snapshot()).is_none(),
+            "one change is told once"
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

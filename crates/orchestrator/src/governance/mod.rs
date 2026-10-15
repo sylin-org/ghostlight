@@ -7,6 +7,7 @@ pub mod documents;
 pub use crate::audit::{AuditSink, JsonlAuditSink};
 pub mod effective;
 pub mod evidence;
+mod file_state;
 pub mod inspection;
 pub mod managed;
 pub mod manifest;
@@ -22,6 +23,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
+use crate::browser::BrowserPort;
+use file_state::FileState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -765,10 +768,23 @@ fn protected_by_policy(url: &Url, sacred_hosts: &[String]) -> bool {
     })
 }
 
+/// Receives the runtime control state each time it changes, once per change.
+pub type ControlObserver = Arc<dyn Fn(RuntimeControlState) + Send + Sync>;
+
 /// Live controls checked immediately before effects and when browser events arrive.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RuntimeControls {
     state: AtomicU8,
+    observer: Mutex<Option<ControlObserver>>,
+}
+
+impl std::fmt::Debug for RuntimeControls {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeControls")
+            .field("state", &self.state())
+            .finish_non_exhaustive()
+    }
 }
 
 impl RuntimeControls {
@@ -790,6 +806,17 @@ impl RuntimeControls {
             RUNTIME_HOLD => RuntimeControlState::Held,
             _ => RuntimeControlState::Ended,
         }
+    }
+
+    /// Tell `observer` about every later change of state, replacing any earlier observer.
+    ///
+    /// A change from the tray, the workbench or an extension intent all end here, so each one
+    /// reaches the observer exactly once. A request that leaves the state as it was does not.
+    pub fn observe(&self, observer: ControlObserver) {
+        *self
+            .observer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(observer);
     }
 
     /// Apply one local human control intent and return the resulting state.
@@ -815,29 +842,180 @@ impl RuntimeControls {
 
     /// Enter a runtime hold.
     pub fn hold(&self) {
-        self.state.store(RUNTIME_HOLD, Ordering::SeqCst);
+        self.transition(RUNTIME_HOLD);
     }
     /// End the admitted session.
     pub fn end_session(&self) {
-        self.state.store(RUNTIME_END, Ordering::SeqCst);
+        self.transition(RUNTIME_END);
     }
     /// Resume active work after an external authority decision.
     pub fn resume(&self) {
-        self.state.store(RUNTIME_ACTIVE, Ordering::SeqCst);
+        self.transition(RUNTIME_ACTIVE);
+    }
+
+    /// Store `next` and tell the observer when it differs from the state before.
+    ///
+    /// The observer lock is held across the store and the notice, so two changes reach the
+    /// observer in the order they were made.
+    fn transition(&self, next: u8) {
+        let observer = self
+            .observer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let previous = self.state.swap(next, Ordering::SeqCst);
+        if previous != next {
+            if let Some(observer) = observer.as_ref() {
+                observer(self.state());
+            }
+        }
     }
 }
 
 /// A small governance service facade used by the application executor.
+///
+/// Every reader sees the one [`Published`] authority and takes no file or network step to get it.
+/// The refresher is the only caller that checks files on a schedule or reaches the organization's
+/// endpoint, so the managed fetch never runs on the invocation path (ADR-0197).
 #[derive(Clone, Debug)]
 pub struct GovernanceFacade {
-    policies: Arc<Mutex<PolicySources>>,
+    /// What every reader sees. Replaced whole; a reader locks it only to clone the `Arc`.
+    published: Arc<Mutex<Arc<Published>>>,
+    /// The local policy files and the last view of the managed authority. Writers lock it for the
+    /// time a file read takes, never across a network call.
+    sources: Arc<Mutex<PolicySources>>,
+    /// The managed authority itself. Only the refresher locks it, and it holds the lock across a
+    /// fetch.
+    remote: Arc<Mutex<Option<managed::ManagedAuthority>>>,
     controls: Arc<RuntimeControls>,
+}
+
+/// One immutable publication of authority, with every view the workbench reads built from it.
+#[derive(Debug)]
+struct Published {
+    snapshot: Arc<AuthoritySnapshot>,
+    diagnostics: GovernanceDiagnostics,
+    chip: effective::PolicyChip,
+    authority: effective::EffectiveAuthority,
+    startup: manifest::BrowserStartup,
+    /// The organization layer a candidate user policy is previewed under.
+    managed: Option<manifest::Manifest>,
+    managed_sequence: Option<u64>,
+    managed_valid: bool,
+}
+
+impl Published {
+    fn build(sources: &PolicySources) -> Self {
+        let managed = sources.managed_manifest().cloned();
+        let managed_sequence = sources.managed_sequence();
+        let valid = sources.authority_valid();
+        let snapshot = Arc::new(assemble(
+            [
+                (managed.clone(), AuthorityTier::Managed),
+                (sources.user.active.clone(), AuthorityTier::User),
+            ],
+            managed_sequence,
+            valid,
+        ));
+        let passport = sources.managed_passport();
+        let user = sources.user.active.as_ref();
+        let organization = managed.as_ref();
+
+        let situation = if !valid {
+            effective::Situation::FailingClosed
+        } else {
+            match (organization.is_some(), user.is_some()) {
+                (true, true) => effective::Situation::Layered,
+                (true, false) => effective::Situation::OrganizationOnly,
+                (false, true) => effective::Situation::UserOnly,
+                (false, false) => effective::Situation::AllOpen,
+            }
+        };
+        let name = organization
+            .and_then(|policy| policy.organization.as_ref())
+            .map(|organization| organization.name.clone());
+        let chip = effective::chip(
+            situation,
+            name.as_deref(),
+            matches!(passport.freshness, ManagedPolicyFreshness::LastKnownGood),
+        );
+
+        let inputs = effective::Inputs {
+            organization,
+            user,
+            valid,
+            sacred_hosts: snapshot.sacred_hosts().to_vec(),
+            organization_source: sources.managed.path.as_ref().map_or_else(
+                || organization.map(|_| passport_source(&passport)),
+                |path| Some(path.display().to_string()),
+            ),
+            organization_document: organization.map(document),
+            user_source: sources
+                .user
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            user_document: user.map(document),
+            user_layer_source: if user.is_some() {
+                sources.user_origin
+            } else {
+                effective::UserLayerSource::None
+            },
+            owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
+            windows: cfg!(windows),
+            passport: passport.clone(),
+        };
+        let authority = effective::compile(&inputs);
+        let startup = authority.browser_startup.value;
+
+        Self {
+            snapshot,
+            diagnostics: GovernanceDiagnostics {
+                local_policy_configured: sources.user.configured(),
+                local_policy_active: sources.user.active.is_some(),
+                local_policy_valid: sources.user.last_load_valid,
+                managed_authority_configured: sources.managed_configured(),
+                managed_authority_active: organization.is_some(),
+                managed_authority_valid: sources.managed_valid(),
+                authority_valid: valid,
+                managed_policy: passport,
+            },
+            chip,
+            authority,
+            startup,
+            managed,
+            managed_sequence,
+            managed_valid: sources.managed_valid(),
+        }
+    }
+}
+
+/// What the facade last saw of the managed authority, kept beside the local files so a
+/// publication never waits for a fetch.
+#[derive(Clone, Debug)]
+struct RemoteView {
+    configured: bool,
+    valid: bool,
+    manifest: Option<manifest::Manifest>,
+    sequence: Option<u64>,
+    passport: ManagedPolicyPassport,
+}
+
+impl RemoteView {
+    fn of(remote: &managed::ManagedAuthority) -> Self {
+        Self {
+            configured: remote.configured(),
+            valid: remote.valid(),
+            manifest: remote.manifest().cloned(),
+            sequence: remote.sequence(),
+            passport: remote.passport(),
+        }
+    }
 }
 
 #[derive(Debug)]
 struct PolicySources {
     managed: PolicySource,
-    managed_remote: Option<managed::ManagedAuthority>,
+    remote: Option<RemoteView>,
     user: PolicySource,
     user_origin: effective::UserLayerSource,
     /// The one path this window may write. Absent when Ghostlight does not own the user layer.
@@ -848,7 +1026,7 @@ impl PolicySources {
     fn new(local: Option<PathBuf>, managed: Option<PathBuf>) -> Self {
         Self {
             managed: PolicySource::new(managed, "managed"),
-            managed_remote: None,
+            remote: None,
             user: PolicySource::new(local, "user"),
             user_origin: effective::UserLayerSource::Environment,
             owned_user_path: None,
@@ -861,7 +1039,7 @@ impl PolicySources {
     fn owning(path: PathBuf, managed: Option<PathBuf>) -> Self {
         Self {
             managed: PolicySource::new(managed, "managed"),
-            managed_remote: None,
+            remote: None,
             user: PolicySource::with_options(Some(path.clone()), "user", true),
             user_origin: effective::UserLayerSource::Workbench,
             owned_user_path: Some(path),
@@ -886,7 +1064,7 @@ impl PolicySources {
         };
         Self {
             managed: PolicySource::new(None, "managed"),
-            managed_remote: Some(managed::ManagedAuthority::production()),
+            remote: None,
             user,
             user_origin,
             owned_user_path: match user_origin {
@@ -897,36 +1075,37 @@ impl PolicySources {
     }
 
     #[cfg(test)]
-    fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
+    fn remote_only() -> Self {
         Self {
             managed: PolicySource::new(None, "managed"),
-            managed_remote: Some(managed::ManagedAuthority::from_paths(paths)),
+            remote: None,
             user: PolicySource::new(None, "user"),
             user_origin: effective::UserLayerSource::Workbench,
             owned_user_path: None,
         }
     }
 
-    fn refresh(&mut self) {
-        if let Some(remote) = &mut self.managed_remote {
-            remote.refresh();
-        }
+    /// Read both local files again, whatever their state.
+    fn reload_local(&mut self) {
         self.managed.refresh("managed");
         self.user.refresh("user");
     }
 
+    /// Read each local file that changed since it was last read. True when any did.
+    fn reload_changed(&mut self) -> bool {
+        let managed = self.managed.refresh_if_changed("managed");
+        let user = self.user.refresh_if_changed("user");
+        managed || user
+    }
+
     fn managed_configured(&self) -> bool {
-        self.managed_remote
-            .as_ref()
-            .is_some_and(managed::ManagedAuthority::configured)
-            || self.managed.configured()
+        self.remote.as_ref().is_some_and(|remote| remote.configured) || self.managed.configured()
     }
 
     fn managed_valid(&self) -> bool {
-        self.managed_remote.as_ref().map_or(
-            self.managed.last_load_valid,
-            managed::ManagedAuthority::valid,
-        )
+        self.remote
+            .as_ref()
+            .map_or(self.managed.last_load_valid, |remote| remote.valid)
     }
 
     /// Whether configured authority can be enforced, which is the one validity every surface uses.
@@ -938,21 +1117,19 @@ impl PolicySources {
     }
 
     fn managed_manifest(&self) -> Option<&manifest::Manifest> {
-        self.managed_remote
+        self.remote
             .as_ref()
-            .and_then(managed::ManagedAuthority::manifest)
+            .and_then(|remote| remote.manifest.as_ref())
             .or(self.managed.active.as_ref())
     }
 
     fn managed_sequence(&self) -> Option<u64> {
-        self.managed_remote
-            .as_ref()
-            .and_then(managed::ManagedAuthority::sequence)
+        self.remote.as_ref().and_then(|remote| remote.sequence)
     }
 
     fn managed_passport(&self) -> ManagedPolicyPassport {
-        if let Some(remote) = &self.managed_remote {
-            return remote.passport();
+        if let Some(remote) = &self.remote {
+            return remote.passport.clone();
         }
         let configured = self.managed.configured();
         let verified = self.managed.active.is_some();
@@ -1013,6 +1190,8 @@ struct PolicySource {
     active: Option<manifest::Manifest>,
     last_load_valid: bool,
     last_error: Option<String>,
+    /// The file as it was when last read, so an unchanged file is not read again.
+    seen: Option<FileState>,
 }
 
 impl PolicySource {
@@ -1028,13 +1207,29 @@ impl PolicySource {
             path,
             active: None,
             last_error: None,
+            seen: None,
         };
         source.refresh(tier);
         source
     }
 
+    /// Read the file again only when its state differs from the last read. True when it did.
+    fn refresh_if_changed(&mut self, tier: &str) -> bool {
+        let Some(path) = &self.path else {
+            return false;
+        };
+        if self.seen == Some(FileState::of(path)) {
+            return false;
+        }
+        self.refresh(tier);
+        true
+    }
+
+    /// Read the file now. The state is taken before the read, so a write that lands during it is
+    /// seen on the next check.
     fn refresh(&mut self, tier: &str) {
         let Some(path) = &self.path else { return };
+        self.seen = Some(FileState::of(path));
         if self.owned && !path.exists() {
             self.present = false;
             self.active = None;
@@ -1168,64 +1363,126 @@ impl GovernanceFacade {
     /// Return content-free configuration health without exposing authority paths or rules.
     #[must_use]
     pub fn diagnostics(&self) -> GovernanceDiagnostics {
-        self.refresh_policies();
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        GovernanceDiagnostics {
-            local_policy_configured: policies.user.configured(),
-            local_policy_active: policies.user.active.is_some(),
-            local_policy_valid: policies.user.last_load_valid,
-            managed_authority_configured: policies.managed_configured(),
-            managed_authority_active: policies.managed_manifest().is_some(),
-            managed_authority_valid: policies.managed_valid(),
-            authority_valid: policies.authority_valid(),
-            managed_policy: policies.managed_passport(),
-        }
+        self.published().diagnostics.clone()
     }
 
     /// Construct the facade from explicit policy paths.
     #[must_use]
     pub fn new(local_policy: Option<PathBuf>, managed_policy: Option<PathBuf>) -> Self {
-        Self {
-            policies: Arc::new(Mutex::new(PolicySources::new(local_policy, managed_policy))),
-            controls: Arc::new(RuntimeControls::default()),
-        }
+        Self::publishing(PolicySources::new(local_policy, managed_policy), None)
     }
 
     /// A facade whose user layer is one Ghostlight owns at an explicit path.
     #[cfg(test)]
     fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
-        Self {
-            policies: Arc::new(Mutex::new(PolicySources::owning(path, managed))),
-            controls: Arc::new(RuntimeControls::default()),
-        }
+        Self::publishing(PolicySources::owning(path, managed), None)
     }
 
     #[cfg(test)]
     fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
+        Self::publishing(
+            PolicySources::remote_only(),
+            Some(managed::ManagedAuthority::from_paths(paths)),
+        )
+    }
+
+    /// Construct the facade from Ghostlight-specific environment variables.
+    ///
+    /// The first publication uses only what is on this machine: the policy files and the
+    /// organization's last verified policy. The refresher fetches from the organization's
+    /// endpoint afterwards, so a slow endpoint never delays a start.
+    #[must_use]
+    pub fn from_environment() -> Self {
+        Self::publishing(
+            PolicySources::production(env::var_os("GHOSTLIGHT_POLICY_FILE").map(PathBuf::from)),
+            Some(managed::ManagedAuthority::production()),
+        )
+    }
+
+    /// Load every local source once and publish the authority they give.
+    fn publishing(
+        mut sources: PolicySources,
+        mut remote: Option<managed::ManagedAuthority>,
+    ) -> Self {
+        if let Some(remote) = remote.as_mut() {
+            remote.load_offline();
+            sources.remote = Some(RemoteView::of(remote));
+        }
+        let published = Arc::new(Published::build(&sources));
         Self {
-            policies: Arc::new(Mutex::new(PolicySources::with_managed_paths(paths))),
+            published: Arc::new(Mutex::new(published)),
+            sources: Arc::new(Mutex::new(sources)),
+            remote: Arc::new(Mutex::new(remote)),
             controls: Arc::new(RuntimeControls::default()),
         }
     }
 
-    /// Construct the facade from Ghostlight-specific environment variables.
-    #[must_use]
-    pub fn from_environment() -> Self {
-        Self {
-            policies: Arc::new(Mutex::new(PolicySources::production(
-                env::var_os("GHOSTLIGHT_POLICY_FILE").map(PathBuf::from),
-            ))),
-            controls: Arc::new(RuntimeControls::default()),
+    fn published(&self) -> Arc<Published> {
+        Arc::clone(&lock(&self.published))
+    }
+
+    /// Check the watched files and the managed authority, and publish what changed.
+    ///
+    /// The refresher calls this once a second. A policy file or the managed bootstrap is read
+    /// again only when its existence, modified time or size differs from the last read, and the
+    /// managed authority fetches from its endpoint on its own schedule. This is the only call
+    /// that waits on the network, and no invocation makes it.
+    pub fn refresh_tick(&self) {
+        let remote = {
+            let mut guard = lock(&self.remote);
+            guard
+                .as_mut()
+                .filter(|remote| remote.needs_refresh())
+                .map(|remote| {
+                    remote.refresh();
+                    RemoteView::of(remote)
+                })
+        };
+        let mut sources = lock(&self.sources);
+        let mut changed = remote.is_some();
+        if remote.is_some() {
+            sources.remote = remote;
         }
+        changed |= sources.reload_changed();
+        if changed {
+            self.publish(&sources);
+        }
+    }
+
+    /// Read the local policy files again now and publish, with no network work.
+    ///
+    /// A person who edits their policy in the workbench sees it take effect at once, not on the
+    /// refresher's next check.
+    fn refresh_local_now(&self) {
+        let mut sources = lock(&self.sources);
+        sources.reload_local();
+        self.publish(&sources);
+    }
+
+    fn publish(&self, sources: &PolicySources) {
+        *lock(&self.published) = Arc::new(Published::build(sources));
+    }
+
+    /// Hold the sources lock, as a refresher mid-read does.
+    #[cfg(test)]
+    fn hold_sources(&self) -> std::sync::MutexGuard<'_, PolicySources> {
+        lock(&self.sources)
     }
 
     /// Access live runtime controls.
     #[must_use]
     pub fn controls(&self) -> Arc<RuntimeControls> {
         Arc::clone(&self.controls)
+    }
+
+    /// Send every change of the runtime control state to every browser `port` reaches.
+    ///
+    /// The notice is best effort and has no receipt: the state itself is what governance checks
+    /// before each effect, and the port replays it to a browser that connects later.
+    pub fn relay_runtime_state(&self, port: Arc<dyn BrowserPort>) {
+        self.controls.observe(Arc::new(move |state| {
+            let _ = port.publish_control_state(state);
+        }));
     }
 
     /// Apply one extension-toolbar intent at the service authority owner.
@@ -1239,127 +1496,35 @@ impl GovernanceFacade {
         self.controls.state()
     }
 
-    /// Author the band chip without compiling the whole destination.
-    ///
-    /// The band redraws on every snapshot, so this reads what it needs under one lock rather than
-    /// building the full view thirty times a minute.
+    /// Author the band chip from the published authority.
     #[must_use]
     pub fn policy_chip(&self) -> effective::PolicyChip {
-        self.refresh_policies();
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let organization = policies.managed_manifest();
-        let valid = policies.authority_valid();
-        let situation = if !valid {
-            effective::Situation::FailingClosed
-        } else {
-            match (organization.is_some(), policies.user.active.is_some()) {
-                (true, true) => effective::Situation::Layered,
-                (true, false) => effective::Situation::OrganizationOnly,
-                (false, true) => effective::Situation::UserOnly,
-                (false, false) => effective::Situation::AllOpen,
-            }
-        };
-        let stale = matches!(
-            policies.managed_passport().freshness,
-            ManagedPolicyFreshness::LastKnownGood
-        );
-        let name = organization
-            .and_then(|policy| policy.organization.as_ref())
-            .map(|organization| organization.name.clone());
-        effective::chip(situation, name.as_deref(), stale)
+        self.published().chip.clone()
     }
 
-    /// Compile the policy into the one answer a person arrives with.
+    /// The compiled policy: the one answer a person arrives with.
     ///
-    /// Assembled under a single lock so the sentence, the capability lines, and the rules behind
-    /// them all describe the same instant. The words are authored in the orchestrator; the window
-    /// renders them and computes nothing (ADR-0122 Decision 2).
+    /// Every part is built from the same publication, so the sentence, the capability lines, and
+    /// the rules behind them all describe the same instant. The words are authored in the
+    /// orchestrator; the window renders them and computes nothing (ADR-0122 Decision 2).
     #[must_use]
     pub fn effective_authority(&self) -> effective::EffectiveAuthority {
-        let sacred_hosts = self.snapshot().sacred_hosts().to_vec();
-        self.refresh_policies();
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let organization = policies.managed_manifest().cloned();
-        let user = policies.user.active.clone();
-        let passport = policies.managed_passport();
-        let inputs = effective::Inputs {
-            organization: organization.as_ref(),
-            user: user.as_ref(),
-            valid: policies.authority_valid(),
-            sacred_hosts,
-            organization_source: policies.managed.path.as_ref().map_or_else(
-                || organization.as_ref().map(|_| passport_source(&passport)),
-                |path| Some(path.display().to_string()),
-            ),
-            organization_document: organization.as_ref().map(document),
-            user_source: policies
-                .user
-                .path
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            user_document: user.as_ref().map(document),
-            user_layer_source: if user.is_some() {
-                policies.user_origin
-            } else {
-                effective::UserLayerSource::None
-            },
-            owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
-            windows: cfg!(windows),
-            passport: passport.clone(),
-        };
-        effective::compile(&inputs)
+        self.published().authority.clone()
     }
 
     /// Resolve the effective missing-browser startup preference.
     #[must_use]
     pub fn browser_startup(&self) -> manifest::BrowserStartup {
-        self.refresh_policies();
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let inputs = effective::Inputs {
-            organization: policies.managed_manifest(),
-            user: policies.user.active.as_ref(),
-            valid: policies.authority_valid(),
-            sacred_hosts: Vec::new(),
-            organization_source: None,
-            organization_document: None,
-            user_source: None,
-            user_document: None,
-            user_layer_source: effective::UserLayerSource::None,
-            owned_user_path: None,
-            windows: cfg!(windows),
-            passport: policies.managed_passport(),
-        };
-        effective::browser_startup(&inputs).value
+        self.published().startup
     }
 
-    /// Build one immutable snapshot from configured policy authority.
+    /// The published authority: an immutable snapshot that no call can change.
+    ///
+    /// This clones an `Arc` and reads no file and no network. A hand edit to a policy file shows
+    /// here when the refresher next publishes it.
     #[must_use]
-    pub fn snapshot(&self) -> AuthoritySnapshot {
-        self.refresh_policies();
-        let (sources, managed_sequence, valid) = {
-            let policies = self
-                .policies
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                [
-                    (policies.managed_manifest().cloned(), AuthorityTier::Managed),
-                    (policies.user.active.clone(), AuthorityTier::User),
-                ],
-                policies.managed_sequence(),
-                policies.authority_valid(),
-            )
-        };
-        assemble(sources, managed_sequence, valid)
+    pub fn snapshot(&self) -> Arc<AuthoritySnapshot> {
+        Arc::clone(&self.published().snapshot)
     }
 
     /// Build the snapshot a candidate user policy would produce, without applying it.
@@ -1370,26 +1535,15 @@ impl GovernanceFacade {
     pub fn candidate_snapshot(&self, document: &str) -> Result<Candidate, manifest::ManifestError> {
         let candidate = manifest::parse(document, "this policy")?;
         let rules = candidate.grants.len();
-        self.refresh_policies();
-        let (managed, managed_sequence, managed_valid) = {
-            let policies = self
-                .policies
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                policies.managed_manifest().cloned(),
-                policies.managed_sequence(),
-                policies.managed_valid(),
-            )
-        };
+        let published = self.published();
         Ok(Candidate {
             snapshot: assemble(
                 [
-                    (managed, AuthorityTier::Managed),
+                    (published.managed.clone(), AuthorityTier::Managed),
                     (Some(candidate), AuthorityTier::User),
                 ],
-                managed_sequence,
-                managed_valid,
+                published.managed_sequence,
+                published.managed_valid,
             ),
             rules,
         })
@@ -1440,7 +1594,7 @@ impl GovernanceFacade {
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
         migrate::replace_atomically(&path, document.as_bytes())
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
-        self.refresh_policies();
+        self.refresh_local_now();
         Ok(policy)
     }
 
@@ -1452,20 +1606,17 @@ impl GovernanceFacade {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(AuthoringError::Unwritable(error.to_string())),
         }
-        self.refresh_policies();
+        self.refresh_local_now();
         Ok(())
     }
 
     /// The user policy path this window may write, or why it may not.
     fn writable_user_policy_path(&self) -> Result<PathBuf, AuthoringError> {
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if policies.user_origin == effective::UserLayerSource::Environment {
+        let sources = lock(&self.sources);
+        if sources.user_origin == effective::UserLayerSource::Environment {
             return Err(AuthoringError::NotOwned);
         }
-        policies
+        sources
             .owned_user_path
             .clone()
             .ok_or(AuthoringError::NoHome)
@@ -1521,13 +1672,6 @@ impl GovernanceFacade {
     pub fn runtime_decision(&self) -> Decision {
         self.controls.decision()
     }
-
-    fn refresh_policies(&self) {
-        self.policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .refresh();
-    }
 }
 
 /// Read and validate one policy file, moving it to the current schema first when Ghostlight owns
@@ -1552,6 +1696,12 @@ fn read_policy(path: &Path, owned: bool) -> Result<manifest::Manifest, Governanc
     }
     manifest::parse(&text, &origin)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn authority_id(layers: &[PolicyLayer], valid: bool) -> String {

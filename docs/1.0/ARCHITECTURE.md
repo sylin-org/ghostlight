@@ -344,6 +344,15 @@ Owns authority loading, immutable snapshots, request restriction, capabilities, 
 policy-protected hosts, admission, landing decisions, runtime controls, holds, and content-minimized
 audit intent. Operation handlers see only the governance facade.
 
+One refresher publishes the authority. The service starts a single thread that, once a second,
+checks each policy file and the managed bootstrap by existence, modified time and size, reads only
+what changed, runs the managed authority on its own schedule, and publishes one immutable
+snapshot with the views the workbench reads. Every reader takes the published snapshot and reads
+no file and no network, so a hand edit to a policy file takes effect within about a second, a
+workbench edit at once, and an administrator's HTTPS policy fetch never runs inside a tool call.
+Each change of runtime control state reaches every connected adapter once, through one observer
+the service installs.
+
 ### Browser
 
 Defines the physical primitive port and observed facts: tabs, windows, navigation commits,
@@ -370,8 +379,8 @@ history from the existing durable audit file. The WebView owns only disposable v
 
 Readiness is resolved from content-free facts, including governance's own enforcement validity, so
 the header cannot read Ready while every governed call fails closed. Runtime-control intents
-change governance state first. The workbench then publishes that state to adapters as a
-best-effort notice and confirms only the governance state, in words from `language/control.rs`.
+change governance state first. Governance then sends that state to adapters as a best-effort
+notice, and the workbench confirms only the governance state, in words from `language/control.rs`.
 Runtime control does not depend on a connected browser. Readiness offers it in every state, so
 the WebView disables the header control only while it cannot reach the authority, because its
 last snapshot outlives that connection.

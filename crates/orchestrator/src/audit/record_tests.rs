@@ -300,7 +300,10 @@ fn permitted(
     requirements: CapabilitySet,
     url: &str,
 ) -> (AuthoritySnapshot, Decision, evidence::PermissionTrace) {
-    let snapshot = crate::governance::GovernanceFacade::new(None, None).snapshot();
+    let snapshot = crate::governance::GovernanceFacade::new(None, None)
+        .snapshot()
+        .as_ref()
+        .clone();
     let (decision, check) = snapshot.authorize_with_evidence(requirements, Some(url));
     let mut trace = evidence::PermissionTrace::default();
     trace.record(check);

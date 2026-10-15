@@ -704,12 +704,10 @@ impl WorkbenchFacade {
     /// Apply an explicit local-human runtime control through the authoritative owners.
     ///
     /// The authority's state is the whole effect: it is checked before every browser effect, with
-    /// or without a connected browser. Publishing it to adapters is a best-effort notice with no
-    /// receipt, and the relay replays it to adapters that connect later, so its result never
-    /// changes what the person is told.
+    /// or without a connected browser. Telling adapters is a best-effort notice the authority sends
+    /// itself when the state changes, so it never changes what the person is told.
     pub fn apply_runtime_intent(&self, intent: WorkbenchRuntimeIntent) -> WorkbenchIntentResult {
         let state = self.governance.apply_runtime_intent(intent.into());
-        let _ = self.browser.publish_control_state(state);
         self.projection.publish(WorkbenchChange::RuntimeChanged {
             runtime_state: state,
         });

@@ -2829,9 +2829,9 @@ fn credential_target_returns_guidance_without_holding_the_session() {
     assert_eq!(result.status, Status::Blocked);
     assert_eq!(result.facts["user_authorization_required"], true);
     assert_eq!(result.facts["values_sent"], false);
-    assert_eq!(
-        browser.control_states().last(),
-        Some(&crate::browser::adapter::RuntimeControlState::Active)
+    assert!(
+        browser.control_states().is_empty(),
+        "an authorization publishes no control state"
     );
     assert!(!browser
         .calls()

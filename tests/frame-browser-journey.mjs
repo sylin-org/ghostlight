@@ -8,6 +8,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { policyRefreshed } from "./lib/policy-refresh.mjs";
 import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
@@ -60,13 +61,14 @@ function channel(write) {
     }
   };
 }
-function policy(child = "denied", screenshots = true) {
+async function policy(child = "denied", screenshots = true) {
   writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 4, name: "H6 isolated Sylin journey", version: randomUUID(),
     grants: [{ id: "parent", hosts: { allow: child === "unrestricted" ? ["*"] : ["sylin.org", "localhost"] }, allowed: ["read", "action", "write", "execute"] },
       ...(["denied", "unrestricted"].includes(child) ? [] : [{ id: "child", hosts: { allow: ["127.0.0.1"] }, allowed: child === "read" ? ["read"] : ["read", "action", "write", "execute"] }])],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" },
       { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
   }));
+  await policyRefreshed();
 }
 const sourceUrls = ["https://sylin.org/ghostlight/demo/iframe/", "https://sylin.org/ghostlight/demo/iframe/form/"];
 const liveSylin = process.env.GHOSTLIGHT_TEST_LIVE_SYLIN === "1";
@@ -118,7 +120,7 @@ const server = createServer(async (request, response) => {
 let socket, cdp, chromium;
 try {
   await new Promise((done) => server.listen(0, "127.0.0.1", done)); port = server.address().port;
-  policy(); const authority = start(executable("ghostlight"));
+  await policy(); const authority = start(executable("ghostlight"));
   await until(() => {
     if (authority.startError) throw authority.startError;
     assert.equal(authority.exitCode, null, `Authority exited before readiness: ${authority.logs || ""}`);
@@ -211,13 +213,13 @@ try {
   await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).length >= 2, "fixture frame")
     .catch(async (error) => { console.error(await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`));
       console.error(await rawWorker(`chrome.debugger.sendCommand({tabId:${physical}}, 'Page.getFrameTree')`)); throw error; });
-  policy("denied");
+  await policy("denied");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.coverage.excluded_documents, 1);
   assert.doesNotMatch(JSON.stringify(result), /127\.0\.0\.1|Project name|ifxf-project/);
   check("excluded child never extracted");
-  policy();
+  await policy();
   await freshFixture();
   const beforeBlockedScript = commands.length;
   result = await call("browser_execute", { tab, script: "document.title = 'must not execute'" });
@@ -252,7 +254,7 @@ try {
     world: "MAIN", func: () => document.getElementById("capture-pixel-fixture")?.remove() })`);
   assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
   check("complete screenshot remains available with embedded text access excluded");
-  policy("denied", false);
+  await policy("denied", false);
   const beforeDeniedCapture = commands.length;
   for (const full_page of [false, true]) {
     result = await call("browser_screenshot", { tab, full_page });
@@ -261,7 +263,7 @@ try {
   }
   assert.ok(!dispatchedSince(beforeDeniedCapture).some(command => command.startsWith("screenshot")));
   check("binary screenshot refusal dispatches no capture and returns no image");
-  policy("all");
+  await policy("all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   const runtimeCoverage = await rawWorker(`chrome.scripting.executeScript({
     target: { tabId: ${physical}, allFrames: true }, world: "MAIN",
@@ -270,7 +272,7 @@ try {
   assert.ok(runtimeCoverage.length >= 2 && runtimeCoverage.every((kind) => kind === "function"), JSON.stringify(runtimeCoverage));
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.match(JSON.stringify(result), /Project name/);
   check("same Sylin content fully available when allowed");
-  policy("all");
+  await policy("all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0);
@@ -287,12 +289,12 @@ try {
   const project = result.facts.items.find((item) => item.name === "Project name");
   const parent = result.facts.items.find((item) => item.name === "Parent note");
   assert.ok(project && parent, JSON.stringify(result));
-  policy("read");
+  await policy("read");
   result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: "MUST_NOT_FILL" }, { target: project.target, value: "MUST_NOT_FILL" }] });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.equal(await rawPage("document.getElementById('h6-parent').value"), "");
   check("readable child cannot be written; known batch denial precedes parent write");
-  policy("all");
+  await policy("all");
   await rawPage(`document.querySelector('iframe').src='http://127.0.0.1:${port}/form?readonly-fixture'; true`);
   await delay(200);
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
@@ -305,11 +307,11 @@ try {
   assert.equal(await rawPage("document.getElementById('h6-parent').value"), "");
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("later embedded readonly field refuses before editing an allowed parent document");
-  policy();
+  await policy();
   result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: "unrelated parent" }] });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0); check("unrelated parent target remains usable");
-  policy();
+  await policy();
   result = await call("browser_fill_form", { tab, fields: [
     { selector: { name: "Parent note", role: "textbox", exact: true }, value: "Standalone semantic draft" }
   ] });
@@ -320,7 +322,7 @@ try {
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
   assert.equal(await rawPage("document.getElementById('h6-parent').value"), "Standalone handle draft");
   check("standalone permitted controls support equivalent semantic-selector and handle fills");
-  policy(); await freshFixture();
+  await policy(); await freshFixture();
   result = await call("browser_find", { tab, text: "Project name", scope: "control" });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.matches.length, 0, JSON.stringify(result));
   assert.equal(result.facts.coverage.excluded_documents, 1); check("denied-only match yields scoped empty search");
@@ -336,7 +338,7 @@ try {
   result = await call("browser_screenshot", { view, x: 300, y: 350, width: 400, height: 250, timeout_ms: 30000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage, undefined);
   check("viewport and magnified captures return complete images");
-  policy("all");
+  await policy("all");
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const oldProject = result.facts.items.find((item) => item.name === "Project name"); assert.ok(oldProject);
   const oldDocument = (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).find((frame) => frame.frameId !== 0);
@@ -362,12 +364,12 @@ try {
   result = await call("browser_record", { action: "save", recording });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.ok(lastResponse.content.some((item) => item.type === "image"));
   check("recording stops at its admitted document boundary and prior frames remain exportable");
-  policy();
+  await policy();
   result = await call("browser_record", { action: "save", recording });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("replay export rechecks its captured embedded sources against current policy");
-  policy("all");
+  await policy("all");
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const field = (name) => result.facts.items.find((item) => item.name === name)?.target;
   const values = [["Project name", "Ghostlight H6 fixture"], ["Contact email", "h6@example.invalid"],
@@ -381,12 +383,12 @@ try {
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.match(JSON.stringify(result), /The frame confirmed receipt locally/);
   check("permitted Sylin embedded form fills and submits its local simulation");
-  policy();
-  policy("denied", false);
+  await policy();
+  await policy("denied", false);
   result = await call("browser_screenshot", { tab });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!lastResponse.content.some(item => item.type === "image"));
-  policy();
+  await policy();
   result = await call("browser_screenshot", { tab });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(lastResponse.content.some(item => item.type === "image"));
@@ -409,7 +411,7 @@ try {
   result = await call("browser_execute", { tab, script: "document.title='UNAVAILABLE_SCRIPT'" });
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("unavailable embedded documents are separate and bounded scripts refuse");
-  policy("unrestricted");
+  await policy("unrestricted");
   result = await call("browser_execute", { tab, script: "document.body.dataset.allOpen='AVAILABLE'; return document.body.dataset.allOpen;" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.value, "AVAILABLE");
@@ -429,14 +431,14 @@ try {
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(lastResponse.content.some((item) => item.type === "image"));
   check("unrestricted recording survives document navigation and exports its retained replay");
-  policy("all");
+  await policy("all");
   result = await call("browser_record", { action: "save", recording: unrestrictedRecording });
   assert.equal(result.status, "failed", JSON.stringify(result));
   assert.equal(result.facts.reason, "document_unavailable");
   assert.equal(result.facts.coverage.unavailable_documents, 1);
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("incomplete recorded source evidence cannot later be exported under host restrictions");
-  policy(); await freshFixture();
+  await policy(); await freshFixture();
   const beforeBlockedRecording = commands.length;
   result = await call("browser_record", { action: "start", tab });
   assert.equal(result.status, "blocked", JSON.stringify(result));
@@ -628,6 +630,7 @@ try {
     const configured = JSON.parse(editorPolicy);
     for (const grant of configured.grants) grant.allowed = capabilities;
     writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify(configured));
+    await policyRefreshed();
     const before = await rawPage("editorEvidence()");
     const beforeDispatch = commands.length;
     result = await call("browser_fill_form", { tab,
@@ -647,9 +650,10 @@ try {
     check(`${capabilities.join("+")}: draft fill enforces the configured capability grant`);
   }
   writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, editorPolicy);
+  await policyRefreshed();
   // Exercise the shipped renderer in its closed shadow tree. Holding an observation or script
   // gives us time to inspect the actual live elements while another controlled tab is active.
-  policy("all"); await newSession();
+  await policy("all"); await newSession();
   const openVisualTab = async name => {
     const url = `http://localhost:${port}/editor#${name}`;
     const opened = await call("browser_navigate", { url, new_tab: true });
@@ -761,7 +765,7 @@ try {
     await visualPage(targetVisual, `(()=>{const frame=document.createElement('iframe');frame.src='http://127.0.0.1:${port}/form?visual-denial';document.body.append(frame);return true;})()`);
     await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${targetVisual.physical}})`))
       .some(frame => frame.url.includes("visual-denial")), "denied visual fixture document");
-    policy();
+    await policy();
     await rawWorker(`(() => {
       globalThis.visualOriginalFrames=chrome.webNavigation.getAllFrames.bind(chrome.webNavigation);
       globalThis.visualInventoryTarget=${targetVisual.physical};

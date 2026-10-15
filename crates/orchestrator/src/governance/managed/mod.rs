@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::Url;
 
+use super::file_state::FileState;
 use super::{
     manifest, ManagedPolicyContact, ManagedPolicyFreshness, ManagedPolicyPassport,
     ManagedPolicySource,
@@ -86,12 +87,6 @@ struct ActivePolicy {
     envelope_hash: [u8; 32],
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct LocalFingerprint {
-    length: u64,
-    modified: Option<SystemTime>,
-}
-
 #[derive(Clone, Debug, Serialize)]
 struct ManagedStatus {
     v: u32,
@@ -121,9 +116,12 @@ pub(crate) struct ManagedAuthority {
     configured: bool,
     bootstrap: Option<Bootstrap>,
     bootstrap_hash: Option<[u8; 32]>,
+    /// The bootstrap file as last read. `None` until the first read.
+    bootstrap_state: Option<FileState>,
     active: Option<ActivePolicy>,
     etag: Option<String>,
-    source_fingerprint: Option<LocalFingerprint>,
+    /// The local bundle source as last looked at. `None` means not looked at yet.
+    source_fingerprint: Option<FileState>,
     next_attempt: Option<Instant>,
     consecutive_failures: u32,
     last_success_ms: Option<u64>,
@@ -148,6 +146,7 @@ impl ManagedAuthority {
             configured: false,
             bootstrap: None,
             bootstrap_hash: None,
+            bootstrap_state: None,
             active: None,
             etag: None,
             source_fingerprint: None,
@@ -160,7 +159,39 @@ impl ManagedAuthority {
         }
     }
 
+    /// Read the bootstrap and its source, fetching over HTTPS when the poll is due.
     pub(crate) fn refresh(&mut self) {
+        self.refresh_with(true);
+    }
+
+    /// Read the bootstrap, the verified cache and any local bundle source, and touch no network.
+    ///
+    /// A service starts from this, so the last verified policy is enforced before the first poll
+    /// and a slow endpoint never delays start.
+    pub(crate) fn load_offline(&mut self) {
+        self.refresh_with(false);
+    }
+
+    /// Whether `refresh` has anything to do: the bootstrap file changed, the HTTPS poll is due,
+    /// or the local bundle source changed. It examines file metadata only.
+    pub(crate) fn needs_refresh(&self) -> bool {
+        if self.bootstrap_state != Some(FileState::of(&self.paths.bootstrap)) {
+            return true;
+        }
+        let Some(bootstrap) = &self.bootstrap else {
+            return false;
+        };
+        if is_https(&bootstrap.source) {
+            self.next_attempt
+                .is_none_or(|deadline| Instant::now() >= deadline)
+        } else {
+            let path = local_source_path(&self.paths.bootstrap, &bootstrap.source);
+            self.source_fingerprint != Some(FileState::of(&path))
+        }
+    }
+
+    fn refresh_with(&mut self, network: bool) {
+        self.bootstrap_state = Some(FileState::of(&self.paths.bootstrap));
         let bytes = match fs::read(&self.paths.bootstrap) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -214,9 +245,10 @@ impl ManagedAuthority {
             return;
         };
         if is_https(&bootstrap.source) {
-            if self
-                .next_attempt
-                .is_some_and(|deadline| Instant::now() < deadline)
+            if !network
+                || self
+                    .next_attempt
+                    .is_some_and(|deadline| Instant::now() < deadline)
             {
                 return;
             }
@@ -448,11 +480,8 @@ impl ManagedAuthority {
 
     fn local_source_changed(&mut self, source: &str) -> bool {
         let path = local_source_path(&self.paths.bootstrap, source);
-        let current = fs::metadata(path).ok().map(|metadata| LocalFingerprint {
-            length: metadata.len(),
-            modified: metadata.modified().ok(),
-        });
-        if self.source_fingerprint == current && self.active.is_some() {
+        let current = Some(FileState::of(&path));
+        if self.source_fingerprint == current {
             return false;
         }
         self.source_fingerprint = current;
@@ -860,5 +889,109 @@ mod tests {
             ..Bootstrap::default()
         };
         assert!(super::validate_bootstrap(&bootstrap).is_err());
+    }
+
+    fn set_modified(path: &std::path::Path, time: std::time::SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_changed_local_bundle_republishes_on_the_next_tick_and_an_unchanged_file_is_not_read() {
+        let root = directory("tick");
+        let paths = ManagedPaths::under(&root);
+        let seed = [38_u8; 32];
+        let source = root.join("org.bundle");
+        let signed =
+            |sequence, name| bundle::sign(&seed, None, sequence, manifest(name, "read"), None);
+        fs::write(&source, signed(12, "org-a")).unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        let facade = super::super::GovernanceFacade::with_managed_paths(paths);
+        let first = facade.snapshot();
+        assert_eq!(first.managed_sequence, Some(12));
+
+        facade.refresh_tick();
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &facade.snapshot()),
+            "a tick that finds nothing changed publishes nothing"
+        );
+
+        let state = fs::metadata(&source).unwrap();
+        let replacement = signed(13, "org-b");
+        assert_eq!(replacement.len() as u64, state.len());
+        fs::write(&source, &replacement).unwrap();
+        set_modified(&source, state.modified().unwrap());
+        facade.refresh_tick();
+        assert_eq!(
+            facade.snapshot().managed_sequence,
+            Some(12),
+            "a file whose existence, modified time and size are unchanged is not read again"
+        );
+
+        set_modified(
+            &source,
+            state.modified().unwrap() + std::time::Duration::from_secs(2),
+        );
+        assert_eq!(facade.snapshot().managed_sequence, Some(12));
+        facade.refresh_tick();
+        let republished = facade.snapshot();
+        assert_eq!(republished.managed_sequence, Some(13));
+        assert_ne!(republished.id(), first.id());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_offline_load_enforces_the_verified_cache_and_leaves_the_fetch_to_the_refresher() {
+        let root = directory("offline");
+        let paths = ManagedPaths::under(&root);
+        let seed = [39_u8; 32];
+        write_bootstrap(&paths.bootstrap, "https://policy.invalid/bundle", &seed);
+        fs::write(
+            paths.cache.as_ref().unwrap(),
+            bundle::sign(&seed, None, 9, manifest("cached", "read"), None),
+        )
+        .unwrap();
+        let mut authority = ManagedAuthority::new(paths);
+
+        authority.load_offline();
+
+        assert!(authority.valid());
+        assert_eq!(authority.sequence(), Some(9));
+        assert_eq!(authority.passport().last_attempt_ms, None);
+        assert!(
+            authority.needs_refresh(),
+            "the first poll is still owed to the refresher"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn nothing_needs_refreshing_while_the_bootstrap_and_a_local_source_are_unchanged() {
+        let root = directory("idle");
+        let paths = ManagedPaths::under(&root);
+        let seed = [40_u8; 32];
+        fs::write(
+            root.join("org.bundle"),
+            bundle::sign(&seed, None, 2, manifest("org", "read"), None),
+        )
+        .unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        let mut authority = ManagedAuthority::new(paths.clone());
+        assert!(authority.needs_refresh(), "a first look is always owed");
+        authority.refresh();
+        assert!(!authority.needs_refresh());
+
+        fs::write(root.join("org.bundle"), b"changed").unwrap();
+        assert!(authority.needs_refresh());
+        authority.refresh();
+        assert!(!authority.needs_refresh());
+
+        fs::remove_file(&paths.bootstrap).unwrap();
+        assert!(authority.needs_refresh());
+        fs::remove_dir_all(root).unwrap();
     }
 }

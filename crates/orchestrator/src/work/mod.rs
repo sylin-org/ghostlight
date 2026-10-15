@@ -1139,9 +1139,6 @@ impl ApplicationExecutor {
     ) -> Decision {
         let requirements = requirements.into();
         let runtime = self.runtime_decision(context);
-        let _ = self
-            .browser
-            .publish_control_state(self.governance.runtime_state());
         let (decision, evidence) = if runtime.allowed {
             context.snapshot.authorize_with_evidence(requirements, url)
         } else {
@@ -2618,7 +2615,7 @@ mod tests {
     mod tabs;
     use std::fs;
     use std::io;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -2752,29 +2749,52 @@ mod tests {
     }
 
     /// A real, isolated policy source that tests may edit between invocations.
-    struct TestPolicy(PathBuf);
+    ///
+    /// An edit through `set` is published to every facade the source gave out, as the refresher
+    /// would after a hand edit.
+    struct TestPolicy(PathBuf, Mutex<Vec<GovernanceFacade>>);
 
     impl TestPolicy {
         fn new() -> Self {
-            let policy = Self(temporary_policy("configured-authority"));
-            policy.set(json!(["read", "action", "write", "execute"]));
-            policy
+            let path = temporary_policy("configured-authority");
+            write_policy(&path, &json!(["read", "action", "write", "execute"]));
+            Self(path, Mutex::default())
         }
 
         fn facade(&self) -> GovernanceFacade {
-            GovernanceFacade::new(Some(self.0.clone()), None)
+            let facade = GovernanceFacade::new(Some(self.0.clone()), None);
+            self.1.lock().unwrap().push(facade.clone());
+            facade
         }
 
         fn set(&self, capabilities: serde_json::Value) {
-            fs::write(
-                &self.0,
-                serde_json::to_vec(&json!({
-                    "schema":4,"name":"test authority","version":"1",
-                    "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
-                }))
-                .unwrap(),
-            )
-            .unwrap();
+            write_policy(&self.0, &capabilities);
+            for facade in self.1.lock().unwrap().iter() {
+                facade.refresh_tick();
+            }
+        }
+    }
+
+    /// Write the test authority granting `capabilities`, moving the modified time forward so the
+    /// refresher sees the edit however fast the test runs.
+    fn write_policy(path: &Path, capabilities: &serde_json::Value) {
+        let before = fs::metadata(path).and_then(|metadata| metadata.modified());
+        fs::write(
+            path,
+            serde_json::to_vec(&json!({
+                "schema":4,"name":"test authority","version":"1",
+                "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        if let Ok(before) = before {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(before + Duration::from_secs(2))
+                .unwrap();
         }
     }
 

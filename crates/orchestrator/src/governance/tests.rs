@@ -116,12 +116,27 @@ fn unsafe_stays_confined_to_the_audited_ffi_crate() {
     assert_eq!(without_inheritance, [AUDITED]);
 }
 
+/// Replace a watched file's content and move its modified time forward, so the refresher sees the
+/// change even when the new content has the old size and the clock has not ticked.
+fn rewrite(path: &Path, content: impl AsRef<[u8]>) {
+    let before = fs::metadata(path).and_then(|metadata| metadata.modified());
+    fs::write(path, content).unwrap();
+    if let Ok(before) = before {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(before + std::time::Duration::from_secs(2))
+            .unwrap();
+    }
+}
+
 fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
     let path = temporary(name);
     fs::write(&path, source).unwrap();
     let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
     let _ = fs::remove_file(path);
-    snapshot
+    snapshot.as_ref().clone()
 }
 
 #[test]
@@ -557,11 +572,11 @@ fn layers_compose_by_intersection_and_snapshots_have_deterministic_identity() {
     );
     assert_eq!(first.id(), same.id());
 
-    fs::write(
-            &local,
-            r#"{"schema":4,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
-        )
-        .unwrap();
+    rewrite(
+        &local,
+        r#"{"schema":4,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+    );
+    facade.refresh_tick();
     let changed = facade.snapshot();
     assert_ne!(first.id(), changed.id());
     let _ = fs::remove_file(managed);
@@ -879,17 +894,22 @@ fn snapshot_does_not_change_when_policy_file_changes() {
     .unwrap();
     let facade = GovernanceFacade::new(Some(path.clone()), None);
     let first = facade.snapshot();
-    fs::write(
+    rewrite(
         &path,
         policy(
             "action",
             r#"[{"id":"action","hosts":{"allow":["*"]},"allowed":["action"]}]"#,
             "[]",
         ),
-    )
-    .unwrap();
+    );
     assert!(first.authorize_capability(Capability::Read).allowed);
     assert!(!first.authorize_capability(Capability::Action).allowed);
+    assert_eq!(
+        facade.snapshot().id(),
+        first.id(),
+        "an edit is invisible to every reader until the refresher publishes it"
+    );
+    facade.refresh_tick();
     let second = facade.snapshot();
     assert!(!second.authorize_capability(Capability::Read).allowed);
     assert!(second.authorize_capability(Capability::Action).allowed);
@@ -916,7 +936,8 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
             .allowed
     );
 
-    fs::write(&path, "{half-written").unwrap();
+    rewrite(&path, "{half-written");
+    facade.refresh_tick();
     let retained = facade.snapshot();
     assert!(retained.authorize_capability(Capability::Read).allowed);
     assert!(!retained.authorize_capability(Capability::Action).allowed);
@@ -932,15 +953,15 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
         effective::Situation::FailingClosed
     );
 
-    fs::write(
+    rewrite(
         &path,
         policy(
             "action",
             r#"[{"id":"action","hosts":{"allow":["*"]},"allowed":["action"]}]"#,
             "[]",
         ),
-    )
-    .unwrap();
+    );
+    facade.refresh_tick();
     let replaced = facade.snapshot();
     assert!(!replaced.authorize_capability(Capability::Read).allowed);
     assert!(replaced.authorize_capability(Capability::Action).allowed);
@@ -1053,5 +1074,113 @@ fn human_control_intents_are_authoritative_and_end_is_terminal() {
     assert_eq!(
         facade.apply_runtime_intent(RuntimeControlIntent::StartSession),
         RuntimeControlState::Active
+    );
+}
+
+#[test]
+fn a_reader_is_never_held_up_by_the_sources_lock() {
+    let path = temporary("lock-free-readers");
+    fs::write(
+        &path,
+        policy(
+            "read",
+            r#"[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]"#,
+            "[]",
+        ),
+    )
+    .unwrap();
+    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let sources = facade.hold_sources();
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = facade.clone();
+    let thread = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let _ = reader.snapshot();
+        let _ = reader.diagnostics();
+        let _ = reader.policy_chip();
+        let _ = reader.effective_authority();
+        let _ = reader.browser_startup();
+        let _ = sender.send(started.elapsed());
+    });
+    let elapsed = receiver.recv_timeout(std::time::Duration::from_secs(10));
+    drop(sources);
+    thread.join().unwrap();
+    let _ = fs::remove_file(path);
+
+    let elapsed = elapsed.expect("a reader waited on the sources lock");
+    assert!(
+        elapsed < std::time::Duration::from_millis(50),
+        "readers took {elapsed:?}"
+    );
+}
+
+#[test]
+fn a_workbench_edit_is_visible_at_once_and_a_removal_returns_to_all_open() {
+    let path = temporary("workbench-edit");
+    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    assert!(
+        facade
+            .snapshot()
+            .authorize_capability(Capability::Action)
+            .allowed
+    );
+
+    facade
+        .apply_user_policy(&policy(
+            "read",
+            r#"[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]"#,
+            "[]",
+        ))
+        .unwrap();
+    let applied = facade.snapshot();
+    assert!(applied.authorize_capability(Capability::Read).allowed);
+    assert!(!applied.authorize_capability(Capability::Action).allowed);
+    assert_ne!(
+        facade.policy_chip().situation,
+        effective::Situation::AllOpen
+    );
+
+    facade.remove_user_policy().unwrap();
+    assert!(
+        facade
+            .snapshot()
+            .authorize_capability(Capability::Action)
+            .allowed
+    );
+    assert_eq!(
+        facade.policy_chip().situation,
+        effective::Situation::AllOpen
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn control_changes_reach_the_observer_once_each() {
+    use std::sync::Mutex;
+
+    let facade = GovernanceFacade::new(None, None);
+    let seen: Arc<Mutex<Vec<RuntimeControlState>>> = Arc::default();
+    let recorder = Arc::clone(&seen);
+    facade
+        .controls()
+        .observe(Arc::new(move |state| recorder.lock().unwrap().push(state)));
+
+    facade.apply_runtime_intent(RuntimeControlIntent::Resume);
+    facade.apply_runtime_intent(RuntimeControlIntent::Hold);
+    facade.apply_runtime_intent(RuntimeControlIntent::Hold);
+    facade.apply_runtime_intent(RuntimeControlIntent::ToggleHold);
+    facade.apply_runtime_intent(RuntimeControlIntent::EndSession);
+    facade.apply_runtime_intent(RuntimeControlIntent::EndSession);
+    facade.apply_runtime_intent(RuntimeControlIntent::StartSession);
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            RuntimeControlState::Held,
+            RuntimeControlState::Active,
+            RuntimeControlState::Ended,
+            RuntimeControlState::Active,
+        ]
     );
 }
