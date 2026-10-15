@@ -142,16 +142,16 @@ not a substitute for the journey.
 The manual `Build release candidate` workflow builds the three executables for Windows and Linux
 from one locked workspace build, builds the deterministic WinGet archive, prepares the checksum-bound npm tarball and
 self-contained MCPB, builds the deterministic extension archive and one pinned CycloneDX SBOM for
-each of the five workspace components, then assembles one 15-artifact candidate unit:
+each workspace crate, then assembles one candidate unit:
 
 - one WinGet archive;
 - six versioned raw binaries;
 - the Chromium adapter;
-- five component SBOMs, including the audited Windows peer crate;
+- one SBOM per workspace crate, including the audited Windows peer crate;
 - the npm launcher tarball; and
 - the Claude Desktop MCPB.
 
-`release-candidate.json` binds 15 normalized artifact coordinates, exact byte lengths, SHA-256
+`release-candidate.json` binds the normalized artifact coordinates, exact byte lengths, SHA-256
 values, the version, the full source revision, and release status. `SHA256SUMS` is independently
 recomputed by `scripts/check-release-candidate.ps1`. GitHub Actions creates build-provenance
 attestations for every file in the candidate unit. The workflow uploads the unit for fourteen days.

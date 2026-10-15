@@ -47,8 +47,12 @@ $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $ArtifactRoot -PathType Container)) {
     throw "Artifact root does not exist: $ArtifactRoot"
 }
-if ($SbomPath.Count -ne 5) {
-    throw "Candidate requires exactly five component SBOMs, found $($SbomPath.Count)"
+$expectedComponents = @((& cargo metadata --no-deps --format-version 1 --manifest-path (Join-Path $repo "Cargo.toml") | ConvertFrom-Json).packages.name | Sort-Object)
+if ($LASTEXITCODE -ne 0 -or $expectedComponents.Count -eq 0) {
+    throw "Could not read the workspace package names"
+}
+if ($SbomPath.Count -ne $expectedComponents.Count) {
+    throw "Candidate requires one component SBOM per workspace crate ($($expectedComponents.Count)), found $($SbomPath.Count)"
 }
 foreach ($path in $SbomPath) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -176,13 +180,6 @@ foreach ($specification in $specifications) {
     })
 }
 
-$expectedComponents = @(
-    "ghostlight",
-    "ghostlight-bridge",
-    "ghostlight-browser-connector",
-    "ghostlight-mcp-connector",
-    "ghostlight-win-peer"
-)
 $observedComponents = [System.Collections.Generic.List[string]]::new()
 foreach ($path in $SbomPath) {
     $document = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json

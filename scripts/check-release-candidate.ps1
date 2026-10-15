@@ -29,7 +29,7 @@ if ($candidate.version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$' -or
     throw "Candidate version or source revision is invalid"
 }
 
-$expectedCoordinates = @(
+$fixedCoordinates = @(
     "browser-adapter|chromium-store",
     "client-bundle|claude-desktop",
     "client-launcher|npm",
@@ -39,20 +39,56 @@ $expectedCoordinates = @(
     "raw-binary|ghostlight-browser-connector@x86_64-unknown-linux-gnu",
     "raw-binary|ghostlight-mcp-connector@x86_64-pc-windows-msvc",
     "raw-binary|ghostlight-mcp-connector@x86_64-unknown-linux-gnu",
-    "sbom|ghostlight",
-    "sbom|ghostlight-bridge",
-    "sbom|ghostlight-browser-connector",
-    "sbom|ghostlight-mcp-connector",
-    "sbom|ghostlight-win-peer",
     "winget-archive|x86_64-pc-windows-msvc"
 )
+
+# Read the workspace member package names at the candidate's source revision.
+function Get-WorkspacePackageNames([string]$revision) {
+    $repo = Split-Path -Parent $PSScriptRoot
+    $root = & git -C $repo show "${revision}:Cargo.toml" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $block = [regex]::Match(($root -join "`n"), '(?ms)^\[workspace\].*?^members\s*=\s*\[(?<members>.*?)\]')
+    if (-not $block.Success) { return $null }
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($member in [regex]::Matches($block.Groups["members"].Value, '"([^"]+)"')) {
+        $manifest = & git -C $repo show "${revision}:$($member.Groups[1].Value)/Cargo.toml" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $name = [regex]::Match(($manifest -join "`n"), '(?ms)^\[package\].*?^name\s*=\s*"(?<name>[^"]+)"')
+        if (-not $name.Success) { return $null }
+        [void]$names.Add($name.Groups["name"].Value)
+    }
+    return $names.ToArray()
+}
+
 $artifacts = @($candidate.artifacts | Sort-Object name)
-if ($artifacts.Count -ne $expectedCoordinates.Count) {
-    throw "Candidate must contain exactly $($expectedCoordinates.Count) artifacts"
+if ($artifacts.Count -eq 0) {
+    throw "Candidate contains no artifacts"
 }
 $coordinates = @($artifacts | ForEach-Object { "$($_.kind)|$($_.target)" } | Sort-Object)
-if (($coordinates -join "`n") -ne (($expectedCoordinates | Sort-Object) -join "`n")) {
-    throw "Candidate artifact coordinates are incomplete or duplicated"
+if (@($coordinates | Select-Object -Unique).Count -ne $coordinates.Count) {
+    throw "Candidate artifact coordinates are duplicated"
+}
+$sbomNames = Get-WorkspacePackageNames $candidate.sourceRevision
+if ($null -ne $sbomNames) {
+    $expectedCoordinates = @($fixedCoordinates + @($sbomNames | ForEach-Object { "sbom|$_" }))
+    if (($coordinates -join "`n") -ne (($expectedCoordinates | Sort-Object) -join "`n")) {
+        throw "Candidate artifact coordinates are incomplete or unexpected"
+    }
+} else {
+    Write-Warning "Source revision $($candidate.sourceRevision) is not available locally; SBOM membership was not verified."
+    $sboms = @($artifacts | Where-Object { $_.kind -eq "sbom" })
+    if ($sboms.Count -eq 0) {
+        throw "Candidate contains no SBOM artifacts"
+    }
+    foreach ($sbom in $sboms) {
+        if ($sbom.name -ne "ghostlight-v$($candidate.version)-sbom-$($sbom.target).cyclonedx.json") {
+            throw "SBOM target does not match its asset name: $($sbom.name)"
+        }
+    }
+    $others = @($coordinates | Where-Object { $_ -notlike "sbom|*" })
+    if (($others -join "`n") -ne (($fixedCoordinates | Sort-Object) -join "`n")) {
+        throw "Candidate artifact coordinates are incomplete or unexpected"
+    }
 }
 
 $actualNames = @(Get-ChildItem -LiteralPath $assetDirectory -File | Select-Object -ExpandProperty Name | Sort-Object)
