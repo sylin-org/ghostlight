@@ -29,7 +29,10 @@ directly. 2.0 freezes the seams (executables, relay and adapter protocols, polic
 entries, install home) and ships to those users once it passes the bar: clean installs on
 Windows and the Linux test machines, a 1.x upgrade on another machine, and a week of daily use
 with no shutdown blocks and no second service. Internals are rebuilt lean in 2.x behind the
-frozen seams; the public push follows when the experience is ready.
+frozen seams; the public push follows when the experience is ready. Nothing ships half-baked:
+the desktop shell (ADR-0199) and the install journey may land before the 2.0 release, which
+follows quality, not a date (owner, 2026-10-15). Order: the seams track (lean blueprint F1 to
+F13), the desktop shell, the install journey, then the release bar.
 
 ## Only main and dev (2026-10-05)
 
