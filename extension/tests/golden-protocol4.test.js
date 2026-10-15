@@ -28,6 +28,8 @@ function section(name) {
 }
 
 const vocabulary = readJson("vocabulary.json");
+// Lists the service and its page assets read; the extension carries none of them.
+const PAGE_MESSAGE_LISTS = ["world_message_kinds", "asset_error_codes", "pre_effect_codes"];
 const known = (list, value) => vocabulary[list].includes(value);
 const sha256 = (data) => crypto.createHash("sha256").update(data).digest("hex");
 
@@ -57,7 +59,9 @@ function contains(wide, base) {
 }
 
 test("protocol.js equals vocabulary.json and is frozen", () => {
-  assert.deepStrictEqual(protocol.vocabulary, vocabulary);
+  const extensionWords = Object.fromEntries(Object.entries(vocabulary).filter(([key]) => !PAGE_MESSAGE_LISTS.includes(key)));
+  assert.deepStrictEqual(protocol.vocabulary, extensionWords);
+  for (const list of PAGE_MESSAGE_LISTS) assert.ok(!(list in protocol.vocabulary), `${list} belongs to the service`);
   assert.ok(isDeeplyFrozen(protocol.vocabulary));
   assert.ok(Object.isFrozen(protocol));
 });

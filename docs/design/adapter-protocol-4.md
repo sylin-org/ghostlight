@@ -632,7 +632,7 @@ tolerance/             frames with extra fields, unknown kinds, unknown events, 
   - tolerance fixtures decode with extras ignored and unknowns mapped to `Unknown` or `Other`;
   - the enum names equal `vocabulary.json`.
 - **JS** (`extension/tests/golden-protocol4.test.js`):
-  - `lib/protocol.js` equals `vocabulary.json`;
+  - `lib/protocol.js` equals `vocabulary.json` without the page-message lists (`world_message_kinds`, `asset_error_codes`, `pre_effect_codes`), which belong to the service and its page assets, not the extension;
   - every request fixture passes `primitives.validate`;
   - each primitive's handler test uses its receipt fixtures as the expected output (C13);
   - the router ignores the tolerance frames.
