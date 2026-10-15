@@ -9,9 +9,8 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use ghostlight_relay::frame::FrameError;
+use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::opening::{Opening, RefusalCode};
-use ghostlight_relay::server::read_opening;
 use ghostlight_relay::MAX_FRAME_BYTES;
 
 use super::*;
@@ -20,6 +19,14 @@ const TOKEN: &str = "fake-token";
 const PATIENCE: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(5);
 const CONTROL_RESULT: &[u8] = br#"{"kind":"result","value":null}"#;
+
+/// Read the opening a connector sends to the fake service, within `patience`.
+fn read_opening(connection: &mut TcpStream, patience: Duration) -> Opening {
+    connection.set_read_timeout(Some(patience)).unwrap();
+    let opening = frame::read_frame(connection).unwrap().unwrap();
+    connection.set_read_timeout(None).unwrap();
+    opening
+}
 
 /// One browser stream the fake service accepted.
 struct Browser {
@@ -68,7 +75,7 @@ impl FakeState {
 
     /// Answer one opening the way a service would.
     fn serve(&self, mut connection: TcpStream) {
-        let opening = read_opening(&mut connection, PATIENCE).unwrap();
+        let opening = read_opening(&mut connection, PATIENCE);
         self.openings.lock().unwrap().push(opening.clone());
         let refused = self
             .refusals

@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::opening::{McpFrame, Opening, Reply, Stream};
-use ghostlight_relay::server::read_opening;
 use ghostlight_relay::BACKOFF_FIRST;
 use serde_json::{json, Value};
 
@@ -19,6 +18,14 @@ use super::*;
 const TOKEN: &str = "fake-token";
 const TICK: Duration = Duration::from_millis(2);
 const PATIENCE: Duration = Duration::from_secs(5);
+
+/// Read the opening a connector sends to the fake service, within `patience`.
+fn read_opening(connection: &mut TcpStream, patience: Duration) -> Opening {
+    connection.set_read_timeout(Some(patience)).unwrap();
+    let opening = frame::read_frame(connection).unwrap().unwrap();
+    connection.set_read_timeout(None).unwrap();
+    opening
+}
 
 /// One connection the fake service accepted.
 struct Accepted {
@@ -57,7 +64,7 @@ impl FakeState {
                 let Ok(mut connection) = connection else {
                     return;
                 };
-                let opening = read_opening(&mut connection, PATIENCE).unwrap();
+                let opening = read_opening(&mut connection, PATIENCE);
                 frame::write_frame(
                     &mut connection,
                     &Reply::Accepted {

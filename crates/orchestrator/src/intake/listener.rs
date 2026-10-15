@@ -8,9 +8,9 @@
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 
+use crate::intake::opening::{constant_time_eq, read_opening, OpeningError};
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::opening::{ControlOp, ControlResult, RefusalCode, Reply, Stream};
-use ghostlight_relay::server::{constant_time_eq, read_opening, OpeningError};
 use ghostlight_relay::{OPENING_DEADLINE, RELAY};
 use serde_json::Value;
 

@@ -23,7 +23,6 @@ pub mod log;
 pub mod opening;
 pub mod private;
 pub mod runtime;
-pub mod server;
 pub mod spawn;
 pub mod templates;
 pub mod watchdog;

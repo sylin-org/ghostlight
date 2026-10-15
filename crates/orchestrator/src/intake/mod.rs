@@ -8,6 +8,7 @@
 
 pub mod listener;
 pub mod mcp;
+pub mod opening;
 pub mod session;
 
 use crate::intake::session::{IntakeChannel, ServerProfile};

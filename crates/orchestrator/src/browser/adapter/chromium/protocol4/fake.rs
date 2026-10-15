@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use ghostlight_bridge::framing::{read_native, write_native};
+use ghostlight_relay::frame::{read_frame, write_frame};
 use serde_json::{json, Value};
 
 use super::wire;
@@ -107,7 +107,7 @@ impl FakeExtension {
     /// `script`.
     pub(crate) fn connect(address: SocketAddr, hello: &Value, script: Script) -> Self {
         let mut stream = TcpStream::connect(address).expect("the fake connects");
-        write_native(&mut stream, hello).expect("the fake sends its hello");
+        write_frame(&mut stream, hello).expect("the fake sends its hello");
         let writer = Arc::new(Mutex::new(stream.try_clone().expect("a writer handle")));
         let seen = Arc::new((Mutex::new(Seen::default()), Condvar::new()));
         let acknowledging = Arc::new(AtomicBool::new(true));
@@ -131,7 +131,7 @@ impl FakeExtension {
 
     /// Send one frame to the service.
     pub(crate) fn send(&self, frame: &impl serde::Serialize) {
-        write_native(&mut *lock(&self.writer), frame).expect("the fake sends a frame");
+        write_frame(&mut *lock(&self.writer), frame).expect("the fake sends a frame");
     }
 
     /// Answer heartbeats from now on, or stop answering them.
@@ -187,7 +187,7 @@ struct Reading {
 
 impl Reading {
     fn run(mut self) {
-        while let Ok(Some(frame)) = read_native::<Value>(&mut self.stream) {
+        while let Ok(Some(frame)) = read_frame::<Value>(&mut self.stream) {
             self.record(|seen| seen.frames.push(frame.clone()));
             self.take(&frame);
         }
@@ -267,7 +267,7 @@ impl Reading {
     }
 
     fn send(&self, frame: &impl serde::Serialize) {
-        let _ = write_native(&mut *lock(&self.writer), frame);
+        let _ = write_frame(&mut *lock(&self.writer), frame);
     }
 
     fn record(&self, change: impl FnOnce(&mut Seen)) {

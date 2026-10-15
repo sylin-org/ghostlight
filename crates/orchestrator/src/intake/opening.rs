@@ -1,8 +1,8 @@
-//! The service side of the relay that is not product policy: reading an opening safely,
-//! comparing tokens, and holding the one lease.
+//! The service side of an opening, bounded in size and time before anything is trusted.
 //!
 //! The listener is reachable by any local process, so everything read before the token is
-//! checked is bounded in size and in time.
+//! checked is bounded in size and in time. This module reads the one opening a connection must
+//! send, compares tokens without leaking where they differ, and holds the one service lease.
 
 use std::fs::{File, TryLockError};
 use std::io::{self, Read};
@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::opening::Opening;
-use crate::private;
+use ghostlight_relay::opening::Opening;
+use ghostlight_relay::private;
 
 /// Largest opening frame the service reads, in bytes: 64 KiB.
 pub const MAX_OPENING_BYTES: usize = 64 * 1024;
@@ -139,8 +139,8 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::frame::{write_frame, write_frame_raw};
-    use crate::opening::Stream;
+    use ghostlight_relay::frame::{write_frame, write_frame_raw};
+    use ghostlight_relay::opening::Stream;
 
     /// A scratch directory removed when dropped.
     struct Scratch(PathBuf);
@@ -149,7 +149,7 @@ mod tests {
         fn new() -> Self {
             static NEXT: AtomicU32 = AtomicU32::new(0);
             let path = std::env::temp_dir().join(format!(
-                "ghostlight-relay-server-{}-{}",
+                "ghostlight-opening-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
@@ -258,7 +258,9 @@ mod tests {
         write_frame_raw(&mut client, b"{\"next\":1}").unwrap();
         let handle = thread::spawn(move || {
             read_opening(&mut server, Duration::from_secs(5)).unwrap();
-            crate::frame::read_frame_raw(&mut server).unwrap().unwrap()
+            ghostlight_relay::frame::read_frame_raw(&mut server)
+                .unwrap()
+                .unwrap()
         });
         assert_eq!(handle.join().unwrap(), b"{\"next\":1}");
     }

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use ghostlight_bridge::framing::{self, FrameError};
+use ghostlight_relay::frame::{self, FrameError};
 
 /// Total time allowed to authenticate or finish a frame once its first byte arrives.
 pub const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,22 +50,13 @@ impl SocketReader {
         self
     }
 
-    /// Read one JSON frame; an opening exchange supplies its absolute authentication deadline.
-    pub fn json<T: DeserializeOwned>(
-        &mut self,
-        opening: Option<Instant>,
-    ) -> Result<Option<T>, FrameError> {
-        self.deadline = opening;
-        framing::read_json_line(self)
-    }
-
-    /// Read one native frame with the same opening/idle distinction as JSON framing.
+    /// Read one native frame; an opening exchange supplies its absolute authentication deadline.
     pub fn native<T: DeserializeOwned>(
         &mut self,
         opening: Option<Instant>,
     ) -> Result<Option<T>, FrameError> {
         self.deadline = opening;
-        framing::read_native(self)
+        frame::read_frame(self)
     }
 }
 
@@ -213,18 +204,6 @@ impl SocketWriter {
         }
     }
 
-    /// Send a JSON response within a bounded total delivery budget.
-    pub fn json<T: Serialize>(&self, value: &T) -> Result<(), FrameError> {
-        let result = self
-            .until(Instant::now() + DELIVERY_TIMEOUT)
-            .map_err(FrameError::from)
-            .and_then(|mut writer| framing::write_json_line(&mut writer, value));
-        if result.is_err() {
-            self.close();
-        }
-        result
-    }
-
     /// Send a native frame within a bounded total delivery budget.
     pub fn native<T: Serialize>(&self, value: &T) -> Result<(), FrameError> {
         self.native_until(value, Instant::now() + DELIVERY_TIMEOUT)
@@ -239,7 +218,7 @@ impl SocketWriter {
         let result = self
             .until(deadline)
             .map_err(FrameError::from)
-            .and_then(|mut writer| framing::write_native(&mut writer, value));
+            .and_then(|mut writer| frame::write_frame(&mut writer, value));
         if result.is_err() {
             self.close();
         }
@@ -303,12 +282,13 @@ mod tests {
         std::thread::scope(|scope| {
             scope.spawn(move || {
                 std::thread::sleep(Duration::from_millis(150));
-                peer.write_all(b"{}\n{\"partial\":").unwrap();
+                peer.write_all(&[2, 0, 0, 0, b'{', b'}']).unwrap();
+                peer.write_all(&[20, 0, 0, 0, b'{', b'"']).unwrap();
                 std::thread::sleep(Duration::from_millis(200));
             });
-            assert_eq!(reader.json::<Value>(None).unwrap(), Some(json!({})));
+            assert_eq!(reader.native::<Value>(None).unwrap(), Some(json!({})));
             let started = Instant::now();
-            assert!(reader.json::<Value>(None).is_err());
+            assert!(reader.native::<Value>(None).is_err());
             assert!(started.elapsed() < Duration::from_millis(180));
         });
     }
@@ -320,6 +300,7 @@ mod tests {
         reader.frame_timeout = Duration::from_millis(100);
         std::thread::scope(|scope| {
             scope.spawn(move || {
+                peer.write_all(&[10, 0, 0, 0]).unwrap();
                 for _ in 0..12 {
                     if peer.write_all(b" ").is_err() {
                         break;
@@ -328,7 +309,7 @@ mod tests {
                 }
             });
             let started = Instant::now();
-            assert!(reader.json::<Value>(None).is_err());
+            assert!(reader.native::<Value>(None).is_err());
             assert!(started.elapsed() < Duration::from_millis(250));
         });
     }
@@ -386,7 +367,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(20));
                 stop.store(true, Ordering::Release);
             });
-            assert!(reader.json::<Value>(None).is_err());
+            assert!(reader.native::<Value>(None).is_err());
         });
     }
 }

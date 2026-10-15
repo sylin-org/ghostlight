@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
+use crate::intake::opening::Lease;
 use crate::intake::session::{
     IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
 };
@@ -29,7 +30,6 @@ use anyhow::{Context, Result};
 use ghostlight_relay::home::{LEASE_FILE_NAME, RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
 use ghostlight_relay::opening::{ControlOp, McpFrame, Stream};
 use ghostlight_relay::runtime::RuntimeFile;
-use ghostlight_relay::server::Lease;
 use ghostlight_relay::templates::FailureTemplates;
 use serde_json::{json, Value};
 use uuid::Uuid;

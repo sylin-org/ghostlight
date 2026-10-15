@@ -222,7 +222,7 @@ fn other_than_running_installer(images: &[PathBuf]) -> Vec<PathBuf> {
 /// released at once.
 fn lease_free(path: &Path) -> bool {
     matches!(
-        ghostlight_relay::server::Lease::try_acquire(path),
+        crate::intake::opening::Lease::try_acquire(path),
         Ok(Some(_))
     )
 }

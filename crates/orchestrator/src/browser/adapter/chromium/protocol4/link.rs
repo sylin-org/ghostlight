@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use ghostlight_bridge::framing::{write_length_frame, write_native, FrameError};
+use ghostlight_relay::frame::{write_frame, write_frame_raw, FrameError};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -572,7 +572,7 @@ impl<'a> Link<'a> {
             .writer
             .until(Instant::now() + CONTROL_DELIVERY_TIMEOUT)
             .map_err(|_| BrowserError::BusyBeforeDispatch)?;
-        write_native(&mut output, &wire::Outbound::Notice(notice))
+        write_frame(&mut output, &wire::Outbound::Notice(notice))
             .map_err(|_| BrowserError::DisconnectedAfterDispatch)
     }
 
@@ -584,7 +584,7 @@ impl<'a> Link<'a> {
             .writer
             .until(Instant::now() + CONTROL_DELIVERY_TIMEOUT)
         {
-            let _ = write_native(
+            let _ = write_frame(
                 &mut output,
                 &wire::Outbound::Cancel {
                     correlation: correlation.into(),
@@ -817,7 +817,7 @@ fn write_request_payload(
     correlation: &str,
 ) -> Result<(), FrameError> {
     if payload.len() <= wire::DIRECT_FRAME_BYTES {
-        return write_length_frame(writer, payload);
+        return write_frame_raw(writer, payload);
     }
     if payload.len() > wire::TRANSFER_MAX_BYTES {
         return Err(FrameError::TooLarge);
@@ -834,7 +834,7 @@ fn write_request_payload(
         write!(&mut sha256, "{byte:02x}").expect("writing to a string cannot fail");
     }
     for (index, chunk) in payload.chunks(wire::CHUNK_PAYLOAD_BYTES).enumerate() {
-        write_native(
+        write_frame(
             writer,
             &wire::Outbound::CommandChunk {
                 transfer_id: transfer_id.clone(),
