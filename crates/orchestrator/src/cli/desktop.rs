@@ -31,8 +31,20 @@ pub enum ActivationState {
 
 /// How the command line starts the service when none answers.
 pub trait Starter {
+    /// Whether the calling process runs with an elevated token. A service started from one
+    /// refuses to run, so nothing is started on its behalf.
+    fn elevated(&self) -> io::Result<bool>;
+
     /// Start the service for `reason` without waiting for it.
     fn start(&self, reason: StartReason) -> io::Result<()>;
+}
+
+/// Start the service for `reason` through `starter`, unless this process is elevated, in which
+/// case nothing is started and the person is told why at once.
+fn start_service(starter: &dyn Starter, reason: StartReason) -> anyhow::Result<()> {
+    crate::service::refuse_elevated_token(|| starter.elevated())?;
+    starter.start(reason)?;
+    Ok(())
 }
 
 /// The real starter: `bin/ghostlight serve --reason <reason>`, detached.
@@ -40,6 +52,10 @@ pub trait Starter {
 pub struct Detached;
 
 impl Starter for Detached {
+    fn elevated(&self) -> io::Result<bool> {
+        ghostlight_win_peer::is_elevated()
+    }
+
     fn start(&self, reason: StartReason) -> io::Result<()> {
         ghostlight_relay::spawn::start_service(reason)
     }
@@ -81,11 +97,11 @@ pub fn open_desktop() -> anyhow::Result<()> {
 pub fn open_with(starter: &dyn Starter) -> anyhow::Result<()> {
     match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
-        Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
+        Ok(false) => return finish_activation(wait_for_workbench_activation()),
         Err(_) => {}
     }
-    starter.start(StartReason::Person)?;
-    finish_activation(wait_for_workbench_activation(), None)
+    start_service(starter, StartReason::Person)?;
+    finish_activation(wait_for_workbench_activation())
 }
 
 /// Wait until the workbench presentation attaches and activates or times out.
@@ -116,15 +132,11 @@ pub fn wait_for_workbench_activation_until(deadline: Instant) -> ActivationState
 }
 
 /// Translate activation state into a final result or user-facing error message.
-pub fn finish_activation(
-    activation: ActivationState,
-    start_error: Option<anyhow::Error>,
-) -> anyhow::Result<()> {
+pub fn finish_activation(activation: ActivationState) -> anyhow::Result<()> {
     match activation {
         ActivationState::Activated => Ok(()),
-        ActivationState::Unavailable => anyhow::bail!(WORKBENCH_OPEN_TIMEOUT_MESSAGE),
-        ActivationState::Unreachable => {
-            Err(start_error.unwrap_or_else(|| anyhow::anyhow!(WORKBENCH_OPEN_TIMEOUT_MESSAGE)))
+        ActivationState::Unavailable | ActivationState::Unreachable => {
+            anyhow::bail!(WORKBENCH_OPEN_TIMEOUT_MESSAGE)
         }
     }
 }
@@ -156,7 +168,7 @@ pub fn run_call() -> anyhow::Result<()> {
 /// does.
 pub fn reach_service(starter: &dyn Starter) -> anyhow::Result<()> {
     if crate::cli::client::readiness().is_err() {
-        starter.start(StartReason::Command)?;
+        start_service(starter, StartReason::Command)?;
         wait_for_service()?;
     }
     Ok(())
@@ -234,6 +246,10 @@ mod tests {
     }
 
     impl Starter for StartsAService {
+        fn elevated(&self) -> io::Result<bool> {
+            Ok(false)
+        }
+
         fn start(&self, reason: StartReason) -> io::Result<()> {
             self.reasons.borrow_mut().push(reason);
             let host = crate::service::ServiceHost::start(&self.home).map_err(io::Error::other)?;
@@ -272,6 +288,40 @@ mod tests {
         );
     }
 
+    /// A starter whose process is elevated, and which fails the test if asked to start anything.
+    struct Elevated(RefCell<usize>);
+
+    impl Starter for Elevated {
+        fn elevated(&self) -> io::Result<bool> {
+            Ok(true)
+        }
+
+        fn start(&self, _: StartReason) -> io::Result<()> {
+            *self.0.borrow_mut() += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn an_elevated_open_or_call_starts_nothing_and_says_why_at_once() {
+        let home = crate::service::test_home::TestHome::new("elevated-start");
+        let starter = Elevated(RefCell::new(0));
+        let began = Instant::now();
+        let opened = open_with(&starter).unwrap_err();
+        assert_eq!(
+            opened.to_string(),
+            crate::language::environment::ELEVATED_SERVICE
+        );
+        let called = reach_service(&starter).unwrap_err();
+        assert_eq!(
+            called.to_string(),
+            crate::language::environment::ELEVATED_SERVICE
+        );
+        assert_eq!(*starter.0.borrow(), 0, "no service was started");
+        assert!(began.elapsed() < Duration::from_secs(5), "no waiting");
+        drop(home);
+    }
+
     #[test]
     fn open_waits_for_delayed_native_presentation_and_reveals_once() {
         struct DelayedPresentation(AtomicUsize);
@@ -296,7 +346,7 @@ mod tests {
             wait_for_workbench_activation_until(timeout_started + Duration::from_millis(100));
         assert_eq!(timeout, ActivationState::Unavailable);
         assert!(timeout_started.elapsed() < Duration::from_secs(1));
-        let message = finish_activation(timeout, None).unwrap_err().to_string();
+        let message = finish_activation(timeout).unwrap_err().to_string();
         assert!(message.contains("did not open in time"));
         assert!(message.contains("ghostlight open"));
         assert!(!message.contains("stop"));

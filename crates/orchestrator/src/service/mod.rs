@@ -215,7 +215,7 @@ impl ServiceHost {
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
-        refuse_when_elevated(elevated().context("read the process token")?)?;
+        refuse_elevated_token(elevated)?;
         let layout = install::layout::Layout::new(home);
         if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
             return Err(QuitLatched.into());
@@ -1301,9 +1301,10 @@ fn acquire_lock(path: &Path, wait: Duration) -> Result<ServiceLock> {
     }
 }
 
-/// Refuse to serve from an elevated token.
-fn refuse_when_elevated(elevated: bool) -> Result<()> {
-    if elevated {
+/// Refuse to serve, or to start a service, from an elevated token. `elevated` reads the token of
+/// the calling process; a token that cannot be read is refused too.
+pub(crate) fn refuse_elevated_token(elevated: impl FnOnce() -> io::Result<bool>) -> Result<()> {
+    if elevated().context("read the process token")? {
         anyhow::bail!(ELEVATED_SERVICE);
     }
     Ok(())
