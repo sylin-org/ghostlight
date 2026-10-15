@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod doctor;
 pub mod parse;
 pub mod session;
+pub mod session_end;
 pub mod setup;
 pub mod start;
 pub mod status;

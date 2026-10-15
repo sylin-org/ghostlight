@@ -131,11 +131,14 @@ extern "system" {
 /// window, in its own process group, with this process's environment. Nothing the starter holds
 /// (a pipe, a file, a socket) reaches it, so a caller reading the starter's output sees it end
 /// when the starter does. The handles `CreateProcessW` returns are closed at once.
+///
+/// It refuses, spawning nothing, while the session is ending (see [`super::session`]).
 pub fn spawn_detached(
     executable: &Path,
     arguments: &[&OsStr],
     directory: &Path,
 ) -> io::Result<u32> {
+    super::session::refuse_start()?;
     let application = nul_terminated(executable.as_os_str().encode_wide().collect())?;
     let mut line = nul_terminated(command_line(executable, arguments))?;
     let directory = nul_terminated(directory.as_os_str().encode_wide().collect())?;

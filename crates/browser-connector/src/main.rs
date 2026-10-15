@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::home;
 use ghostlight_relay::log::{self, Component, Event as LogEvent};
+use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::{self, Opening, Reply, StartReason};
 use ghostlight_relay::spawn;
 use ghostlight_relay::watchdog::ParentWatchdog;
@@ -57,6 +58,15 @@ fn main() -> Result<()> {
     let _watchdog = ParentWatchdog::start(move || {
         let _ = parent.send(Event::ParentGone);
     });
+    // The listener is part of the shutdown contract, so a connector that cannot start it does
+    // not run.
+    let ending = events.clone();
+    let _session = session::listen(move |signal| {
+        session::stop_on_final(signal, || {
+            let _ = ending.send(Event::SessionEnded);
+        });
+    })
+    .context("listen for the end of the session")?;
     let ended = port::run(environment, io::stdin(), io::stdout(), events, inbox)
         .context("carry the browser port")?;
     record(LogEvent::ProcessExited, ended.as_str());

@@ -4,9 +4,10 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 #[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
+use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::{QuitReason, StartReason};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -22,6 +23,7 @@ use crate::governance::effective::EffectiveAuthority;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSetupResult, HarnessSummary,
 };
+use crate::language::environment::SESSION_LISTENER_FAILED;
 use crate::service::lifetime::QUIT_GRACE;
 use crate::service::{Quit, ServiceHost};
 use crate::workbench::{
@@ -98,10 +100,17 @@ pub fn run(reason: StartReason) -> Result<()> {
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
 
+    // Heard from the first moment: a start that is still waiting for the service lock leaves at
+    // once, and once the host exists the session end goes through its quit path.
+    let ending = Arc::new(OnceLock::<Quit>::new());
+    let _session_listener = listen_for_session_end(Arc::clone(&ending))
+        .map_err(|error| anyhow::anyhow!("{SESSION_LISTENER_FAILED} {error}"))?;
+
     let host = Arc::new(ServiceHost::start_waiting(
         &ghostlight_relay::home::home()?,
         reason,
     )?);
+    let _ = ending.set(host.quit_handle());
     host.expect_ready_by(host.ready_deadline(), || {
         std::process::exit(READY_STALLED_EXIT)
     })?;
@@ -183,19 +192,6 @@ pub fn run(reason: StartReason) -> Result<()> {
     // A quit from the service asks for the same exit the tray Quit takes.
     let quit_handle = app.handle().clone();
     host.install_quit_signal(Arc::new(move || quit_handle.exit(0)));
-    #[cfg(target_os = "windows")]
-    let _shutdown_listener = {
-        let app_handle = app.handle().clone();
-        ghostlight_win_peer::listen_for_system_shutdown(Box::new(move |event| {
-            handle_system_shutdown_event(event, arm_system_shutdown_fallback, || {
-                app_handle.exit(0)
-            });
-        }))
-        .map_err(|error| {
-            record_desktop_failure(&host, "Windows shutdown listener failed to start");
-            anyhow::anyhow!("Ghostlight could not start Windows shutdown listener: {error}")
-        })?
-    };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         app.run_return(move |app, event| match event {
             RunEvent::Ready => {
@@ -236,7 +232,9 @@ pub fn run(reason: StartReason) -> Result<()> {
                 }
                 eprintln!("Ghostlight {} desktop ready", env!("CARGO_PKG_VERSION"));
             }
-            RunEvent::ExitRequested { code, api, .. } if should_prevent_desktop_exit(code) => {
+            RunEvent::ExitRequested { code, api, .. }
+                if should_prevent_desktop_exit(code, session::session_ending()) =>
+            {
                 api.prevent_exit();
             }
             _ => {}
@@ -405,62 +403,30 @@ fn build_workbench(app: &AppHandle) -> Result<WebviewWindow, WorkbenchPresentati
     Ok(window)
 }
 
-static SYSTEM_SHUTDOWN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "windows")]
-const SYSTEM_SHUTDOWN_FALLBACK_MS: u64 = 1500;
-
-pub(crate) fn is_system_shutdown_in_progress() -> bool {
-    SYSTEM_SHUTDOWN_IN_PROGRESS.load(Ordering::SeqCst)
+/// Listen for the end of the session from this process's start.
+///
+/// On the final signal the fallback exit is armed first. A service that exists then says goodbye
+/// with `session_end` on every stream and leaves through the desktop's exit; a start that has no
+/// service yet holds nothing and leaves at once.
+fn listen_for_session_end(
+    ending: Arc<OnceLock<Quit>>,
+) -> std::io::Result<session::SessionListener> {
+    session::listen(move |event| session::stop_on_final(event, || end_session(ending.get())))
 }
 
-#[allow(dead_code)]
-pub(crate) fn set_system_shutdown_in_progress(in_progress: bool) {
-    SYSTEM_SHUTDOWN_IN_PROGRESS.store(in_progress, Ordering::SeqCst);
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn handle_system_shutdown_event(
-    event: ghostlight_win_peer::ShutdownEvent,
-    arm_fallback: impl FnOnce(),
-    request_exit: impl FnOnce(),
-) {
-    match event {
-        ghostlight_win_peer::ShutdownEvent::Query => set_system_shutdown_in_progress(true),
-        ghostlight_win_peer::ShutdownEvent::Cancelled => set_system_shutdown_in_progress(false),
-        ghostlight_win_peer::ShutdownEvent::Terminating => {
-            set_system_shutdown_in_progress(true);
-            // Tao can destroy its event target while processing WM_ENDSESSION. Arm the
-            // independent exit before calling into that target so a blocked exit request cannot
-            // prevent Windows shutdown indefinitely.
-            arm_fallback();
-            request_exit();
-        }
+/// End this process because the session is ending: through the quit path when the service
+/// exists, at once when it does not.
+fn end_session(quit: Option<&Quit>) {
+    match quit {
+        Some(quit) => quit.session_end(),
+        None => std::process::exit(0),
     }
 }
 
-#[cfg(target_os = "windows")]
-fn arm_system_shutdown_fallback() {
-    if std::thread::Builder::new()
-        .name("ghostlight-shutdown-fallback".into())
-        .spawn(|| {
-            std::thread::sleep(std::time::Duration::from_millis(
-                SYSTEM_SHUTDOWN_FALLBACK_MS,
-            ));
-            std::process::exit(0);
-        })
-        .is_err()
-    {
-        // If the process cannot create its fallback thread during system teardown, there is no
-        // safe way to promise a bounded wait around the native event loop.
-        std::process::exit(0);
-    }
-}
-
-fn should_prevent_desktop_exit(code: Option<i32>) -> bool {
-    if is_system_shutdown_in_progress() {
-        return false;
-    }
-    code.is_none()
+/// Whether the desktop contains an exit request instead of leaving: only the implicit loss of
+/// the last window is contained, and never while the session is ending.
+fn should_prevent_desktop_exit(code: Option<i32>, session_ending: bool) -> bool {
+    !session_ending && code.is_none()
 }
 
 #[cfg(target_os = "linux")]
@@ -820,35 +786,22 @@ fn validate_search_query(query: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        handle_system_shutdown_event, set_system_shutdown_in_progress, should_prevent_desktop_exit,
-        validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT,
+        should_prevent_desktop_exit, validate_policy_document, validate_search_query,
+        POLICY_DOCUMENT_LIMIT,
     };
 
     #[test]
     fn only_implicit_window_loss_is_contained() {
-        set_system_shutdown_in_progress(false);
-        assert!(should_prevent_desktop_exit(None));
-        assert!(!should_prevent_desktop_exit(Some(0)));
-        assert!(!should_prevent_desktop_exit(Some(1)));
-
-        set_system_shutdown_in_progress(true);
-        assert!(!should_prevent_desktop_exit(None));
-        assert!(!should_prevent_desktop_exit(Some(0)));
-        assert!(!should_prevent_desktop_exit(Some(1)));
-        set_system_shutdown_in_progress(false);
+        assert!(should_prevent_desktop_exit(None, false));
+        assert!(!should_prevent_desktop_exit(Some(0), false));
+        assert!(!should_prevent_desktop_exit(Some(1), false));
     }
 
     #[test]
-    fn system_termination_arms_the_fallback_before_requesting_native_exit() {
-        let order = std::sync::Mutex::new(Vec::new());
-        handle_system_shutdown_event(
-            ghostlight_win_peer::ShutdownEvent::Terminating,
-            || order.lock().unwrap().push("fallback"),
-            || order.lock().unwrap().push("native_exit"),
-        );
-        assert_eq!(*order.lock().unwrap(), ["fallback", "native_exit"]);
-        assert!(!should_prevent_desktop_exit(None));
-        set_system_shutdown_in_progress(false);
+    fn nothing_is_contained_while_the_session_is_ending() {
+        assert!(!should_prevent_desktop_exit(None, true));
+        assert!(!should_prevent_desktop_exit(Some(0), true));
+        assert!(!should_prevent_desktop_exit(Some(1), true));
     }
 
     #[test]

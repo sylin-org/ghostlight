@@ -8,7 +8,9 @@
 //!
 //! A start carries the reason it was made for (ADR-0199 Decision 10). The reason decides what a
 //! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
-//! latch, and every quit says goodbye on each live stream before the service exits ([`Quit`]).
+//! latch, and every quit says goodbye on each live stream before the service exits ([`Quit`]). The
+//! end of the session is the fourth goodbye: the service says `session_end` on every stream and
+//! leaves without the latch and without waiting for work in flight (ADR-0199 Decision 13).
 
 mod admission;
 pub mod latch;
@@ -509,6 +511,33 @@ impl Quit {
                 ghostlight_bridge::diagnostics::Level::Error,
                 None,
                 "the quit drain could not start",
+            );
+        }
+    }
+
+    /// Leave because the session is ending: refuse new work, say `session_end` goodbye on every
+    /// stream, then ask the desktop to exit. Returns at once, and neither waits for work in
+    /// flight nor sets the latch, since a sign-out is not a person's Quit and the caller has
+    /// already armed the fallback exit that bounds this stop.
+    pub fn session_end(&self) {
+        self.drain.begin_quit();
+        let signal = Arc::clone(&self.signal);
+        let farewell = Arc::clone(&self.farewell);
+        let spawned = thread::Builder::new()
+            .name("ghostlight-session-end".into())
+            .spawn(move || {
+                farewell.say(GoodbyeReason::SessionEnd);
+                let signal = lock(&signal).clone();
+                if let Some(signal) = signal {
+                    signal();
+                }
+            });
+        if spawned.is_err() {
+            self.diagnostics.sink().emit(
+                ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                ghostlight_bridge::diagnostics::Level::Error,
+                None,
+                "the session end could not start",
             );
         }
     }
@@ -2957,6 +2986,30 @@ mod tests {
                 .recv_timeout(Duration::from_secs(5))
                 .expect("the desktop is asked to exit after the goodbye");
         }
+    }
+
+    #[test]
+    fn a_session_end_says_goodbye_on_an_mcp_stream_and_leaves_without_the_latch() {
+        let (home, host, quit_requested) = quittable_host("session-end-goodbye");
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+        let running = host.intake.quit.drain.admit().unwrap();
+
+        host.quit_handle().session_end();
+
+        assert_eq!(goodbye_on(&mut socket), GoodbyeReason::SessionEnd);
+        quit_requested
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the desktop is asked to exit without waiting for work in flight");
+        assert!(
+            !super::latch::is_set(&home.path().join("state").join("quit")),
+            "a sign-out is not a person's Quit"
+        );
+        assert!(
+            host.intake.quit.drain.admit().is_err(),
+            "no new work is admitted once the session is ending"
+        );
+        drop(running);
     }
 
     #[test]

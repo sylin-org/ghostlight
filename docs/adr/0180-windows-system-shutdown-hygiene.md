@@ -84,3 +84,14 @@ deadline. This is process evidence, not only callback evidence.
 
 Reference: [SetConsoleCtrlHandler](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
 documents the `user32.dll`/`gdi32.dll` exception and recommends a hidden window for session events.
+
+## Amendment 2026-10-15: one listener in the relay, in every process
+
+[ADR-0199](0199-one-service-thin-shells.md) Decisions 13 and 14 move the listener out of
+`crates/win-peer` into the relay's `os` module (`ghostlight_relay::os::session`) and extend it
+to Linux (SIGTERM and SIGHUP through a self-pipe). Every process registers it: the service, both
+connectors and every one-shot command. The ending state it keeps begins at the first signal, the
+query included, and lifts only when the system cancels; while it holds nothing Ghostlight owns
+starts a process. The fallback exit is 2 s. The service says `goodbye{session_end}` on every
+stream before it leaves. A connector or service that cannot start the listener does not run; a
+one-shot command runs without it.

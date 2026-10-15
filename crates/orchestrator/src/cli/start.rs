@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
+use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::StartReason;
 
 use crate::cli::parse::{self, LaunchMode};
@@ -51,6 +52,9 @@ pub struct ProcessLauncher;
 
 impl Launcher for ProcessLauncher {
     fn run(&self, executable: &Path, arguments: &[OsString]) -> io::Result<i32> {
+        if session::session_ending() {
+            return Err(io::Error::other(session::START_REFUSED));
+        }
         let status = Command::new(executable).args(arguments).status()?;
         Ok(status.code().unwrap_or(EXIT_WITHOUT_CODE))
     }

@@ -571,6 +571,35 @@ fn an_uninstall_goodbye_ends_the_run_at_once_without_telling_chrome() {
 }
 
 #[test]
+fn a_session_end_goodbye_ends_the_run_at_once_and_starts_nothing() {
+    let mut harness = Harness::connected(b"hello");
+    harness.fake.send(&goodbye_frame(GoodbyeReason::SessionEnd));
+    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
+    assert!(harness.chrome_receives().is_empty());
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.fake.roles(), [Role::Browser], "no probe follows");
+}
+
+#[test]
+fn a_session_that_ends_while_the_service_is_away_ends_the_run_without_a_start() {
+    let mut harness = Harness::connected(b"hello");
+    harness.fake.go_down();
+    harness.wait(|| harness.chrome_receives().len() == 1);
+
+    harness.events.send(Event::SessionEnded).unwrap();
+
+    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_session_that_ends_before_the_first_connection_ends_the_run() {
+    let mut harness = Harness::start(false, false);
+    harness.events.send(Event::SessionEnded).unwrap();
+    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
+}
+
+#[test]
 fn the_unavailable_frame_is_the_golden_that_names_the_absence() {
     let golden =
         include_str!("../../../../tests/golden/protocol4/frames/backend_unavailable.absent.json");

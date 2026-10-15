@@ -627,7 +627,7 @@ Every one of these cost something to learn.
   and connectors that load `user32.dll` must maintain a hidden top-level window (`WS_POPUP`,
   `WS_EX_TOOLWINDOW`) to receive session termination broadcasts. A fallback must be armed before
   calling into a native event loop that shutdown may already have destroyed; a console handler alone
-  is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment).
+  is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment). The listener is `ghostlight_relay::os::session`, registered by every process (ADR-0199 Decisions 13 and 14).
 
 - **A reply is not yet validated effect evidence.** A reply proves an attempt, not its effect:
   confirm an effect only when the receipt matches the request identity and the admitted document

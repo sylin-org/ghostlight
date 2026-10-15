@@ -421,10 +421,14 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    for the exact authority process. Windows acceptance counts actual Tauri windows, including
    hidden windows; a single service PID or a mocked activation result is insufficient evidence.
    Open tolerates delayed native startup within its bounded wait; an expired wait permits retry
-   without telling the person to stop a healthy authority. On Windows, every authority and
-   connector owns a hidden top-level session listener. `WM_QUERYENDSESSION` never vetoes shutdown,
-   and `WM_ENDSESSION` terminates the exact process within four seconds even when Tao has already
-   destroyed its event target. A console-control fallback never suppresses the default process exit.
+   without telling the person to stop a healthy authority. Ghostlight never delays a sign-out or
+   shutdown, and starts nothing once the session is ending. Every process (the service, both
+   connectors and every one-shot command) owns the session listener: on Windows a hidden
+   top-level window, on Linux SIGTERM and SIGHUP. `WM_QUERYENDSESSION` never vetoes the end, and
+   the final signal ends the exact process within two seconds even when Tao has already destroyed
+   its event target. A console-control fallback never suppresses the default process exit. The
+   service says `session_end` goodbye on every stream first. While the session is ending, no
+   service, browser or page is started by any process.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. The persistent lamp band states whether Ghostlight is all-open, has one or more
    policies applied, or has a configured policy issue, and links to Status for detail. Activity,

@@ -25,6 +25,10 @@ pub const ELEVATED_SERVICE: &str = "Ghostlight does not run with administrator r
 /// Ghostlight, and so does not bring it back.
 pub const QUIT_HELD: &str = "Ghostlight was quit, so this start did not bring it back.";
 
+/// What Ghostlight says when the machine will not let it listen for the end of the session. The
+/// reason follows.
+pub const SESSION_LISTENER_FAILED: &str = "Ghostlight could not listen for the end of the session:";
+
 /// One row of the environment table.
 ///
 /// Rows are distinguished only where Ghostlight has something different to say. A desktop shell

@@ -215,6 +215,7 @@ impl Write for SharedOutput {
 struct Harness {
     fake: Arc<FakeState>,
     clock: Arc<FakeClock>,
+    events: mpsc::Sender<Event>,
     input: Option<mpsc::Sender<Vec<u8>>>,
     output: SharedOutput,
     done: Option<JoinHandle<io::Result<()>>>,
@@ -235,17 +236,19 @@ impl Harness {
             poll: Some(TICK),
         };
         let stdout = output.clone();
+        let (events, inbox) = mpsc::channel();
+        let sender = events.clone();
         let done = thread::spawn(move || {
-            let (events, inbox) = mpsc::channel();
             let stdin = ChannelInput {
                 chunks,
                 pending: Vec::new(),
             };
-            run(environment, stdin, stdout, events, inbox)
+            run(environment, stdin, stdout, sender, inbox)
         });
         Self {
             fake,
             clock,
+            events,
             input: Some(input),
             output,
             done: Some(done),
@@ -670,6 +673,36 @@ fn after_an_uninstall_goodbye_requests_are_answered_and_the_connector_exits() {
         "the outstanding request is answered before the connector ends"
     );
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn after_a_session_end_goodbye_requests_are_answered_and_the_connector_exits_without_a_start() {
+    let mut harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    say_goodbye(&harness, GoodbyeReason::SessionEnd);
+    harness.finish().unwrap();
+    assert_eq!(
+        harness.answer(&json!(1))["result"]["isError"],
+        json!(true),
+        "the outstanding request is answered before the connector ends"
+    );
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.fake.connections(), 1, "no new connection is tried");
+}
+
+#[test]
+fn a_session_that_ends_makes_the_connector_exit_without_trying_the_service_again() {
+    let mut harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    let attempts = harness.fake.attempts.load(Ordering::SeqCst);
+
+    harness.events.send(Event::SessionEnded).unwrap();
+    harness.finish().unwrap();
+
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.fake.attempts.load(Ordering::SeqCst), attempts);
 }
 
 #[test]

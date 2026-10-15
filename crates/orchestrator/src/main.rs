@@ -11,11 +11,13 @@
     windows_subsystem = "windows"
 )]
 
+use ghostlight::cli::session_end::listen_unless_serving;
 use ghostlight::cli::start::{start, ProcessLauncher, Start};
 use ghostlight::install::layout::Layout;
 
 fn main() -> anyhow::Result<()> {
-    let arguments = std::env::args_os().skip(1).collect();
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    let _session = listen_unless_serving(&arguments);
     let current_exe = std::env::current_exe()?;
     match start(
         arguments,

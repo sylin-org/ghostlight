@@ -18,8 +18,10 @@
 //! and nothing is held: the next request starts the service again, as an `agent` start. After
 //! `replace` lines are held and the connector reconnects without starting the service for up to
 //! [`HOLD_LIMIT`], and then behaves as after a lost connection. After `uninstall` outstanding
-//! requests are answered and the connector exits. A stream that ends with no goodbye is a crash
-//! and behaves as a lost connection.
+//! requests are answered and the connector exits. After `session_end` the connector exits too, and
+//! it exits the same way when its own session listener hears that the session is ending
+//! ([`Event::SessionEnded`]): nothing is started then (ADR-0199 Decision 13). A stream that ends
+//! with no goodbye is a crash and behaves as a lost connection.
 //!
 //! Everything runs on one loop over [`Event`]s. Threads only read: one for stdin, one per service
 //! connection, and one per connection attempt. Time comes from an injected [`Clock`] so the bounds
@@ -127,13 +129,15 @@ pub enum Event {
     Gone(u64),
     /// The process that started the connector went away.
     ParentGone,
+    /// The session is ending.
+    SessionEnded,
 }
 
-/// Forward one MCP session between `input`, `output` and the service until the input closes or
-/// the parent goes away.
+/// Forward one MCP session between `input`, `output` and the service until the input closes, the
+/// parent goes away or the session ends.
 ///
 /// `events` and `inbox` are the two ends of the loop's channel; the caller keeps a sender of its
-/// own for [`Event::ParentGone`]. Only a failure to write to `output` is an error.
+/// own for [`Event::ParentGone`] and [`Event::SessionEnded`]. Only a failure to write to `output` is an error.
 pub fn run(
     environment: Environment,
     input: impl Read + Send + 'static,
@@ -167,7 +171,8 @@ pub fn run(
 enum Flow {
     /// Keep forwarding.
     Continue,
-    /// Stop: the input closed or the parent went away.
+    /// Stop: the input closed, the parent went away, the session is ending or the service said
+    /// goodbye for good.
     Exit,
 }
 
@@ -295,6 +300,10 @@ impl<W: Write> Forwarder<W> {
             }
             Event::ParentGone => {
                 (self.environment.log)(LogEvent::ParentGone, "");
+                return Ok(Flow::Exit);
+            }
+            Event::SessionEnded => {
+                (self.environment.log)(LogEvent::SessionEnded, "");
                 return Ok(Flow::Exit);
             }
         }

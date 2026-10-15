@@ -12,11 +12,10 @@
 //! The crate holds the executable paths of a process's ancestors in `process` (from which the
 //! installer learns whether it runs inside an app's container), whether the process token is
 //! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
-//! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
-//! `item_id_list` (named by the installer's Start-menu shortcut), and session shutdown events in
-//! `shutdown`. Starting the service and process identity live in the relay's audited `os` module
-//! (ADR-0199 Decision 3). Non-Windows targets compile the portable surface returning an empty
-//! answer.
+//! creation in `private_file` (ADR-0160), and the shell's item identifier list of a file in
+//! `item_id_list` (named by the installer's Start-menu shortcut). Starting the service, process
+//! identity and the session listener live in the relay's audited `os` module (ADR-0199 Decisions
+//! 3 and 14). Non-Windows targets compile the portable surface returning an empty answer.
 
 #[cfg(target_os = "windows")]
 mod elevation;
@@ -26,32 +25,6 @@ mod item_id_list;
 mod private_file;
 #[cfg(target_os = "windows")]
 mod process;
-#[cfg(target_os = "windows")]
-mod shutdown;
-
-/// Session shutdown events from the operating system.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ShutdownEvent {
-    /// System is querying whether session can end (WM_QUERYENDSESSION).
-    Query,
-    /// System cancelled the shutdown sequence (WM_ENDSESSION with wParam == FALSE).
-    Cancelled,
-    /// System is terminating (WM_ENDSESSION with wParam != FALSE or console shutdown).
-    Terminating,
-}
-
-#[cfg(target_os = "windows")]
-pub use shutdown::{listen_for_system_shutdown, SystemShutdownListener};
-
-#[cfg(not(target_os = "windows"))]
-pub struct SystemShutdownListener;
-
-#[cfg(not(target_os = "windows"))]
-pub fn listen_for_system_shutdown(
-    _callback: Box<dyn Fn(ShutdownEvent) + Send + Sync + 'static>,
-) -> std::io::Result<SystemShutdownListener> {
-    Ok(SystemShutdownListener)
-}
 
 /// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
 /// parents. Empty where the platform cannot answer.

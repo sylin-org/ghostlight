@@ -147,12 +147,22 @@ destroyed event, and rebuilds from the canonical configuration. On Linux, abnorm
 termination discards that exact window after the signal callback; the next explicit Open creates a
 fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority, and
 it holds (see above).
-On Windows, each long-lived Ghostlight process also owns a hidden top-level session-listener
-window. It accepts `WM_QUERYENDSESSION`; terminal session notification disarms ordinary desktop
-retention and arms a bounded process-exit fallback before asking the native event loop to exit.
-Connectors use this window route as well because loading `user32.dll` can suppress console logoff
-and shutdown notifications. The console handler is only a fallback and preserves Windows' default
-process termination.
+Every Ghostlight process honors the end of the session: the service, both connectors, and every
+one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
+hidden top-level window on its own thread, never a message-only window, plus the console handler;
+it answers `WM_QUERYENDSESSION` with TRUE at once, and the console handler returns FALSE so the
+default exit is never suppressed. On Linux it is SIGTERM and SIGHUP through a handler that writes
+one byte to a self-pipe and a thread that reads it. One process-wide state says the session is
+ending. It is set at the first signal, the query included, and lifted only when the system
+cancels the end. While it holds, `start_service` and `spawn_detached` refuse and nothing is
+spawned; browser recovery launches no browser and the install handoff opens no page.
+
+On the final signal a process arms a 2 s fallback exit first. The service then says
+`goodbye{session_end}` on every stream and leaves through the desktop's exit, without waiting for
+work in flight and without setting the quit latch. A connector, which may find the service already
+gone, exits 0 on its own signal and on a `session_end` goodbye, and a stream that drops while the
+session is ending never leads to a start. A one-shot command leaves at once. Desktop retention is
+disarmed while the state holds, so the native event loop never keeps the process alive.
 
 ## Fringe stability
 

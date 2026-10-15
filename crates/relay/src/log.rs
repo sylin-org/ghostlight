@@ -52,6 +52,8 @@ pub enum Event {
     ProcessExited,
     /// The parent process went away.
     ParentGone,
+    /// The session is ending, so the connector is leaving.
+    SessionEnded,
     /// The connector tried to start the service.
     ServiceStartAttempted,
     /// Starting the service failed.
@@ -74,6 +76,7 @@ impl Event {
             Self::ProcessStarted => "process_started",
             Self::ProcessExited => "process_exited",
             Self::ParentGone => "parent_gone",
+            Self::SessionEnded => "session_ended",
             Self::ServiceStartAttempted => "service_start_attempted",
             Self::ServiceStartFailed => "service_start_failed",
             Self::ConnectFailed => "connect_failed",

@@ -10,6 +10,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use ghostlight_relay::os::session;
 use ghostlight_relay::private;
 
 /// Stable service-first page that points at the current store extension.
@@ -28,7 +29,8 @@ pub enum HandoffOutcome {
     Suppressed,
 }
 
-/// Decide whether this install run should offer the browser-extension walkthrough.
+/// Decide whether this install run should offer the browser-extension walkthrough. It never does
+/// while the session is ending: opening a page starts a program (ADR-0199 Decision 13).
 #[must_use]
 pub fn should_offer(
     dry_run: bool,
@@ -36,8 +38,9 @@ pub fn should_offer(
     automated: bool,
     install_usable: bool,
     already_offered: bool,
+    session_ending: bool,
 ) -> bool {
-    !dry_run && !no_open && !automated && install_usable && !already_offered
+    !dry_run && !no_open && !automated && install_usable && !already_offered && !session_ending
 }
 
 /// Offer the extension walkthrough once for the current user.
@@ -49,7 +52,14 @@ pub fn offer(
 ) -> io::Result<HandoffOutcome> {
     let marker = marker_path(&super::layout::Layout::current()?.state());
     let already_offered = marker.exists();
-    if !should_offer(dry_run, no_open, automated, install_usable, already_offered) {
+    if !should_offer(
+        dry_run,
+        no_open,
+        automated,
+        install_usable,
+        already_offered,
+        session::session_ending(),
+    ) {
         return Ok(if already_offered {
             HandoffOutcome::AlreadyOffered
         } else {
@@ -130,12 +140,17 @@ mod tests {
 
     #[test]
     fn handoff_requires_a_first_usable_interactive_install() {
-        assert!(should_offer(false, false, false, true, false));
-        assert!(!should_offer(true, false, false, true, false));
-        assert!(!should_offer(false, true, false, true, false));
-        assert!(!should_offer(false, false, true, true, false));
-        assert!(!should_offer(false, false, false, false, false));
-        assert!(!should_offer(false, false, false, true, true));
+        assert!(should_offer(false, false, false, true, false, false));
+        assert!(!should_offer(true, false, false, true, false, false));
+        assert!(!should_offer(false, true, false, true, false, false));
+        assert!(!should_offer(false, false, true, true, false, false));
+        assert!(!should_offer(false, false, false, false, false, false));
+        assert!(!should_offer(false, false, false, true, true, false));
+    }
+
+    #[test]
+    fn no_page_is_opened_while_the_session_is_ending() {
+        assert!(!should_offer(false, false, false, true, false, true));
     }
 
     #[test]

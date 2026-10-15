@@ -85,11 +85,11 @@ public static class GhostlightNativeJourney {
             if (process != owner) return true;
             var name = new StringBuilder(256);
             GetClassName(window, name, name.Capacity);
-            if (name.ToString().StartsWith("GhostlightShutdownListener_")) listener = window;
+            if (name.ToString().StartsWith("GhostlightSessionListener_")) listener = window;
             if (name.ToString() == "Tauri Window") workbench = window;
             return true;
         }, IntPtr.Zero);
-        if (listener == IntPtr.Zero) throw new InvalidOperationException("Shutdown listener window is unavailable.");
+        if (listener == IntPtr.Zero) throw new InvalidOperationException("Session listener window is unavailable.");
 
         UIntPtr result;
         if (SendMessageTimeout(listener, 0x0011, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out result) == IntPtr.Zero || result.ToUInt64() != 1)

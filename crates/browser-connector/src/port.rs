@@ -22,7 +22,9 @@
 //! A service that ends the stream on purpose says goodbye first (ADR-0199 Decision 10). The
 //! goodbye is not the browser's frame and is never passed on. After `quit` and `replace` the
 //! connector behaves as it does for a lost service. After `uninstall` it returns
-//! [`Ended::ServiceUninstalled`] at once and the process exits.
+//! [`Ended::ServiceUninstalled`] at once and the process exits. After `session_end`, and when its
+//! own session listener hears that the session is ending, it returns [`Ended::SessionOver`] at
+//! once, and nothing is started (ADR-0199 Decision 13).
 //!
 //! Two threads carry the frames, one per direction, and the calling thread decides what happens
 //! next from the events they send. Correlation ids, command names and payloads are never read
@@ -119,6 +121,8 @@ pub enum Event {
     ServiceLost,
     /// The service said goodbye because Ghostlight is being removed.
     ServiceUninstalled,
+    /// The session is ending, whether the service said so or this process heard it.
+    SessionEnded,
 }
 
 /// Why [`run`] returned. Every one of them is a clean exit.
@@ -132,6 +136,8 @@ pub enum Ended {
     ServiceReturned,
     /// The service said goodbye because Ghostlight is being removed.
     ServiceUninstalled,
+    /// The session is ending: the service said goodbye for it, or this process heard it.
+    SessionOver,
 }
 
 impl Ended {
@@ -143,6 +149,7 @@ impl Ended {
             Self::ParentGone => "parent_gone",
             Self::ServiceReturned => "service_returned",
             Self::ServiceUninstalled => "service_uninstalled",
+            Self::SessionOver => "session_ended",
         }
     }
 }
@@ -151,7 +158,8 @@ impl Ended {
 /// service answers again after the connection was lost.
 ///
 /// `events` and `inbox` are the two ends of the port's channel; the caller keeps a sender of its
-/// own for [`Event::ParentGone`]. Only a failure to read from the browser is an error.
+/// own for [`Event::ParentGone`] and [`Event::SessionEnded`]. Only a failure to read from the
+/// browser is an error.
 pub fn run(
     environment: Environment,
     input: impl Read + Send + 'static,
@@ -388,6 +396,10 @@ impl Port {
             Event::Hello(hello) => Ok(Waited::Hello(hello)),
             Event::ServiceLost => Ok(Waited::Lost),
             Event::ServiceUninstalled => Ok(Waited::Ended(Ended::ServiceUninstalled)),
+            Event::SessionEnded => {
+                (self.environment.log)(LogEvent::SessionEnded, "");
+                Ok(Waited::Ended(Ended::SessionOver))
+            }
             Event::InputClosed | Event::OutputClosed => Ok(Waited::Ended(Ended::BrowserGone)),
             Event::ParentGone => {
                 (self.environment.log)(LogEvent::ParentGone, "");
@@ -469,10 +481,10 @@ impl Port {
                     Ok(Some(payload)) => {
                         if let Some(reason) = goodbye_in(&payload) {
                             goodbye = Some(reason);
-                            if ends_the_port(reason) {
+                            if let Some(ending) = ending_event(reason) {
                                 socket.shutdown();
                                 shared.lose();
-                                let _ = events.send(Event::ServiceUninstalled);
+                                let _ = events.send(ending);
                                 return;
                             }
                         } else if frame::write_frame_raw(&mut output, &payload).is_err() {
@@ -501,10 +513,14 @@ impl Port {
     }
 }
 
-/// Whether a goodbye with `reason` means the service is gone for good, so the port ends at once
-/// instead of waiting for a service to return.
-fn ends_the_port(reason: GoodbyeReason) -> bool {
-    matches!(reason, GoodbyeReason::Uninstall | GoodbyeReason::SessionEnd)
+/// The event that ends the port at once for a goodbye with `reason`, or `None` when the service
+/// is expected back and the port waits for it.
+fn ending_event(reason: GoodbyeReason) -> Option<Event> {
+    match reason {
+        GoodbyeReason::Uninstall => Some(Event::ServiceUninstalled),
+        GoodbyeReason::SessionEnd => Some(Event::SessionEnded),
+        GoodbyeReason::Quit | GoodbyeReason::Replace | GoodbyeReason::Unknown => None,
+    }
 }
 
 /// The program a connector presents itself as: the frozen edge, at this build.

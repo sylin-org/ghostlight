@@ -90,7 +90,11 @@ pub fn spawn_serve(executable: &Path, directory: &Path, reason: StartReason) -> 
 /// `home`) and return without waiting for it.
 ///
 /// Success means the process was created, not that the service is ready. See [`spawn_serve`].
+///
+/// While the session is ending nothing is started: the call fails with
+/// [`START_REFUSED`](os::session::START_REFUSED) before it looks at the home.
 pub fn start_service(reason: StartReason) -> io::Result<()> {
+    os::session::refuse_start()?;
     spawn_serve(&home::service_executable()?, &home::home()?, reason).map(|_| ())
 }
 

@@ -112,11 +112,14 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
 /// through its own close-on-exec pipe, which the marking leaves open until the exec.
 ///
 /// A thread collects the child's exit status so an early exit does not linger as a zombie.
+///
+/// It refuses, spawning nothing, while the session is ending (see [`super::session`]).
 pub fn spawn_detached(
     executable: &Path,
     arguments: &[&OsStr],
     directory: &Path,
 ) -> io::Result<u32> {
+    super::session::refuse_start()?;
     let limit = descriptor_limit();
     let mut command = Command::new(executable);
     command

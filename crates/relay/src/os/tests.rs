@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::session::EXCLUSIVE;
 use super::spawn_detached;
 
 /// How long a reader of the starter's pipe may wait for end of file.
@@ -158,6 +159,9 @@ mod linux_platform {
 
 #[test]
 fn a_detached_child_holds_none_of_its_starters_handles() {
+    let _exclusive = EXCLUSIVE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let (reader, writer) = platform::inheritable_pipe();
     let (program, arguments) = platform::long_lived_program();
     let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
@@ -181,12 +185,18 @@ fn a_detached_child_holds_none_of_its_starters_handles() {
 
 #[test]
 fn a_program_that_cannot_start_is_an_error() {
+    let _exclusive = EXCLUSIVE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let missing = Path::new("ghostlight-no-such-program");
     assert!(spawn_detached(missing, &[], &std::env::temp_dir()).is_err());
 }
 
 #[test]
 fn a_directory_that_does_not_exist_is_an_error() {
+    let _exclusive = EXCLUSIVE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     let (program, arguments) = platform::long_lived_program();
     let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
     let missing: PathBuf = std::env::temp_dir().join("ghostlight-no-such-directory");

@@ -19,6 +19,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use ghostlight_relay::os::session;
+
 use super::{choose_browser, BrowserPort};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::GovernanceFacade;
@@ -241,7 +243,24 @@ impl RecoveryMechanism for SystemRecoveryMechanism {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<(), MechanismError> {
+        self.launch_unless_ending(session::session_ending(), browser, deadline, cancelled)
+    }
+}
+
+impl SystemRecoveryMechanism {
+    /// Launch `browser`, unless the session is ending: then nothing is started and the call ends
+    /// as cancelled (ADR-0199 Decision 13).
+    fn launch_unless_ending(
+        &self,
+        session_ending: bool,
+        browser: &RecoveryCandidate,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Result<(), MechanismError> {
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
+        if session_ending {
+            return Err(MechanismError::Wait(RecoveryWaitError::Cancelled));
+        }
         let executable = browser.ordinary_executable.as_ref().ok_or_else(|| {
             MechanismError::Failed((
                 RecoveryFailure::LaunchFailed,
@@ -1613,5 +1632,27 @@ mod tests {
             }
         );
         assert!(lock(&recovery.flights).scopes.is_empty());
+    }
+
+    #[test]
+    fn no_browser_is_launched_while_the_session_is_ending() {
+        let browser = candidate("Chromium", BrowserPackage::Native, NativeHostState::Current);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let cancelled = AtomicBool::new(false);
+
+        let refused = SystemRecoveryMechanism
+            .launch_unless_ending(true, &browser, deadline, &cancelled)
+            .unwrap_err();
+        assert!(matches!(
+            refused,
+            MechanismError::Wait(RecoveryWaitError::Cancelled)
+        ));
+
+        // The browser's executable does not exist, so a launch that is attempted fails; that
+        // failure is how the test tells an attempt from a refusal.
+        let attempted = SystemRecoveryMechanism
+            .launch_unless_ending(false, &browser, deadline, &cancelled)
+            .unwrap_err();
+        assert!(matches!(attempted, MechanismError::Failed(_)));
     }
 }
