@@ -1431,8 +1431,12 @@ pub fn stop_legacy_images(images: &[PathBuf]) -> anyhow::Result<()> {
             "Cannot replace the running installer"
         );
         let killed = system.process(pid).is_some_and(|process| process.kill());
-        anyhow::ensure!(killed, "Could not stop Ghostlight process {pid}");
-        stopped.push(pid);
+        let gone = !killed && !still_running(&mut system, pid);
+        match stop_outcome(killed, gone) {
+            StopOutcome::Stopping => stopped.push(pid),
+            StopOutcome::AlreadyGone => {}
+            StopOutcome::Failed => anyhow::bail!("Could not stop Ghostlight process {pid}"),
+        }
     }
     let deadline = Instant::now() + STOP_WAIT;
     while !stopped.is_empty() {
@@ -1455,6 +1459,41 @@ pub fn stop_legacy_images(images: &[PathBuf]) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// What a stop attempt on one process came to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StopOutcome {
+    /// The kill was delivered; wait for the process to exit.
+    Stopping,
+    /// The kill failed because the process had already exited, which is what stopping wants.
+    AlreadyGone,
+    /// The kill failed and the process is still running.
+    Failed,
+}
+
+/// Classify one stop attempt. A process can exit on its own between the process snapshot and
+/// the kill (a connector the browser is cycling does), and that must not fail the install.
+fn stop_outcome(killed: bool, gone: bool) -> StopOutcome {
+    if killed {
+        StopOutcome::Stopping
+    } else if gone {
+        StopOutcome::AlreadyGone
+    } else {
+        StopOutcome::Failed
+    }
+}
+
+/// Whether `pid` still runs: present in a fresh look and not a zombie.
+fn still_running(system: &mut System, pid: Pid) -> bool {
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().without_tasks(),
+    );
+    system
+        .process(pid)
+        .is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
 }
 
 /// Whether any process other than the running installer is running one of `images`.
@@ -2600,5 +2639,12 @@ mod tests {
             (FlatpakPart::Manifest, FlatpakResult::LeftForeign)
         );
         assert!(route.manifest.is_dir());
+    }
+
+    #[test]
+    fn a_process_that_exits_before_its_kill_counts_as_stopped() {
+        assert_eq!(stop_outcome(true, false), StopOutcome::Stopping);
+        assert_eq!(stop_outcome(false, true), StopOutcome::AlreadyGone);
+        assert_eq!(stop_outcome(false, false), StopOutcome::Failed);
     }
 }
