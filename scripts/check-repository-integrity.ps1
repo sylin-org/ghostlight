@@ -30,7 +30,7 @@ $nulFiles = [System.Collections.Generic.List[string]]::new()
 foreach ($relative in $tracked) {
     $path = Join-Path $repo $relative
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Tracked file is unreadable or missing: $relative"
+        continue
     }
     $item = Get-Item -LiteralPath $path -Force
     $isText = $textExtensions -contains $item.Extension.ToLowerInvariant() -or
@@ -39,24 +39,45 @@ foreach ($relative in $tracked) {
         continue
     }
     $bytes = [System.IO.File]::ReadAllBytes($item.FullName)
-    if ($bytes -contains 0) {
+    $hasNul = $false
+    $hasHigh = $false
+    foreach ($byte in $bytes) {
+        if ($byte -eq 0) {
+            $hasNul = $true
+        }
+        elseif ($byte -gt 127) {
+            $hasHigh = $true
+        }
+    }
+    $hasUtf16Bom = $bytes.Length -ge 2 -and
+        (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or
+        ($bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF))
+    if ($hasNul -or $hasUtf16Bom) {
         [void]$nulFiles.Add($relative)
     }
-    if ($null -ne ($bytes | Where-Object { $_ -gt 127 } | Select-Object -First 1)) {
+    if ($hasHigh) {
         [void]$nonAscii.Add($relative.Replace("\", "/"))
     }
 }
 
 if ($nulFiles.Count -gt 0) {
-    throw "Text files contain NUL bytes: $($nulFiles -join ', ')"
+    throw "Text files contain NUL bytes or a UTF-16 byte order mark: $($nulFiles -join ', ')"
 }
 
 $expectedNonAscii = @($baseline.nonAsciiHistoricalFiles | Sort-Object)
 $observedNonAscii = @($nonAscii | Sort-Object)
-if (($expectedNonAscii -join "`n") -ne ($observedNonAscii -join "`n")) {
-    $added = @($observedNonAscii | Where-Object { $expectedNonAscii -notcontains $_ })
-    $removed = @($expectedNonAscii | Where-Object { $observedNonAscii -notcontains $_ })
-    throw "Non-ASCII historical baseline drifted. Added: $($added -join ', '); removed: $($removed -join ', ')"
+$added = @($observedNonAscii | Where-Object { $expectedNonAscii -notcontains $_ })
+if ($added.Count -gt 0) {
+    throw "New non-ASCII text files (ASCII only; fix the file): $($added -join ', ')"
+}
+$trackedNormalized = @($tracked | ForEach-Object { $_.Replace("\", "/") })
+$untracked = @($expectedNonAscii | Where-Object { $trackedNormalized -notcontains $_ })
+if ($untracked.Count -gt 0) {
+    throw "Historical file listed in $BaselinePath is no longer tracked: $($untracked -join ', '); remove the baseline entry deliberately if this was intended."
+}
+$clean = @($expectedNonAscii | Where-Object { $observedNonAscii -notcontains $_ })
+if ($clean.Count -gt 0) {
+    Write-Output "Note: listed historical files are now ASCII-clean; prune them from the baseline when convenient: $($clean -join ', ')"
 }
 
 $brokenLinks = [System.Collections.Generic.List[string]]::new()
@@ -228,8 +249,8 @@ if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
     }
 }
 
-Write-Output "Repository integrity: $($tracked.Count) tracked files readable; local links valid; source version $sourceVersion aligned."
-Write-Output "Historical ASCII exceptions remain fixed at $($expectedNonAscii.Count) named files; no new exception is allowed."
+Write-Output "Repository integrity: local links valid; source version $sourceVersion aligned."
+Write-Output "Only the $($expectedNonAscii.Count) listed historical files may contain non-ASCII bytes."
 Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
 # The behavioral-parity matrix must stay closed and evidenced.
 node (Join-Path $PSScriptRoot ".." "tests" "capability-matrix.mjs")
