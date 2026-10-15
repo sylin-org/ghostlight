@@ -8,7 +8,6 @@ pub mod desktop_entry;
 pub mod entry;
 pub mod handoff;
 pub mod layout;
-pub mod marker;
 pub mod migration;
 pub mod native_host;
 pub mod reconcile;

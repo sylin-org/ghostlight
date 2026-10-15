@@ -1497,25 +1497,20 @@ fn remove_old_images_beside(executable: &Path) {
     }
 }
 
-/// Register every browser that has no Ghostlight registration, when `executable` serves the
-/// installation in `home` (the installed service or the marked development build). A person who
-/// installed through a route that never registered a browser gets one on the first start; a
-/// registration that exists is the installer's to reclaim, never this start's.
+/// Register every browser that has no Ghostlight registration, when `executable` is the installed
+/// service of `home`. A person who installed through a route that never registered a browser gets
+/// one on the first start; a registration that exists is the installer's to reclaim, never this
+/// start's.
 fn register_missing_browsers(home: &Path, executable: &Path) {
     if !install::reconcile::native_hosts_allowed() {
         return;
     }
     let layout = install::layout::Layout::new(home);
     let executable = install::entry::canonical_path(executable);
-    let marked = install::marker::DevelopmentMarker::read(&layout.development_marker())
-        .ok()
-        .flatten()
-        .map(|marker| marker.executable);
-    let serving = std::iter::once(layout.service_executable())
-        .chain(marked)
-        .any(|candidate| {
-            install::entry::same_path(&install::entry::canonical_path(&candidate), &executable)
-        });
+    let serving = install::entry::same_path(
+        &install::entry::canonical_path(&layout.service_executable()),
+        &executable,
+    );
     if serving {
         let _ = install::native_host::NativeHostRegistry::discover().register_missing();
     }

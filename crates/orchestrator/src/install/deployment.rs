@@ -1,28 +1,32 @@
 //! `ghostlight deployment install`: the one way executables reach the Ghostlight home.
 //!
 //! A package, the npm launcher, the get scripts and the development loop all run a
-//! `ghostlight-service` with this command (ADR-0197 Decisions 13 to 15, ADR-0199 Decision 19).
-//! Under the install lock it:
+//! `ghostlight-service` with this command (ADR-0197 Decisions 13 and 14, ADR-0199 Decision 19 and
+//! the development channel amendment). Under the install lock it:
 //!
 //! 1. checks the 2.0 break migration's destinations when a 1.x layout is found, so a conflict
 //!    changes nothing, then moves the 1.x policy, managed-policy and client-location files into
 //!    the home: no 1.x program holds them open, and the 2.0 service or client that the next
 //!    steps let start must find them in place;
-//! 2. reads `bin/install.json` and decides what to replace: a release refuses an older payload,
-//!    does nothing for the same intact version, rename-swaps the service image into `bin`, and
-//!    replaces the edge only when the relay revision changes or `bin` still holds the pre-edge
-//!    layout; `--development` swaps the service and the edge into `dev` and writes the
-//!    development marker (installing into `bin` as well when `bin` needs another edge). The
-//!    Ghostlight shell goes beside every service image placed, when the payload has one;
-//!    `--restore` removes the marker;
+//! 2. reads `bin/install.json` and decides what to replace. A release refuses an older payload
+//!    and a development installation, does nothing for the same intact version, rename-swaps the
+//!    service image into `bin`, and replaces the edge only when the relay revision changes, `bin`
+//!    still holds the pre-edge layout, or the edge in `bin` is not the one recorded.
+//!    `--development` places the same files the same way, but always swaps the service, whatever
+//!    version is installed, and records the development channel. `--restore` does the same for
+//!    this executable's own package and records the release channel: the one way back from a
+//!    development installation, and the one allowed move down. The Ghostlight shell goes beside
+//!    the service image when the payload has one and `bin` holds another;
 //! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
 //!    before anything old is stopped, so a browser or client that relaunches its host the moment
 //!    the old one stops starts the new one;
 //! 4. stops the 1.x images and looks again for a few rounds for any that respawned;
 //! 5. asks the running service to quit (a control `quit` for replacement) and waits for its
 //!    service lock to be free, and stops that exact image if it has not exited or is an earlier
-//!    development build that cannot be asked; archives the 1.x audit log, then removes the 1.x
-//!    lifecycle files, the installation record last;
+//!    development build that cannot be asked; stops what runs from the retired development
+//!    directory and removes that directory and its marker, which earlier development builds used;
+//!    archives the 1.x audit log, then removes the 1.x lifecycle files, the installation record
+//!    last;
 //! 6. starts `bin/ghostlight-service serve` and writes `install.json` only once a service answers a
 //!    control status with an instance other than the one that was replaced.
 //!
@@ -32,7 +36,7 @@
 //! process.
 
 use std::env;
-use std::fs::{File, TryLockError};
+use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -47,10 +51,9 @@ use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
 use super::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
-use super::marker::DevelopmentMarker;
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
-use super::record::{self, InstallRecord, PayloadRefused, Standing};
+use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
 use super::swap;
 use crate::cli::client;
 use crate::service::lock::ServiceLock;
@@ -84,19 +87,22 @@ const EARLIER_DEVELOPMENT_RELAY: &str = "3";
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// A release: the payload becomes the installed service in `bin`.
+    /// A release: the payload becomes the installed service in `bin`, unless an equal or newer
+    /// one is there or the installation is a development build.
     Release,
-    /// A development build: the payload serves from `dev`, selected by the marker.
+    /// A development build: the payload becomes the installed service in `bin` every time and
+    /// the installation is recorded as the development channel.
     Development,
-    /// Deselect the development build so the installed service serves again. Offline: nothing
-    /// is copied.
+    /// Return to a release: this executable's own payload becomes the installed service in `bin`
+    /// whatever version or channel is installed, and the installation is recorded as a release.
+    /// The one allowed move down.
     Restore,
 }
 
 /// One `deployment install` command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
-    /// The directory holding the payload's two executables; `None` is this executable's own
+    /// The directory holding the payload's executables; `None` is this executable's own
     /// directory.
     pub payload: Option<PathBuf>,
     /// What to install.
@@ -126,14 +132,15 @@ impl Build {
         })
     }
 
-    /// The record `install.json` holds once this build serves from `bin`, with the edge it
-    /// leaves there.
-    fn record(&self, edge_sha256: Option<String>) -> InstallRecord {
+    /// The record `install.json` holds once this build serves from `bin` as `channel`, with the
+    /// edge it leaves there.
+    fn record(&self, edge_sha256: Option<String>, channel: Channel) -> InstallRecord {
         InstallRecord {
             service_version: self.version.clone(),
             relay_revision: self.relay_revision.clone(),
             service_sha256: self.image_sha256.clone(),
             edge_sha256,
+            channel,
         }
     }
 }
@@ -463,16 +470,6 @@ pub struct Swap {
     pub source: PathBuf,
 }
 
-/// What happens to the development marker.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MarkerChange {
-    /// Write the marker naming this development executable.
-    Write(PathBuf),
-    /// Remove the marker.
-    Remove,
-}
-
 /// Everything one install will do, in order. `--plan` prints it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct InstallPlan {
@@ -485,16 +482,18 @@ pub struct InstallPlan {
     /// The same version is installed and intact: nothing else happens.
     pub unchanged: bool,
     /// Executables placed by rename-swap: the service image, the shell beside it when the payload
-    /// has one, and the edge where it changes.
+    /// has one and `bin` holds another, and the edge where it changes.
     pub swaps: Vec<Swap>,
-    /// The development marker change.
-    pub marker: Option<MarkerChange>,
     /// Whether the running service is replaced by a new `serve`.
     pub restart: bool,
     /// The record written once the new service answers.
     pub record: Option<InstallRecord>,
-    /// Images stopped: the old installation's, and the running service's if it does not quit.
+    /// Images stopped: the old installation's, the retired development directory's, and the
+    /// running service's if it does not quit.
     pub processes_to_stop: Vec<PathBuf>,
+    /// Files and directories removed once `bin` holds the new executables: the retired
+    /// development directory and its marker, where an earlier development build ran.
+    pub deletions: Vec<PathBuf>,
     /// Registrations the reconcile will write.
     pub registrations_to_rewrite: Vec<PendingRegistration>,
 }
@@ -510,31 +509,39 @@ pub struct Outcome {
     pub registrations: Option<ReconcileReport>,
     /// What became of the files the 1.x Flatpak route left in the home.
     pub flatpak: Vec<FlatpakStep>,
+    /// Entries of the plan's deletions that could not be removed, because a program still runs
+    /// from them. The next install tries again; this one is not failed by them.
+    pub left_behind: Vec<PathBuf>,
 }
 
-/// Why `--restore` would not run.
+/// A release package found an installation that a development build made.
 #[derive(Debug, Error)]
-pub enum RestoreRefused {
-    /// Nothing records a release in `bin`.
-    #[error("No release is recorded in {0}, so there is nothing to restore")]
-    NoRelease(PathBuf),
-    /// The restore was not run by the release service in `bin`.
-    #[error("Run the restore with the installed service: {0} deployment install --restore")]
-    NotInstalledService(PathBuf),
-    /// The edge in `bin` speaks another relay revision than the service there.
-    #[error(
-        "The edge in {bin} speaks relay revision {edge} and the service there speaks \
-         {service}, so the installed service could not serve it. Install a release first"
-    )]
-    RelayMismatch {
-        /// The `bin` directory.
-        bin: PathBuf,
-        /// Relay revision recorded for the edge.
-        edge: String,
-        /// Relay revision of the service.
-        service: String,
-    },
+#[error(
+    "The installed Ghostlight is a development build, so this package did not replace it. To \
+     return to a release, run: {restore}"
+)]
+pub struct DevelopmentInstalled {
+    /// The command that installs this package as a release over the development build.
+    pub restore: String,
 }
+
+impl DevelopmentInstalled {
+    /// The refusal that names `executable`, the service image of the refused package.
+    fn new(executable: &Path) -> Self {
+        let name = executable.display().to_string();
+        let name = if name.contains(char::is_whitespace) {
+            format!("\"{name}\"")
+        } else {
+            name
+        };
+        Self {
+            restore: format!("{name} deployment install {RESTORE_OPTION}"),
+        }
+    }
+}
+
+/// The option that returns a development installation to a release.
+const RESTORE_OPTION: &str = "--restore";
 
 /// Why a payload directory cannot be installed.
 #[derive(Debug, Error)]
@@ -582,9 +589,7 @@ fn run_in(layout: Layout, request: &Request) -> anyhow::Result<Outcome> {
         None => own_directory,
         Some(payload) => {
             let service = payload.join(SERVICE_EXECUTABLE_NAME);
-            if request.mode != Mode::Restore
-                && record::sha256_file(&service).ok().as_deref() != Some(&build.image_sha256)
-            {
+            if record::sha256_file(&service).ok().as_deref() != Some(&build.image_sha256) {
                 return Err(PayloadError::OtherBuild(payload.clone()).into());
             }
             payload.clone()
@@ -642,6 +647,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
             service_started: None,
             registrations: None,
             flatpak: Vec::new(),
+            left_behind: Vec::new(),
         });
     }
     let _guard = hold_install_lock(&context.layout.install_lock())?;
@@ -654,69 +660,75 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     let layout = &context.layout;
     let migration = migration::plan(layout.home(), &context.legacy)?;
     let installed = InstallRecord::read(&layout.install_record())?;
-    let pre_edge = migration::pre_edge_layout(layout);
+    let retired = RetiredDevelopment::find(layout);
     let mut plan = InstallPlan {
         mode,
         version: context.build.version.clone(),
         migration,
         unchanged: false,
         swaps: Vec::new(),
-        marker: None,
         restart: true,
         record: None,
         processes_to_stop: Vec::new(),
+        deletions: retired.deletions.clone(),
         registrations_to_rewrite: Vec::new(),
     };
-    let relay_changes = installed.as_ref().map(|record| &record.relay_revision)
-        != Some(&context.build.relay_revision);
-    let edge_changes = relay_changes || pre_edge;
+    let edge_changes = edge_changes(context, installed.as_ref())?;
     match mode {
         Mode::Release => {
+            if installed
+                .as_ref()
+                .is_some_and(|record| record.channel == Channel::Development)
+            {
+                let service = context.payload.join(SERVICE_EXECUTABLE_NAME);
+                return Err(DevelopmentInstalled::new(&service).into());
+            }
             validate_payload(&context.payload, &layout.bin())?;
             let image = installed_image(layout)?;
-            let payload_record = context.build.record(None);
+            let payload_record = context.build.record(None, Channel::Release);
             match record::decide(installed.as_ref(), &payload_record, image.as_deref()) {
                 Standing::Newer => {
                     let installed = installed.as_ref().expect("a newer standing has a record");
                     return Err(PayloadRefused::new(installed, &payload_record).into());
                 }
-                Standing::Same if plan.migration.is_empty() => {
+                Standing::Same if plan.migration.is_empty() && retired.is_empty() => {
                     plan.unchanged = true;
                     plan.restart = false;
                     return Ok(plan);
                 }
                 Standing::Same => {}
                 Standing::Absent | Standing::Older | Standing::Damaged => {
-                    push_service_swaps(context, &mut plan, layout.bin());
-                    plan.record = Some(placed_in_bin(
+                    place_in_bin(
                         context,
                         &mut plan,
                         installed.as_ref(),
                         edge_changes,
-                    )?);
+                        Channel::Release,
+                    )?;
                 }
             }
         }
-        Mode::Development => {
-            validate_payload(&context.payload, &layout.dev())?;
-            push_service_swaps(context, &mut plan, layout.dev());
-            plan.swaps.push(edge_swap(context, layout.dev()));
-            plan.marker = Some(MarkerChange::Write(layout.development_executable()));
-            if edge_changes {
-                // The edge starts bin/ghostlight-service serve, which forwards to the
-                // development build, so bin must hold an edge and a service at the payload's
-                // relay revision.
-                push_service_swaps(context, &mut plan, layout.bin());
-                plan.record = Some(placed_in_bin(context, &mut plan, installed.as_ref(), true)?);
-            }
-        }
-        Mode::Restore => {
-            check_restore(context, installed.as_ref())?;
-            plan.marker = Some(MarkerChange::Remove);
+        Mode::Development | Mode::Restore => {
+            validate_payload(&context.payload, &layout.bin())?;
+            let channel = if mode == Mode::Development {
+                Channel::Development
+            } else {
+                Channel::Release
+            };
+            place_in_bin(
+                context,
+                &mut plan,
+                installed.as_ref(),
+                edge_changes,
+                channel,
+            )?;
         }
     }
     plan.processes_to_stop = plan.migration.images_to_stop.clone();
-    for image in running_images(layout) {
+    for image in running_images(layout)
+        .into_iter()
+        .chain(retired.images.iter().cloned())
+    {
         if !plan.processes_to_stop.contains(&image) {
             plan.processes_to_stop.push(image);
         }
@@ -740,6 +752,12 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// is archived, the 1.x lifecycle files are deleted, and what the 1.x Flatpak route left in the
 /// home is removed or restored, each file reported. A migrating plan always restarts: a plan
 /// with nothing to place and a migration to run never reaches the unchanged shortcut.
+///
+/// The retired development directory and marker go the same way: once `bin` holds the new
+/// executables and the registrations name them, the service is asked to quit (it may be running
+/// from that directory), whatever else runs from there is stopped, and the directory and the
+/// marker are removed. An entry a running program keeps is reported in [`Outcome::left_behind`];
+/// it does not fail the install.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
@@ -748,6 +766,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             service_started: None,
             registrations: None,
             flatpak: Vec::new(),
+            left_behind: Vec::new(),
         });
     }
     let migrating = !plan.migration.is_empty();
@@ -757,20 +776,13 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     );
     let mut copied = Vec::new();
     let mut flatpak = Vec::new();
+    let mut left_behind = Vec::new();
     if migrating {
         migration::prepare(&plan.migration)?;
         copied = migration::copy_state(&plan.migration)?;
     }
     for placed in &plan.swaps {
         swap::rename_swap(&placed.directory, &placed.name, &placed.source)?;
-    }
-    match &plan.marker {
-        Some(MarkerChange::Write(executable)) => DevelopmentMarker {
-            executable: executable.clone(),
-        }
-        .write(&layout.development_marker())?,
-        Some(MarkerChange::Remove) => DevelopmentMarker::remove(&layout.development_marker())?,
-        None => {}
     }
     let registrations = context
         .registrations
@@ -786,6 +798,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             // A program that will not stop is left for `doctor` to name; it blocks nothing here.
             let _ = context.control.stop_strays(&strays);
         }
+        left_behind = remove_retired_development(context.control, layout, &plan);
         if migrating {
             migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
@@ -809,6 +822,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         service_started,
         registrations: Some(registrations),
         flatpak,
+        left_behind,
     })
 }
 
@@ -857,66 +871,162 @@ fn stop_legacy(control: &dyn ProcessControl, images: &[PathBuf]) -> anyhow::Resu
     Ok(())
 }
 
-/// The swap placing the payload's service in `directory`.
-fn service_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
+/// The swap placing the payload's service in `bin`.
+fn service_swap(context: &Context<'_>) -> Swap {
     Swap {
-        directory,
+        directory: context.layout.bin(),
         name: SERVICE_EXECUTABLE_NAME.to_owned(),
         source: context.payload.join(SERVICE_EXECUTABLE_NAME),
     }
 }
 
-/// The swap placing the payload's shell in `directory`.
-fn desktop_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
+/// The swap placing the payload's shell in `bin`.
+fn desktop_swap(context: &Context<'_>) -> Swap {
     Swap {
-        directory,
+        directory: context.layout.bin(),
         name: DESKTOP_EXECUTABLE_NAME.to_owned(),
         source: context.payload.join(DESKTOP_EXECUTABLE_NAME),
     }
 }
 
-/// Add the swap placing the payload's service in `directory` to `plan`, and right after it the
-/// swap placing the payload's shell when the payload has one. A payload without a shell installs
-/// as it always did.
-fn push_service_swaps(context: &Context<'_>, plan: &mut InstallPlan, directory: PathBuf) {
-    plan.swaps.push(service_swap(context, directory.clone()));
-    if context.payload.join(DESKTOP_EXECUTABLE_NAME).is_file() {
-        plan.swaps.push(desktop_swap(context, directory));
-    }
-}
-
-/// The swap placing the payload's edge in `directory`.
-fn edge_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
+/// The swap placing the payload's edge in `bin`.
+fn edge_swap(context: &Context<'_>) -> Swap {
     Swap {
-        directory,
+        directory: context.layout.bin(),
         name: EDGE_EXECUTABLE_NAME.to_owned(),
         source: context.payload.join(EDGE_EXECUTABLE_NAME),
     }
 }
 
-/// Add the edge swap to `plan` when `edge_changes`, and return the record `bin` holds once the
-/// payload is installed there: the edge it leaves is the payload's, or the installed one.
-fn placed_in_bin(
+/// Whether the payload has a shell that `bin` does not already hold.
+fn shell_changes(context: &Context<'_>) -> bool {
+    let source = context.payload.join(DESKTOP_EXECUTABLE_NAME);
+    let installed = context.layout.bin().join(DESKTOP_EXECUTABLE_NAME);
+    source.is_file()
+        && !matches!(
+            (record::sha256_file(&source), record::sha256_file(&installed)),
+            (Ok(payload), Ok(installed)) if payload == installed
+        )
+}
+
+/// Whether the install replaces the edge in `bin`: there is no record, the edge speaks another
+/// relay revision, `bin` still holds the pre-edge layout, or the edge there is missing or is not
+/// the one the record says was installed.
+fn edge_changes(context: &Context<'_>, installed: Option<&InstallRecord>) -> io::Result<bool> {
+    let relay_changes =
+        installed.map(|record| &record.relay_revision) != Some(&context.build.relay_revision);
+    if relay_changes || migration::pre_edge_layout(&context.layout) {
+        return Ok(true);
+    }
+    let Some(recorded) = installed.and_then(|record| record.edge_sha256.as_deref()) else {
+        return Ok(true);
+    };
+    match record::sha256_file(&context.layout.edge()) {
+        Ok(sha) => Ok(sha != recorded),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
+/// Add the swaps that place the payload in `bin` to `plan`, and set the record `bin` holds once
+/// they are done: the service always, the shell when the payload has one `bin` does not, and the
+/// edge when `edge_changes` (the edge it leaves is the payload's, or the installed one).
+fn place_in_bin(
     context: &Context<'_>,
     plan: &mut InstallPlan,
     installed: Option<&InstallRecord>,
     edge_changes: bool,
-) -> anyhow::Result<InstallRecord> {
+    channel: Channel,
+) -> anyhow::Result<()> {
+    plan.swaps.push(service_swap(context));
+    if shell_changes(context) {
+        plan.swaps.push(desktop_swap(context));
+    }
     let edge_sha256 = if edge_changes {
-        plan.swaps.push(edge_swap(context, context.layout.bin()));
+        plan.swaps.push(edge_swap(context));
         Some(record::sha256_file(
             &context.payload.join(EDGE_EXECUTABLE_NAME),
         )?)
     } else {
         installed.and_then(|record| record.edge_sha256.clone())
     };
-    Ok(context.build.record(edge_sha256))
+    plan.record = Some(context.build.record(edge_sha256, channel));
+    Ok(())
 }
 
-/// Every image a running service of this home may have been started from.
+/// What earlier 2.0 development builds left in the home: the images that may still run from the
+/// retired development directory, and the directory and marker to remove.
+struct RetiredDevelopment {
+    /// Every service, edge and shell image in the directory, with the images earlier swaps moved
+    /// aside.
+    images: Vec<PathBuf>,
+    /// The directory and the marker, as far as they exist.
+    deletions: Vec<PathBuf>,
+}
+
+impl RetiredDevelopment {
+    /// Look in `layout`'s home.
+    fn find(layout: &Layout) -> Self {
+        let directory = layout.retired_development_directory();
+        let marker = layout.retired_development_marker();
+        let images = [
+            SERVICE_EXECUTABLE_NAME,
+            EDGE_EXECUTABLE_NAME,
+            DESKTOP_EXECUTABLE_NAME,
+        ]
+        .into_iter()
+        .flat_map(|name| swap::images(&directory, name))
+        .collect();
+        let deletions = [directory, marker]
+            .into_iter()
+            .filter(|path| fs::symlink_metadata(path).is_ok())
+            .collect();
+        Self { images, deletions }
+    }
+
+    /// Whether nothing is left to clean up.
+    fn is_empty(&self) -> bool {
+        self.deletions.is_empty()
+    }
+}
+
+/// Stop what runs from the retired development directory and remove what `plan` lists as
+/// deletions. Returns the entries that could not be removed, which are the ones a program still
+/// runs from. A stop that fails is not an error here: the removal that follows names what stayed.
+fn remove_retired_development(
+    control: &dyn ProcessControl,
+    layout: &Layout,
+    plan: &InstallPlan,
+) -> Vec<PathBuf> {
+    if plan.deletions.is_empty() {
+        return Vec::new();
+    }
+    let retired = RetiredDevelopment::find(layout);
+    if !retired.images.is_empty() {
+        let _ = control.stop_image(&retired.images);
+    }
+    plan.deletions
+        .iter()
+        .filter(|path| {
+            let removed = if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            };
+            removed.is_err_and(|error| error.kind() != io::ErrorKind::NotFound)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Every image a running service of this home may have been started from: the ones in `bin` and
+/// the service images of the retired development directory.
 fn running_images(layout: &Layout) -> Vec<PathBuf> {
     let mut images = swap::images(&layout.bin(), SERVICE_EXECUTABLE_NAME);
-    images.extend(swap::images(&layout.dev(), SERVICE_EXECUTABLE_NAME));
+    images.extend(swap::images(
+        &layout.retired_development_directory(),
+        SERVICE_EXECUTABLE_NAME,
+    ));
     images
 }
 
@@ -927,29 +1037,6 @@ fn installed_image(layout: &Layout) -> io::Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
-}
-
-/// Refuse a restore unless the installed service runs it and its edge matches it.
-fn check_restore(
-    context: &Context<'_>,
-    installed: Option<&InstallRecord>,
-) -> Result<(), RestoreRefused> {
-    let layout = &context.layout;
-    let installed = installed.ok_or_else(|| RestoreRefused::NoRelease(layout.bin()))?;
-    let image = record::sha256_file(&layout.service_executable()).ok();
-    if image.as_deref() != Some(context.build.image_sha256.as_str()) {
-        return Err(RestoreRefused::NotInstalledService(
-            layout.service_executable(),
-        ));
-    }
-    if installed.relay_revision != context.build.relay_revision {
-        return Err(RestoreRefused::RelayMismatch {
-            bin: layout.bin(),
-            edge: installed.relay_revision.clone(),
-            service: context.build.relay_revision.clone(),
-        });
-    }
-    Ok(())
 }
 
 /// Require the service and the edge in `payload`, which must not be `destination` itself.
@@ -1352,6 +1439,7 @@ mod tests {
                 relay_revision: RELAY.to_owned(),
                 service_sha256: fixture.build(VERSION).image_sha256,
                 edge_sha256: Some(record::sha256_file(&fixture.layout.edge()).unwrap()),
+                channel: Channel::Release,
             })
         );
         assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
@@ -1523,6 +1611,7 @@ mod tests {
             relay_revision: RELAY.to_owned(),
             service_sha256: "0".repeat(64),
             edge_sha256: None,
+            channel: Channel::Release,
         }
         .write(&fixture.layout.install_record())
         .unwrap();
@@ -1544,33 +1633,6 @@ mod tests {
         assert_eq!(
             fixture.record().unwrap().edge_sha256,
             Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-        );
-    }
-
-    #[test]
-    fn a_development_service_that_sits_under_the_edges_name_is_stopped_and_replaced() {
-        let fixture = Fixture::new();
-        let dev = fixture.layout.dev();
-        fs::create_dir_all(&dev).unwrap();
-        fs::write(
-            fixture.layout.development_edge(),
-            "pre-edge development service",
-        )
-        .unwrap();
-        let control = FakeControl::new();
-        fixture.run(Mode::Development, VERSION, &control).unwrap();
-        let calls = control.calls();
-        let Call::Stop(images) = &calls[0] else {
-            panic!("{calls:?}");
-        };
-        assert_eq!(images, &[dev.join(format!("{EDGE_EXECUTABLE_NAME}.old-1"))]);
-        assert_eq!(
-            fixture.read(fixture.layout.development_edge()),
-            edge_text(RELAY)
-        );
-        assert_eq!(
-            fixture.read(fixture.layout.development_executable()),
-            "service"
         );
     }
 
@@ -1597,59 +1659,222 @@ mod tests {
         assert_eq!(calls[2..], [Call::Start, Call::Wait]);
     }
 
+    /// The names of the files a plan places, in order.
+    fn placed_names(plan: &InstallPlan) -> Vec<&str> {
+        plan.swaps
+            .iter()
+            .map(|placed| placed.name.as_str())
+            .collect()
+    }
+
+    /// Put what an earlier 2.0 development build left in the home: a service, an edge and a shell
+    /// in the retired directory, an image a swap moved aside, and the marker. Returns the images.
+    fn plant_retired_development(fixture: &Fixture) -> Vec<PathBuf> {
+        let directory = fixture.layout.retired_development_directory();
+        fs::create_dir_all(&directory).unwrap();
+        let mut images: Vec<PathBuf> = [
+            SERVICE_EXECUTABLE_NAME,
+            EDGE_EXECUTABLE_NAME,
+            DESKTOP_EXECUTABLE_NAME,
+        ]
+        .iter()
+        .map(|name| directory.join(name))
+        .collect();
+        images.push(directory.join(format!("{SERVICE_EXECUTABLE_NAME}.old-1")));
+        for image in &images {
+            fs::write(image, "development image").unwrap();
+        }
+        fs::write(fixture.layout.retired_development_marker(), "{}").unwrap();
+        images
+    }
+
     #[test]
-    fn development_installs_dev_the_marker_and_bin_at_the_break() {
+    fn a_development_install_swaps_the_service_into_bin_and_keeps_an_intact_edge() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let recorded = fixture.record().unwrap();
+        assert_eq!(recorded.channel, Channel::Release);
+        Fixture::write_payload(&fixture.payload, "development service");
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+        let control = FakeControl::new();
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(
+            fixture.read(fixture.layout.service_executable()),
+            "development service"
+        );
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        let record = fixture.record().unwrap();
+        assert_eq!(record.channel, Channel::Development);
+        assert_eq!(record.edge_sha256, recorded.edge_sha256);
+        assert_eq!(
+            record.service_sha256,
+            record::sha256_file(&fixture.layout.service_executable()).unwrap()
+        );
+        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+        assert!(!fixture.layout.retired_development_directory().exists());
+        assert!(!fixture.layout.retired_development_marker().exists());
+    }
+
+    #[test]
+    fn a_development_install_with_no_record_also_swaps_the_edge() {
         let fixture = Fixture::new();
         let outcome = fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
         assert_eq!(outcome.service_started, Some(true));
         assert_eq!(
-            fixture.read(fixture.layout.development_executable()),
-            "service"
+            placed_names(&outcome.plan),
+            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
         );
-        assert_eq!(
-            DevelopmentMarker::read(&fixture.layout.development_marker()).unwrap(),
-            Some(DevelopmentMarker {
-                executable: fixture.layout.development_executable(),
-            })
-        );
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        assert_eq!(
-            fixture.read(fixture.layout.development_edge()),
-            edge_text(RELAY)
-        );
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        assert_eq!(fixture.record().unwrap().relay_revision, RELAY);
-
-        // With bin on the same relay revision, the next development build leaves bin alone.
-        Fixture::write_payload(&fixture.payload, "dev service");
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.plan.swaps.len(), 2);
         assert!(outcome
             .plan
             .swaps
             .iter()
-            .all(|placed| placed.directory == fixture.layout.dev()));
-        assert_eq!(
-            fixture.read(fixture.layout.development_executable()),
-            "dev service"
-        );
+            .all(|placed| placed.directory == fixture.layout.bin()));
         assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        let record = fixture.record().unwrap();
+        assert_eq!(record.channel, Channel::Development);
+        assert_eq!(
+            record.edge_sha256,
+            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+        );
+        assert!(!fixture.layout.retired_development_directory().exists());
     }
 
     #[test]
-    fn restore_removes_the_marker_and_refuses_a_relay_mismatch() {
+    fn a_development_install_swaps_an_edge_that_is_not_the_recorded_one() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let recorded = fixture.record().unwrap().edge_sha256;
+        fs::write(fixture.layout.edge(), "changed edge").unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(
+            placed_names(&outcome.plan),
+            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+        );
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
+
+        fs::remove_file(fixture.layout.edge()).unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME));
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+    }
+
+    #[test]
+    fn a_development_install_of_the_same_version_swaps_and_restarts_every_time() {
+        let fixture = Fixture::new();
+        for round in 0..3 {
+            Fixture::write_payload(&fixture.payload, &format!("build {round}"));
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert!(!outcome.plan.unchanged, "round {round}");
+            assert_eq!(outcome.service_started, Some(true), "round {round}");
+            assert_eq!(
+                fixture.read(fixture.layout.service_executable()),
+                format!("build {round}")
+            );
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+        }
+    }
+
+    #[test]
+    fn a_development_install_accepts_any_version() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, "2.5.0", &FakeControl::new())
+            .unwrap();
+        for version in ["2.0.0", "3.0.0"] {
+            Fixture::write_payload(&fixture.payload, version);
+            fixture
+                .run(Mode::Development, version, &FakeControl::new())
+                .unwrap();
+            assert_eq!(fixture.record().unwrap().service_version, version);
+            assert_eq!(fixture.read(fixture.layout.service_executable()), version);
+        }
+    }
+
+    #[test]
+    fn a_release_install_over_a_development_installation_is_refused_and_changes_nothing() {
         let fixture = Fixture::new();
         fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
-        // The bin service runs the restore: its build is the bin image.
+        let before = fixture.snapshot();
+        for version in ["2.0.0", VERSION, "9.9.9"] {
+            let control = FakeControl::new();
+            let error = fixture.run(Mode::Release, version, &control).unwrap_err();
+            let refusal = error
+                .downcast_ref::<DevelopmentInstalled>()
+                .unwrap_or_else(|| panic!("{error}"));
+            let service = fixture.payload.join(SERVICE_EXECUTABLE_NAME);
+            assert!(
+                refusal.restore.ends_with(&format!(
+                    "{} deployment install --restore",
+                    service.display()
+                )),
+                "{}",
+                refusal.restore
+            );
+            assert!(error.to_string().contains("development build"), "{error}");
+            assert!(control.calls().is_empty());
+            assert_eq!(fixture.snapshot(), before, "{version}");
+        }
+    }
+
+    #[test]
+    fn a_restore_from_a_payload_older_than_the_development_installation_installs_a_release() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, "2.5.0", &FakeControl::new())
+            .unwrap();
+        Fixture::write_payload(&fixture.payload, "release service");
         let control = FakeControl::new();
-        let outcome = install(
-            &fixture.context(fixture.build(VERSION), &control),
+        let outcome = fixture.run(Mode::Restore, "2.0.0", &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(!outcome.plan.unchanged);
+        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(
+            fixture.read(fixture.layout.service_executable()),
+            "release service"
+        );
+        let record = fixture.record().unwrap();
+        assert_eq!(record.service_version, "2.0.0");
+        assert_eq!(record.channel, Channel::Release);
+        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+
+        // The installation is a release again: the same package is nothing to do.
+        let outcome = fixture
+            .run(Mode::Release, "2.0.0", &FakeControl::new())
+            .unwrap();
+        assert!(outcome.plan.unchanged);
+    }
+
+    #[test]
+    fn a_restore_replaces_the_edge_by_the_normal_rule_and_is_not_offline() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        Fixture::write_payload(&fixture.payload, "release service");
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
+        let build = Build {
+            relay_revision: "5".to_owned(),
+            ..fixture.build("2.0.0")
+        };
+        install(
+            &fixture.context(build, &FakeControl::new()),
             &Request {
                 payload: None,
                 mode: Mode::Restore,
@@ -1657,32 +1882,151 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!fixture.layout.development_marker().exists());
+        assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
+        let record = fixture.record().unwrap();
+        assert_eq!(record.relay_revision, "5");
+        assert_eq!(record.channel, Channel::Release);
+    }
 
-        let mut record = fixture.record().unwrap();
-        record.relay_revision = "2".to_owned();
-        record.write(&fixture.layout.install_record()).unwrap();
+    #[test]
+    fn a_restore_with_nothing_installed_is_an_install() {
+        let fixture = Fixture::new();
+        let outcome = fixture
+            .run(Mode::Restore, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+        assert_eq!(fixture.record().unwrap().channel, Channel::Release);
+    }
+
+    #[test]
+    fn the_retired_development_layout_is_planned_and_removed_after_the_bin_swap() {
+        let fixture = Fixture::new();
+        let images = plant_retired_development(&fixture);
+        let directory = fixture.layout.retired_development_directory();
+        let marker = fixture.layout.retired_development_marker();
         let before = fixture.snapshot();
-        let control = FakeControl::new();
-        let error = install(
-            &fixture.context(fixture.build(VERSION), &control),
-            &Request {
-                payload: None,
-                mode: Mode::Restore,
-                plan_only: false,
-            },
+
+        let planned = plan(
+            &fixture.context(fixture.build(VERSION), &FakeControl::new()),
+            Mode::Development,
         )
-        .unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<RestoreRefused>(),
-                Some(RestoreRefused::RelayMismatch { .. })
-            ),
-            "{error}"
+        .unwrap();
+        assert_eq!(planned.deletions, [directory.clone(), marker.clone()]);
+        for image in &images {
+            assert!(planned.processes_to_stop.contains(image), "{image:?}");
+        }
+        assert_eq!(fixture.snapshot(), before, "a plan changes nothing");
+
+        let control = fixture.watching_control();
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(outcome.left_behind.is_empty());
+        assert!(!directory.exists());
+        assert!(!marker.exists());
+        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+
+        let calls = control.calls();
+        let Call::Stop(stopped) = &calls[1] else {
+            panic!("{calls:?}");
+        };
+        let mut stopped = stopped.clone();
+        stopped.sort();
+        let mut expected = images;
+        expected.sort();
+        assert_eq!(stopped, expected);
+        assert_eq!(calls[0], Call::Quit);
+        assert_eq!(calls[2..], [Call::Start, Call::Wait]);
+        for sighting in control.sightings() {
+            assert!(
+                sighting.registered,
+                "registrations name bin before any stop"
+            );
+        }
+        assert!(fixture.manifest_names_bin_edge());
+    }
+
+    #[test]
+    fn a_service_still_running_from_the_retired_directory_is_stopped_by_its_exact_image() {
+        let fixture = Fixture::new();
+        let images = plant_retired_development(&fixture);
+        let mut control = FakeControl::new();
+        control.quits = false;
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        let calls = control.calls();
+        let Call::Stop(first) = &calls[1] else {
+            panic!("{calls:?}");
+        };
+        assert!(first.contains(&images[0]), "{first:?}");
+        assert!(!fixture.layout.retired_development_directory().exists());
+    }
+
+    #[test]
+    fn a_marker_with_no_directory_and_a_directory_with_no_marker_are_each_removed() {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.layout.home()).unwrap();
+        fs::write(fixture.layout.retired_development_marker(), "{}").unwrap();
+        let control = FakeControl::new();
+        fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert!(!fixture.layout.retired_development_marker().exists());
+        assert!(!control
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::Stop(_))));
+
+        fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(!fixture.layout.retired_development_directory().exists());
+    }
+
+    #[test]
+    fn a_same_release_with_a_retired_development_layout_still_cleans_it_up() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        plant_retired_development(&fixture);
+        let control = FakeControl::new();
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert!(!outcome.plan.unchanged);
+        assert!(outcome.plan.swaps.is_empty());
+        assert!(!fixture.layout.retired_development_directory().exists());
+        assert!(!fixture.layout.retired_development_marker().exists());
+        assert_eq!(control.calls()[0], Call::Quit);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_entry_a_running_program_keeps_is_reported_and_does_not_fail_the_install() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let fixture = Fixture::new();
+        let images = plant_retired_development(&fixture);
+        // A program running from an image holds it open without sharing delete.
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&images[0])
+            .unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(
+            outcome.left_behind,
+            [fixture.layout.retired_development_directory()]
         );
-        assert!(control.calls().is_empty());
-        assert_eq!(fixture.snapshot(), before);
+        assert!(!fixture.layout.retired_development_marker().exists());
+        drop(held);
+
+        // The next install finishes the removal.
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(outcome.left_behind.is_empty());
+        assert!(!fixture.layout.retired_development_directory().exists());
     }
 
     #[test]
@@ -2143,7 +2487,7 @@ mod tests {
         )
         .unwrap();
         assert!(!outcome.plan.migration.is_empty());
-        assert_eq!(outcome.plan.swaps.len(), 4);
+        assert_eq!(outcome.plan.swaps.len(), 2);
         assert!(serde_json::to_value(&outcome.plan).is_ok());
         assert!(control.calls().is_empty());
         assert_eq!(fixture.snapshot(), before);
@@ -2277,6 +2621,7 @@ mod tests {
             relay_revision: relay.to_owned(),
             service_sha256: "0".repeat(64),
             edge_sha256: None,
+            channel: Channel::Release,
         };
         record(EARLIER_DEVELOPMENT_RELAY)
             .write(&fixture.layout.install_record())
@@ -2320,11 +2665,11 @@ mod tests {
     }
 
     #[test]
-    fn a_development_payload_with_a_shell_places_it_beside_every_service() {
+    fn a_development_payload_with_a_shell_places_it_in_bin_when_bin_holds_another() {
         let fixture = Fixture::new();
         add_shell(&fixture, "shell");
         let layout = &fixture.layout;
-        let named = |name: &str, directory: PathBuf| (name.to_owned(), directory);
+        let named = |name: &str| (name.to_owned(), layout.bin());
 
         let control = FakeControl::new();
         let planned = plan(
@@ -2335,28 +2680,22 @@ mod tests {
         assert_eq!(
             placed(&planned),
             [
-                named(SERVICE_EXECUTABLE_NAME, layout.dev()),
-                named(DESKTOP_EXECUTABLE_NAME, layout.dev()),
-                named(EDGE_EXECUTABLE_NAME, layout.dev()),
-                named(SERVICE_EXECUTABLE_NAME, layout.bin()),
-                named(DESKTOP_EXECUTABLE_NAME, layout.bin()),
-                named(EDGE_EXECUTABLE_NAME, layout.bin()),
+                named(SERVICE_EXECUTABLE_NAME),
+                named(DESKTOP_EXECUTABLE_NAME),
+                named(EDGE_EXECUTABLE_NAME),
             ]
         );
+        assert!(!layout.retired_development_directory().exists());
 
         fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
         assert_eq!(
-            fixture.read(layout.dev().join(DESKTOP_EXECUTABLE_NAME)),
-            "shell"
-        );
-        assert_eq!(
             fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
             "shell"
         );
 
-        // With bin on the same relay revision, the next development build leaves bin alone.
+        // A different shell is swapped; the intact edge stays.
         add_shell(&fixture, "next shell");
         let outcome = fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
@@ -2364,19 +2703,20 @@ mod tests {
         assert_eq!(
             placed(&outcome.plan),
             [
-                named(SERVICE_EXECUTABLE_NAME, layout.dev()),
-                named(DESKTOP_EXECUTABLE_NAME, layout.dev()),
-                named(EDGE_EXECUTABLE_NAME, layout.dev()),
+                named(SERVICE_EXECUTABLE_NAME),
+                named(DESKTOP_EXECUTABLE_NAME)
             ]
         );
         assert_eq!(
-            fixture.read(layout.dev().join(DESKTOP_EXECUTABLE_NAME)),
+            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
             "next shell"
         );
-        assert_eq!(
-            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
-            "shell"
-        );
+
+        // The same shell is left in place.
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(placed(&outcome.plan), [named(SERVICE_EXECUTABLE_NAME)]);
     }
 
     #[test]
@@ -2424,13 +2764,13 @@ mod tests {
         assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
     }
 
-    /// A temporary home with its `bin` and `dev` directories.
+    /// A temporary home with its `bin` and retired development directories.
     fn stray_home() -> (Scratch, Layout) {
         let scratch = Scratch::new();
         let root = fs::canonicalize(scratch.path()).unwrap();
         let layout = Layout::new(root.join("home"));
         fs::create_dir_all(layout.bin()).unwrap();
-        fs::create_dir_all(layout.dev()).unwrap();
+        fs::create_dir_all(layout.retired_development_directory()).unwrap();
         (scratch, layout)
     }
 
@@ -2507,7 +2847,7 @@ mod tests {
     fn the_current_programs_and_programs_elsewhere_are_never_strays() {
         let (scratch, layout) = stray_home();
         let mut current = Vec::new();
-        for directory in [layout.bin(), layout.dev()] {
+        for directory in [layout.bin(), layout.retired_development_directory()] {
             for name in [
                 EDGE_EXECUTABLE_NAME,
                 SERVICE_EXECUTABLE_NAME,

@@ -1,17 +1,17 @@
 //! The entry rule: what a `ghostlight` process does before it does its job.
 //!
-//! Any copy of the service image can be started: from `bin`, from a development build, or from a
-//! package that only carries it. [`decide`] answers, from the process's own path, its role, the
-//! development marker and the state of the installation, whether to run, hand over to another
-//! executable, install first, or refuse (ADR-0197 Decisions 10, 13 and 15, ADR-0199 Decisions 2
-//! and 19). It is pure: the caller gathers the facts and performs the answer. Links are not followed here, so the caller
-//! resolves every path it passes with [`canonical_path`] first.
+//! Any copy of the service image can be started: from `bin`, or from a package or a build
+//! directory that only carries it. [`decide`] answers, from the process's own path, its role and
+//! the state of the installation, whether to run, hand over to another executable, install first,
+//! or refuse (ADR-0197 Decisions 10 and 13, ADR-0199 Decisions 2 and 19 and the development
+//! channel amendment). It is pure: the caller gathers the facts and performs the answer. Links
+//! are not followed here, so the caller resolves every path it passes with [`canonical_path`]
+//! first.
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use super::marker::DevelopmentMarker;
 use super::record::Standing;
 
 /// What a process was started to do, as far as the entry rule cares.
@@ -40,8 +40,9 @@ pub struct Facts {
     pub installed_service: PathBuf,
     /// The fixed edge, `home/bin/ghostlight`.
     pub installed_edge: PathBuf,
-    /// Whether the executable the development marker names exists.
-    pub development_executable_exists: bool,
+    /// Whether the installed record is the development channel. A copy that is not the installed
+    /// service never installs over it.
+    pub development_channel: bool,
     /// How the installed copy stands against this process's own package.
     pub standing: Standing,
 }
@@ -63,48 +64,35 @@ pub enum Entry {
 /// Why a process may not run.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum Refusal {
-    /// Only the installed service or the development build serves, so there is one service per
-    /// user by construction.
-    #[error("only the installed Ghostlight service or the development build can serve")]
+    /// Only the installed service serves, so there is one service per user by construction.
+    #[error("only the installed Ghostlight service can serve")]
     ServeFromElsewhere,
 }
 
 /// Decide what the process at `current_exe` does for `role`.
 ///
-/// `current_exe`, the marker's executable and `facts.installed_service` must all be canonical
-/// ([`canonical_path`]). A process never forwards to itself: a target that names the running
-/// executable ends in [`Entry::Run`].
+/// `current_exe` and `facts.installed_service` must both be canonical ([`canonical_path`]). A
+/// process never forwards to itself: a target that names the running executable ends in
+/// [`Entry::Run`].
 ///
 /// 1. The installer always runs.
-/// 2. The edge's own verbs always go to the installed edge, also while a development marker is
-///    set: the development install keeps the edge in `bin` at its relay revision. A copy that is
-///    not the installed service is a carrier and installs first when the installed set is
-///    absent, older or damaged.
-/// 3. While a development marker names an existing executable, that executable does everything
-///    else: it runs, and every other copy forwards to it. A marker whose executable is gone is
-///    ignored, so a deleted build cannot lock out the installed one.
-/// 4. Without a marker only the installed service serves. Inspection runs from anywhere.
-/// 5. Any other launch from a copy that is not the installed service is a carrier: it installs
-///    when the installed service is absent, older or damaged, and otherwise hands over.
+/// 2. Only the installed service serves.
+/// 3. Inspection runs from anywhere.
+/// 4. Any other launch from a copy that is not the installed service is a carrier. It installs
+///    when the installed set is absent, older or damaged, unless the installed set is the
+///    development channel, which a carrier never installs over. Otherwise it hands over: the
+///    edge's own verbs to the installed edge, everything else to the installed service.
 #[must_use]
-pub fn decide(
-    current_exe: &Path,
-    role: Role,
-    marker: Option<&DevelopmentMarker>,
-    facts: &Facts,
-) -> Entry {
+pub fn decide(current_exe: &Path, role: Role, facts: &Facts) -> Entry {
     if role == Role::Deployment {
         return Entry::Run;
-    }
-    let marked = marker.filter(|_| role != Role::Relay && facts.development_executable_exists);
-    if let Some(marker) = marked {
-        return forward_unless_self(current_exe, &marker.executable);
     }
     let installed = same_path(current_exe, &facts.installed_service);
     let needs_install = matches!(
         facts.standing,
         Standing::Absent | Standing::Older | Standing::Damaged
-    ) && !installed;
+    ) && !installed
+        && !facts.development_channel;
     match role {
         Role::Deployment | Role::Inspect => Entry::Run,
         Role::Serve if installed => Entry::Run,
@@ -120,8 +108,8 @@ pub fn decide(
 /// Windows puts on resolved paths. A path that cannot be resolved is returned unchanged.
 ///
 /// This is how the entry rule's inputs are made comparable: the running executable (which Linux
-/// reports with links resolved), the installed service and the marker's executable all go
-/// through it before [`decide`] sees them.
+/// reports with links resolved) and the installed service both go through it before [`decide`]
+/// sees them.
 #[must_use]
 pub fn canonical_path(path: &Path) -> PathBuf {
     ghostlight_relay::home::canonical(path).unwrap_or_else(|_| path.to_path_buf())
@@ -197,63 +185,46 @@ mod tests {
         Facts {
             installed_service: path("bin/ghostlight-service"),
             installed_edge: path("bin/ghostlight"),
-            development_executable_exists: true,
+            development_channel: false,
             standing,
         }
     }
 
-    fn marker() -> DevelopmentMarker {
-        DevelopmentMarker {
-            executable: path("dev/ghostlight-service"),
+    fn development(standing: Standing) -> Facts {
+        Facts {
+            development_channel: true,
+            ..facts(standing)
         }
     }
 
-    fn check(
-        name: &str,
-        current_exe: &Path,
-        role: Role,
-        marker: Option<DevelopmentMarker>,
-        facts: Facts,
-        expected: Entry,
-    ) {
-        assert_eq!(
-            decide(current_exe, role, marker.as_ref(), &facts),
-            expected,
-            "{name}"
-        );
+    fn check(name: &str, current_exe: &Path, role: Role, facts: Facts, expected: Entry) {
+        assert_eq!(decide(current_exe, role, &facts), expected, "{name}");
     }
 
     #[test]
     fn decisions_follow_the_entry_rule() {
         let installed = path("bin/ghostlight-service");
         let edge = path("bin/ghostlight");
-        let development = path("dev/ghostlight-service");
+        let build = path("target/release/ghostlight-service");
         let carrier = path("package/ghostlight-service");
-        let missing_build = Facts {
-            development_executable_exists: false,
-            ..facts(Standing::Same)
-        };
         check(
             "the installer runs from a carrier",
             &carrier,
             Role::Deployment,
-            None,
             facts(Standing::Absent),
             Entry::Run,
         );
         check(
-            "the installer ignores the marker",
+            "the installer runs over a development channel",
             &carrier,
             Role::Deployment,
-            Some(marker()),
-            facts(Standing::Same),
+            development(Standing::Same),
             Entry::Run,
         );
         check(
             "the installed service runs",
             &installed,
             Role::Launch,
-            None,
             facts(Standing::Same),
             Entry::Run,
         );
@@ -261,31 +232,34 @@ mod tests {
             "the installed service serves",
             &installed,
             Role::Serve,
-            None,
             facts(Standing::Same),
+            Entry::Run,
+        );
+        check(
+            "the installed service serves a development channel",
+            &installed,
+            Role::Serve,
+            development(Standing::Same),
             Entry::Run,
         );
         check(
             "a carrier serving is refused",
             &carrier,
             Role::Serve,
-            None,
             facts(Standing::Same),
             Entry::Refuse(Refusal::ServeFromElsewhere),
         );
         check(
-            "a development build serving without its marker is refused",
-            &development,
+            "a build directory serving is refused whatever the channel",
+            &build,
             Role::Serve,
-            None,
-            facts(Standing::Same),
+            development(Standing::Same),
             Entry::Refuse(Refusal::ServeFromElsewhere),
         );
         check(
             "an absent install is installed by the carrier",
             &carrier,
             Role::Launch,
-            None,
             facts(Standing::Absent),
             Entry::CarrierInstall,
         );
@@ -293,7 +267,6 @@ mod tests {
             "an older install is installed over by the carrier",
             &carrier,
             Role::Launch,
-            None,
             facts(Standing::Older),
             Entry::CarrierInstall,
         );
@@ -301,7 +274,6 @@ mod tests {
             "a damaged install is installed over by the carrier",
             &carrier,
             Role::Launch,
-            None,
             facts(Standing::Damaged),
             Entry::CarrierInstall,
         );
@@ -309,7 +281,6 @@ mod tests {
             "the same install is run, not reinstalled",
             &carrier,
             Role::Launch,
-            None,
             facts(Standing::Same),
             Entry::Forward(installed.clone()),
         );
@@ -317,7 +288,6 @@ mod tests {
             "a newer install is run, not downgraded",
             &carrier,
             Role::Launch,
-            None,
             facts(Standing::Newer),
             Entry::Forward(installed.clone()),
         );
@@ -325,56 +295,7 @@ mod tests {
             "inspection never installs",
             &carrier,
             Role::Inspect,
-            None,
             facts(Standing::Absent),
-            Entry::Run,
-        );
-        check(
-            "the marker forwards the installed service",
-            &installed,
-            Role::Serve,
-            Some(marker()),
-            facts(Standing::Same),
-            Entry::Forward(development.clone()),
-        );
-        check(
-            "the marker forwards a carrier",
-            &carrier,
-            Role::Launch,
-            Some(marker()),
-            facts(Standing::Absent),
-            Entry::Forward(development.clone()),
-        );
-        check(
-            "the marker forwards inspection",
-            &installed,
-            Role::Inspect,
-            Some(marker()),
-            facts(Standing::Same),
-            Entry::Forward(development.clone()),
-        );
-        check(
-            "the marked build runs every role",
-            &development,
-            Role::Serve,
-            Some(marker()),
-            facts(Standing::Absent),
-            Entry::Run,
-        );
-        check(
-            "the marked build runs a launch",
-            &development,
-            Role::Launch,
-            Some(marker()),
-            facts(Standing::Absent),
-            Entry::Run,
-        );
-        check(
-            "a marker naming a deleted build is ignored",
-            &installed,
-            Role::Serve,
-            Some(marker()),
-            missing_build.clone(),
             Entry::Run,
         );
         for (name, standing) in [
@@ -386,7 +307,6 @@ mod tests {
                 &format!("a carrier handed the edge's verbs installs over an {name} install"),
                 &carrier,
                 Role::Relay,
-                None,
                 facts(standing),
                 Entry::CarrierInstall,
             );
@@ -396,7 +316,6 @@ mod tests {
                 "a carrier hands the edge's verbs to the installed edge",
                 &carrier,
                 Role::Relay,
-                None,
                 facts(standing),
                 Entry::Forward(edge.clone()),
             );
@@ -405,40 +324,57 @@ mod tests {
             "the installed service hands the edge's verbs to the installed edge",
             &installed,
             Role::Relay,
-            None,
             facts(Standing::Same),
             Entry::Forward(edge.clone()),
         );
+    }
+
+    #[test]
+    fn a_carrier_never_installs_over_a_development_channel() {
+        let installed = path("bin/ghostlight-service");
+        let edge = path("bin/ghostlight");
+        let carrier = path("package/ghostlight-service");
+        for standing in [
+            Standing::Absent,
+            Standing::Older,
+            Standing::Damaged,
+            Standing::Same,
+            Standing::Newer,
+        ] {
+            check(
+                "a carrier runs the installed service",
+                &carrier,
+                Role::Launch,
+                development(standing),
+                Entry::Forward(installed.clone()),
+            );
+            check(
+                "a carrier hands the edge's verbs to the installed edge",
+                &carrier,
+                Role::Relay,
+                development(standing),
+                Entry::Forward(edge.clone()),
+            );
+        }
         check(
-            "the edge's verbs go to the installed edge while a development build is marked",
-            &carrier,
-            Role::Relay,
-            Some(marker()),
-            facts(Standing::Same),
-            Entry::Forward(edge.clone()),
-        );
-        check(
-            "the marked build hands the edge's verbs to the installed edge too",
-            &development,
-            Role::Relay,
-            Some(marker()),
-            facts(Standing::Same),
-            Entry::Forward(edge),
-        );
-        check(
-            "a carrier ignores a marker naming a deleted build",
-            &carrier,
+            "a build directory runs the installed service",
+            &path("target/release/ghostlight-service"),
             Role::Launch,
-            Some(marker()),
-            missing_build,
-            Entry::Forward(installed.clone()),
+            development(Standing::Older),
+            Entry::Forward(installed),
+        );
+        check(
+            "the installed service hands the edge's verbs to the installed edge",
+            &path("bin/ghostlight-service"),
+            Role::Relay,
+            development(Standing::Same),
+            Entry::Forward(edge),
         );
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_paths_compare_without_regard_to_spelling() {
-        let installed = path("bin/ghostlight-service");
         let shouted = PathBuf::from(ROOT.to_uppercase())
             .join("BIN")
             .join("GHOSTLIGHT-SERVICE");
@@ -450,29 +386,15 @@ mod tests {
         let trailing = PathBuf::from(format!("{ROOT}\\bin\\ghostlight-service\\"));
         for spelling in [&shouted, &slashed, &verbatim, &trailing] {
             assert_eq!(
-                decide(spelling, Role::Serve, None, &facts(Standing::Same)),
+                decide(spelling, Role::Serve, &facts(Standing::Same)),
                 Entry::Run,
                 "{spelling:?}"
             );
         }
-        for spelling in [&shouted, &slashed, &verbatim] {
-            let named_by_marker = DevelopmentMarker {
-                executable: spelling.clone(),
-            };
-            check(
-                "a marker naming the running build in another spelling runs it",
-                &installed,
-                Role::Launch,
-                Some(named_by_marker),
-                facts(Standing::Absent),
-                Entry::Run,
-            );
-        }
         check(
             "a service named in another spelling is never forwarded to",
-            &installed,
+            &path("bin/ghostlight-service"),
             Role::Launch,
-            None,
             Facts {
                 installed_service: shouted,
                 ..facts(Standing::Same)
@@ -520,10 +442,10 @@ mod tests {
         let facts = Facts {
             installed_service: canonical_path(&link.join("bin").join("ghostlight-service")),
             installed_edge: canonical_path(&link.join("bin").join("ghostlight")),
-            development_executable_exists: false,
+            development_channel: false,
             standing: Standing::Same,
         };
-        assert_eq!(decide(&running, Role::Serve, None, &facts), Entry::Run);
-        assert_eq!(decide(&running, Role::Launch, None, &facts), Entry::Run);
+        assert_eq!(decide(&running, Role::Serve, &facts), Entry::Run);
+        assert_eq!(decide(&running, Role::Launch, &facts), Entry::Run);
     }
 }

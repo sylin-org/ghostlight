@@ -28,8 +28,8 @@ pub const SUBCOMMANDS: &[&str] = &[
 /// The parsed execution intent of a Ghostlight process invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LaunchMode {
-    /// Install a payload into the Ghostlight home, select a development build, or restore the
-    /// installed service.
+    /// Install a payload into the Ghostlight home as a release or as the development channel, or
+    /// restore a release over a development installation.
     DeploymentInstall(crate::install::deployment::Request),
     /// Start or activate the desktop workbench.
     Desktop,
@@ -122,8 +122,8 @@ const DEPLOYMENT_USAGE: &str =
     "usage: ghostlight deployment install [<payload directory>] [--development | --restore] [--plan]";
 
 /// Read the options of `deployment install`: at most one payload directory, at most one of
-/// `--development` and `--restore`, and `--plan`. A restore copies nothing, so it takes no
-/// payload.
+/// `--development` and `--restore`, and `--plan`. A restore installs a payload like any other
+/// install, so it takes the same optional payload directory.
 fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployment::Request> {
     use crate::install::deployment::{Mode, Request};
 
@@ -144,7 +144,7 @@ fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployme
             _ => return None,
         }
     }
-    (request.mode != Mode::Restore || request.payload.is_none()).then_some(request)
+    Some(request)
 }
 
 /// Whether `argument` selects one of the edge's relays: `mcp` or a Chrome extension origin.
@@ -499,9 +499,18 @@ mod tests {
             parse(&["--restore", "--plan"]).unwrap(),
             request(None, Mode::Restore, true)
         );
+        assert_eq!(
+            parse(&["--restore", "payload"]).unwrap(),
+            request(Some("payload"), Mode::Restore, false)
+        );
+        assert_eq!(
+            parse(&["payload", "--restore"]).unwrap(),
+            request(Some("payload"), Mode::Restore, false)
+        );
         for refused in [
             &["--development", "--restore"][..],
-            &["--restore", "payload"],
+            &["--restore", "--development"],
+            &["--restore", "payload", "extra"],
             &["one", "two"],
             &["--plan", "--plan"],
             &["--force"],

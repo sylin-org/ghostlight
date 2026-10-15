@@ -2,8 +2,9 @@
 //! command (ADR-0199 Decision 1).
 //!
 //! Before any command runs, the entry rule decides whether this copy does the job, hands it to
-//! the development build or the installed service, hands the edge's relay verbs to the installed
-//! edge, or installs from its own package first (ADR-0197 Decisions 10, 13 and 15).
+//! the installed service, hands the edge's relay verbs to the installed edge, or installs from
+//! its own package first (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the development
+//! channel amendment).
 
 // The mandatory npm launcher retains CLI stdio and waits for this child. Release desktop launches
 // therefore use the native Windows application subsystem without flashing a console window.

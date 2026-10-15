@@ -5,6 +5,8 @@
 
 use ghostlight_relay::endpoint::Endpoint;
 
+use crate::install::layout::Layout;
+use crate::install::record::{Channel, InstallRecord};
 use crate::intake::listener::control::Status;
 use crate::language::workbench as words;
 
@@ -97,6 +99,12 @@ pub fn render_runtime_status(observation: &RuntimeObservation, json: bool, idle_
 pub fn run_status(json: bool) -> anyhow::Result<()> {
     if !json {
         println!("Ghostlight {}", env!("CARGO_PKG_VERSION"));
+        let installed = Layout::current()
+            .ok()
+            .and_then(|layout| InstallRecord::read(&layout.install_record()).ok().flatten());
+        if installed.is_some_and(|record| record.channel == Channel::Development) {
+            println!("{}", words::DEVELOPMENT_CHANNEL_LINE);
+        }
     }
     render_runtime_status(&observe_runtime()?, json, false);
     Ok(())

@@ -1,11 +1,11 @@
 //! The entry rule performed: what `main` does before it dispatches a command.
 //!
 //! [`start`] gathers the facts [`crate::install::entry::decide`] needs from the Ghostlight home,
-//! asks it, and carries the answer out through a [`Launcher`]: run here, forward to the
-//! development build or the installed service, hand the edge's own verbs to the installed edge,
-//! install from a carrier package first, or refuse to serve (ADR-0197 Decisions 10, 13 and 15,
-//! ADR-0199 Decision 2). The launcher is the only part that starts processes, so tests drive the
-//! real rule with a fake one.
+//! asks it, and carries the answer out through a [`Launcher`]: run here, forward to the installed
+//! service, hand the edge's own verbs to the installed edge, install from a carrier package
+//! first, or refuse to serve (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the
+//! development channel amendment). The launcher is the only part that starts processes, so tests
+//! drive the real rule with a fake one.
 
 use std::ffi::OsString;
 use std::io;
@@ -14,13 +14,11 @@ use std::process::Command;
 
 use anyhow::Result;
 use ghostlight_relay::os::session;
-use ghostlight_relay::protocol::StartReason;
 
 use crate::cli::parse::{self, LaunchMode};
 use crate::install::entry::{self, canonical_path, Entry, Facts, Role};
 use crate::install::layout::Layout;
-use crate::install::marker::DevelopmentMarker;
-use crate::install::record::{self, InstallRecord, Standing};
+use crate::install::record::{self, Channel, InstallRecord, Standing};
 
 /// Exit code of a forwarded process that ended without one (killed by a signal).
 const EXIT_WITHOUT_CODE: i32 = 1;
@@ -39,10 +37,6 @@ pub trait Launcher {
     /// Run `executable` with `arguments` and inherited standard streams, wait for it, and
     /// return its exit code.
     fn run(&self, executable: &Path, arguments: &[OsString]) -> io::Result<i32>;
-    /// Start `executable serve --reason <reason>` detached with `home` as its working directory,
-    /// without waiting.
-    fn serve_detached(&self, executable: &Path, home: &Path, reason: StartReason)
-        -> io::Result<()>;
     /// Install this executable's package as a release into the home of `layout`.
     fn install(&self, layout: &Layout) -> Result<()>;
 }
@@ -60,15 +54,6 @@ impl Launcher for ProcessLauncher {
         Ok(status.code().unwrap_or(EXIT_WITHOUT_CODE))
     }
 
-    fn serve_detached(
-        &self,
-        executable: &Path,
-        home: &Path,
-        reason: StartReason,
-    ) -> io::Result<()> {
-        ghostlight_relay::spawn::spawn_serve(executable, home, reason).map(|_| ())
-    }
-
     fn install(&self, layout: &Layout) -> Result<()> {
         crate::install::deployment::install_carrier(layout)
     }
@@ -76,9 +61,8 @@ impl Launcher for ProcessLauncher {
 
 /// Apply the entry rule to a process at `current_exe` started with `arguments`.
 ///
-/// `layout` is the Ghostlight home. A command that does not parse is never installed for: it
-/// still forwards while a development build is marked, so a newer build can answer it, and is
-/// otherwise reported here.
+/// `layout` is the Ghostlight home. A command that does not parse is never installed for; it is
+/// reported here.
 pub fn start(
     arguments: Vec<OsString>,
     current_exe: &Path,
@@ -90,37 +74,31 @@ pub fn start(
     let current_exe = canonical_path(current_exe);
     let installed_service = canonical_path(&layout.service_executable());
     let installed_edge = canonical_path(&layout.edge());
-    let marker = DevelopmentMarker::read(&layout.development_marker())
-        .ok()
-        .flatten()
-        .map(|marker| DevelopmentMarker {
-            executable: canonical_path(&marker.executable),
-        });
-    // Only a launch from a copy other than the installed service consults the standing, so the
+    // Only a launch from a copy other than the installed service consults the record, so the
     // installed image is hashed only then.
     let launching = matches!(role, Role::Launch | Role::Relay);
-    let standing = if launching && !entry::same_path(&current_exe, &installed_service) {
-        standing(layout, &current_exe)?
-    } else {
-        Standing::Same
-    };
+    let (standing, development_channel) =
+        if launching && !entry::same_path(&current_exe, &installed_service) {
+            let installed = InstallRecord::read(&layout.install_record())?;
+            let development_channel = installed
+                .as_ref()
+                .is_some_and(|record| record.channel == Channel::Development);
+            (
+                standing(layout, &current_exe, installed.as_ref())?,
+                development_channel,
+            )
+        } else {
+            (Standing::Same, false)
+        };
     let facts = Facts {
         installed_service,
         installed_edge,
-        development_executable_exists: marker
-            .as_ref()
-            .is_some_and(|marker| marker.executable.is_file()),
+        development_channel,
         standing,
     };
-    match entry::decide(&current_exe, role, marker.as_ref(), &facts) {
+    match entry::decide(&current_exe, role, &facts) {
         Entry::Run => Ok(Start::Dispatch(parsed?)),
-        Entry::Forward(target) => match parsed {
-            Ok(LaunchMode::Serve(reason)) => {
-                launcher.serve_detached(&target, layout.home(), reason)?;
-                Ok(Start::Exit(0))
-            }
-            _ => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
-        },
+        Entry::Forward(target) => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
         Entry::CarrierInstall => {
             launcher.install(layout)?;
             let installed = if role == Role::Relay {
@@ -148,9 +126,13 @@ fn role_of(mode: &LaunchMode) -> Role {
     }
 }
 
-/// How the installation in `layout` stands against the package `current_exe` belongs to.
-fn standing(layout: &Layout, current_exe: &Path) -> io::Result<Standing> {
-    let installed = InstallRecord::read(&layout.install_record())?;
+/// How the installation recorded as `installed` in `layout` stands against the package
+/// `current_exe` belongs to.
+fn standing(
+    layout: &Layout,
+    current_exe: &Path,
+    installed: Option<&InstallRecord>,
+) -> io::Result<Standing> {
     let installed_image = match record::sha256_file(&layout.service_executable()) {
         Ok(sha) => Some(sha),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -161,9 +143,10 @@ fn standing(layout: &Layout, current_exe: &Path) -> io::Result<Standing> {
         relay_revision: ghostlight_relay::RELAY.to_string(),
         service_sha256: record::sha256_file(current_exe)?,
         edge_sha256: None,
+        channel: Channel::Release,
     };
     Ok(record::decide(
-        installed.as_ref(),
+        installed,
         &payload,
         installed_image.as_deref(),
     ))
@@ -177,6 +160,7 @@ mod tests {
 
     use super::*;
     use crate::install::scratch::Scratch;
+    use ghostlight_relay::protocol::StartReason;
 
     /// Exit code the fake launcher reports for every run.
     const FORWARDED_EXIT: i32 = 7;
@@ -185,7 +169,6 @@ mod tests {
     #[derive(Debug, Eq, PartialEq)]
     enum Call {
         Run(PathBuf, Vec<OsString>),
-        Serve(PathBuf, StartReason),
         Install(PathBuf),
     }
 
@@ -198,18 +181,6 @@ mod tests {
                 .borrow_mut()
                 .push(Call::Run(executable.to_path_buf(), arguments.to_vec()));
             Ok(FORWARDED_EXIT)
-        }
-
-        fn serve_detached(
-            &self,
-            executable: &Path,
-            _home: &Path,
-            reason: StartReason,
-        ) -> io::Result<()> {
-            self.0
-                .borrow_mut()
-                .push(Call::Serve(executable.to_path_buf(), reason));
-            Ok(())
         }
 
         fn install(&self, layout: &Layout) -> Result<()> {
@@ -256,22 +227,17 @@ mod tests {
             self.executable(self.layout.edge(), b"edge")
         }
 
-        fn development(&self) -> PathBuf {
-            let development = self.executable(self.layout.development_executable(), b"development");
-            DevelopmentMarker {
-                executable: development.clone(),
-            }
-            .write(&self.layout.development_marker())
-            .unwrap();
-            development
+        fn record(&self, version: &str) {
+            self.record_in(version, Channel::Release);
         }
 
-        fn record(&self, version: &str) {
+        fn record_in(&self, version: &str, channel: Channel) {
             InstallRecord {
                 service_version: version.to_owned(),
                 relay_revision: ghostlight_relay::RELAY.to_string(),
                 service_sha256: record::sha256_file(&self.layout.service_executable()).unwrap(),
                 edge_sha256: None,
+                channel,
             }
             .write(&self.layout.install_record())
             .unwrap();
@@ -294,45 +260,51 @@ mod tests {
     }
 
     #[test]
-    fn a_marked_development_build_receives_every_command_with_the_same_arguments() {
+    fn a_carrier_runs_the_installed_service_when_the_installation_is_a_development_build() {
         let home = Home::new();
         let carrier = home.carrier();
-        let development = home.development();
-        let (result, calls) = home.start(&carrier, &["call", "--catalog"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(
-            calls,
-            vec![Call::Run(development.clone(), os(&["call", "--catalog"]))]
-        );
-        let (result, calls) = home.start(&development, &["call", "--catalog"]);
-        assert!(matches!(result.unwrap(), Start::Dispatch(LaunchMode::Call)));
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn serve_is_forwarded_detached_with_its_reason_and_the_parent_exits_zero() {
-        let home = Home::new();
         let installed = home.installed();
-        let development = home.development();
-        for reason in [
-            StartReason::Agent,
-            StartReason::Browser,
-            StartReason::Update,
-        ] {
-            let (result, calls) = home.start(&installed, &["serve", "--reason", reason.as_str()]);
-            assert_eq!(result.unwrap(), Start::Exit(0));
-            assert_eq!(calls, vec![Call::Serve(development.clone(), reason)]);
+        // Older, same and newer than the carrier: none of them is installed over.
+        for version in ["0.0.1", env!("CARGO_PKG_VERSION"), "999.0.0"] {
+            home.record_in(version, Channel::Development);
+            let (result, calls) = home.start(&carrier, &["call", "--catalog"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT), "{version}");
+            assert_eq!(
+                calls,
+                vec![Call::Run(installed.clone(), os(&["call", "--catalog"]))],
+                "{version}"
+            );
         }
     }
 
     #[test]
-    fn serve_without_a_reason_is_a_usage_error_the_development_build_reports() {
+    fn a_carrier_installs_over_an_older_release_but_not_an_older_development_build() {
         let home = Home::new();
+        let carrier = home.carrier();
+        home.installed();
+        home.record("0.0.1");
+        let (_, calls) = home.start(&carrier, &["open"]);
+        assert_eq!(calls[0], Call::Install(home.layout.bin()));
+        home.record_in("0.0.1", Channel::Development);
+        let (_, calls) = home.start(&carrier, &["open"]);
+        assert!(!calls.iter().any(|call| matches!(call, Call::Install(_))));
+    }
+
+    #[test]
+    fn only_the_installed_service_serves_whatever_the_channel() {
+        let home = Home::new();
+        let carrier = home.carrier();
         let installed = home.installed();
-        let development = home.development();
-        let (result, calls) = home.start(&installed, &["serve"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(calls, vec![Call::Run(development, os(&["serve"]))]);
+        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
+        let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
+        assert!(result.unwrap_err().is::<entry::Refusal>());
+        assert!(calls.is_empty());
+        let (result, calls) = home.start(&installed, &["serve", "--reason", "agent"]);
+        assert_eq!(
+            result.unwrap(),
+            Start::Dispatch(LaunchMode::Serve(StartReason::Agent))
+        );
+        assert!(calls.is_empty());
     }
 
     #[test]
@@ -382,8 +354,7 @@ mod tests {
         let carrier = home.carrier();
         let installed = home.installed();
         let edge = home.edge();
-        home.record(env!("CARGO_PKG_VERSION"));
-        let development = home.development();
+        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
         for arguments in [
             &["mcp"][..],
             &["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
@@ -392,7 +363,7 @@ mod tests {
                 "--parent-window=4",
             ],
         ] {
-            for current in [&carrier, &installed, &development] {
+            for current in [&carrier, &installed] {
                 let (result, calls) = home.start(current, arguments);
                 assert_eq!(
                     result.unwrap(),

@@ -17,8 +17,7 @@ use crate::cli::status::{
 use crate::install::container;
 use crate::install::deployment::{stop_strays, stray_processes, StrayProcess};
 use crate::install::layout::Layout;
-use crate::install::marker::DevelopmentMarker;
-use crate::install::record::InstallRecord;
+use crate::install::record::{Channel, InstallRecord};
 use crate::language::workbench as words;
 
 /// Everything `doctor` observed, gathered once.
@@ -28,7 +27,6 @@ use crate::language::workbench as words;
 pub struct DoctorObservation {
     home: PathBuf,
     installed: Option<InstallRecord>,
-    development: Option<DevelopmentMarker>,
     environment: crate::language::environment::Environment,
     binaries: Vec<(PathBuf, bool)>,
     sibling_set_ready: bool,
@@ -68,7 +66,6 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     let strays = stray_processes(&layout, runtime.status.as_ref().map(|status| status.pid));
     Ok(DoctorObservation {
         installed: InstallRecord::read(&layout.install_record())?,
-        development: DevelopmentMarker::read(&layout.development_marker())?,
         home: layout.home().to_path_buf(),
         // Same module as the install summary, so the two can never describe this machine
         // differently.
@@ -104,11 +101,12 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         ),
         None => println!("Installed: nothing recorded in the Ghostlight home"),
     }
-    if let Some(development) = &observation.development {
-        println!(
-            "Development build: {} -- it serves in place of the installed service",
-            development.executable.display()
-        );
+    if observation
+        .installed
+        .as_ref()
+        .is_some_and(|record| record.channel == Channel::Development)
+    {
+        println!("{}", words::DEVELOPMENT_CHANNEL_LINE);
     }
     println!(
         "Environment: {} -- {}",
@@ -207,7 +205,6 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
             "home": observation.home,
             "endpoint": observation.runtime.endpoint,
             "installed": observation.installed,
-            "development": observation.development,
             "invoking_executable": std::env::current_exe().ok(),
         },
         "environment": {
@@ -258,7 +255,6 @@ mod tests {
         DoctorObservation {
             home: PathBuf::from("home"),
             installed: None,
-            development: None,
             environment: crate::language::environment::current(),
             binaries: Vec::new(),
             sibling_set_ready: true,

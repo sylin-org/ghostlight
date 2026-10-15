@@ -2,11 +2,11 @@
 //!
 //! Every route installs into `home/bin`: the edge `ghostlight` and the service image
 //! `ghostlight-service` (ADR-0199 Decision 1), and the shell `ghostlight-desktop` beside them
-//! when the payload carries it. A development build lives in `home/dev`, beside its
-//! own edge, and is selected by the marker file `home/development`. The installer's record, its lock, and the state,
-//! policy and manifest directories sit beside them (ADR-0197 Decisions 10, 13 and 14). The
-//! layout holds names only and touches no file: callers pass the home that
-//! `ghostlight_relay::home::home()` resolves, and tests pass a temporary directory.
+//! when the payload carries it. A development build installs there too, as a channel recorded in
+//! the installer's record (ADR-0199 amendment, the development channel lands in 2.0). The record,
+//! its lock, and the state, policy and manifest directories sit beside the executables
+//! (ADR-0197 Decisions 10 and 14). The layout holds names only and touches no file: callers pass
+//! the home that `ghostlight_relay::home::home()` resolves, and tests pass a temporary directory.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,11 +26,13 @@ pub const DESKTOP_EXECUTABLE_NAME: &str = "ghostlight-desktop.exe";
 #[cfg(not(windows))]
 pub const DESKTOP_EXECUTABLE_NAME: &str = "ghostlight-desktop";
 
-/// Directory holding a development build of the service.
-pub const DEV_DIRECTORY_NAME: &str = "dev";
+/// Directory in which earlier 2.0 development builds ran beside the installed release. An install
+/// stops what runs there and removes it.
+pub const RETIRED_DEVELOPMENT_DIRECTORY_NAME: &str = "dev";
 
-/// Marker file selecting the development build. Its presence is the selection.
-pub const DEVELOPMENT_MARKER_NAME: &str = "development";
+/// Marker file with which earlier 2.0 development builds selected the build in the retired
+/// development directory. An install removes it.
+pub const RETIRED_DEVELOPMENT_MARKER_NAME: &str = "development";
 
 /// Record of what the installer put in `bin`, kept beside those executables.
 pub const INSTALL_RECORD_NAME: &str = "install.json";
@@ -95,10 +97,16 @@ impl Layout {
         self.home.join(BIN_DIRECTORY_NAME)
     }
 
-    /// Directory of the development build: `home/dev`.
+    /// The retired directory of earlier development builds: `home/dev`.
     #[must_use]
-    pub fn dev(&self) -> PathBuf {
-        self.home.join(DEV_DIRECTORY_NAME)
+    pub fn retired_development_directory(&self) -> PathBuf {
+        self.home.join(RETIRED_DEVELOPMENT_DIRECTORY_NAME)
+    }
+
+    /// The retired development marker: `home/development`.
+    #[must_use]
+    pub fn retired_development_marker(&self) -> PathBuf {
+        self.home.join(RETIRED_DEVELOPMENT_MARKER_NAME)
     }
 
     /// The installed service executable: `home/bin/ghostlight-service`.
@@ -111,24 +119,6 @@ impl Layout {
     #[must_use]
     pub fn edge(&self) -> PathBuf {
         self.bin().join(EDGE_EXECUTABLE_NAME)
-    }
-
-    /// The development build's service executable: `home/dev/ghostlight-service`.
-    #[must_use]
-    pub fn development_executable(&self) -> PathBuf {
-        self.dev().join(SERVICE_EXECUTABLE_NAME)
-    }
-
-    /// The development build's edge: `home/dev/ghostlight`.
-    #[must_use]
-    pub fn development_edge(&self) -> PathBuf {
-        self.dev().join(EDGE_EXECUTABLE_NAME)
-    }
-
-    /// The development marker: `home/development`.
-    #[must_use]
-    pub fn development_marker(&self) -> PathBuf {
-        self.home.join(DEVELOPMENT_MARKER_NAME)
     }
 
     /// The install record: `home/bin/install.json`.
@@ -206,8 +196,11 @@ mod tests {
         let home = Path::new(HOME);
         assert_eq!(layout.home(), home);
         assert_eq!(layout.bin(), home.join("bin"));
-        assert_eq!(layout.dev(), home.join("dev"));
-        assert_eq!(layout.development_marker(), home.join("development"));
+        assert_eq!(layout.retired_development_directory(), home.join("dev"));
+        assert_eq!(
+            layout.retired_development_marker(),
+            home.join("development")
+        );
         assert_eq!(
             layout.install_record(),
             home.join("bin").join("install.json")
@@ -229,20 +222,11 @@ mod tests {
     fn executables_carry_the_platform_suffix() {
         let layout = Layout::new(HOME);
         let bin = Path::new(HOME).join("bin");
-        let dev = Path::new(HOME).join("dev");
         assert_eq!(
             layout.service_executable(),
             bin.join(format!("ghostlight-service{EXE}"))
         );
         assert_eq!(layout.edge(), bin.join(format!("ghostlight{EXE}")));
-        assert_eq!(
-            layout.development_executable(),
-            dev.join(format!("ghostlight-service{EXE}"))
-        );
-        assert_eq!(
-            layout.development_edge(),
-            dev.join(format!("ghostlight{EXE}"))
-        );
     }
 
     #[test]

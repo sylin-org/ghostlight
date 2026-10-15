@@ -1,10 +1,11 @@
 //! The install record and the install-or-refuse decision.
 //!
 //! `bin/install.json` says what the installer last put in `bin`: the service version, the relay
-//! revision the edge speaks, and the hashes of the service image and the edge. [`decide`] compares that
-//! record with the payload being installed and answers whether to install, do nothing, repair or
-//! refuse (ADR-0197 Decision 14). Every installer write goes through [`atomic_replace`], so a
-//! reader sees the old file or the new one, never a partial one.
+//! revision the edge speaks, the hashes of the service image and the edge, and the [`Channel`]
+//! that installed them. [`decide`] compares that record with the payload being installed and
+//! answers whether to install, do nothing, repair or refuse (ADR-0197 Decision 14). Every
+//! installer write goes through [`atomic_replace`], so a reader sees the old file or the new one,
+//! never a partial one.
 
 use std::cmp::Ordering;
 use std::fs::{self, File};
@@ -15,6 +16,21 @@ use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+/// Which kind of build the installation in `bin` is.
+///
+/// The development loop installs its build into `bin` as the development channel. A release
+/// package never installs over it; `deployment install --restore` is the way back (ADR-0199
+/// amendment, the development channel lands in 2.0).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    /// A packaged release.
+    #[default]
+    Release,
+    /// A build the development loop installed.
+    Development,
+}
 
 /// What the installer last put in `bin`.
 ///
@@ -32,6 +48,10 @@ pub struct InstallRecord {
     /// existed has none, which is how the installer knows `bin` still holds the earlier layout.
     #[serde(default)]
     pub edge_sha256: Option<String>,
+    /// Which channel installed this set. A record written before channels existed reads as
+    /// [`Channel::Release`].
+    #[serde(default)]
+    pub channel: Channel,
 }
 
 impl InstallRecord {
@@ -329,7 +349,29 @@ mod tests {
             relay_revision: "3".to_owned(),
             service_sha256: sha.to_owned(),
             edge_sha256: None,
+            channel: Channel::Release,
         }
+    }
+
+    #[test]
+    fn a_record_without_a_channel_reads_as_release_and_the_channel_round_trips() {
+        let scratch = Scratch::new();
+        let path = scratch.path().join("install.json");
+        fs::write(
+            &path,
+            r#"{"service_version":"2.0.0","relay_revision":"4","service_sha256":"ab"}"#,
+        )
+        .unwrap();
+        let read = InstallRecord::read(&path).unwrap().unwrap();
+        assert_eq!(read.channel, Channel::Release);
+        let development = InstallRecord {
+            channel: Channel::Development,
+            ..read
+        };
+        development.write(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains(r#""channel": "development""#), "{text}");
+        assert_eq!(InstallRecord::read(&path).unwrap(), Some(development));
     }
 
     #[test]

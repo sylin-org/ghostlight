@@ -451,7 +451,8 @@ impl Legacy {
             .iter()
             .flat_map(LegacyInstallation::directories)
             .filter(|directory| {
-                !same_path(directory, &layout.bin()) && !same_path(directory, &layout.dev())
+                !same_path(directory, &layout.bin())
+                    && !same_path(directory, &layout.retired_development_directory())
             })
             .collect();
         let registrations = find_registrations(&old_directories);
@@ -802,18 +803,14 @@ pub fn pre_edge_layout(layout: &Layout) -> bool {
         )
 }
 
-/// The service images of the earlier layout that sit under the edge's name, as files that exist:
-/// the one in `bin` while `bin` holds that layout, and the development build's.
+/// The service image of the earlier layout that sits under the edge's name in `bin`, as a file
+/// that exists, while `bin` holds that layout. The earlier development directory is cleaned by the
+/// installer's own plan, which stops every image in it.
 fn pre_edge_service_images(layout: &Layout) -> Vec<PathBuf> {
-    let mut images = Vec::new();
-    if pre_edge_layout(layout) {
-        images.push(layout.edge());
-    }
-    if !layout.development_executable().is_file() {
-        images.push(layout.development_edge());
-    }
-    images.retain(|image| image.is_file());
-    images
+    Some(layout.edge())
+        .filter(|image| pre_edge_layout(layout) && image.is_file())
+        .into_iter()
+        .collect()
 }
 
 /// Make every destination directory and refuse a destination that holds something else.
@@ -2399,6 +2396,7 @@ mod tests {
             relay_revision: "2".into(),
             service_sha256: "00".into(),
             edge_sha256: None,
+            channel: record::Channel::Release,
         }
         .write(&serving.join(INSTALL_RECORD_NAME))
         .unwrap();

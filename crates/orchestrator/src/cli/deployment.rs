@@ -5,7 +5,7 @@
 //! the next launch will install again.
 
 use crate::install::container;
-use crate::install::deployment::{self, MarkerChange, Mode, Outcome, Request, ServiceDidNotStart};
+use crate::install::deployment::{self, Mode, Outcome, Request, ServiceDidNotStart};
 use crate::install::layout::Layout;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 use crate::install::reconcile::ReconcileReport;
@@ -50,17 +50,29 @@ fn report(outcome: &Outcome, layout: &Layout) {
             placed.directory.display()
         );
     }
-    match (plan.mode, &plan.marker) {
-        (Mode::Development, Some(MarkerChange::Write(executable))) => println!(
-            "The development build {} now serves in place of {}.",
-            executable.display(),
+    match plan.mode {
+        Mode::Development => println!(
+            "The development build now serves from {}.",
             layout.service_executable().display()
         ),
-        (Mode::Restore, _) => println!(
-            "The installed service {} serves again.",
+        Mode::Restore => println!(
+            "The release now serves from {}.",
             layout.service_executable().display()
         ),
-        _ => {}
+        Mode::Release => {}
+    }
+    for path in &plan.deletions {
+        if outcome.left_behind.contains(path) {
+            eprintln!(
+                "Could not remove {}: a program still runs from it. The next install tries again.",
+                path.display()
+            );
+        } else {
+            println!(
+                "Removed {}, where earlier development builds ran.",
+                path.display()
+            );
+        }
     }
     if outcome.service_started == Some(true) {
         println!("The Ghostlight service started.");

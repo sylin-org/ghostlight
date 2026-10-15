@@ -247,6 +247,9 @@ pub fn endpoint_line(endpoint: &str) -> String {
     format!("Endpoint: {endpoint}")
 }
 
+/// The line `status` and `doctor` print when the installation in `bin` is a development build.
+pub const DEVELOPMENT_CHANNEL_LINE: &str = "Channel: development";
+
 /// The line that names something from an older Ghostlight installation that is still running.
 #[must_use]
 pub fn stray_line(image: &str) -> String {

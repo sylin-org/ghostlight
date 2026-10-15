@@ -41,8 +41,7 @@ fn declared() -> Option<String> {
 /// How many ancestors the caller walk reads before it stops.
 ///
 /// The bound covers the whole climb: the Ghostlight hops (the edge hands over to a service image,
-/// a carrier hands over to the installed one, which may hand over to a development build) and the
-/// run of same-named ancestors above them. It keeps a malformed process tree from looping the walk.
+/// a carrier hands over to the installed one) and the run of same-named ancestors above them. It keeps a malformed process tree from looping the walk.
 const MAX_ANCESTORS_READ: usize = 8;
 
 /// One process as the caller walk sees it.
@@ -77,11 +76,11 @@ fn is_ghostlight(name: &str) -> bool {
 /// Climb from `start` past every Ghostlight executable, then to the outermost of the run of
 /// same-named ancestors the caller sits in.
 ///
-/// A command is forwarded through fresh child processes (a carrier, the installed command, a
-/// development build), so the immediate parent is a throwaway Ghostlight process that differs on
-/// every call. Past those, MSYS and Cygwin run every native program through a per-command stub with
-/// the same image as the shell, so the first foreign ancestor differs on every command while the
-/// shell above it is stable. A run of consecutive ancestors sharing one image name (compared
+/// A command is forwarded through fresh child processes (a carrier, the installed command), so the
+/// immediate parent is a throwaway Ghostlight process that differs on every call. Past those, MSYS
+/// and Cygwin run every native program through a per-command stub with the same image as the
+/// shell, so the first foreign ancestor differs on every command while the shell above it is
+/// stable. A run of consecutive ancestors sharing one image name (compared
 /// case-insensitively) is therefore one terminal, and its outermost member is the caller. That also
 /// treats a shell nested in the same shell as one terminal, which is the intended model.
 ///
