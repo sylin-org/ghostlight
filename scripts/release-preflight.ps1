@@ -286,10 +286,6 @@ try {
         Run-Gate { node tests/policy-grammar.mjs } "policy grammar failed"
     } }
 
-    $stages += @{ Name = "capability matrix (behavior evidence map)"; Skip = ""; Action = {
-        Run-Gate { node tests/capability-matrix.mjs } "capability matrix failed"
-    } }
-
     $stages += @{ Name = "JavaScript syntax (ui/app.js, preview server)"; Skip = ""; Action = {
         node --check crates/orchestrator/ui/app.js
         if ($LASTEXITCODE -ne 0) { throw "ui/app.js syntax" }

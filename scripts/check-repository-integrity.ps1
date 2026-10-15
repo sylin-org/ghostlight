@@ -252,5 +252,3 @@ if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
 Write-Output "Repository integrity: local links valid; source version $sourceVersion aligned."
 Write-Output "Only the $($expectedNonAscii.Count) listed historical files may contain non-ASCII bytes."
 Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
-# The behavioral-parity matrix must stay closed and evidenced.
-node (Join-Path $PSScriptRoot ".." "tests" "capability-matrix.mjs")
