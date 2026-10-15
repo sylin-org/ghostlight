@@ -302,3 +302,9 @@ check is `tests/guards/connectors.test.mjs`, run in CI, not a committed hash fil
 until `RELAY` is bumped. Test directories (`crates/*/tests/**`) are excluded; inline unit tests
 still count. The `extension/` half of Decision 25 (page-asset hashes) is unchanged by this
 amendment.
+
+The per-target `cargo tree` snapshots under `tests/golden/cargo-tree/` pin crate names, not
+versions, so a routine `cargo update` needs no refresh. The guard also fails if any connector tree
+contains a network crate (hyper, reqwest, ureq, h2, http, rustls, native-tls, openssl, curl,
+isahc, tokio, socket2 or mio), which keeps ADR-0028 (never phone home) true by construction. In CI
+an unresolvable tree fails; outside CI it is skipped.
