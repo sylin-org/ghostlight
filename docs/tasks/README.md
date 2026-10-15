@@ -42,7 +42,7 @@ and commit-safety rules add to AGENTS.md and take precedence for that batch.
 
 | Batch | Opened | Note |
 | --- | --- | --- |
-| [break-2.0](break-2.0/BOOTSTRAP.md) | 2026-10-14 | ADR-0197: the 2.0 break set built by service, extension and connectors lanes in one checkout, then a switch. Lanes landed; switch next at switch-8 (see [switch.md](break-2.0/switch.md)). |
+| [break-2.0](break-2.0/BOOTSTRAP.md) | 2026-10-14 | ADR-0197 and ADR-0199: the 2.0 break set built by service, extension and connectors lanes in one checkout, then a switch. Lanes landed; the switch (see [switch.md](break-2.0/switch.md)) continues in the seams ledger, which carries the 2.0 decisions of ADR-0199 (see [seams.md](break-2.0/seams.md)). |
 | [security-hardening](security-hardening/EPIC.md) | 2026-09-06 | Dependable governance for delightful browser work: assessment, decisions, bounded cycles, and ideation for unresolved choices |
 | [process-diagnostics](process-diagnostics/) | 2026-08-29 | ADR-0145: one shared local diagnostics directory all three executables write bounded, content-free operational logs into; watch-driven marker, CLI, popup, and workbench surfaces |
 | [public-distribution](public-distribution/) | 2026-08-29 | ADR-0144: Ghostlight as an installable plugin member (twin manifests, one-address catalogs, bundled skill) and drafted external submissions |

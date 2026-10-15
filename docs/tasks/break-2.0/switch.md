@@ -15,7 +15,7 @@ preserved real home after `-Plan`.
 
 ## RESUME HERE
 
-Next: switch-8, the D22 removals.
+Continues in [seams.md](seams.md): switch-8 onward is carried there, per ADR-0199.
 
 Later slices adopt `install::record::atomic_replace` for every installer writer, and gather the
 entry rule's facts through `install::entry::canonical_path`.

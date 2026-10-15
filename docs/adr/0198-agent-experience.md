@@ -249,3 +249,32 @@ never reused. Five designs and their reviews followed; this ADR records the resu
   options-bearing refusal, the one-call fill, the change report, the forms scope, the stale-handle
   retry and an already-held wait. The settle removal in decision 13 and the leave-page landing in
   decision 30 are confirmed live before release.
+
+## Amendment 2026-10-15: dispositions
+
+Where this section and the text above differ, this section wins. It names the seams the later work
+lands on, not plan numbers.
+
+- **Rules 1 to 6** bind every later stage. Rule 6 (no extension change) holds: the extension
+  freezes at 2.0, and everything below lands in the service and its page assets.
+- **Decisions 7 to 11, 17, 19, 20 (tiers), 21 to 26, 31, 33 and 35** have landed and re-home
+  unchanged.
+- **Decisions 13 to 15 (change reports) and 16** land after 2.0 on the observe wrapper. The first
+  cut reports dialogs, a navigation start, newly invalid fields or alerts, and controls that
+  appeared. Focus, enablement, values and the target's own state follow only when a session shows a
+  missed call.
+- **Decision 18 (forms scope)** lands after 2.0 on the tool table.
+- **Decision 20's modal frames** land after 2.0 on the page seam.
+- **Decisions 27, 29 and 30** land after 2.0 on the refusal fold.
+- **Decision 28 (trusted replacement)** comes last, and only if sessions show that the extra
+  `browser_find` after a stale handle is common once Decisions 17 and 27 are in.
+- **Decisions 32, 34 and 36** land on the observe wrapper. Decision 36 is one more read inside the
+  same wrapper, which keeps a false confirmation out.
+- **Decision 12 (custom widgets)** comes last.
+- **Decision 26's budget** stays as a ceiling in the `docs/1.0/catalog.json` test with its pinned
+  phrases, without the ratchet ceremony.
+- **Decision 37's instructions** land clause by clause with each behavior.
+- **Verification:** "the asset hash refreshed per change" is dropped with the hash pin; the page
+  asset id is computed.
+
+The paused slices (a20 to a43 and the widgets lane) follow these dispositions.
