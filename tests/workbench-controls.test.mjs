@@ -338,6 +338,21 @@ test("in Watch only Pause is a button while active, and the group has one Contin
   assert.deepEqual(shown.calls, [["continueInWindow"]]);
 });
 
+test("in Control with no watch view served, the state is told once and nothing sends the window to itself", () => {
+  const shown = kit();
+  const unserved = part();
+  unserved.viewing = {
+    ...unserved.viewing, watch: false, url: null, word: "Not serving a watch view.",
+    acts: { set_watching: { available: false, why_not: "Not serving a watch view." } }
+  };
+  shown.controls.render(unserved);
+  assert.equal(shown.el("controls-viewing-word").textContent, "Not serving a watch view.");
+  assert.equal(shown.el("controls-viewing-toggle").hidden, true);
+  assert.equal(shown.el("controls-viewing-copy").hidden, true);
+  assert.equal(shown.el("controls-continue").hidden, true);
+  assert.equal(shown.el("controls-hold").hidden, false);
+});
+
 test("while held, a watching screen shows the state and the Continue line, and no button for the runtime", () => {
   const shown = kit();
   shown.controls.render(part({ context: "watch", runtime: "held" }));

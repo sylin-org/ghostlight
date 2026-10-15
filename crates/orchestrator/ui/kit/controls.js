@@ -42,6 +42,9 @@
     ended: Object.freeze(["start_session"])
   });
 
+  /** The token the service gives the Ghostlight window's own context. */
+  const CONTEXT_CONTROL = "control";
+
   /** The data attributes the sheet's buttons are found by. */
   const VIEWING_TOGGLE = "toggle";
   const VIEWING_COPY = "copy";
@@ -176,8 +179,17 @@
       show("test-notification", Boolean(notifications.acts.test_notification?.available));
     }
 
-    /** One Continue line for the group: the reason the first act this screen may not do gives. */
+    /**
+     * One Continue line for the group: the reason the first act this screen may not do gives.
+     * Only a screen that is not the window has it. In the window, an act the service withholds
+     * (the watch view is not served) is a state the window already says, and continuing in the
+     * window would send it nowhere.
+     */
     function drawContinue(part) {
+      if (part.you.context === CONTEXT_CONTROL) {
+        show("controls-continue", false);
+        return;
+      }
       const acts = [
         ...Object.values(part.runtime.acts),
         ...Object.values(part.viewing.acts),

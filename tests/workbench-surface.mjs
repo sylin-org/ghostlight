@@ -65,8 +65,9 @@ const SHEET_WHY = "Change this in the Ghostlight window.";
 const SHEET_PRIVATE = "Watching is off: only this window shows Ghostlight.";
 const SHEET_WATCHED = "Others on this computer can watch this view in a browser.";
 const SHEET_WATCHER = "Anyone on this computer can open this view. Changes are made in the Ghostlight window.";
+const SHEET_NOT_SERVED = "Ghostlight is not serving a watch view on this computer.";
 const controlsPart = ({
-  context = "control", watch = true, runtime = "active", note = null, layer = "marker"
+  context = "control", watch = true, runtime = "active", note = null, layer = "marker", served = true
 } = {}) => {
   const control = context === "control";
   const act = (may = false) => (control || may ? { available: true, why_not: null } : { available: false, why_not: SHEET_WHY });
@@ -77,10 +78,13 @@ const controlsPart = ({
       word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime], note,
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
-    viewing: {
+    viewing: served ? {
       label: "Others can watch", watch, url: "http://127.0.0.1:41234/",
       word: watch ? "On -- anyone on this computer can open this view" : "Off -- only this window shows Ghostlight",
       acts: { set_watching: act() }
+    } : {
+      label: "Others can watch", watch: false, url: null, word: SHEET_NOT_SERVED,
+      acts: { set_watching: { available: false, why_not: SHEET_NOT_SERVED } }
     },
     diagnostics: {
       label: "Process diagnostics", on, layer, used_bytes: 4242, folder: "~/.cache/ghostlight",
@@ -847,12 +851,14 @@ function openStream() {
 }
 
 /** The service the page talks to, in one context. */
-function fakeService(kind) {
+function fakeService(kind, { served = true } = {}) {
   const state = {
     seq: 5, runtime: "active", note: null, requests: [], stream: null, bearer: "key-1",
     policyTag: "tag-1", stale: false, watching: true
   };
-  const controls = () => controlsPart({ context: kind, watch: state.watching, runtime: state.runtime, note: state.note });
+  const controls = () => controlsPart({
+    context: kind, watch: state.watching, runtime: state.runtime, note: state.note, served
+  });
   const status = () => ({
     service: { version: "2.0.0", started_at_ms: 0, runtime_state: state.runtime },
     readiness: state.runtime === "held"
@@ -938,8 +944,8 @@ function fakeService(kind) {
 }
 
 /** One page: the real modules over a stub document, with no native shell. */
-function bootHttpPage(kind) {
-  const service = fakeService(kind);
+function bootHttpPage(kind, options) {
+  const service = fakeService(kind, options);
   const pageNodes = new Map(ids.map((id) => [id, node(id)]));
   // The markup says which elements start out hidden; the stub starts from the same truth.
   const startsHidden = new Set([...markup.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g)]
@@ -1170,6 +1176,18 @@ await controlling.settle();
 await controlling.settle();
 const writes = controlRequests.filter((request) => request.path === "/api/policy/user");
 
+// ---- Control, with no watch view served -------------------------------------------------------
+const unserved = bootHttpPage("control", { served: false });
+await unserved.settle();
+await unserved.settle();
+const unservedSheet = {
+  viewingWord: unserved.text("controls-viewing-word").textContent,
+  viewingToggle: unserved.text("controls-viewing-toggle").hidden,
+  viewingCopy: unserved.text("controls-viewing-copy").hidden,
+  continueLine: unserved.text("controls-continue").hidden,
+  pause: unserved.text("controls-hold").hidden
+};
+
 // ---- Closed ---------------------------------------------------------------------------------
 const closedPage = bootHttpPage("closed");
 await closedPage.settle();
@@ -1259,6 +1277,11 @@ const httpChecks = [
       && controlOpening.sheetViewingToggle === false && controlOpening.sheetDiagnosticsToggle === false
       && controlOpening.sheetReveal === false && controlOpening.sheetContinue === true,
     JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
+  ["the window with no watch view served says so once, offers no toggle, and does not send itself to the window",
+    unservedSheet.viewingWord === SHEET_NOT_SERVED && unservedSheet.viewingToggle === true
+      && unservedSheet.viewingCopy === true && unservedSheet.continueLine === true
+      && unservedSheet.pause === false && unserved.threw === null && unserved.reported.length === 0,
+    JSON.stringify({ unservedSheet, threw: unserved.threw, reported: unserved.reported })],
   ["the window's Controls button opens the sheet, and Escape or a click outside closes it",
     sheetOpened && sheetClosedByEscape && sheetClosedByOutsideClick,
     JSON.stringify({ sheetOpened, sheetClosedByEscape, sheetClosedByOutsideClick })],
