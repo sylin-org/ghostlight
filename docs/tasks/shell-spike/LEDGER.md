@@ -46,6 +46,8 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
+Superseded in part by the ADR-0199 amendment of 2026-10-15: the private scheme, the in-memory bundle and the page bridge give way to the Ghostlight web apps over loopback, and the shell continues in [shell-m1.md](../break-2.0/shell-m1.md). Items 2 and 3 of the shell-spike-7 live checklist (the bridge echo and the content-policy probes) no longer apply.
+
 All seven slices have landed. Next: the coordinator runs the live checks under Owed live checks
 and records the results per platform. The shell lane then wires the service and deletes
 `crates/desktop/src/spike.rs` and `crates/desktop/spike/`.

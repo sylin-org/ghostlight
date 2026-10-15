@@ -454,3 +454,138 @@ Then, in order:
 The 2.x items follow the release: commands inside the running service (Decision 6), the install
 fold (Decision 17), the development channel (Decision 18), `state/version`, `service.json` and the
 hard stop (Decision 9).
+
+## Amendment (2026-10-15): the Ghostlight web apps over loopback
+
+Owner direction and answers, 2026-10-15. This changes how the shell gets its pages and how a page
+reaches the service. Every other decision of this ADR stands.
+
+### What changes
+
+1. **The service serves the existing workbench on loopback HTTP.** The files under
+   `crates/orchestrator/ui` are served as they are, plus a small shared kit under `ui/kit/` that
+   every Ghostlight web app uses (the band, the Controls sheet and their styles). The page
+   transport, `ui/lib/transport.js`, gains JSON calls and the live stream, and keeps the Tauri
+   path until Tauri leaves the service.
+2. **Access is decided per route, in context.** Every request is in one of three contexts:
+   - **Control**: it carries the bearer. That is the Ghostlight window.
+   - **Watch**: no bearer, and "Others can watch" is on. That is a browser tab, for example a
+     second monitor.
+   - **Closed**: no bearer, and watching is off.
+
+   A wrong bearer is refused (401). It never falls back to Watch. Each route names its answer
+   for each context, and anything not named is refused. Each part of the state has one
+   projection per context, made in the service when the response is written; the page never
+   redacts. A watcher sees the glance: readiness, who is connected, what agents are doing and
+   where, and what policy allows. A watcher sees the person's never-touch list and excluded hosts
+   only as counts, and never the raw policy files. Nobody, not even the window, sees the command
+   text of another program's entry: harness evidence names only that program's file name and
+   argument count. Display paths are home-relative for everyone.
+
+   Without the bearer a page may make a few requests, each because it only reads, only refreshes
+   the service's own view, or only takes power away: search (a POST, so free text never sits in a
+   URL), policy Check against history, Re-check clients (one scan per 5 s), "Continue in the
+   Ghostlight window" (once per 5 s), and Hold. Resume, Start and End stay in the window, as do
+   every act that changes what agents may do, writes another program's config, or acts on the
+   desktop (open the log folder, Locate, the test notification, links the service opens).
+3. **The page is told, not guessing.** `GET /api/context` answers in every context. It returns
+   the context, one sentence that says who can see this view, every act with `available` and
+   `why_not`, the product's version and license, and the closed table of the product's links. In
+   a tab the links are ordinary anchors; in the window the service opens them. The page renders
+   what it is told: a control it cannot press is drawn as state with one "Change this in the
+   Ghostlight window" line, never as a greyed button.
+4. **One live stream, pushed.** `GET /api/events` is a server-sent event stream that the page
+   reads with fetch, so the window can send its header. It carries today's activity events plus
+   status, connections, controls and part-changed events, projected for each context. One
+   sequence numbers every event, it advances whether or not anyone listens, and a snapshot reads
+   it before it gathers data. Every screen subscribes to one hub. A pause from the tray or the
+   browser toolbar goes through the same facade as the window, so every screen shows it within
+   a second and says where it came from.
+5. **One shared Controls sheet.** The band in every Ghostlight web app opens the same sheet. "On
+   this screen" holds personal settings kept in the browser. "For Ghostlight on this computer"
+   holds Pause and the session, "Others can watch", process diagnostics and the notification
+   test, which leave the Status page. Every screen shows their live state; only the window
+   changes them, except Hold.
+6. **A fixed port per user.** The default port comes from the home path, in 41000 to 41999,
+   skipping 41737, which the preview server uses. When it is taken, the OS picks one. `status`
+   and `doctor` show the actual URL, so a person can open or bookmark the watch view.
+7. **Guards.** The server binds 127.0.0.1 only and answers only when the `Host` header is exactly
+   that address and port, which defeats DNS rebinding; a page request for `localhost` is
+   redirected there, and an API request under any other host is refused. It refuses a WebSocket
+   upgrade, sends no CORS header, and refuses embedding. Every POST, PUT and DELETE needs a JSON
+   body and a same-origin `Origin` and `Sec-Fetch-Site` when present. The bearer is 256 random
+   bits per service start, compared in constant time, and never in a URL, a log, an audit line or
+   a response. Requests without it are rate-limited. Governance refuses agent navigation to the
+   workbench's own origin whatever the policy says.
+8. **Others can watch.** On by default. The window, the trust pages and `doctor` say who can see.
+   While it is off, the page files and `/api/context` still answer, so the About page shows in
+   full in a tab (the product, its version, links and license); every data view and data route
+   answers one sentence saying watching is off. The home holds `state/watch.off` only while it
+   is off.
+9. **The shell is a webview pointed at that URL.** `ghostlight-desktop` receives the URL and the
+   bearer from the service over relay protocol 4's `desktop` role, on the peer-checked pipe, and
+   hands the bearer only to its own page through the webview's initialization script. A normal
+   browser tab never has it. The spike's window, tray and session-end parts stay.
+10. **The service is zero or one.** `status`, `doctor` and the window say "Ghostlight service is
+    up; 2 MCP clients and 2 browsers connected", or "Ghostlight service is not running". They
+    count connections, never services. Anything else from Ghostlight that is still running, for
+    example a connector from an older installation, is a fault `doctor` names with its fix.
+
+### What it supersedes
+
+- Decision 1, the shell's "renders only service-owned HTML served through a private custom
+  scheme". The shell renders the service's loopback workbench. It still opens no port and links
+  no network client; the service opens one loopback port.
+- Decision 5, "A 2.0 service refuses the `desktop` ... role". The service serves the `desktop`
+  role to a shell of its own build. The `command` role stays refused until Decision 6 lands.
+- Decision 7's transport: the UI bundle sent by hash, the post-and-receive JSON bridge and the
+  content policy that allows nothing from the network. The page loads from the loopback origin
+  under a content policy limited to that origin. Today's Tauri commands become HTTP routes, not
+  bridge messages, except `quit_ghostlight`, which the page never calls (a person quits from the
+  tray). The rest of Decision 7 stands: a same-build contract on the `desktop` role, the shell's
+  four states, `WorkbenchFacade` in the service, and the fixed name and AppUserModelID.
+- Decision 21's reason for the `http` exception in the shell's tree: `wry`'s own API types still
+  bring it, but the shell registers no custom scheme and no IPC handler. It does no I/O and opens
+  no socket.
+- ADR-0135 Decision 3's disclosure, on every surface: a foreign entry is named by its program's
+  file name and argument count instead of its bounded command line, and a malformed
+  configuration names no parser reason. Another program's arguments, and a parser's message, can
+  quote a secret. ADR-0135's other decisions stand.
+
+ADR-0155 holds: local destinations follow policy. The workbench's own origin is one
+product-owned ceiling, like the non-HTTP scheme ceiling, not an address block. ADR-0077
+Decision 1 holds: no browser-control session arrives over TCP. The workbench carries no MCP and
+starts no browser work. It keeps ADR-0077's loopback, `Host`, bounded-header and no-upgrade
+guards; unlike ADR-0077's read-only Console, it takes changes, and only with the bearer.
+
+### Why
+
+The owner chose reuse and delight: the workbench people already know, in the Ghostlight window
+and on any screen of the computer, with access that fits what each request does. One blanket
+rule (reads open, everything else keyed) would have shown another program's tokens to any
+caller and would have refused a watcher the harmless things a second screen exists for. The
+private scheme opened no port at all, but it meant a second way to load the same pages and a
+bridge with its own vocabulary. A loopback port has known risks: another program or account on
+the same computer, a web page in the person's browser, and DNS rebinding. The guards contain
+them. Changes need a secret that the service hands out only on its per-user, peer-checked pipe.
+A page on another origin can read no response and send no change. Rebinding fails the `Host`
+check. Agents cannot open the page. "Others can watch" covers shared computers.
+
+### Consequences
+
+- While watching is on, any program or account on this computer can see what a watcher sees:
+  activity with hosts, client names, policy rules and settings, and connection state. It can
+  press Hold. The never-touch list and excluded hosts show only as counts.
+- Harness evidence is reduced for everyone, the window included: the program's file name and its
+  argument count, never its command text.
+- A program that runs as the same person can open the `desktop` role and get the bearer, as it
+  can already change that person's policy files. The bearer keeps out other accounts, web pages
+  and rebinding, not the person's own programs. An agent with a shell tool is such a program and
+  gets Watch at most from the page.
+- The Ghostlight window changes visibly in this milestone: the Controls sheet replaces the Status
+  page's session, notification and diagnostics strips.
+- If another program holds the default port, the service uses another one and `status` says so.
+  A bookmark then reaches that program, which never receives the bearer, because the shell takes
+  the URL from the service.
+- Removing Tauri from the service, presence, idle exit and the rest of the shell track are
+  planned after the owner sees this working, live.
