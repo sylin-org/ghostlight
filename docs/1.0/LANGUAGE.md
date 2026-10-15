@@ -517,11 +517,25 @@ The clauses by problem word:
 | `option_disabled` | `The option "<v>" of the "<n>" dropdown is disabled.` | `Choose an enabled option, or inspect the form for the field that enables it.` |
 | `multiple_values` | `The "<n>" dropdown takes one value, not a list.` | `Repeat browser_fill_form with target_... set to a single value.` |
 | `not_boolean` | `The "<n>" checkbox takes true or false, not "<v>".` | `Repeat with true or false for target_....` |
-| `format` | `The "<n>" date field takes YYYY-MM-DD, not "<v>".` and `Allowed: 2026-10-01 to 2026-12-31.` when the control declares limits | `Repeat browser_fill_form with target_... set to a corrected value.` |
+| `format` | `The "<n>" date field takes YYYY-MM-DD, not "<v>".` and `Allowed: 2026-10-01 to 2026-12-31.` when the control declares limits | `Repeat browser_fill_form with target_... set to a corrected value.` With two or more fields to correct (`format`, `not_boolean`, `multiple_values`), one shared step: `Repeat browser_fill_form with corrected values for target_14 and target_15.` |
 | `wrong_tool`, a file input | `The "<n>" field is a file input.` | `Attach the file with browser_upload on target_....` |
 | `wrong_tool`, a button | `The "<n>" control is a button, not a field.` | `Click it with browser_click on target_....` |
 | `wrong_tool`, a page widget | `The "<n>" dropdown is a page widget, not a form field.` | `Open it with browser_click on target_..., then browser_click the option by name.` |
 | `submit_not_owned` | `The submit control does not belong to the form that holds these fields.` | `Repeat without submit_target, then click the submit control with browser_click.` |
+
+Typed inputs take the ISO shapes (ADR-0198 Decision 10). The page checks `date`, `time`,
+`datetime-local`, `month`, `week`, `number`, `range` and `color` before any edit by assigning the
+value to a detached input of the same type with the same `min`, `max` and `step`, and reading it
+back. The value must come back as given and inside the declared range. The shapes are `YYYY-MM-DD`,
+`HH:MM`, `YYYY-MM-DDTHH:MM`, `YYYY-MM`, `YYYY-Www`, `a number` and `#rrggbb`. There is no lenient
+date parsing: `10/14/2026` is refused, not guessed at. A color compares without regard to case. An
+empty value clears the field. A step the value does not land on is not refused; the field's invalid
+state shows it. Wrong tools are named instead of failing in the page: a file input (use
+`browser_upload`), a button, a submit, reset or image input (use `browser_click`), and an element
+that is not a form control but has the role `combobox` or `listbox` (use `browser_click`). One call
+with a bad date, a checkbox word that is not a boolean and a file input ends with every one of them
+named, nothing edited, and two steps: `Repeat browser_fill_form with corrected values for target_14
+and target_15.` and `Attach the file with browser_upload on target_16.`
 
 The control noun comes from its role and input type (`dropdown`, `date field`, `checkbox`, `text
 field`). A given value is quoted up to 40 characters, on one line. Page text in a clause (option

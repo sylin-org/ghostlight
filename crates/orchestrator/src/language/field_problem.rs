@@ -46,6 +46,8 @@ const NO_VALUE: &str = "no value";
 const REVERTED_SHOWN_MAX: usize = 3;
 /// The most next steps a result carries.
 const NEXT_STEPS_MAX: usize = 2;
+/// The most handles one shared step names before it counts the rest.
+const HANDLES_LISTED_MAX: usize = 4;
 
 /// The closed vocabulary of reasons a page gives for a field that cannot take its value.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -539,6 +541,18 @@ impl RejectedField {
         }
     }
 
+    /// Whether repeating the fill with a different value fixes this field, so its step can be
+    /// shared with the other fields that need the same.
+    fn needs_corrected_value(&self) -> bool {
+        !self.credential
+            && matches!(
+                self.problem.kind,
+                FieldProblemKind::Format
+                    | FieldProblemKind::NotBoolean
+                    | FieldProblemKind::MultipleValues
+            )
+    }
+
     /// The step that fixes this field.
     fn next_step(&self) -> String {
         let target = &self.target;
@@ -688,14 +702,53 @@ pub fn reverted_facts(set: usize, fields: &[RejectedField]) -> Value {
     })
 }
 
-/// The steps for a refused fill: those of the first fields, at most two.
+/// The steps for a refused fill, at most two. Fields whose value only needs correcting share one
+/// step that names every handle, placed where the first of them stands; every other field
+/// brings its own step.
 #[must_use]
 pub fn rejected_next_steps(fields: &[RejectedField]) -> Vec<String> {
-    fields
-        .iter()
-        .take(NEXT_STEPS_MAX)
-        .map(RejectedField::next_step)
-        .collect()
+    let mut steps = Vec::new();
+    let mut correctable: Vec<&RejectedField> = Vec::new();
+    let mut shared_at = 0;
+    for field in fields {
+        if field.needs_corrected_value() {
+            if correctable.is_empty() {
+                shared_at = steps.len();
+                steps.push(String::new());
+            }
+            correctable.push(field);
+        } else {
+            steps.push(field.next_step());
+        }
+    }
+    match correctable.as_slice() {
+        [] => {}
+        [only] => steps[shared_at] = only.next_step(),
+        several => {
+            let handles: Vec<&str> = several.iter().map(|field| field.target.as_str()).collect();
+            steps[shared_at] = format!(
+                "Repeat browser_fill_form with corrected values for {}.",
+                handle_list(&handles)
+            );
+        }
+    }
+    steps.truncate(NEXT_STEPS_MAX);
+    steps
+}
+
+/// Handles as a sentence list: `a`, `a and b`, `a, b and c`, and past the room the leading
+/// ones and how many more.
+fn handle_list(handles: &[&str]) -> String {
+    match handles {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        _ if handles.len() > HANDLES_LISTED_MAX => format!(
+            "{} and {} more",
+            handles[..HANDLES_LISTED_MAX].join(", "),
+            handles.len() - HANDLES_LISTED_MAX
+        ),
+        [leading @ .., last] => format!("{} and {last}", leading.join(", ")),
+    }
 }
 
 /// The facts of a refused fill: the reason and one entry for each field.
@@ -1219,6 +1272,113 @@ mod tests {
                 "Open it with browser_click on {HANDLE}, then browser_click the option by name."
             )]
         );
+    }
+
+    fn at(target: &str, mut control: RejectedControl) -> RejectedControl {
+        control.target = target.into();
+        control
+    }
+
+    #[test]
+    fn a_bad_date_a_bad_checkbox_word_and_a_file_input_read_as_one_refusal_with_two_steps() {
+        let fields = vec![
+            RejectedField::new(
+                decode(
+                    json!({"field": 0, "problem": "format", "type": "date", "expected": "YYYY-MM-DD"}),
+                ),
+                at(
+                    "target_14",
+                    control(TargetRole::Textbox, "Start", "10/14/2026"),
+                ),
+                true,
+            ),
+            RejectedField::new(
+                decode(json!({"field": 1, "problem": "not_boolean"})),
+                at(
+                    "target_15",
+                    control(TargetRole::Checkbox, "Remember me", "maybe"),
+                ),
+                true,
+            ),
+            RejectedField::new(
+                decode(json!({"field": 2, "problem": "wrong_tool", "type": "file"})),
+                at(
+                    "target_16",
+                    control(TargetRole::Textbox, "Resume", "cv.pdf"),
+                ),
+                true,
+            ),
+        ];
+        let refusal = Refusal::FieldValuesRejected { fields, total: 4 };
+        let summary = refusal.summary();
+        assert_eq!(
+            summary,
+            "Nothing was changed: 3 of 4 fields cannot take their values. The \"Start\" date field takes YYYY-MM-DD, not \"10/14/2026\". The \"Remember me\" checkbox takes true or false, not \"maybe\". The \"Resume\" field is a file input."
+        );
+        assert!(summary.chars().count() <= 500);
+        assert_eq!(
+            refusal.next_steps(),
+            vec![
+                "Repeat browser_fill_form with corrected values for target_14 and target_15."
+                    .to_owned(),
+                "Attach the file with browser_upload on target_16.".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn corrected_values_name_the_first_handles_and_count_the_rest() {
+        let many = |count: usize| {
+            rejected_next_steps(
+                &(0..count)
+                    .map(|index| {
+                        RejectedField::new(
+                            decode(json!({"field": index, "problem": "format", "expected": "a number"})),
+                            at(&format!("target_{index}"), control(TargetRole::NumberField, "Qty", "x")),
+                            true,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            many(3),
+            vec!["Repeat browser_fill_form with corrected values for target_0, target_1 and target_2.".to_owned()]
+        );
+        assert_eq!(
+            many(6),
+            vec!["Repeat browser_fill_form with corrected values for target_0, target_1, target_2, target_3 and 2 more.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_credential_field_keeps_its_own_step_beside_a_shared_correction() {
+        let mut secret = at("target_9", control(TargetRole::Textbox, "Password", "x"));
+        secret.credential = true;
+        let fields = vec![
+            RejectedField::new(
+                decode(json!({"field": 0, "problem": "format", "expected": "a number"})),
+                at("target_1", control(TargetRole::NumberField, "Qty", "x")),
+                true,
+            ),
+            RejectedField::new(
+                decode(json!({"field": 1, "problem": "format"})),
+                secret,
+                true,
+            ),
+            RejectedField::new(
+                decode(json!({"field": 2, "problem": "format", "expected": "a number"})),
+                at("target_3", control(TargetRole::NumberField, "Count", "y")),
+                true,
+            ),
+        ];
+        let steps = rejected_next_steps(&fields);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(
+            steps[0],
+            "Repeat browser_fill_form with corrected values for target_1 and target_3."
+        );
+        assert!(steps[1].contains("target_9"), "{steps:?}");
     }
 
     #[test]

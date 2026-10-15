@@ -41,6 +41,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     optionDisabled: "option_disabled",
     multipleValues: "multiple_values",
     notBoolean: "not_boolean",
+    format: "format",
+    wrongTool: "wrong_tool",
     reverted: "reverted"
   });
   // The problems that make a fill refuse with the option code; any other refuses as not fillable.
@@ -56,6 +58,25 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     [FIELD_PROBLEMS.multipleValues]: "takes one value, not a list",
     [FIELD_PROBLEMS.notBoolean]: "takes true or false"
   });
+  // The shape each typed input takes, as a refusal tells the agent. The browser sanitizes any other
+  // shape to an empty value, or to its default, so a fill checks the value against a detached
+  // input of the same type before it edits anything.
+  const TYPED_FORMATS = Object.freeze({
+    date: "YYYY-MM-DD",
+    time: "HH:MM",
+    "datetime-local": "YYYY-MM-DDTHH:MM",
+    month: "YYYY-MM",
+    week: "YYYY-Www",
+    number: "a number",
+    range: "a number",
+    color: "#rrggbb"
+  });
+  // The attributes a typed input's check and its refusal carry, because they bound the value.
+  const TYPED_LIMIT_ATTRIBUTES = ["min", "max", "step"];
+  // The input types that are buttons, which a click presses and a fill never sets.
+  const BUTTON_INPUT_TYPES = new Set(["submit", "button", "reset", "image"]);
+  // The roles of a page widget that is not a form control. A fill cannot choose in one.
+  const WIDGET_ROLES = new Set(["combobox", "listbox"]);
   // How a fill value matched a choice when it was not the exact text, value or label.
   const MATCH_NORMALIZED = "normalized";
   // The words a checkbox or radio takes besides the booleans, compared without case.
@@ -1127,9 +1148,55 @@ ${line}` : line;
     return kind === "checkbox" ? resolveCheckbox(element, value) : resolveRadio(element, value);
   }
 
+  // The control a fill is the wrong tool for: a file input (browser_upload), a button
+  // (browser_click) or a page widget with a combobox or listbox role that is not a form control.
+  function wrongToolProblem(element) {
+    const tag = tagOf(element);
+    const type = inputType(element);
+    if (tag === "input" && type === "file") return { problem: FIELD_PROBLEMS.wrongTool, type };
+    if (tag === "button" || (tag === "input" && BUTTON_INPUT_TYPES.has(type))) return { problem: FIELD_PROBLEMS.wrongTool };
+    const formControl = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
+    if (!formControl && WIDGET_ROLES.has(element.getAttribute("role"))) return { problem: FIELD_PROBLEMS.wrongTool };
+    return null;
+  }
+
+  // Why a typed input cannot take a value, or null when it can. The browser sanitizes a value it
+  // does not understand to an empty one (or to its default for a color or a range), so the value is
+  // assigned to a detached input of the same type with the same bounds and read back. It must come
+  // back as given, apart from the case of a color, and inside the declared range. The refusal says
+  // the shape and the declared limits, never the value.
+  function typedProblem(element, value) {
+    const type = inputType(element);
+    const expected = TYPED_FORMATS[type];
+    if (!expected) return null;
+    const given = String(value);
+    const limits = {};
+    const probe = document.createElement("input");
+    probe.setAttribute("type", type);
+    for (const attribute of TYPED_LIMIT_ATTRIBUTES) {
+      const declared = element.getAttribute(attribute);
+      if (declared === null || declared === "") continue;
+      probe.setAttribute(attribute, declared);
+      limits[attribute] = shared.bounded(oneLine(declared), LIMIT_MAX);
+    }
+    setNativeValue(probe, given);
+    const held = String(probe.value);
+    const sameValue = type === "color" ? held.toLowerCase() === given.toLowerCase() : held === given;
+    const outside = probe.validity?.rangeUnderflow === true || probe.validity?.rangeOverflow === true;
+    if (sameValue && !outside) return null;
+    const problem = { problem: FIELD_PROBLEMS.format, type, expected };
+    if (Object.keys(limits).length) problem.limits = limits;
+    return problem;
+  }
+
   // How a fill value lands on a control: the choice it resolves to, or the problem that says why
   // it cannot. A control that is not a native choice has neither, unless a list was given to it.
-  function checkFillElement(element, value, allowCredentials = false) {
+  // Before an edit (`beforeEdit`) the control must also be one a fill is the right tool for, and a
+  // typed input must be able to hold the value. After the edit neither is asked again, because the
+  // page may have moved a bound since.
+  function checkFillElement(element, value, allowCredentials = false, beforeEdit = false) {
+    const wrongTool = beforeEdit ? wrongToolProblem(element) : null;
+    if (wrongTool) return { choice: null, problem: wrongTool };
     requireActionable(element, "fill");
     if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (!(element instanceof HTMLSelectElement || element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
@@ -1139,7 +1206,7 @@ ${line}` : line;
     if (resolved && !resolved.problem && resolved.element !== element) requireActionable(resolved.element, "fill");
     if (resolved) return { choice: resolved.problem ? null : resolved, problem: resolved.problem ?? null };
     if (Array.isArray(value)) return { choice: null, problem: { problem: FIELD_PROBLEMS.multipleValues } };
-    return { choice: null, problem: null };
+    return { choice: null, problem: beforeEdit ? typedProblem(element, value) : null };
   }
 
   // The refusal for one or more fields that cannot take their values. The detail is what the
@@ -1176,7 +1243,7 @@ ${line}` : line;
   }
 
   function validateFillElement(element, value, allowCredentials = false) {
-    const { choice, problem } = checkFillElement(element, value, allowCredentials);
+    const { choice, problem } = checkFillElement(element, value, allowCredentials, true);
     if (problem) throw fieldProblemsError([problem], false);
     return choice;
   }
@@ -1188,7 +1255,7 @@ ${line}` : line;
     const elements = message.fields.map((field) => resolve(field.locator));
     const problems = [];
     elements.forEach((element, index) => {
-      const { problem } = checkFillElement(element, message.fields[index].value, message.allow_credentials);
+      const { problem } = checkFillElement(element, message.fields[index].value, message.allow_credentials, true);
       if (problem) problems.push({ field: index, ...problem });
     });
     if (problems.length) throw fieldProblemsError(problems, true);
@@ -1216,6 +1283,8 @@ ${line}` : line;
   // What a text or typed control holds once the value is in. A native choice is checked by its
   // resolution instead.
   function expectedFillValue(element, value) {
+    // A color input holds its value in lower case whatever case it was given in.
+    if (inputType(element) === "color") return String(value).toLowerCase();
     // The textarea API and contenteditable innerText normalize both CRLF and lone CR to LF.
     return (element instanceof HTMLTextAreaElement || element.isContentEditable)
       ? String(value).replace(/\r\n?/g, "\n")

@@ -1616,7 +1616,13 @@ vocabulary: `option_missing`, `option_ambiguous`, `option_disabled`, `multiple_v
 words `content.js` names are among them. `options` lists what would succeed (25 entries of 60
 characters, with `options_total` when cut, a group as `{group, options}`, a disabled option as
 `{text, disabled:true}`); for a select too long to list, `containing` holds the enabled options
-whose text contains the refused value. A credential-class control lists none of these. The page
+whose text contains the refused value. A `format` problem carries `type` (the input type),
+`expected` (the shape the type takes) and `limits` (the declared `min`, `max` and `step`); the page
+assigns the value to a detached input of that type with those bounds and refuses a value that does
+not read back as given or that falls outside the range. A `wrong_tool` problem names a file input
+(`type:"file"`), a button, or a non-form element with the role `combobox` or `listbox`, and is
+found before the control is checked for visibility. A credential-class control lists none of
+these. The page
 never echoes the value the caller gave. The serialized detail stays within 4 KB: options are
 dropped first, then `containing`. A problem that loses its options this way gains `options_total`
 with the number it held, so the service never reads a dropped list as an empty select.

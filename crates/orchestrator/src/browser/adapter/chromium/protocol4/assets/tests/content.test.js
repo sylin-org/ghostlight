@@ -2444,6 +2444,179 @@ test("a refusal that mixes option problems with others is not fillable and says 
   assert.equal(options.error.message, "select option not found");
 });
 
+// ---- typed inputs and wrong tools are refused before any edit -----------------------------------
+
+/** A visible typed input with the bounds a page declares. */
+function typedInput(harness, label, type, bounds = {}, props = {}) {
+  const element = harness.newInput(label, { type, ...props });
+  for (const [name, value] of Object.entries(bounds)) element.setAttribute(name, value);
+  return element;
+}
+
+/** The problems of a prepare_fill over one field, or an empty list when the fill is accepted. */
+async function problemsOf(harness, label, value) {
+  const reply = await prepareRefusal(harness, [[label, value]]);
+  return reply.ok ? [] : reply.error.detail.problems;
+}
+
+test("a date the browser would sanitize away is refused with its shape, and the value stays out", async () => {
+  const harness = contentHarness();
+  const start = typedInput(harness, "Start", "date");
+
+  const refused = await prepareRefusal(harness, [["Start", "10/14/2026"]]);
+
+  assert.equal(refused.error.code, "not_fillable");
+  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "format", type: "date", expected: "YYYY-MM-DD" }]);
+  assert.ok(!JSON.stringify(refused).includes("10/14/2026"));
+  assert.equal(start.value, "");
+  assert.deepEqual(start.events, []);
+  assert.deepEqual(await problemsOf(harness, "Start", "2026-10-14"), []);
+  assert.deepEqual(await problemsOf(harness, "Start", "2026-02-30"), [{ field: 0, problem: "format", type: "date", expected: "YYYY-MM-DD" }]);
+  assert.deepEqual(await problemsOf(harness, "Start", ""), [], "clearing a date is a valid value");
+});
+
+test("a date outside its declared range is refused with the limits the page declares", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Start", "date", { min: "2026-10-01", max: "2026-12-31" });
+  const limited = { field: 0, problem: "format", type: "date", expected: "YYYY-MM-DD", limits: { min: "2026-10-01", max: "2026-12-31" } };
+
+  assert.deepEqual(await problemsOf(harness, "Start", "2027-01-15"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Start", "2026-09-30"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Start", "10/14/2026"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Start", "2026-10-14"), []);
+});
+
+test("a number outside its bounds or not a number is refused, and one inside is accepted", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Quantity", "number", { min: "1", max: "10" });
+  const limited = { field: 0, problem: "format", type: "number", expected: "a number", limits: { min: "1", max: "10" } };
+
+  assert.deepEqual(await problemsOf(harness, "Quantity", "11"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Quantity", "0"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Quantity", "many"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Quantity", "1,000"), [limited]);
+  assert.deepEqual(await problemsOf(harness, "Quantity", "5"), []);
+  assert.deepEqual(await problemsOf(harness, "Quantity", "10"), []);
+});
+
+test("a range the browser would clamp is refused instead of landing on another value", async () => {
+  const harness = contentHarness();
+  const volume = typedInput(harness, "Volume", "range", { min: "0", max: "10", step: "1" }, { value: "5" });
+
+  assert.deepEqual(await problemsOf(harness, "Volume", "50"), [{ field: 0, problem: "format", type: "range", expected: "a number", limits: { min: "0", max: "10", step: "1" } }]);
+  assert.deepEqual(await problemsOf(harness, "Volume", "7"), []);
+  assert.equal(volume.value, "5");
+});
+
+test("a color takes any case, and a name that is not a hex color is refused", async () => {
+  const harness = contentHarness();
+  const accent = typedInput(harness, "Accent", "color", {}, { value: "#000000" });
+
+  assert.deepEqual(await problemsOf(harness, "Accent", "#FF8800"), []);
+  assert.deepEqual(await problemsOf(harness, "Accent", "#ff8800"), []);
+  assert.deepEqual(await problemsOf(harness, "Accent", "orange"), [{ field: 0, problem: "format", type: "color", expected: "#rrggbb" }]);
+  assert.deepEqual(await problemsOf(harness, "Accent", "#f80"), [{ field: 0, problem: "format", type: "color", expected: "#rrggbb" }]);
+
+  const locator = await harness.locatorOf("Accent");
+  accent.value = "#ff8800";
+  const retained = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value: "#FF8800" }], stable_ms: 10, poll_ms: 5, limit_ms: 100 });
+  assert.deepEqual(retained.value, { retained: true, fields: [{ field: 0, now: "#ff8800" }] });
+});
+
+test("time, datetime, month and week each name the one shape they take", async () => {
+  const harness = contentHarness();
+  const cases = [
+    ["time", "Open", "HH:MM", "09:30", "9:30 AM"],
+    ["datetime-local", "Meeting", "YYYY-MM-DDTHH:MM", "2026-10-14T09:30", "2026-10-14 9:30"],
+    ["month", "Billing", "YYYY-MM", "2026-10", "October 2026"],
+    ["week", "Sprint", "YYYY-Www", "2026-W42", "2026-42"]
+  ];
+  for (const [type, label] of cases) typedInput(harness, label, type);
+
+  for (const [type, label, expected, good, bad] of cases) {
+    assert.deepEqual(await problemsOf(harness, label, good), [], type);
+    assert.deepEqual(await problemsOf(harness, label, bad), [{ field: 0, problem: "format", type, expected }], type);
+  }
+});
+
+test("a typed input filled with a list is refused as one value, not probed", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Start", "date");
+
+  assert.deepEqual(await problemsOf(harness, "Start", ["2026-10-14"]), [{ field: 0, problem: "multiple_values" }]);
+});
+
+test("a file input, a button and a page widget are the wrong tool, each with what it is", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Resume", "file");
+  typedInput(harness, "Save", "submit");
+  typedInput(harness, "Back", "button");
+  typedInput(harness, "Clear", "reset");
+  const pressed = harness.element("button");
+  pressed.setAttribute("aria-label", "Send");
+  harness.document.body.append(pressed);
+  const widget = harness.element("div");
+  widget.setAttribute("role", "combobox");
+  widget.setAttribute("aria-label", "Country");
+  harness.document.body.append(widget);
+  const list = harness.element("div");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Colors");
+  harness.document.body.append(list);
+
+  assert.deepEqual(await problemsOf(harness, "Resume", "cv.pdf"), [{ field: 0, problem: "wrong_tool", type: "file" }]);
+  for (const label of ["Save", "Back", "Clear", "Send", "Country", "Colors"]) {
+    assert.deepEqual(await problemsOf(harness, label, "x"), [{ field: 0, problem: "wrong_tool" }], label);
+  }
+});
+
+test("a hidden file input is still named as the wrong tool", async () => {
+  const harness = contentHarness();
+  const upload = typedInput(harness, "Resume", "file");
+  const locator = await harness.locatorOf("Resume");
+  upload.hidden = true;
+
+  const refused = await harness.send({ kind: "prepare_fill", fields: [{ locator, value: "cv.pdf" }], visual_settle: false });
+
+  assert.equal(refused.error.code, "not_fillable");
+  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "wrong_tool", type: "file" }]);
+});
+
+test("a call with a bad date, a bad checkbox word and a file input reports all three and edits nothing", async () => {
+  const harness = contentHarness();
+  const start = typedInput(harness, "Start", "date");
+  const remember = harness.newInput("Remember me", { type: "checkbox", checked: false });
+  typedInput(harness, "Resume", "file");
+  textInput(harness, { label: "Name", value: "kept" });
+
+  const refused = await prepareRefusal(harness, [["Start", "10/14/2026"], ["Remember me", "maybe"], ["Resume", "cv.pdf"], ["Name", "Ada"]]);
+
+  assert.equal(refused.error.code, "not_fillable");
+  assert.equal(refused.error.message, "target is not fillable (3 fields refused)");
+  assert.deepEqual(refused.error.detail.problems, [
+    { field: 0, problem: "format", type: "date", expected: "YYYY-MM-DD" },
+    { field: 1, problem: "not_boolean" },
+    { field: 2, problem: "wrong_tool", type: "file" }
+  ]);
+  assert.equal(start.value, "");
+  assert.equal(remember.checked, false);
+  assert.equal(harness.input.value, "kept");
+  assert.deepEqual(harness.edits, []);
+  assert.deepEqual(remember.events, []);
+});
+
+test("a filled value is still retained when the page moved a bound after the fill", async () => {
+  const harness = contentHarness();
+  const end = typedInput(harness, "End", "date", { min: "2026-10-01" });
+  const locator = await harness.locatorOf("End");
+  await harness.send({ kind: "fill_local", field: { locator, value: "2026-10-14" }, allow_credentials: false });
+  end.setAttribute("min", "2026-11-01");
+
+  const verified = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value: "2026-10-14" }], stable_ms: 10, poll_ms: 5, limit_ms: 100 });
+
+  assert.deepEqual(verified.value, { retained: true, fields: [{ field: 0, now: "2026-10-14" }] });
+});
+
 // ---- coded throw sites ---------------------------------------------------------------------------
 
 test("every throw site carries its code and keeps its message", async () => {

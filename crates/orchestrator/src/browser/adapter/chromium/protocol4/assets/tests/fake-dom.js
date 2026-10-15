@@ -34,6 +34,52 @@ function selectorMatches(element, selector) {
   });
 }
 
+const DATE_PARTS = /^(\d{4,})-(\d{2})-(\d{2})$/;
+const TIME_PARTS = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
+const NUMBER_SHAPE = /^-?(?:\d+|\d*\.\d+)(?:[eE][-+]?\d+)?$/;
+
+function validDate(text) {
+  const parts = DATE_PARTS.exec(text);
+  if (!parts) return false;
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(Number(parts[1]), month, 0)).getUTCDate();
+}
+
+function validTime(text) {
+  const parts = TIME_PARTS.exec(text);
+  return Boolean(parts) && Number(parts[1]) < 24 && Number(parts[2]) < 60 && Number(parts[3] ?? 0) < 60;
+}
+
+/**
+ * The value a browser keeps when a script assigns `text` to an input of `type`: the text when it
+ * has the type's shape, an empty value for the date and time types and a number, and the type's
+ * default for a color. A range clamps to its bounds and snaps to its step.
+ */
+function sanitizedValue(type, text, attribute) {
+  switch (type) {
+    case "date": return validDate(text) ? text : "";
+    case "time": return validTime(text) ? text : "";
+    case "datetime-local": {
+      const [date, time, ...rest] = text.split("T");
+      return rest.length === 0 && validDate(date) && validTime(time ?? "") ? text : "";
+    }
+    case "month": return /^\d{4,}-(?:0[1-9]|1[0-2])$/.test(text) ? text : "";
+    case "week": return /^\d{4,}-W(?:0[1-9]|[1-4]\d|5[0-3])$/.test(text) ? text : "";
+    case "number": return NUMBER_SHAPE.test(text) ? text : "";
+    case "color": return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toLowerCase() : "#000000";
+    case "range": {
+      const least = Number(attribute("min") ?? 0);
+      const most = Number(attribute("max") ?? 100);
+      const step = Number(attribute("step") ?? 1);
+      if (!NUMBER_SHAPE.test(text)) return String(least + (most - least) / 2);
+      const snapped = least + Math.round((Number(text) - least) / step) * step;
+      return String(Math.min(most, Math.max(least, snapped)));
+    }
+    default: return text;
+  }
+}
+
 function descendantsOf(root, selector) {
   const found = [];
   for (const node of root.childNodes ?? []) {
@@ -217,6 +263,33 @@ function createFakeDom({ top = true } = {}) {
     select() { selectedRange = { selected: this }; }
   }
 
+  /**
+   * A detached input made with `document.createElement("input")`: it sanitizes an assigned value
+   * by its `type` attribute and reports whether the value is outside its `min` and `max`.
+   */
+  class ProbeInput extends HTMLElement {
+    constructor() {
+      super("INPUT");
+      let held = "";
+      Object.defineProperty(this, "value", {
+        get: () => held,
+        set: (text) => { held = sanitizedValue(this.getAttribute("type") ?? "text", String(text), (name) => this.getAttribute(name)); }
+      });
+    }
+
+    get validity() {
+      const type = this.getAttribute("type") ?? "text";
+      const least = this.getAttribute("min");
+      const most = this.getAttribute("max");
+      const compare = (a, b) => (type === "number" || type === "range" ? Number(a) - Number(b) : (a < b ? -1 : a > b ? 1 : 0));
+      const filled = this.value !== "";
+      return {
+        rangeUnderflow: filled && least !== null && compare(this.value, least) < 0,
+        rangeOverflow: filled && most !== null && compare(this.value, most) > 0
+      };
+    }
+  }
+
   class HTMLTextAreaElement extends HTMLElement {}
   class HTMLSelectElement extends HTMLElement {}
   class File {
@@ -267,7 +340,7 @@ function createFakeDom({ top = true } = {}) {
       if (selectorMatches(input, selector) && !found.includes(input)) found.unshift(input);
       return found;
     },
-    createElement(tag) { return new HTMLElement(tag); },
+    createElement(tag) { return String(tag).toLowerCase() === "input" ? new ProbeInput() : new HTMLElement(tag); },
     createElementNS(namespace, tag) {
       created.namespaces.push(namespace);
       return new HTMLElement(tag);
