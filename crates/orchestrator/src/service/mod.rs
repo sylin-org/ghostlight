@@ -2,7 +2,8 @@
 //!
 //! [`ServiceHost`] holds the service lock, prepares the executor and the browser port, and binds
 //! the relay protocol 4 endpoint once the desktop is ready (ADR-0166, ADR-0199 Decisions 5 and
-//! 9). Every connection then opens with one relay opening: an `mcp` stream is one MCP client
+//! 9). The workbench's loopback server starts first, on one port per user, and carries no relay
+//! peer. Every connection then opens with one relay opening: an `mcp` stream is one MCP client
 //! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
 //! connection, and a `control` stream answers one operation.
 //!
@@ -24,7 +25,7 @@ use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
@@ -60,6 +61,7 @@ use crate::language::outcome::DialogKind;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
+use crate::workbench::web::{PendingWorkbench, Watching, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
@@ -84,6 +86,18 @@ const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
 use lifetime::{Drain, ReadyWatch, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
+
+/// What the runtime-published diagnostics line says: where the relay and the workbench listen.
+///
+/// It names the workbench by address only. The bearer is not an input, so it cannot appear.
+fn published_detail(endpoint: Option<&str>, workbench: Option<&WorkbenchAddress>) -> String {
+    format!(
+        "desktop_ready=true endpoint={} relay={} workbench={}",
+        endpoint.unwrap_or_default(),
+        ghostlight_relay::RELAY,
+        workbench.map_or("", WorkbenchAddress::url)
+    )
+}
 
 /// The desktop's request to leave its event loop, installed once the desktop exists.
 pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
@@ -306,6 +320,7 @@ impl ServiceHost {
             sessions: Capacity::new(admission::SESSIONS),
             budget: QueueBudget::default(),
             stop: Arc::clone(&stop),
+            workbench_server: OnceLock::new(),
         });
         Ok(Self {
             workbench,
@@ -325,16 +340,20 @@ impl ServiceHost {
         })
     }
 
-    /// Bind the relay endpoint after the desktop event loop has established an interaction route,
-    /// and start accepting on it.
+    /// Start the workbench's loopback server, then bind the relay endpoint after the desktop event
+    /// loop has established an interaction route, and start accepting on it.
     ///
-    /// Until this runs nothing can connect: there is no discovery file, port or token to find. A
-    /// second call changes nothing.
+    /// The server binds first and agents are barred from its address before it answers, so no
+    /// agent request can arrive before the rule holds. The relay has no port, token or discovery
+    /// file; the workbench's one loopback port carries no relay peer. Until this runs nothing can
+    /// connect. When the workbench cannot bind at all, the service serves on without it. A second
+    /// call changes nothing.
     pub fn publish_ready(&self) -> Result<()> {
         let mut bound = lock(&self.bound);
         if bound.is_some() {
             return Ok(());
         }
+        let workbench = self.start_workbench();
         // Edges that served an earlier service find this one from here on, so a call with no
         // browser waits for them from this moment, not from construction.
         self.browser.endpoint_published();
@@ -348,13 +367,48 @@ impl ServiceHost {
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
-            &format!(
-                "desktop_ready=true endpoint={} relay={}",
-                endpoint.as_deref().unwrap_or_default(),
-                ghostlight_relay::RELAY
+            &published_detail(
+                endpoint.as_ref().ok().map(String::as_str),
+                workbench.as_ref(),
             ),
         );
         Ok(())
+    }
+
+    /// Bind the workbench's port, bar agents from it, and start answering.
+    fn start_workbench(&self) -> Option<WorkbenchAddress> {
+        let pending = match PendingWorkbench::bind(&self.home) {
+            Ok(pending) => pending,
+            Err(error) => {
+                self.diagnostics.sink().emit(
+                    ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+                    ghostlight_bridge::diagnostics::Level::Error,
+                    None,
+                    &format!("the workbench could not bind a loopback port: {error}"),
+                );
+                return None;
+            }
+        };
+        self.intake
+            .governance
+            .protect_workbench_port(pending.address().port());
+        let watching = Arc::new(Watching::load(
+            install::layout::Layout::new(&self.home).watch_off_marker(),
+        ));
+        let server =
+            Arc::new(pending.serve(&self.workbench, self.intake.instance.clone(), watching));
+        let address = server.address().clone();
+        let _ = self.intake.workbench_server.set(server);
+        Some(address)
+    }
+
+    /// Where the workbench is served, once `publish_ready` has started its server.
+    #[must_use]
+    pub fn workbench_address(&self) -> Option<WorkbenchAddress> {
+        self.intake
+            .workbench_server
+            .get()
+            .map(|server| server.address().clone())
     }
 
     /// When this service must be accepting openings by: [`READY_LIMIT`] after it took the lock.
@@ -417,6 +471,9 @@ impl ServiceHost {
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
         self.refresher.unpark();
+        if let Some(server) = self.intake.workbench_server.get() {
+            server.stop();
+        }
         if let Some(bound) = lock(&self.bound).take() {
             bound.listener.shutdown();
             let _ = bound.thread.join();
@@ -626,6 +683,9 @@ struct Intake {
     sessions: Capacity,
     budget: QueueBudget,
     stop: Arc<AtomicBool>,
+    /// The workbench's server, once `publish_ready` has started it. The desktop role reads its
+    /// address and bearer from here.
+    workbench_server: OnceLock<Arc<WorkbenchServer>>,
 }
 
 impl Intake {
@@ -2039,6 +2099,7 @@ mod tests {
             sessions: super::Capacity::new(super::admission::SESSIONS),
             budget: super::QueueBudget::default(),
             stop: Arc::default(),
+            workbench_server: std::sync::OnceLock::new(),
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
         let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
@@ -2476,6 +2537,66 @@ mod tests {
         assert!(!old.exists(), "the numbered old image was left behind");
         drop(host);
         let _ = std::fs::remove_file(&old);
+    }
+
+    #[test]
+    fn publishing_starts_the_workbench_and_bars_agents_from_its_address() {
+        let home = TestHome::new("workbench-published");
+        let host = ServiceHost::start(home.path()).unwrap();
+        assert!(host.workbench_address().is_none());
+        host.publish_ready().unwrap();
+        let address = host.workbench_address().expect("the workbench is served");
+        assert!(address.url().starts_with("http://127.0.0.1:"));
+
+        let snapshot = host.intake.governance.snapshot();
+        for url in [address.url().to_owned(), format!("{}app.js", address.url())] {
+            let decision = snapshot.authorize_landing(crate::governance::CapabilitySet::READ, &url);
+            assert!(!decision.allowed, "{url} must be barred from agents");
+        }
+        let elsewhere = snapshot.authorize_landing(
+            crate::governance::CapabilitySet::READ,
+            "https://example.com/",
+        );
+        assert!(elsewhere.allowed);
+
+        // The page answers on that address, and the facade knows where it is.
+        assert_eq!(host.workbench.web_address(), Some(address));
+        host.publish_ready().unwrap();
+        drop(host);
+    }
+
+    #[test]
+    fn the_published_line_names_the_address_and_never_the_bearer() {
+        let home = TestHome::new("workbench-line");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let address = host.workbench_address().unwrap();
+        let bearer = host
+            .intake
+            .workbench_server
+            .get()
+            .unwrap()
+            .bearer()
+            .to_owned();
+        let line = super::published_detail(Some("endpoint"), Some(&address));
+        assert!(line.contains(&format!("workbench={}", address.url())));
+        assert!(!line.contains(&bearer));
+        assert!(!format!("{:?}", host.intake.workbench_server.get().unwrap()).contains(&bearer));
+        assert!(super::published_detail(None, None).ends_with("workbench="));
+        drop(host);
+    }
+
+    #[test]
+    fn a_stopped_host_frees_the_workbench_port() {
+        let home = TestHome::new("workbench-freed");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let port = host.workbench_address().unwrap().port();
+        drop(host);
+        assert!(
+            std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err(),
+            "nothing answers on the port after the service stops"
+        );
     }
 
     #[test]

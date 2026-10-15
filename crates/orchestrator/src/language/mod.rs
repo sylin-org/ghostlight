@@ -22,6 +22,7 @@ pub(crate) mod self_check;
 pub(crate) mod settlement;
 #[path = "catalog.rs"]
 mod tool_catalog;
+pub mod workbench;
 
 pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 

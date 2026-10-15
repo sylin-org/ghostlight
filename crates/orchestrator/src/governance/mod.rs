@@ -1423,7 +1423,7 @@ impl GovernanceFacade {
 
     /// A facade whose user layer is one Ghostlight owns at an explicit path.
     #[cfg(test)]
-    fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
+    pub(crate) fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
         Self::publishing(PolicySources::owning(path, managed), None)
     }
 

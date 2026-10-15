@@ -34,6 +34,9 @@ pub const STATE_DIRECTORY_NAME: &str = "state";
 /// start that finds it does not bring Ghostlight back.
 pub const QUIT_LATCH_NAME: &str = "quit";
 
+/// The marker under the state directory that exists exactly while "Others can watch" is off.
+pub const WATCH_OFF_MARKER_NAME: &str = "watch.off";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
 
@@ -153,6 +156,12 @@ impl Layout {
         self.state().join(QUIT_LATCH_NAME)
     }
 
+    /// The watching-off marker: `home/state/watch.off`. It exists only while watching is off.
+    #[must_use]
+    pub fn watch_off_marker(&self) -> PathBuf {
+        self.state().join(WATCH_OFF_MARKER_NAME)
+    }
+
     /// The user policy directory: `home/policy`.
     #[must_use]
     pub fn policy(&self) -> PathBuf {
@@ -197,6 +206,10 @@ mod tests {
         assert_eq!(layout.service_lock(), home.join("run").join("service.lock"));
         assert_eq!(layout.state(), home.join("state"));
         assert_eq!(layout.quit_latch(), home.join("state").join("quit"));
+        assert_eq!(
+            layout.watch_off_marker(),
+            home.join("state").join("watch.off")
+        );
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));
     }

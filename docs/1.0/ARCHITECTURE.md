@@ -275,9 +275,9 @@ fields still read; the extra fields are ignored.
 
 Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
 contract is [relay-protocol-4](../design/relay-protocol-4.md)): a named pipe on Windows and a Unix
-socket in `run` on Linux. There is no port, token or discovery file. The endpoint belongs to the
-user and the home, only the same user can open it, and each end checks the other's user before a
-payload byte moves. The relay framing, a four-byte little-endian length prefix, is Chromium's, so
+socket in `run` on Linux. The relay has no port, token or discovery file; the workbench's one
+loopback port carries no relay peer. The endpoint belongs to the user and the home, only the same
+user can open it, and each end checks the other's user before a payload byte moves. The relay framing, a four-byte little-endian length prefix, is Chromium's, so
 the browser relay and the adapter protocol use it end to end and the native host can forward
 bounded adapter frames without decoding them. A connection opens with one opening naming its role
 (`mcp`, `browser` or `control`; `desktop` and `command` are refused as unsupported) and the relay
@@ -470,10 +470,13 @@ owns the equivalent system entry and does not create a per-user shadow. Browser 
 is read-only and typed separately from native-host registration, so a current manifest cannot make
 a sandboxed or absent browser look usable.
 
-Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. File work runs outside
-the UI event loop. The native notification port is best effort and content-free. WebView, tray,
-notification, and recoverable Tauri failures cannot change domain truth; startup or event-loop
-failure ends the desktop authority instead of leaving an invisible process.
+Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. The loopback server in
+`workbench/web` is a second inbound adapter over the same facade. It decides access per route in
+three contexts (Control with the per-start bearer, Watch, Closed) and projects each part for its
+audience in the service. File work runs outside the UI event loop. The native notification port is
+best effort and content-free. WebView, tray, notification, and recoverable Tauri failures cannot
+change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
+an invisible process.
 
 ## Chokepoints and unit of work
 

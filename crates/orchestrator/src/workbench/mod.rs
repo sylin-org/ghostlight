@@ -1,14 +1,22 @@
 //! Orchestrator-owned desktop read model, user intents, and operating-system presentation port.
 
+pub mod context;
 mod history;
+mod input;
+pub mod parts;
+pub mod web;
+
 pub use history::{HistoryStep, StepHistoryState};
+pub use input::{
+    validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT, SEARCH_QUERY_LIMIT,
+};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browser::adapter::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
@@ -365,6 +373,45 @@ pub struct WorkbenchFacade {
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
     started_at_ms: u64,
+    web: Arc<OnceLock<WebFacts>>,
+    policy_writes: Arc<Mutex<()>>,
+    diagnostics_writes: Arc<Mutex<()>>,
+}
+
+/// What the facade knows of the loopback server that serves it.
+///
+/// The server never hands the facade its bearer: a surface in the service process needs the
+/// address and who can watch, not the key.
+#[derive(Clone, Debug)]
+pub struct WebFacts {
+    /// Where the workbench is served.
+    pub address: web::WorkbenchAddress,
+    /// The value that changes on every start of this service.
+    pub instance: String,
+    /// Whether other screens may watch.
+    pub watching: Arc<web::Watching>,
+}
+
+/// Why a precondition-guarded policy write did not happen.
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum PolicyWriteError {
+    /// The rules on disk are not the ones the caller saw.
+    #[error("the rules changed since the caller read them")]
+    Stale,
+    /// The authority refused the write.
+    #[error(transparent)]
+    Authoring(#[from] AuthoringError),
+}
+
+/// Why a state-guarded client act did not happen.
+#[derive(Debug, Error)]
+pub enum HarnessActError {
+    /// The client is not in the state the caller saw.
+    #[error("the client changed since the caller saw it")]
+    Stale,
+    /// The registry refused the act.
+    #[error(transparent)]
+    Failed(#[from] HarnessError),
 }
 
 impl WorkbenchFacade {
@@ -385,7 +432,41 @@ impl WorkbenchFacade {
             diagnostics,
             harnesses: HarnessRegistry::discover(),
             started_at_ms: unix_ms(),
+            web: Arc::default(),
+            policy_writes: Arc::default(),
+            diagnostics_writes: Arc::default(),
         }
+    }
+
+    /// The same facade over a client registry that never touches this user's clients.
+    #[cfg(test)]
+    pub(crate) fn with_harnesses(mut self, harnesses: HarnessRegistry) -> Self {
+        self.harnesses = harnesses;
+        self
+    }
+
+    /// Record where the loopback server serves this workbench. The first call wins.
+    pub fn attach_web(&self, facts: WebFacts) {
+        let _ = self.web.set(facts);
+    }
+
+    /// The address the workbench is served at, once a server is up.
+    #[must_use]
+    pub fn web_address(&self) -> Option<web::WorkbenchAddress> {
+        self.web.get().map(|facts| facts.address.clone())
+    }
+
+    /// Whether other screens may watch. Before a server is up, nothing is closed.
+    #[must_use]
+    pub fn watching(&self) -> bool {
+        self.web.get().is_none_or(|facts| facts.watching.is_on())
+    }
+
+    /// The body of GET /api/context for the given context, built from what the server reported.
+    #[must_use]
+    pub fn context_document(&self, context: context::WebContext) -> serde_json::Value {
+        let instance = self.web.get().map_or("", |facts| facts.instance.as_str());
+        context::context_document(context, self.watching(), instance)
     }
 
     /// The current process-diagnostics state for surfaces.
@@ -396,7 +477,19 @@ impl WorkbenchFacade {
 
     /// The person-facing toggle act, then the resulting state.
     pub fn apply_diagnostics_toggle(&self) -> crate::diagnostics::DiagnosticsReport {
+        let _writing = lock(&self.diagnostics_writes);
         self.diagnostics.toggle();
+        self.diagnostics.report()
+    }
+
+    /// Set process diagnostics on or off, then report the state.
+    ///
+    /// It flips only when the state differs, so two screens or a retry converge on the request.
+    pub fn set_diagnostics(&self, on: bool) -> crate::diagnostics::DiagnosticsReport {
+        let _writing = lock(&self.diagnostics_writes);
+        if self.diagnostics.directory().is_some() != on {
+            self.diagnostics.toggle();
+        }
         self.diagnostics.report()
     }
 
@@ -803,6 +896,27 @@ impl WorkbenchFacade {
         &self,
         document: &str,
     ) -> Result<WorkbenchIntentResult, AuthoringError> {
+        let _writing = lock(&self.policy_writes);
+        self.apply_policy_unguarded(document)
+    }
+
+    /// Apply a user policy only if the rules on disk still have the tag the caller read.
+    ///
+    /// The check and the write happen under one lock.
+    pub fn apply_user_policy_if(
+        &self,
+        document: &str,
+        expected_etag: &str,
+    ) -> Result<WorkbenchIntentResult, PolicyWriteError> {
+        let _writing = lock(&self.policy_writes);
+        self.require_policy_tag(expected_etag)?;
+        Ok(self.apply_policy_unguarded(document)?)
+    }
+
+    fn apply_policy_unguarded(
+        &self,
+        document: &str,
+    ) -> Result<WorkbenchIntentResult, AuthoringError> {
         let policy = self.governance.apply_user_policy(document)?;
         Ok(self.policy_result(format!(
             "Your rules are applied: {} {}.",
@@ -812,8 +926,31 @@ impl WorkbenchFacade {
 
     /// Remove this machine's user policy and return authority to whatever remains above it.
     pub fn remove_user_policy(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
+        let _writing = lock(&self.policy_writes);
+        self.remove_policy_unguarded()
+    }
+
+    /// Remove the user policy only if the rules on disk still have the tag the caller read.
+    pub fn remove_user_policy_if(
+        &self,
+        expected_etag: &str,
+    ) -> Result<WorkbenchIntentResult, PolicyWriteError> {
+        let _writing = lock(&self.policy_writes);
+        self.require_policy_tag(expected_etag)?;
+        Ok(self.remove_policy_unguarded()?)
+    }
+
+    fn remove_policy_unguarded(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
         self.governance.remove_user_policy()?;
         Ok(self.policy_result("Your rules are removed.".to_owned()))
+    }
+
+    fn require_policy_tag(&self, expected_etag: &str) -> Result<(), PolicyWriteError> {
+        if parts::policy_etag(&self.governance.effective_authority()) == expected_etag {
+            Ok(())
+        } else {
+            Err(PolicyWriteError::Stale)
+        }
     }
 
     /// Report one applied policy change the same way every other workbench mutation is reported.
@@ -829,6 +966,33 @@ impl WorkbenchFacade {
     /// Re-check supported development harnesses without changing their configuration.
     pub fn refresh_harnesses(&self) -> Result<Vec<HarnessSummary>, HarnessError> {
         self.harnesses.refresh()
+    }
+
+    /// The last complete check of the supported clients, without scanning again.
+    #[must_use]
+    pub fn cached_harnesses(&self) -> Vec<HarnessSummary> {
+        self.harnesses.summaries()
+    }
+
+    /// Apply one client act only if the client is still in the state the caller drew.
+    ///
+    /// The expected state is its wire token, for example installed.
+    pub fn manage_harness_expecting(
+        &self,
+        id: &str,
+        action: HarnessAction,
+        expected_state: &str,
+    ) -> Result<HarnessActionResult, HarnessActError> {
+        let current = self
+            .harnesses
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == id)
+            .map(|summary| serde_json::to_value(summary.state));
+        if !matches!(current, Some(Ok(state)) if state == expected_state) {
+            return Err(HarnessActError::Stale);
+        }
+        Ok(self.harnesses.apply(id, action)?)
     }
 
     /// Apply one explicit, ownership-checked development-harness registration intent.

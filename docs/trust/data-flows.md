@@ -15,6 +15,7 @@ audit run on the endpoint.
 | Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |
 | Audit records | Append-only JSON Lines file | Local path selected by the endpoint owner. |
 | Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
+| Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window | Same endpoint. |
 
 The managed HTTPS source may use a bearer token and organization CA pin. The signed bundle is the
 authority: Ed25519 is required, optional ML-DSA-65 makes both legs mandatory, and rollback is
@@ -23,7 +24,7 @@ refused by monotonic sequence. No bootstrap means no policy network work.
 ## Flows that do not exist
 
 - No telemetry, analytics, crash upload, activation callback, or update ping.
-- No audit upload, direct syslog delivery, HTTP collector, or inbound management listener.
+- No audit upload, direct syslog delivery, HTTP collector, or listener on any address but loopback.
 - No Ghostlight model-provider call. The MCP client owns its model relationship.
 - No vendor policy endpoint or embedded vendor policy key.
 
@@ -39,8 +40,9 @@ nothing Ghostlight does contacts the vendor.
 
 - `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal
   records. Use the endpoint's existing file collector for SIEM delivery.
-- There is no discovery file, port or token. `run/` in the home holds the service lock and, on
-  Linux, the relay socket.
+- There is no discovery file. The workbench listens on one loopback port, which ghostlight status
+  shows; it carries no MCP and starts no browser work. `run/` in the home holds the service lock
+  and, on Linux, the relay socket.
 - Managed deployments keep a verified signed bundle cache and a content-minimized status sidecar.
   The sidecar includes verification, sequence, freshness, source class, timing, organization, and
   contacts, but no source address, bearer token, verification key, or policy rules.

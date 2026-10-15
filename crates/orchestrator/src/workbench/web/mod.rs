@@ -1,0 +1,358 @@
+//! The loopback server that serves the workbench to the Ghostlight window and to browser tabs.
+//!
+//! It is a second inbound adapter over [`WorkbenchFacade`], beside the Tauri commands. It binds
+//! 127.0.0.1 only, answers only when the `Host` header is its own address, and decides access per
+//! route in three contexts: Control (the request carries this start's bearer), Watch (no bearer
+//! while "Others can watch" is on) and Closed (no bearer while it is off). Each part of the state
+//! is projected for its audience when the response is written (ADR-0199, amendment of 2026-10-15).
+//!
+//! The bearer is 256 random bits made at each start. It is held here, handed to the desktop role
+//! and to nobody else, and never logged, put in a URL or sent in a response.
+
+mod assets;
+mod http;
+mod limits;
+mod routes;
+#[cfg(test)]
+mod tests;
+mod watching;
+
+use std::fmt;
+use std::io;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use base64::Engine as _;
+use ghostlight_relay::endpoint::fnv1a32;
+use zeroize::Zeroizing;
+
+use super::{WebFacts, WorkbenchFacade};
+
+pub use watching::Watching;
+
+/// The lowest port a home's default can be.
+const PORT_BASE: u16 = 41_000;
+
+/// How many ports above [`PORT_BASE`] a default can fall on.
+const PORT_SPAN: u32 = 1_000;
+
+/// The port the workbench preview server uses, which a default never takes.
+const PREVIEW_PORT: u16 = 41_737;
+
+/// How many random bytes make a bearer.
+const BEARER_BYTES: usize = 32;
+
+/// The most connections served at once. A connection beyond that is closed at once.
+const MAX_CONNECTIONS: usize = 32;
+
+/// How long the accept loop rests after a failed accept.
+const ACCEPT_RETRY: Duration = Duration::from_millis(50);
+
+/// The port a home's workbench tries first: 41000 to 41999 from the home path, never the
+/// preview server's.
+#[must_use]
+pub fn default_port(home: &Path) -> u16 {
+    let lowered = home.to_string_lossy().to_ascii_lowercase();
+    let offset = u16::try_from(fnv1a32(lowered.as_bytes()) % PORT_SPAN)
+        .expect("the span is below the width of a port");
+    let port = PORT_BASE + offset;
+    if port == PREVIEW_PORT {
+        PREVIEW_PORT + 1
+    } else {
+        port
+    }
+}
+
+/// Whether two secrets are equal, in time that depends only on their length.
+#[must_use]
+pub fn same_secret(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
+/// Where the workbench is served.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkbenchAddress {
+    url: String,
+    port: u16,
+    usual: bool,
+}
+
+impl WorkbenchAddress {
+    fn new(port: u16, usual: bool) -> Self {
+        Self {
+            url: format!("http://{}:{port}/", Ipv4Addr::LOCALHOST),
+            port,
+            usual,
+        }
+    }
+
+    /// The address a person opens, ending in a slash.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The port.
+    #[must_use]
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Whether this is the port the home's default names. It is not when the default was taken.
+    #[must_use]
+    pub const fn usual(&self) -> bool {
+        self.usual
+    }
+}
+
+/// A bound listener that is not answering yet.
+///
+/// The service protects the address from agents between binding and serving, so no agent request
+/// can reach the page before the rule holds.
+pub struct PendingWorkbench {
+    listener: TcpListener,
+    address: WorkbenchAddress,
+}
+
+impl PendingWorkbench {
+    /// Bind 127.0.0.1 on the home's default port, or on a port the system picks when that is taken.
+    pub fn bind(home: &Path) -> io::Result<Self> {
+        Self::bind_preferring(default_port(home))
+    }
+
+    /// Bind 127.0.0.1 on `preferred`, or on a port the system picks when that is taken.
+    pub fn bind_preferring(preferred: u16) -> io::Result<Self> {
+        let (listener, usual) = match TcpListener::bind((Ipv4Addr::LOCALHOST, preferred)) {
+            Ok(listener) => (listener, true),
+            Err(_) => (TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?, false),
+        };
+        let port = listener.local_addr()?.port();
+        Ok(Self {
+            listener,
+            address: WorkbenchAddress::new(port, usual),
+        })
+    }
+
+    /// Where the workbench will be served.
+    #[must_use]
+    pub const fn address(&self) -> &WorkbenchAddress {
+        &self.address
+    }
+
+    /// Start answering, and tell the facade what it needs to know of this server.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the operating system has no random bytes to make a bearer from.
+    pub fn serve(
+        self,
+        facade: &WorkbenchFacade,
+        instance: String,
+        watching: Arc<Watching>,
+    ) -> WorkbenchServer {
+        facade.attach_web(WebFacts {
+            address: self.address.clone(),
+            instance: instance.clone(),
+            watching: Arc::clone(&watching),
+        });
+        let mut random = Zeroizing::new([0_u8; BEARER_BYTES]);
+        getrandom::getrandom(&mut *random).expect("the operating system supplies random bytes");
+        let bearer =
+            Zeroizing::new(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&random[..]));
+        let shared = Arc::new(Shared {
+            facade: facade.clone(),
+            instance,
+            bearer,
+            watching,
+            port: self.address.port,
+            limits: limits::Limits::default(),
+            wrong_keys: AtomicU64::new(0),
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = spawn_accept(self.listener, Arc::clone(&shared), Arc::clone(&stop));
+        WorkbenchServer {
+            shared,
+            address: self.address,
+            stop,
+            thread: Mutex::new(thread),
+        }
+    }
+}
+
+/// What every connection of one server shares.
+struct Shared {
+    facade: WorkbenchFacade,
+    instance: String,
+    bearer: Zeroizing<String>,
+    watching: Arc<Watching>,
+    port: u16,
+    limits: limits::Limits,
+    wrong_keys: AtomicU64,
+}
+
+impl fmt::Debug for Shared {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Shared")
+            .field("port", &self.port)
+            .field("bearer", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// A running workbench server. Dropping it stops it.
+pub struct WorkbenchServer {
+    shared: Arc<Shared>,
+    address: WorkbenchAddress,
+    stop: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl fmt::Debug for WorkbenchServer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkbenchServer")
+            .field("address", &self.address)
+            .field("bearer", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
+impl WorkbenchServer {
+    /// Bind and serve in one step, for a caller that has no rule to put between the two.
+    pub fn start(
+        home: &Path,
+        facade: &WorkbenchFacade,
+        instance: String,
+        watching: Arc<Watching>,
+    ) -> io::Result<Self> {
+        Ok(PendingWorkbench::bind(home)?.serve(facade, instance, watching))
+    }
+
+    /// Where the workbench is served.
+    #[must_use]
+    pub const fn address(&self) -> &WorkbenchAddress {
+        &self.address
+    }
+
+    /// The bearer of this start, for the desktop role. It goes nowhere else.
+    #[must_use]
+    pub fn bearer(&self) -> &str {
+        &self.shared.bearer
+    }
+
+    /// How many requests carried a bearer that was not this start's.
+    #[must_use]
+    pub fn wrong_key_count(&self) -> u64 {
+        self.shared.wrong_keys.load(Ordering::Acquire)
+    }
+
+    /// How many client scans requests have started.
+    #[must_use]
+    pub fn scan_count(&self) -> u64 {
+        self.shared.limits.scans()
+    }
+
+    /// Stop answering and free the port. A second call does nothing.
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let thread = self
+            .thread
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(thread) = thread {
+            // One connection to ourselves wakes the accept that waits.
+            let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.address.port));
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for WorkbenchServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Counts the connections being served, and frees a place when one ends.
+struct Place(Arc<AtomicUsize>);
+
+impl Place {
+    fn take(count: &Arc<AtomicUsize>) -> Option<Self> {
+        if count.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+            count.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(Self(Arc::clone(count)))
+    }
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn spawn_accept(
+    listener: TcpListener,
+    shared: Arc<Shared>,
+    stop: Arc<AtomicBool>,
+) -> Option<JoinHandle<()>> {
+    thread::Builder::new()
+        .name("ghostlight-workbench-listener".into())
+        .spawn(move || {
+            let connections = Arc::new(AtomicUsize::new(0));
+            for stream in listener.incoming() {
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(stream) = stream else {
+                    thread::sleep(ACCEPT_RETRY);
+                    continue;
+                };
+                if !from_loopback(&stream) {
+                    continue;
+                }
+                let Some(place) = Place::take(&connections) else {
+                    continue;
+                };
+                let shared = Arc::clone(&shared);
+                let _ = thread::Builder::new()
+                    .name("ghostlight-workbench-connection".into())
+                    .spawn(move || {
+                        let _place = place;
+                        serve_connection(&shared, stream);
+                    });
+            }
+        })
+        .ok()
+}
+
+/// A peer that is not on this computer's loopback is closed unanswered (ADR-0077 Decision 3).
+fn from_loopback(stream: &TcpStream) -> bool {
+    stream
+        .peer_addr()
+        .is_ok_and(|peer: SocketAddr| peer.ip().is_loopback())
+}
+
+fn serve_connection(shared: &Shared, stream: TcpStream) {
+    let _ = stream.set_nodelay(true);
+    let (mut incoming, head) = http::Incoming::read_head(stream);
+    let response = match head {
+        Ok(head) => routes::answer(shared, &head, &mut incoming),
+        Err(http::ReadError::Closed) => return,
+        Err(http::ReadError::Malformed) => routes::unreadable(),
+    };
+    incoming.finish(&response);
+}
