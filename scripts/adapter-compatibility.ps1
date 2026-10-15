@@ -127,7 +127,11 @@ if ($Json) {
     $result | ConvertTo-Json -Depth 5
 }
 else {
-    Write-Output "Source: Ghostlight $serviceVersion with Chrome adapter $adapterVersion -- compatible"
+    $coverageStatus = @{
+        $true  = "compatible"
+        $false = "not covered (required before a release candidate)"
+    }
+    Write-Output "Source: Ghostlight $serviceVersion with Chrome adapter $adapterVersion -- $($coverageStatus[$sourceCompatible])"
     Write-Output "Public: Ghostlight $publicService with Chrome adapter $publicAdapter -- compatible"
     Write-Output "Declared adapter rows: $(@($compatibility.chromeAdapters).Count)"
 }
