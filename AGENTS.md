@@ -250,9 +250,8 @@ active documentation honestly.
 
 ## Keeping this system honest
 
-When you finish significant work: update `docs/STATUS.md` (and the batch LEDGER if you are
-in one), record new decisions as ADRs, capture any durable cross-cutting learning or standing
-preference in [docs/MEMORY.md](docs/MEMORY.md) (session handoffs and sensitive/working notes go in
-`local/NOTES.md`), and keep this file pointing at reality. Write durable facts to these project
-scopes, never to a model-private memory store (that is only a cache, and it must not diverge from
-these). Trust the tree and `git log` over any prose that disagrees with them.
+When you finish significant work, update docs/STATUS.md. If you are executing a batch, record
+progress in its LEDGER, and touch STATUS only to say the batch started, changed scope or closed.
+Record a new decision as an ADR. Add to [docs/MEMORY.md](docs/MEMORY.md) only a new standing
+owner preference or a cross-cutting learning. Keep this file pointing at reality, and trust the
+tree and `git log` over prose that disagrees.

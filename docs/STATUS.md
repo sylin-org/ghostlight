@@ -1,7 +1,5 @@
 # STATUS -- Ghostlight 1.3.14 published; unchanged Chrome adapter 1.3.12
 
-Last updated: 2026-10-14 (2.0 break set in flight on dev).
-
 ## In flight: the 2.0 break set (2026-10-14)
 
 Dev carries the unreleased 2.0 break set of
