@@ -16,7 +16,7 @@ use ghostlight_relay::private;
 const NEW_SUFFIX: &str = ".new";
 
 /// Separator between an image name and the number of the swap that moved it aside.
-const OLD_MARKER: &str = ".old-";
+pub(crate) const OLD_MARKER: &str = ".old-";
 
 /// Replace `dir/name` with the file at `source`.
 ///
@@ -75,7 +75,7 @@ pub fn remove_old_images(dir: &Path) {
         let is_old_image = entry
             .file_name()
             .to_str()
-            .is_some_and(|name| old_image_number(name).is_some());
+            .is_some_and(|name| moved_aside(name).is_some());
         if is_old_image {
             let _ = fs::remove_file(entry.path());
         }
@@ -92,11 +92,12 @@ pub fn images(dir: &Path, name: &str) -> Vec<PathBuf> {
         .collect();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let moved_aside = entry.file_name().to_str().is_some_and(|file_name| {
-                old_image_number(file_name).is_some()
-                    && file_name.rsplit_once(OLD_MARKER).map(|(base, _)| base) == Some(name)
-            });
-            if moved_aside {
+            let is_copy = entry
+                .file_name()
+                .to_str()
+                .and_then(moved_aside)
+                .is_some_and(|(base, _)| base == name);
+            if is_copy {
                 found.push(entry.path());
             }
         }
@@ -112,13 +113,14 @@ fn unused_old_name(dir: &Path, name: &str) -> PathBuf {
         .expect("a counter that cannot be exhausted yields a free name")
 }
 
-/// The swap number when `file_name` is `<name>.old-<digits>`.
-fn old_image_number(file_name: &str) -> Option<u32> {
+/// The image name and the swap number when `file_name` is `<name>.old-<digits>`, the name a swap
+/// gives an image it moves aside.
+pub(crate) fn moved_aside(file_name: &str) -> Option<(&str, u32)> {
     let (name, number) = file_name.rsplit_once(OLD_MARKER)?;
     if name.is_empty() || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    number.parse().ok()
+    Some((name, number.parse().ok()?))
 }
 
 /// Remove a file, treating one that is already gone as success.

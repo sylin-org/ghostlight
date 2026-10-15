@@ -52,7 +52,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
-use super::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
+use super::layout::{retired_connector_names, Layout, DESKTOP_EXECUTABLE_NAME};
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
@@ -278,6 +278,9 @@ pub enum StrayKind {
     RetiredConnector,
     /// A service image a deploy moved aside whose process is not the service that answers.
     ReplacedService,
+    /// A program still running from the directory earlier 2.0 development builds ran in, which
+    /// an install removes.
+    RetiredDevelopment,
 }
 
 /// A process of an older installation that is still running.
@@ -293,9 +296,6 @@ pub struct StrayProcess {
 
 /// How long a stopped stray is given to exit.
 const STRAY_STOP_WAIT: Duration = Duration::from_secs(5);
-
-/// The text the swap puts before the number in the name of an image it moves aside.
-const MOVED_ASIDE_MARKER: &str = ".old-";
 
 /// What Linux appends to the executable path of a process whose file has been removed.
 const REMOVED_IMAGE_MARKER: &str = " (deleted)";
@@ -347,9 +347,9 @@ fn stray_refresh() -> ProcessRefreshKind {
 /// Whether the process running `image` is a leftover of an older installation.
 ///
 /// Only executables under the Ghostlight home count, so a program of the same name elsewhere is
-/// left alone. The name decides, so a process whose file has since been removed is still found.
-/// The current edge, the shell and the current service image are never strays, nor is the
-/// process asking.
+/// left alone. Anything running from the retired development directory is a leftover; elsewhere
+/// the name decides, so a process whose file has since been removed is still found. The current
+/// edge, the shell and the current service image are never strays, nor is the process asking.
 fn classify(
     image: &Path,
     pid: u32,
@@ -360,22 +360,21 @@ fn classify(
     if pid == own_pid || !lies_under(image, layout.home()) {
         return None;
     }
+    if lies_under(image, &layout.retired_development_directory()) {
+        return Some(StrayKind::RetiredDevelopment);
+    }
     let file_name = image.file_name()?.to_str()?;
-    let (base, moved_aside) = match file_name.rsplit_once(MOVED_ASIDE_MARKER) {
-        Some((base, number))
-            if !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) =>
-        {
-            (base, true)
-        }
-        _ => (file_name, false),
+    let (base, is_moved_aside) = match swap::moved_aside(file_name) {
+        Some((base, _)) => (base, true),
+        None => (file_name, false),
     };
-    if migration::retired_connector_names()
+    if retired_connector_names()
         .iter()
         .any(|name| same_file_name(name, base))
     {
         return Some(StrayKind::RetiredConnector);
     }
-    (moved_aside && same_file_name(SERVICE_EXECUTABLE_NAME, base) && Some(pid) != service_pid)
+    (is_moved_aside && same_file_name(SERVICE_EXECUTABLE_NAME, base) && Some(pid) != service_pid)
         .then_some(StrayKind::ReplacedService)
 }
 
@@ -399,6 +398,36 @@ fn lies_under(image: &Path, home: &Path) -> bool {
         .chain(resolved.as_deref())
         .flat_map(Path::ancestors)
         .any(|ancestor| homes.iter().any(|home| same_path(ancestor, home)))
+}
+
+/// What became of the strays one search found.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StrayStop {
+    /// The strays that are gone now.
+    pub stopped: Vec<StrayProcess>,
+    /// The strays that would not stop.
+    pub stuck: Vec<StrayProcess>,
+}
+
+/// Find the strays of `layout`'s home through `control` and stop them.
+///
+/// `service_pid` is the service that answers, when one does. This is the one way an install, a
+/// deploy and `doctor --fix` stop leftovers, so they say and do the same.
+pub fn stop_found_strays(
+    control: &dyn ProcessControl,
+    layout: &Layout,
+    service_pid: Option<u32>,
+) -> StrayStop {
+    let found = control.strays(layout, service_pid);
+    if found.is_empty() {
+        return StrayStop::default();
+    }
+    let stuck = control.stop_strays(&found);
+    let stopped = found
+        .into_iter()
+        .filter(|stray| !stuck.contains(stray))
+        .collect();
+    StrayStop { stopped, stuck }
 }
 
 /// Stop each stray and wait for it to exit. Returns the ones that would not stop.
@@ -515,6 +544,9 @@ pub struct Outcome {
     /// Entries of the plan's deletions that could not be removed. The next install tries again;
     /// this one is not failed by them.
     pub left_behind: Vec<PathBuf>,
+    /// Programs of an older installation that would not stop. The next install, deploy or
+    /// `doctor --fix` tries again; this one is not failed by them.
+    pub strays_left: Vec<StrayProcess>,
 }
 
 /// A release package found an installation that a development build made. The refusal names the
@@ -633,6 +665,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
+            strays_left: Vec::new(),
         });
     }
     let _guard = hold_install_lock(&context.layout.install_lock())?;
@@ -753,6 +786,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
+            strays_left: Vec::new(),
         });
     }
     let migrating = !plan.migration.is_empty();
@@ -763,6 +797,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     let mut copied = Vec::new();
     let mut flatpak = Vec::new();
     let mut left_behind = Vec::new();
+    let mut strays_left = Vec::new();
     if migrating {
         migration::prepare(&plan.migration)?;
         copied = migration::copy_state(&plan.migration)?;
@@ -779,11 +814,8 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         if !context.control.quit(layout) {
             context.control.stop_image(&running_images(layout))?;
         }
-        let strays = context.control.strays(layout, None);
-        if !strays.is_empty() {
-            // A program that will not stop is left for `doctor` to name; it blocks nothing here.
-            let _ = context.control.stop_strays(&strays);
-        }
+        // A program that will not stop is reported; it blocks nothing here.
+        strays_left = stop_found_strays(context.control, layout, None).stuck;
         left_behind = remove_retired_development(context.control, layout, &plan);
         if migrating {
             migration::retire_state(&copied)?;
@@ -809,6 +841,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         registrations: Some(registrations),
         flatpak,
         left_behind,
+        strays_left,
     })
 }
 
@@ -1073,9 +1106,9 @@ mod tests {
     use std::fs;
 
     use super::super::migration::{
-        retired_connector_names, FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation,
-        MigrationError, AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME,
-        LEGACY_RECORD_NAME, LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
+        FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation, MigrationError,
+        AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME,
+        LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
@@ -1149,6 +1182,8 @@ mod tests {
         failing_stops: Cell<u32>,
         /// The programs of an older installation the fake finds running.
         strays: Vec<StrayProcess>,
+        /// Whether the programs of an older installation refuse to stop.
+        strays_stay: bool,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -1166,6 +1201,7 @@ mod tests {
                 writes_on_stop: Vec::new(),
                 failing_stops: Cell::new(0),
                 strays: Vec::new(),
+                strays_stay: false,
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -1238,7 +1274,11 @@ mod tests {
             self.note(Call::StopStrays(
                 strays.iter().map(|stray| stray.pid).collect(),
             ));
-            Vec::new()
+            if self.strays_stay {
+                strays.to_vec()
+            } else {
+                Vec::new()
+            }
         }
 
         fn start_serve(&self, _layout: &Layout) -> io::Result<()> {
@@ -1456,6 +1496,57 @@ mod tests {
                 Call::Wait
             ]
         );
+    }
+
+    #[test]
+    fn a_stray_that_would_not_stop_is_reported_and_blocks_nothing() {
+        let fixture = Fixture::new();
+        let mut control = FakeControl::new();
+        let stray = StrayProcess {
+            pid: 4242,
+            image: fixture.layout.bin().join(&retired_connector_names()[1]),
+            kind: StrayKind::RetiredConnector,
+        };
+        control.strays = vec![stray.clone()];
+        control.strays_stay = true;
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(outcome.strays_left, [stray]);
+        assert_eq!(
+            control.calls(),
+            [
+                Call::Quit,
+                Call::StopStrays(vec![4242]),
+                Call::Start,
+                Call::Wait
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stray_search_separates_what_stopped_from_what_stayed() {
+        let layout = Layout::new("home");
+        let stray = |pid: u32, name: &str| StrayProcess {
+            pid,
+            image: layout.bin().join(name),
+            kind: StrayKind::RetiredConnector,
+        };
+        let mut control = FakeControl::new();
+        assert_eq!(
+            stop_found_strays(&control, &layout, Some(9)),
+            StrayStop::default()
+        );
+        assert!(control.calls().is_empty());
+
+        control.strays = vec![stray(1, "one"), stray(2, "two")];
+        let stop = stop_found_strays(&control, &layout, Some(9));
+        assert_eq!(stop.stopped, control.strays);
+        assert!(stop.stuck.is_empty());
+
+        control.strays_stay = true;
+        let stop = stop_found_strays(&control, &layout, None);
+        assert!(stop.stopped.is_empty());
+        assert_eq!(stop.stuck, control.strays);
     }
 
     #[test]
@@ -2892,17 +2983,16 @@ mod tests {
     fn the_current_programs_and_programs_elsewhere_are_never_strays() {
         let (scratch, layout) = stray_home();
         let mut current = Vec::new();
-        for directory in [layout.bin(), layout.retired_development_directory()] {
-            for name in [
-                EDGE_EXECUTABLE_NAME,
-                SERVICE_EXECUTABLE_NAME,
-                DESKTOP_EXECUTABLE_NAME,
-            ] {
-                current.push(directory.join(name));
-            }
-            current.push(directory.join(format!("{EDGE_EXECUTABLE_NAME}.old-1")));
-            current.push(directory.join(format!("{DESKTOP_EXECUTABLE_NAME}.old-1")));
+        let directory = layout.bin();
+        for name in [
+            EDGE_EXECUTABLE_NAME,
+            SERVICE_EXECUTABLE_NAME,
+            DESKTOP_EXECUTABLE_NAME,
+        ] {
+            current.push(directory.join(name));
         }
+        current.push(directory.join(format!("{EDGE_EXECUTABLE_NAME}.old-1")));
+        current.push(directory.join(format!("{DESKTOP_EXECUTABLE_NAME}.old-1")));
         for image in &current {
             assert_eq!(
                 kind_of(&layout, image, 7004, None),
@@ -2919,6 +3009,39 @@ mod tests {
         }
         let image = elsewhere.join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
         assert_eq!(kind_of(&layout, &image, 7005, None), None);
+    }
+
+    #[test]
+    fn anything_running_from_the_retired_development_directory_is_a_stray_of_its_own_kind() {
+        let (scratch, layout) = stray_home();
+        let directory = layout.retired_development_directory();
+        for name in [
+            EDGE_EXECUTABLE_NAME.to_owned(),
+            SERVICE_EXECUTABLE_NAME.to_owned(),
+            DESKTOP_EXECUTABLE_NAME.to_owned(),
+            format!("{SERVICE_EXECUTABLE_NAME}.old-1"),
+            format!("{EDGE_EXECUTABLE_NAME}.old-3"),
+            retired_connector_names()[0].clone(),
+            "helper".to_owned(),
+        ] {
+            let image = directory.join(&name);
+            assert_eq!(
+                kind_of(&layout, &image, 7020, Some(7021)),
+                Some(StrayKind::RetiredDevelopment),
+                "{name}"
+            );
+        }
+        let beside = directory.with_file_name("development-notes").join("helper");
+        assert_eq!(kind_of(&layout, &beside, 7022, None), None);
+        let elsewhere = fs::canonicalize(scratch.path())
+            .unwrap()
+            .join("dev")
+            .join(EDGE_EXECUTABLE_NAME);
+        assert_eq!(kind_of(&layout, &elsewhere, 7023, None), None);
+        assert_eq!(
+            serde_json::to_value(StrayKind::RetiredDevelopment).unwrap(),
+            serde_json::json!("retired_development")
+        );
     }
 
     #[test]
@@ -2962,5 +3085,101 @@ mod tests {
             serde_json::to_value(StrayKind::ReplacedService).unwrap(),
             serde_json::json!("replaced_service")
         );
+    }
+
+    /// Set on the child the real-process tests start, so that [`a_stray_stand_in_waits_when_asked`]
+    /// waits in it.
+    const STAND_IN_VARIABLE: &str = "GHOSTLIGHT_TEST_STRAY_STAND_IN";
+
+    /// The longest a stand-in waits if the test that started it never stops it.
+    const STAND_IN_LIFETIME: Duration = Duration::from_secs(60);
+
+    /// How long a test waits for the stand-in to show in the process table.
+    const STAND_IN_APPEARS_WITHIN: Duration = Duration::from_secs(20);
+
+    /// The program the real-process tests start under a retired connector's name: this test
+    /// binary, told to run only this test. It returns at once unless [`STAND_IN_VARIABLE`] is set,
+    /// and then exits by itself after [`STAND_IN_LIFETIME`].
+    #[test]
+    fn a_stray_stand_in_waits_when_asked() {
+        if env::var_os(STAND_IN_VARIABLE).is_some() {
+            std::thread::sleep(STAND_IN_LIFETIME);
+        }
+    }
+
+    /// A started stand-in, killed and reaped when the test ends however it ends.
+    struct StandIn(std::process::Child);
+
+    impl Drop for StandIn {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// Copy this test binary to `image` and start the copy waiting.
+    fn start_stand_in(image: &Path) -> StandIn {
+        fs::copy(env::current_exe().unwrap(), image).unwrap();
+        let child = std::process::Command::new(image)
+            .args(["--exact", "--test-threads=1"])
+            .arg("install::deployment::tests::a_stray_stand_in_waits_when_asked")
+            .env(STAND_IN_VARIABLE, "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        StandIn(child)
+    }
+
+    /// The stray of `layout`'s home that runs as process `pid`, once the table shows it.
+    fn wait_for_stray(layout: &Layout, pid: u32) -> StrayProcess {
+        let deadline = Instant::now() + STAND_IN_APPEARS_WITHIN;
+        loop {
+            if let Some(found) = stray_processes(layout, None)
+                .into_iter()
+                .find(|stray| stray.pid == pid)
+            {
+                return found;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the stand-in never showed as a stray"
+            );
+            std::thread::sleep(POLL);
+        }
+    }
+
+    #[test]
+    fn a_running_retired_connector_is_found_and_stopped_by_its_exact_pid() {
+        let (_scratch, layout) = stray_home();
+        let image = layout.bin().join(&retired_connector_names()[0]);
+        let mut stand_in = start_stand_in(&image);
+        let pid = stand_in.0.id();
+
+        let stray = wait_for_stray(&layout, pid);
+        assert_eq!(stray.kind, StrayKind::RetiredConnector);
+        assert!(same_path(&stray.image, &image), "{}", stray.image.display());
+
+        // The pid now belongs to another program than the one the scan saw: leave it alone.
+        let other = StrayProcess {
+            image: layout.bin().join(&retired_connector_names()[1]),
+            ..stray.clone()
+        };
+        assert!(stop_strays(&[other]).is_empty());
+        assert!(
+            stand_in.0.try_wait().unwrap().is_none(),
+            "a pid running another image was stopped"
+        );
+
+        assert!(stop_strays(&[stray]).is_empty());
+        let deadline = Instant::now() + STRAY_STOP_WAIT;
+        while stand_in.0.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the stray is still running");
+            std::thread::sleep(POLL);
+        }
+        assert!(stray_processes(&layout, None)
+            .iter()
+            .all(|found| found.pid != pid));
     }
 }

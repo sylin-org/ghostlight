@@ -124,8 +124,12 @@ within five seconds of its own start, which is below the extension's hello timeo
 An accepted control opening is answered by one frame, `{"kind": "result", "value": ...}`, and the
 stream closes. The value is the service's to define. The 2.0 service answers `readiness` with its
 readiness summary, `status` with `{service, instance, pid, started_by}` (`started_by` is the start
-reason the service was started with), `show` with `{shown}` (whether a
-window came forward) and `quit` with `{quitting: true}`. An operation this revision does not know
+reason the service was started with) and, when the service has them, `connections`
+(`{mcp_clients, command_line, browsers}`, how many of each are connected) and `workbench`
+(`{url, usual_port, watching}`, where the workbench is served and whether other screens on this
+computer may watch; the bearer that opens the window is never part of it), `show` with `{shown}`
+(whether a window came forward) and `quit` with `{quitting: true}`. A reader treats `connections`
+and `workbench` as optional: an older service answers without them. An operation this revision does not know
 is refused as `unsupported`.
 
 **`desktop`** carries the same-build shell contract of ADR-0199 Decision 7 and its 2026-10-15

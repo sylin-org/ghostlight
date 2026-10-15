@@ -10,7 +10,9 @@
 
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{self, AppContainer};
+use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
+use crate::language::workbench as stray_words;
 
 /// Registrations an install left unwritten because the app container it ran in keeps them private.
 #[derive(Default)]
@@ -29,6 +31,9 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use crate::language::environment;
 
     ghostlight_relay::home::home()?;
+    if install && !options.dry_run {
+        stop_older_installation_programs()?;
+    }
     let native_hosts = NativeHostRegistry::discover();
     let mut kept_private = KeptPrivate::default();
     let mut install_usable = false;
@@ -211,6 +216,36 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
+/// that `doctor` would name. The service that answers is never touched. A program that will not
+/// stop is said so and does not fail the install.
+fn stop_older_installation_programs() -> anyhow::Result<()> {
+    let layout = Layout::current()?;
+    let service_pid = crate::cli::client::status_at(layout.home())
+        .ok()
+        .map(|status| status.pid);
+    let stop = stop_found_strays(&SystemProcessControl, &layout, service_pid);
+    for line in stray_stop_lines(&stop) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// One line for each stray `stop` stopped and each it could not.
+fn stray_stop_lines(stop: &StrayStop) -> Vec<String> {
+    let image =
+        |stray: &crate::install::deployment::StrayProcess| stray.image.display().to_string();
+    stop.stopped
+        .iter()
+        .map(|stray| stray_words::stray_stopped_line(&image(stray)))
+        .chain(
+            stop.stuck
+                .iter()
+                .map(|stray| stray_words::stray_not_stopped_line(&image(stray))),
+        )
+        .collect()
 }
 
 /// How the report names the browsers whose registry value an install left unwritten.
@@ -495,7 +530,7 @@ mod tests {
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 
-    use super::{private_browser_registrations, select_install_browsers};
+    use super::{private_browser_registrations, select_install_browsers, stray_stop_lines};
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
@@ -566,6 +601,26 @@ mod tests {
         assert_eq!(
             private_browser_registrations(&["Google Chrome".to_owned()]),
             ["Google Chrome browser connection"]
+        );
+    }
+
+    #[test]
+    fn an_install_says_what_it_stopped_and_what_it_could_not() {
+        use crate::install::deployment::{StrayKind, StrayProcess, StrayStop};
+
+        let stray = |image: &str| StrayProcess {
+            pid: 3,
+            image: PathBuf::from(image),
+            kind: StrayKind::RetiredConnector,
+        };
+        assert!(stray_stop_lines(&StrayStop::default()).is_empty());
+        let lines = stray_stop_lines(&StrayStop {
+            stopped: vec![stray("a.exe")],
+            stuck: vec![stray("b.exe")],
+        });
+        assert_eq!(
+            lines,
+            ["Stopped a.exe.", "Could not stop b.exe. Close it yourself."]
         );
     }
 }

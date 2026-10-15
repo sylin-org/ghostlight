@@ -254,17 +254,18 @@ pub const DEVELOPMENT_CHANNEL_LINE: &str = "Channel: development";
 #[must_use]
 pub fn stray_line(image: &str) -> String {
     format!(
-        "Something from an older Ghostlight installation is still running: {image}. Close it, or run ghostlight doctor --fix."
+        "Something from an older Ghostlight installation is still running: {image}. Close it, or run ghostlight install."
     )
 }
 
-/// The line `doctor --fix` prints for a stray it stopped.
+/// The line `ghostlight install` and `doctor --fix` print for a stray they stopped.
 #[must_use]
 pub fn stray_stopped_line(image: &str) -> String {
     format!("Stopped {image}.")
 }
 
-/// The line `doctor --fix` prints for a stray that would not stop.
+/// The line `ghostlight install`, a deploy and `doctor --fix` print for a stray that would not
+/// stop.
 #[must_use]
 pub fn stray_not_stopped_line(image: &str) -> String {
     format!("Could not stop {image}. Close it yourself.")
@@ -399,7 +400,7 @@ mod tests {
     fn the_stray_lines_name_the_image_and_the_fix() {
         assert_eq!(
             stray_line("C:/gl/bin/old.exe"),
-            "Something from an older Ghostlight installation is still running: C:/gl/bin/old.exe. Close it, or run ghostlight doctor --fix."
+            "Something from an older Ghostlight installation is still running: C:/gl/bin/old.exe. Close it, or run ghostlight install."
         );
         assert_eq!(stray_stopped_line("old.exe"), "Stopped old.exe.");
         assert_eq!(

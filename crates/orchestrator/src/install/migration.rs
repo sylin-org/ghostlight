@@ -42,7 +42,7 @@
 //! holds content this migration did not copy is never overwritten, and an original is deleted
 //! only when its content is at the destination.
 
-use std::env::{self, consts::EXE_SUFFIX};
+use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -55,9 +55,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::entry;
-use super::layout::{
-    Layout, INSTALL_RECORD_NAME, RETIRED_BROWSER_CONNECTOR_NAME, RETIRED_MCP_CONNECTOR_NAME,
-};
+use super::layout::{retired_connector_names, Layout, INSTALL_RECORD_NAME};
 use super::native_host::{self, NativeHostRegistry};
 use super::record::{self, InstallRecord, Version};
 use super::{HarnessRegistry, HarnessState};
@@ -775,12 +773,6 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     plan.flatpak =
         Some(FlatpakLeftovers::below(&legacy.roots.user_home)).filter(FlatpakLeftovers::present);
     Ok(plan)
-}
-
-/// File names of the connector images 1.x and earlier 2.0 development builds installed.
-pub(super) fn retired_connector_names() -> [String; 2] {
-    [RETIRED_MCP_CONNECTOR_NAME, RETIRED_BROWSER_CONNECTOR_NAME]
-        .map(|name| format!("{name}{EXE_SUFFIX}"))
 }
 
 /// The retired connector images that exist in `layout`'s `bin`.

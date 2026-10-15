@@ -41,7 +41,8 @@ Rules:
 ## RESUME HERE
 
 Milestone 1 is complete (m1-12-honest-names landed out of order, before m1-11). The live demo with the
-owner is next; the coordinator runs it from DEMO.md beside the plan.
+owner is next; the coordinator runs it from DEMO.md beside the plan. Owner answer Q5 is closed:
+`ghostlight install` stops strays, and doctor's stray sentence names it (polish-02-strays).
 
 ## Landed
 
@@ -59,6 +60,7 @@ owner is next; the coordinator runs it from DEMO.md beside the plan.
 | m1-10-shell-webview | `ghostlight-desktop` is the Ghostlight window: a webview on the service's loopback workbench. It opens the relay `desktop` stream (`link.rs`), takes the address, the bearer and the tray from the `workbench` frame, hands the bearer to that origin's page only (`webview::access_script`) and keeps its web storage in `state/desktop-webview` under the home. The private scheme, the in-memory bundle, the page bridge and the spike page are gone; the shell depends on `ghostlight-relay` and nothing else in the workspace. | see `git log` |
 | m1-11-status-and-doctor | `ghostlight status` counts connections and names the workbench; `doctor` names what an older installation left running and `doctor --fix` stops it. The control `status` answer gains `connections` and `workbench` (never the bearer); the text and `--json` forms say the same; the endpoint moves to doctor's `Endpoint:` line. `install::deployment` owns the stray scan (`stray_processes`, `classify`, `stop_strays`); a restart deploy stops strays after the old service quits and before the new one starts. | see `git log` |
 | m1-12-honest-names | The edge carries a version resource: FileDescription "Ghostlight connection", ProductName "Ghostlight", CompanyName "Sylin", FileVersion and ProductVersion 4.0.0 (the relay revision). `embed-resource` becomes a Windows build dependency of the edge. The window keeps "Ghostlight". | see `git log` |
+| polish-02-strays (Q5 closed) | `ghostlight install` stops what an older installation left running through the same `install::deployment::stop_found_strays` the deploy uses, and says what it stopped and what would not stop; doctor's stray sentence names `ghostlight install`, and `doctor --fix` stops them by running the install repairs. A deploy reports strays that would not stop in `Outcome::strays_left` and prints one sentence for each. A program still running from the retired development directory is a stray of its own kind (`retired_development`). One vocabulary: `swap::moved_aside` and `swap::OLD_MARKER` serve the swap and the scan, and `layout::retired_connector_names` serves the migration and the scan. A real-process test starts a copy of the test binary under a retired connector name, finds it, leaves a pid that runs another image alone, and stops it by its exact pid. `relay-protocol-4.md` section 5 lists `connections` and `workbench` in the `status` answer. | see `git log` |
 
 ## Route table
 
@@ -429,3 +431,11 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
 - m1-11: docs/trust/data-flows.md says again that `ghostlight status` shows the workbench port (it prints the
   "Workbench:" line), and its Local artifacts list gains the shell's webview profile under
   `~/.ghostlight/state/desktop-webview`.
+
+- polish-02: owed live check, on the owner's machine after the dev loop: with a retired connector or a program in
+  `~/.ghostlight/dev` still running, `ghostlight doctor` names it with "Close it, or run ghostlight install.", and
+  `ghostlight install` prints "Stopped <image>." for it; afterwards `ghostlight doctor` names no stray.
+- polish-02: `doctor --fix` no longer stops strays itself; it runs the install repairs, which begin by stopping them,
+  so the two commands cannot differ. The service that answers is exempt from the moved-aside rule only; a program
+  running from the retired development directory is a stray even when it is the answering service, because the
+  directory is about to be removed.

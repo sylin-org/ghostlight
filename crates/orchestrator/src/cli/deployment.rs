@@ -13,6 +13,7 @@ use crate::install::migration::FlatpakStep;
 use crate::install::reconcile::ReconcileReport;
 use crate::language::deployment::{self as words, Placed};
 use crate::language::environment;
+use crate::language::workbench as stray_words;
 
 /// Where a line of the report goes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -90,6 +91,11 @@ fn report(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
     }
     lines.extend(service_line(outcome, layout));
     lines.extend(deletion_lines(outcome, layout));
+    lines.extend(outcome.strays_left.iter().map(|stray| {
+        Line::problem(stray_words::stray_not_stopped_line(
+            &stray.image.display().to_string(),
+        ))
+    }));
     if outcome.service_started == Some(true) {
         lines.push(Line::output(words::SERVICE_STARTED.to_owned()));
     }
@@ -225,6 +231,7 @@ mod tests {
                 registrations: None,
                 flatpak: Vec::new(),
                 left_behind,
+                strays_left: Vec::new(),
             },
             layout,
         )
@@ -312,6 +319,31 @@ mod tests {
         assert!(kept
             .iter()
             .any(|line| line.stream == Stream::Problem && line.text.contains(&shown_directory)));
+    }
+
+    #[test]
+    fn a_stray_that_would_not_stop_is_named_as_a_problem() {
+        use crate::install::deployment::{StrayKind, StrayProcess};
+
+        let layout = Layout::new("home");
+        let image = layout.bin().join("ghostlight-mcp-connector");
+        let outcome = Outcome {
+            plan: plan(Mode::Release, &layout, Vec::new()),
+            service_started: Some(true),
+            registrations: None,
+            flatpak: Vec::new(),
+            left_behind: Vec::new(),
+            strays_left: vec![StrayProcess {
+                pid: 7,
+                image: image.clone(),
+                kind: StrayKind::RetiredConnector,
+            }],
+        };
+        let lines = report(&outcome, &layout);
+        let sentence = format!("Could not stop {}. Close it yourself.", image.display());
+        let named: Vec<&Line> = lines.iter().filter(|line| line.text == sentence).collect();
+        assert_eq!(named.len(), 1, "{lines:?}");
+        assert_eq!(named[0].stream, Stream::Problem);
     }
 
     #[test]

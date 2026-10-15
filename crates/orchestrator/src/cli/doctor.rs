@@ -15,7 +15,7 @@ use crate::cli::status::{
     observe_runtime, render_runtime_status, runtime_document, RuntimeObservation,
 };
 use crate::install::container;
-use crate::install::deployment::{stop_strays, stray_processes, StrayProcess};
+use crate::install::deployment::{stray_processes, StrayProcess};
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
 use crate::language::deployment as deployment_words;
@@ -196,25 +196,10 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         ),
     }
     if fix {
-        stop_listed_strays(&observation.strays);
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
     }
     Ok(())
-}
-
-/// Stop the strays `doctor` named and say what became of each. One that will not stop is a fault
-/// that is reported; the repairs that follow still run.
-fn stop_listed_strays(strays: &[StrayProcess]) {
-    let stuck = stop_strays(strays);
-    for stray in strays {
-        let image = stray.image.display().to_string();
-        if stuck.contains(stray) {
-            println!("{}", words::stray_not_stopped_line(&image));
-        } else {
-            println!("{}", words::stray_stopped_line(&image));
-        }
-    }
 }
 
 /// The JSON document `doctor --json` prints, built from the same observation the text path uses.

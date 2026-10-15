@@ -8,6 +8,7 @@
 //! (ADR-0197 Decisions 10 and 14). The layout holds names only and touches no file: callers pass
 //! the home that `ghostlight_relay::home::home()` resolves, and tests pass a temporary directory.
 
+use std::env::consts::EXE_SUFFIX;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -65,6 +66,14 @@ pub const RETIRED_MCP_CONNECTOR_NAME: &str = "ghostlight-mcp-connector";
 
 /// The retired browser connector's name without a platform suffix.
 pub const RETIRED_BROWSER_CONNECTOR_NAME: &str = "ghostlight-browser-connector";
+
+/// File names of the connector images 1.x and earlier 2.0 development builds installed, with this
+/// platform's executable suffix.
+#[must_use]
+pub fn retired_connector_names() -> [String; 2] {
+    [RETIRED_MCP_CONNECTOR_NAME, RETIRED_BROWSER_CONNECTOR_NAME]
+        .map(|name| format!("{name}{EXE_SUFFIX}"))
+}
 
 /// Every path the installer and the entry rule use, derived from one home directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
