@@ -1618,7 +1618,8 @@ characters, with `options_total` when cut, a group as `{group, options}`, a disa
 `{text, disabled:true}`); for a select too long to list, `containing` holds the enabled options
 whose text contains the refused value. A credential-class control lists none of these. The page
 never echoes the value the caller gave. The serialized detail stays within 4 KB: options are
-dropped first, then `containing`.
+dropped first, then `containing`. A problem that loses its options this way gains `options_total`
+with the number it held, so the service never reads a dropped list as an empty select.
 
 The code stays `option_missing` when every problem is an option problem and `not_fillable`
 otherwise, and the message keeps its prefix (`select option not found`, `target is not fillable`),

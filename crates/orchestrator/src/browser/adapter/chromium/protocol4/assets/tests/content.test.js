@@ -2057,6 +2057,7 @@ test("the detail stays under 4 KB by dropping options first", async () => {
   assert.ok(JSON.stringify(refused.error.detail).length <= 4096);
   assert.deepEqual(refused.error.detail.problems.map((problem) => problem.field), [0, 1, 2, 3, 4]);
   assert.ok(refused.error.detail.problems.every((problem) => problem.problem === "option_missing" && !("options" in problem)));
+  assert.ok(refused.error.detail.problems.every((problem) => problem.options_total === 25));
 });
 
 test("single-field paths refuse with the code and message alone, with no detail", async () => {

@@ -956,13 +956,25 @@ ${line}` : line;
     return new AssetError(options ? "option_missing" : "not_fillable", message, withDetail ? boundedDetail(problems) : undefined);
   }
 
-  // The detail within its size cap: options go first, then the lists of near matches.
+  // How many options a listing holds, option groups flattened.
+  function listedOptionCount(options) {
+    return options.reduce((total, option) => total + (option.options ? listedOptionCount(option.options) : 1), 0);
+  }
+
+  // The detail within its size cap: options go first, then the lists of near matches. A problem
+  // that loses its options still says how many there were, so the service never reads a dropped
+  // list as an empty select.
   function boundedDetail(problems) {
     const detail = { problems: problems.map((problem) => ({ ...problem })) };
     const fits = () => JSON.stringify(detail).length <= PROBLEM_DETAIL_MAX;
     for (const key of ["options", "containing"]) {
       if (fits()) break;
-      for (const problem of detail.problems) delete problem[key];
+      for (const problem of detail.problems) {
+        if (key === "options" && problem.options?.length && problem.options_total === undefined) {
+          problem.options_total = listedOptionCount(problem.options);
+        }
+        delete problem[key];
+      }
     }
     return detail;
   }

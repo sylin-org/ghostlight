@@ -486,8 +486,8 @@ The clauses by problem word:
 
 | Problem | Clause | Next step |
 | --- | --- | --- |
-| `option_missing`, 25 options or fewer | `The "<n>" dropdown has no option "<v>". It offers: A, B, C.` | `Repeat browser_fill_form with target_... set to one of the offered options.` |
-| `option_missing`, a longer list | `... has no option "<v>" among its 195 options.` and `Options containing "<v>": X, Y.` when any | `Read target_... with browser_read to list all its options.` |
+| `option_missing`, 25 options or fewer | `The "<n>" dropdown has no option "<v>". It offers: A, B, C.` When the names are too wide for one clause: `It offers: A, B and 12 more, all in the facts.` | `Repeat browser_fill_form with target_... set to one of the offered options.` |
+| `option_missing`, a longer list, or a list the page sent without its options | `... has no option "<v>" among its 195 options.` and `Options containing "<v>": X, Y.` when any | `Read target_... with browser_read to list all its options.` |
 | `option_missing`, after an earlier choice field in the call | the clause above, then `Its options can depend on earlier fields.` | `Fill the earlier fields first, then repeat for target_....` |
 | `option_missing` on a radio button | `The "<group>" choice has no option "<v>". It offers: Standard, Express.` | `Repeat with one of the offered labels for target_....` |
 | `option_ambiguous` | `"<v>" matches 2 options of the "<n>" dropdown: Other (value other-staff), Other (value other-guest).` | `Repeat with the option's value for target_....` |

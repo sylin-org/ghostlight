@@ -394,7 +394,7 @@ impl RejectedField {
         };
         let offered = self.enabled_options();
         let mut clause;
-        if self.list_is_cut(&offered) {
+        if self.list_is_cut() {
             clause = format!(
                 "{} has no option {given} among its {}.",
                 self.subject_phrase(),
@@ -414,7 +414,7 @@ impl RejectedField {
             } else if offered.is_empty() {
                 clause.push_str(" Every option is disabled.");
             } else {
-                clause.push_str(&format!(" It offers: {}.", offered.join(", ")));
+                clause.push_str(&format!(" It offers: {}.", offered_phrase(&offered)));
             }
         }
         if self.follows_choice {
@@ -423,10 +423,10 @@ impl RejectedField {
         clause
     }
 
-    /// Whether the clause cannot name every option: the page cut the list, or the names do not
-    /// fit the room one clause has.
-    fn list_is_cut(&self, offered: &[String]) -> bool {
-        self.problem.options_total.is_some() || fitting(offered).len() < offered.len()
+    /// Whether the page cut the list, so the facts do not hold every option. A list the page sent
+    /// whole is never cut, even when its names are too wide for one clause.
+    fn list_is_cut(&self) -> bool {
+        self.problem.options_total.is_some()
     }
 
     fn ambiguous_clause(&self) -> String {
@@ -515,8 +515,7 @@ impl RejectedField {
                 format!("Repeat with one of the offered labels for {target}.")
             }
             FieldProblemKind::OptionMissing
-                if self.enabled_options().is_empty()
-                    || self.list_is_cut(&self.enabled_options()) =>
+                if self.enabled_options().is_empty() || self.list_is_cut() =>
             {
                 format!("Read {target} with browser_read to list all its options.")
             }
@@ -702,6 +701,18 @@ fn is_handle_shaped(word: &str) -> bool {
     })
 }
 
+/// The options a clause offers: all of them when they fit the room, otherwise the leading ones
+/// and how many more the facts hold.
+fn offered_phrase(offered: &[String]) -> String {
+    let kept = fitting(offered);
+    let rest = offered.len() - kept.len();
+    if rest == 0 {
+        kept.join(", ")
+    } else {
+        format!("{} and {rest} more, all in the facts", kept.join(", "))
+    }
+}
+
 /// The leading items of a list whose joined text stays inside one clause's room. Page text is
 /// made safe for a sentence on the way.
 fn fitting(items: &[String]) -> Vec<String> {
@@ -819,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn a_list_too_wide_for_one_clause_is_treated_as_a_long_one() {
+    fn a_whole_list_too_wide_for_one_clause_names_the_rest_and_keeps_the_repeat_step() {
         let options: Vec<String> = (0..25)
             .map(|index| format!("{}{index}", "w".repeat(50)))
             .collect();
@@ -831,9 +842,50 @@ mod tests {
             true,
         );
         let summary = refusal.summary();
-        assert!(summary.contains("among its 25 options"), "{summary}");
+        assert!(
+            summary.contains("has no option \"x\". It offers: "),
+            "{summary}"
+        );
+        assert!(summary.contains(" more, all in the facts."), "{summary}");
+        assert!(!summary.contains("among its"), "{summary}");
         assert!(summary.chars().count() <= 500);
-        assert!(refusal.next_steps()[0].starts_with("Read "));
+        assert_eq!(
+            refusal.next_steps(),
+            vec![format!(
+                "Repeat browser_fill_form with {HANDLE} set to one of the offered options."
+            )]
+        );
+        let Refusal::FieldValuesRejected { fields, .. } = &refusal else {
+            unreachable!()
+        };
+        assert_eq!(
+            rejected_facts(fields)["problems"][0]["options"]
+                .as_array()
+                .map(Vec::len),
+            Some(25)
+        );
+    }
+
+    #[test]
+    fn options_the_transport_dropped_are_never_spoken_as_an_empty_select() {
+        let dropped = one(
+            json!({"field": 0, "problem": "option_missing", "options_total": 4}),
+            TargetRole::Combobox,
+            "Role",
+            "Engineer",
+            true,
+        );
+        assert_eq!(
+            dropped.summary(),
+            "Nothing was changed. The \"Role\" dropdown has no option \"Engineer\" among its 4 options."
+        );
+        assert!(!dropped.summary().contains("offers no options"));
+        assert_eq!(
+            dropped.next_steps(),
+            vec![format!(
+                "Read {HANDLE} with browser_read to list all its options."
+            )]
+        );
     }
 
     #[test]
