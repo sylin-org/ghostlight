@@ -18,8 +18,8 @@ ordinary call. Tests validate every example and a list of ordinary calls against
 schemas, decode them, and check that every next step naming a tool names only fields that tool
 advertises (ADR-0196).
 
-Each declaration includes field guidance, one shortest valid example, a truthful output schema,
-and standard MCP annotations. The catalog says only what a field's name, type, enum, bounds and
+Each declaration includes field guidance, one shortest valid example, and standard MCP
+annotations. `docs/1.0/catalog.json` is the exact catalog, pinned by a test. The catalog says only what a field's name, type, enum, bounds and
 default do not. Guidance every tool shares, the optional `tab` and the `timeout_ms` bound, is in
 the server instructions and in a short `tab` description; `timeout_ms` and `visual_settle` carry
 none. The coordinate fact lives once in each `view` description: `x` and `y` are pixels in the

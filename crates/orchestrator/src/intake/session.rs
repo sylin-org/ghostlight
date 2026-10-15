@@ -50,9 +50,6 @@ pub struct ToolDefinition {
     /// JSON Schema for the input object.
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
-    /// JSON Schema for the structured result object, when one is advertised.
-    #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<Value>,
     /// Standard MCP behavior hints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ToolAnnotations>,
@@ -225,7 +222,6 @@ mod tests {
             name: "browser_tabs".into(),
             description: "List controlled tabs.".into(),
             input_schema: json!({"type": "object"}),
-            output_schema: Some(json!({"type": "object"})),
             annotations: Some(ToolAnnotations {
                 title: Some("List tabs".into()),
                 read_only_hint: Some(true),
@@ -236,7 +232,6 @@ mod tests {
         };
         let encoded = serde_json::to_value(complete).expect("tool serializes");
         assert_eq!(encoded["inputSchema"], json!({"type": "object"}));
-        assert_eq!(encoded["outputSchema"], json!({"type": "object"}));
         assert_eq!(encoded["annotations"]["title"], "List tabs");
         assert_eq!(encoded["annotations"]["readOnlyHint"], true);
         assert_eq!(encoded["annotations"]["destructiveHint"], false);
@@ -249,11 +244,9 @@ mod tests {
             name: "browser_tabs".into(),
             description: "List controlled tabs.".into(),
             input_schema: json!({"type": "object"}),
-            output_schema: None,
             annotations: None,
         };
         let encoded = serde_json::to_value(minimal).expect("tool serializes");
-        assert!(encoded.get("outputSchema").is_none());
         assert!(encoded.get("annotations").is_none());
     }
 

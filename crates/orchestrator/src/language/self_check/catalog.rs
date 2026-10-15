@@ -10,7 +10,6 @@ use std::collections::BTreeSet;
 use serde_json::{json, Value};
 
 use super::schema::{is_valid, violations};
-use crate::intake::session::ToolDefinition;
 use crate::language::{catalog, decode};
 
 /// An absolute path the decoder accepts on the platform the tests run on.
@@ -504,22 +503,9 @@ fn the_checker_rejects_invalid_calls_against_the_real_catalog() {
     }
 }
 
-/// The tools `tools/list` returns for the complete catalog: the output schema stays out of the
-/// listing, so it stays out of the measure.
-fn listed_tools() -> Vec<ToolDefinition> {
-    catalog()
-        .into_iter()
-        .map(|tool| ToolDefinition {
-            output_schema: None,
-            ..tool
-        })
-        .collect()
-}
-
 /// The most characters the `tools` array of `tools/list` may serialize to (ADR-0198 decision 26).
 ///
-/// The budget ratchets down. A later change raises it only by the measured size of a clause its
-/// new behavior needs, and the commit that raises it says so.
+/// A commit that adds a behavior needing words raises this ceiling, and says so.
 const CATALOG_BUDGET_CHARS: usize = 31_700;
 
 /// Tools that carry the most guidance get their own cap on the serialized tool object, so one
@@ -545,7 +531,7 @@ const PINNED_PHRASES: [&str; 7] = [
 
 #[test]
 fn the_listed_catalog_stays_under_its_size_budget() {
-    let tools = listed_tools();
+    let tools = catalog();
     let size = serde_json::to_string(&tools)
         .expect("catalog serializes")
         .len();
@@ -568,7 +554,7 @@ fn the_listed_catalog_stays_under_its_size_budget() {
 
 #[test]
 fn the_trim_keeps_the_governance_phrases() {
-    let listed = serde_json::to_string(&listed_tools()).expect("catalog serializes");
+    let listed = serde_json::to_string(&catalog()).expect("catalog serializes");
     for phrase in PINNED_PHRASES {
         assert!(listed.contains(phrase), "the catalog lost \"{phrase}\"");
     }
@@ -579,7 +565,7 @@ fn the_trim_keeps_the_governance_phrases() {
 #[test]
 fn the_documented_shortest_calls_lead_their_examples() {
     let first = |name: &str| {
-        listed_tools()
+        catalog()
             .into_iter()
             .find(|tool| tool.name == name)
             .map(|tool| tool.input_schema["examples"][0].clone())
@@ -588,4 +574,184 @@ fn the_documented_shortest_calls_lead_their_examples() {
     assert_eq!(first("browser_screenshot"), json!({}));
     assert_eq!(first("browser_scroll"), json!({}));
     assert_eq!(first("browser_press_key"), json!({"key":"Enter"}));
+}
+
+/// The environment variable that rewrites the model-surface goldens instead of comparing them.
+const UPDATE_VARIABLE: &str = "GHOSTLIGHT_CATALOG_UPDATE";
+
+/// The exact `tools` array of `tools/list`, pretty-printed, relative to the repository root.
+const CATALOG_GOLDEN: &str = "docs/1.0/catalog.json";
+
+/// The complete `tools/call` result of one successful call, relative to the repository root.
+const SUCCESS_GOLDEN: &str = "tests/golden/model/success.json";
+
+/// The complete `tools/call` result of one refused call, relative to the repository root.
+const REFUSAL_GOLDEN: &str = "tests/golden/model/refusal.json";
+
+/// The placeholder that stands for a value that differs on every run.
+const VOLATILE_PLACEHOLDER: &str = "<volatile>";
+
+/// Keys whose values are minted per run: handles, times and the resume token.
+const VOLATILE_KEYS: [&str; 5] = ["invocation", "tab", "resume", "at", "timestamp"];
+
+fn repository_path(relative: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
+}
+
+/// A pretty-printed golden: the value, then exactly one newline.
+fn golden_text(value: &impl serde::Serialize) -> String {
+    let mut text = serde_json::to_string_pretty(value).expect("golden serializes");
+    text.push('\n');
+    text
+}
+
+/// Replace every volatile value with a fixed placeholder and keep every key.
+fn normalize(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map.iter_mut() {
+                if VOLATILE_KEYS.contains(&key.as_str()) && !inner.is_null() {
+                    *inner = Value::String(VOLATILE_PLACEHOLDER.into());
+                } else {
+                    normalize(inner);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(normalize),
+        _ => {}
+    }
+}
+
+/// Compare `actual` with the golden file, or rewrite the file when the update variable is set.
+fn check_golden(relative: &str, actual: &str) {
+    let path = repository_path(relative);
+    if std::env::var_os(UPDATE_VARIABLE).is_some() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("golden directory is writable");
+        }
+        std::fs::write(&path, actual).expect("golden is writable");
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_default();
+    if expected == actual {
+        return;
+    }
+    let line = expected
+        .lines()
+        .zip(actual.lines())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| expected.lines().count().min(actual.lines().count()));
+    panic!(
+        "{relative} differs from the model surface at line {}:\n  file:   {}\n  actual: {}\nrun the test with {UPDATE_VARIABLE}=1 to rewrite it when the change is deliberate",
+        line + 1,
+        expected.lines().nth(line).unwrap_or("<end of file>"),
+        actual.lines().nth(line).unwrap_or("<end of file>"),
+    );
+}
+
+#[test]
+fn the_catalog_matches_docs_1_0_catalog_json() {
+    check_golden(CATALOG_GOLDEN, &golden_text(&catalog()));
+}
+
+#[test]
+fn the_catalog_golden_is_ascii() {
+    let text = std::fs::read_to_string(repository_path(CATALOG_GOLDEN)).expect("golden exists");
+    assert!(
+        text.is_ascii(),
+        "{CATALOG_GOLDEN} holds a non-ASCII character"
+    );
+}
+
+/// The `tools/call` result the latest MCP revision gives a client for `envelope`.
+fn rendered_result(tool: &str, envelope: &crate::work::result::InvocationResult) -> Value {
+    use crate::intake::mcp::{McpSession, Step, LATEST_REVISION};
+    use crate::intake::session::{ServiceRequest, ServiceResponse};
+
+    let mut session = McpSession::new("npm");
+    session.accept(
+        &json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_REVISION,
+                "clientInfo": {"name": "golden client", "version": "1"},
+                "capabilities": {}
+            }
+        })
+        .to_string(),
+    );
+    session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let steps = session.accept(
+        &json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": tool, "arguments": {}}
+        })
+        .to_string(),
+    );
+    let id = steps
+        .into_iter()
+        .find_map(|step| match step {
+            Step::Forward(ServiceRequest::Invoke { id, .. }) => Some(id),
+            _ => None,
+        })
+        .expect("the call is forwarded to the service");
+    let lines = session.render(ServiceResponse::Result {
+        id,
+        text: envelope.model_text(),
+        result: serde_json::to_value(envelope).expect("envelope serializes"),
+        is_error: envelope.is_error(),
+        content: Vec::new(),
+    });
+    let mut result = lines[0]["result"].clone();
+    normalize(&mut result);
+    result
+}
+
+#[test]
+fn the_result_envelope_matches_its_goldens() {
+    use crate::language::outcome::{Outcome, Refusal};
+    use crate::work::result::{Effect, InvocationResult, Readiness, Status};
+
+    let listed = Outcome::TabsListed { count: 1 };
+    let success = InvocationResult::new(
+        "invocation_0123456789abcdef",
+        Status::Succeeded,
+        Effect::None,
+        Readiness::NotApplicable,
+        true,
+        &listed.summary(),
+        json!({
+            "tabs": [{
+                "tab": "tab_q3k7",
+                "title": "Example Domain",
+                "url": "https://example.com/",
+                "active": true,
+                "readiness": "complete"
+            }],
+            "browsers": [{"browser": "chromium", "name": "Chromium", "attended": true}]
+        }),
+        listed.next_steps(),
+    );
+    check_golden(
+        SUCCESS_GOLDEN,
+        &golden_text(&rendered_result("browser_tabs", &success)),
+    );
+
+    let refused = Refusal::InvalidRequest;
+    let refusal = InvocationResult::new(
+        "invocation_fedcba9876543210",
+        Status::Failed,
+        Effect::None,
+        Readiness::NotApplicable,
+        true,
+        &refused.summary(),
+        json!({"reason": "invalid_input"}),
+        refused.next_steps(),
+    );
+    check_golden(
+        REFUSAL_GOLDEN,
+        &golden_text(&rendered_result("browser_tabs", &refusal)),
+    );
 }

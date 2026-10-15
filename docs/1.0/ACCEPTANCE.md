@@ -15,7 +15,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    conditional branch, bound, and default in `LANGUAGE.md`. Every declaration has field guidance
    (the field's own description, a self-describing name with its type, enum, bounds and default,
    or shared guidance in the server instructions; ADR-0198 decision 26), a shortest valid
-   example, a truthful output schema, and standard MCP annotations. Under a strict JSON Schema
+   example, and standard MCP annotations. Under a strict JSON Schema
    check, every example and at least two ordinary calls for each tool that takes input satisfy
    the advertised input schema, match no `oneOf` more than once, and decode. Every next step that
    names a tool names only fields that tool advertises, and only values a closed field accepts.

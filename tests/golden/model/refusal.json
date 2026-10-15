@@ -1,0 +1,22 @@
+{
+  "content": [
+    {
+      "text": "The call does not match the Ghostlight catalog. Next: Match the call to the advertised schema; the invalid_input detail states exactly what to change.",
+      "type": "text"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "effect": "none",
+    "facts": {
+      "reason": "invalid_input"
+    },
+    "invocation": "<volatile>",
+    "next_steps": [
+      "Match the call to the advertised schema; the invalid_input detail states exactly what to change."
+    ],
+    "repeat_safe": true,
+    "status": "failed",
+    "summary": "The call does not match the Ghostlight catalog."
+  }
+}

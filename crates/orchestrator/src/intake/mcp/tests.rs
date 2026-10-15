@@ -66,7 +66,6 @@ fn tool(name: &str) -> ToolDefinition {
         name: name.into(),
         description: "A tool.".into(),
         input_schema: json!({"type": "object"}),
-        output_schema: Some(json!({"type": "object", "required": ["status"]})),
         annotations: Some(ToolAnnotations {
             read_only_hint: Some(true),
             ..ToolAnnotations::default()

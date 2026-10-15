@@ -2718,7 +2718,6 @@ mod tests {
         assert_eq!(names.len(), CATALOG_TOOL_COUNT);
         for tool in catalog {
             assert!(tool.input_schema.is_object());
-            assert!(tool.output_schema.is_some());
             assert!(tool.annotations.is_some());
         }
     }

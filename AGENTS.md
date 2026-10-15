@@ -164,6 +164,9 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   plus `cargo test -p ghostlight` and `npm test` in `extension/`, which also read the expanded bundle.
 - `crates/relay`, either connector crate, any `Cargo.toml` or `Cargo.lock`, or `tests/golden/`:
   `node --test tests/guards/connectors.test.mjs`.
+- The model surface changes on purpose: regenerate the catalog golden with
+  `GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight the_catalog_matches` (slice f08a renames
+  the package), and the result goldens with the same variable on `the_result_envelope`.
 - Changed runtime JavaScript that no test runs: `node --check` on it.
 - Docs or other text: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1` (ASCII and links).
 

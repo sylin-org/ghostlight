@@ -277,7 +277,7 @@ frames.
 ### Language
 
 Owns the one 23-tool catalog, JSON schemas, descriptions, examples, MCP annotations, decoder
-defaults, validation, typed operations, output schemas, and mapping of domain outcomes to language
+defaults, validation, typed operations, and mapping of domain outcomes to language
 facts. Nothing outside this context defines a tool or an alternate client dialect. Each tool
 advertises one portable object schema: every field any branch accepts, each as one schema that
 admits every value some branch admits. Cross-field rules, such as which fields belong together,

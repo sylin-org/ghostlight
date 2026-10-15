@@ -553,13 +553,6 @@ impl McpSession {
         let Some(waiter) = self.catalog_waiters.pop_front() else {
             return Vec::new();
         };
-        let tools: Vec<ToolDefinition> = tools
-            .into_iter()
-            .map(|tool| ToolDefinition {
-                output_schema: None,
-                ..tool
-            })
-            .collect();
         let reply = success(waiter.id, json!({"tools": tools}));
         let Some(batch_id) = waiter.batch else {
             return vec![reply];

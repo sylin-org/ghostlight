@@ -1,0 +1,34 @@
+{
+  "content": [
+    {
+      "text": "Listed 1 tab in this session.",
+      "type": "text"
+    }
+  ],
+  "isError": false,
+  "structuredContent": {
+    "effect": "none",
+    "facts": {
+      "browsers": [
+        {
+          "attended": true,
+          "browser": "chromium",
+          "name": "Chromium"
+        }
+      ],
+      "tabs": [
+        {
+          "active": true,
+          "readiness": "complete",
+          "tab": "<volatile>",
+          "title": "Example Domain",
+          "url": "https://example.com/"
+        }
+      ]
+    },
+    "invocation": "<volatile>",
+    "repeat_safe": true,
+    "status": "succeeded",
+    "summary": "Listed 1 tab in this session."
+  }
+}
