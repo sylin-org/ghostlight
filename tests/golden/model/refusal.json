@@ -1,7 +1,7 @@
 {
   "content": [
     {
-      "text": "The call does not match the Ghostlight catalog. Next: Match the call to the advertised schema; the invalid_input detail states exactly what to change.",
+      "text": "The call does not match the Ghostlight catalog. Next: action must be one of list, focus, close: got `rearrange`",
       "type": "text"
     }
   ],
@@ -9,11 +9,12 @@
   "structuredContent": {
     "effect": "none",
     "facts": {
+      "detail": "invalid input: action must be one of list, focus, close: got `rearrange`",
       "reason": "invalid_input"
     },
     "invocation": "<volatile>",
     "next_steps": [
-      "Match the call to the advertised schema; the invalid_input detail states exactly what to change."
+      "action must be one of list, focus, close: got `rearrange`"
     ],
     "repeat_safe": true,
     "status": "failed",

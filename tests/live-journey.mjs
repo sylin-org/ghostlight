@@ -197,7 +197,7 @@ try {
 
   const listed = await request("tools/list");
   assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
-  assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
+  assert.equal(listed.result.tools.every((tool) => tool.outputSchema === undefined && tool.annotations), true);
   const authority = await call("policy_explain", {});
   assert.equal(authority.status, "succeeded", JSON.stringify(authority));
   assert.equal(authority.facts.layers.length, 0, "This installed acceptance lane requires all-open authority; it never changes policy.");

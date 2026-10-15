@@ -1,0 +1,66 @@
+//! The `tools/call` results a model receives for one success and one refusal, pinned.
+//!
+//! Both calls run through the real executor with the fake browser, and the returned envelope is
+//! rendered by a real MCP session, so the goldens hold what the product sends and not a rebuilt
+//! copy of it.
+
+use super::*;
+use crate::language::self_check::golden::{
+    check_golden, golden_text, rendered_result, REFUSAL_GOLDEN, SUCCESS_GOLDEN,
+};
+
+#[test]
+fn a_listed_tab_matches_the_success_golden() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(7, "https://example.com/")],
+    }));
+    let arguments = json!({"action":"list"});
+    let result = executor.execute(
+        &workspace,
+        "browser_tabs",
+        arguments.clone(),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    check_golden(
+        SUCCESS_GOLDEN,
+        &golden_text(&rendered_result("browser_tabs", arguments, &result)),
+    );
+}
+
+#[test]
+fn a_call_that_does_not_decode_matches_the_refusal_golden() {
+    let (executor, _, _, workspace, _) = fixture();
+    let arguments = json!({"action":"rearrange"});
+    let result = executor.execute(
+        &workspace,
+        "browser_tabs",
+        arguments.clone(),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Failed, "{result:?}");
+    assert_eq!(result.facts["reason"], "invalid_input");
+    assert!(
+        result.facts["detail"].is_string(),
+        "the refusal carries the detail its guidance points at: {result:?}"
+    );
+    check_golden(
+        REFUSAL_GOLDEN,
+        &golden_text(&rendered_result("browser_tabs", arguments, &result)),
+    );
+}

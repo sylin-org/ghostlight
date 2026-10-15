@@ -2636,6 +2636,7 @@ mod tests {
     mod credentials;
     mod documents;
     mod execution;
+    mod golden;
     mod presentation;
     mod protocol4;
     mod provenance;

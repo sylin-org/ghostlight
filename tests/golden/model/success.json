@@ -12,8 +12,8 @@
       "browsers": [
         {
           "attended": true,
-          "browser": "chromium",
-          "name": "Chromium"
+          "browser": "browser_fake",
+          "name": null
         }
       ],
       "tabs": [
@@ -21,7 +21,7 @@
           "active": true,
           "readiness": "complete",
           "tab": "<volatile>",
-          "title": "Example Domain",
+          "title": "Example",
           "url": "https://example.com/"
         }
       ]

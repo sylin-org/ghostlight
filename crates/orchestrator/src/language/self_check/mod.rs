@@ -7,8 +7,10 @@
 //! - `schema` is a small dependency-free JSON Schema checker for the keywords the catalog uses.
 //! - `catalog` validates every example and a list of known-good calls against each tool's own
 //!   advertised input schema, and decodes them through the real decoder.
+//! - `golden` compares or rewrites the pinned model-surface files (catalog and results).
 //! - `hints` checks that every next step naming a tool asks only for fields that tool accepts.
 
 mod catalog;
+pub(crate) mod golden;
 mod hints;
 mod schema;

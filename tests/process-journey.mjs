@@ -624,7 +624,7 @@ try {
 
   const listed = await mcp.request("tools/list");
   assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
-  assert.equal(listed.result.tools.every((tool) => tool.outputSchema && tool.annotations), true);
+  assert.equal(listed.result.tools.every((tool) => tool.outputSchema === undefined && tool.annotations), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_workspace"), false);
   assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
