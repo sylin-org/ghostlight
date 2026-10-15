@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-06-native-acts.
+Next: m1-07-page-transport.
 
 ## Landed
 
@@ -51,6 +51,7 @@ Next: m1-06-native-acts.
 | m1-03-own-origin | Agents can never open or read the workbench's own loopback origin: `GovernanceFacade::protect_workbench_port` shares the port with every snapshot, and the landing decision refuses a loopback address on that port with `ProtectedHost` whatever the policy says. The authority id does not depend on the port. | see `git log` |
 | m1-04-loopback-server | The service serves the workbench on 127.0.0.1 with access decided per route in three contexts (Control, Watch, Closed), each part projected for its audience, guards on Host, Origin and framing, and the bearer made at each start. `protect_workbench_port` runs between binding and answering. The Tauri window is unchanged. | see `git log` |
 | m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
+| m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
 
 ## Route table
 
@@ -77,9 +78,11 @@ every route but the pages and `/api/context`.
 | `/api/integrations/setup-all` | POST | yes | window | 403 | none | `setup_detected_harnesses` |
 | `/api/integrations/act` | POST | with `expected_state` | window | 403 | none | `manage_harness` |
 | `/api/notifications/test` | POST | yes | window | 403 | none | `test_notification` |
+| `/api/open` | POST | `{ destination }` or `{ product }`, exactly one | window | 403 | none | `open_destination`, `open_harness_download` |
+| `/api/diagnostics/reveal` | POST | yes | window | 403 | none | `reveal_diagnostics` |
+| `/api/integrations/locate` | POST | `{ id }`, answers the client result or `null` | window | 403 | none | `locate_harness` |
 
-Not routed, by design: `quit_ghostlight`, `copy_harness_text` (m1-07 copies in the page),
-`reveal_diagnostics`, `locate_harness`, `open_harness_download` and `open_destination` (m1-06).
+Not routed, by design: `quit_ghostlight` and `copy_harness_text` (m1-07 copies in the page).
 
 `/api/events` answers `200 text/event-stream` with no length, ended by closing the connection. It
 writes `event: hello` with `{ context, instance, seq }`, then `id: <instance>-<seq>` and
@@ -92,7 +95,9 @@ policy writes, diagnostics, setup-all, client act).
 Bodies are JSON objects with exactly the named fields. Answers keep today's Tauri values: search
 answers the array of hits, a preview answers the preview, an intent answers the intent result, a
 rescan answers the projected roster, a client act answers the projected `HarnessActionResult`.
-Errors are `{ "error": { "code", "message" } }`; what a facade call refuses with is 422
+The three native routes answer `{}` (open, reveal) or the projected `HarnessActionResult` / `null` (locate, with
+`Ghostlight-Seq`); a person who closes the dialog gets `null`. The dialog blocks its connection thread until the
+person answers. Errors are `{ "error": { "code", "message" } }`; what a facade call refuses with is 422
 `refused` and its text.
 
 ## Owed live checks
@@ -113,6 +118,9 @@ Errors are `{ "error": { "code", "message" } }`; what a facade call refuses with
   browsers counts in the band change in the window with no refresh.
 - m1-05, Windows: leave the window open for a minute with a tab on the watch address; both stay
   current, and closing the tab frees its place within about 15 s (the next keep-alive write fails).
+- m1-06, Windows and Linux, in the Ghostlight window: the About and Status pages' links open in the
+  default browser; "Open log folder" shows the diagnostics folder (on and off); a client's Download opens
+  its page; Locate opens the file dialog, a cancel changes nothing, a chosen file is remembered.
 
 ## Blockers
 
@@ -211,3 +219,20 @@ None.
   it when the person opens that destination. A tag already acted on is not acted on twice. The
   Status page's checkup cards are derived from the snapshot and are not pushed; they follow the
   ten-second heartbeat or the next hint.
+
+- m1-06: `S/workbench/mod.rs` has `WorkbenchNativeActs`, `NativeActError` (`Workbench`, `Harness`,
+  `DiagnosticsOff`, `LinkNotSecure`) and the facade methods `open_destination`, `open_harness_download`,
+  `reveal_diagnostics` and `locate_harness_by_picking`. `WorkbenchPresentationError::ActFailed` carries the
+  computer's own text unprefixed, so the window shows the error text it showed before. The facade refuses any
+  address that does not begin `https://` before the adapter is asked.
+- m1-06: the spec's test "reveal_diagnostics with diagnostics off opens nothing" does not hold in the tree:
+  `diagnostics::observe` names the diagnostics folder even while diagnostics are off (retained logs stay
+  readable there, and the page always offers "Open log folder"), so `report().directory` is never `None`. The
+  `None` branch and its moved sentence (`DIAGNOSTICS_OFF`) stay as the spec says, pinned by a test of the error's
+  text; the behavior test pins that the folder opens in both states.
+- m1-06: the download address is added to each projected client entry (snapshot, rescan and act answers) by
+  `parts::add_download_url` from the routes, because the address lives in the client registry and
+  `HarnessSummary` (`S/install/mod.rs`) is not this lane's to change after m1-02. It is public, so Control and
+  Watch both get it.
+- m1-06: `WebAct` gained `open`, `reveal_diagnostics` and `locate`, Control only (answer Q20). `WebAct::ALL` has 17.
+

@@ -902,3 +902,189 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
     assert_eq!(hints(&heard(&events)).len(), 3);
     let _ = std::fs::remove_file(path);
 }
+
+/// A set of native acts that records what it was asked for and answers from a script.
+#[derive(Default)]
+pub(super) struct RecordingActs {
+    pub(super) urls: Mutex<Vec<String>>,
+    pub(super) folders: Mutex<Vec<std::path::PathBuf>>,
+    pub(super) titles: Mutex<Vec<String>>,
+    pub(super) chosen: Mutex<Option<std::path::PathBuf>>,
+}
+
+impl RecordingActs {
+    /// How many acts of any kind were asked for.
+    pub(super) fn asked(&self) -> usize {
+        self.urls.lock().unwrap().len()
+            + self.folders.lock().unwrap().len()
+            + self.titles.lock().unwrap().len()
+    }
+}
+
+impl super::WorkbenchNativeActs for RecordingActs {
+    fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError> {
+        self.urls.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+
+    fn open_folder(&self, path: &std::path::Path) -> Result<(), WorkbenchPresentationError> {
+        self.folders.lock().unwrap().push(path.to_path_buf());
+        Ok(())
+    }
+
+    fn pick_file(
+        &self,
+        title: &str,
+    ) -> Result<Option<std::path::PathBuf>, WorkbenchPresentationError> {
+        self.titles.lock().unwrap().push(title.to_owned());
+        Ok(self.chosen.lock().unwrap().clone())
+    }
+}
+
+/// A facade over a temporary home and a client roster of its own, with acts attached when asked.
+fn facade_with_acts(attach: bool) -> (WorkbenchFacade, Arc<RecordingActs>, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!("ghostlight-acts-{}", uuid::Uuid::new_v4()));
+    let state = root.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::birth(&root),
+    )
+    .with_harnesses(crate::install::HarnessRegistry::isolated(
+        &root.join("clients"),
+        &root.join("ghostlight"),
+        &state,
+    ));
+    let acts = Arc::new(RecordingActs::default());
+    if attach {
+        facade.attach_native_acts(acts.clone());
+    }
+    (facade, acts, root)
+}
+
+#[test]
+fn a_destination_opens_exactly_its_own_address() {
+    let (facade, acts, root) = facade_with_acts(true);
+    facade
+        .open_destination(super::WorkbenchDestination::Home)
+        .unwrap();
+    assert_eq!(
+        *acts.urls.lock().unwrap(),
+        [super::WorkbenchDestination::Home.url()]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_clients_download_opens_its_page_and_an_unknown_product_opens_nothing() {
+    let (facade, acts, root) = facade_with_acts(true);
+    let product = facade
+        .cached_harnesses()
+        .into_iter()
+        .find(|summary| summary.can_download)
+        .expect("some supported client has an official download")
+        .product_id;
+    facade.open_harness_download(&product).unwrap();
+    let expected = facade.harness_download_url(&product).unwrap();
+    assert!(expected.starts_with("https://"));
+    assert_eq!(*acts.urls.lock().unwrap(), [expected]);
+
+    let refused = facade.open_harness_download("not-a-product").unwrap_err();
+    assert!(matches!(
+        refused,
+        super::NativeActError::Harness(crate::install::HarnessError::NoDownload(_))
+    ));
+    assert_eq!(acts.urls.lock().unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_diagnostics_folder_opens_whether_diagnostics_are_on_or_off() {
+    let (facade, acts, root) = facade_with_acts(true);
+    // The folder is named even while diagnostics are off, so retained logs stay readable.
+    facade.reveal_diagnostics().unwrap();
+    facade.set_diagnostics(true);
+    facade.reveal_diagnostics().unwrap();
+    let wanted = std::path::PathBuf::from(facade.diagnostics_report().directory.unwrap());
+    assert_eq!(acts.folders.lock().unwrap().last(), Some(&wanted));
+    assert!(wanted.starts_with(&root));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_refusal_to_show_diagnostics_reads_as_the_moved_sentence() {
+    assert_eq!(
+        super::NativeActError::DiagnosticsOff.to_string(),
+        crate::language::workbench::DIAGNOSTICS_OFF
+    );
+}
+
+#[test]
+fn locating_by_picking_remembers_the_file_and_a_closed_dialog_changes_nothing() {
+    let (facade, acts, root) = facade_with_acts(true);
+    let before = facade.cached_harnesses();
+    assert!(facade.locate_harness_by_picking("goose").unwrap().is_none());
+    assert_eq!(
+        *acts.titles.lock().unwrap(),
+        [crate::language::workbench::LOCATE_DIALOG_TITLE]
+    );
+    assert_eq!(facade.cached_harnesses(), before);
+
+    let located = root.join("portable/config.yaml");
+    std::fs::create_dir_all(located.parent().unwrap()).unwrap();
+    std::fs::write(&located, "provider: local\n").unwrap();
+    *acts.chosen.lock().unwrap() = Some(located.clone());
+    let result = facade.locate_harness_by_picking("goose").unwrap().unwrap();
+    assert_eq!(result.summary.config_path, located.to_string_lossy());
+
+    *acts.chosen.lock().unwrap() = Some(root.join("portable/missing.json"));
+    assert!(matches!(
+        facade.locate_harness_by_picking("goose"),
+        Err(super::NativeActError::Harness(_))
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn without_native_acts_every_act_is_unavailable() {
+    let (facade, acts, root) = facade_with_acts(false);
+    let unavailable = |result: Result<(), super::NativeActError>| {
+        assert!(matches!(
+            result,
+            Err(super::NativeActError::Workbench(
+                super::WorkbenchError::PresentationUnavailable
+            ))
+        ));
+    };
+    unavailable(facade.open_destination(super::WorkbenchDestination::Home));
+    unavailable(facade.open_harness_download("cursor"));
+    unavailable(facade.reveal_diagnostics());
+    unavailable(facade.locate_harness_by_picking("goose").map(|_| ()));
+    assert_eq!(acts.asked(), 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn an_address_that_is_not_secure_never_reaches_the_computer() {
+    let (facade, acts, root) = facade_with_acts(true);
+    for url in [
+        "http://example.com/",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "",
+        "HTTPS://example.com/",
+    ] {
+        assert!(matches!(
+            facade.open_secure_link(&*acts, url),
+            Err(super::NativeActError::LinkNotSecure)
+        ));
+    }
+    assert_eq!(acts.asked(), 0);
+    let _ = std::fs::remove_dir_all(root);
+}

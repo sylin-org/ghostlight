@@ -19,6 +19,8 @@ use crate::language::coverage::{Coverage, HumanCoverage};
 use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
+use crate::workbench::tests::RecordingActs;
+use crate::workbench::WorkbenchDestination;
 use crate::workbench::WorkbenchPresentationPort;
 use crate::workbench::{WorkbenchNotification, WorkbenchPresentationError, WorkbenchProjection};
 
@@ -469,13 +471,19 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
             r#"{"id":"cursor","action":"install","expected_state":"not_detected"}"#,
         ),
         post("/api/notifications/test", "{}"),
+        post("/api/open", r#"{"destination":"home"}"#),
+        post("/api/diagnostics/reveal", "{}"),
+        post("/api/integrations/locate", r#"{"id":"goose"}"#),
     ];
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
     for call in calls {
         let label = format!("{} {}", call.method, call.path);
         let reply = fixture.watch(call);
         assert_eq!(reply.status, 401, "{label}");
         assert_eq!(reply.code(), "needs_window", "{label}");
     }
+    assert_eq!(acts.asked(), 0);
     assert_eq!(fixture.facade.policy().layers.len(), 0);
     assert!(fixture.facade.diagnostics_report().directory.is_some());
     assert_eq!(fixture.facade.diagnostics.directory(), None);
@@ -516,7 +524,12 @@ fn closed_serves_the_pages_and_the_product_and_nothing_else() {
         post("/api/integrations/setup-all", "{}"),
         post("/api/integrations/act", "{}"),
         post("/api/notifications/test", "{}"),
+        post("/api/open", r#"{"destination":"home"}"#),
+        post("/api/diagnostics/reveal", "{}"),
+        post("/api/integrations/locate", r#"{"id":"goose"}"#),
     ];
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
     for call in data_routes {
         let label = format!("{} {}", call.method, call.path);
         let reply = fixture.watch(call);
@@ -527,6 +540,7 @@ fn closed_serves_the_pages_and_the_product_and_nothing_else() {
         assert!(text.contains(words::WATCHING_OFF));
     }
     assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
+    assert_eq!(acts.asked(), 0);
 }
 
 #[test]
@@ -1771,4 +1785,160 @@ fn a_screen_that_stops_reading_is_reset_and_another_keeps_receiving() {
     }
     fixture.server.stop();
     counting.join().unwrap();
+}
+
+#[test]
+fn the_window_opens_a_destination_or_a_clients_download_and_nothing_else() {
+    let fixture = Fixture::start();
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
+
+    let home = fixture.control(post("/api/open", r#"{"destination":"home"}"#));
+    assert_eq!(home.status, 200);
+    assert_eq!(
+        *acts.urls.lock().unwrap(),
+        [WorkbenchDestination::Home.url()]
+    );
+
+    let product = fixture
+        .facade
+        .cached_harnesses()
+        .into_iter()
+        .find(|summary| summary.can_download)
+        .unwrap()
+        .product_id;
+    let download = fixture.control(post(
+        "/api/open",
+        &json!({ "product": product }).to_string(),
+    ));
+    assert_eq!(download.status, 200);
+    assert_eq!(acts.urls.lock().unwrap().len(), 2);
+    assert!(acts.urls.lock().unwrap()[1].starts_with("https://"));
+
+    let unknown = fixture.control(post("/api/open", r#"{"product":"not-a-product"}"#));
+    assert_eq!(unknown.status, 422);
+    assert_eq!(unknown.code(), "refused");
+
+    for body in [
+        r#"{"destination":"https://example.com"}"#,
+        r#"{"destination":"home","product":"x"}"#,
+        r#"{}"#,
+        r#"{"url":"https://example.com"}"#,
+        r#"{"destination":null,"product":null}"#,
+    ] {
+        let reply = fixture.control(post("/api/open", body));
+        assert_eq!(reply.status, 400, "{body}");
+    }
+    assert_eq!(acts.urls.lock().unwrap().len(), 2);
+    assert_eq!(acts.asked(), 2);
+}
+
+#[test]
+fn the_window_shows_the_diagnostics_folder_and_a_missing_adapter_is_told_so() {
+    let fixture = Fixture::start();
+    let unavailable = fixture.control(post("/api/diagnostics/reveal", "{}"));
+    assert_eq!(unavailable.status, 422);
+    assert_eq!(unavailable.code(), "refused");
+
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
+    assert_eq!(
+        fixture
+            .control(post("/api/diagnostics/reveal", "{}"))
+            .status,
+        200
+    );
+    assert_eq!(acts.folders.lock().unwrap().len(), 1);
+    assert_eq!(
+        fixture
+            .control(post("/api/diagnostics/reveal", r#"{"extra":1}"#))
+            .status,
+        400
+    );
+}
+
+#[test]
+fn locating_a_client_answers_its_result_or_null_when_the_dialog_is_closed() {
+    let fixture = Fixture::start();
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
+
+    let closed = fixture.control(post("/api/integrations/locate", r#"{"id":"goose"}"#));
+    assert_eq!(closed.status, 200);
+    assert_eq!(closed.json(), Value::Null);
+    assert!(closed.header("Ghostlight-Seq").is_some());
+
+    let located = fixture.root.join("portable/config.yaml");
+    std::fs::create_dir_all(located.parent().unwrap()).unwrap();
+    std::fs::write(
+        &located,
+        "provider: local
+",
+    )
+    .unwrap();
+    *acts.chosen.lock().unwrap() = Some(located.clone());
+    let result = fixture.control(post("/api/integrations/locate", r#"{"id":"goose"}"#));
+    assert_eq!(result.status, 200);
+    assert!(result.json()["summary"]["config_path"]
+        .as_str()
+        .unwrap()
+        .ends_with("config.yaml"));
+
+    let unknown = fixture.control(post("/api/integrations/locate", r#"{"id":"not-a-client"}"#));
+    assert_eq!(unknown.status, 422);
+}
+
+#[test]
+fn every_context_is_given_the_table_of_links_and_never_an_address_of_its_own() {
+    let fixture = Fixture::start();
+    let wanted: serde_json::Map<String, Value> = WorkbenchDestination::all()
+        .into_iter()
+        .map(|destination| (destination.key().to_owned(), json!(destination.url())))
+        .collect();
+    let closed = Fixture::closed();
+    for reply in [
+        fixture.control(get("/api/context")),
+        fixture.watch(get("/api/context")),
+        closed.watch(get("/api/context")),
+    ] {
+        let links = reply.json()["links"].clone();
+        assert_eq!(links, Value::Object(wanted.clone()));
+        for url in links.as_object().unwrap().values() {
+            assert!(url.as_str().unwrap().starts_with("https://"));
+        }
+    }
+}
+
+#[test]
+fn a_watcher_is_given_the_download_address_of_each_client_that_has_one() {
+    let fixture = Fixture::start();
+    for reply in [
+        fixture.watch(get("/api/snapshot?parts=integrations")),
+        fixture.control(get("/api/snapshot?parts=integrations")),
+    ] {
+        let body = reply.json();
+        let harnesses = body["parts"]["integrations"]["harnesses"]
+            .as_array()
+            .unwrap();
+        let mut downloadable = 0;
+        for harness in harnesses {
+            if harness["can_download"] == true {
+                downloadable += 1;
+                let url = fixture
+                    .facade
+                    .harness_download_url(harness["product_id"].as_str().unwrap())
+                    .unwrap();
+                assert_eq!(harness["download_url"], url);
+            } else {
+                assert!(harness.get("download_url").is_none());
+            }
+        }
+        assert!(downloadable > 0);
+    }
+    let rescan = fixture.watch(post("/api/integrations/rescan", "{}")).json();
+    assert!(rescan
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|harness| harness.get("download_url").is_some()));
 }

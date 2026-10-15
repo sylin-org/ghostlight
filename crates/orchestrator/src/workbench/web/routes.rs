@@ -17,13 +17,13 @@ use super::events::{TooManyScreens, EVENT_STREAM_TYPE};
 use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
-use crate::install::HarnessAction;
+use crate::install::{HarnessAction, HarnessActionResult};
 use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
-use crate::workbench::parts::{Audience, Part, Projection};
+use crate::workbench::parts::{add_download_url, Audience, Part, Projection};
 use crate::workbench::{
     validate_policy_document, validate_search_query, HarnessActError, PolicyWriteError,
-    RuntimeSource, WorkbenchRuntimeIntent,
+    RuntimeSource, WorkbenchDestination, WorkbenchRuntimeIntent,
 };
 
 /// The prefix of every route that carries data or takes a change.
@@ -87,6 +87,9 @@ enum Api {
     SetupAll,
     HarnessAct,
     TestNotification,
+    Open,
+    RevealDiagnostics,
+    Locate,
 }
 
 /// What a watcher may do on a route.
@@ -123,7 +126,7 @@ const fn route(
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 15] = [
+static ROUTES: [Route; 18] = [
     route(
         Api::Context,
         Method::Get,
@@ -226,6 +229,27 @@ static ROUTES: [Route; 15] = [
         Api::TestNotification,
         Method::Post,
         "/api/notifications/test",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::Open,
+        Method::Post,
+        "/api/open",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::RevealDiagnostics,
+        Method::Post,
+        "/api/diagnostics/reveal",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::Locate,
+        Method::Post,
+        "/api/integrations/locate",
         WatchAccess::NeedsWindow,
         SMALL_BODY,
     ),
@@ -611,6 +635,9 @@ fn api(
         Api::SetupAll => acted(shared, setup_all(shared, &body)),
         Api::HarnessAct => acted(shared, harness_act(shared, &projection, &body)),
         Api::TestNotification => test_notification(shared, &body),
+        Api::Open => open(shared, &body),
+        Api::RevealDiagnostics => reveal_diagnostics(shared, &body),
+        Api::Locate => acted(shared, locate(shared, &projection, &body)),
     };
     drop(preview_permit);
     response
@@ -710,6 +737,21 @@ struct HarnessArguments {
     expected_state: String,
 }
 
+/// What the page asks to have opened: a destination from the closed vocabulary or a client's
+/// product, and exactly one of the two.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenArguments {
+    destination: Option<WorkbenchDestination>,
+    product: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocateArguments {
+    id: String,
+}
+
 /// The query key that names the parts a snapshot should hold.
 const PARTS_KEY: &str = "parts";
 
@@ -743,7 +785,17 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
     let snapshot = shared.facade.snapshot();
     let body: serde_json::Map<String, Value> = parts
         .into_iter()
-        .map(|part| (part.token().to_owned(), projection.part(part, &snapshot)))
+        .map(|part| {
+            let mut value = projection.part(part, &snapshot);
+            if part == Part::Integrations {
+                if let Some(harnesses) = value.get_mut("harnesses").and_then(Value::as_array_mut) {
+                    harnesses
+                        .iter_mut()
+                        .for_each(|harness| link_download(shared, harness));
+                }
+            }
+            (part.token().to_owned(), value)
+        })
         .collect();
     json_response(
         Status::Ok,
@@ -773,6 +825,22 @@ fn acted(shared: &Shared, response: Response) -> Response {
     } else {
         response
     }
+}
+
+/// Give a projected client entry its download address, when the product has one.
+fn link_download(shared: &Shared, harness: &mut Value) {
+    add_download_url(harness, |product| {
+        shared.facade.harness_download_url(product).ok()
+    });
+}
+
+/// A client act's result, projected, with the summary's download address.
+fn harness_result(shared: &Shared, projection: &Projection, result: &HarnessActionResult) -> Value {
+    let mut value = projection.harness_result(result);
+    if let Some(summary) = value.get_mut("summary") {
+        link_download(shared, summary);
+    }
+    value
 }
 
 fn search(shared: &Shared, body: &[u8]) -> Response {
@@ -826,7 +894,15 @@ fn rescan(shared: &Shared, projection: &Projection, watching: bool, body: &[u8])
         shared.limits.rescan_for_window(scan)
     };
     match outcome {
-        Ok(summaries) => json_response(Status::Ok, &projection.harnesses(&summaries)),
+        Ok(summaries) => {
+            let mut roster = projection.harnesses(&summaries);
+            if let Some(harnesses) = roster.as_array_mut() {
+                harnesses
+                    .iter_mut()
+                    .for_each(|harness| link_download(shared, harness));
+            }
+            json_response(Status::Ok, &roster)
+        }
         Err(message) => refused(&message),
     }
 }
@@ -963,7 +1039,7 @@ fn harness_act(shared: &Shared, projection: &Projection, body: &[u8]) -> Respons
         arguments.action.into(),
         &arguments.expected_state,
     ) {
-        Ok(result) => json_response(Status::Ok, &projection.harness_result(&result)),
+        Ok(result) => json_response(Status::Ok, &harness_result(shared, projection, &result)),
         Err(HarnessActError::Stale) => {
             failure(Status::Conflict, ErrorCode::Stale, words::STALE_HARNESS)
         }
@@ -977,6 +1053,52 @@ fn test_notification(shared: &Shared, body: &[u8]) -> Response {
     }
     match shared.facade.test_notification() {
         Ok(()) => json_response(Status::Ok, &json!({})),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+fn open(shared: &Shared, body: &[u8]) -> Response {
+    let arguments: OpenArguments = match decode(body) {
+        Ok(arguments) => arguments,
+        Err(response) => return response,
+    };
+    let opened = match arguments {
+        OpenArguments {
+            destination: Some(destination),
+            product: None,
+        } => shared.facade.open_destination(destination),
+        OpenArguments {
+            destination: None,
+            product: Some(product),
+        } => shared.facade.open_harness_download(&product),
+        OpenArguments { .. } => return bad_request(),
+    };
+    match opened {
+        Ok(()) => json_response(Status::Ok, &json!({})),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+fn reveal_diagnostics(shared: &Shared, body: &[u8]) -> Response {
+    if let Err(response) = decode::<NoArguments>(body) {
+        return response;
+    }
+    match shared.facade.reveal_diagnostics() {
+        Ok(()) => json_response(Status::Ok, &json!({})),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+/// Ask the person for a client's file, then answer the client's result, or `null` when they
+/// closed the dialog. The answer holds the connection until the person answers.
+fn locate(shared: &Shared, projection: &Projection, body: &[u8]) -> Response {
+    let arguments: LocateArguments = match decode(body) {
+        Ok(arguments) => arguments,
+        Err(response) => return response,
+    };
+    match shared.facade.locate_harness_by_picking(&arguments.id) {
+        Ok(Some(result)) => json_response(Status::Ok, &harness_result(shared, projection, &result)),
+        Ok(None) => json_response(Status::Ok, &Value::Null),
         Err(error) => refused(&error.to_string()),
     }
 }

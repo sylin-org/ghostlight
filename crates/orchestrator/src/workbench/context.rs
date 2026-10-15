@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use super::parts::Audience;
+use super::WorkbenchDestination;
 use crate::language::workbench as words;
 
 /// Who is asking, as far as access goes.
@@ -96,11 +97,17 @@ pub enum WebAct {
     HarnessAct,
     /// Show a test notification.
     TestNotification,
+    /// Open a link or a client's download page in the person's browser.
+    Open,
+    /// Show the diagnostics folder in the file manager.
+    RevealDiagnostics,
+    /// Ask the person for a client's application or settings file.
+    Locate,
 }
 
 impl WebAct {
     /// Every act, in the order the context document lists them.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 17] = [
         Self::Search,
         Self::CheckPolicy,
         Self::Rescan,
@@ -115,6 +122,9 @@ impl WebAct {
         Self::SetupAll,
         Self::HarnessAct,
         Self::TestNotification,
+        Self::Open,
+        Self::RevealDiagnostics,
+        Self::Locate,
     ];
 
     /// The key the page names this act by.
@@ -135,6 +145,9 @@ impl WebAct {
             Self::SetupAll => "setup_all",
             Self::HarnessAct => "harness_act",
             Self::TestNotification => "test_notification",
+            Self::Open => "open",
+            Self::RevealDiagnostics => "reveal_diagnostics",
+            Self::Locate => "locate",
         }
     }
 
@@ -177,6 +190,17 @@ const OPENER_SERVICE: &str = "service";
 /// How the page opens a link in a browser tab: an ordinary anchor.
 const OPENER_ANCHOR: &str = "anchor";
 
+/// Every address the product points at, by the key of its destination.
+///
+/// Every context gets the table: a tab opens a destination as an ordinary anchor, and the About
+/// page shows in full while watching is off. The page holds no address of its own.
+fn links() -> Map<String, Value> {
+    WorkbenchDestination::all()
+        .into_iter()
+        .map(|destination| (destination.key().to_owned(), json!(destination.url())))
+        .collect()
+}
+
 /// The body of `GET /api/context`.
 ///
 /// Closed holds only the context, its word and sentence, the product and the links: nothing about
@@ -214,7 +238,7 @@ pub fn context_document(context: WebContext, watching: bool, instance: &str) -> 
             "license": words::PRODUCT_LICENSE,
         }),
     );
-    document.insert("links".into(), json!({}));
+    document.insert("links".into(), Value::Object(links()));
     Value::Object(document)
 }
 
@@ -289,6 +313,19 @@ mod tests {
             document["acts"]["resume"]["why_not"],
             words::CHANGE_IN_WINDOW
         );
+    }
+
+    #[test]
+    fn every_context_gets_the_whole_table_of_links() {
+        for context in [WebContext::Control, WebContext::Watch, WebContext::Closed] {
+            let document = context_document(context, true, "instance_1");
+            let links = document["links"].as_object().unwrap();
+            assert_eq!(links.len(), WorkbenchDestination::all().len());
+            for destination in WorkbenchDestination::all() {
+                assert_eq!(links[destination.key()], destination.url());
+                assert!(destination.url().starts_with("https://"));
+            }
+        }
     }
 
     #[test]

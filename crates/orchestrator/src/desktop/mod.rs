@@ -1,8 +1,7 @@
 //! Thin Tauri 2 adapter for Ghostlight's orchestrator-owned workbench facade.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-#[cfg(target_os = "linux")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -30,7 +29,7 @@ use crate::service::{Quit, ServiceHost};
 use crate::workbench::{
     validate_policy_document, validate_search_query, PolicyPreview, RuntimeSource, SearchHit,
     WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
-    WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
+    WorkbenchIntentResult, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort, WorkbenchRuntimeIntent, WorkbenchSnapshot,
 };
 
@@ -74,6 +73,42 @@ impl WorkbenchPresentationPort for NativePresentation {
             .body(notification.body)
             .show()
             .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
+    }
+}
+
+/// The operating-system acts the service asks of this process: open a link, open a folder,
+/// choose a file.
+struct NativeActs {
+    app: AppHandle,
+}
+
+impl WorkbenchNativeActs for NativeActs {
+    fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError> {
+        self.app
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|error| WorkbenchPresentationError::ActFailed(error.to_string()))
+    }
+
+    fn open_folder(&self, path: &Path) -> Result<(), WorkbenchPresentationError> {
+        self.app
+            .opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| WorkbenchPresentationError::ActFailed(error.to_string()))
+    }
+
+    fn pick_file(&self, title: &str) -> Result<Option<PathBuf>, WorkbenchPresentationError> {
+        self.app
+            .dialog()
+            .file()
+            .set_title(title)
+            .blocking_pick_file()
+            .map(|selected| {
+                selected
+                    .into_path()
+                    .map_err(|error| WorkbenchPresentationError::ActFailed(error.to_string()))
+            })
+            .transpose()
     }
 }
 
@@ -222,6 +257,9 @@ pub fn run(reason: StartReason) -> Result<()> {
                 app.state::<DesktopState>()
                     .workbench
                     .attach_presentation(Arc::new(NativePresentation { app: app.clone() }));
+                app.state::<DesktopState>()
+                    .workbench
+                    .attach_native_acts(Arc::new(NativeActs { app: app.clone() }));
                 if let Err(error) = ready_host.publish_ready() {
                     record_desktop_failure(&ready_host, "desktop-ready runtime publication failed");
                     eprintln!("Ghostlight could not publish desktop readiness: {error}");
@@ -640,28 +678,13 @@ async fn manage_harness(
 #[tauri::command]
 async fn locate_harness(
     id: String,
-    app: AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<Option<HarnessActionResult>, String> {
-    let dialog_app = app.clone();
-    let selected = tauri::async_runtime::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .set_title("Locate the harness application or settings file")
-            .blocking_pick_file()
-    })
-    .await
-    .map_err(|error| error.to_string())?;
-    let Some(selected) = selected else {
-        return Ok(None);
-    };
-    let path = selected.into_path().map_err(|error| error.to_string())?;
     let workbench = state.workbench.clone();
+    // The dialog blocks until the person answers, so it never runs on the main thread.
     tauri::async_runtime::spawn_blocking(move || {
         workbench
-            .locate_harness(&id, &path)
-            .map(Some)
+            .locate_harness_by_picking(&id)
             .map_err(|error| error.to_string())
     })
     .await
@@ -689,17 +712,10 @@ fn copy_harness_text(
 }
 
 #[tauri::command]
-fn open_harness_download(
-    product_id: String,
-    app: AppHandle,
-    state: State<'_, DesktopState>,
-) -> Result<(), String> {
-    let url = state
+fn open_harness_download(product_id: String, state: State<'_, DesktopState>) -> Result<(), String> {
+    state
         .workbench
-        .harness_download_url(&product_id)
-        .map_err(|error| error.to_string())?;
-    app.opener()
-        .open_url(url, None::<&str>)
+        .open_harness_download(&product_id)
         .map_err(|error| error.to_string())
 }
 
@@ -722,12 +738,10 @@ fn toggle_diagnostics(state: State<'_, DesktopState>) -> Result<serde_json::Valu
 /// the diagnostics state names; this actuation lives in the native process, and the WebView
 /// gains no opener permission.
 #[tauri::command]
-fn reveal_diagnostics(state: State<'_, DesktopState>, app: AppHandle) -> Result<(), String> {
-    let Some(directory) = state.workbench.diagnostics_report().directory else {
-        return Err("Diagnostics are off; turn them on first.".into());
-    };
-    app.opener()
-        .open_path(directory, None::<&str>)
+fn reveal_diagnostics(state: State<'_, DesktopState>) -> Result<(), String> {
+    state
+        .workbench
+        .reveal_diagnostics()
         .map_err(|error| error.to_string())
 }
 
@@ -737,8 +751,9 @@ fn reveal_diagnostics(state: State<'_, DesktopState>, app: AppHandle) -> Result<
 /// into opening something the product did not choose.
 #[tauri::command]
 fn open_destination(destination: WorkbenchDestination, app: AppHandle) -> Result<(), String> {
-    app.opener()
-        .open_url(destination.url(), None::<&str>)
+    app.state::<DesktopState>()
+        .workbench
+        .open_destination(destination)
         .map_err(|error| error.to_string())
 }
 

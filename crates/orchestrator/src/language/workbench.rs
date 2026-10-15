@@ -89,6 +89,15 @@ pub const PAUSED_FROM_BROWSER: &str = "Paused from the browser toolbar.";
 /// What a screen is told when every place for a live view of its kind is taken.
 pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and try again.";
 
+/// Why the diagnostics folder cannot be shown: diagnostics are off.
+pub const DIAGNOSTICS_OFF: &str = "Diagnostics are off; turn them on first.";
+
+/// A link the service would not open because it is not a secure address.
+pub const LINK_NOT_SECURE: &str = "Ghostlight opens only secure links.";
+
+/// The title of the dialog where a person points at a client's application or settings file.
+pub const LOCATE_DIALOG_TITLE: &str = "Locate the harness application or settings file";
+
 /// A search that is longer than the search box allows.
 #[must_use]
 pub fn search_too_long(limit: usize) -> String {
@@ -149,6 +158,8 @@ mod tests {
             COPIED_SETUP,
             SEARCH_CONTROL_CHARACTER,
             POLICY_EMPTY,
+            DIAGNOSTICS_OFF,
+            LINK_NOT_SECURE,
         ] {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");

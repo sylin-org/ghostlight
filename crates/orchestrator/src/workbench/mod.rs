@@ -15,7 +15,7 @@ pub use input::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -400,6 +400,7 @@ pub struct WorkbenchFacade {
     harnesses: HarnessRegistry,
     live: Arc<live::Live>,
     web: Arc<OnceLock<WebFacts>>,
+    native_acts: Arc<Mutex<Option<Arc<dyn WorkbenchNativeActs>>>>,
     policy_writes: Arc<Mutex<()>>,
     diagnostics_writes: Arc<Mutex<()>>,
 }
@@ -464,6 +465,7 @@ impl WorkbenchFacade {
             harnesses: HarnessRegistry::discover(),
             live,
             web: Arc::default(),
+            native_acts: Arc::default(),
             policy_writes: Arc::default(),
             diagnostics_writes: Arc::default(),
         }
@@ -537,6 +539,72 @@ impl WorkbenchFacade {
     /// Attach the best-effort operating-system presentation adapter.
     pub fn attach_presentation(&self, port: Arc<dyn WorkbenchPresentationPort>) {
         self.projection.attach_presentation(port);
+    }
+
+    /// Attach the adapter that opens links and folders and asks for files on this computer.
+    pub fn attach_native_acts(&self, acts: Arc<dyn WorkbenchNativeActs>) {
+        *lock(&self.native_acts) = Some(acts);
+    }
+
+    /// The attached native acts, or the failure every native act ends in without them.
+    fn native_acts(&self) -> Result<Arc<dyn WorkbenchNativeActs>, NativeActError> {
+        lock(&self.native_acts)
+            .clone()
+            .ok_or_else(|| WorkbenchError::PresentationUnavailable.into())
+    }
+
+    /// Open one of the destinations Ghostlight is willing to point at.
+    ///
+    /// The surface names a destination from a closed vocabulary, never an address, so this cannot
+    /// be talked into opening something the product did not choose.
+    pub fn open_destination(
+        &self,
+        destination: WorkbenchDestination,
+    ) -> Result<(), NativeActError> {
+        self.open_secure_link(&*self.native_acts()?, destination.url())
+    }
+
+    /// Open the official download page of one supported client.
+    pub fn open_harness_download(&self, product_id: &str) -> Result<(), NativeActError> {
+        let acts = self.native_acts()?;
+        let url = self.harness_download_url(product_id)?;
+        self.open_secure_link(&*acts, url)
+    }
+
+    /// Open the diagnostics folder in the operating system's file manager.
+    pub fn reveal_diagnostics(&self) -> Result<(), NativeActError> {
+        let acts = self.native_acts()?;
+        let directory = self
+            .diagnostics_report()
+            .directory
+            .ok_or(NativeActError::DiagnosticsOff)?;
+        acts.open_folder(Path::new(&directory)).map_err(native)
+    }
+
+    /// Ask the person for a client's application or settings file, and remember the one chosen.
+    ///
+    /// Answers `None` when the person closes the dialog without choosing.
+    pub fn locate_harness_by_picking(
+        &self,
+        id: &str,
+    ) -> Result<Option<HarnessActionResult>, NativeActError> {
+        let acts = self.native_acts()?;
+        let Some(path) = acts.pick_file(words::LOCATE_DIALOG_TITLE).map_err(native)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.locate_harness(id, &path)?))
+    }
+
+    /// Open `url` through `acts`, which only ever gets a secure address.
+    fn open_secure_link(
+        &self,
+        acts: &dyn WorkbenchNativeActs,
+        url: &str,
+    ) -> Result<(), NativeActError> {
+        if !url.starts_with(SECURE_SCHEME) {
+            return Err(NativeActError::LinkNotSecure);
+        }
+        acts.open_url(url).map_err(native)
     }
 
     /// Add a best-effort sequenced change-event sink used by a live presentation surface. Every
@@ -1131,6 +1199,49 @@ pub trait WorkbenchPresentationPort: Send + Sync {
         -> Result<(), WorkbenchPresentationError>;
 }
 
+/// What only the operating system can do for the workbench: open a link, open a folder, ask for
+/// a file.
+///
+/// The service owns what to open and when; the adapter that implements this owns how this
+/// computer does it. It is kept apart from [`WorkbenchPresentationPort`] so a presentation
+/// adapter that only shows and notifies needs none of it.
+pub trait WorkbenchNativeActs: Send + Sync {
+    /// Open an address in the person's browser. The facade passes only `https://` addresses.
+    fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError>;
+
+    /// Show a folder in the file manager.
+    fn open_folder(&self, path: &Path) -> Result<(), WorkbenchPresentationError>;
+
+    /// Ask the person to choose a file, under `title`. Answers `None` when they close the dialog.
+    /// The dialog blocks the calling thread until the person answers.
+    fn pick_file(&self, title: &str) -> Result<Option<PathBuf>, WorkbenchPresentationError>;
+}
+
+/// The start every address the service opens has.
+const SECURE_SCHEME: &str = "https://";
+
+/// Why a native act did not happen.
+#[derive(Debug, Error)]
+pub enum NativeActError {
+    /// No adapter is attached, or this computer refused.
+    #[error(transparent)]
+    Workbench(#[from] WorkbenchError),
+    /// The client roster refused: an unknown product or a path that is not a client.
+    #[error(transparent)]
+    Harness(#[from] HarnessError),
+    /// Process diagnostics are off, so there is no folder to show.
+    #[error("{}", words::DIAGNOSTICS_OFF)]
+    DiagnosticsOff,
+    /// The address is not a secure one.
+    #[error("{}", words::LINK_NOT_SECURE)]
+    LinkNotSecure,
+}
+
+/// A refusal of the adapter, as the failure of the act.
+fn native(error: WorkbenchPresentationError) -> NativeActError {
+    WorkbenchError::from(error).into()
+}
+
 /// Best-effort outbound port for sequenced workbench changes.
 ///
 /// Delivery failures are presentation failures. The adapter contains them, and they never reach
@@ -1281,6 +1392,9 @@ pub enum WorkbenchPresentationError {
     /// Native notification delivery failed.
     #[error("native presentation failed: {0}")]
     Native(String),
+    /// The computer refused an open or a dialog. The text is the computer's own.
+    #[error("{0}")]
+    ActFailed(String),
 }
 
 /// Failure at the typed workbench application boundary.
