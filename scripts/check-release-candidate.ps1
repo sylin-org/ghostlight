@@ -43,20 +43,27 @@ $fixedCoordinates = @(
 )
 
 # Read the workspace member package names at the candidate's source revision.
+# Returns $null only when that revision is not available locally. Once the
+# revision exists, anything unreadable or unexpected in the manifests throws.
 function Get-WorkspacePackageNames([string]$revision) {
     $repo = Split-Path -Parent $PSScriptRoot
-    $root = & git -C $repo show "${revision}:Cargo.toml" 2>$null
+    & git -C $repo cat-file -e "${revision}^{commit}" 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
+    $root = & git -C $repo show "${revision}:Cargo.toml" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Cargo.toml is unreadable at source revision $revision" }
     $block = [regex]::Match(($root -join "`n"), '(?ms)^\[workspace\].*?^members\s*=\s*\[(?<members>.*?)\]')
-    if (-not $block.Success) { return $null }
+    if (-not $block.Success) { throw "Cargo.toml at source revision $revision has no workspace members block" }
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($member in [regex]::Matches($block.Groups["members"].Value, '"([^"]+)"')) {
-        $manifest = & git -C $repo show "${revision}:$($member.Groups[1].Value)/Cargo.toml" 2>$null
-        if ($LASTEXITCODE -ne 0) { return $null }
+        $path = $member.Groups[1].Value
+        if ($path -match '[*?\[]') { throw "Workspace member is a glob and cannot be verified: $path" }
+        $manifest = & git -C $repo show "${revision}:$path/Cargo.toml" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Workspace member $path has no Cargo.toml at source revision $revision" }
         $name = [regex]::Match(($manifest -join "`n"), '(?ms)^\[package\].*?^name\s*=\s*"(?<name>[^"]+)"')
-        if (-not $name.Success) { return $null }
+        if (-not $name.Success) { throw "Workspace member $path has no package name at source revision $revision" }
         [void]$names.Add($name.Groups["name"].Value)
     }
+    if ($names.Count -eq 0) { throw "Cargo.toml at source revision $revision lists no workspace members" }
     return $names.ToArray()
 }
 
