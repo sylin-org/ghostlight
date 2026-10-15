@@ -186,5 +186,8 @@ them.
   journey's cleared-variable list and `tests/history-compatibility.mjs`. (4) The man page, the
   scripting guide and the SIEM guide lose exit code 3 and the `attention_required` signal; the
   exit codes 2, 4, 5 and 6 are asserted by number in `each_status_keeps_its_exit_code`. The
-  audit lines written before this slice are covered by
-  `audit_reads_lines_that_carry_the_removed_attention_state`.
+  audit lines written before this slice
+  carried `reason: runtime_attention`; `ReasonCode::RuntimeHold` reads that code through a
+  read-only serde alias and never writes it, and
+  `audit_reads_lines_that_carry_the_removed_attention_state` runs such a line through
+  `audit::read_line`.

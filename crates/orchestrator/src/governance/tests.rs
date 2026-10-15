@@ -1083,6 +1083,8 @@ fn audit_reads_legacy_failure_payloads_without_reemitting_them() {
 #[test]
 fn audit_reads_lines_that_carry_the_removed_attention_state() {
     let mut encoded = serde_json::to_value(sample_record()).unwrap();
+    encoded["allowed"] = serde_json::json!(false);
+    encoded["reason"] = serde_json::json!("runtime_attention");
     encoded["status"] = serde_json::json!("attention_required");
     encoded["refusal_facts"] = serde_json::json!({"reason":"attention_required"});
     encoded["composition"] = serde_json::json!({
@@ -1094,16 +1096,24 @@ fn audit_reads_lines_that_carry_the_removed_attention_state() {
         "stopped": true,
         "issue": {"step": 2, "cause": "attention_required"}
     });
-    let record: AuditRecord = serde_json::from_value(encoded).expect("old history stays readable");
+    let mut line = serde_json::to_vec(&encoded).unwrap();
+    line.push(b'\n');
+    let Some(crate::audit::AuditLine::Receipt(record)) =
+        crate::audit::read_line(&mut line.as_slice()).unwrap()
+    else {
+        panic!("a line written by the attention state must still read as a receipt");
+    };
+    assert!(!record.allowed);
+    assert_eq!(record.reason, ReasonCode::RuntimeHold);
     assert_eq!(record.status, "attention_required");
     assert_eq!(record.refusal_facts, None);
     let progress = record.composition.expect("the account survives");
     assert_eq!(progress.counts.total, 3);
     assert_eq!(progress.counts.succeeded, 1);
     assert_eq!(progress.counts.not_run, 1);
-    assert!(!serde_json::to_string(&progress)
-        .unwrap()
-        .contains("attention_required\":1"));
+    let rewritten = serde_json::to_string(&*record).unwrap();
+    assert!(!rewritten.contains("runtime_attention"));
+    assert!(!rewritten.contains("attention_required\":1"));
 }
 
 #[test]
@@ -1338,12 +1348,17 @@ fn stop_is_terminal_and_idempotent() {
 /// variable is never read.
 #[test]
 fn the_runtime_control_variable_is_ignored() {
-    let path = temporary("runtime-control");
+    let home = crate::service::test_home::TestHome::new("runtime-control");
+    let path = home.path().join("runtime-control.txt");
     fs::write(&path, "attention").unwrap();
+    let inherited_policy = std::env::var_os("GHOSTLIGHT_POLICY_FILE");
+    std::env::remove_var("GHOSTLIGHT_POLICY_FILE");
     std::env::set_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE", &path);
     let facade = GovernanceFacade::from_environment();
     std::env::remove_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE");
-    let _ = fs::remove_file(path);
+    if let Some(value) = inherited_policy {
+        std::env::set_var("GHOSTLIGHT_POLICY_FILE", value);
+    }
     assert_eq!(facade.runtime_state(), RuntimeControlState::Active);
     assert!(facade.runtime_decision().allowed);
     facade.apply_runtime_intent(RuntimeControlIntent::Hold);

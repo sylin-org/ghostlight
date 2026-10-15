@@ -970,7 +970,7 @@ Enforced denials retain their actual policy explanation regardless of how often 
 never open a session hold or require review/resume. Credential input without the user's explicit
 authorization returns guidance for that request and leaves later permitted work available.
 Flow error handling follows the requested stop/continue choice for these ordinary refusals.
-Explicit global runtime attention remains a human control, not a denial or credential threshold.
+Pause and Stop remain human controls, not a denial or credential threshold.
 
 Pause and Stop keep their fixed directives at the final dispatch check. A late refusal preserves
 already acknowledged effects, including when it prevents a separate postcondition observation.

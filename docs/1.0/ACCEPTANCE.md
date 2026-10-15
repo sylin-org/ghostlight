@@ -529,7 +529,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 
 1. Obsolete request restrictions fail before dispatch under every policy mode. Configured enforcing
    policy still denies direct and composed work. Neither observe nor enforced denials create
-   automatic attention.
+   an automatic hold.
 2. After any number of matching or mixed denials, the same session can perform permitted work
    without a human review or resume. Other sessions remain independent. Flow stop/continue applies
    normally to ordinary refusals.

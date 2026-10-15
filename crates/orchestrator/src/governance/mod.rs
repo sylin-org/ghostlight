@@ -215,7 +215,10 @@ pub enum ReasonCode {
     InvalidAuthority,
     /// Model-facing input did not match the catalog contract.
     InvalidRequest,
-    /// Runtime control entered hold.
+    /// Runtime control entered hold. Audit lines written before the attention state was removed
+    /// carry that state's code for the same kind of refusal, and still read as this one; it is
+    /// never written.
+    #[serde(alias = "runtime_attention")]
     RuntimeHold,
     /// Runtime control ended the session.
     SessionEnded,
