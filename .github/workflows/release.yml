@@ -89,7 +89,7 @@ jobs:
           path: .tmp/h6-browser-evidence.json
           if-no-files-found: warn
       - shell: pwsh
-        run: ./scripts/check-public-surfaces.ps1
+        run: ./scripts/check-public-surfaces.ps1 -Release
       - shell: pwsh
         run: ./scripts/check-repository-integrity.ps1
 

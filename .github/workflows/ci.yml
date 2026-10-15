@@ -20,11 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: Check source, public, and compatibility truth
+        if: github.ref != 'refs/heads/main'
         shell: pwsh
         run: ./scripts/check-public-surfaces.ps1
+      - name: Check source, public, and compatibility truth for a release
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: ./scripts/check-public-surfaces.ps1 -Release
       - name: Check whole-repository integrity
         shell: pwsh
         run: ./scripts/check-repository-integrity.ps1

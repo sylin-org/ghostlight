@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 param(
-    [switch]$Online
+    [switch]$Online,
+    [switch]$Release
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,14 +84,14 @@ if (@($server.packages).Count -ne 1) {
 Assert-Equal -Actual $server.packages[0].version -Expected $publicStatus.release -Label "registry package/public release"
 Assert-Equal -Actual $server.name -Expected "org.sylin/ghostlight" -Label "official registry name"
 
-$release = $publicStatus.release
+$publicRelease = $publicStatus.release
 $adapter = $publicStatus.chromeStore.publicAdapterVersion
-Assert-InstallPins -Text $readme -Label "README" -Release $release -Adapter $adapter
-Assert-InstallPins -Text $llmsInstall -Label "LLM install guide" -Release $release -Adapter $adapter
-Assert-InstallPins -Text $installationGuide -Label "installation guide" -Release $release -Adapter $adapter
-Assert-Contains -Text $supplyChain -Needle "currently serve $release" -Label "supply-chain trust page"
+Assert-InstallPins -Text $readme -Label "README" -Release $publicRelease -Adapter $adapter
+Assert-InstallPins -Text $llmsInstall -Label "LLM install guide" -Release $publicRelease -Adapter $adapter
+Assert-InstallPins -Text $installationGuide -Label "installation guide" -Release $publicRelease -Adapter $adapter
+Assert-Contains -Text $supplyChain -Needle "currently serve $publicRelease" -Label "supply-chain trust page"
 Assert-Contains -Text $supplyChain -Needle "adapter serves $adapter" -Label "supply-chain trust page"
-Assert-Contains -Text $trustFaq -Needle "currently serve $release" -Label "trust FAQ"
+Assert-Contains -Text $trustFaq -Needle "currently serve $publicRelease" -Label "trust FAQ"
 Assert-Contains -Text $trustFaq -Needle "adapter serves $adapter" -Label "trust FAQ"
 Assert-Contains -Text $wingetTemplate -Needle "/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip" -Label "WinGet template archive URL"
 if ($publicStatus.extensionSummary -notmatch ("\bv" + [regex]::Escape($adapter) + "\b")) {
@@ -99,8 +100,15 @@ if ($publicStatus.extensionSummary -notmatch ("\bv" + [regex]::Escape($adapter) 
 
 $compatibilityJson = & (Join-Path $PSScriptRoot "adapter-compatibility.ps1") -Json
 $compatibility = $compatibilityJson | ConvertFrom-Json
-if (-not $compatibility.source.compatible -or -not $compatibility.public.compatible) {
-    throw "source or public compatibility is false"
+if (-not $compatibility.public.compatible) {
+    throw "public compatibility is false"
+}
+if (-not $compatibility.source.compatible) {
+    $sourceMessage = "source adapter $($compatibility.source.chromeAdapter) has no row covering service $($compatibility.source.service); required before a release candidate"
+    if ($Release) {
+        throw $sourceMessage
+    }
+    Write-Warning $sourceMessage
 }
 
 Write-Output "Offline truth: source $sourceVersion; public $($publicStatus.release); public adapter $($publicStatus.chromeStore.publicAdapterVersion)"
@@ -114,10 +122,10 @@ $githubHeaders = @{
     "User-Agent" = "Ghostlight-public-surface-check"
     "Accept" = "application/vnd.github+json"
 }
-$release = Invoke-RestMethod -Headers $githubHeaders -Uri "https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v$($publicStatus.release)"
-Assert-Equal -Actual $release.tag_name -Expected "v$($publicStatus.release)" -Label "GitHub release tag"
-Assert-Equal -Actual $release.draft -Expected $false -Label "GitHub release draft state"
-Assert-Equal -Actual $release.prerelease -Expected $false -Label "GitHub release prerelease state"
+$githubRelease = Invoke-RestMethod -Headers $githubHeaders -Uri "https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v$($publicStatus.release)"
+Assert-Equal -Actual $githubRelease.tag_name -Expected "v$($publicStatus.release)" -Label "GitHub release tag"
+Assert-Equal -Actual $githubRelease.draft -Expected $false -Label "GitHub release draft state"
+Assert-Equal -Actual $githubRelease.prerelease -Expected $false -Label "GitHub release prerelease state"
 $latestRelease = Invoke-RestMethod -Headers $githubHeaders -Uri "https://api.github.com/repos/sylin-org/ghostlight/releases/latest"
 Assert-Equal -Actual $latestRelease.tag_name -Expected "v$($publicStatus.release)" -Label "GitHub latest release"
 

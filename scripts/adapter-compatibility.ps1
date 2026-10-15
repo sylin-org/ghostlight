@@ -91,9 +91,10 @@ foreach ($pair in @(
 $sourceRow = @($compatibility.chromeAdapters | Where-Object {
     $_.adapterVersion -eq $adapterVersion
 })
-if ($sourceRow.Count -ne 1 -or -not (Test-Coverage -Row $sourceRow[0] -ServiceVersion $serviceVersion)) {
-    throw "source adapter $adapterVersion does not cover source service $serviceVersion"
+if ($sourceRow.Count -ne 1) {
+    throw "source adapter $adapterVersion has no unique compatibility.json row"
 }
+$sourceCompatible = Test-Coverage -Row $sourceRow[0] -ServiceVersion $serviceVersion
 
 $publicStatus = Read-JsonFile -Path (Join-Path $repo "docs/public-status.json")
 $publicAdapter = $publicStatus.chromeStore.publicAdapterVersion
@@ -112,7 +113,7 @@ $result = [ordered]@{
     source = [ordered]@{
         service = $serviceVersion
         chromeAdapter = $adapterVersion
-        compatible = $true
+        compatible = $sourceCompatible
     }
     public = [ordered]@{
         service = $publicService

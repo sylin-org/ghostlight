@@ -93,7 +93,7 @@ cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/process-journey.mjs
 node --check crates/orchestrator/ui/app.js
 node --check tests/workbench-preview-server.mjs
-pwsh -NoProfile -File scripts/check-public-surfaces.ps1
+pwsh -NoProfile -File scripts/check-public-surfaces.ps1 -Release
 pwsh -NoProfile -File scripts/check-repository-integrity.ps1
 pwsh -NoProfile -File scripts/package-extension.ps1
 ```
