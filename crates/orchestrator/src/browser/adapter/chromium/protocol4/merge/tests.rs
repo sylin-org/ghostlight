@@ -162,7 +162,6 @@ fn a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order() {
     assert_eq!(merged.left_out.count(LeftOutKey::Hidden), 1);
     assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 1);
     assert_eq!(merged.left_out.count(LeftOutKey::Aside), 0);
-    assert_eq!(merged.left_out.size_cut(), 2);
 }
 
 #[test]

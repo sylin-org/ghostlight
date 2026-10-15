@@ -128,12 +128,6 @@ impl LeftOutKey {
             _ => Self::Content,
         }
     }
-
-    /// Whether the cap cuts this key, as opposed to a control the page cannot act on.
-    #[must_use]
-    pub const fn is_size_cut(self) -> bool {
-        !matches!(self, Self::BehindDialog)
-    }
 }
 
 /// How many items a listing left out, by key. Only keys with a count are rendered.
@@ -167,16 +161,6 @@ impl LeftOut {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.counts.is_empty()
-    }
-
-    /// How many items the cap cut, which excludes the controls dropped for being unusable.
-    #[must_use]
-    pub fn size_cut(&self) -> usize {
-        self.counts
-            .iter()
-            .filter(|(key, _)| key.is_size_cut())
-            .map(|(_, amount)| amount)
-            .sum()
     }
 
     /// The counts as a facts object keyed by word, or `None` when nothing was left out.
@@ -272,7 +256,6 @@ mod tests {
             left_out.to_value(),
             Some(serde_json::json!({"chrome": 96, "behind_dialog": 3}))
         );
-        assert_eq!(left_out.size_cut(), 96);
     }
 
     #[test]

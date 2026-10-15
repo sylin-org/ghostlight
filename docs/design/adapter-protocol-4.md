@@ -1803,8 +1803,8 @@ every actionable target that sits under a composed `[inert]` ancestor or outside
 carries `modal_open`, true when the document has an open modal dialog. Structure targets are not
 dropped. The service reads `left_out` against the closed key list, drops other words, and when the
 documents together hold more than the cap it cuts again by the same tiers, derived from each
-target's `hidden` state word and `area`, and adds its own counts. `truncated` and the size cut
-make the read's coverage report its size limit; `behind_dialog` does not.
+target's `hidden` state word and `area`, and adds its own counts. `truncated` and the service's
+own cut make the read's coverage report its size limit; `behind_dialog` does not.
 
 State words gain `required`, `readonly` and `invalid`. A credential-class control carries `value`
 (`[hidden]` when set, empty when empty) and none of the other keys. The service bounds every key
