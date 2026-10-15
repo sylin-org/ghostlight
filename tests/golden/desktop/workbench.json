@@ -1,0 +1,20 @@
+{
+  "kind": "workbench",
+  "url": "http://127.0.0.1:41234/",
+  "bearer": "BEARER",
+  "tray": {
+    "tooltip": "Ghostlight",
+    "items": [
+      {
+        "id": "open",
+        "label": "Open Ghostlight",
+        "enabled": true
+      },
+      {
+        "id": "quit",
+        "label": "Quit Ghostlight",
+        "enabled": true
+      }
+    ]
+  }
+}

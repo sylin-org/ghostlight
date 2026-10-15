@@ -87,8 +87,9 @@ tell a restart from a blip), and the failure templates (section 8). A refused re
 
 Liveness is an accepted opening. There is no separate ping.
 
-A 2.0 service refuses the `desktop` and `command` roles as `unsupported`. The roles exist so a later
-shell or command stream needs no new relay revision.
+A 2.0 service refuses the `command` role as `unsupported`, and serves `desktop` only to a shell of
+its own build (ADR-0199 amendment of 2026-10-15). The roles exist so a later shell or command
+stream needs no new relay revision.
 
 ## 5. The frames of each role
 
@@ -127,8 +128,9 @@ reason the service was started with), `show` with `{shown}` (whether a
 window came forward) and `quit` with `{quitting: true}`. An operation this revision does not know
 is refused as `unsupported`.
 
-**`desktop`** and **`command`.** Reserved. Their streams, when they land, are defined by the shell
-contract and the command contract of ADR-0199 Decisions 6 and 7; neither changes this protocol.
+**`desktop`** carries the same-build shell contract of ADR-0199 Decision 7 and its 2026-10-15
+amendment. **`command`** is reserved; its stream, when it lands, is defined by the command contract
+of ADR-0199 Decision 6. Neither changes this protocol.
 
 ## 6. Goodbye
 

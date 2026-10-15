@@ -9,7 +9,7 @@
 use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::protocol::{
-    Control, ControlResult, Opening, QuitReason, RefusalCode, Reply, Role,
+    Control, ControlResult, Opening, Program, QuitReason, RefusalCode, Reply, Role,
 };
 use ghostlight_relay::{OPENING_DEADLINE, RELAY};
 use serde::Serialize;
@@ -61,12 +61,19 @@ pub enum Judgement {
     Drop,
 }
 
+/// Whether `opening` comes from the Ghostlight shell of this very build: the only peer the
+/// `desktop` role is served to.
+fn is_this_builds_shell(opening: &Opening) -> bool {
+    opening.edge.program == Program::Desktop && opening.edge.build == env!("CARGO_PKG_VERSION")
+}
+
 /// Read the opening of a new connection and judge it.
 ///
 /// The opening must arrive within [`OPENING_DEADLINE`]. Its relay revision must be one this
 /// service speaks (this one and later), its role must be one a 2.0 service serves, and a `control`
-/// opening must name an operation, and for `quit` a reason, that the service knows. A quitting
-/// service takes no new connection.
+/// opening must name an operation, and for `quit` a reason, that the service knows. A `desktop`
+/// opening must come from the shell of this service's own build. A quitting service takes no new
+/// connection.
 pub fn judge(connection: &Connection, quitting: bool) -> Judgement {
     let opening = match read_opening(connection, OPENING_DEADLINE) {
         Ok(opening) => opening,
@@ -82,6 +89,7 @@ pub fn judge(connection: &Connection, quitting: bool) -> Judgement {
     }
     match (opening.role, opening.control) {
         (Role::Mcp | Role::Browser, _) => {}
+        (Role::Desktop, _) if is_this_builds_shell(&opening) => {}
         (Role::Control, None) => return Judgement::Refuse(OpeningRefusal::Malformed),
         (Role::Control, Some(Control::Unknown)) => {
             return Judgement::Refuse(OpeningRefusal::Unsupported)
@@ -203,9 +211,8 @@ mod tests {
     }
 
     #[test]
-    fn the_desktop_and_command_roles_and_unknown_names_are_unsupported() {
+    fn the_command_role_and_unknown_names_are_unsupported() {
         for name in [
-            "opening.desktop.json",
             "opening.command.json",
             "tolerance/opening.unknown_role.json",
             "tolerance/opening.unknown_control_op.json",
@@ -217,6 +224,54 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// The desktop opening of the frozen golden, with its build replaced by `build`.
+    fn desktop_opening(build: &str) -> Value {
+        let mut sent = fixture("opening.desktop.json");
+        sent["edge"]["build"] = build.into();
+        sent
+    }
+
+    #[test]
+    fn the_frozen_desktop_golden_is_admitted_exactly_when_its_build_is_this_one() {
+        let sent = fixture("opening.desktop.json");
+        let decoded: Opening = serde_json::from_value(sent.clone()).unwrap();
+        let expected = if decoded.edge.build == env!("CARGO_PKG_VERSION") {
+            Judgement::Admit(decoded)
+        } else {
+            Judgement::Refuse(OpeningRefusal::Unsupported)
+        };
+        assert_eq!(judged(&sent, false), expected);
+    }
+
+    #[test]
+    fn a_desktop_opening_of_this_build_is_admitted() {
+        let sent = desktop_opening(env!("CARGO_PKG_VERSION"));
+        let decoded: Opening = serde_json::from_value(sent.clone()).unwrap();
+        assert_eq!(judged(&sent, false), Judgement::Admit(decoded));
+    }
+
+    #[test]
+    fn a_desktop_opening_of_another_build_or_from_another_program_is_unsupported() {
+        let other_build = desktop_opening("0.0.1-other");
+        let mut edge = desktop_opening(env!("CARGO_PKG_VERSION"));
+        edge["edge"]["program"] = "edge".into();
+        for sent in [other_build, edge] {
+            assert_eq!(
+                judged(&sent, false),
+                Judgement::Refuse(OpeningRefusal::Unsupported),
+                "{sent}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_quitting_service_refuses_the_shell_too() {
+        assert_eq!(
+            judged(&desktop_opening(env!("CARGO_PKG_VERSION")), true),
+            Judgement::Refuse(OpeningRefusal::ShuttingDown)
+        );
     }
 
     #[test]

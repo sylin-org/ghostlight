@@ -22,8 +22,9 @@ use crate::governance::effective::EffectiveAuthority;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessSetupResult, HarnessSummary,
 };
+use crate::intake::desktop::TrayItemId;
 use crate::language::environment::SESSION_LISTENER_FAILED;
-use crate::language::workbench::{COPIED_COMMAND, COPIED_SETUP};
+use crate::language::workbench::{COPIED_COMMAND, COPIED_SETUP, TRAY_TOOLTIP};
 use crate::service::lifetime::QUIT_GRACE;
 use crate::service::{Quit, ServiceHost};
 use crate::workbench::context::WebContext;
@@ -153,6 +154,7 @@ pub fn run(reason: StartReason) -> Result<()> {
     let setup_workbench = workbench.clone();
     let tray_available = Arc::new(AtomicBool::new(false));
     let setup_tray_available = Arc::clone(&tray_available);
+    let setup_host = Arc::clone(&host);
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         // Registered in Rust only. The capability file grants the webview neither plugin's generic
@@ -202,7 +204,10 @@ pub fn run(reason: StartReason) -> Result<()> {
                 app: app.handle().clone(),
             }));
             match build_tray(app) {
-                Ok(()) => setup_tray_available.store(true, Ordering::SeqCst),
+                Ok(()) => {
+                    setup_tray_available.store(true, Ordering::SeqCst);
+                    setup_host.native_tray_present();
+                }
                 Err(error) => {
                     eprintln!(
                         "Ghostlight could not create a tray icon in this desktop session: {error}; use the Applications entry or 'ghostlight open'"
@@ -303,22 +308,23 @@ fn record_desktop_failure(host: &ServiceHost, detail: &str) {
 }
 
 fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Ghostlight", true, None::<&str>)?;
-    let hold = MenuItem::with_id(app, "hold", "Pause browser work", true, None::<&str>)?;
-    let resume = MenuItem::with_id(app, "resume", "Resume browser work", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Ghostlight", true, None::<&str>)?;
+    let item = |id: TrayItemId| MenuItem::with_id(app, id.as_str(), id.label(), true, None::<&str>);
+    let open = item(TrayItemId::Open)?;
+    let hold = item(TrayItemId::Hold)?;
+    let resume = item(TrayItemId::Resume)?;
+    let quit = item(TrayItemId::Quit)?;
     let menu = Menu::with_items(app, &[&open, &hold, &resume, &quit])?;
     TrayIconBuilder::with_id("ghostlight")
         .icon(tauri::include_image!("../../extension/icons/icon32.png"))
-        .tooltip("Ghostlight")
+        .tooltip(TRAY_TOOLTIP)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => reveal_from_tray(app),
-            "hold" => apply_tray_intent(app, WorkbenchRuntimeIntent::Hold),
-            "resume" => apply_tray_intent(app, WorkbenchRuntimeIntent::Resume),
-            "quit" => quit_by_person(app),
-            _ => {}
+        .on_menu_event(|app, event| match TrayItemId::parse(event.id().as_ref()) {
+            Some(TrayItemId::Open) => reveal_from_tray(app),
+            Some(TrayItemId::Hold) => apply_tray_intent(app, WorkbenchRuntimeIntent::Hold),
+            Some(TrayItemId::Resume) => apply_tray_intent(app, WorkbenchRuntimeIntent::Resume),
+            Some(TrayItemId::Quit) => quit_by_person(app),
+            None => {}
         })
         .on_tray_icon_event(|tray, event| {
             if matches!(

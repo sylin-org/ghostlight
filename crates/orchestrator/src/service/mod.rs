@@ -5,7 +5,8 @@
 //! 9). The workbench's loopback server starts first, on one port per user, and carries no relay
 //! peer. Every connection then opens with one relay opening: an `mcp` stream is one MCP client
 //! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
-//! connection, and a `control` stream answers one operation.
+//! connection, a `control` stream answers one operation, and a `desktop` stream hands the shell of
+//! the same build the workbench address and its secret (ADR-0199 Decision 7).
 //!
 //! A start carries the reason it was made for (ADR-0199 Decision 10). The reason decides what a
 //! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
@@ -42,7 +43,7 @@ use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
 use crate::browser::adapter::chromium::protocol4::assets::page_assets;
-use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
+use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome, RuntimeControlIntent};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     AdapterLifecycleObserver, Availability, BrowserError, BrowserEventSink, BrowserPort,
@@ -51,6 +52,7 @@ use crate::browser::{
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
+use crate::intake::desktop::{DesktopFrame, TrayItemId};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::intake::MCP_CHANNEL;
@@ -318,9 +320,11 @@ impl ServiceHost {
             diagnostics: Arc::clone(&diagnostics),
             quit: quit.clone(),
             sessions: Capacity::new(admission::SESSIONS),
+            desktops: Capacity::new(admission::DESKTOPS),
             budget: QueueBudget::default(),
             stop: Arc::clone(&stop),
             workbench_server: OnceLock::new(),
+            native_tray: AtomicBool::new(false),
         });
         Ok(Self {
             workbench,
@@ -400,6 +404,11 @@ impl ServiceHost {
         let address = server.address().clone();
         let _ = self.intake.workbench_server.set(server);
         Some(address)
+    }
+
+    /// Record that the desktop has a tray of its own, so a shell is not handed a second one.
+    pub fn native_tray_present(&self) {
+        self.intake.native_tray.store(true, Ordering::SeqCst);
     }
 
     /// Where the workbench is served, once `publish_ready` has started its server.
@@ -681,11 +690,15 @@ struct Intake {
     diagnostics: Arc<DiagnosticsHub>,
     quit: Quit,
     sessions: Capacity,
+    /// The places for `desktop` streams.
+    desktops: Capacity,
     budget: QueueBudget,
     stop: Arc<AtomicBool>,
     /// The workbench's server, once `publish_ready` has started it. The desktop role reads its
     /// address and bearer from here.
     workbench_server: OnceLock<Arc<WorkbenchServer>>,
+    /// Whether the desktop has a tray of its own. While it does, a shell is sent no tray.
+    native_tray: AtomicBool,
 }
 
 impl Intake {
@@ -757,11 +770,63 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
                     eprintln!("MCP session ended after an invalid or interrupted exchange.");
                 }
             }
-            Role::Desktop | Role::Command | Role::Unknown => {
+            Role::Desktop => {
+                // A shell that goes away abruptly or sends a frame this build cannot read ends
+                // its own stream and nothing else.
+                let _ = serve_desktop(connection, intake);
+            }
+            Role::Command | Role::Unknown => {
                 listener::refuse(&connection, OpeningRefusal::Unsupported);
             }
         },
     }
+}
+
+/// Serve one shell of this build on an accepted `desktop` stream.
+///
+/// The shell is handed the workbench address and its secret, and the tray when the service has
+/// none of its own. The stream is enrolled for the goodbye like an `mcp` stream. What the shell
+/// sends is a click on a tray entry; the shell opens its own window, so an `open` click and a
+/// frame kind this build does not know are skipped. A frame that does not decode ends the stream.
+fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
+    let Some(server) = intake.workbench_server.get() else {
+        listener::refuse(&connection, OpeningRefusal::Unsupported);
+        return Ok(());
+    };
+    let Some(_place) = intake.desktops.acquire(1) else {
+        listener::refuse(&connection, OpeningRefusal::Capacity);
+        return Ok(());
+    };
+    listener::accept(&connection, &intake.accepted(Role::Desktop))?;
+    let mut reader =
+        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
+    let writer = Arc::new(SocketWriter::new(connection)?);
+    let _enrolled = intake.quit.enroll(Arc::clone(&writer));
+    writer.native(&DesktopFrame::workbench(
+        server.address().url(),
+        server.bearer(),
+        intake.native_tray.load(Ordering::SeqCst),
+    ))?;
+    while let Some(frame) = reader.native::<DesktopFrame>(None)? {
+        let DesktopFrame::Tray { item } = frame else {
+            continue;
+        };
+        match item {
+            TrayItemId::Hold => {
+                intake
+                    .workbench
+                    .apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Tray);
+            }
+            TrayItemId::Resume => {
+                intake
+                    .workbench
+                    .apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Tray);
+            }
+            TrayItemId::Quit => intake.quit.begin(QuitReason::Quit, QUIT_GRACE),
+            TrayItemId::Open => {}
+        }
+    }
+    Ok(())
 }
 
 /// Answer one control operation and close.
@@ -1609,8 +1674,10 @@ mod tests {
 
     use super::test_home::TestHome;
     use crate::browser::adapter::BrowserCommand;
+    use crate::browser::adapter::RuntimeControlState;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
+    use crate::intake::desktop::{DesktopFrame, TrayItemId, TrayModel};
     use crate::intake::listener::{self, control};
     use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
@@ -2234,9 +2301,11 @@ mod tests {
             diagnostics,
             quit,
             sessions: super::Capacity::new(super::admission::SESSIONS),
+            desktops: super::Capacity::new(super::admission::DESKTOPS),
             budget: super::QueueBudget::default(),
             stop: Arc::default(),
             workbench_server: std::sync::OnceLock::new(),
+            native_tray: std::sync::atomic::AtomicBool::new(false),
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
         let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
@@ -3534,5 +3603,266 @@ mod tests {
             "one change is told once"
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// An opening for the shell of this build.
+    fn desktop_opening() -> RelayOpening {
+        RelayOpening::new(
+            Role::Desktop,
+            Edge::new(Program::Desktop, env!("CARGO_PKG_VERSION").into()),
+        )
+    }
+
+    /// Open a `desktop` stream and read the frame that hands over the workbench.
+    fn open_desktop() -> (Connection, DesktopFrame) {
+        let (mut connection, reply) = dial(&desktop_opening());
+        assert!(reply.accepted, "{reply:?}");
+        let handed = frame::read_frame::<DesktopFrame>(&mut connection)
+            .unwrap()
+            .expect("the first frame hands over the workbench");
+        (connection, handed)
+    }
+
+    /// The address, the bearer and the tray of a frame that hands over the workbench.
+    fn handed_over(handed: DesktopFrame) -> (String, String, Option<TrayModel>) {
+        match handed {
+            DesktopFrame::Workbench { url, bearer, tray } => (url, bearer, tray),
+            other => panic!("not the workbench: {other:?}"),
+        }
+    }
+
+    /// One request to the workbench on `port`; the status code and the whole answer come back.
+    fn workbench_call(
+        port: u16,
+        method: &str,
+        path: &str,
+        bearer: Option<&str>,
+        body: Option<&str>,
+    ) -> (u16, String) {
+        use std::io::{Read, Write};
+
+        let mut text = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
+        if let Some(bearer) = bearer {
+            text.push_str(&format!("Authorization: Bearer {bearer}\r\n"));
+        }
+        if let Some(body) = body {
+            text.push_str(&format!(
+                "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                body.len()
+            ));
+        }
+        text.push_str("\r\n");
+        text.push_str(body.unwrap_or_default());
+        let mut stream = std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+            .expect("the workbench answers");
+        stream.set_read_timeout(Some(PATIENCE)).unwrap();
+        stream.write_all(text.as_bytes()).unwrap();
+        let mut bytes = Vec::new();
+        let _ = stream.read_to_end(&mut bytes);
+        let answer = String::from_utf8_lossy(&bytes).into_owned();
+        let status = answer
+            .split(' ')
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .unwrap_or_else(|| panic!("no status in {answer}"));
+        (status, answer)
+    }
+
+    #[test]
+    fn a_shell_of_this_build_is_handed_the_workbench_and_its_bearer() {
+        let home = TestHome::new("desktop-handover");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let address = host.workbench_address().unwrap();
+
+        let (_stream, handed) = open_desktop();
+        let (url, bearer, tray) = handed_over(handed);
+
+        assert_eq!(url, address.url());
+        assert_eq!(
+            tray,
+            Some(TrayModel::standard()),
+            "the service has no tray of its own here"
+        );
+        let hold = r#"{"intent":"hold"}"#;
+        let (status, _) = workbench_call(
+            address.port(),
+            "POST",
+            "/api/runtime",
+            Some(&bearer),
+            Some(hold),
+        );
+        assert_eq!(status, 200, "the bearer makes the request the window's");
+        assert_eq!(
+            host.workbench.snapshot().configuration.runtime_state,
+            RuntimeControlState::Held
+        );
+        let resume = r#"{"intent":"resume"}"#;
+        let (status, _) =
+            workbench_call(address.port(), "POST", "/api/runtime", None, Some(resume));
+        assert_eq!(status, 401, "without the bearer a screen cannot resume");
+        drop(host);
+    }
+
+    #[test]
+    fn a_shell_is_sent_no_tray_while_the_service_has_one_of_its_own() {
+        let home = TestHome::new("desktop-native-tray");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        host.native_tray_present();
+
+        let (_stream, handed) = open_desktop();
+
+        assert_eq!(handed_over(handed).2, None);
+        drop(host);
+    }
+
+    #[test]
+    fn tray_clicks_hold_and_resume_the_agents_and_an_open_click_changes_nothing() {
+        let home = TestHome::new("desktop-tray-clicks");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let (mut stream, _) = open_desktop();
+        let state = || host.workbench.snapshot().configuration.runtime_state;
+
+        for (item, expected) in [
+            (TrayItemId::Open, RuntimeControlState::Active),
+            (TrayItemId::Hold, RuntimeControlState::Held),
+            (TrayItemId::Open, RuntimeControlState::Held),
+        ] {
+            frame::write_frame(&mut stream, &DesktopFrame::Tray { item }).unwrap();
+            eventually(|| state() == expected);
+        }
+        assert!(
+            host.workbench.snapshot().runtime_note.is_some(),
+            "a pause says where it came from"
+        );
+
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Resume,
+            },
+        )
+        .unwrap();
+        eventually(|| state() == RuntimeControlState::Active);
+        eventually(|| host.workbench.snapshot().runtime_note.is_none());
+        drop(host);
+    }
+
+    #[test]
+    fn a_tray_quit_is_the_persons_quit() {
+        let (home, host, quit_requested) = quittable_host("desktop-tray-quit");
+        let (mut stream, _) = open_desktop();
+
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Quit,
+            },
+        )
+        .unwrap();
+
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the desktop is asked to exit");
+        assert!(super::latch::is_set(
+            &home.path().join("state").join("quit")
+        ));
+        drop(host);
+    }
+
+    #[test]
+    fn a_quit_says_goodbye_on_the_desktop_stream_before_it_closes() {
+        for (reason, goodbye) in [
+            (QuitReason::Quit, GoodbyeReason::Quit),
+            (QuitReason::Replace, GoodbyeReason::Replace),
+            (QuitReason::Uninstall, GoodbyeReason::Uninstall),
+        ] {
+            let (_home, host, _quit_requested) = quittable_host("desktop-goodbye");
+            let (mut stream, _) = open_desktop();
+
+            host.quit_handle().begin(reason, Duration::from_secs(5));
+
+            match frame::read_frame::<DesktopFrame>(&mut stream).unwrap() {
+                Some(DesktopFrame::Goodbye { reason }) => assert_eq!(reason, goodbye),
+                other => panic!("expected a goodbye, got {other:?}"),
+            }
+            drop(host);
+        }
+    }
+
+    #[test]
+    fn a_session_end_says_goodbye_on_the_desktop_stream() {
+        let (_home, host, _quit_requested) = quittable_host("desktop-session-end");
+        let (mut stream, _) = open_desktop();
+
+        host.quit_handle().session_end();
+
+        assert!(matches!(
+            frame::read_frame::<DesktopFrame>(&mut stream).unwrap(),
+            Some(DesktopFrame::Goodbye {
+                reason: GoodbyeReason::SessionEnd
+            })
+        ));
+        drop(host);
+    }
+
+    #[test]
+    fn a_third_desktop_stream_is_refused_for_capacity_until_a_place_frees() {
+        let home = TestHome::new("desktop-capacity");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let (first, _) = open_desktop();
+        let (_second, _) = open_desktop();
+
+        let (_, reply) = dial(&desktop_opening());
+        assert!(!reply.accepted);
+        assert_eq!(reply.code, Some(RefusalCode::Capacity));
+        assert_eq!(reply.say, Some(OpeningRefusal::Capacity.message()));
+
+        drop(first);
+        eventually(|| dial(&desktop_opening()).1.accepted);
+        drop(host);
+    }
+
+    #[test]
+    fn a_service_with_no_workbench_refuses_the_desktop_role_as_unsupported() {
+        let home = TestHome::new("desktop-no-workbench");
+        let served = serve_fake(&home);
+        let client = served.over_a_pair();
+
+        let reply = protocol::open(&client, &desktop_opening(), Instant::now() + PATIENCE).unwrap();
+
+        assert!(!reply.accepted);
+        assert_eq!(reply.code, Some(RefusalCode::Unsupported));
+        assert_eq!(reply.say, Some(OpeningRefusal::Unsupported.message()));
+    }
+
+    #[test]
+    fn a_desktop_stream_that_sends_a_frame_it_cannot_read_ends_alone() {
+        let home = TestHome::new("desktop-garbage");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let (mut stream, _) = open_desktop();
+        let (mut other, _) = open_desktop();
+
+        frame::write_frame_raw(&mut stream, b"{ not json at all").unwrap();
+
+        assert!(matches!(
+            frame::read_frame::<DesktopFrame>(&mut stream),
+            Ok(None) | Err(_)
+        ));
+        frame::write_frame(
+            &mut other,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Hold,
+            },
+        )
+        .unwrap();
+        eventually(|| {
+            host.workbench.snapshot().configuration.runtime_state == RuntimeControlState::Held
+        });
+        drop(host);
     }
 }

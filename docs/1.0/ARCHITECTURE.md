@@ -280,7 +280,7 @@ loopback port carries no relay peer. The endpoint belongs to the user and the ho
 user can open it, and each end checks the other's user before a payload byte moves. The relay framing, a four-byte little-endian length prefix, is Chromium's, so
 the browser relay and the adapter protocol use it end to end and the native host can forward
 bounded adapter frames without decoding them. A connection opens with one opening naming its role
-(`mcp`, `browser` or `control`; `desktop` and `command` are refused as unsupported) and the relay
+(`mcp`, `browser`, `control` or `desktop`, the last only from a shell of the same build; `command` is refused as unsupported) and the relay
 revision, and the service answers with its version, an instance that changes on every start and,
 for `mcp`, the failure templates. An opening that names an earlier relay revision is refused before
 any work is accepted. A `control` opening asks `readiness`, `status`, `show` or `quit`. Correlation

@@ -15,6 +15,8 @@ const SERVICE_BYTES: usize = 64 * 1024 * 1024;
 const CONTROL_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const HANDSHAKES: usize = 16;
 pub(super) const SESSIONS: usize = 64;
+/// The most `desktop` streams at once: one shell and the one that is replacing it.
+pub(super) const DESKTOPS: usize = 2;
 
 /// Shared counted capacity, released when its owning resource leaves scope.
 #[derive(Clone)]

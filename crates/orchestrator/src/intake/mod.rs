@@ -4,8 +4,10 @@
 //! relay listener in [`listener`]. An edge forwards each client line unchanged over relay
 //! protocol 4, and [`mcp::McpSession`] turns those lines into the session vocabulary the service
 //! queue consumes, then renders the service's answers back into MCP. The engine owns no
-//! transport: whoever holds the stream feeds it lines and writes what it returns.
+//! transport: whoever holds the stream feeds it lines and writes what it returns. A shell of the
+//! same build reaches the workbench through the `desktop` role, whose frames are in [`desktop`].
 
+pub mod desktop;
 pub mod listener;
 pub mod mcp;
 pub mod opening;

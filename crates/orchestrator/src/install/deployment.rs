@@ -12,7 +12,8 @@
 //!    does nothing for the same intact version, rename-swaps the service image into `bin`, and
 //!    replaces the edge only when the relay revision changes or `bin` still holds the pre-edge
 //!    layout; `--development` swaps the service and the edge into `dev` and writes the
-//!    development marker (installing into `bin` as well when `bin` needs another edge);
+//!    development marker (installing into `bin` as well when `bin` needs another edge). The
+//!    Ghostlight shell goes beside every service image placed, when the payload has one;
 //!    `--restore` removes the marker;
 //! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
 //!    before anything old is stopped, so a browser or client that relaunches its host the moment
@@ -44,7 +45,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
-use super::layout::Layout;
+use super::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
 use super::marker::DevelopmentMarker;
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
@@ -277,7 +278,8 @@ pub struct InstallPlan {
     pub migration: MigrationPlan,
     /// The same version is installed and intact: nothing else happens.
     pub unchanged: bool,
-    /// Executables placed by rename-swap: the service image, and the edge where it changes.
+    /// Executables placed by rename-swap: the service image, the shell beside it when the payload
+    /// has one, and the edge where it changes.
     pub swaps: Vec<Swap>,
     /// The development marker change.
     pub marker: Option<MarkerChange>,
@@ -479,7 +481,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                 }
                 Standing::Same => {}
                 Standing::Absent | Standing::Older | Standing::Damaged => {
-                    plan.swaps.push(service_swap(context, layout.bin()));
+                    push_service_swaps(context, &mut plan, layout.bin());
                     plan.record = Some(placed_in_bin(
                         context,
                         &mut plan,
@@ -491,14 +493,14 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         }
         Mode::Development => {
             validate_payload(&context.payload, &layout.dev())?;
-            plan.swaps.push(service_swap(context, layout.dev()));
+            push_service_swaps(context, &mut plan, layout.dev());
             plan.swaps.push(edge_swap(context, layout.dev()));
             plan.marker = Some(MarkerChange::Write(layout.development_executable()));
             if edge_changes {
                 // The edge starts bin/ghostlight-service serve, which forwards to the
                 // development build, so bin must hold an edge and a service at the payload's
                 // relay revision.
-                plan.swaps.push(service_swap(context, layout.bin()));
+                push_service_swaps(context, &mut plan, layout.bin());
                 plan.record = Some(placed_in_bin(context, &mut plan, installed.as_ref(), true)?);
             }
         }
@@ -650,6 +652,25 @@ fn service_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
         directory,
         name: SERVICE_EXECUTABLE_NAME.to_owned(),
         source: context.payload.join(SERVICE_EXECUTABLE_NAME),
+    }
+}
+
+/// The swap placing the payload's shell in `directory`.
+fn desktop_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
+    Swap {
+        directory,
+        name: DESKTOP_EXECUTABLE_NAME.to_owned(),
+        source: context.payload.join(DESKTOP_EXECUTABLE_NAME),
+    }
+}
+
+/// Add the swap placing the payload's service in `directory` to `plan`, and right after it the
+/// swap placing the payload's shell when the payload has one. A payload without a shell installs
+/// as it always did.
+fn push_service_swaps(context: &Context<'_>, plan: &mut InstallPlan, directory: PathBuf) {
+    plan.swaps.push(service_swap(context, directory.clone()));
+    if context.payload.join(DESKTOP_EXECUTABLE_NAME).is_file() {
+        plan.swaps.push(desktop_swap(context, directory));
     }
 }
 
@@ -2010,5 +2031,123 @@ mod tests {
         );
         assert!(SystemProcessControl.wait_ready(layout, Some("instance_old")));
         service.join().unwrap();
+    }
+
+    /// What the plan places, as file name and directory in order.
+    fn placed(plan: &InstallPlan) -> Vec<(String, PathBuf)> {
+        plan.swaps
+            .iter()
+            .map(|swap| (swap.name.clone(), swap.directory.clone()))
+            .collect()
+    }
+
+    /// Put a shell in the fixture's payload.
+    fn add_shell(fixture: &Fixture, text: &str) {
+        fs::write(fixture.payload.join(DESKTOP_EXECUTABLE_NAME), text).unwrap();
+    }
+
+    #[test]
+    fn a_development_payload_with_a_shell_places_it_beside_every_service() {
+        let fixture = Fixture::new();
+        add_shell(&fixture, "shell");
+        let layout = &fixture.layout;
+        let named = |name: &str, directory: PathBuf| (name.to_owned(), directory);
+
+        let control = FakeControl::new();
+        let planned = plan(
+            &fixture.context(fixture.build(VERSION), &control),
+            Mode::Development,
+        )
+        .unwrap();
+        assert_eq!(
+            placed(&planned),
+            [
+                named(SERVICE_EXECUTABLE_NAME, layout.dev()),
+                named(DESKTOP_EXECUTABLE_NAME, layout.dev()),
+                named(EDGE_EXECUTABLE_NAME, layout.dev()),
+                named(SERVICE_EXECUTABLE_NAME, layout.bin()),
+                named(DESKTOP_EXECUTABLE_NAME, layout.bin()),
+                named(EDGE_EXECUTABLE_NAME, layout.bin()),
+            ]
+        );
+
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(
+            fixture.read(layout.dev().join(DESKTOP_EXECUTABLE_NAME)),
+            "shell"
+        );
+        assert_eq!(
+            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+            "shell"
+        );
+
+        // With bin on the same relay revision, the next development build leaves bin alone.
+        add_shell(&fixture, "next shell");
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(
+            placed(&outcome.plan),
+            [
+                named(SERVICE_EXECUTABLE_NAME, layout.dev()),
+                named(DESKTOP_EXECUTABLE_NAME, layout.dev()),
+                named(EDGE_EXECUTABLE_NAME, layout.dev()),
+            ]
+        );
+        assert_eq!(
+            fixture.read(layout.dev().join(DESKTOP_EXECUTABLE_NAME)),
+            "next shell"
+        );
+        assert_eq!(
+            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+            "shell"
+        );
+    }
+
+    #[test]
+    fn a_release_payload_with_a_shell_places_it_in_bin_beside_the_service() {
+        let fixture = Fixture::new();
+        add_shell(&fixture, "shell");
+        let control = FakeControl::new();
+        let planned = plan(
+            &fixture.context(fixture.build(VERSION), &control),
+            Mode::Release,
+        )
+        .unwrap();
+        let bin = fixture.layout.bin();
+        assert_eq!(
+            placed(&planned),
+            [
+                (SERVICE_EXECUTABLE_NAME.to_owned(), bin.clone()),
+                (DESKTOP_EXECUTABLE_NAME.to_owned(), bin.clone()),
+                (EDGE_EXECUTABLE_NAME.to_owned(), bin.clone()),
+            ]
+        );
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(fixture.read(bin.join(DESKTOP_EXECUTABLE_NAME)), "shell");
+    }
+
+    #[test]
+    fn a_payload_without_a_shell_installs_as_before_and_still_validates() {
+        let fixture = Fixture::new();
+        for mode in [Mode::Release, Mode::Development] {
+            let control = FakeControl::new();
+            let planned = plan(&fixture.context(fixture.build(VERSION), &control), mode).unwrap();
+            assert!(
+                planned
+                    .swaps
+                    .iter()
+                    .all(|swap| swap.name != DESKTOP_EXECUTABLE_NAME),
+                "{mode:?}"
+            );
+        }
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
     }
 }

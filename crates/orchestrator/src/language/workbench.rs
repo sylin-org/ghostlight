@@ -89,6 +89,21 @@ pub const PAUSED_FROM_BROWSER: &str = "Paused from the browser toolbar.";
 /// What a screen is told when every place for a live view of its kind is taken.
 pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and try again.";
 
+/// The hover text of the tray icon.
+pub const TRAY_TOOLTIP: &str = "Ghostlight";
+
+/// The tray entry that brings the Ghostlight window forward.
+pub const TRAY_OPEN: &str = "Open Ghostlight";
+
+/// The tray entry that pauses the agents' browser work.
+pub const TRAY_HOLD: &str = "Pause browser work";
+
+/// The tray entry that lets the agents' browser work continue.
+pub const TRAY_RESUME: &str = "Resume browser work";
+
+/// The tray entry that quits Ghostlight.
+pub const TRAY_QUIT: &str = "Quit Ghostlight";
+
 /// Why the diagnostics folder cannot be shown: diagnostics are off.
 pub const DIAGNOSTICS_OFF: &str = "Diagnostics are off; turn them on first.";
 

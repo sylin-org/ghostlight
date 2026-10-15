@@ -1,7 +1,8 @@
 //! The 2.0 install root: where every installed file lives under the Ghostlight home.
 //!
 //! Every route installs into `home/bin`: the edge `ghostlight` and the service image
-//! `ghostlight-service` (ADR-0199 Decision 1). A development build lives in `home/dev`, beside its
+//! `ghostlight-service` (ADR-0199 Decision 1), and the shell `ghostlight-desktop` beside them
+//! when the payload carries it. A development build lives in `home/dev`, beside its
 //! own edge, and is selected by the marker file `home/development`. The installer's record, its lock, and the state,
 //! policy and manifest directories sit beside them (ADR-0197 Decisions 10, 13 and 14). The
 //! layout holds names only and touches no file: callers pass the home that
@@ -14,6 +15,16 @@ use ghostlight_relay::home::{
     self, BIN_DIRECTORY_NAME, EDGE_EXECUTABLE_NAME, RUN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME,
     SERVICE_LOCK_NAME,
 };
+
+/// File name of the Ghostlight shell on this platform. The relay owns the names of the service and
+/// the edge; the shell is not a relay peer's executable, so its name lives here.
+#[cfg(windows)]
+pub const DESKTOP_EXECUTABLE_NAME: &str = "ghostlight-desktop.exe";
+
+/// File name of the Ghostlight shell on this platform. The relay owns the names of the service and
+/// the edge; the shell is not a relay peer's executable, so its name lives here.
+#[cfg(not(windows))]
+pub const DESKTOP_EXECUTABLE_NAME: &str = "ghostlight-desktop";
 
 /// Directory holding a development build of the service.
 pub const DEV_DIRECTORY_NAME: &str = "dev";

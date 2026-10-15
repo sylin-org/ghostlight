@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-09-desktop-role.
+Next: m1-10-shell-webview.
 
 ## Landed
 
@@ -54,6 +54,7 @@ Next: m1-09-desktop-role.
 | m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
 | m1-07-page-transport | The page speaks loopback HTTP and renders its context. `transport.js` gains `overHttp` (one table maps each Tauri command name to a route) and the live stream with reconnect; `app.js` reads `GET /api/context` first and renders what it is told: Control as before, Watch as state with one Continue line per panel, Closed as one sentence per data view with the About page in full. The page drops the pull on every focus and the rescan on every focus; opening Integrations rescans once. The Tauri window keeps its path and gains `workbench_context`, `set_diagnostics` and `continue_in_window`. | see `git log` |
 | m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; while it is off every watching stream ends with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
+| m1-09-desktop-role | The service serves relay protocol 4's `desktop` role to a shell of its own build: `S/intake/desktop.rs` holds the same-build frames (`workbench`, `goodbye`, `tray`), the shell is handed the workbench address and the bearer and is enrolled for the goodbye, and a tray click holds, resumes or quits. The installer places `ghostlight-desktop` beside every service image it places when the payload has one. Goldens in `tests/golden/desktop/`. | see `git log` |
 
 ## Route table
 
@@ -152,6 +153,11 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
   only while it is off, and a service restart keeps the choice.
 - m1-08, Windows: run `ghostlight diagnostics on` from a terminal while the sheet is open; its diagnostics row follows
   within about a second with no refresh.
+
+- m1-09, Windows and Linux, after the dev loop: `ghostlight-desktop` sits beside the deployed service (in `dev`
+  and, on a development install that changes the edge, in `bin` too) and `ghostlight doctor` still reads clean. A
+  running shell does not block the deploy: the swap moves it aside and the next service start clears the old copy.
+  Nothing starts the shell yet (m1-10), so this is a file check only.
 
 ## Blockers
 
@@ -332,5 +338,21 @@ None.
 - m1-08: `docs/1.0/ARCHITECTURE.md` still says process diagnostics can be toggled "from the workbench Status card"
   (the process-diagnostics paragraph). That paragraph is not one this slice may edit; whoever next edits it should say
   "Controls sheet".
+- m1-09: the service's side of the contract is `intake::desktop::DesktopFrame`; the shell (m1-10) writes its own
+  types and reads the same files in `tests/golden/desktop/`. `workbench.json` holds a two-item tray (open, quit) as
+  the spec says; the service's own tray (`TrayModel::standard`) has the four items. `Tray` ids are the closed
+  `TrayItemId`, which the Tauri tray's `build_tray` now also uses for its menu ids and its click match, with the
+  words from `S/language/workbench.rs`.
+- m1-09: `serve_desktop` refuses `Unsupported` for a service with no workbench server before it looks at the
+  places, so a service that cannot serve the window never holds a place. A `Tray` frame whose item is not one of
+  the four does not decode and ends that stream, like any frame that does not decode.
+- m1-09: the native-tray flag is `ServiceHost::native_tray_present()`, called from the Tauri setup where
+  `tray_available` is stored. It is read when a shell connects, so a shell that opens before the tray exists would be
+  sent one; the tray is built in `setup`, before `publish_ready`, so none can.
+- m1-09: `cli/deployment.rs` needed no change. Its printed outcome already prints "Installed <name> in <directory>."
+  for each swap, so the shell is named once per place it is put.
+- m1-09: a release install of the same version that is intact is still "already installed" and places nothing, so a
+  `bin` that was installed before the payload carried the shell gets it with the next version or the next
+  development install, not with a same-version release install.
 - Owner question: Theme and "Hold this screen" are not part of this milestone's "On this screen" group. Should
   either be added once the demo has been seen?
