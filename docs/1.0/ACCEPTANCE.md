@@ -91,10 +91,12 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     sole connected browser. Two connected browsers with no evidence produce a refusal naming both
     candidates, with no dispatch and no binding. Listing a workspace's tabs succeeds with no browser
     connected.
-21. Every tool result keeps its canonical envelope in `structuredContent` and repeats that complete
-    opaque envelope after the authored ordinary-text summary. A client that reads only normal MCP
-    content can recover nested script values and find-match handles. The edge has no tool-name or
-    result-field dispatch, and image content remains separate.
+21. Every tool result carries the lean model view of its envelope in `structuredContent`: fields at
+    their default are omitted, an absent key means its default, and page data such as a script's
+    `facts.value` is never rewritten. The ordinary text block carries the authored summary and safe
+    next steps, plus the same lean JSON only for an MCP revision before 2025-06-18. The canonical
+    envelope stays in the service. The edge has no tool-name dispatch, and image content remains
+    separate.
 
 ## Executor and truth gates
 

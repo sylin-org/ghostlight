@@ -186,10 +186,11 @@ opaque to the bridge; their meaning remains in the orchestrator. One small typed
 lets the edge render bounded screenshots and GIFs without knowing which tool produced them. MCP
 request ids and protocol revisions do not cross this bridge. Readiness inspection returns before
 channel admission or workspace creation and never demand-starts the authority or writes audit.
-The MCP edge generically renders each opaque result both as `structuredContent` and as compact JSON
-after the authored ordinary-text summary. It never branches on a tool name or result field. This
-keeps complete results available to clients that expose only ordinary content without moving
-product vocabulary out of the orchestrator.
+The MCP edge renders each result as the lean model view in `structuredContent`, with the authored
+summary and safe next steps in the ordinary text block; a session on an MCP revision before
+2025-06-18 gets the same lean JSON in that block too. The view only omits fields at their default.
+It never branches on a tool name, and the canonical envelope stays in the service for audit,
+history and flow references. This keeps the edge free of product vocabulary.
 
 The browser bridge has generic messages for hello, primitive request, receipt, browser event,
 cancel, and presentation. It carries a closed primitive vocabulary but no model-facing tool

@@ -143,11 +143,27 @@ Every invocation returns one envelope:
 | `facts` | object | Tool-specific canonical facts. |
 | `next_steps` | string array | Zero to two Ghostlight-authored safe suggestions. |
 
-The MCP edge renders the complete envelope twice for client compatibility: `structuredContent`
-retains the machine-readable object, and the ordinary text block contains the authored summary and
-safe next steps followed by compact JSON for the same opaque envelope. A client that ignores
-`structuredContent` therefore still receives every canonical fact. Bounded rich content crosses
-the bridge in a separate generic content vocabulary. `browser_screenshot` returns an image block.
+The canonical envelope stays inside the service for audit, history, flow references and the
+workbench. The MCP edge renders the lean model view of it (ADR-0198 Decisions 21 and 22), once, in
+`structuredContent`. The view is the same envelope with every field at its default left out, and
+an absent key means its default:
+
+- `history_storage` of `saved`, `readiness` of `not_applicable`, and an empty `next_steps`, on the
+  envelope and on each flow step result; `history_storage` of `saved` on a flow step row.
+- `facts.coverage` when nothing limited the read (see Document coverage).
+- On each entry of `facts.items` and `facts.matches`, an empty `state` and a false
+  `credential_class`.
+- On each `facts.tree` node, an empty `label` and an empty `children`.
+
+`status`, `effect`, `repeat_safe`, `summary`, `invocation` and `facts.tab` always stay. Explicit
+facts stay at any value, including a `value` of `""` or `"[hidden]"` and a `history_storage` of
+`unconfirmed`. Page data is never rewritten: a script's `facts.value` reaches the client exactly
+as the script returned it. The edge adds no field and changes no value.
+
+The ordinary text block carries the authored summary and safe next steps. A session negotiated at
+an MCP revision before 2025-06-18 cannot read `structuredContent`, so its text block also carries
+the same lean JSON after them (ADR-0198 Decision 24). Bounded rich content crosses the bridge in
+a separate generic content vocabulary. `browser_screenshot` returns an image block.
 `browser_record` save returns a GIF image block only when the caller asked for the replay itself;
 a save that stays inside the browser returns none. Image bytes are not copied into structured
 facts or the textual JSON projection.
@@ -963,12 +979,17 @@ No-effect claims apply only to work that has not dispatched; lost effectful repl
 
 ## Document coverage (ADR-0158)
 
-Scoped results carry `facts.coverage`: targeted versus whole-page scope, inspected/excluded/page
-excluded/unavailable document counts and `limited_by_size`. Historical `masked_regions` is retained
+Scoped results carry `facts.coverage` in the canonical envelope: targeted versus whole-page
+scope, inspected/excluded/page excluded/unavailable document counts and `limited_by_size`. Historical `masked_regions` is retained
 for receipt compatibility; new operations report zero. Counts retain
 observed maxima across physical preparation and execution, not repeated-read sums. Policy
 exclusions, unavailable content, and size ceilings have separate qualifications. Negative findings
 are limited to inspected content; absence across unseen content is never established.
+
+The model view carries `facts.coverage` only when something limited the read: an excluded, page
+excluded or unavailable document, `limited_by_size`, or masked regions. A read without it saw every
+document in scope. A composition carries a limited child's coverage even when the child's result
+was cut from the parent (ADR-0198 Decision 22). The durable audit is unchanged.
 
 Human notice preferences do not remove coverage from model results. Excluded document hosts,
 identities, URLs, labels, values, and locators are not copied into the model/audit coverage.
@@ -981,7 +1002,8 @@ have language-owned outcomes. No script scanner or retry is treated as document 
 
 ## History storage (ADR-0159)
 
-Every terminal envelope also carries `history_storage`: `saved` or `unconfirmed`. This describes
+Every terminal envelope also carries `history_storage`: `saved` or `unconfirmed`. The model view
+omits `saved`, so an absent key means saved. This describes
 receipt storage, independently of status, effect, readiness, and repeat safety. An unconfirmed
 receipt adds "History could not be saved." to the action's actual outcome. Composition facts and
 safe parent audit metadata retain `unconfirmed_history_steps`; a saved parent cannot confirm its
