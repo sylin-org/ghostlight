@@ -45,6 +45,13 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     wrongTool: "wrong_tool",
     reverted: "reverted"
   });
+  // The tools a control that a fill cannot use is left to, as a wrong_tool problem names them. The
+  // service decodes the same closed list.
+  const WRONG_TOOL_ROUTES = Object.freeze({
+    file: "file",
+    button: "button",
+    widget: "widget"
+  });
   // The problems that make a fill refuse with the option code; any other refuses as not fillable.
   const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionAmbiguous, FIELD_PROBLEMS.optionDisabled]);
   // What a refusal says when the service cannot read its detail. The prefix follows the code, so
@@ -73,6 +80,9 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   });
   // The attributes a typed input's check and its refusal carry, because they bound the value.
   const TYPED_LIMIT_ATTRIBUTES = ["min", "max", "step"];
+  // The bounds and step a range input applies when the page declares none. A range always clamps
+  // to its bounds and snaps to its step, so its refusal always reports the ones in force.
+  const RANGE_DEFAULT_LIMITS = Object.freeze({ min: 0, max: 100, step: 1 });
   // The input types that are buttons, which a click presses and a fill never sets.
   const BUTTON_INPUT_TYPES = new Set(["submit", "button", "reset", "image"]);
   // The roles of a page widget that is not a form control. A fill cannot choose in one.
@@ -1148,23 +1158,54 @@ ${line}` : line;
     return kind === "checkbox" ? resolveCheckbox(element, value) : resolveRadio(element, value);
   }
 
-  // The control a fill is the wrong tool for: a file input (browser_upload), a button
-  // (browser_click) or a page widget with a combobox or listbox role that is not a form control.
+  // The control a fill is the wrong tool for, with the tool it is left to: a file input is
+  // attached with an upload, a button or a submit, reset or image input is pressed with a click,
+  // and a page widget with a combobox or listbox role that is not a form control is opened with a
+  // click. The route comes from the element, never from the role the control reads as.
   function wrongToolProblem(element) {
     const tag = tagOf(element);
     const type = inputType(element);
-    if (tag === "input" && type === "file") return { problem: FIELD_PROBLEMS.wrongTool, type };
-    if (tag === "button" || (tag === "input" && BUTTON_INPUT_TYPES.has(type))) return { problem: FIELD_PROBLEMS.wrongTool };
+    const refused = (route) => ({ problem: FIELD_PROBLEMS.wrongTool, route });
+    if (tag === "input" && type === "file") return refused(WRONG_TOOL_ROUTES.file);
+    if (tag === "button" || (tag === "input" && BUTTON_INPUT_TYPES.has(type))) return refused(WRONG_TOOL_ROUTES.button);
     const formControl = tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
-    if (!formControl && WIDGET_ROLES.has(element.getAttribute("role"))) return { problem: FIELD_PROBLEMS.wrongTool };
+    if (!formControl && WIDGET_ROLES.has(element.getAttribute("role"))) return refused(WRONG_TOOL_ROUTES.widget);
     return null;
+  }
+
+  // A number attribute of a range input, or the fallback when it is missing or not a number.
+  function rangeAttribute(element, name, fallback) {
+    const declared = element.getAttribute(name);
+    const number = declared === null || declared.trim() === "" ? Number.NaN : Number(declared);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  // The bounds and step a range input applies, as the refusal reports them. A bound that is
+  // missing or not a number is the default, a maximum below the minimum is the minimum, and a step
+  // that is not above zero (the keyword "any" included) is the default step.
+  function rangeLimits(element) {
+    const min = rangeAttribute(element, "min", RANGE_DEFAULT_LIMITS.min);
+    const max = Math.max(min, rangeAttribute(element, "max", RANGE_DEFAULT_LIMITS.max));
+    const declaredStep = rangeAttribute(element, "step", RANGE_DEFAULT_LIMITS.step);
+    const step = declaredStep > 0 ? declaredStep : RANGE_DEFAULT_LIMITS.step;
+    return { min: String(min), max: String(max), step: String(step) };
+  }
+
+  // Whether the value a detached input kept is the value given. A color keeps its value in lower
+  // case, and a range writes a number back in its own form, so those compare as the browser
+  // reads them. Every other type must come back as given.
+  function keptAsGiven(type, held, given) {
+    if (type === "color") return held.toLowerCase() === given.toLowerCase();
+    if (type === "range") return given.trim() !== "" && Number(held) === Number(given);
+    return held === given;
   }
 
   // Why a typed input cannot take a value, or null when it can. The browser sanitizes a value it
   // does not understand to an empty one (or to its default for a color or a range), so the value is
   // assigned to a detached input of the same type with the same bounds and read back. It must come
-  // back as given, apart from the case of a color, and inside the declared range. The refusal says
-  // the shape and the declared limits, never the value.
+  // back as given and inside the declared range. A range also clamps to its bounds and snaps to
+  // its step, so a value it moved is refused with the bounds and step in force. The refusal says
+  // the shape and the limits, never the value.
   function typedProblem(element, value) {
     const type = inputType(element);
     const expected = TYPED_FORMATS[type];
@@ -1180,12 +1221,11 @@ ${line}` : line;
       limits[attribute] = shared.bounded(oneLine(declared), LIMIT_MAX);
     }
     setNativeValue(probe, given);
-    const held = String(probe.value);
-    const sameValue = type === "color" ? held.toLowerCase() === given.toLowerCase() : held === given;
     const outside = probe.validity?.rangeUnderflow === true || probe.validity?.rangeOverflow === true;
-    if (sameValue && !outside) return null;
+    if (keptAsGiven(type, String(probe.value), given) && !outside) return null;
     const problem = { problem: FIELD_PROBLEMS.format, type, expected };
-    if (Object.keys(limits).length) problem.limits = limits;
+    const reported = type === "range" ? rangeLimits(element) : limits;
+    if (Object.keys(reported).length) problem.limits = reported;
     return problem;
   }
 
@@ -1285,6 +1325,8 @@ ${line}` : line;
   function expectedFillValue(element, value) {
     // A color input holds its value in lower case whatever case it was given in.
     if (inputType(element) === "color") return String(value).toLowerCase();
+    // A range input writes a number back in its own form: 5.0 is held as 5.
+    if (inputType(element) === "range" && String(value).trim() !== "" && Number.isFinite(Number(value))) return String(Number(value));
     // The textarea API and contenteditable innerText normalize both CRLF and lone CR to LF.
     return (element instanceof HTMLTextAreaElement || element.isContentEditable)
       ? String(value).replace(/\r\n?/g, "\n")

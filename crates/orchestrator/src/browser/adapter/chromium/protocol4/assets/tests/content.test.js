@@ -2508,6 +2508,41 @@ test("a range the browser would clamp is refused instead of landing on another v
   assert.equal(volume.value, "5");
 });
 
+test("a range that declares no bounds is refused with the bounds it applies", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Volume", "range", {}, { value: "50" });
+  const applied = { field: 0, problem: "format", type: "range", expected: "a number", limits: { min: "0", max: "100", step: "1" } };
+
+  assert.deepEqual(await problemsOf(harness, "Volume", "150"), [applied]);
+  assert.deepEqual(await problemsOf(harness, "Volume", "-5"), [applied]);
+  assert.deepEqual(await problemsOf(harness, "Volume", "loud"), [applied]);
+  assert.deepEqual(await problemsOf(harness, "Volume", "100"), []);
+});
+
+test("a range value off its step is refused with the step, and an equal number in another form is not", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Level", "range", { min: "0", max: "100", step: "10" }, { value: "50" });
+  const stepped = { field: 0, problem: "format", type: "range", expected: "a number", limits: { min: "0", max: "100", step: "10" } };
+
+  assert.deepEqual(await problemsOf(harness, "Level", "15"), [stepped]);
+  assert.deepEqual(await problemsOf(harness, "Level", "20"), []);
+  assert.deepEqual(await problemsOf(harness, "Level", "20.0"), []);
+  assert.deepEqual(await problemsOf(harness, "Level", "2e1"), []);
+  assert.deepEqual(await problemsOf(harness, "Level", ""), [stepped], "a range has no empty value");
+});
+
+test("a range given a number in another form is held as that number once filled", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Level", "range", { min: "0", max: "100", step: "10" }, { value: "20" });
+  const field = { locator: await harness.locatorOf("Level"), value: "20.0" };
+
+  const held = await harness.send({ kind: "verify_fill_retained", fields: [field], stable_ms: 0, poll_ms: 5, limit_ms: 50 });
+
+  assert.equal(held.ok, true);
+  assert.equal(held.value.retained, true);
+  assert.deepEqual(held.value.fields, [{ field: 0, now: "20" }]);
+});
+
 test("a color takes any case, and a name that is not a hex color is refused", async () => {
   const harness = contentHarness();
   const accent = typedInput(harness, "Accent", "color", {}, { value: "#000000" });
@@ -2564,9 +2599,27 @@ test("a file input, a button and a page widget are the wrong tool, each with wha
   list.setAttribute("aria-label", "Colors");
   harness.document.body.append(list);
 
-  assert.deepEqual(await problemsOf(harness, "Resume", "cv.pdf"), [{ field: 0, problem: "wrong_tool", type: "file" }]);
-  for (const label of ["Save", "Back", "Clear", "Send", "Country", "Colors"]) {
-    assert.deepEqual(await problemsOf(harness, label, "x"), [{ field: 0, problem: "wrong_tool" }], label);
+  assert.deepEqual(await problemsOf(harness, "Resume", "cv.pdf"), [{ field: 0, problem: "wrong_tool", route: "file" }]);
+  for (const label of ["Save", "Back", "Clear", "Send"]) {
+    assert.deepEqual(await problemsOf(harness, label, "x"), [{ field: 0, problem: "wrong_tool", route: "button" }], label);
+  }
+  for (const label of ["Country", "Colors"]) {
+    assert.deepEqual(await problemsOf(harness, label, "x"), [{ field: 0, problem: "wrong_tool", route: "widget" }], label);
+  }
+});
+
+test("an image input and a button with a role of its own are still a button to click", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Go", "image");
+  for (const [label, role] of [["Dark mode", "switch"], ["Overview", "tab"], ["Settings", "menuitem"]]) {
+    const pressed = harness.element("button");
+    pressed.setAttribute("role", role);
+    pressed.setAttribute("aria-label", label);
+    harness.document.body.append(pressed);
+  }
+
+  for (const label of ["Go", "Dark mode", "Overview", "Settings"]) {
+    assert.deepEqual(await problemsOf(harness, label, "x"), [{ field: 0, problem: "wrong_tool", route: "button" }], label);
   }
 });
 
@@ -2579,7 +2632,7 @@ test("a hidden file input is still named as the wrong tool", async () => {
   const refused = await harness.send({ kind: "prepare_fill", fields: [{ locator, value: "cv.pdf" }], visual_settle: false });
 
   assert.equal(refused.error.code, "not_fillable");
-  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "wrong_tool", type: "file" }]);
+  assert.deepEqual(refused.error.detail.problems, [{ field: 0, problem: "wrong_tool", route: "file" }]);
 });
 
 test("a call with a bad date, a bad checkbox word and a file input reports all three and edits nothing", async () => {
@@ -2596,7 +2649,7 @@ test("a call with a bad date, a bad checkbox word and a file input reports all t
   assert.deepEqual(refused.error.detail.problems, [
     { field: 0, problem: "format", type: "date", expected: "YYYY-MM-DD" },
     { field: 1, problem: "not_boolean" },
-    { field: 2, problem: "wrong_tool", type: "file" }
+    { field: 2, problem: "wrong_tool", route: "file" }
   ]);
   assert.equal(start.value, "");
   assert.equal(remember.checked, false);

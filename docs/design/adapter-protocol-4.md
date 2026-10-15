@@ -1608,7 +1608,7 @@ and a fill the page partly undid (ADR-0198 Decisions 8, 10 and 11).
 
 **Fill problems.** `prepareFill` checks every field before it throws, so one failed call reports
 all the fields that cannot take their value and nothing is edited. Its detail is
-`{problems:[{field, problem, options?, options_total?, containing?, expected?, limits?, group?, type?}]}`.
+`{problems:[{field, problem, options?, options_total?, containing?, expected?, limits?, group?, type?, route?}]}`.
 `field` is the index into the `fields` the call carried. `problem` is a word from a closed
 vocabulary: `option_missing`, `option_ambiguous`, `option_disabled`, `multiple_values`,
 `not_boolean`, `format`, `wrong_tool`, `reverted`, `submit_not_owned`. The Rust enum
@@ -1619,9 +1619,14 @@ characters, with `options_total` when cut, a group as `{group, options}`, a disa
 whose text contains the refused value. A `format` problem carries `type` (the input type),
 `expected` (the shape the type takes) and `limits` (the declared `min`, `max` and `step`); the page
 assigns the value to a detached input of that type with those bounds and refuses a value that does
-not read back as given or that falls outside the range. A `wrong_tool` problem names a file input
-(`type:"file"`), a button, or a non-form element with the role `combobox` or `listbox`, and is
-found before the control is checked for visibility. A credential-class control lists none of
+not read back as given or that falls outside the range. A range compares numerically, since it
+writes a number back in its own form, and always reports the `min`, `max` and `step` in force (0,
+100 and 1 when it declares none), because it clamps and snaps whatever it declares. A `wrong_tool`
+problem always carries `route`, a word from the closed list `file`, `button` and `widget`: a file
+input, a `<button>` element or a submit, reset or image input, and a non-form element with the
+role `combobox` or `listbox`. The page finds the route from the element, never from the role the
+control reads as, and finds it before the control is checked for visibility. The service refuses
+to decode a `wrong_tool` problem without a known route. A credential-class control lists none of
 these. The page
 never echoes the value the caller gave. The serialized detail stays within 4 KB: options are
 dropped first, then `containing`. A problem that loses its options this way gains `options_total`

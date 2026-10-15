@@ -20,7 +20,7 @@ use super::wire::{
 };
 use super::world::{self, kind, AssetErrorCode, Message};
 use crate::browser::adapter::{PhysicalField, PhysicalFile, RuntimeControlIntent};
-use crate::language::field_problem::FieldProblemKind;
+use crate::language::field_problem::{FieldProblemKind, WrongToolRoute};
 
 /// The fixture directory, from the orchestrator crate.
 const GOLDEN: &str = "../../tests/golden/protocol4";
@@ -38,6 +38,8 @@ const PROBLEMS_OPEN: &str = "const FIELD_PROBLEMS = Object.freeze({";
 const PROBLEMS_CLOSE: &str = "});";
 /// How `content.js` tests the kind of the message it dispatches.
 const DISPATCH_TEST: &str = "message.kind === \"";
+/// Where `content.js` opens its table of the routes a wrong-tool problem names.
+const ROUTES_OPEN: &str = "const WRONG_TOOL_ROUTES = Object.freeze({";
 /// The file name suffix of every fixture.
 const JSON_SUFFIX: &str = ".json";
 /// The case-name prefix of a receipt fixture that carries an outcome.
@@ -638,6 +640,13 @@ fn every_problem_word_content_js_names_is_one_the_service_decodes() {
         MultipleValues, NotBoolean, Format, WrongTool, Reverted, SubmitNotOwned),
     );
     assert!(named.is_subset(&known), "{named:?} is not within {known:?}");
+}
+
+#[test]
+fn every_wrong_tool_route_content_js_names_is_one_the_service_decodes() {
+    let named = quoted_between(CONTENT_JS, ROUTES_OPEN, PROBLEMS_CLOSE);
+    let known = set(names!(WrongToolRoute: File, Button, Widget));
+    assert_eq!(named, known);
 }
 
 #[test]

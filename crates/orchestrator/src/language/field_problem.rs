@@ -34,8 +34,8 @@ const HANDLE_PREFIXES: [&str; 6] = ["target_", "tab_", "view_", "diag_", "image_
 const HANDLE_SUFFIX_CHARS: usize = 8;
 /// What page text shaped like a handle becomes in a sentence.
 const HANDLE_REPLACEMENT: &str = "[handle]";
-/// The input type of a file input, which a fill hands to `browser_upload`.
-const FILE_INPUT_TYPE: &str = "file";
+/// The input type of a range, whose refusal names the step it snaps to.
+const RANGE_INPUT_TYPE: &str = "range";
 /// The `reason` fact of a fill that was refused before any edit.
 const REJECTED_REASON: &str = "field_value_rejected";
 /// The `reason` fact of a fill the page partly undid.
@@ -89,6 +89,20 @@ impl FieldProblemKind {
             Self::SubmitNotOwned => "submit_not_owned",
         }
     }
+}
+
+/// The tool a control that a fill cannot use is left to, as the page found it in the element
+/// itself. The control's role is no guide: an image input reads as a text field and a button
+/// with the role `switch` reads as a checkbox.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WrongToolRoute {
+    /// A file input, which `browser_upload` attaches a file to.
+    File,
+    /// A button, or a submit, reset or image input, which `browser_click` presses.
+    Button,
+    /// A page widget with a combobox or listbox role, which `browser_click` opens.
+    Widget,
 }
 
 /// One option a refusal offers, as the page lists it: bare text, text with the detail that tells
@@ -187,7 +201,7 @@ pub struct FieldProblem {
     /// The form the control takes, such as `YYYY-MM-DD`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected: Option<String>,
-    /// The constraints the control declares.
+    /// The constraints the control declares, or for a range the bounds and step it applies.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub limits: Map<String, Value>,
     /// Which entry of a given list the problem is about, when the value was a list.
@@ -199,6 +213,9 @@ pub struct FieldProblem {
     /// The input type of the control, when its role does not imply it.
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     pub input_type: Option<String>,
+    /// The tool a wrong-tool control is left to. The page always names one for that problem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<WrongToolRoute>,
     /// What a reverted control holds now, when the page can say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub now: Option<String>,
@@ -213,12 +230,18 @@ pub struct FieldProblems {
 
 impl FieldProblems {
     /// Read the detail of a page failure. A shape this build does not know, an unknown problem
-    /// word included, gives none, so the refusal stays the generic one.
+    /// word included, or a wrong-tool problem that names no route, gives none, so the refusal
+    /// stays the generic one.
     #[must_use]
     pub fn decode(detail: &Value) -> Option<Self> {
         serde_json::from_value::<Self>(detail.clone())
             .ok()
             .filter(|decoded| !decoded.problems.is_empty())
+            .filter(|decoded| {
+                decoded.problems.iter().all(|problem| {
+                    problem.kind != FieldProblemKind::WrongTool || problem.route.is_some()
+                })
+            })
     }
 }
 
@@ -293,12 +316,21 @@ impl RejectedField {
         self.subject.role() == TargetRole::Radio
     }
 
+    /// The tool a wrong-tool control is left to. The decoder refuses a wrong-tool problem without
+    /// a route, so the widget reading here is never a guess about a page's answer.
+    fn route(&self) -> WrongToolRoute {
+        self.problem.route.unwrap_or(WrongToolRoute::Widget)
+    }
+
     /// The noun the clause uses for the control.
     fn noun(&self) -> &str {
         let input_type = self.problem.input_type.as_deref();
         match self.problem.kind {
-            FieldProblemKind::WrongTool if input_type == Some(FILE_INPUT_TYPE) => "field",
-            FieldProblemKind::WrongTool if self.subject.role() == TargetRole::Button => "control",
+            FieldProblemKind::WrongTool => match self.route() {
+                WrongToolRoute::File => "field",
+                WrongToolRoute::Button => "control",
+                WrongToolRoute::Widget => self.subject.role().noun(),
+            },
             FieldProblemKind::OptionMissing if self.is_radio() => "choice",
             _ => input_type
                 .and_then(typed_noun)
@@ -521,10 +553,23 @@ impl RejectedField {
                 .map(|text| page_text(text, PAGE_TEXT_MAX_CHARS))
                 .filter(|text| !text.is_empty())
         };
-        match (limit("min"), limit("max")) {
-            (Some(min), Some(max)) => clause.push_str(&format!(" Allowed: {min} to {max}.")),
-            (Some(min), None) => clause.push_str(&format!(" Allowed: from {min}.")),
-            (None, Some(max)) => clause.push_str(&format!(" Allowed: up to {max}.")),
+        let bounds = match (limit("min"), limit("max")) {
+            (Some(min), Some(max)) => Some(format!("{min} to {max}")),
+            (Some(min), None) => Some(format!("from {min}")),
+            (None, Some(max)) => Some(format!("up to {max}")),
+            (None, None) => None,
+        };
+        // Only a range moves a value to its step. Any other typed input keeps a value off its
+        // step, so naming the step there would refuse what the page accepts.
+        let step = (self.problem.input_type.as_deref() == Some(RANGE_INPUT_TYPE))
+            .then(|| limit("step"))
+            .flatten();
+        match (bounds, step) {
+            (Some(bounds), Some(step)) => {
+                clause.push_str(&format!(" Allowed: {bounds}, in steps of {step}."));
+            }
+            (Some(bounds), None) => clause.push_str(&format!(" Allowed: {bounds}.")),
+            (None, Some(step)) => clause.push_str(&format!(" Allowed: steps of {step}.")),
             (None, None) => {}
         }
         clause
@@ -532,12 +577,10 @@ impl RejectedField {
 
     fn wrong_tool_clause(&self) -> String {
         let phrase = self.subject_phrase();
-        if self.problem.input_type.as_deref() == Some(FILE_INPUT_TYPE) {
-            format!("{phrase} is a file input.")
-        } else if self.subject.role() == TargetRole::Button {
-            format!("{phrase} is a button, not a field.")
-        } else {
-            format!("{phrase} is a page widget, not a form field.")
+        match self.route() {
+            WrongToolRoute::File => format!("{phrase} is a file input."),
+            WrongToolRoute::Button => format!("{phrase} is a button, not a field."),
+            WrongToolRoute::Widget => format!("{phrase} is a page widget, not a form field."),
         }
     }
 
@@ -594,17 +637,13 @@ impl RejectedField {
             FieldProblemKind::Format => {
                 format!("Repeat browser_fill_form with {target} set to a corrected value.")
             }
-            FieldProblemKind::WrongTool => {
-                if self.problem.input_type.as_deref() == Some(FILE_INPUT_TYPE) {
-                    format!("Attach the file with browser_upload on {target}.")
-                } else if self.subject.role() == TargetRole::Button {
-                    format!("Click it with browser_click on {target}.")
-                } else {
-                    format!(
-                        "Open it with browser_click on {target}, then browser_click the option by name."
-                    )
-                }
-            }
+            FieldProblemKind::WrongTool => match self.route() {
+                WrongToolRoute::File => format!("Attach the file with browser_upload on {target}."),
+                WrongToolRoute::Button => format!("Click it with browser_click on {target}."),
+                WrongToolRoute::Widget => format!(
+                    "Open it with browser_click on {target}, then browser_click the option by name."
+                ),
+            },
             FieldProblemKind::Reverted => {
                 format!("Read {target} with browser_read to see its current value.")
             }
@@ -1226,7 +1265,7 @@ mod tests {
     #[test]
     fn a_control_a_fill_cannot_use_points_at_the_tool_that_can() {
         let file = one(
-            json!({"field": 0, "problem": "wrong_tool", "type": "file"}),
+            json!({"field": 0, "problem": "wrong_tool", "route": "file"}),
             TargetRole::Textbox,
             "Resume",
             "cv.pdf",
@@ -1241,7 +1280,7 @@ mod tests {
             vec![format!("Attach the file with browser_upload on {HANDLE}.")]
         );
         let button = one(
-            json!({"field": 0, "problem": "wrong_tool"}),
+            json!({"field": 0, "problem": "wrong_tool", "route": "button"}),
             TargetRole::Button,
             "Save",
             "x",
@@ -1256,7 +1295,7 @@ mod tests {
             vec![format!("Click it with browser_click on {HANDLE}.")]
         );
         let widget = one(
-            json!({"field": 0, "problem": "wrong_tool"}),
+            json!({"field": 0, "problem": "wrong_tool", "route": "widget"}),
             TargetRole::Combobox,
             "Country",
             "x",
@@ -1301,7 +1340,7 @@ mod tests {
                 true,
             ),
             RejectedField::new(
-                decode(json!({"field": 2, "problem": "wrong_tool", "type": "file"})),
+                decode(json!({"field": 2, "problem": "wrong_tool", "route": "file"})),
                 at(
                     "target_16",
                     control(TargetRole::Textbox, "Resume", "cv.pdf"),
@@ -1571,7 +1610,7 @@ mod tests {
             json!({"field": 0, "problem": "multiple_values"}),
             json!({"field": 0, "problem": "not_boolean"}),
             json!({"field": 0, "problem": "format", "expected": "YYYY-MM-DD", "type": "date"}),
-            json!({"field": 0, "problem": "wrong_tool", "type": "file", "group": "PRIVATE_GROUP"}),
+            json!({"field": 0, "problem": "wrong_tool", "route": "file", "group": "PRIVATE_GROUP"}),
             json!({"field": 0, "problem": "reverted"}),
         ];
         for problem in cases {
@@ -1793,7 +1832,7 @@ mod tests {
         for kind in kinds {
             assert_eq!(serde_json::to_value(kind).unwrap(), json!(kind.as_str()));
             let refusal = one(
-                json!({"field": 0, "problem": kind.as_str()}),
+                json!({"field": 0, "problem": kind.as_str(), "route": "widget"}),
                 TargetRole::Combobox,
                 "Role",
                 "x",
@@ -1803,6 +1842,107 @@ mod tests {
             assert!(refusal.summary().len() > "Nothing was changed.".len());
             assert!(!refusal.next_steps().is_empty());
         }
+    }
+
+    #[test]
+    fn the_route_the_page_names_decides_the_sentence_not_the_role_the_control_reads_as() {
+        let button_routes = [
+            (TargetRole::Textbox, "Go", "text field", "an image input"),
+            (
+                TargetRole::Checkbox,
+                "Dark mode",
+                "checkbox",
+                "a button with a switch role",
+            ),
+            (
+                TargetRole::Tab,
+                "Overview",
+                "tab control",
+                "a button with a tab role",
+            ),
+            (
+                TargetRole::MenuItem,
+                "Settings",
+                "menu item",
+                "a button with a menu item role",
+            ),
+        ];
+        for (role, name, role_noun, case) in button_routes {
+            let refusal = one(
+                json!({"field": 0, "problem": "wrong_tool", "route": "button"}),
+                role,
+                name,
+                "x",
+                true,
+            );
+            let summary = refusal.summary();
+            assert_eq!(
+                summary,
+                format!("Nothing was changed. The \"{name}\" control is a button, not a field."),
+                "{case}"
+            );
+            assert!(!summary.contains(role_noun), "{case}: {summary}");
+            assert!(!summary.contains("widget"), "{case}: {summary}");
+            assert_eq!(
+                refusal.next_steps(),
+                vec![format!("Click it with browser_click on {HANDLE}.")],
+                "{case}"
+            );
+        }
+        let widget = one(
+            json!({"field": 0, "problem": "wrong_tool", "route": "widget"}),
+            TargetRole::ListBox,
+            "Colors",
+            "x",
+            true,
+        );
+        assert_eq!(
+            widget.summary(),
+            "Nothing was changed. The \"Colors\" list box is a page widget, not a form field."
+        );
+    }
+
+    #[test]
+    fn a_wrong_tool_problem_with_no_route_or_an_unknown_one_does_not_decode() {
+        for problem in [
+            json!({"field": 0, "problem": "wrong_tool"}),
+            json!({"field": 0, "problem": "wrong_tool", "route": "teleport"}),
+            json!({"field": 0, "problem": "wrong_tool", "type": "file"}),
+        ] {
+            assert!(
+                FieldProblems::decode(&json!({ "problems": [problem.clone()] })).is_none(),
+                "{problem}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_range_refusal_always_names_its_bounds_and_the_step_it_snaps_to() {
+        let applied = json!({"field": 0, "problem": "format", "type": "range",
+            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "1"}});
+        let undeclared = one(applied, TargetRole::Slider, "Volume", "150", true);
+        assert_eq!(
+            undeclared.summary(),
+            "Nothing was changed. The \"Volume\" slider takes a number, not \"150\". Allowed: 0 to 100, in steps of 1."
+        );
+        let stepped = json!({"field": 0, "problem": "format", "type": "range",
+            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "10"}});
+        let off_step = one(stepped, TargetRole::Slider, "Level", "15", true);
+        assert_eq!(
+            off_step.summary(),
+            "Nothing was changed. The \"Level\" slider takes a number, not \"15\". Allowed: 0 to 100, in steps of 10."
+        );
+    }
+
+    #[test]
+    fn a_number_field_never_names_a_step_because_it_keeps_a_value_off_its_step() {
+        let number = json!({"field": 0, "problem": "format", "type": "number",
+            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "10"}});
+        let refusal = one(number, TargetRole::NumberField, "Count", "many", true);
+        assert_eq!(
+            refusal.summary(),
+            "Nothing was changed. The \"Count\" number field takes a number, not \"many\". Allowed: 0 to 100."
+        );
     }
 
     #[test]

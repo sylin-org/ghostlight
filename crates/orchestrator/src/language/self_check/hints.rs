@@ -1050,19 +1050,19 @@ fn rejected_fill_samples() -> Vec<Refusal> {
             false,
         ),
         (
-            json!({"problem": "wrong_tool", "type": "file"}),
+            json!({"problem": "wrong_tool", "route": "file"}),
             TargetRole::Textbox,
             false,
             false,
         ),
         (
-            json!({"problem": "wrong_tool"}),
+            json!({"problem": "wrong_tool", "route": "button"}),
             TargetRole::Button,
             false,
             false,
         ),
         (
-            json!({"problem": "wrong_tool"}),
+            json!({"problem": "wrong_tool", "route": "widget"}),
             TargetRole::Combobox,
             false,
             false,
