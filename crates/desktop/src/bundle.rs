@@ -163,6 +163,48 @@ impl Bundle {
     }
 }
 
+/// The bundles the scheme serves from: the shell's own pages and, once the service has sent one,
+/// the service's pages. A path under [`SHELL_PREFIX`] always comes from the shell bundle and every
+/// other path from the service bundle, so the service can never shadow a shell page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleSet {
+    shell: Bundle,
+    service: Option<Bundle>,
+}
+
+impl BundleSet {
+    /// A set holding only the shell's own bundle.
+    pub fn new(shell: Bundle) -> BundleSet {
+        BundleSet {
+            shell,
+            service: None,
+        }
+    }
+
+    /// Replaces the service bundle.
+    pub fn set_service(&mut self, service: Bundle) {
+        self.service = Some(service);
+    }
+
+    /// The id of the service bundle, if one has been set.
+    pub fn service_id(&self) -> Option<&str> {
+        self.service.as_ref().map(Bundle::id)
+    }
+
+    /// The stored file at `path`: from the shell bundle for a [`SHELL_PREFIX`] path, otherwise
+    /// from the service bundle.
+    pub fn get(&self, path: &str) -> Option<&BundleFile> {
+        let is_shell = path
+            .split_once('/')
+            .is_some_and(|(first, _)| first == SHELL_PREFIX);
+        if is_shell {
+            self.shell.get(path)
+        } else {
+            self.service.as_ref().and_then(|service| service.get(path))
+        }
+    }
+}
+
 /// Which side a bundle is built for, which decides what its paths may be.
 #[derive(Clone, Copy)]
 enum Origin {
@@ -404,5 +446,27 @@ mod tests {
         assert_eq!(stored.sha256, hex(&Sha256::digest(b"{}")));
         assert!(bundle.get("a/c.json").is_none());
         assert_eq!(bundle.paths().collect::<Vec<_>>(), vec!["a/b.json"]);
+    }
+
+    #[test]
+    fn a_bundle_set_resolves_each_path_from_its_own_bundle() {
+        let shell = Bundle::shell(vec![file("_shell/a.html", "shell")]).unwrap();
+        let service = Bundle::service(vec![file("a.html", "service")]).unwrap();
+        let service_id = service.id().to_string();
+        let mut set = BundleSet::new(shell);
+        assert_eq!(set.service_id(), None);
+        set.set_service(service);
+        assert_eq!(set.service_id(), Some(service_id.as_str()));
+        assert_eq!(&*set.get("_shell/a.html").unwrap().bytes, b"shell");
+        assert_eq!(&*set.get("a.html").unwrap().bytes, b"service");
+        assert!(set.get("_shell/missing.html").is_none());
+    }
+
+    #[test]
+    fn without_a_service_bundle_a_service_path_is_absent() {
+        let shell = Bundle::shell(vec![file("_shell/a.html", "shell")]).unwrap();
+        let set = BundleSet::new(shell);
+        assert!(set.get("a.html").is_none());
+        assert!(set.get("_shell/a.html").is_some());
     }
 }

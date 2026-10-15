@@ -46,7 +46,7 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
-Next: shell-spike-2-scheme-and-policy.
+Next: shell-spike-3.
 
 `crates/desktop/Cargo.toml` declares every dependency the lane uses and may not change after
 shell-spike-1. A slice that needs another crate records a blocker instead.
@@ -56,12 +56,21 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 | Slice | What | Commit |
 |---|---|---|
 | shell-spike-1 | The `ghostlight-desktop` crate in the workspace (library only until shell-spike-7), its full dependency list, and `bundle.rs`: an in-memory content-addressed set of web files. Paths are plain relative ASCII paths of at most 128 bytes; file types come from a closed table (html, css, js, png, svg, json) and anything else is refused; at most 256 files and 8 MiB; the id is the SHA-256 over `<path>\0<file sha256>\n` lines in path order. `Bundle::service` refuses the reserved `_shell` first segment and `Bundle::shell` requires it. The network guard checks the shell's tree on Windows and Linux. | see `git log` |
+| shell-spike-2 | `scheme.rs` and `BundleSet`. The private `ghostlight` scheme (`https://ghostlight.localhost` on Windows, `ghostlight://localhost` elsewhere, both forms parsed everywhere by `request_path`), the fixed `CONTENT_POLICY` (`default-src 'none'`), `respond` (GET and HEAD only, 404, 405, security headers, the policy repeated as a meta element in every HTML page, 500 for HTML with no head), `allows_navigation`, and `harden`, the one place the webview settings are applied. `BundleSet` serves `_shell/` paths from the shell bundle and every other path from the service bundle. | see `git log` |
 
 ## Owed live checks
 
 - shell-spike-1: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
   warnings` and `cargo test -p ghostlight-desktop`. The coordinator's host builds only
   `x86_64-pc-windows-msvc`, and `gtk` and `webkit2gtk` need the Linux system libraries.
+
+- shell-spike-2: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
+  warnings` and `cargo test -p ghostlight-desktop`.
+- shell-spike-2: `scheme::harden` and the scheme handler are glue and are checked live in
+  shell-spike-3 and later: that WebView2 serves `https://ghostlight.localhost/` from memory with
+  no network, that a `<script src=https://example.com/x.js>` and a `fetch` are blocked by the
+  policy, that `window.open`, a download and a link to another origin do nothing, and that
+  devtools are absent in a release build.
 
 ## Blockers
 

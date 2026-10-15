@@ -21,3 +21,4 @@
 //! the one exception and fails if it ever leaves the tree.
 
 pub mod bundle;
+pub mod scheme;
