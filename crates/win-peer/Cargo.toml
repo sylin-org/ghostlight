@@ -10,8 +10,10 @@ description.workspace = true
 # This crate deliberately does NOT inherit the workspace lints table. Cargo applies inherited
 # workspace lints as command-line flags, which no in-source allow can override, and a per-crate
 # override alongside inheritance is rejected outright. ADR-0105 stages 2 and 3 need raw Win32
-# FFI (extended to private runtime-file creation by ADR-0160), so this one audited crate carries the whole workspace's unsafe surface and every other
-# crate keeps the forbid. A repository guard test asserts every other member inherits the forbid.
+# FFI (extended to private runtime-file creation by ADR-0160), so this crate is one of two audited
+# `unsafe` surfaces in the workspace; the other is the relay's `os` module (ADR-0199 Decisions 3
+# and 21), which sets its own `deny` table. Every other member inherits the forbid. The
+# governance guard checks each manifest and accepts win-peer with `allow` and relay with `deny`.
 
 [lints.rust]
 unsafe_code = "allow"
