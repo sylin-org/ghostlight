@@ -20,5 +20,6 @@
 //! take. It does no I/O and opens no socket. `crates/desktop/guards/network.test.mjs` names it as
 //! the one exception and fails if it ever leaves the tree.
 
+pub mod bridge;
 pub mod bundle;
 pub mod scheme;
