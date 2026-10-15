@@ -262,6 +262,17 @@ mod tests {
         (listener.accept().unwrap().0, peer)
     }
 
+    fn assert_expired(result: Result<Option<Value>, FrameError>) {
+        match result {
+            Err(FrameError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) => {}
+            other => panic!("expected the frame clock to expire, got {other:?}"),
+        }
+    }
+
     #[test]
     fn abandoned_and_partial_native_openings_expire() {
         for prefix in [vec![], vec![10], vec![10, 0, 0, 0, b'{']] {
@@ -288,7 +299,7 @@ mod tests {
             });
             assert_eq!(reader.native::<Value>(None).unwrap(), Some(json!({})));
             let started = Instant::now();
-            assert!(reader.native::<Value>(None).is_err());
+            assert_expired(reader.native::<Value>(None));
             assert!(started.elapsed() < Duration::from_millis(180));
         });
     }
@@ -300,7 +311,7 @@ mod tests {
         reader.frame_timeout = Duration::from_millis(100);
         std::thread::scope(|scope| {
             scope.spawn(move || {
-                peer.write_all(&[10, 0, 0, 0]).unwrap();
+                peer.write_all(&[64, 0, 0, 0]).unwrap();
                 for _ in 0..12 {
                     if peer.write_all(b" ").is_err() {
                         break;
@@ -309,7 +320,7 @@ mod tests {
                 }
             });
             let started = Instant::now();
-            assert!(reader.native::<Value>(None).is_err());
+            assert_expired(reader.native::<Value>(None));
             assert!(started.elapsed() < Duration::from_millis(250));
         });
     }

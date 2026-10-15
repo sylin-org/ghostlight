@@ -5,8 +5,8 @@
 //! stable across service upgrades: length-prefixed framing, the fixed home and its file names,
 //! the tolerant runtime-file reader, the opening frame and its replies, and the failure-template
 //! file, plus the mechanics every connector repeats: starting the service, watching the parent,
-//! writing diagnostics, opening a connection, and the service's opening reader and lease. It
-//! authors no words and makes no product decisions.
+//! writing diagnostics, and opening a connection. It authors no words and makes no product
+//! decisions.
 //!
 //! A change under a published relay revision needs a revision bump (`RELAY` and the crate
 //! version); `tests/guards/connectors.test.mjs` checks the source against the last release tag
