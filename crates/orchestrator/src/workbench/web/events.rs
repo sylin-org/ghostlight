@@ -4,9 +4,10 @@
 //! once for each audience that has a subscriber, so a watcher never receives what only the window
 //! may see, and is queued for every stream in a bounded channel that publishing never waits on.
 //! A stream that falls behind by more than the channel holds is ended with a `reset` event, and
-//! its screen reads a fresh snapshot. Turning watching off ends every watching stream with a
-//! `closed` event that says why, and leaves the window's streams open (ADR-0199, amendment of
-//! 2026-10-15).
+//! its screen reads a fresh snapshot. A watching stream lives only while watching is on: the hub
+//! reads the shared state, so a watcher is refused while it is off and every open one is ended
+//! with a `closed` event that says why on the next change of any kind. The window's streams are
+//! never touched by it (ADR-0199, amendment of 2026-10-15).
 
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,7 +21,7 @@ use super::http::{EventWriter, Incoming, Response};
 use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Audience, Projection};
-use crate::workbench::{WorkbenchChange, WorkbenchEvent, WorkbenchEventSink};
+use crate::workbench::{Watching, WorkbenchEvent, WorkbenchEventSink};
 
 /// The type of the stream.
 pub const EVENT_STREAM_TYPE: &str = "text/event-stream";
@@ -55,9 +56,14 @@ const COMMENT_KEEP: &str = ": keep";
 /// Why a stream was reset: its screen did not keep up.
 const RESET_BEHIND: &str = "behind";
 
-/// Every place for a live view of this kind is taken.
+/// Why a stream was not opened.
 #[derive(Debug, Eq, PartialEq)]
-pub struct TooManyScreens;
+pub enum Refused {
+    /// Every place for a live view of this kind is taken.
+    TooManyScreens,
+    /// The view asked for is a watching one and watching is off.
+    WatchingOff,
+}
 
 /// One stream's place in the hub.
 struct Subscriber {
@@ -75,6 +81,7 @@ pub struct EventHub {
     instance: String,
     controller: Projection,
     watcher: Projection,
+    watching: Arc<Watching>,
     subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
 }
@@ -86,13 +93,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl EventHub {
-    /// A hub whose streams name changes by `instance` and their number.
+    /// A hub whose streams name changes by `instance` and their number, and whose watching
+    /// streams live while `watching` is on.
     #[must_use]
-    pub fn new(instance: String) -> Self {
+    pub fn new(instance: String, watching: Arc<Watching>) -> Self {
         Self {
             instance,
             controller: Projection::new(Audience::Control),
             watcher: Projection::new(Audience::Watch),
+            watching,
             subscribers: Mutex::new(Vec::new()),
             next_id: AtomicU64::new(0),
         }
@@ -100,26 +109,33 @@ impl EventHub {
 
     /// Open a stream for `context`, which must be Control or Watch.
     ///
+    /// A watching stream is refused while watching is off. The state is read under the same lock
+    /// that publishing ends watching streams under, so a stream either opens before a change
+    /// that finds watching off and is ended by it, or is refused.
+    ///
     /// `seq` reads the current sequence while the hub is locked, so the stream carries exactly the
     /// changes numbered above the one its hello names.
     pub fn open(
         self: &Arc<Self>,
         context: WebContext,
         seq: impl FnOnce() -> u64,
-    ) -> Result<Subscription, TooManyScreens> {
+    ) -> Result<Subscription, Refused> {
         let limit = match context {
             WebContext::Control => MAX_CONTROL_STREAMS,
             WebContext::Watch => MAX_WATCH_STREAMS,
-            WebContext::Closed => return Err(TooManyScreens),
+            WebContext::Closed => return Err(Refused::WatchingOff),
         };
         let mut subscribers = lock(&self.subscribers);
+        if context == WebContext::Watch && !self.watching.is_on() {
+            return Err(Refused::WatchingOff);
+        }
         if subscribers
             .iter()
             .filter(|subscriber| subscriber.context == context)
             .count()
             >= limit
         {
-            return Err(TooManyScreens);
+            return Err(Refused::TooManyScreens);
         }
         let after = seq();
         let id = self.next_id.fetch_add(1, Ordering::AcqRel);
@@ -179,19 +195,16 @@ impl WorkbenchEventSink for EventHub {
         let mut subscribers = lock(&self.subscribers);
         let mut control: Option<Arc<str>> = None;
         let mut watch: Option<Arc<str>> = None;
-        // A part that says watching is off ends every watching stream, and none of them is sent
-        // the part: a screen that may no longer watch is shown no data.
-        let watching_off = matches!(
-            &event.change,
-            WorkbenchChange::ControlsChanged { controls } if !controls.viewing.watch
-        );
+        // While watching is off every watching stream ends, whatever the change is, and none of
+        // them is sent it: a screen that may no longer watch is shown no data.
+        let watching_off = !self.watching.is_on();
         subscribers.retain(|subscriber| {
-            if subscriber.after >= event.seq {
-                return true;
-            }
             if watching_off && subscriber.context == WebContext::Watch {
                 subscriber.closed.store(true, Ordering::Release);
                 return false;
+            }
+            if subscriber.after >= event.seq {
+                return true;
             }
             let frame = match subscriber.context {
                 WebContext::Control => {
@@ -350,7 +363,26 @@ mod tests {
     }
 
     fn hub() -> Arc<EventHub> {
-        Arc::new(EventHub::new("instance_test".into()))
+        hub_watching(Arc::new(Watching::load(
+            std::env::temp_dir().join("ghostlight-events-never-written"),
+        )))
+    }
+
+    fn hub_watching(watching: Arc<Watching>) -> Arc<EventHub> {
+        Arc::new(EventHub::new("instance_test".into(), watching))
+    }
+
+    /// A watching state whose marker lives in a directory of its own, and that directory.
+    fn switchable() -> (Arc<Watching>, std::path::PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "ghostlight-events-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        (
+            Arc::new(Watching::load(directory.join("watch.off"))),
+            directory,
+        )
     }
 
     #[test]
@@ -387,7 +419,7 @@ mod tests {
         }
         assert_eq!(
             hub.open(WebContext::Control, || 0).err(),
-            Some(TooManyScreens)
+            Some(Refused::TooManyScreens)
         );
         let mut watch = Vec::new();
         for _ in 0..MAX_WATCH_STREAMS {
@@ -395,13 +427,13 @@ mod tests {
         }
         assert_eq!(
             hub.open(WebContext::Watch, || 0).err(),
-            Some(TooManyScreens)
+            Some(Refused::TooManyScreens)
         );
         drop(control.pop());
         assert!(hub.open(WebContext::Control, || 0).is_ok());
         assert_eq!(
             hub.open(WebContext::Closed, || 0).err(),
-            Some(TooManyScreens)
+            Some(Refused::WatchingOff)
         );
     }
 
@@ -437,5 +469,49 @@ mod tests {
         let stream = hub.open(WebContext::Control, || 0).unwrap();
         hub.close();
         assert_eq!(stream.next(Duration::from_millis(10)), Frame::End);
+    }
+
+    #[test]
+    fn a_watcher_is_refused_once_watching_is_off_and_the_window_is_not() {
+        let (watching, directory) = switchable();
+        let hub = hub_watching(Arc::clone(&watching));
+        assert!(watching.set(false).unwrap());
+        hub.publish(change(1));
+        assert_eq!(
+            hub.open(WebContext::Watch, || 1).err(),
+            Some(Refused::WatchingOff)
+        );
+        assert_eq!(hub.open_streams(WebContext::Watch), 0);
+        let window = hub.open(WebContext::Control, || 1).unwrap();
+        hub.publish(change(2));
+        assert!(matches!(
+            window.next(Duration::from_millis(50)),
+            Frame::Change(_)
+        ));
+        assert!(watching.set(true).unwrap());
+        assert!(hub.open(WebContext::Watch, || 2).is_ok());
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn a_watching_stream_ends_on_the_first_change_after_watching_goes_off() {
+        let (watching, directory) = switchable();
+        let hub = hub_watching(Arc::clone(&watching));
+        let watcher = hub.open(WebContext::Watch, || 0).unwrap();
+        let window = hub.open(WebContext::Control, || 0).unwrap();
+        hub.publish(change(1));
+        assert!(matches!(
+            watcher.next(Duration::from_millis(50)),
+            Frame::Change(_)
+        ));
+        // A change of any kind that comes between the flip and the controls change is not sent.
+        assert!(watching.set(false).unwrap());
+        hub.publish(change(2));
+        assert_eq!(watcher.next(Duration::from_millis(50)), Frame::Closed);
+        assert_eq!(hub.open_streams(WebContext::Watch), 0);
+        assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
+        assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
+        assert_eq!(hub.open_streams(WebContext::Control), 1);
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 }

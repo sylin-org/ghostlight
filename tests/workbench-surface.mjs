@@ -139,7 +139,6 @@ const snapshot = () => ({
     manual_setup: "[mcp_servers.ghostlight]"
   }],
   diagnostics: [],
-  process_diagnostics: { layer: "marker", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
   // The aggregate answer is the orchestrator's, exactly like the policy sentence below. The
   // fixture carries a word the window has no way to compute, so a surface that authored its own
   // would visibly disagree with this.
@@ -631,7 +630,6 @@ view.collections({
   sessions: [], browsers: [],
   diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Ghostlight is accepting local connections." }],
   history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
-  process_diagnostics: { layer: "marker", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
   configuration: { managed_policy: { configured: false } },
   harnesses: []
 }, []);
@@ -873,8 +871,7 @@ function fakeService(kind) {
     activity: { operations: [], history: [], document_coverage: [] },
     integrations: { harnesses: roster() },
     diagnostics: {
-      diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }],
-      process_diagnostics: { layer: "marker", directory: "~/.cache/ghostlight", used_bytes: 4242 }
+      diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }]
     },
     controls: controls()
   });

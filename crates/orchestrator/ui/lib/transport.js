@@ -143,8 +143,7 @@
       history,
       document_coverage: activity.document_coverage ?? [],
       harnesses: integrations.harnesses ?? [],
-      diagnostics: diagnostics.diagnostics ?? [],
-      process_diagnostics: diagnostics.process_diagnostics
+      diagnostics: diagnostics.diagnostics ?? []
     };
     if (status.runtime_note !== undefined) flat.runtime_note = status.runtime_note;
     if (controls !== undefined) flat.controls = controls;

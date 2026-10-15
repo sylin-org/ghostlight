@@ -163,7 +163,10 @@ impl PendingWorkbench {
             instance: instance.clone(),
             watching: Arc::clone(&watching),
         });
-        let events = Arc::new(events::EventHub::new(instance.clone()));
+        let events = Arc::new(events::EventHub::new(
+            instance.clone(),
+            Arc::clone(&watching),
+        ));
         facade.attach_events(Arc::clone(&events) as Arc<dyn WorkbenchEventSink>);
         let mut random = Zeroizing::new([0_u8; BEARER_BYTES]);
         getrandom::getrandom(&mut *random).expect("the operating system supplies random bytes");

@@ -53,7 +53,7 @@ Next: m1-09-desktop-role.
 | m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
 | m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
 | m1-07-page-transport | The page speaks loopback HTTP and renders its context. `transport.js` gains `overHttp` (one table maps each Tauri command name to a route) and the live stream with reconnect; `app.js` reads `GET /api/context` first and renders what it is told: Control as before, Watch as state with one Continue line per panel, Closed as one sentence per data view with the About page in full. The page drops the pull on every focus and the rescan on every focus; opening Integrations rescans once. The Tauri window keeps its path and gains `workbench_context`, `set_diagnostics` and `continue_in_window`. | see `git log` |
-| m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; off ends every watching stream with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
+| m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; while it is off every watching stream ends with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
 
 ## Route table
 
@@ -311,8 +311,12 @@ None.
 - m1-08: an act that changes the controls answers with `Ghostlight-Seq` of the `controls_changed` it caused, which
   follows its part hint. `the_acts_that_change_a_part_hint_at_it_with_its_tag` now reads the controls event for the
   diagnostics act.
-- m1-08: a watching stream that watching-off ends gets no copy of the part: the hub ends it with `closed` instead.
-  A closed tab does not poll; it shows the closed sentence until it is reloaded.
+- m1-08: a watching stream lives only while watching is on. The hub reads the shared state: it refuses a watcher
+  while watching is off (the route answers `watching_off`), and the first change of any kind after the flip ends every
+  open watching stream with `closed` and sends it nothing. A closed tab does not poll; it shows the closed sentence
+  until it is reloaded.
+- m1-08: with no watch view served, the Controls part says so: the viewing row is off, has no address, its word is
+  the not-served sentence and Turn on or off is unavailable with that reason, in every context.
 - m1-08: the Copy address button shows only on a screen that may change who watches, and only where the page has a
   clipboard (the loopback path). The Tauri path has no clipboard command, so the address is selectable text there.
 - m1-08: `app.js` wires only the band's wheel for `data-intent`; the buttons in the sheet carry their own attributes
@@ -320,8 +324,9 @@ None.
   `data-continue`, for the same reason.
 - m1-08: `view.js` names the body for the runtime state without discarding the other classes it wears, because the
   personal settings are body classes too.
-- m1-08: the diagnostics part still carries `process_diagnostics` (the pinned key set is unchanged); the page now reads
-  the sheet's diagnostics row instead.
+- m1-08: the diagnostics part no longer carries `process_diagnostics`, and neither do the snapshot and the page's
+  flat shape: the Controls sheet's diagnostics row is the one place the page reads that state. `doctor` keeps its own
+  observation.
 - m1-08: `connection_counts` is tested over an in-memory workspace store with admitted MCP and command-line
   connections and a fake browser; it needs no home, so no `TestHome` is used.
 - m1-08: `docs/1.0/ARCHITECTURE.md` still says process diagnostics can be toggled "from the workbench Status card"

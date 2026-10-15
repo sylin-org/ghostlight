@@ -893,7 +893,7 @@ fn paths_are_home_relative_for_both_audiences_and_manual_setup_stays_exact() {
                 );
             }
         }
-        let directory = body["parts"]["diagnostics"]["process_diagnostics"]["directory"]
+        let directory = body["parts"]["controls"]["diagnostics"]["folder"]
             .as_str()
             .unwrap_or_default();
         if let Some(home) = &user_home {
@@ -2106,6 +2106,30 @@ fn a_facade_that_is_not_served_cannot_change_watching() {
     let error = facade.set_watching(false).unwrap_err();
     assert_eq!(error.to_string(), words::WATCHING_NOT_SERVED);
     assert!(facade.watching());
+}
+
+#[test]
+fn a_facade_that_is_not_served_does_not_claim_anyone_can_watch() {
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let controls = facade.snapshot().controls;
+    assert!(!controls.viewing.watch);
+    assert_eq!(controls.viewing.url, None);
+    assert_eq!(controls.viewing.word, words::WATCHING_NOT_SERVED);
+    assert_eq!(controls.you.sentence, words::SENTENCE_CONTROL_PRIVATE);
+    let act = &controls.viewing.acts.set_watching;
+    assert!(!act.available);
+    assert_eq!(act.why_not.as_deref(), Some(words::WATCHING_NOT_SERVED));
+    let tab = controls.seen_by(WebContext::Watch);
+    assert!(!tab.viewing.acts.set_watching.available);
 }
 
 #[test]

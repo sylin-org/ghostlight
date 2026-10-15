@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
 use super::parts::{
-    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, StatusConfiguration, StatusPart,
+    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, StatusConfiguration,
+    StatusPart, ViewingFacts,
 };
 use super::{
     BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
@@ -255,8 +256,10 @@ impl Live {
         ControlsPart::of(&ControlsFacts {
             runtime_state: gathered.runtime_state,
             runtime_note: gathered.runtime_note.as_deref(),
-            watching: facts.is_none_or(|facts| facts.watching.is_on()),
-            url: facts.map(|facts| facts.address.url()),
+            viewing: facts.map_or(ViewingFacts::NotServed, |facts| ViewingFacts::Served {
+                watching: facts.watching.is_on(),
+                url: facts.address.url(),
+            }),
             diagnostics: &report,
             counts: count_connections(
                 gathered

@@ -188,11 +188,6 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             severity: DiagnosticSeverity::Passing,
             detail: "Ghostlight is accepting local connections.".into(),
         }],
-        process_diagnostics: crate::diagnostics::DiagnosticsReport {
-            layer: "marker",
-            directory: Some("/home/ann/.ghostlight/logs".into()),
-            used_bytes: 4,
-        },
         harnesses: vec![HarnessSummary {
             id: "cursor".into(),
             product_id: "cursor".into(),
@@ -242,8 +237,10 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         controls: ControlsPart::of(&ControlsFacts {
             runtime_state: RuntimeControlState::Held,
             runtime_note: Some("Paused from the tray."),
-            watching: true,
-            url: Some("http://127.0.0.1:41234/"),
+            viewing: ViewingFacts::Served {
+                watching: true,
+                url: "http://127.0.0.1:41234/",
+            },
             diagnostics: &DiagnosticsReport {
                 layer: "marker",
                 directory: Some("/home/ann/.ghostlight/logs".into()),
@@ -486,10 +483,6 @@ const DIAGNOSTIC_KEYS: &[&str] = &[
     "diagnostics[].id",
     "diagnostics[].label",
     "diagnostics[].severity",
-    "process_diagnostics",
-    "process_diagnostics.directory",
-    "process_diagnostics.layer",
-    "process_diagnostics.used_bytes",
 ];
 
 const POLICY_KEYS: &[&str] = &[
@@ -791,7 +784,18 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
     let home = path.parent().unwrap().to_owned();
     let inside = |name: &str| home.join(name).to_string_lossy().into_owned();
     snapshot.harnesses[0].config_path = inside("cursor.json");
-    snapshot.process_diagnostics.directory = Some(inside("logs"));
+    snapshot.controls = ControlsPart::of(&ControlsFacts {
+        runtime_state: RuntimeControlState::Active,
+        runtime_note: None,
+        viewing: ViewingFacts::NotServed,
+        diagnostics: &DiagnosticsReport {
+            layer: "marker",
+            directory: Some(inside("logs")),
+            used_bytes: 0,
+        },
+        counts: ConnectionCounts::default(),
+        user_home: Some(&home),
+    });
     let authority = authority(&path);
     for audience in [Audience::Control, Audience::Watch] {
         let projection = Projection::with_home(audience, Some(home.clone()));
@@ -801,11 +805,8 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
             integrations["harnesses"][0]["config_path"],
             format!("~{sep}cursor.json")
         );
-        let diagnostics = projection.part(Part::Diagnostics, &snapshot);
-        assert_eq!(
-            diagnostics["process_diagnostics"]["directory"],
-            format!("~{sep}logs")
-        );
+        let controls = projection.part(Part::Controls, &snapshot);
+        assert_eq!(controls["diagnostics"]["folder"], format!("~{sep}logs"));
         let policy = projection.policy(&authority);
         let file = path.file_name().unwrap().to_string_lossy();
         assert_eq!(policy["layers"][0]["path"], format!("~{sep}{file}"));

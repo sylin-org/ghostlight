@@ -200,6 +200,20 @@ impl ConnectionsPart {
 /// The layer name of process diagnostics that are not being written.
 const DIAGNOSTICS_OFF_LAYER: &str = "off";
 
+/// What the service knows of the watch view the Controls sheet speaks for.
+#[derive(Clone, Copy, Debug)]
+pub enum ViewingFacts<'a> {
+    /// No watch view is served, so nobody can watch and the setting cannot change.
+    NotServed,
+    /// A watch view is served at `url`.
+    Served {
+        /// Whether other screens on this computer may watch.
+        watching: bool,
+        /// Where the watch view is served.
+        url: &'a str,
+    },
+}
+
 /// The facts the Controls sheet is made from, before any context has seen them.
 #[derive(Clone, Copy, Debug)]
 pub struct ControlsFacts<'a> {
@@ -207,10 +221,8 @@ pub struct ControlsFacts<'a> {
     pub runtime_state: RuntimeControlState,
     /// Where a pause came from, while agents are paused.
     pub runtime_note: Option<&'a str>,
-    /// Whether other screens on this computer may watch.
-    pub watching: bool,
-    /// Where the watch view is served, when a server is up.
-    pub url: Option<&'a str>,
+    /// Whether a watch view is served, and whether others may watch it.
+    pub viewing: ViewingFacts<'a>,
     /// The process-diagnostics state.
     pub diagnostics: &'a DiagnosticsReport,
     /// What is connected to the service.
@@ -282,6 +294,9 @@ pub struct ViewingControls {
     pub word: &'static str,
     /// What the context may do.
     pub acts: ViewingActs,
+    /// Whether a watch view is served, which decides whether watching can be changed at all.
+    #[serde(skip)]
+    served: bool,
 }
 
 /// The acts of the "Others can watch" row.
@@ -383,17 +398,30 @@ impl ControlsPart {
                     end_session: unavailable.clone(),
                 },
             },
-            viewing: ViewingControls {
-                label: words::CONTROLS_VIEWING_LABEL,
-                watch: facts.watching,
-                url: facts.url.map(str::to_owned),
-                word: if facts.watching {
-                    words::CONTROLS_VIEWING_ON
-                } else {
-                    words::CONTROLS_VIEWING_OFF
+            viewing: match facts.viewing {
+                ViewingFacts::NotServed => ViewingControls {
+                    label: words::CONTROLS_VIEWING_LABEL,
+                    watch: false,
+                    url: None,
+                    word: words::WATCHING_NOT_SERVED,
+                    acts: ViewingActs {
+                        set_watching: unavailable.clone(),
+                    },
+                    served: false,
                 },
-                acts: ViewingActs {
-                    set_watching: unavailable.clone(),
+                ViewingFacts::Served { watching, url } => ViewingControls {
+                    label: words::CONTROLS_VIEWING_LABEL,
+                    watch: watching,
+                    url: Some(url.to_owned()),
+                    word: if watching {
+                        words::CONTROLS_VIEWING_ON
+                    } else {
+                        words::CONTROLS_VIEWING_OFF
+                    },
+                    acts: ViewingActs {
+                        set_watching: unavailable.clone(),
+                    },
+                    served: true,
                 },
             },
             diagnostics: DiagnosticsControls {
@@ -455,9 +483,15 @@ impl ControlsPart {
             start_session: may(WebAct::StartSession),
             end_session: may(WebAct::EndSession),
         };
-        self.viewing.acts = ViewingActs {
-            set_watching: may(WebAct::SetWatching),
+        let set_watching = if self.viewing.served {
+            may(WebAct::SetWatching)
+        } else {
+            Availability {
+                available: false,
+                why_not: Some(words::WATCHING_NOT_SERVED.to_owned()),
+            }
         };
+        self.viewing.acts = ViewingActs { set_watching };
         self.diagnostics.acts = DiagnosticsActs {
             set_diagnostics: may(WebAct::SetDiagnostics),
             reveal_diagnostics: may(WebAct::RevealDiagnostics),
@@ -488,7 +522,6 @@ struct IntegrationsPart<'a> {
 #[derive(Serialize)]
 struct DiagnosticsPart<'a> {
     diagnostics: &'a [DiagnosticItem],
-    process_diagnostics: &'a crate::diagnostics::DiagnosticsReport,
 }
 
 /// The key a client entry holds its official download address under.
@@ -579,16 +612,9 @@ impl Projection {
                 value
             }
             Part::Controls => self.controls(&snapshot.controls),
-            Part::Diagnostics => {
-                let mut value = to_value(&DiagnosticsPart {
-                    diagnostics: &snapshot.diagnostics,
-                    process_diagnostics: &snapshot.process_diagnostics,
-                });
-                if let Some(directory) = value.pointer_mut("/process_diagnostics/directory") {
-                    self.rewrite_path(directory);
-                }
-                value
-            }
+            Part::Diagnostics => to_value(&DiagnosticsPart {
+                diagnostics: &snapshot.diagnostics,
+            }),
         }
     }
 

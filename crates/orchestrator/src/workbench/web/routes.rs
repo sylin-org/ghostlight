@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::assets::{self, Asset};
-use super::events::{TooManyScreens, EVENT_STREAM_TYPE};
+use super::events::{Refused, EVENT_STREAM_TYPE};
 use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
@@ -824,7 +824,8 @@ fn events(shared: &Shared, context: WebContext) -> Response {
         Ok(subscription) => Response::new(Status::Ok)
             .with_header(header::CONTENT_TYPE, EVENT_STREAM_TYPE)
             .with_events(subscription),
-        Err(TooManyScreens) => failure(
+        Err(Refused::WatchingOff) => watching_off(),
+        Err(Refused::TooManyScreens) => failure(
             Status::ServiceUnavailable,
             ErrorCode::TooManyScreens,
             words::TOO_MANY_SCREENS,

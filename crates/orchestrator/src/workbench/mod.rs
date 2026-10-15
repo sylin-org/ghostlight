@@ -751,7 +751,6 @@ impl WorkbenchFacade {
             browsers,
             history,
             diagnostics,
-            process_diagnostics: self.diagnostics.report(),
             harnesses: self.harnesses.summaries(),
             configuration: ConfigurationSummary {
                 runtime_state: status.service.runtime_state,
@@ -1479,8 +1478,6 @@ pub struct WorkbenchSnapshot {
     /// Current local checkup results.
     pub diagnostics: Vec<DiagnosticItem>,
     /// Cached, explicitly supported development-harness registrations.
-    /// Read the process-diagnostics state (ADR-0145).
-    pub process_diagnostics: crate::diagnostics::DiagnosticsReport,
     pub harnesses: Vec<HarnessSummary>,
     /// Content-free authority and runtime configuration facts.
     pub configuration: ConfigurationSummary,

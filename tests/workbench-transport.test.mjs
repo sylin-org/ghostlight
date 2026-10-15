@@ -55,7 +55,7 @@ const parts = {
     document_coverage: [{ invocation: "b" }]
   },
   integrations: { harnesses: [{ id: "codex" }] },
-  diagnostics: { diagnostics: [{ label: "Orchestrator" }], process_diagnostics: { layer: "off" } },
+  diagnostics: { diagnostics: [{ label: "Orchestrator" }] },
   controls: { viewing: { watch: true }, you: { context: "control" } }
 };
 
@@ -70,7 +70,7 @@ test("a snapshot is one GET naming the six parts, put back into today's flat sha
   assert.deepEqual(Object.keys(snapshot).sort(), [
     "audit_health", "audit_notice", "browsers", "configuration", "controls", "diagnostics",
     "document_coverage", "harnesses", "history", "instance", "operations", "overview",
-    "process_diagnostics", "readiness", "runtime_note", "seq", "service", "sessions"
+    "readiness", "runtime_note", "seq", "service", "sessions"
   ]);
   assert.deepEqual(snapshot.controls, parts.controls);
   assert.equal(snapshot.seq, 9);
@@ -79,7 +79,6 @@ test("a snapshot is one GET naming the six parts, put back into today's flat sha
   assert.deepEqual(snapshot.overview, {
     active_sessions: 1, active_operations: 1, connected_browsers: 2, blocked_in_history: 1
   });
-  assert.deepEqual(snapshot.process_diagnostics, { layer: "off" });
 });
 
 test("a snapshot of a running service has no pause note", () => {
