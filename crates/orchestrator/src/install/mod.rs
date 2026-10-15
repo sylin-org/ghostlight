@@ -380,9 +380,10 @@ pub struct HarnessSummary {
     /// Optional precomposed proof behind a blocked state, authored by the orchestrator
     /// (ADR-0135).
     ///
-    /// Present only when the target needs attention: either the bounded command line found
-    /// where Ghostlight's entry belongs, or the bounded reason the configuration could
-    /// not be parsed. The surface renders it verbatim and authors no words of its own.
+    /// Present only for a foreign entry: it names the program found where Ghostlight's entry
+    /// belongs and its argument count, never its arguments (ADR-0135 as narrowed by the
+    /// ADR-0199 amendment of 2026-10-15). The surface renders it verbatim and authors no
+    /// words of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
     /// Whether an explicit install can be attempted.
@@ -1098,8 +1099,10 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let evidence: Option<String> = match &registration {
         Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
             Some(found) => format!(
-                "Found `{found}` where Ghostlight's entry belongs; \
+                "Found another program, `{}` with {}, where Ghostlight's entry belongs; \
                  Ghostlight maintains `{}` there and changed nothing.",
+                found.program,
+                argument_count_phrase(found.arguments),
                 context.edge.display()
             ),
             None => format!(
@@ -1108,9 +1111,6 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
                 context.edge.display()
             ),
         }),
-        Err(HarnessError::Malformed(reason)) => {
-            bounded_disclosure(reason).map(|reason| format!("The parser reported: {reason}"))
-        }
         _ => None,
     };
     if definition.located_stale {
@@ -1168,9 +1168,44 @@ enum RegistrationState {
     Updatable,
     /// An owned entry starts the retired `ghostlight-mcp-connector`, which no longer exists.
     Retired,
-    /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload is the
-    /// bounded command line found there, when one could be read (ADR-0135).
-    Foreign(Option<String>),
+    /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload names
+    /// the program found there, when one could be read (ADR-0135); never its arguments.
+    Foreign(Option<ForeignCommand>),
+}
+
+/// What Ghostlight discloses about a foreign entry's command: the program and how many
+/// arguments follow it, and nothing of their text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ForeignCommand {
+    /// The bounded file name of the program, up to its first whitespace.
+    program: String,
+    /// The `args` array length plus every further word of a whole-command-line `command`.
+    arguments: usize,
+}
+
+impl ForeignCommand {
+    /// Reduce a foreign entry's command to its program and argument count. A command with no
+    /// file name part yields `None`.
+    fn from_entry(command: &str, args: Option<&[&str]>) -> Option<Self> {
+        let file_name = Path::new(command).file_name()?.to_string_lossy();
+        let bounded = bounded_disclosure(&file_name)?;
+        let mut words = bounded.split_whitespace();
+        let program = words.next()?.to_string();
+        let extra_words = words.count();
+        Some(Self {
+            program,
+            arguments: args.map_or(0, <[&str]>::len) + extra_words,
+        })
+    }
+}
+
+/// "no arguments", "1 argument" or "<n> arguments".
+fn argument_count_phrase(count: usize) -> String {
+    match count {
+        0 => "no arguments".into(),
+        1 => "1 argument".into(),
+        many => format!("{many} arguments"),
+    }
 }
 
 fn registration_state(
@@ -1867,7 +1902,7 @@ fn command_registration_state(
     windows: bool,
 ) -> RegistrationState {
     if !command_owned(command, args, edge, windows) {
-        return RegistrationState::Foreign(bounded_command_line(command, args));
+        return RegistrationState::Foreign(ForeignCommand::from_entry(command, args));
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
     let expected = fs::canonicalize(edge).unwrap_or_else(|_| edge.to_path_buf());
@@ -1922,18 +1957,6 @@ fn bounded_disclosure(value: &str) -> Option<String> {
     let mut bounded: String = one_line.chars().take(EVIDENCE_MAX_CHARS - 3).collect();
     bounded.push_str("...");
     Some(bounded)
-}
-
-/// The bounded command line found where Ghostlight's entry belongs.
-fn bounded_command_line(command: &str, args: Option<&[&str]>) -> Option<String> {
-    let mut line = String::from(command);
-    if let Some(args) = args {
-        for argument in args {
-            line.push(' ');
-            line.push_str(argument);
-        }
-    }
-    bounded_disclosure(&line)
 }
 
 fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialect, HarnessError> {
@@ -2195,13 +2218,13 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
-        executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
-        inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
-        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer,
-        HarnessAction, HarnessContext, HarnessCopyKind, HarnessError, HarnessRegistry,
-        HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState,
-        EDGE_COMMAND_NAME, EVIDENCE_MAX_CHARS, RETIRED_MCP_CONNECTOR_NAME,
+        command_registration_state, definitions, edit_json, edit_toml, executable_name,
+        expected_json_entry, fix_toml, harness_roots, inspect, inspect_json, inspect_toml,
+        json_entry_args, json_entry_command, jsonc_options, manual_json_setup, mcp_command_line,
+        replace_with_backup, resolve_through_symlink, AppContainer, ForeignCommand, HarnessAction,
+        HarnessContext, HarnessCopyKind, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
+        HarnessSummary, JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME,
+        RETIRED_MCP_CONNECTOR_NAME,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -3215,16 +3238,20 @@ mod tests {
     }
 
     #[test]
-    fn foreign_entries_disclose_what_was_found() {
+    fn foreign_entries_name_only_the_program_and_its_argument_count() {
         let directory = temporary("foreign-evidence");
         let path = claude_desktop_config(&directory);
         let expected_edge = edge(&directory);
-        let long_argument = "x".repeat(EVIDENCE_MAX_CHARS + 40);
+        let command = if cfg!(windows) {
+            "C:/tools/other\u{202e}-server.exe"
+        } else {
+            "/opt/tools/other\u{202e}-server"
+        };
         let entry = serde_json::json!({
             "mcpServers": {
                 "ghostlight": {
-                    "command": "  some\u{202e}other\ttool  ",
-                    "args": [long_argument],
+                    "command": command,
+                    "args": ["--token", "sk-test-secret", "launch-it"],
                 }
             }
         });
@@ -3239,30 +3266,55 @@ mod tests {
             summary.detail
         );
         let evidence = summary.evidence.expect("foreign entries carry evidence");
-        // The bidi override is stripped and whitespace collapses; the words themselves stay.
-        assert!(evidence.contains("someother tool"), "{evidence}");
+        assert!(evidence.contains("other-server"), "{evidence}");
+        assert!(!evidence.contains('\u{202e}'), "{evidence}");
+        assert!(evidence.contains("3 arguments"), "{evidence}");
         assert!(
             evidence.contains(&expected_edge.display().to_string()),
             "{evidence}"
         );
         assert!(evidence.contains("changed nothing"), "{evidence}");
-        // The whole command line is capped, so the surviving x-run shrinks by the prefix and
-        // the ellipsis.
-        let prefix = "someother tool ".chars().count();
-        let capped_x = "x".repeat(EVIDENCE_MAX_CHARS - prefix - 3);
-        assert!(evidence.contains(&format!("{capped_x}...")), "{evidence}");
-        assert!(
-            !evidence.contains(&"x".repeat(EVIDENCE_MAX_CHARS + 1)),
-            "disclosure is capped: {evidence}"
-        );
-        assert!(evidence.chars().all(|character| !character.is_control()));
+        for hidden in ["sk-test-secret", "--token", "launch-it"] {
+            assert!(!evidence.contains(hidden), "{evidence}");
+        }
         assert!(!summary.can_install);
         assert!(summary.can_fix);
         fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn malformed_configurations_disclose_the_parser_reason() {
+    fn argument_counts_read_in_plain_words() {
+        let directory = temporary("foreign-count");
+        let path = claude_desktop_config(&directory);
+        edge(&directory);
+        let write = |entry: serde_json::Value| {
+            fs::write(
+                &path,
+                serde_json::json!({ "mcpServers": { "ghostlight": entry } }).to_string(),
+            )
+            .unwrap();
+            inspected_summary(&directory).evidence.expect("evidence")
+        };
+
+        let one = write(serde_json::json!({ "command": "/opt/tools/other", "args": ["a"] }));
+        assert!(one.contains("with 1 argument,"), "{one}");
+        let none = write(serde_json::json!({ "command": "/opt/tools/other" }));
+        assert!(none.contains("with no arguments,"), "{none}");
+
+        let line = write(serde_json::json!({
+            "command": "C:/tools/other-server.exe --token sk-test-secret"
+        }));
+        assert!(line.contains("`other-server.exe`"), "{line}");
+        assert!(line.contains("2 arguments"), "{line}");
+        assert!(
+            !line.contains("--token") && !line.contains("sk-test-secret"),
+            "{line}"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_configurations_disclose_nothing_from_the_file() {
         let directory = temporary("malformed-evidence");
         let path = claude_desktop_config(&directory);
         edge(&directory);
@@ -3278,9 +3330,20 @@ mod tests {
             "{}",
             summary.detail
         );
-        let evidence = summary.evidence.expect("malformed files carry evidence");
-        assert!(evidence.starts_with("The parser reported:"), "{evidence}");
+        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
         assert!(!summary.can_fix);
+
+        let toml = directory.join("codex.toml");
+        fs::write(
+            &toml,
+            "[mcp_servers.ghostlight\ntoken = \"sk-test-secret\"\n",
+        )
+        .unwrap();
+        let source = fs::read_to_string(&toml).unwrap();
+        let error = inspect_toml(&source, &directory.join("edge"), false).unwrap_err();
+        assert!(matches!(error, HarnessError::Malformed(_)));
+        let serialized = serde_json::to_string(&summary).unwrap();
+        assert!(!serialized.contains("sk-test-secret"), "{serialized}");
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3319,7 +3382,7 @@ mod tests {
     }
 
     #[test]
-    fn every_blocked_dialect_discloses_its_found_command() {
+    fn every_blocked_dialect_names_the_found_program() {
         let directory = temporary("dialect-evidence");
         let expected_edge = edge(&directory);
 
@@ -3332,16 +3395,9 @@ mod tests {
         let toml_source = fs::read_to_string(&toml).unwrap();
         assert!(matches!(
             inspect_toml(&toml_source, &expected_edge, false),
-            Ok(RegistrationState::Foreign(Some(found)))
-                if found.contains("alien-tool serve")
+            Ok(RegistrationState::Foreign(Some(ForeignCommand { program, arguments: 1 })))
+                if program == "alien-tool"
         ));
-
-        // An entry without any readable command discloses nothing.
-        assert_eq!(bounded_command_line("", None), None);
-        assert_eq!(
-            bounded_command_line("tool", Some(&["a", "b"])),
-            Some("tool a b".into())
-        );
 
         fs::remove_dir_all(directory).unwrap();
     }

@@ -40,13 +40,14 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-02-harness-evidence.
+Next: m1-03 (the next slice key in the lane plan).
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
 | m1-01-adr-amendment | The owner-approved amendment of 2026-10-15 is appended to ADR-0199 (the Ghostlight web apps over loopback), with its README row, this ledger, and the pointers from the shell-spike ledger and the task index. Docs only. | see `git log` |
+| m1-02-harness-evidence | Harness evidence names a foreign program and its argument count, never its arguments; a configuration that cannot be parsed carries no evidence (owner answers Q3 and Q8). | see `git log` |
 
 ## Route table
 
@@ -72,3 +73,5 @@ None.
   `edge_swap` and `placed_in_bin`; `intake/listener.rs` `judge` refuses `Role::Desktop` and
   `service/mod.rs` refuses it again; `desktop/mod.rs` still has its `tauri::generate_handler!`
   list. No name differs from the spec.
+
+- m1-02: the foreign entry's `program` keeps the file name of `command` up to its first whitespace; later words count as arguments. The malformed-file case no longer names a line number, because the detail alone says it could not be parsed; the parse-error line number of owner answer Q3 is left to a later slice if the owner wants it on the page.

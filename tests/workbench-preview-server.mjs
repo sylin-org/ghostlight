@@ -50,8 +50,7 @@ const harnesses = [
   previewHarness({
     id: "claude-desktop", name: "Claude Desktop", target: "User", state: "needs_attention",
     configPath: "/home/test/.config/Claude/claude_desktop_config.json", canDownload: false,
-    detail: "This configuration could not be parsed; it was left untouched.",
-    evidence: "The parser reported: expected value at line 1 column 2 of the JSON input"
+    detail: "This configuration could not be parsed; it was left untouched."
   }),
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
   previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", icon: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
@@ -63,7 +62,7 @@ const harnesses = [
     id: "cline-cursor", productId: "cline", name: "Cline", target: "Cursor", icon: "cline.svg",
     state: "needs_attention",
     configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
-    evidence: `Found \`npx other-agent\` where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
+    evidence: `Found another program, \`npx\` with 2 arguments, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "available", configPath: "/home/test/.cursor/mcp.json" }),
   previewHarness({ id: "zcode", name: "ZCode", target: "User", state: "installed", configPath: "/home/test/.zcode/cli/config.json" }),
@@ -81,7 +80,7 @@ const harnesses = [
   previewHarness({
     id: "kilo-code", name: "Kilo Code", target: "CLI", state: "needs_attention",
     configPath: "/home/test/.config/kilo/kilo.json", manualSetup: jsonSetup("mcp"),
-    evidence: `Found \`alien-cli --mcp\` where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
+    evidence: `Found another program, \`alien-cli\` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "available", configPath: "/home/test/.claude.json" }),
   previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),

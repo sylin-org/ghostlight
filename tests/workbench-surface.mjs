@@ -309,7 +309,7 @@ view.collections({
       icon: "junie.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
       can_fix: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
       connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "junie setup",
-      evidence: "Found `alien-agent --serve` where Ghostlight's entry belongs; Ghostlight maintains `/opt/ghostlight/ghostlight` there and changed nothing." },
+      evidence: "Found another program, `alien-agent` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `/opt/ghostlight/ghostlight` there and changed nothing." },
     { id: "cline-cursor", product_id: "cline", name: "Cline", target: "Cursor",
       icon: "cline.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
       can_fix: false, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
@@ -653,7 +653,7 @@ const checks = [
     `roster: ${JSON.stringify(rosterHtml)}`],
   ["a blocked target shows the orchestrator's precomposed evidence and other targets show none",
     rosterCard("Junie")?.html.includes('<p class="integration-evidence">')
-      && rosterCard("Junie")?.html.includes("`alien-agent --serve`")
+      && rosterCard("Junie")?.html.includes("`alien-agent`")
       && rosterCard("Junie")?.html.includes("changed nothing.")
       && !rosterCard("Cline")?.html.includes("integration-evidence"),
     `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
