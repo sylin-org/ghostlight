@@ -297,6 +297,12 @@ the owner wants, and what this project learned the hard way.
   locations (owner, 2026-09-08 Windows boot investigation; ADR-0145 amendment). Isolated checks
   supplement this evidence but cannot prove installation, startup or recovery. Ask before running
   a separate desktop test installation. A separate build directory only avoids locked files.
+- **One live Ghostlight on the owner's machine, always.** Never run a second service, a demo or
+  spike build of any Ghostlight executable, or a journey that starts its own service in a test
+  home on the owner's machine: two of anything invites "which service is this adapter talking
+  to?" A deploy replaces the live installation in place; if it breaks, the owner restores. Do
+  not hedge with parallel deployments. Journeys that start their own service run on the test
+  machines or in CI only (owner, 2026-10-15).
 - **Browser support means full ordinary-session capability.** Do not ship a partial adapter under a
   browser-support label. Every advertised Ghostlight job must work in the user's visible,
   authenticated, already-running browser without a headless mode, disposable profile, managed
