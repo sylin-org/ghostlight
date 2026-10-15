@@ -25,7 +25,7 @@ schemes and configured sacred domains remain hard ceilings.
 
 Every policy denial receives deterministic attribution to authority, tier, grant, and
 rule. Repeated refusals do not pause a session; later permitted work remains available. Human
-Pause/Stop and explicit global attention remain authoritative. Controls are rechecked at browser
+Pause/Stop remain authoritative. Controls are rechecked at browser
 transmission, while already dispatched work retains its actual effect evidence.
 
 Fill and typing require the caller to acknowledge explicit user authorization for credential
