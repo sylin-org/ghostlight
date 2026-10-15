@@ -299,15 +299,83 @@ test("simultaneous connect triggers open one port", async () => {
   } finally { worker.dispose(); }
 });
 
-test("installing the extension opens the setup page", async () => {
+const SETUP_PAGE = `chrome-extension://${EXTENSION_ID}/setup.html`;
+const HOST_NOT_FOUND = "Specified native messaging host not found.";
+const opened = (worker) => worker.browser.named("tabs.create").map((call) => call.args[0].url);
+
+test("installing where the host is absent opens the bundled setup page once", async () => {
+  const worker = await boot({ connect: false });
+  try {
+    worker.chrome.runtime.onInstalled.emit({ reason: "install" });
+    await flush();
+    assert.deepEqual(opened(worker), [SETUP_PAGE]);
+    worker.timers.fire(3_000);
+    await flush();
+    assert.deepEqual(opened(worker), [SETUP_PAGE], "a later retry opens no second page");
+  } finally { worker.dispose(); }
+});
+
+test("an open port with no answer yet is not an outcome of the welcome", async () => {
   const worker = await boot();
   try {
     worker.chrome.runtime.onInstalled.emit({ reason: "install" });
     await flush();
-    assert.deepEqual(worker.browser.named("tabs.create").map((call) => call.args[0].url), ["https://sylin.org/ghostlight/chromium-extension/post-install/"]);
-    worker.chrome.runtime.onInstalled.emit({ reason: "update" });
+    assert.deepEqual(opened(worker), []);
+    await worker.close(HOST_NOT_FOUND);
+    assert.deepEqual(opened(worker), [SETUP_PAGE]);
+    await worker.close(HOST_NOT_FOUND);
+    assert.deepEqual(opened(worker), [SETUP_PAGE]);
+  } finally { worker.dispose(); }
+});
+
+test("installing where the service answers opens no page", async () => {
+  const answered = await boot();
+  try {
+    await answered.accept();
+    answered.chrome.runtime.onInstalled.emit({ reason: "install" });
     await flush();
-    assert.equal(worker.browser.named("tabs.create").length, 1);
+    assert.deepEqual(opened(answered), []);
+  } finally { answered.dispose(); }
+  const pending = await boot();
+  try {
+    pending.chrome.runtime.onInstalled.emit({ reason: "install" });
+    await flush();
+    await pending.accept();
+    assert.deepEqual(opened(pending), []);
+    await pending.close(HOST_NOT_FOUND);
+    assert.deepEqual(opened(pending), []);
+  } finally { pending.dispose(); }
+});
+
+test("a disconnect for another reason or a hello timeout opens no page", async () => {
+  const exited = await boot();
+  try {
+    exited.chrome.runtime.onInstalled.emit({ reason: "install" });
+    await exited.close("Native host has exited.");
+    assert.deepEqual(opened(exited), []);
+    await exited.close(HOST_NOT_FOUND);
+    assert.deepEqual(opened(exited), []);
+  } finally { exited.dispose(); }
+  const silent = await boot();
+  try {
+    silent.chrome.runtime.onInstalled.emit({ reason: "install" });
+    await flush();
+    silent.timers.fire(10_000);
+    await flush();
+    assert.deepEqual(opened(silent), []);
+    await silent.close(HOST_NOT_FOUND);
+    assert.deepEqual(opened(silent), []);
+  } finally { silent.dispose(); }
+});
+
+test("an update opens no page even where the host is absent", async () => {
+  const worker = await boot({ connect: false });
+  try {
+    for (const reason of ["update", "chrome_update", "shared_module_update"]) {
+      worker.chrome.runtime.onInstalled.emit({ reason });
+      await flush();
+    }
+    assert.deepEqual(opened(worker), []);
   } finally { worker.dispose(); }
 });
 

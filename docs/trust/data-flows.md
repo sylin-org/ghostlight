@@ -31,6 +31,10 @@ There is zero vendor-bound traffic. The only Ghostlight-initiated network flow t
 endpoint is the explicitly configured managed HTTPS fetch to the customer's own source. Ordinary
 site traffic remains browser traffic.
 
+When the extension is installed on a computer where the Ghostlight service is absent, it opens its
+own bundled setup page once. That page loads nothing from the network. No vendor page opens, and
+nothing Ghostlight does contacts the vendor.
+
 ## Local artifacts
 
 - `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal

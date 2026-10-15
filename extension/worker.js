@@ -15,7 +15,7 @@ const shared = globalThis.GhostlightShared;
 const stateApi = globalThis.GhostlightState;
 const manifest = chrome.runtime.getManifest();
 
-const SERVICE_INSTALL_URL = "https://sylin.org/ghostlight/chromium-extension/post-install/";
+const WELCOME_PAGE = "setup.html";
 const OUTDATED_SERVICE = "Update Ghostlight on this computer.";
 const SERVICE_UNAVAILABLE = "The local Ghostlight service is unavailable.";
 const ASSETS_REJECTED = "The service sent page code that failed its checksum.";
@@ -33,6 +33,9 @@ const ENGINE_BRAND = "Chromium";
 const OFFSCREEN_TARGET = "ghostlight-offscreen";
 const CONTROLLED_KEY = "ghostlight.controlled";
 const UNKNOWN_DIALOG = "unknown";
+
+// How the first connection of this worker ended, as far as the welcome page cares.
+const FIRST_CONNECTION = Object.freeze({ ACCEPTED: "accepted", HOST_ABSENT: "host_absent", OTHER: "other" });
 
 const CONTROL = Object.freeze({ MANAGED: "managed", RELEASED: "released" });
 const RUNTIME = Object.freeze({ ACTIVE: "active", HELD: "held", ENDED: "ended", DISCONNECTED: "disconnected" });
@@ -346,6 +349,27 @@ async function resumeControlledTabs() {
   await Promise.allSettled(managedIds().map((tabId) => lifecycle.retain(tabId)));
 }
 
+// ---- welcome ------------------------------------------------------------------------------------
+
+// The setup page opens once, for an install whose first connection finds the service absent. Only a
+// definite outcome settles it: a port that is open and unanswered is not one, because Chrome reports a
+// missing host through the disconnect a moment after connectNative returns. A worker restart forgets
+// the pending welcome and opens nothing.
+let firstConnection = null;
+let welcomePending = false;
+
+function settleWelcome(outcome) {
+  firstConnection ??= outcome;
+  if (!welcomePending) return;
+  welcomePending = false;
+  if (outcome === FIRST_CONNECTION.HOST_ABSENT) chrome.tabs.create({ url: chrome.runtime.getURL(WELCOME_PAGE) }).catch(() => {});
+}
+
+function failedConnection(reason) {
+  const absent = shared.linkState({ connected: false, compatible: false, lastError: reason }) === shared.LINK_HOST_ABSENT;
+  settleWelcome(absent ? FIRST_CONNECTION.HOST_ABSENT : FIRST_CONNECTION.OTHER);
+}
+
 // ---- native connection --------------------------------------------------------------------------
 
 function connectNative(trigger = "worker") {
@@ -425,6 +449,7 @@ async function establishNativeConnection() {
     nativePort = null;
     setConnection({ connected: false, service_version: null, last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
     connectionLog.record(connectionEvents.CONNECT_FAILED, { attempt, stage, error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
+    failedConnection(error?.message);
     scheduleRetry(attempt);
   }
 }
@@ -448,6 +473,7 @@ function endHelloWait() {
 // A service that has not accepted the hello in time is one this extension cannot work with.
 function onHelloTimeout() {
   helloTimer = null;
+  settleWelcome(FIRST_CONNECTION.OTHER);
   setConnection({ connected: false, compatible: false, service_outdated: true, last_error: OUTDATED_SERVICE });
 }
 
@@ -478,6 +504,7 @@ function onPortClosed(port, attempt, reason = chrome.runtime.lastError?.message 
   const orderly = backendLost;
   backendLost = false;
   connectionLog.record(connectionEvents.NATIVE_DISCONNECTED, { attempt, error: reason });
+  failedConnection(reason);
   setConnection({ connected: false, service_version: null, last_error: reason });
   settleServiceBoundaryState().catch(recordError);
   broadcastAmbient();
@@ -570,6 +597,7 @@ async function runRequest(frame, port) {
 
 function accept(frame, port) {
   endHelloWait();
+  settleWelcome(FIRST_CONNECTION.ACCEPTED);
   negotiation = negotiation.then(() => negotiate(frame, port)).catch(recordError);
   return negotiation;
 }
@@ -646,7 +674,9 @@ async function releaseDebuggerSessions() {
 chrome.runtime.onInstalled.addListener((details) => {
   connectionLog.record(connectionEvents.EXTENSION_INSTALLED, { trigger: details?.reason });
   connectNative("installed");
-  if (details?.reason === "install") chrome.tabs.create({ url: SERVICE_INSTALL_URL }).catch(() => {});
+  if (details?.reason !== "install") return;
+  welcomePending = true;
+  if (firstConnection) settleWelcome(firstConnection);
 });
 
 chrome.runtime.onStartup.addListener(() => {
