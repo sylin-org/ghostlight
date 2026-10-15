@@ -69,7 +69,7 @@ is coordinated with the parent; component journeys do not substitute for that ac
 
 ## Journey evidence
 
-The runner is [tests/delight-journey.mjs](../../tests/delight-journey.mjs). It uses the real authority,
+The runner is `tests/delight-journey.mjs` (retired in dc16a65c; see git history). It uses the real authority,
 CLI and MCP connector, the shipped MV3 worker/page runtime, an isolated Chromium profile and a
 loopback native-port shim. Its local form accepts only trusted input and re-renders the controlled
 values. A separate HTTP server counts persisted saves and stores their fields. Browser command
