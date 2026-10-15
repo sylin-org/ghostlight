@@ -3358,8 +3358,8 @@ full visible browser matrix remain owed.
   fast-forward and has been retired; `main` was promoted to the published 1.0.0 on 2026-08-26.
 - `main` carries the published 1.0 line, promoted by fast-forward on 2026-08-26. Promoting `dev`
   again for 1.1.0 is a deliberate release decision, not routine sync. The line carries Windows and
-  Linux source, extension, process, and supply-chain CI; a manual Pages deployment; and bounded
-  monthly dependency updates targeting `dev`.
+  Linux source, extension, process, and supply-chain CI; a manual Pages deployment. Version-update
+  automation was removed on 2026-10-14; dependency updates are done by hand on `dev`.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
   package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused

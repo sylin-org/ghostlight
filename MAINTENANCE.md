@@ -7,8 +7,9 @@ rather than something you discover later.
 
 ## Who maintains it
 
-One maintainer (`lbotinelly`), with Dependabot handling routine dependency bumps. There is no team,
-no on-call rotation, and no paid support desk. See [SECURITY.md](SECURITY.md) for how security
+One maintainer (`lbotinelly`). Dependency updates are done by hand on `dev`; Dependabot
+security alerts and updates are a repository setting. There is no team, no on-call
+rotation, and no paid support desk. See [SECURITY.md](SECURITY.md) for how security
 reports are handled and on what (best-effort) timelines.
 
 ## The Continuity Promise (why a quiet period is safe)
