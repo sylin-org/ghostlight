@@ -103,8 +103,8 @@ Prompt injection, including indirect injection from page content, is an unsolved
 industry-wide, and I will not claim to have solved it. What Ghostlight does is bound the
 blast radius so a successful injection cannot become an unbounded action. Sacred never-touch
 domains are refused even when a policy or a prompt asks for them; capability grants scope what
-the agent may do to which hosts; observe and enforce modes control whether actions run at
-all, with shadow denials recording what enforcement would have blocked; and a panic kill
+the agent may do to which hosts; every policy denial is enforced, and `ghostlight policy
+simulate` previews a candidate policy against recorded audit before rollout; and a panic kill
 switch stops everything immediately. Injection can still mislead
 the model, but governance decides what a misled model is permitted to do.
 
@@ -116,12 +116,10 @@ Evidence: docs/SPEC.md (sacred domains, capability model); ADR-0022 (capability 
 ### What can the agent do autonomously? Can we pause or stop it mid-run?
 
 Autonomy is bounded by policy and is interruptible at any point. Every tool call is classified
-by capability (read, action, write, execute) and gated accordingly; observe and enforce
-modes let you run the agent in a watching posture before granting it real actions, and under
-observe a loaded policy runs in shadow, recording would-deny events without blocking
-anything. A take-the-wheel pause hands control back to the human mid-run, and a panic kill
-switch terminates the session outright. Enforce blocks refused work; observe deliberately runs and
-audits ordinary would-deny decisions for rollout analysis.
+by capability (read, action, write, execute) and gated accordingly; every policy denial is
+enforced, and `ghostlight policy simulate` previews a candidate policy against recorded audit
+before you roll it out. A take-the-wheel pause hands control back to the human mid-run, and a
+panic kill switch terminates the session outright.
 
 See [docs/SPEC.md](../SPEC.md) and the
 [governance configuration guide](../guides/governance-configuration.md).

@@ -154,7 +154,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. With no active policy, local and remote HTTP(S) browser work is permitted, including localhost,
    its subdomains, loopback, link-local metadata, and IPv4-embedded IPv6 destinations.
 2. Non-HTTP(S) schemes remain denied. Local destinations follow authored host and capability
-   rules, observe/enforce modes, and policy-defined never-touch hosts.
+   rules and policy-defined never-touch hosts.
 3. RAWX is independent: each operation uses its complete set, and composition steps are admitted
    separately. Empty wrapper or local-window operations do not invent authority. Current audit has
    one parent composition record plus safe incremental child receipts. Grouped history and policy
@@ -532,8 +532,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 ## Explicit control and credential-input evidence (ADR-0185)
 
 1. Obsolete request restrictions fail before dispatch under every policy mode. Configured enforcing
-   policy still denies direct and composed work. Neither observe nor enforced denials create
-   an automatic hold.
+   policy still denies direct and composed work. Policy denials never create an automatic
+   hold.
 2. After any number of matching or mixed denials, the same session can perform permitted work
    without a human review or resume. Other sessions remain independent. Flow stop/continue applies
    normally to ordinary refusals.
@@ -584,8 +584,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. A failed append or sync leaves the actual outcome, effect, and repeat safety intact. Results
    and human history distinguish confirmed storage from a volatile receipt. A saved parent does
    not upgrade children whose storage was unconfirmed.
-2. Keep working is the default. Either policy layer can require audit; a lower layer and grant
-   grant cannot relax the requirement. Known failure refuses browser work before startup
+2. Keep working is the default. Either policy layer can require audit; a lower layer or a grant
+   cannot relax the requirement. Known failure refuses browser work before startup
    recovery and at the final dispatch callback, including later children under Continue.
 3. Storage recovery is bounded and serialized with writes. It reopens the repaired destination,
    synchronizes a content-free gap marker, and permits new requests without replay or backfill.
