@@ -20,9 +20,9 @@ the owner wants, and what this project learned the hard way.
 - **Guard exact public versions and derive catalog documentation from source.** A minor-line check
   accepted README 1.3.6 while the public service had reached 1.3.10, and the implemented
   `browser_workspace` tool (since removed by ADR-0196) raised the catalog to 24 while active
-  language documents still said 23.
-  Current README, install, trust, and direct-package surfaces must match `docs/public-status.json`
-  exactly. The documented tool headings and counts must match `EXPECTED_TOOL_NAMES` in order.
+  language documents still said 23. Public surfaces must match docs/public-status.json exactly
+  (scripts/check-public-surfaces.ps1); LANGUAGE.md headings and the README count derive from
+  EXPECTED_TOOL_NAMES (scripts/check-repository-integrity.ps1).
 
 ## Standing owner directives
 
@@ -37,10 +37,16 @@ the owner wants, and what this project learned the hard way.
   awaiting parity in current product contracts or public guidance (ADR-0184). Preserve
   the old records and the owned-registration migration cleanup.
 
-- **Release credentials stay repo-local and gitignored.** The owner requires npm credentials
-  in `local/.npmrc`, not the shared home-directory npm configuration. Run login and release
-  commands with that explicit user config; preserve owner-private file permissions. The existing
-  Chrome/MCP release credentials remain in `local/.ghostlight-release.env`. Never publish values.
+- **Release credentials stay repo-local and gitignored.** The owner requires npm credentials in
+  `local/.npmrc`, not the shared home-directory npm configuration. Run login and release commands
+  with that explicit user config; preserve owner-private file permissions. The existing Chrome/MCP
+  release credentials remain in `local/.ghostlight-release.env`. Never publish values. The owner
+  authorized durable Chrome/MCP release OAuth credentials in `local/.ghostlight-release.env` for
+  release work; commands, saved-identity lookup and recovery are in [the release
+  procedure](RELEASE.md#chrome-api-procedure), and the release scripts default to that file.
+  Having credentials does not authorize a publication: publish only under owner authorization for
+  that specific release, and reuse such authorization already given in the conversation instead of
+  asking again.
 
 - **Ghostlight usage MUST be delightful.** Deployment-induced split authorities are a product
   defect, not browser troubleshooting for the user. One production installation per OS user;
@@ -65,32 +71,20 @@ the owner wants, and what this project learned the hard way.
   the newly spawned adapter. Upgrades must cleanly quiesce/retire lingering predecessor processes and
   redirect running clients.
 
-- **Use the existing Chrome release API setup.** The owner requested durable production
-  OAuth credentials under ignored `local/.ghostlight-release.env` and authorized their use
-  for release work. This is a specific exception to the general no-secrets-in-local rule.
-  Read `local/CHROME-RELEASE.md` for account/client identity and recovery; follow
-  [the release procedure](RELEASE.md#chrome-api-procedure) for commands. Always pass
-  `-CredentialFile local/.ghostlight-release.env`; release script defaults also use this repo-local file.
-  Check saved settings before asking the owner for IDs or new credentials. Reuse existing
-  release authorization from the conversation; this storage directive alone does not
-  authorize a new publication.
+- **One checkout, two branches.** Work in the ordinary Ghostlight repository on `dev`. Do not
+  create fleet folders, extra worktrees or per-agent branches (owner, 2026-09-09 and 2026-10-05;
+  see AGENTS.md Branches). Put scratch output in the existing ignored folders (`.tmp/`, isolated
+  target directories). Leave the existing preserved worktrees
+  (`.tmp/fleet-acceptance/integration-worktree`, the Codex release-1-3-13 worktree) in place
+  unless the owner asks for them to be removed.
 
-- **Keep local work in the ordinary Ghostlight repository.** The owner rejected
-  separate fleet folders/worktrees on 2026-09-09. The existing acceptance layout
-  may remain for its current run; new work uses the main repository and existing
-  ignored artifact conventions.
-
-- **The four remote machines are dedicated test resources.** The owner grants the coordinator
-  and each machine's local agents full control of test-01, test-02, test-03, and leo-desktop-02
-  for project testing: prerequisites, desktop/browser interaction, installation, packaging,
-  and controlled restart, reboot, upgrade, and recovery work. Preserve the baseline first and
-  use that authorization without repeatedly asking. Each machine agent owns its lane end to end:
-  choose the sequence, fix concrete product/platform/test failures locally, commit and verify
-  fixes, and continue without coordinator checkpoints. Escalate only unresolved restrictions,
-  missing resources, or material product decisions; keep working on independent coverage.
-  Record starting and changed candidate identities for later integration. This does not authorize
-  public releases or access to founder-private material. The [fleet campaign](testing/fleet-acceptance-2026-09.md)
-  tracks execution and evidence.
+- **Dedicated test machines.** test-01, test-02, test-03 and leo-desktop-02 are owner-granted test
+  resources. Agents may install prerequisites, interact with the desktop and browser, package,
+  install, upgrade, restart, reboot and recover on them for project testing without asking each
+  time. Preserve the baseline first, and record which candidate is installed before and after so
+  evidence never comes from stale binaries. This never authorizes public releases or
+  founder-private access. How the 2026-09 campaign ran (lanes, escalation, evidence format) is in
+  [the fleet campaign](testing/fleet-acceptance-2026-09.md).
 - **Coordinated machines may commit and push as the owner.** The owner authorized provisioning
   the local Ghostlight Git credentials to the four dedicated machines. Use the owner's verified
   identity and secure credential helpers; never put tokens or private keys in task messages,
@@ -101,12 +95,9 @@ the owner wants, and what this project learned the hard way.
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
   agent references when the page changes; govern the next actual agent request (ADR-0164).
 
-- **Delight through sane defaults.** Anticipate the caller's intent with intelligent, safe defaults
-  rather than demanding boilerplate configuration. Screenshots and composite wait operations default to
-  visual quiescence and layout settlement (`visual_settle: true`, ADR-0174) with zero-cost opt-out.
-  Ergonomic pipeline templates (`with_authorized_tab`,
-  `with_authorized_optional_target`, ADR-0176/ADR-0177), modular CLI decomposition (`cli/`, ADR-0177),
-  and centralized catalog invariants (`CATALOG_TOOL_COUNT`) keep developer extension clean and error-free.
+- **Delight through sane defaults.** Anticipate the caller's intent with safe defaults instead of
+  boilerplate configuration; bounded settlement across page tools is the model case (see
+  'Settlement is a timing preference' below, ADR-0174/ADR-0195).
 
 - **The agent decides agent-facing experience.** On 2026-10-14 the owner delegated every decision
   about what agents see to the agent, as the audience: tool result content and size, matching
@@ -144,7 +135,10 @@ the owner wants, and what this project learned the hard way.
   flavor line, with the adjacent real local facts and help links. Normal-screen refinement must
   not flatten or replace that identity.
 - **Prefer the root fix.** No wrapper, alternate id, guarded installer, or parallel protocol added
-  to route around the abstraction that should own the change.
+  to route around the abstraction that should own the change. If a spot fix is genuinely
+  unavoidable, say so in the commit message so the debt is visible. When a root fix lands, retire
+  the temporary workaround it replaces in the same change; a leftover 6s fill delay taxed every
+  form fill until ADR-0169.
 - **Understand the architecture before fixing.** Several failures in one capability means stop
   implementing. Map ownership, lifecycle, authority, state, and delivery; find the single owning
   seam; change it there. Restore a green checkpoint before proposing the change.
@@ -154,10 +148,7 @@ the owner wants, and what this project learned the hard way.
   tooling useful and natural for end users. Governance lets individuals and organizations choose
   reliable boundaries that work consistently whenever work passes through Ghostlight. Ordinary
   permitted work should stay easy, and limits and outcomes should be understandable when they
-  matter. This purpose guides the security-hardening epic; it is not a claim of host containment.
-  For that epic, the owner requires an ideation session before implementing a package with
-  unresolved product decisions. Preserve accepted decisions and proceed with independent agreed
-  work; the epic's IDEATION and LEDGER separate the two.
+  matter. This is not a claim of host containment.
 - **Host restrictions belong to policy.** The owner removed the built-in localhost, loopback, and
   link-local ban. All-open includes local HTTP(S) browser work; do not reintroduce a hard-coded
   address block, a local-access toggle, or an exception flow (ADR-0155).
@@ -217,9 +208,8 @@ the owner wants, and what this project learned the hard way.
   operation and data use, not infer authentication or financial activity from possible text values.
 - **Human runtime control is authoritative.** ADR-0126 decides that pause refuses the next effect
   instead of suspending a caller, and stop is terminal with a pinned directive. Both directives
-  already live in `crates/orchestrator/src/language/outcome.rs`; the reference-experience S5
-  records their implementation. Preserve those decisions when testing effect-boundary timing
-  and scope. Do not rebuild missing language from an older memory entry.
+  live in `crates/orchestrator/src/language/outcome.rs`. Preserve them when testing
+  effect-boundary timing and scope.
 - **Ghostlight does not regulate agent behavior.** Repeated policy denials and credential-input
   guidance never pause a session or create a review/resume ritual. Each request follows configured
   policy and explicit human controls. Dispatch checks happen after writer wait; a refused
@@ -256,27 +246,15 @@ the owner wants, and what this project learned the hard way.
   the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
   the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
   keeps the Applications entry and `ghostlight open`; there is no service-only launch mode.
-- **A held lease is not desktop readiness.** Serialize launch-to-ready separately from lifetime
-  custody, publish discovery only after the native interaction route exists, and reap failed
-  owned children before allowing another attempt. Concurrent reconnect workers need a shared
-  bounded cooldown or they simply take turns spawning failures (ADR-0166).
-- **A deployment lock does not stop clients respawning connectors.** After a locked-executable
-  copy failure, recheck and stop only the selected exact destination before retrying. Waiting
-  alone cannot replace an image that the harness keeps alive. Keep neighboring images running.
+- **A held lease is not readiness.** Publish discovery only once the interaction route exists,
+  reap every child that failed or lost the lease race, and bound concurrent starters' retries, or
+  they take turns spawning failures (32 authorities in four seconds, ADR-0166; current mechanics
+  in ADR-0197 Decision 10).
 - **One process does not prove one workbench.** A startup/Open race created two responsive native
   windows inside one authority. Publish activation only after startup construction finishes;
   Tauri's label lookup does not reserve a window under construction. Native lifecycle acceptance
   counts actual windows, including hidden ones, through startup and close/reopen bursts. A mock
   activation port or process count cannot prove this promise (ADR-0119's September 7 amendment).
-- **Keep the fringes stable.** Product and journey change belongs in the orchestrator. The
-  connectors negotiate and relay. The extension owns Chromium, the page, and the drawing, and makes
-  no product, workspace, authority, or model-language decision.
-- **Thin means nothing bleeds through the extension, not that the extension does little.** A
-  capability that is physically the browser's belongs at the browser layer, because that is the only
-  layer that has it. Counting responsibilities is the wrong test and has moved browser capabilities
-  to the wrong side before (ADR-0053, corrected by ADR-0109).
-- **Plural by design.** Sessions, workspaces, operations, browser instances, and future browser
-  families are collections. Never build a singleton assumption into a new contract.
 - **Keep browser work visible and user-placed.** Reuse the same-name Ghostlight group wherever the
   user put it; create a dedicated window only when none exists; never reclaim an unrelated one.
 - **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
@@ -292,26 +270,22 @@ the owner wants, and what this project learned the hard way.
   never contacts Ghostlight or another vendor endpoint.
 - **Outward changes wait for the owner.** Local edits, tests, and commits are normal. Pushes,
   merges, tags, releases, store actions, and anything public are not.
-- **Full integration means the active live graph.** An isolated target and every automated gate can
-  be green while an older authority is still serving real connectors. Do not call that a full
-  integration test. Identify exact live image paths, deploy and restart only the changed component,
-  prove its existing shores renegotiate, and name any physical lane that still did not run.
-  The owner's default is acceptance on the installation in place with a normally launched browser.
-  Do not switch to a separate installation, profile, runtime, or agent-launched browser to obtain
-  a pass. Isolated checks can supplement that evidence but cannot establish that installation,
-  startup, or recovery works for the user. A separate build directory avoids locked files; it is
-  not authorization to run a second desktop installation.
+- **Full integration means the installation in place.** Green gates on an isolated target do not
+  prove the user's installation: an older authority can still serve real connectors (28295436),
+  and a rebuilt connector can stay stranded in bin (c034af69). Identify the exact live image
+  paths, deploy only the changed component through the dev loop, confirm those paths now run the
+  new build, restart it, prove its existing shores renegotiate, and name any physical lane that
+  did not run. Accept on the installed graph with a normally launched browser. Never start a
+  second authority, installation, profile, runtime, agent-launched browser, startup helper or OS
+  diagnostic shortcut to get a pass. Diagnostics live in the product's existing toggles and log
+  locations (owner, 2026-09-08 Windows boot investigation; ADR-0145 amendment). Isolated checks
+  supplement this evidence but cannot prove installation, startup or recovery. Ask before running
+  a separate desktop test installation. A separate build directory only avoids locked files.
 - **Browser support means full ordinary-session capability.** Do not ship a partial adapter under a
   browser-support label. Every advertised Ghostlight job must work in the user's visible,
   authenticated, already-running browser without a headless mode, disposable profile, managed
   launch, or restart ritual. A smaller honest capability list is still a poor regular-user
   experience when normal work immediately requires another browser (ADR-0183).
-- **Live debugging uses the installation in place.** The owner does not want a second Ghostlight
-  authority, an alternate diagnostic build running beside it, startup helpers, or diagnostic
-  shortcuts scattered around the OS. Build away from locked files, deploy through the dev loop,
-  and exercise only the normal installed graph. Keep diagnostic capability in the product's
-  existing toggles and log locations. Ask before running a separate desktop test installation
-  during an active live-debugging session.
 - **Installation must connect without restarting the browser.** Installing the service and extension
   must make an already-running browser usable. A complete Chrome shutdown is not an acceptable
   setup requirement. Installation acceptance uses the actual browser, native-host registration,
@@ -333,19 +307,15 @@ the owner wants, and what this project learned the hard way.
 - **A vendor rename can be a configuration migration, not an executable alias.** Keep independently
   installed generations as concrete targets under one product identity when their paths differ.
   Otherwise detection can make setup write a valid file that the detected client never reads.
-- **Persist before handoff.** Update STATUS, the relevant ADR or task evidence, and this file when a
-  durable fact changes, and commit before writing a restart prompt.
-- **Live swaps only through `scripts/dev-loop.ps1`.** Never hand-copy a binary over
-  `target/release`, never kill-and-restart the authority by hand. The script's `deploy.lock`
-  suppresses demand-start while it works; bypassing it makes the connector respawn the authority
-  mid-swap, which produced two live instances and two workbench windows at once (2026-08-24,
-  foundry press_key diagnosis). If the service seems stuck, deploy again through the script; do
-  not improvise around it. Convergence after a version change also means hunting the superseded
-  install's own long-lived connectors: an orphan connector demand-starts its exact sibling by
-  path, so stopping a stale orchestrator alone just gets it respawned (2026-08-27, installed 1.0.0
-  MCP connector kept reviving its orchestrator beside the deployed 1.1.0 authority). Stop the
-  connector by exact path first; the parent harness then reconnects through its configured,
-  current-path command.
+- **Persist before handoff.** Before writing a restart, compaction or handoff prompt, write any
+  durable fact the next agent needs into the tree and commit it. The prompt points at the tree; it
+  does not carry state. Where each kind of fact goes is in AGENTS.md "Keeping this system honest".
+- **Live swaps only through `scripts/dev-loop.ps1`.** Never hand-copy a binary into an install or
+  kill and restart the authority by hand: the installer (`ghostlight deployment install`) owns
+  locking, stopping and copying, and bypassing it once left two live authorities (151aad95,
+  2026-08-24). If the service seems stuck, deploy again through the script. An orphan connector
+  from a superseded install demand-starts its exact sibling by path (2026-08-27), so stop that
+  connector by exact path first. Mechanics: docs/DEV-LOOP.md.
 - **A generic configuration root is not product detection evidence.** A config file directly under
   home, the platform config root, or roaming must exist itself, or the product needs independent
   executable evidence. Treating the generic parent as detection makes absent clients actionable
