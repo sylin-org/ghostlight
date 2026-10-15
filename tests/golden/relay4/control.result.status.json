@@ -1,8 +1,8 @@
 {
   "kind": "result",
   "value": {
-    "ready": true,
-    "version": "2.0.0",
-    "instance": "9f3a61c2d0b84e17"
+    "service": "2.0.0",
+    "instance": "9f3a61c2d0b84e17",
+    "pid": 18244
   }
 }

@@ -87,47 +87,47 @@ pub fn parse(arguments: &[String]) -> anyhow::Result<Command> {
 
 /// Run one parsed command.
 pub fn run(command: &Command) -> anyhow::Result<()> {
-    let runtime = ghostlight_relay::home::runtime_file()?;
+    let home = ghostlight_relay::home::home()?;
     match command {
-        Command::Path => run_path(&runtime),
+        Command::Path => run_path(&home),
         Command::Show {
             last,
             component,
             op,
             json,
         } => run_show(
-            &runtime,
+            &home,
             last.as_deref(),
             component.as_deref(),
             op.as_deref(),
             *json,
         ),
-        Command::Prune => run_prune(&runtime),
+        Command::Prune => run_prune(&home),
         Command::On => {
-            let activation = set_marker(&runtime, true)?;
-            report(&activation, &marker_path(&runtime));
+            let activation = set_marker(&home, true)?;
+            report(&activation, &marker_path(&home));
             Ok(())
         }
         Command::Off => {
-            let activation = set_marker(&runtime, false)?;
-            report(&activation, &marker_path(&runtime));
+            let activation = set_marker(&home, false)?;
+            report(&activation, &marker_path(&home));
             Ok(())
         }
     }
 }
 
-fn effective(runtime: &std::path::Path) -> Activation {
+fn effective(home: &std::path::Path) -> Activation {
     let explicit = std::env::var_os(ENV_DIR).map(PathBuf::from);
-    resolve(explicit, runtime)
+    resolve(explicit, home)
 }
 
 /// The folder this command should act on: the active directory, or the default one when off,
 /// so retained logs stay readable and prunable after diagnostics are turned off.
-fn target_directory(runtime: &std::path::Path, activation: &Activation) -> PathBuf {
+fn target_directory(home: &std::path::Path, activation: &Activation) -> PathBuf {
     activation
         .directory()
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(runtime))
+        .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(home))
 }
 
 fn report(activation: &Activation, marker: &std::path::Path) {
@@ -148,19 +148,19 @@ fn report(activation: &Activation, marker: &std::path::Path) {
     }
 }
 
-fn run_path(runtime: &std::path::Path) -> anyhow::Result<()> {
-    let activation = effective(runtime);
-    report(&activation, &marker_path(runtime));
+fn run_path(home: &std::path::Path) -> anyhow::Result<()> {
+    let activation = effective(home);
+    report(&activation, &marker_path(home));
     println!(
         "Log folder: {}",
-        target_directory(runtime, &activation).display()
+        target_directory(home, &activation).display()
     );
     Ok(())
 }
 
-fn run_prune(runtime: &std::path::Path) -> anyhow::Result<()> {
-    let activation = effective(runtime);
-    let directory = target_directory(runtime, &activation);
+fn run_prune(home: &std::path::Path) -> anyhow::Result<()> {
+    let activation = effective(home);
+    let directory = target_directory(home, &activation);
     let report = prune_directory(&directory);
     println!(
         "Pruned {} log files; kept {} files ({} bytes) in {}.",
@@ -173,15 +173,15 @@ fn run_prune(runtime: &std::path::Path) -> anyhow::Result<()> {
 }
 
 fn run_show(
-    runtime: &std::path::Path,
+    home: &std::path::Path,
     last: Option<&str>,
     component: Option<&str>,
     op: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let activation = effective(runtime);
+    let activation = effective(home);
     let off = matches!(activation, Activation::Off);
-    let directory = target_directory(runtime, &activation);
+    let directory = target_directory(home, &activation);
     if off {
         println!(
             "Diagnostics are off; showing the retained records in {}.",

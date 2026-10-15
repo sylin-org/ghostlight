@@ -43,7 +43,8 @@ orchestrator start initializes this desktop authority; there is no service-only 
 ## Local lifecycle
 
 There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
-(ADR-0197 Decision 10): the installed executables in `bin`, the runtime file and lease, the state
+(ADR-0197 Decision 10): the installed executables in `bin`, `run` (the service lock and, on Linux,
+the relay socket), the state
 directory `state` (audit log, MCP client locations, the extension handoff marker), the policy
 directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
 `diagnostics` with the `diagnostics.on` marker.
@@ -90,27 +91,31 @@ first; an original and a copy that both changed are kept, the original set aside
 beside each copy records what was copied, so an install that fails before this step is finished
 by the next one by the same rule),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
-start `bin/ghostlight serve`, and write `install.json` only once the new service publishes.
+start `bin/ghostlight serve`, and write `install.json` only once a service answers a control
+status with an instance other than the one it replaced. The quit is a control `quit` for
+replacement, and the installer waits up to 10 s for `run/service.lock` to be free; an earlier
+development build that cannot be asked, or an installed image that still runs, is stopped by its
+exact image.
 Registering first matters: a browser relaunches its connector from the registration the moment
 the old connector stops, and an old registration would start the 1.x connector again.
 When the service starts from `bin` or the marked build, it registers any browser that has no
 registration yet.
 
-The orchestrator acquires an operating-system lifetime lease beside its runtime document before
-opening listeners or initializing the desktop. The lease, not the replaceable discovery document,
-admits the single local authority. Concurrent launch losers exit before creating a second runtime
-identity or tray.
+On Windows the orchestrator refuses to start with an elevated token. It then acquires an
+operating-system lock on `run/service.lock` before opening any state or initializing the desktop.
+The lock, held until exit, admits the single local authority, and the endpoint's first-instance
+flag is a second refusal. Concurrent launch losers exit before creating a second tray.
 
 A connector that finds no service starts `bin/ghostlight serve` detached and keeps connecting on
-its backoff schedule. A `serve` that loses the lease exits quietly, and one that has not published
-discovery within 30 seconds exits, so a stalled start never blocks the next one. The desktop
-publishes discovery only after native Ready has established its interaction route (ADR-0166).
+its backoff schedule. A `serve` that loses the lock exits quietly, and one that has not bound its
+endpoint within 30 seconds exits, so a stalled start never blocks the next one. The desktop
+binds the endpoint only after native Ready has established its interaction route (ADR-0166).
 
 A no-argument launch first asks a running service to reveal its workbench, then otherwise starts
 the complete desktop authority, creates its tray, and backgrounds the workbench: minimized on
 Windows and hidden on Linux. The explicit local-human `ghostlight open` intent sends the same
-authenticated activation request; when no service answers it starts `bin/ghostlight serve`, waits
-for its runtime, then reveals it. The request admits no workspace and adds no listener. No
+control `show` request; when no service answers it starts `bin/ghostlight serve`, waits for its
+endpoint, then reveals it. The request admits no workspace and adds no listener. No
 supported launch can create an authority that refuses presentation by design.
 
 The tray and authority do not depend on a permanent window. Native close destroys only the
@@ -132,16 +137,17 @@ process termination.
 Ghostlight's fringes are independently versioned compatibility products. Their size is not
 constrained; their reasons to change are. The MCP connector changes only for MCP negotiation and
 protocol compatibility and local service connection lifetime. The browser connector changes only
-for native messaging, local relay authentication, framing, discovery, and connection lifetime.
+for native messaging, the local relay endpoint and its peer checks, framing, and connection
+lifetime.
 Each browser adapter changes only for privileged browser mechanisms, browser-execution integrity
 and recovery, or the preserved Ghostlight user experience. Any product feature expressible through
 existing physical browser capabilities changes only the orchestrator.
 
 The browser connector treats adapter frames as opaque bounded bytes. A small relay protocol owns
-local authentication and backend availability separately from the adapter protocol. The relay
-keeps Chromium's native port alive while the service is unavailable, reconnects to the current
-runtime endpoint, repeats only the relay and cached adapter handshakes, and never interprets or
-replays a physical operation.
+the peer checks and backend availability separately from the adapter protocol. The relay keeps
+Chromium's native port alive while the service is unavailable, reconnects to the endpoint of the
+home, repeats only the relay and cached adapter handshakes, and never interprets or replays a
+physical operation.
 
 The adapter is a policy-free browser execution engine, not merely a collection of API calls. It
 owns browser-local operation state, safe mechanism retries, duplicate-operation suppression,
@@ -200,8 +206,7 @@ The service bounds unfinished exchanges and response delivery while keeping heal
 connected. Fixed per-connection workers absorb bursts in bounded ordinary and independent-control
 queues. The executor decodes once at intake; waiting consumes the original deadline and reaches
 the same completion/audit path. Sustained waits appear in the existing workbench operation list.
-Runtime discovery is published from a new private file; Windows creation uses the existing audited
-FFI boundary. ADR-0160 records exact bounds and the limits of this local resilience guarantee.
+ADR-0160 records exact bounds and the limits of this local resilience guarantee.
 
 Connection evidence is immutable at service admission (ADR-0161). Every prepared invocation keeps
 its own evidence across queue waits, workspace sharing, composed children, preparation failure,
@@ -212,11 +217,18 @@ never borrows a current session's identity. The service does not identify the pr
 end of a connection, and provenance grants no authority. Audit lines with extra attribution
 fields still read; the extra fields are ignored.
 
-The service edge bridge uses versioned newline-delimited JSON on an authenticated loopback
-connection. The browser relay and adapter protocol use Chromium's four-byte little-endian length
-prefix end to end, so the native host can forward bounded adapter frames without decoding them.
-Each bridge hello rejects incompatible major versions before accepting work. Correlation ids are
-opaque.
+Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
+contract is [relay-protocol-4](../design/relay-protocol-4.md)): a named pipe on Windows and a Unix
+socket in `run` on Linux. There is no port, token or discovery file. The endpoint belongs to the
+user and the home, only the same user can open it, and each end checks the other's user before a
+payload byte moves. The relay framing, a four-byte little-endian length prefix, is Chromium's, so
+the browser relay and the adapter protocol use it end to end and the native host can forward
+bounded adapter frames without decoding them. A connection opens with one opening naming its role
+(`mcp`, `browser` or `control`; `desktop` and `command` are refused as unsupported) and the relay
+revision, and the service answers with its version, an instance that changes on every start and,
+for `mcp`, the failure templates. An opening that names an earlier relay revision is refused before
+any work is accepted. A `control` opening asks `readiness`, `status`, `show` or `quit`. Correlation
+ids are opaque.
 
 The browser hello also carries a persistent opaque adapter installation id, a restart-local adapter
 epoch, an optional bounded product name, a reported attention fact, and versioned physical
@@ -558,9 +570,9 @@ non-destructive and visually quiet. Diagnostic payloads never enter audit or pre
 
 Process diagnostics are a separate, local surface (ADR-0145). When activated, all three
 executables append bounded, content-free operational JSONL -- connection lifecycle, demand-start
-outcomes, negotiation, operation boundaries -- into one directory beside the runtime file.
+outcomes, negotiation, operation boundaries -- into one directory in the Ghostlight home.
 Activation is layered and eventual: `GHOSTLIGHT_DIAGNOSTICS_DIR` pins a process on at birth, and
-a presence-only `diagnostics.on` marker beside the runtime file is applied live by an OS watch
+a presence-only `diagnostics.on` marker in the home is applied live by an OS watch
 with a 2-second safety-net re-check, whichever fires first. An OS person toggles it by hand,
 with `ghostlight diagnostics on|off`, from the extension popup through the runtime-control path,
 or from the workbench Status card, which also opens the folder through a native-process act.

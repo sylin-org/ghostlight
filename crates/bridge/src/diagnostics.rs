@@ -2,8 +2,8 @@
 //! appends bounded, content-free operational JSONL. Implements ADR-0145.
 //!
 //! Activation is layered and re-checked live: an explicit `GHOSTLIGHT_DIAGNOSTICS_DIR` pins the
-//! sink on at birth, otherwise a presence-only `diagnostics.on` marker beside the runtime
-//! discovery file toggles every running component, served by an OS directory watch with a
+//! sink on at birth, otherwise a presence-only `diagnostics.on` marker in the Ghostlight home
+//! toggles every running component, served by an OS directory watch with a
 //! 2-second safety-net re-check, whichever fires first. A sink fault never disturbs the
 //! product: append failures disable the sink for the process lifetime. Each activation period
 //! owns one file, named so a directory listing reads chronologically; retention keeps the
@@ -23,7 +23,7 @@ use notify::Watcher as _;
 
 /// The environment variable that turns diagnostics on and names the directory.
 pub const ENV_DIR: &str = "GHOSTLIGHT_DIAGNOSTICS_DIR";
-/// The presence-only marker file that turns diagnostics on beside the runtime discovery file.
+/// The presence-only marker file in the Ghostlight home that turns diagnostics on.
 pub const MARKER_FILE_NAME: &str = ghostlight_relay::home::DIAGNOSTICS_MARKER_NAME;
 /// The header record's schema marker.
 pub const SCHEMA: &str = "ghostlight-diagnostics-1";
@@ -138,26 +138,26 @@ impl Activation {
     }
 }
 
-/// The activation marker: `diagnostics.on` in the Ghostlight home beside the runtime file.
-pub fn marker_path(runtime_path: &Path) -> PathBuf {
-    runtime_path.with_file_name(MARKER_FILE_NAME)
+/// The activation marker: `diagnostics.on` in the Ghostlight home `home`.
+pub fn marker_path(home: &Path) -> PathBuf {
+    home.join(MARKER_FILE_NAME)
 }
 
-/// The default log directory: `diagnostics` in the Ghostlight home beside the runtime file.
-/// This is where logs go when the marker layer activates, and where retained logs remain
-/// readable after they are turned off.
-pub fn default_directory(runtime_path: &Path) -> PathBuf {
-    runtime_path.with_file_name(ghostlight_relay::home::DIAGNOSTICS_DIRECTORY_NAME)
+/// The default log directory: `diagnostics` in the Ghostlight home `home`. This is where logs
+/// go when the marker layer activates, and where retained logs remain readable after they are
+/// turned off.
+pub fn default_directory(home: &Path) -> PathBuf {
+    home.join(ghostlight_relay::home::DIAGNOSTICS_DIRECTORY_NAME)
 }
 
 /// Resolve the activation layers: an explicit directory wins, then the marker, then off.
-pub fn resolve(explicit: Option<PathBuf>, runtime_path: &Path) -> Activation {
+pub fn resolve(explicit: Option<PathBuf>, home: &Path) -> Activation {
     if let Some(directory) = explicit {
         return Activation::Explicit { directory };
     }
-    if marker_path(runtime_path).is_file() {
+    if marker_path(home).is_file() {
         Activation::Marker {
-            directory: default_directory(runtime_path),
+            directory: default_directory(home),
         }
     } else {
         Activation::Off
@@ -165,8 +165,8 @@ pub fn resolve(explicit: Option<PathBuf>, runtime_path: &Path) -> Activation {
 }
 
 /// Create or remove the marker as a person's act, then report the resulting activation.
-pub fn set_marker(runtime_path: &Path, on: bool) -> io::Result<Activation> {
-    let marker = marker_path(runtime_path);
+pub fn set_marker(home: &Path, on: bool) -> io::Result<Activation> {
+    let marker = marker_path(home);
     if on {
         if let Some(parent) = marker.parent() {
             private::create_dir_all(parent)?;
@@ -182,7 +182,7 @@ pub fn set_marker(runtime_path: &Path, on: bool) -> io::Result<Activation> {
             Err(error) => return Err(error),
         }
     }
-    Ok(resolve(None, runtime_path))
+    Ok(resolve(None, home))
 }
 
 /// A source of marker-change wake-ups. The production implementation watches the marker's
@@ -269,7 +269,7 @@ pub struct Sink {
     run_id: String,
     pid: u32,
     pinned: Option<PathBuf>,
-    runtime_path: PathBuf,
+    home: PathBuf,
     watcher: Mutex<Option<Box<dyn Send + Sync>>>,
     state: Mutex<SinkState>,
     on_change: Mutex<Option<ChangeCallback>>,
@@ -283,25 +283,18 @@ struct SinkState {
 impl Sink {
     /// Birth the sink from the process environment, starting the safety-net tick and the OS
     /// watch. The explicit layer, when present, pins the sink on for this process's life.
-    pub fn birth(component: Component, version: &str, runtime_path: &Path) -> Arc<Sink> {
+    pub fn birth(component: Component, version: &str, home: &Path) -> Arc<Sink> {
         let pinned = std::env::var_os(ENV_DIR).map(PathBuf::from);
-        let sink = Sink::birth_with(
-            component,
-            version,
-            runtime_path,
-            pinned,
-            &OsMarkerWatcher,
-            None,
-        );
+        let sink = Sink::birth_with(component, version, home, pinned, &OsMarkerWatcher, None);
         sink.emit(
             event::PROCESS_CONTEXT,
             Level::Info,
             None,
             &format!(
-                "executable={} runtime={} runtime_exists={}",
+                "executable={} home={} home_exists={}",
                 std::env::current_exe().unwrap_or_default().display(),
-                runtime_path.display(),
-                runtime_path.exists()
+                home.display(),
+                home.exists()
             ),
         );
         sink
@@ -311,7 +304,7 @@ impl Sink {
     pub fn birth_with(
         component: Component,
         version: &str,
-        runtime_path: &Path,
+        home: &Path,
         pinned: Option<PathBuf>,
         watcher: &dyn MarkerWatcher,
         on_change: Option<ChangeCallback>,
@@ -328,7 +321,7 @@ impl Sink {
             run_id,
             pid: std::process::id(),
             pinned,
-            runtime_path: runtime_path.to_path_buf(),
+            home: home.to_path_buf(),
             watcher: Mutex::new(None),
             state: Mutex::new(SinkState {
                 open: None,
@@ -338,7 +331,7 @@ impl Sink {
         });
 
         if sink.pinned.is_none() {
-            let marker = marker_path(runtime_path);
+            let marker = marker_path(home);
             let wake_sink = Arc::clone(&sink);
             let guard = watcher.watch(marker, Arc::new(move || wake_sink.evaluate()));
             *sink.watcher.lock().expect("diagnostics watcher lock") = guard;
@@ -369,7 +362,7 @@ impl Sink {
             Some(directory) => Activation::Explicit {
                 directory: directory.clone(),
             },
-            None => resolve(None, &self.runtime_path),
+            None => resolve(None, &self.home),
         }
     }
 
@@ -725,10 +718,6 @@ mod tests {
         root
     }
 
-    fn runtime_in(root: &Path) -> PathBuf {
-        root.join("ghostlight-runtime.json")
-    }
-
     /// Drive re-checks until an observable effect lands, bounded. The product contract is
     /// eventual (watch or tick, whichever fires first), and resolution alone proves nothing:
     /// only an opened file, a written line, or a callback is the transition.
@@ -756,17 +745,17 @@ mod tests {
     #[test]
     fn explicit_layer_wins_over_marker_over_off() {
         let root = temp_root("resolve");
-        let runtime = runtime_in(&root);
-        assert_eq!(resolve(None, &runtime), Activation::Off);
-        fs::write(marker_path(&runtime), b"").expect("marker");
+        let home = root.clone();
+        assert_eq!(resolve(None, &home), Activation::Off);
+        fs::write(marker_path(&home), b"").expect("marker");
         assert_eq!(
-            resolve(None, &runtime),
+            resolve(None, &home),
             Activation::Marker {
                 directory: root.join("diagnostics")
             }
         );
         assert_eq!(
-            resolve(Some(root.join("elsewhere")), &runtime),
+            resolve(Some(root.join("elsewhere")), &home),
             Activation::Explicit {
                 directory: root.join("elsewhere")
             }
@@ -774,19 +763,23 @@ mod tests {
     }
 
     #[test]
-    fn marker_names_are_stable_and_derived_from_the_runtime_file() {
-        let runtime = Path::new("/data/ghostlight-runtime.json");
-        assert_eq!(marker_path(runtime), PathBuf::from("/data/diagnostics.on"));
+    fn marker_names_are_stable_and_derived_from_the_home() {
+        let home = Path::new("/data");
+        assert_eq!(marker_path(home), Path::new("/data").join("diagnostics.on"));
+        assert_eq!(
+            default_directory(home),
+            Path::new("/data").join("diagnostics")
+        );
     }
 
     #[test]
     fn birth_pins_the_explicit_layer_and_opens_a_headered_file() {
         let root = temp_root("pinned");
-        let runtime = runtime_in(&root);
+        let home = root.clone();
         let sink = Sink::birth_with(
             Component::Orchestrator,
             "9.9.9-test",
-            &runtime,
+            &home,
             Some(root.join("diagnostics")),
             &OsMarkerWatcher,
             None,
@@ -851,19 +844,19 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = temp_root("private");
-        let runtime = runtime_in(&root);
-        set_marker(&runtime, true).expect("marker");
+        let home = root.clone();
+        set_marker(&home, true).expect("marker");
         let sink = Sink::birth_with(
             Component::McpConnector,
             "9.9.9-test",
-            &runtime,
+            &home,
             None,
             &OsMarkerWatcher,
             None,
         );
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "private");
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&marker_path(&runtime)), 0o600);
+        assert_eq!(mode(&marker_path(&home)), 0o600);
         let directory = root.join("diagnostics");
         assert_eq!(mode(&directory), 0o700);
         let logs: Vec<_> = fs::read_dir(&directory).unwrap().flatten().collect();
@@ -876,18 +869,18 @@ mod tests {
     #[test]
     fn the_marker_layer_toggles_a_live_sink_through_evaluate() {
         let root = temp_root("toggle");
-        let runtime = runtime_in(&root);
+        let home = root.clone();
         let sink = Sink::birth_with(
             Component::McpConnector,
             "9.9.9-test",
-            &runtime,
+            &home,
             None,
             &OsMarkerWatcher,
             None,
         );
         assert_eq!(sink.activation().layer(), "off");
         sink.emit(event::PROCESS_STARTED, Level::Info, None, "before marker");
-        let marker = marker_path(&runtime);
+        let marker = marker_path(&home);
         fs::write(&marker, b"").expect("marker");
         wait_until_bounded(|| log_lines(&root) >= 2);
         sink.evaluate();
@@ -919,13 +912,13 @@ mod tests {
     #[test]
     fn transitions_report_through_the_change_callback() {
         let root = temp_root("callback");
-        let runtime = runtime_in(&root);
+        let home = root.clone();
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_for_callback = Arc::clone(&seen);
         let sink = Sink::birth_with(
             Component::BrowserConnector,
             "9.9.9-test",
-            &runtime,
+            &home,
             None,
             &OsMarkerWatcher,
             Some(Arc::new(move |activation: &Activation| {
@@ -935,7 +928,7 @@ mod tests {
                     .push(activation.layer().to_string());
             })),
         );
-        fs::write(marker_path(&runtime), b"").expect("marker");
+        fs::write(marker_path(&home), b"").expect("marker");
         // The contract is eventual: the watch or the tick applies the layer, whichever fires
         // first. Drive the re-check to the deadline instead of assuming one call is enough.
         wait_until_bounded(|| !seen.lock().expect("seen lock").is_empty());
@@ -969,7 +962,7 @@ mod tests {
         let sink = Sink::birth_with(
             Component::Orchestrator,
             "9.9.9-test",
-            &runtime_in(&root),
+            &root,
             Some(blocked),
             &OsMarkerWatcher,
             None,
@@ -1039,7 +1032,7 @@ mod tests {
     fn foreign_and_marker_names_are_not_parsed_as_logs() {
         assert!(parse_log_name("diagnostics.on").is_none());
         assert!(parse_log_name("foreign.txt").is_none());
-        assert!(parse_log_name("ghostlight-runtime.json").is_none());
+        assert!(parse_log_name("service.lock").is_none());
         let (component, stamp) =
             parse_log_name("20260829T123456Z-mcp-connector-42-7.jsonl").expect("parses");
         assert_eq!(component, "mcp-connector");
@@ -1071,7 +1064,7 @@ mod tests {
         let sink = Sink::birth_with(
             Component::Orchestrator,
             "9.9.9-test",
-            &runtime_in(&root),
+            &root,
             None,
             &Manual,
             None,

@@ -1,7 +1,7 @@
 //! Comprehensive local installation health check and diagnosis.
 //!
 //! This module gathers environmental observations across binaries, package registrations,
-//! MCP harness configs, service runtime status, and diagnostics, and can optionally apply
+//! MCP harness configs, the service endpoint and status, and diagnostics, and can optionally apply
 //! non-destructive repairs.
 
 use std::path::PathBuf;
@@ -60,12 +60,12 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         binaries.push((path, ready));
     }
     let runtime = observe_runtime()?;
-    let readiness = if runtime.running {
+    let readiness = if runtime.running() {
         crate::cli::client::readiness().ok()
     } else {
         None
     };
-    let diagnostics = crate::diagnostics::observe(&runtime.path);
+    let diagnostics = crate::diagnostics::observe(layout.home());
     Ok(DoctorObservation {
         installed: InstallRecord::read(&layout.install_record())?,
         development: DevelopmentMarker::read(&layout.development_marker())?,
@@ -118,7 +118,7 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     if let Some(readiness) = &observation.readiness {
         println!("{}", readiness_line(readiness));
-    } else if observation.runtime.running {
+    } else if observation.runtime.running() {
         println!(
             "Readiness: unavailable -- The running Ghostlight authority did not report its current state."
         );
@@ -182,7 +182,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "version": env!("CARGO_PKG_VERSION"),
         "installation": {
             "home": observation.home,
-            "runtime_file": observation.runtime.path,
+            "endpoint": observation.runtime.endpoint,
             "installed": observation.installed,
             "development": observation.development,
             "invoking_executable": std::env::current_exe().ok(),

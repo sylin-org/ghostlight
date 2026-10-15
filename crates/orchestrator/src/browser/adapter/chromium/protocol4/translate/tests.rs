@@ -1,6 +1,5 @@
 //! Documents, reading and observation against a scripted protocol-4 extension.
 
-use std::net::TcpListener;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -56,13 +55,9 @@ fn port_with(script: super::super::fake::Script) -> (RelayBrowserPort, FakeExten
             source: String::new(),
         }),
     );
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
-        &FakeExtension::hello(FOUR),
-        script,
-    );
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
+    let fake = FakeExtension::connect(extension, &FakeExtension::hello(FOUR), script);
+    port.attach(service).unwrap();
     (port, fake)
 }
 

@@ -1,43 +1,34 @@
-//! In-process tests of the port against a fake relay-3 service on loopback and in-memory
+//! In-process tests of the port against a fake relay-4 service over connected pairs and in-memory
 //! Chrome pipes.
 
 use std::io::Cursor;
-use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use ghostlight_relay::frame::{self, FrameError};
-use ghostlight_relay::opening::{Opening, RefusalCode};
-use ghostlight_relay::MAX_FRAME_BYTES;
+use ghostlight_relay::endpoint::pair;
+use ghostlight_relay::frame;
+use ghostlight_relay::protocol::{RefusalCode, Role};
+use ghostlight_relay::{MAX_FRAME_BYTES, RELAY};
 
 use super::*;
 
-const TOKEN: &str = "fake-token";
 const PATIENCE: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(5);
 const CONTROL_RESULT: &[u8] = br#"{"kind":"result","value":null}"#;
-
-/// Read the opening a connector sends to the fake service, within `patience`.
-fn read_opening(connection: &mut TcpStream, patience: Duration) -> Opening {
-    connection.set_read_timeout(Some(patience)).unwrap();
-    let opening = frame::read_frame(connection).unwrap().unwrap();
-    connection.set_read_timeout(None).unwrap();
-    opening
-}
+const ORIGIN: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/";
 
 /// One browser stream the fake service accepted.
 struct Browser {
-    writer: TcpStream,
+    writer: Connection,
     received: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-/// A relay-3 service on loopback that the test switches on and off.
+/// A relay-4 service the test switches on and off.
 #[derive(Default)]
 struct FakeState {
-    port: u16,
     up: AtomicBool,
     start_brings_up: AtomicBool,
     /// How many openings to refuse before accepting.
@@ -50,32 +41,17 @@ struct FakeState {
 }
 
 impl FakeState {
-    fn listen(up: bool, start_brings_up: bool) -> Arc<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let state = Arc::new(Self {
-            port: listener.local_addr().unwrap().port(),
+    fn new(up: bool, start_brings_up: bool) -> Arc<Self> {
+        Arc::new(Self {
             up: AtomicBool::new(up),
             start_brings_up: AtomicBool::new(start_brings_up),
             ..Self::default()
-        });
-        let weak = Arc::downgrade(&state);
-        thread::spawn(move || {
-            for connection in listener.incoming() {
-                let Some(state) = weak.upgrade() else {
-                    return;
-                };
-                let Ok(connection) = connection else {
-                    return;
-                };
-                state.serve(connection);
-            }
-        });
-        state
+        })
     }
 
-    /// Answer one opening the way a service would.
-    fn serve(&self, mut connection: TcpStream) {
-        let opening = read_opening(&mut connection, PATIENCE);
+    /// Answer one opening the way a service would, on the far end of a new pair.
+    fn answer(&self, opening: &Opening) -> io::Result<(Connection, Reply)> {
+        let (client, mut server) = pair()?;
         self.openings.lock().unwrap().push(opening.clone());
         let refused = self
             .refusals
@@ -84,37 +60,31 @@ impl FakeState {
             })
             .is_ok();
         if refused {
-            let reply = Reply::Refused {
-                code: RefusalCode::ShuttingDown,
-                message: String::new(),
-            };
-            frame::write_frame(&mut connection, &reply).unwrap();
-            return;
+            let reply = Reply::refused(RefusalCode::ShuttingDown, String::new());
+            return Ok((client, reply));
         }
-        let accepted = Reply::Accepted {
-            service_version: "2.0.0".to_owned(),
-        };
-        frame::write_frame(&mut connection, &accepted).unwrap();
-        match opening.stream {
-            Stream::Browser => {
+        let accepted = Reply::accepted("2.0.0".to_owned(), "instance_fake".to_owned(), None);
+        match opening.role {
+            Role::Browser => {
                 let received = Arc::new(Mutex::new(Vec::new()));
                 let sink = Arc::clone(&received);
-                let mut reader = connection.try_clone().unwrap();
+                let mut reader = server.try_clone().unwrap();
                 thread::spawn(move || {
                     while let Ok(Some(payload)) = frame::read_frame_raw(&mut reader) {
                         sink.lock().unwrap().push(payload);
                     }
                 });
                 self.browsers.lock().unwrap().push(Browser {
-                    writer: connection,
+                    writer: server,
                     received,
                 });
             }
-            Stream::Control { .. } => {
-                frame::write_frame_raw(&mut connection, CONTROL_RESULT).unwrap();
+            Role::Control => {
+                frame::write_frame_raw(&mut server, CONTROL_RESULT).unwrap();
             }
             _ => {}
         }
+        Ok((client, accepted))
     }
 
     fn bring_up(&self) {
@@ -125,7 +95,7 @@ impl FakeState {
     fn go_down(&self) {
         self.up.store(false, Ordering::SeqCst);
         for browser in self.browsers.lock().unwrap().iter() {
-            let _ = browser.writer.shutdown(Shutdown::Both);
+            browser.writer.shutdown();
         }
     }
 
@@ -133,9 +103,13 @@ impl FakeState {
         self.browsers.lock().unwrap().len()
     }
 
-    fn streams(&self) -> Vec<Stream> {
-        let openings = self.openings.lock().unwrap();
-        openings.iter().map(|one| one.stream.clone()).collect()
+    fn openings(&self) -> Vec<Opening> {
+        self.openings.lock().unwrap().clone()
+    }
+
+    /// The role of every opening the service saw, in order.
+    fn roles(&self) -> Vec<Role> {
+        self.openings().iter().map(|one| one.role).collect()
     }
 
     /// Frames received on browser stream `index`, in order.
@@ -159,19 +133,14 @@ impl FakeState {
 struct FakeService(Arc<FakeState>);
 
 impl Service for FakeService {
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError> {
-        if matches!(stream, Stream::Control { .. }) {
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
+        if opening.role == Role::Control {
             self.0.probes.fetch_add(1, Ordering::SeqCst);
         }
         if !self.0.up.load(Ordering::SeqCst) {
             return Err(ConnectError::NoService);
         }
-        let mut socket = TcpStream::connect(("127.0.0.1", self.0.port))?;
-        frame::write_frame(&mut socket, &Opening::new(TOKEN.to_owned(), stream))?;
-        match frame::read_frame::<Reply>(&mut socket)? {
-            Some(reply) => Ok((socket, reply)),
-            None => Err(ConnectError::Frame(FrameError::Truncated)),
-        }
+        Ok(self.0.answer(opening)?)
     }
 
     fn start(&self) -> io::Result<()> {
@@ -232,11 +201,17 @@ struct Harness {
 
 impl Harness {
     fn start(up: bool, start_brings_up: bool) -> Self {
-        let fake = FakeState::listen(up, start_brings_up);
+        Self::start_from(up, start_brings_up, Some(ORIGIN.to_owned()))
+    }
+
+    /// A connector started by Chrome with `origin` as its first argument, if it had one.
+    fn start_from(up: bool, start_brings_up: bool, origin: Option<String>) -> Self {
+        let fake = FakeState::new(up, start_brings_up);
         let (input, chunks) = mpsc::channel();
         let output = SharedOutput::default();
         let environment = Environment {
             service: Arc::new(FakeService(Arc::clone(&fake))),
+            origin,
             log: no_log,
         };
         let (events, inbox) = mpsc::channel();
@@ -332,7 +307,7 @@ fn the_service_is_started_before_the_first_connection_and_not_after_it_is_found(
     harness.chrome_sends(b"hello");
     harness.wait(|| harness.fake.received(0).len() == 1);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(harness.fake.streams(), [Stream::Browser]);
+    assert_eq!(harness.fake.roles(), [Role::Browser]);
     harness.chrome_closes();
     harness.finish().unwrap();
 }
@@ -344,7 +319,7 @@ fn a_refused_opening_keeps_the_hello_held_and_starts_the_service() {
     harness.chrome_sends(b"hello");
     harness.wait(|| harness.fake.received(0).len() == 1);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(harness.fake.streams(), [Stream::Browser, Stream::Browser]);
+    assert_eq!(harness.fake.roles(), [Role::Browser, Role::Browser]);
     assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
     harness.chrome_closes();
     harness.finish().unwrap();
@@ -414,14 +389,11 @@ fn a_returning_service_ends_the_run_without_a_new_stream() {
     harness.fake.bring_up();
     assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.fake.roles(), [Role::Browser, Role::Control]);
     assert_eq!(
-        harness.fake.streams(),
-        [
-            Stream::Browser,
-            Stream::Control {
-                op: ControlOp::Readiness
-            }
-        ]
+        harness.fake.openings()[1].control,
+        Some(Control::Readiness),
+        "the probe changes nothing"
     );
     assert_eq!(harness.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
 }
@@ -441,7 +413,7 @@ fn chrome_closing_before_any_hello_ends_the_run_without_a_connection() {
     let mut harness = Harness::start(true, false);
     harness.chrome_closes();
     assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-    assert!(harness.fake.streams().is_empty());
+    assert!(harness.fake.openings().is_empty());
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
 
@@ -472,4 +444,45 @@ fn an_unreadable_chrome_frame_is_an_error() {
         .send(declared.to_le_bytes().to_vec())
         .unwrap();
     assert!(harness.finish().is_err());
+}
+
+#[test]
+fn the_opening_names_the_edge_and_carries_the_extension_origin() {
+    let mut harness = Harness::connected(b"hello");
+    let opening = &harness.fake.openings()[0];
+    assert_eq!(opening.relay, RELAY);
+    assert_eq!(opening.role, Role::Browser);
+    assert_eq!(opening.edge.program, Program::Edge);
+    assert_eq!(opening.edge.revision, RELAY);
+    assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
+    assert_eq!(opening.origin.as_deref(), Some(ORIGIN));
+    harness.chrome_closes();
+    harness.finish().unwrap();
+}
+
+#[test]
+fn an_opening_without_an_origin_when_chrome_named_none() {
+    let mut harness = Harness::start_from(true, false, None);
+    harness.chrome_sends(b"hello");
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    assert_eq!(harness.fake.openings()[0].origin, None);
+    harness.chrome_closes();
+    harness.finish().unwrap();
+}
+
+#[test]
+fn only_a_first_argument_that_names_an_extension_is_an_origin() {
+    assert_eq!(
+        extension_origin(Some(ORIGIN.to_owned())).as_deref(),
+        Some(ORIGIN)
+    );
+    assert_eq!(
+        extension_origin(Some("--parent-window=4242".to_owned())),
+        None
+    );
+    assert_eq!(
+        extension_origin(Some("https://example.com/".to_owned())),
+        None
+    );
+    assert_eq!(extension_origin(None), None);
 }

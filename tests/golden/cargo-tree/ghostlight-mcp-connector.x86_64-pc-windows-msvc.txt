@@ -1,7 +1,6 @@
 anyhow
 ghostlight-mcp-connector
 ghostlight-relay
-ghostlight-win-peer
 itoa
 memchr
 proc-macro2

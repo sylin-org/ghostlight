@@ -1,11 +1,12 @@
-//! Forwarding one MCP stdio session to the service over relay protocol 3 (ADR-0197 Decisions 2,
+//! Forwarding one MCP stdio session to the service over relay protocol 4 (ADR-0197 Decisions 2,
 //! 11 and 12).
 //!
 //! The connector reads client lines from stdin and service lines from an `mcp` relay stream, and
 //! passes each one on unchanged. It looks inside a line only to track outstanding request ids per
 //! direction, to answer `ping` itself, and to know which requests to answer when the service is
-//! cut off or does not come back in time. Those answers are the service's own failure templates;
-//! the connector authors no words.
+//! cut off or does not come back in time. Those answers are the failure templates the service
+//! handed over in its last accepted reply; the connector authors no words, and before any reply
+//! it answers the bare internal error.
 //!
 //! A client response reaches the service only when it answers a request the live connection made.
 //! A lone response that answers nothing outstanding is dropped, and a batch loses such elements
@@ -18,19 +19,18 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpStream};
-use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ghostlight_relay::client::ConnectError;
+use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame;
 use ghostlight_relay::log::Event as LogEvent;
-use ghostlight_relay::opening::{McpFrame, Reply, Stream};
+use ghostlight_relay::protocol::{
+    failure_response, Edge, Failure, McpFrame, Opening, Program, Reply, Role, Templates,
+};
 use ghostlight_relay::spawn::Backoff;
-use ghostlight_relay::templates::{self, Failure, FailureTemplates};
 use ghostlight_relay::MAX_FRAME_BYTES;
 use serde_json::{json, Value};
 
@@ -57,8 +57,8 @@ mod rpc {
 
 /// The service the connector talks to: how to open a stream and how to start it.
 pub trait Service: Send + Sync + 'static {
-    /// Connect to the running service and present an opening for `stream`.
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError>;
+    /// Connect to the running service and present `opening`.
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
 
     /// Start the service without waiting for it to be ready.
     fn start(&self) -> io::Result<()>;
@@ -89,9 +89,6 @@ pub struct Environment {
     pub service: Arc<dyn Service>,
     /// The clock behind the hold limit and the backoff.
     pub clock: Arc<dyn Clock>,
-    /// The failure-template file, read each time a request must be answered. `None` when the
-    /// home cannot be found, which answers like a missing file.
-    pub templates: Option<PathBuf>,
     /// The diagnostics writer.
     pub log: Log,
     /// The longest the loop sleeps before looking at the clock again. `None` sleeps until the
@@ -107,8 +104,9 @@ pub enum Event {
     LineTooLong,
     /// The client closed stdin.
     InputClosed,
-    /// A connection attempt was accepted by a service.
-    Connected(TcpStream),
+    /// A connection attempt was accepted by a service, with the failure templates its reply
+    /// carried.
+    Connected(Connection, Option<Templates>),
     /// A connection attempt failed; the service was asked to start.
     AttemptFailed,
     /// A frame arrived on the connection of the given generation.
@@ -167,7 +165,7 @@ struct Forwarder<W: Write> {
     output: W,
     events: Sender<Event>,
     /// The live service connection, for writing.
-    link: Option<TcpStream>,
+    link: Option<Connection>,
     /// Counts connections, so events from an ended one are ignored.
     generation: u64,
     /// Whether any service has accepted this session yet.
@@ -180,6 +178,8 @@ struct Forwarder<W: Write> {
     backoff: Backoff,
     /// The resume token the service last handed this session.
     resume: Option<String>,
+    /// The failure templates of the last accepted reply. None until a service has accepted.
+    templates: Option<Templates>,
     hold: Hold,
     /// Client requests delivered to the service and not yet answered, by id key.
     client_requests: BTreeMap<String, Request>,
@@ -203,6 +203,7 @@ impl<W: Write> Forwarder<W> {
             next_attempt: now,
             backoff: Backoff::new(),
             resume: None,
+            templates: None,
             hold: Hold::default(),
             client_requests: BTreeMap::new(),
             service_requests: BTreeMap::new(),
@@ -254,7 +255,7 @@ impl<W: Write> Forwarder<W> {
                 }
                 return Ok(Flow::Exit);
             }
-            Event::Connected(socket) => self.connected(socket)?,
+            Event::Connected(socket, templates) => self.connected(socket, templates)?,
             Event::AttemptFailed => {
                 self.attempting = false;
                 self.next_attempt = self.environment.clock.now() + self.backoff.next_wait();
@@ -289,19 +290,19 @@ impl<W: Write> Forwarder<W> {
         let service = Arc::clone(&self.environment.service);
         let events = self.events.clone();
         let log = self.environment.log;
-        let stream = Stream::Mcp {
-            channel: CHANNEL.to_owned(),
-            session: None,
-            resume: self.resume.clone(),
-        };
+        let mut opening = Opening::new(
+            Role::Mcp,
+            Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned()),
+        );
+        opening.channel = Some(CHANNEL.to_owned());
+        opening.resume = self.resume.clone();
         thread::spawn(move || {
-            let event = match service.connect(stream) {
-                Ok((socket, Reply::Accepted { .. })) => Event::Connected(socket),
+            let event = match service.connect(&opening) {
+                Ok((socket, reply)) if reply.accepted => Event::Connected(socket, reply.templates),
                 Ok((_, reply)) => {
-                    let detail = match reply {
-                        Reply::Refused { code, .. } => format!("{code:?}"),
-                        other => format!("{other:?}"),
-                    };
+                    let detail = reply
+                        .code
+                        .map_or_else(String::new, |code| format!("{code:?}"));
                     log(LogEvent::OpeningRefused, &detail);
                     start(service.as_ref(), log);
                     Event::AttemptFailed
@@ -317,8 +318,11 @@ impl<W: Write> Forwarder<W> {
     }
 
     /// Take a newly accepted connection and deliver everything held, in order.
-    fn connected(&mut self, socket: TcpStream) -> io::Result<()> {
+    fn connected(&mut self, socket: Connection, templates: Option<Templates>) -> io::Result<()> {
         self.attempting = false;
+        if templates.is_some() {
+            self.templates = templates;
+        }
         self.backoff.reset();
         self.ever_connected = true;
         let reader = match socket.try_clone() {
@@ -438,7 +442,7 @@ impl<W: Write> Forwarder<W> {
                 self.resume = Some(token);
                 Ok(())
             }
-            McpFrame::Unknown => Ok(()),
+            McpFrame::Goodbye { .. } | McpFrame::Unknown => Ok(()),
         }
     }
 
@@ -449,7 +453,7 @@ impl<W: Write> Forwarder<W> {
     /// are dropped rather than sent to whichever service comes next.
     fn disconnect(&mut self) -> io::Result<()> {
         if let Some(link) = self.link.take() {
-            let _ = link.shutdown(Shutdown::Both);
+            link.shutdown();
         }
         self.next_attempt = self.environment.clock.now();
         self.service_requests.clear();
@@ -464,14 +468,9 @@ impl<W: Write> Forwarder<W> {
         if requests.is_empty() {
             return Ok(());
         }
-        let templates = self
-            .environment
-            .templates
-            .as_deref()
-            .and_then(|path| FailureTemplates::read(path).ok().flatten());
         for request in requests {
-            let response = templates::failure_response(
-                templates.as_ref(),
+            let response = failure_response(
+                self.templates.as_ref(),
                 failure,
                 &request.method,
                 &request.id,
@@ -650,7 +649,7 @@ fn read_line(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<Input
 ///
 /// A frame that is not an MCP frame is skipped; a stream that ends or cannot be framed ends the
 /// connection.
-fn read_service(generation: u64, mut socket: TcpStream, events: Sender<Event>) {
+fn read_service(generation: u64, mut socket: Connection, events: Sender<Event>) {
     thread::spawn(move || loop {
         match frame::read_frame_raw(&mut socket) {
             Ok(Some(payload)) => {

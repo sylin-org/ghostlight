@@ -9,12 +9,12 @@
 //! nothing.
 
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use ghostlight_relay::endpoint::Connection as RelayConnection;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -104,7 +104,7 @@ impl Receipts {
 /// transport failure when the connection cannot be set up.
 pub(crate) fn attach(
     port: &RelayBrowserPort,
-    stream: TcpStream,
+    stream: RelayConnection,
     reader: SocketReader,
     hello: Value,
 ) -> Result<(), BrowserError> {

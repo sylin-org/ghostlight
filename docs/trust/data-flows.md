@@ -8,8 +8,8 @@ audit run on the endpoint.
 | Flow | Transport | Destination |
 | --- | --- | --- |
 | MCP client to MCP connector | stdio | Same endpoint. |
-| MCP connector to service | Authenticated loopback TCP with typed framing | Same endpoint. |
-| Service to browser connector | Authenticated loopback TCP with typed framing | Same endpoint. |
+| MCP connector to service | A per-user named pipe (Windows) or Unix socket (Linux) that only the same user can open; each end checks the other's user before anything is sent. Typed framing | Same endpoint. |
+| Service to browser connector | The same per-user named pipe or Unix socket, with the same checks. Typed framing | Same endpoint. |
 | Browser connector to extension | Chromium native messaging | Same endpoint. |
 | Extension to the controlled page | Chrome DevTools Protocol | The user's existing browser profile. |
 | Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |
@@ -39,14 +39,14 @@ nothing Ghostlight does contacts the vendor.
 
 - `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal
   records. Use the endpoint's existing file collector for SIEM delivery.
-- The runtime discovery file contains loopback ports, protocol majors, and a local authentication
-  token.
+- There is no discovery file, port or token. `run/` in the home holds the service lock and, on
+  Linux, the relay socket.
 - Managed deployments keep a verified signed bundle cache and a content-minimized status sidecar.
   The sidecar includes verification, sequence, freshness, source class, timing, organization, and
   contacts, but no source address, bearer token, verification key, or policy rules.
 - Browser adapter settings and MCP-client registrations remain in their platform-native local
   stores.
-- On Linux, the audit log, policy, state, runtime and diagnostics files that Ghostlight creates
+- On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
   closed to other users. That includes the files an upgrade from 1.x copies there. A file that
   already existed keeps its mode.

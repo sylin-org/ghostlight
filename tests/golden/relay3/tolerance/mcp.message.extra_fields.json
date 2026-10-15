@@ -1,5 +1,0 @@
-{
-  "kind": "message",
-  "line": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
-  "received_at": 1790000999
-}

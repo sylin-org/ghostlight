@@ -5,8 +5,8 @@ user is already signed in. It operates no vendor runtime or customer-data store.
 
 ## Architecture and trust boundaries
 
-The MCP connector terminates stdio MCP and sends typed work over authenticated loopback TCP to the
-persistent `ghostlight` service. The service owns workspaces, language, policy, audit, execution,
+The MCP connector terminates stdio MCP and sends typed work over a per-user named pipe or Unix
+socket, which only the same user can open, to the persistent `ghostlight` service. The service owns workspaces, language, policy, audit, execution,
 and completion. The browser connector relays typed browser work between that service and the
 extension through Chromium native messaging. The extension owns Chrome APIs, page-local DOM work,
 browser durability, and content-free presentation. It owns no policy.

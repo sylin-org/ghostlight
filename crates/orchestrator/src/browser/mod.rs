@@ -6,7 +6,6 @@ pub mod session;
 pub mod transport;
 
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -15,6 +14,7 @@ use std::time::{Duration, Instant};
 use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link, wire};
 use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
 use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
+use ghostlight_relay::endpoint::Connection as RelayConnection;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -551,7 +551,7 @@ pub trait AdapterLifecycleObserver: Send + Sync + 'static {
     fn adapter_answering(&self, _browser_id: &str) {}
 }
 
-/// Authenticated loopback implementation of the physical browser port.
+/// Relay-backed implementation of the physical browser port.
 pub struct RelayBrowserPort {
     service_epoch: String,
     adapters: Arc<Mutex<AdapterRegistry>>,
@@ -688,13 +688,7 @@ impl RelayBrowserPort {
     }
 
     /// Negotiate and attach one already-authenticated browser-relay stream.
-    pub fn attach(&self, stream: TcpStream) -> Result<(), BrowserError> {
-        stream
-            .set_nonblocking(false)
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
-        stream
-            .set_nodelay(true)
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?;
+    pub fn attach(&self, stream: RelayConnection) -> Result<(), BrowserError> {
         let reader = SocketReader::new(
             stream
                 .try_clone()
@@ -708,7 +702,7 @@ impl RelayBrowserPort {
     /// The first frame must be a protocol-4 hello. Anything else is told to update and closed.
     pub(crate) fn attach_reader(
         &self,
-        stream: TcpStream,
+        stream: RelayConnection,
         mut reader: SocketReader,
         opening: Instant,
     ) -> Result<(), BrowserError> {
@@ -856,7 +850,7 @@ impl RelayBrowserPort {
 
 /// Tell an extension that does not speak adapter protocol 4 to update, then close its socket.
 /// Best effort: the extension may already be gone.
-fn refuse_incompatible(stream: TcpStream) {
+fn refuse_incompatible(stream: RelayConnection) {
     let Ok(writer) = SocketWriter::new(stream) else {
         return;
     };

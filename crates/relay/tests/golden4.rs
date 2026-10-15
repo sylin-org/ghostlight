@@ -10,11 +10,10 @@ use ghostlight_relay::endpoint::{fnv1a32, home_hash, Endpoint};
 use ghostlight_relay::protocol::{
     goodbye_frame, goodbye_in, Control, ControlResult, Edge, Failure, GoodbyeReason, McpFrame,
     Opening, Program, QuitReason, RefusalCode, Reply, Role, StartReason, DEFAULT_TEMPLATE,
-    REVISION,
 };
 use ghostlight_relay::{
     home, BACKOFF_FIRST, BACKOFF_MAX, HOLD_LIMIT, HOLD_LIMIT_BYTES, MAX_FRAME_BYTES,
-    OPENING_DEADLINE,
+    OPENING_DEADLINE, RELAY,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -101,7 +100,7 @@ fn edge(program: Program) -> Edge {
 #[test]
 fn opening_fixtures_round_trip() {
     let mcp: Opening = assert_round_trip("opening.mcp.json");
-    assert_eq!(mcp.relay, REVISION);
+    assert_eq!(mcp.relay, RELAY);
     assert_eq!(mcp.role, Role::Mcp);
     assert_eq!(mcp.edge, edge(Program::Edge));
     assert_eq!(mcp.reason, Some(StartReason::Agent));
@@ -195,7 +194,7 @@ fn mcp_and_control_fixtures_round_trip() {
     assert_eq!(
         result,
         ControlResult::Result {
-            value: json!({"ready": true, "version": "2.0.0", "instance": "9f3a61c2d0b84e17"})
+            value: json!({"service": "2.0.0", "instance": "9f3a61c2d0b84e17", "pid": 18244})
         }
     );
 }
@@ -285,7 +284,7 @@ fn tolerance_fixtures_decode() {
 #[test]
 fn constants_equal_the_vocabulary() {
     let vocabulary = fixture("vocabulary.json");
-    assert_eq!(vocabulary["relay"], json!(REVISION));
+    assert_eq!(vocabulary["relay"], json!(RELAY));
     assert_eq!(vocabulary["frame"]["max_bytes"], json!(MAX_FRAME_BYTES));
     assert_eq!(vocabulary["hold_limit_bytes"], json!(HOLD_LIMIT_BYTES));
     assert_eq!(vocabulary["hold_limit_ms"], json!(HOLD_LIMIT.as_millis()));

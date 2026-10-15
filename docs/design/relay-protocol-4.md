@@ -119,8 +119,10 @@ while it waits.
 | `quit` | `reason`: `quit`, `replace` or `uninstall` | Finishes in-flight work and exits, sending the matching goodbye first. |
 
 An accepted control opening is answered by one frame, `{"kind": "result", "value": ...}`, and the
-stream closes. The value is the service's to define. An operation this revision does not know is
-refused as `unsupported`.
+stream closes. The value is the service's to define. The 2.0 service answers `readiness` with its
+readiness summary, `status` with `{service, instance, pid}`, `show` with `{shown}` (whether a
+window came forward) and `quit` with `{quitting: true}`. An operation this revision does not know
+is refused as `unsupported`.
 
 **`desktop`** and **`command`.** Reserved. Their streams, when they land, are defined by the shell
 contract and the command contract of ADR-0199 Decisions 6 and 7; neither changes this protocol.

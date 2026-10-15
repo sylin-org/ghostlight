@@ -44,7 +44,8 @@ when the old one stops starts the new one. At the 2.0 break it then stops the 1.
 again for a few rounds for any that respawned. It asks the running service to quit, which gives
 in-flight calls 10 s. If it is still running, that exact image is stopped. It then removes the
 copied 1.x originals, archives the 1.x audit log, deletes the 1.x lifecycle files, the installation record last, starts
-`bin/ghostlight serve`, and waits up to 30 s for the runtime file. Nothing needs stopping by
+`bin/ghostlight serve`, and waits up to 30 s for a service that answers a control status with a
+new instance. Nothing needs stopping by
 hand. A connector that was not replaced keeps running and reconnects.
 
 Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
@@ -135,7 +136,7 @@ On Windows, the full and process lanes include the `desktop-windows` gate. It re
 PowerShell 7 and a Windows desktop. The journey launches an isolated authority, sends concurrent
 Open requests during startup, counts its real native workbench windows, and checks responsiveness,
 minimize/restore, and close/reopen while the authority stays alive. It uses the fresh
-`GHOSTLIGHT_BIN_DIR` build and changes only its own processes, windows, runtime files, and WebView
+`GHOSTLIGHT_BIN_DIR` build and changes only its own processes, windows, endpoint, and WebView
 profile. It also starts both connectors with held input, delivers the Windows end-session sequence
 to all three exact processes, and requires bounded successful exit, including the worst ordering
 where Tao's event target ends before the authority's dedicated listener. It verifies the spawned

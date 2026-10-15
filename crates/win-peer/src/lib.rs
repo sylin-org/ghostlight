@@ -10,13 +10,16 @@
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
 //! The crate holds the executable paths of a process's ancestors in `process` (from which the
-//! installer learns whether it runs inside an app's container), owner-private runtime-file
+//! installer learns whether it runs inside an app's container), whether the process token is
+//! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
 //! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
 //! `item_id_list` (named by the installer's Start-menu shortcut), and session shutdown events in
 //! `shutdown`. Starting the service and process identity live in the relay's audited `os` module
 //! (ADR-0199 Decision 3). Non-Windows targets compile the portable surface returning an empty
 //! answer.
 
+#[cfg(target_os = "windows")]
+mod elevation;
 #[cfg(target_os = "windows")]
 mod item_id_list;
 #[cfg(target_os = "windows")]
@@ -71,6 +74,15 @@ pub fn ancestor_images(limit: usize) -> Vec<std::path::PathBuf> {
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
+}
+
+/// Whether this process runs with an elevated token. `false` where the platform has no such
+/// notion.
+pub fn is_elevated() -> std::io::Result<bool> {
+    #[cfg(target_os = "windows")]
+    return elevation::is_elevated();
+    #[cfg(not(target_os = "windows"))]
+    Ok(false)
 }
 
 /// The shell's serialized item identifier list for the existing file at `path`, terminator

@@ -1,6 +1,5 @@
 //! The Link and the browser-native commands against a scripted protocol-4 extension.
 
-use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -33,13 +32,9 @@ fn port(script: Script) -> (RelayBrowserPort, FakeExtension) {
             source: String::new(),
         }),
     );
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
-        &FakeExtension::hello(FOUR),
-        script,
-    );
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
+    let fake = FakeExtension::connect(extension, &FakeExtension::hello(FOUR), script);
+    port.attach(service).unwrap();
     (port, fake)
 }
 

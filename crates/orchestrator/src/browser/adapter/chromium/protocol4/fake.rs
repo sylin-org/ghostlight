@@ -1,17 +1,17 @@
-//! A scripted protocol-4 extension over a real loopback socket, for tests.
+//! A scripted protocol-4 extension over a relay connection, for tests.
 //!
 //! It sends its hello at once, acknowledges heartbeats, answers each request through a scripted
 //! closure (at once, when the request is cancelled, or never), reassembles chunked requests, and
 //! records every frame the service sends.
 
 use std::collections::{BTreeMap, HashMap};
-use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
+use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::frame::{read_frame, write_frame};
 use serde_json::{json, Value};
 
@@ -58,9 +58,9 @@ impl Seen {
     }
 }
 
-/// A protocol-4 extension on the far side of one loopback connection.
+/// A protocol-4 extension on the far side of one connection.
 pub(crate) struct FakeExtension {
-    writer: Arc<Mutex<TcpStream>>,
+    writer: Arc<Mutex<Connection>>,
     seen: Arc<(Mutex<Seen>, Condvar)>,
     acknowledging: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
@@ -103,10 +103,9 @@ impl FakeExtension {
         }
     }
 
-    /// Connect to the service at `address`, send `hello`, and answer what follows with
-    /// `script`.
-    pub(crate) fn connect(address: SocketAddr, hello: &Value, script: Script) -> Self {
-        let mut stream = TcpStream::connect(address).expect("the fake connects");
+    /// Speak for the extension on `stream`, the far end of a connected pair: send `hello`, and
+    /// answer what follows with `script`.
+    pub(crate) fn connect(mut stream: Connection, hello: &Value, script: Script) -> Self {
         write_frame(&mut stream, hello).expect("the fake sends its hello");
         let writer = Arc::new(Mutex::new(stream.try_clone().expect("a writer handle")));
         let seen = Arc::new((Mutex::new(Seen::default()), Condvar::new()));
@@ -141,7 +140,7 @@ impl FakeExtension {
 
     /// Close the fake's side of the connection.
     pub(crate) fn close(&self) {
-        let _ = lock(&self.writer).shutdown(Shutdown::Both);
+        lock(&self.writer).shutdown();
     }
 
     /// Wait until what the fake has seen satisfies `condition`, and return it.
@@ -176,8 +175,8 @@ impl Drop for FakeExtension {
 
 /// The fake's reader thread.
 struct Reading {
-    stream: TcpStream,
-    writer: Arc<Mutex<TcpStream>>,
+    stream: Connection,
+    writer: Arc<Mutex<Connection>>,
     seen: Arc<(Mutex<Seen>, Condvar)>,
     acknowledging: Arc<AtomicBool>,
     script: Script,

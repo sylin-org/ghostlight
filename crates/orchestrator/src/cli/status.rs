@@ -1,57 +1,52 @@
 //! Local service status reporting.
 //!
-//! This module reads the relay runtime file the service publishes and asks the service for its
-//! readiness over a control stream. It never changes machine state and never starts a service.
+//! This module asks the service for its status over a control stream. It never changes machine
+//! state and never starts a service.
 
-use std::path::PathBuf;
+use ghostlight_relay::endpoint::Endpoint;
+
+use crate::intake::listener::control::Status;
 
 /// What the local service looks like right now.
 #[derive(Clone, Debug)]
 pub struct RuntimeObservation {
-    /// Path to the relay runtime file.
-    pub path: PathBuf,
-    /// Reported service version, if a runtime file names a service.
-    pub version: Option<String>,
-    /// Relay revision the service speaks, if a runtime file names a service.
-    pub relay: Option<u16>,
-    /// Whether the service answered a readiness control opening.
-    pub running: bool,
+    /// The endpoint the service listens on: a pipe name or a socket path.
+    pub endpoint: String,
+    /// What the service reported, when one answered.
+    pub status: Option<Status>,
+}
+
+impl RuntimeObservation {
+    /// Whether a service answered.
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.status.is_some()
+    }
 }
 
 /// Observe the current status of the local Ghostlight service.
 pub fn observe_runtime() -> anyhow::Result<RuntimeObservation> {
-    let path = ghostlight_relay::home::runtime_file()?;
-    Ok(
-        match ghostlight_relay::runtime::RuntimeFile::read(&path)
-            .ok()
-            .flatten()
-        {
-            Some(runtime) => RuntimeObservation {
-                path,
-                version: Some(runtime.service_version),
-                relay: Some(runtime.relay),
-                running: crate::cli::client::readiness().is_ok(),
-            },
-            None => RuntimeObservation {
-                path,
-                version: None,
-                relay: None,
-                running: false,
-            },
-        },
-    )
+    let endpoint = Endpoint::for_home(&ghostlight_relay::home::home()?)?.to_string();
+    Ok(RuntimeObservation {
+        endpoint,
+        status: crate::cli::client::status().ok(),
+    })
 }
 
 /// The `status --json` document scripts read.
 pub fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
-    let Some(version) = observation.version.as_deref() else {
-        return serde_json::json!({ "running": false });
-    };
-    serde_json::json!({
-        "version": version,
-        "relay": observation.relay,
-        "running": observation.running,
-    })
+    match &observation.status {
+        Some(status) => serde_json::json!({
+            "running": true,
+            "version": status.service,
+            "instance": status.instance,
+            "endpoint": observation.endpoint,
+        }),
+        None => serde_json::json!({
+            "running": false,
+            "endpoint": observation.endpoint,
+        }),
+    }
 }
 
 /// Render the observed runtime status to standard output in text or JSON format.
@@ -60,26 +55,17 @@ pub fn render_runtime_status(observation: &RuntimeObservation, json: bool, idle_
         println!("{}", runtime_document(observation));
         return;
     }
-    match observation.version.as_deref() {
-        Some(version) => println!(
-            "Service: {} -- version {} -- relay {} -- {}",
-            observation.path.display(),
-            version,
-            observation
-                .relay
-                .map_or_else(String::new, |relay| relay.to_string()),
-            if observation.running {
-                "running"
-            } else {
-                "not reachable"
-            }
+    match &observation.status {
+        Some(status) => println!(
+            "Service: {} -- version {} -- running",
+            observation.endpoint, status.service
         ),
         None if idle_is_ready => println!(
             "Service: ready on demand -- it starts when Chromium or an MCP client connects."
         ),
         None => println!(
-            "Service: not running (no readable endpoint at {})",
-            observation.path.display()
+            "Service: not running (nothing answers at {})",
+            observation.endpoint
         ),
     }
 }

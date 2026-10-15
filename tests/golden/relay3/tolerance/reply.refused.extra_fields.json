@@ -1,6 +1,0 @@
-{
-  "kind": "refused",
-  "code": "capacity",
-  "message": "Too many connections.",
-  "retry_after_ms": 1000
-}

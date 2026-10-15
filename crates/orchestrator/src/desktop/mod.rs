@@ -37,36 +37,36 @@ const SEARCH_QUERY_LIMIT: usize = 120;
 const POLICY_DOCUMENT_LIMIT: usize = 256 * 1024;
 /// Single channel the disposable workbench listens on for sequenced orchestrator changes.
 const CHANGE_EVENT: &str = "ghostlight://change";
-/// How long a `serve` start keeps asking for the service lease while another process holds it.
-const SERVE_LEASE_WAIT: Duration = Duration::from_secs(1);
-/// The status a `serve` start exits with when it never became discoverable.
+/// How long a `serve` start keeps asking for the service lock while another process holds it.
+const SERVE_LOCK_WAIT: Duration = Duration::from_secs(1);
+/// The status a `serve` start exits with when it never bound its endpoint.
 pub const DISCOVERY_STALLED_EXIT: i32 = 3;
 
 /// How a desktop process was asked to start.
 #[derive(Clone, Copy, Debug)]
 pub struct Startup {
-    /// How long to keep asking for the service lease while another process holds it.
-    pub lease_wait: Duration,
-    /// When discovery must be published by. A start that misses it stops by itself.
+    /// How long to keep asking for the service lock while another process holds it.
+    pub lock_wait: Duration,
+    /// When the endpoint must be bound by. A start that misses it stops by itself.
     pub discovery_deadline: Option<Instant>,
 }
 
 impl Startup {
-    /// A person asked for Ghostlight: take the lease or yield at once, and wait for nothing.
+    /// A person asked for Ghostlight: take the lock or yield at once, and wait for nothing.
     #[must_use]
     pub const fn interactive() -> Self {
         Self {
-            lease_wait: Duration::ZERO,
+            lock_wait: Duration::ZERO,
             discovery_deadline: None,
         }
     }
 
-    /// A connector asked for the service: wait briefly for the lease, and stop by itself if
-    /// discovery is not published within the discovery window of `process_start`.
+    /// An edge asked for the service: wait briefly for the lock, and stop by itself if the
+    /// endpoint is not bound within the discovery window of `process_start`.
     #[must_use]
     pub fn serve(process_start: Instant) -> Self {
         Self {
-            lease_wait: SERVE_LEASE_WAIT,
+            lock_wait: SERVE_LOCK_WAIT,
             discovery_deadline: Some(process_start + DISCOVERY_WINDOW),
         }
     }
@@ -126,7 +126,7 @@ pub fn run(startup: Startup) -> Result<()> {
 
     let host = Arc::new(ServiceHost::start_waiting(
         &ghostlight_relay::home::home()?,
-        startup.lease_wait,
+        startup.lock_wait,
     )?);
     if let Some(deadline) = startup.discovery_deadline {
         host.expect_discovery_by(deadline, || std::process::exit(DISCOVERY_STALLED_EXIT))?;

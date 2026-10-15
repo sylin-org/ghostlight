@@ -1,104 +1,84 @@
-//! In-process tests of the forwarding loop against a fake relay-3 service on loopback.
+//! In-process tests of the forwarding loop against a fake relay-4 service over connected pairs.
 
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use ghostlight_relay::frame::{self, FrameError};
-use ghostlight_relay::opening::{McpFrame, Opening, Reply, Stream};
+use ghostlight_relay::endpoint::pair;
+use ghostlight_relay::frame;
+use ghostlight_relay::protocol::{McpFrame, Opening, Program, Reply, Role, Templates};
 use ghostlight_relay::BACKOFF_FIRST;
+use ghostlight_relay::RELAY;
 use serde_json::{json, Value};
 
 use super::*;
 
-const TOKEN: &str = "fake-token";
 const TICK: Duration = Duration::from_millis(2);
 const PATIENCE: Duration = Duration::from_secs(5);
 
-/// Read the opening a connector sends to the fake service, within `patience`.
-fn read_opening(connection: &mut TcpStream, patience: Duration) -> Opening {
-    connection.set_read_timeout(Some(patience)).unwrap();
-    let opening = frame::read_frame(connection).unwrap().unwrap();
-    connection.set_read_timeout(None).unwrap();
-    opening
+/// The failure templates the golden accepted reply carries.
+fn golden_templates() -> Templates {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay4/reply.accepted.json");
+    let reply: Reply = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    reply.templates.expect("the golden reply carries templates")
 }
 
 /// One connection the fake service accepted.
 struct Accepted {
     opening: Opening,
-    writer: TcpStream,
+    writer: Connection,
     received: Arc<Mutex<Vec<String>>>,
 }
 
-/// A relay-3 service on loopback that the test switches on and off.
-#[derive(Default)]
+/// A relay-4 service the test switches on and off.
 struct FakeState {
-    port: u16,
     up: AtomicBool,
     start_brings_up: AtomicBool,
     /// When set, the next connection is accepted and then closed at once.
     drop_next: AtomicBool,
     starts: AtomicU32,
+    /// The templates the accepted reply carries.
+    templates: Mutex<Option<Templates>>,
     accepted: Mutex<Vec<Accepted>>,
 }
 
 impl FakeState {
-    fn listen(up: bool, start_brings_up: bool) -> Arc<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let state = Arc::new(Self {
-            port: listener.local_addr().unwrap().port(),
+    fn new(up: bool, start_brings_up: bool) -> Arc<Self> {
+        Arc::new(Self {
             up: AtomicBool::new(up),
             start_brings_up: AtomicBool::new(start_brings_up),
-            ..Self::default()
-        });
-        let weak = Arc::downgrade(&state);
-        thread::spawn(move || {
-            for connection in listener.incoming() {
-                let Some(state) = weak.upgrade() else {
-                    return;
-                };
-                let Ok(mut connection) = connection else {
-                    return;
-                };
-                let opening = read_opening(&mut connection, PATIENCE);
-                frame::write_frame(
-                    &mut connection,
-                    &Reply::Accepted {
-                        service_version: "2.0.0".to_owned(),
-                    },
-                )
-                .unwrap();
-                let received = Arc::new(Mutex::new(Vec::new()));
-                if state.drop_next.swap(false, Ordering::SeqCst) {
-                    let _ = connection.shutdown(Shutdown::Both);
-                    state.accepted.lock().unwrap().push(Accepted {
-                        opening,
-                        writer: connection,
-                        received,
-                    });
-                    continue;
-                }
-                let mut reader = connection.try_clone().unwrap();
-                let sink = Arc::clone(&received);
-                thread::spawn(move || {
-                    while let Ok(Some(frame)) = frame::read_frame::<McpFrame>(&mut reader) {
-                        if let McpFrame::Message { line } = frame {
-                            sink.lock().unwrap().push(line);
-                        }
+            drop_next: AtomicBool::new(false),
+            starts: AtomicU32::new(0),
+            templates: Mutex::new(Some(golden_templates())),
+            accepted: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Take the service end of a new connection: record the opening and the lines received.
+    fn serve(&self, connection: Connection, opening: Opening) {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        if self.drop_next.swap(false, Ordering::SeqCst) {
+            connection.shutdown();
+        } else {
+            let mut reader = connection.try_clone().unwrap();
+            let sink = Arc::clone(&received);
+            thread::spawn(move || {
+                while let Ok(Some(frame)) = frame::read_frame::<McpFrame>(&mut reader) {
+                    if let McpFrame::Message { line } = frame {
+                        sink.lock().unwrap().push(line);
                     }
-                });
-                state.accepted.lock().unwrap().push(Accepted {
-                    opening,
-                    writer: connection,
-                    received,
-                });
-            }
+                }
+            });
+        }
+        self.accepted.lock().unwrap().push(Accepted {
+            opening,
+            writer: connection,
+            received,
         });
-        state
     }
 
     fn connections(&self) -> usize {
@@ -130,7 +110,7 @@ impl FakeState {
     fn go_down(&self) {
         self.up.store(false, Ordering::SeqCst);
         for one in self.accepted.lock().unwrap().iter() {
-            let _ = one.writer.shutdown(Shutdown::Both);
+            one.writer.shutdown();
         }
     }
 }
@@ -139,16 +119,15 @@ impl FakeState {
 struct FakeService(Arc<FakeState>);
 
 impl Service for FakeService {
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError> {
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
         if !self.0.up.load(Ordering::SeqCst) {
             return Err(ConnectError::NoService);
         }
-        let mut socket = TcpStream::connect(("127.0.0.1", self.0.port))?;
-        frame::write_frame(&mut socket, &Opening::new(TOKEN.to_owned(), stream))?;
-        match frame::read_frame::<Reply>(&mut socket)? {
-            Some(reply) => Ok((socket, reply)),
-            None => Err(ConnectError::Frame(FrameError::Truncated)),
-        }
+        let (client, server) = pair()?;
+        let templates = self.0.templates.lock().unwrap().clone();
+        let reply = Reply::accepted("2.0.0".to_owned(), "instance_fake".to_owned(), templates);
+        self.0.serve(server, opening.clone());
+        Ok((client, reply))
     }
 
     fn start(&self) -> io::Result<()> {
@@ -216,20 +195,15 @@ struct Harness {
 
 fn no_log(_: LogEvent, _: &str) {}
 
-fn golden_templates() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay3/templates.json")
-}
-
 impl Harness {
-    fn start(up: bool, start_brings_up: bool, templates: PathBuf) -> Self {
-        let fake = FakeState::listen(up, start_brings_up);
+    fn start(up: bool, start_brings_up: bool) -> Self {
+        let fake = FakeState::new(up, start_brings_up);
         let clock = Arc::new(FakeClock(Mutex::new(Instant::now())));
         let (input, chunks) = mpsc::channel();
         let output = SharedOutput::default();
         let environment = Environment {
             service: Arc::new(FakeService(Arc::clone(&fake))),
             clock: Arc::clone(&clock) as Arc<dyn Clock>,
-            templates: Some(templates),
             log: no_log,
             poll: Some(TICK),
         };
@@ -252,7 +226,7 @@ impl Harness {
     }
 
     fn connected(up: bool) -> Self {
-        let harness = Self::start(up, true, golden_templates());
+        let harness = Self::start(up, true);
         harness.wait(|| harness.fake.connections() == 1);
         harness
     }
@@ -451,22 +425,23 @@ fn held_lines_flush_in_order_after_an_opening_that_resumes() {
     assert_eq!(harness.fake.received(1), held);
 
     let openings = harness.fake.openings();
-    let resume_of = |opening: &Opening| match &opening.stream {
-        Stream::Mcp {
-            channel, resume, ..
-        } => {
-            assert_eq!(channel, CHANNEL);
-            resume.clone()
-        }
-        other => panic!("not an mcp stream: {other:?}"),
-    };
-    assert_eq!(resume_of(&openings[0]), None);
-    assert_eq!(resume_of(&openings[1]), Some("resume-1".to_owned()));
+    for opening in &openings {
+        assert_eq!(opening.relay, RELAY);
+        assert_eq!(opening.role, Role::Mcp);
+        assert_eq!(opening.channel.as_deref(), Some(CHANNEL));
+        assert_eq!(opening.edge.program, Program::Edge);
+        assert_eq!(opening.edge.revision, RELAY);
+        assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
+    }
+    assert_eq!(openings[0].resume, None);
+    assert_eq!(openings[1].resume, Some("resume-1".to_owned()));
 }
 
 #[test]
 fn an_expired_request_is_answered_with_its_methods_template_or_the_default() {
-    let harness = Harness::start(false, false, golden_templates());
+    let harness = Harness::start(true, false);
+    harness.wait(|| harness.fake.connections() == 1);
+    harness.go_away(0);
     harness.send(&request(&json!(1), "tools/call"));
     harness.settle();
     harness.advance(Duration::from_secs(10));
@@ -503,8 +478,8 @@ fn an_expired_request_is_answered_with_its_methods_template_or_the_default() {
                 .is_some_and(|id| id.starts_with("settle-"))
         })
         .count();
-    assert_eq!(answers, 2, "held notifications expire silently");
-    assert_eq!(harness.fake.connections(), 0);
+    assert_eq!(answers, 3, "held notifications expire silently");
+    assert_eq!(harness.fake.connections(), 1);
 }
 
 #[test]
@@ -516,7 +491,7 @@ fn a_cut_off_request_is_answered_with_the_cut_off_template() {
     harness.fake.go_down();
     assert_eq!(
         harness.answer(&json!(1))["result"]["content"][0]["text"],
-        json!("Ghostlight restarted before this call finished. Try it again.")
+        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating.")
     );
     assert_eq!(
         harness.answer(&json!(2))["error"],
@@ -542,7 +517,7 @@ fn nothing_written_to_a_service_is_sent_again() {
 
 #[test]
 fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
-    let harness = Harness::start(false, true, golden_templates());
+    let harness = Harness::start(false, true);
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     harness.advance(BACKOFF_FIRST);
     harness.wait(|| harness.fake.connections() == 1);
@@ -606,7 +581,7 @@ fn a_held_request_left_by_a_service_that_died_mid_flush_still_starts_one() {
     {
         assert_eq!(
             answer["result"]["content"][0]["text"],
-            json!("Ghostlight restarted before this call finished. Try it again."),
+            json!("Ghostlight restarted before this call finished. It may have happened; check before repeating."),
             "a held request is cut off or delivered, never left to expire"
         );
     }
@@ -657,16 +632,28 @@ fn only_answers_to_outstanding_service_requests_reach_the_service() {
 }
 
 #[test]
-fn a_missing_template_file_answers_a_bare_internal_error() {
-    let missing = std::env::temp_dir().join(format!(
-        "ghostlight-mcp-connector-no-templates-{}.json",
-        std::process::id()
-    ));
-    let harness = Harness::start(true, true, missing);
-    harness.wait(|| harness.fake.connections() == 1);
+fn a_reply_without_templates_keeps_the_ones_already_held() {
+    let harness = Harness::connected(true);
+    *harness.fake.templates.lock().unwrap() = None;
+    harness.go_away(0);
     harness.send(&request(&json!(5), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
+    harness.settle();
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.advance(BACKOFF_FIRST);
+    harness.wait(|| harness.fake.received(1).len() == 1);
     harness.fake.go_down();
+    assert_eq!(
+        harness.answer(&json!(5))["result"]["content"][0]["text"],
+        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating.")
+    );
+}
+
+#[test]
+fn before_any_reply_a_failed_request_is_answered_the_bare_internal_error() {
+    let harness = Harness::start(false, false);
+    harness.send(&request(&json!(5), "tools/call"));
+    harness.settle();
+    harness.advance(Duration::from_secs(60));
     assert_eq!(
         harness.answer(&json!(5)),
         json!({"jsonrpc": "2.0", "id": 5, "error": {"code": -32603, "message": ""}})
@@ -675,11 +662,11 @@ fn a_missing_template_file_answers_a_bare_internal_error() {
 
 #[test]
 fn closing_stdin_answers_held_requests_and_ends() {
-    let mut harness = Harness::start(false, false, golden_templates());
+    let mut harness = Harness::start(false, false);
     harness.send(&request(&json!(9), "tools/call"));
     harness.settle();
     harness.close().unwrap();
-    assert_eq!(harness.answer(&json!(9))["result"]["isError"], json!(true));
+    assert_eq!(harness.answer(&json!(9))["error"]["code"], json!(-32603));
 }
 
 #[test]

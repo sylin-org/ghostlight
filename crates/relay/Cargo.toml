@@ -1,20 +1,17 @@
 [package]
 name = "ghostlight-relay"
 publish = false
-# The relay revision, not the product version. Connectors never read CARGO_PKG_VERSION.
-version = "3.0.0"
+# The relay revision, not the product version.
+version = "4.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Frozen relay protocol 3 contracts shared by the Ghostlight connectors and service"
+description = "Frozen relay protocol 4 contracts shared by the Ghostlight edges and service"
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-ghostlight-win-peer = { path = "../win-peer" }
 
 # This crate does not inherit the workspace lints table: Cargo applies inherited lints as
 # command-line flags, and an inherited forbid cannot be lifted by one module. The frozen relay

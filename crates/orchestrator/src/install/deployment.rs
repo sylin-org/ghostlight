@@ -16,10 +16,12 @@
 //!    before anything old is stopped, so a browser or client that relaunches a connector the
 //!    moment the old one stops starts the new one;
 //! 4. stops the 1.x images and looks again for a few rounds for any that respawned;
-//! 5. asks the running service to quit and stops that exact image if it has not exited, archives
-//!    the 1.x audit log, then removes the 1.x lifecycle files, the installation record last;
-//! 6. starts `bin/ghostlight serve` and writes `install.json` only once the new service
-//!    publishes.
+//! 5. asks the running service to quit (a control `quit` for replacement) and waits for its
+//!    service lock to be free, and stops that exact image if it has not exited or is an earlier
+//!    development build that cannot be asked; archives the 1.x audit log, then removes the 1.x
+//!    lifecycle files, the installation record last;
+//! 6. starts `bin/ghostlight serve` and writes `install.json` only once a service answers a
+//!    control status with an instance other than the one that was replaced.
 //!
 //! There is no rollback: a service that does not start is reported, `install.json` stays as it
 //! was, and the next launch installs again. `--plan` prints what would happen and changes
@@ -33,12 +35,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use ghostlight_relay::home::{
-    LEASE_FILE_NAME, RUNTIME_FILE_NAME, SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE,
-};
-use ghostlight_relay::opening::{ControlOp, Reply, Stream};
+use ghostlight_relay::home::{SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE};
 use ghostlight_relay::private;
-use ghostlight_relay::runtime::RuntimeFile;
+use ghostlight_relay::protocol::{Control, QuitReason};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -49,6 +48,8 @@ use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, InstallRecord, PayloadRefused, Standing};
 use super::swap;
+use crate::cli::client;
+use crate::service::lock::ServiceLock;
 
 /// The connectors one package carries beside the service.
 const CONNECTORS: [&str; 2] = [
@@ -57,7 +58,7 @@ const CONNECTORS: [&str; 2] = [
 ];
 
 /// How long an install waits for another install to finish. An install can itself spend the
-/// quit wait and the publish wait.
+/// quit wait and the ready wait.
 const INSTALL_LOCK_WAIT: Duration = Duration::from_secs(60);
 
 /// Pause between attempts to take the install lock, between checks of a quitting service and
@@ -71,11 +72,15 @@ const LEGACY_RESPAWN_ROUNDS: u32 = 3;
 /// How long the running service has to finish in-flight work and exit after `quit`.
 const QUIT_WAIT: Duration = Duration::from_secs(10);
 
-/// How long a started service has to publish its runtime file.
-const PUBLISH_WAIT: Duration = Duration::from_secs(30);
+/// How long a started service has to answer a control status.
+const READY_WAIT: Duration = Duration::from_secs(30);
 
-/// Pause between checks for a published runtime file.
-const PUBLISH_POLL: Duration = Duration::from_millis(100);
+/// Pause between asks for a control status.
+const READY_POLL: Duration = Duration::from_millis(100);
+
+/// The relay revision of the development builds that preceded relay 4. They hold no service lock
+/// and cannot be asked to quit, so the installer stops their exact images instead.
+const EARLIER_DEVELOPMENT_RELAY: &str = "3";
 
 /// What an install puts where.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -136,8 +141,11 @@ impl Build {
 /// Starting and stopping the service. The installer never starts or stops a process any other
 /// way, so tests drive the whole install with a fake.
 pub trait ProcessControl {
-    /// Ask the service of `layout`'s home to quit and wait up to 10 s for it to exit. Returns
-    /// whether no service of that home runs afterwards.
+    /// The instance of the service of `layout`'s home that answers a control status, when one
+    /// does.
+    fn instance(&self, layout: &Layout) -> Option<String>;
+    /// Ask the service of `layout`'s home to quit for replacement and wait up to 10 s for its
+    /// service lock to be free. Returns whether no service of that home runs afterwards.
     fn quit(&self, layout: &Layout) -> bool;
     /// Stop every process running one of `images` and wait for it to exit.
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
@@ -145,8 +153,9 @@ pub trait ProcessControl {
     fn is_running(&self, images: &[PathBuf]) -> bool;
     /// Start `bin/ghostlight serve` in `layout`'s home, detached, without waiting for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
-    /// Wait up to 30 s for a service to publish a runtime file whose token is not `stale`.
-    fn wait_published(&self, layout: &Layout, stale: Option<&str>) -> bool;
+    /// Wait up to 30 s for the service of `layout`'s home to answer an accepted control status
+    /// whose instance is not `previous`.
+    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> bool;
 }
 
 /// The real processes of this user.
@@ -154,29 +163,41 @@ pub trait ProcessControl {
 pub struct SystemProcessControl;
 
 impl ProcessControl for SystemProcessControl {
+    fn instance(&self, layout: &Layout) -> Option<String> {
+        client::status_at(layout.home())
+            .ok()
+            .map(|status| status.instance)
+    }
+
     fn quit(&self, layout: &Layout) -> bool {
-        let lease = layout.home().join(LEASE_FILE_NAME);
-        if lease_free(&lease) {
-            return true;
+        let earlier = InstallRecord::read(&layout.install_record())
+            .ok()
+            .flatten()
+            .is_some_and(|record| record.relay_revision == EARLIER_DEVELOPMENT_RELAY);
+        if earlier {
+            return false;
         }
-        if let Ok((mut stream, Reply::Accepted { .. })) = ghostlight_relay::client::connect(
-            Stream::Control {
-                op: ControlOp::Quit,
-            },
-            ghostlight_relay::client::REPLY_DEADLINE,
-        ) {
-            // The answer only says the service heard; the lease says when it has gone.
-            let _ = stream.set_read_timeout(Some(ghostlight_relay::client::REPLY_DEADLINE));
-            let _ = ghostlight_relay::frame::read_frame_raw(&mut stream);
+        let lock = layout.service_lock();
+        if !ServiceLock::is_free(&lock) {
+            // The answer only says the service heard; the lock says when it has gone.
+            let _ = client::control_at(
+                layout.home(),
+                Control::Quit {
+                    reason: QuitReason::Replace,
+                },
+            );
         }
+        let images = running_images(layout);
         let deadline = Instant::now() + QUIT_WAIT;
-        while Instant::now() < deadline {
-            if lease_free(&lease) {
+        loop {
+            if ServiceLock::is_free(&lock) && !self.is_running(&images) {
                 return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
             }
             std::thread::sleep(POLL);
         }
-        lease_free(&lease)
     }
 
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
@@ -192,16 +213,18 @@ impl ProcessControl for SystemProcessControl {
             .map(|_| ())
     }
 
-    fn wait_published(&self, layout: &Layout, stale: Option<&str>) -> bool {
-        let deadline = Instant::now() + PUBLISH_WAIT;
+    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> bool {
+        let deadline = Instant::now() + READY_WAIT;
         loop {
-            if fresh_runtime_token(layout, stale).is_some() {
+            let answered = client::status_at(layout.home())
+                .is_ok_and(|status| Some(status.instance.as_str()) != previous);
+            if answered {
                 return true;
             }
             if Instant::now() >= deadline {
                 return false;
             }
-            std::thread::sleep(PUBLISH_POLL);
+            std::thread::sleep(READY_POLL);
         }
     }
 }
@@ -217,28 +240,6 @@ fn other_than_running_installer(images: &[PathBuf]) -> Vec<PathBuf> {
         })
         .cloned()
         .collect()
-}
-
-/// Whether nothing holds the service lease at `path`. Taking it for a moment is the test; it is
-/// released at once.
-fn lease_free(path: &Path) -> bool {
-    matches!(
-        crate::intake::opening::Lease::try_acquire(path),
-        Ok(Some(_))
-    )
-}
-
-/// The token of the runtime file in `layout`'s home, when there is one.
-fn runtime_token(layout: &Layout) -> Option<String> {
-    RuntimeFile::read(&layout.home().join(RUNTIME_FILE_NAME))
-        .ok()
-        .flatten()
-        .map(|runtime| runtime.token)
-}
-
-/// The runtime token in `layout`'s home when it is not `stale`.
-fn fresh_runtime_token(layout: &Layout, stale: Option<&str>) -> Option<String> {
-    runtime_token(layout).filter(|token| Some(token.as_str()) != stale)
 }
 
 /// One executable placed by a rename-swap.
@@ -281,7 +282,7 @@ pub struct InstallPlan {
     pub marker: Option<MarkerChange>,
     /// Whether the running service is replaced by a new `serve`.
     pub restart: bool,
-    /// The record written once the new service publishes.
+    /// The record written once the new service answers.
     pub record: Option<InstallRecord>,
     /// Images stopped: the old installation's, and the running service's if it does not quit.
     pub processes_to_stop: Vec<PathBuf>,
@@ -294,7 +295,7 @@ pub struct InstallPlan {
 pub struct Outcome {
     /// The plan that was carried out.
     pub plan: InstallPlan,
-    /// Whether the new service published; `None` when no service was started.
+    /// Whether the new service answered; `None` when no service was started.
     pub service_started: Option<bool>,
     /// What the reconcile changed; `None` when nothing was installed.
     pub registrations: Option<ReconcileReport>,
@@ -416,7 +417,7 @@ pub fn install_carrier(layout: &Layout) -> anyhow::Result<()> {
     }
 }
 
-/// The new service did not publish in time.
+/// The new service did not answer in time.
 #[derive(Debug, Error)]
 #[error(
     "The Ghostlight service in {0} did not start within 30 s. The installation record was not \
@@ -563,7 +564,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         .reconcile(layout, &context.build.version);
     stop_legacy(context.control, &legacy_images(&plan))?;
     let service_started = if plan.restart {
-        let stale = runtime_token(layout);
+        let replaced = context.control.instance(layout);
         if !context.control.quit(layout) {
             context.control.stop_image(&running_images(layout))?;
         }
@@ -575,7 +576,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         }
         Some(
             context.control.start_serve(layout).is_ok()
-                && context.control.wait_published(layout, stale.as_deref()),
+                && context.control.wait_ready(layout, replaced.as_deref()),
         )
     } else {
         None
@@ -758,12 +759,16 @@ mod tests {
     use super::super::scratch::Scratch;
     use super::super::HarnessRegistry;
     use super::*;
+    use crate::intake::listener::{self, control};
+    use crate::intake::opening::read_opening;
+    use ghostlight_relay::endpoint::Listener;
+    use ghostlight_relay::protocol::{self, Reply, Role};
 
     /// Version of the payload under test.
     const VERSION: &str = "2.1.0";
 
     /// Relay revision of the payload under test.
-    const RELAY: &str = "3";
+    const RELAY: &str = "4";
 
     /// What the fake process control was asked to do.
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -791,7 +796,11 @@ mod tests {
     /// Process control that records every request and starts nothing.
     struct FakeControl {
         quits: bool,
-        publishes: bool,
+        answers: bool,
+        /// The instance of the running service the installer replaces, when there is one.
+        instance: Option<String>,
+        /// What each wait for the new service was told to treat as stale.
+        waited_for: RefCell<Vec<Option<String>>>,
         /// How many looks for a respawned 1.x program find one.
         respawns: Cell<u32>,
         /// The manifest, the connector it must name and the 1.x record to look at on every
@@ -811,7 +820,9 @@ mod tests {
         fn new() -> Self {
             Self {
                 quits: true,
-                publishes: true,
+                answers: true,
+                instance: None,
+                waited_for: RefCell::new(Vec::new()),
                 respawns: Cell::new(0),
                 witness: None,
                 policy_witness: None,
@@ -886,9 +897,16 @@ mod tests {
             Ok(())
         }
 
-        fn wait_published(&self, _layout: &Layout, _stale: Option<&str>) -> bool {
+        fn instance(&self, _layout: &Layout) -> Option<String> {
+            self.instance.clone()
+        }
+
+        fn wait_ready(&self, _layout: &Layout, previous: Option<&str>) -> bool {
             self.note(Call::Wait);
-            self.publishes
+            self.waited_for
+                .borrow_mut()
+                .push(previous.map(str::to_owned));
+            self.answers
         }
     }
 
@@ -1056,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_install_places_everything_and_records_it_once_the_service_publishes() {
+    fn a_fresh_install_places_everything_and_records_it_once_the_service_answers() {
         let fixture = Fixture::new();
         let control = FakeControl::new();
         let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
@@ -1679,10 +1697,10 @@ mod tests {
     }
 
     #[test]
-    fn a_service_that_never_publishes_leaves_the_record_unwritten() {
+    fn a_service_that_never_answers_leaves_the_record_unwritten() {
         let fixture = Fixture::new();
         let mut control = FakeControl::new();
-        control.publishes = false;
+        control.answers = false;
         let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
         assert_eq!(outcome.service_started, Some(false));
         assert!(fixture.layout.service_executable().is_file());
@@ -1740,5 +1758,131 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         drop(held);
         waiter.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn the_new_service_is_waited_for_by_the_instance_it_replaces() {
+        let fixture = Fixture::new();
+        let mut control = FakeControl::new();
+        control.instance = Some("instance_old".to_owned());
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(
+            control.waited_for.borrow().as_slice(),
+            [Some("instance_old".to_owned())]
+        );
+
+        let fresh = Fixture::new();
+        let control = FakeControl::new();
+        fresh.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(control.waited_for.borrow().as_slice(), [None]);
+    }
+
+    /// A stand-in for the running service: it answers `answers` control openings on the home of
+    /// `layout`, handing each opening to `seen`, and returns once they are all answered.
+    fn fake_service(
+        layout: &Layout,
+        answers: usize,
+        seen: impl Fn(&protocol::Opening) + Send + 'static,
+    ) -> std::thread::JoinHandle<()> {
+        fs::create_dir_all(layout.home()).unwrap();
+        let listener = Listener::bind_first(layout.home()).unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..answers {
+                let connection = listener.accept().unwrap();
+                let opening = read_opening(&connection, Duration::from_secs(5)).unwrap();
+                seen(&opening);
+                let reply = Reply::accepted("2.0.0".to_owned(), "instance_new".to_owned(), None);
+                listener::accept(&connection, &reply).unwrap();
+                listener::answer_control(
+                    &connection,
+                    &control::Status {
+                        service: "2.0.0".to_owned(),
+                        instance: "instance_new".to_owned(),
+                        pid: std::process::id(),
+                    },
+                )
+                .unwrap();
+            }
+        })
+    }
+
+    #[test]
+    fn the_installer_asks_the_service_to_quit_for_replacement_and_waits_for_its_lock() {
+        let fixture = Fixture::new();
+        let layout = &fixture.layout;
+        let lock = ServiceLock::try_acquire(&layout.service_lock())
+            .unwrap()
+            .expect("the service lock");
+        let held = std::sync::Mutex::new(Some(lock));
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = std::sync::Arc::clone(&asked);
+        let delay = Duration::from_millis(300);
+        let service = fake_service(layout, 1, move |opening| {
+            record.lock().unwrap().push((opening.role, opening.control));
+            // The service exits a moment after it hears the quit: its lock goes with it.
+            let lock = held.lock().unwrap().take();
+            let _ = std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                drop(lock);
+            });
+        });
+        let started = Instant::now();
+        assert!(SystemProcessControl.quit(layout));
+        assert!(
+            started.elapsed() >= delay,
+            "the installer waited for the lock, not for the answer"
+        );
+        service.join().unwrap();
+        assert_eq!(
+            asked.lock().unwrap().as_slice(),
+            [(
+                Role::Control,
+                Some(Control::Quit {
+                    reason: QuitReason::Replace
+                })
+            )]
+        );
+    }
+
+    #[test]
+    fn a_home_with_no_running_service_has_nothing_to_wait_for() {
+        let fixture = Fixture::new();
+        assert!(SystemProcessControl.quit(&fixture.layout));
+    }
+
+    #[test]
+    fn an_earlier_development_build_cannot_be_asked_to_quit() {
+        let fixture = Fixture::new();
+        let record = |relay: &str| InstallRecord {
+            service_version: VERSION.to_owned(),
+            relay_revision: relay.to_owned(),
+            service_sha256: "0".repeat(64),
+        };
+        record(EARLIER_DEVELOPMENT_RELAY)
+            .write(&fixture.layout.install_record())
+            .unwrap();
+        assert!(
+            !SystemProcessControl.quit(&fixture.layout),
+            "the caller is told to stop the image"
+        );
+        record(RELAY)
+            .write(&fixture.layout.install_record())
+            .unwrap();
+        assert!(SystemProcessControl.quit(&fixture.layout));
+    }
+
+    #[test]
+    fn the_new_service_is_ready_when_an_instance_other_than_the_old_one_answers() {
+        let fixture = Fixture::new();
+        let layout = &fixture.layout;
+        let service = fake_service(layout, 2, |opening| {
+            assert_eq!(opening.control, Some(Control::Status));
+        });
+        assert_eq!(
+            SystemProcessControl.instance(layout).as_deref(),
+            Some("instance_new")
+        );
+        assert!(SystemProcessControl.wait_ready(layout, Some("instance_old")));
+        service.join().unwrap();
     }
 }

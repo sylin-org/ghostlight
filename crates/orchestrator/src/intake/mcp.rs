@@ -11,18 +11,17 @@
 //! and next steps, and tool definitions carry no `outputSchema` (ADR-0197 Decision 17). A session
 //! negotiated at a revision before 2025-06-18 cannot read `structuredContent`, so its text block
 //! also carries the same lean JSON after `Result: ` (ADR-0198 Decision 24). [`ResumeState`] is what lets a session continue across a service restart
-//! (Decision 12), and [`failure_templates`] holds the answers a connector gives when it cannot
+//! (Decision 12), and [`failure_templates`] holds the answers an edge gives when it cannot
 //! reach the service (Decision 2).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::intake::session::{
     ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use ghostlight_relay::templates::DEFAULT_TEMPLATE;
-use ghostlight_relay::RELAY;
+use ghostlight_relay::protocol::{Templates, DEFAULT_TEMPLATE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -668,21 +667,21 @@ pub fn negotiate(requested: &str) -> &'static str {
         .unwrap_or(LATEST_REVISION)
 }
 
-/// The failure templates a connector answers with when it cannot reach the service.
+/// The failure templates an edge answers with when it cannot reach the service.
 ///
-/// Shaped as relay protocol 3's `relay-templates.json`: for each failure, a JSON-RPC response for
-/// `tools/call` and a `default` for every other request, each with a null id the connector fills.
+/// For each failure, a JSON-RPC response for `tools/call` and a `default` for every other request,
+/// each with a null id the edge fills. The service hands them to every `mcp` stream in its
+/// accepted reply.
 #[must_use]
-pub fn failure_templates() -> Value {
-    json!({
-        "relay": RELAY,
-        "cut_off": failure_entries(ConnectorFailure::CutOff),
-        "expired": failure_entries(ConnectorFailure::Expired),
-    })
+pub fn failure_templates() -> Templates {
+    Templates {
+        cut_off: failure_entries(ConnectorFailure::CutOff),
+        expired: failure_entries(ConnectorFailure::Expired),
+    }
 }
 
-fn failure_entries(failure: ConnectorFailure) -> Value {
-    let mut entries = Map::new();
+fn failure_entries(failure: ConnectorFailure) -> BTreeMap<String, Value> {
+    let mut entries = BTreeMap::new();
     entries.insert(
         method::TOOLS_CALL.into(),
         success(Value::Null, failure_call_result(failure)),
@@ -695,7 +694,7 @@ fn failure_entries(failure: ConnectorFailure) -> Value {
             "error": {"code": code::INTERNAL_ERROR, "message": failure.request_message()}
         }),
     );
-    Value::Object(entries)
+    entries
 }
 
 fn failure_call_result(failure: ConnectorFailure) -> Value {

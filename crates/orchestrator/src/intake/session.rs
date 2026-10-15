@@ -2,7 +2,7 @@
 //!
 //! An intake turns what its client sends into [`ServiceRequest`]s and renders the queue's
 //! [`ServiceResponse`]s back to the client. These types never cross a process boundary; the wire
-//! between processes is relay protocol 3. Only what a client or a durable record sees is
+//! between processes is relay protocol 4. Only what a client or a durable record sees is
 //! serializable: tool definitions, the intake channel and the session marker.
 
 use serde::{Deserialize, Serialize};
@@ -253,16 +253,12 @@ mod tests {
     #[test]
     fn the_cli_session_marker_reads_as_the_relay_opening_fixture_writes_it() {
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/golden/relay3/opening.cli.json");
+            .join("../../tests/golden/relay4/opening.cli.json");
         let opening: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
-        let marker: SessionMarker =
-            serde_json::from_value(opening["stream"]["session"].clone()).unwrap();
+        let marker: SessionMarker = serde_json::from_value(opening["session"].clone()).unwrap();
         assert_eq!(marker.key(), "process:18244:1790000123");
         assert_eq!(marker.name(), Some("ghostlight"));
-        assert_eq!(
-            serde_json::to_value(&marker).unwrap(),
-            opening["stream"]["session"]
-        );
+        assert_eq!(serde_json::to_value(&marker).unwrap(), opening["session"]);
     }
 }

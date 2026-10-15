@@ -191,7 +191,7 @@ cleanly rather than racing the installer.
 ## Writing an integration rather than a script
 
 If you are building a program rather than a shell script, it can speak the local service bridge
-directly instead of shelling out: authenticated loopback TCP, line-delimited JSON,
-`Hello` / `Catalog` / `Invoke` / `Cancel`, discovered through the runtime file. That is the same
-contract `ghostlight call` uses, and it is the caller an organization can hold to a signature (see
+directly instead of shelling out: the per-user relay endpoint, an `mcp` opening on the `cli`
+channel, then MCP lines, as specified in [relay protocol 4](../design/relay-protocol-4.md). That is
+the same contract `ghostlight call` uses, and it is the caller an organization can hold to a signature (see
 [ADR-0105](../adr/0105-scripted-intake-channels.md)).

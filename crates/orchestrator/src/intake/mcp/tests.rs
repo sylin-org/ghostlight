@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::intake::session::{
     ServiceContent, ServiceRequest, ServiceResponse, ToolAnnotations, ToolDefinition,
 };
-use ghostlight_relay::templates::{Failure, FailureTemplates};
+use ghostlight_relay::protocol::{Failure, Templates};
 use serde_json::{json, Value};
 
 use super::{
@@ -391,9 +392,14 @@ fn a_service_result_loses_its_defaults_in_structured_content() {
     );
 }
 
+/// The failure templates as the JSON an edge receives.
+fn templates_json() -> Value {
+    serde_json::to_value(failure_templates()).unwrap()
+}
+
 #[test]
 fn every_failure_template_says_history_was_not_confirmed_and_is_already_lean() {
-    let templates = failure_templates();
+    let templates = templates_json();
     for failure in ["cut_off", "expired"] {
         let envelope = &templates[failure]["tools/call"]["result"]["structuredContent"];
         assert_eq!(envelope["history_storage"], "unconfirmed");
@@ -469,8 +475,7 @@ fn a_second_initialize_is_refused() {
 
 #[test]
 fn failure_templates_are_json_rpc_responses_with_null_ids_and_ascii_text() {
-    let templates = failure_templates();
-    assert_eq!(templates["relay"], 3);
+    let templates = templates_json();
     for failure in ["cut_off", "expired"] {
         let call = &templates[failure]["tools/call"];
         assert_eq!(call["jsonrpc"], "2.0");
@@ -497,22 +502,11 @@ fn failure_templates_are_json_rpc_responses_with_null_ids_and_ascii_text() {
 #[test]
 fn failure_templates_have_the_relay_fixture_shape() {
     let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay3/templates.json");
-    let text = std::fs::read_to_string(fixture).expect("relay 3 templates fixture");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay4/reply.accepted.json");
+    let text = std::fs::read_to_string(fixture).expect("relay 4 accepted reply fixture");
     let fixture: Value = serde_json::from_str(&text).unwrap();
-    let templates = failure_templates();
-    assert_eq!(templates["relay"], fixture["relay"]);
-    for failure in ["cut_off", "expired"] {
-        let keys = |value: &Value| {
-            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
-            keys.sort();
-            keys
-        };
-        assert_eq!(keys(&templates[failure]), keys(&fixture[failure]));
-    }
-    let ours: FailureTemplates = serde_json::from_value(templates).unwrap();
-    let pinned: FailureTemplates = serde_json::from_value(fixture).unwrap();
-    assert_eq!(ours.relay, pinned.relay);
+    let pinned: Templates = serde_json::from_value(fixture["templates"].clone()).unwrap();
+    let ours = failure_templates();
     for failure in [Failure::CutOff, Failure::Expired] {
         for method in ["tools/call", "tools/list"] {
             let ours = ours.template(failure, method).expect("a template");
@@ -521,6 +515,11 @@ fn failure_templates_have_the_relay_fixture_shape() {
             assert_eq!(ours["error"]["code"], pinned["error"]["code"]);
         }
     }
+    let keys = |templates: &Templates| {
+        let names = |entries: &BTreeMap<String, Value>| entries.keys().cloned().collect::<Vec<_>>();
+        (names(&templates.cut_off), names(&templates.expired))
+    };
+    assert_eq!(keys(&ours), keys(&pinned));
 }
 
 #[test]
@@ -574,14 +573,12 @@ fn a_session_before_initialize_has_no_resume_state() {
         .is_none());
 }
 
+/// A resume token an earlier build handed out. A published token keeps reading.
+const EARLIER_RESUME_TOKEN: &str = "rs1.eyJyZXZpc2lvbiI6IjIwMjUtMDYtMTgifQ";
+
 #[test]
-fn the_relay_fixture_resume_token_decodes() {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay3/mcp.resume.json");
-    let text = std::fs::read_to_string(fixture).expect("relay 3 resume fixture");
-    let fixture: Value = serde_json::from_str(&text).unwrap();
-    let token = fixture["token"].as_str().expect("fixture token");
-    let state = ResumeState::decode(token).expect("fixture token decodes");
+fn a_resume_token_an_earlier_build_handed_out_decodes() {
+    let state = ResumeState::decode(EARLIER_RESUME_TOKEN).expect("the token decodes");
     assert_eq!(state.revision, "2025-06-18");
     let session = McpSession::resumed(state);
     assert!(session.is_initialized());

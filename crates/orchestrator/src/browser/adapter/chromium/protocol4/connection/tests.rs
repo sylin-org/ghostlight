@@ -1,7 +1,6 @@
 //! Protocol-4 attachment, routing and liveness against a scripted extension.
 
 use std::fmt::Write as _;
-use std::net::TcpListener;
 use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -46,9 +45,9 @@ fn quiet() -> Script {
 
 /// Connect a fake extension with `hello` and let the port attach it.
 fn attach(port: &RelayBrowserPort, hello: &Value) -> (FakeExtension, Result<(), BrowserError>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let fake = FakeExtension::connect(listener.local_addr().unwrap(), hello, quiet());
-    let attached = port.attach(listener.accept().unwrap().0);
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
+    let fake = FakeExtension::connect(extension, hello, quiet());
+    let attached = port.attach(service);
     (fake, attached)
 }
 

@@ -5,7 +5,6 @@
 //! extensions, because what they prove lives in the port: a connection that left moments ago,
 //! and a silent connection that answers again.
 
-use std::net::TcpListener;
 use std::thread;
 use std::time::Instant;
 
@@ -22,15 +21,15 @@ const RELAY_BROWSER: &str = "browser_relay";
 
 /// Attach one scripted extension that lists no tabs, announcing itself attended when asked.
 fn attach(port: &RelayBrowserPort, attended: bool) -> FakeExtension {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
     let mut hello = FakeExtension::hello(RELAY_BROWSER);
     hello["attended"] = json!(attended);
     let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
+        extension,
         &hello,
         Box::new(|correlation, _| Reply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))),
     );
-    port.attach(listener.accept().unwrap().0).unwrap();
+    port.attach(service).unwrap();
     fake
 }
 

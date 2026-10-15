@@ -5,8 +5,6 @@
 //! that provably changed nothing is a plain failure, and one that may have changed the page is an
 //! unknown effect.
 
-use std::net::TcpListener;
-
 use serde_json::Value;
 
 use super::*;
@@ -161,9 +159,9 @@ fn opened_audited(
             source: String::new(),
         }),
     ));
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
     let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
+        extension,
         &FakeExtension::hello(BROWSER),
         Box::new(move |correlation, primitive| {
             Reply::Now(
@@ -171,7 +169,7 @@ fn opened_audited(
             )
         }),
     );
-    port.attach(listener.accept().unwrap().0).unwrap();
+    port.attach(service).unwrap();
     let workspaces = WorkspaceStore::default();
     let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
     let mut executor = ApplicationExecutor::new(

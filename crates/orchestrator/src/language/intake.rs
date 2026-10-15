@@ -19,9 +19,7 @@ pub const SHUTTING_DOWN_MESSAGE: &str =
 /// Why the service refused a relay opening, so the peer can tell the person.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpeningRefusal {
-    /// The token did not match this service.
-    Authentication,
-    /// The relay revision, stream kind or control operation is not one this service speaks.
+    /// The relay revision, role or control operation is not one this service speaks.
     Unsupported,
     /// The opening could not be read.
     Malformed,
@@ -36,7 +34,6 @@ impl OpeningRefusal {
     #[must_use]
     pub fn message(self) -> String {
         match self {
-            Self::Authentication => "The token does not match this service.".into(),
             Self::Unsupported => {
                 "This Ghostlight service does not speak what the connection asked for. Update Ghostlight on this computer."
                     .into()
@@ -193,7 +190,6 @@ mod tests {
         use super::OpeningRefusal;
 
         for refusal in [
-            OpeningRefusal::Authentication,
             OpeningRefusal::Unsupported,
             OpeningRefusal::Malformed,
             OpeningRefusal::Capacity,

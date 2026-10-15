@@ -18,23 +18,24 @@
 //! `docs/design/relay-protocol-4.md`.
 
 use std::io;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::endpoint::{ConnectError, Connection};
+use crate::endpoint::{self, ConnectError, Connection};
 use crate::frame::{self, FrameError};
+use crate::RELAY;
 
 mod templates;
 
 #[cfg(test)]
 mod tests;
 
-pub use templates::{bare_error, fill, Failure, Templates, DEFAULT_TEMPLATE, INTERNAL_ERROR_CODE};
-
-/// The relay revision this module speaks. Carried in every opening.
-pub const REVISION: u16 = 4;
+pub use templates::{
+    bare_error, failure_response, fill, Failure, Templates, DEFAULT_TEMPLATE, INTERNAL_ERROR_CODE,
+};
 
 /// The fixed start of the goodbye frame a service writes on a browser stream.
 const GOODBYE_PREFIX: &str = r#"{"goodbye":""#;
@@ -198,7 +199,7 @@ impl Edge {
     pub fn new(program: Program, build: String) -> Self {
         Self {
             program,
-            revision: REVISION,
+            revision: RELAY,
             build,
         }
     }
@@ -259,7 +260,7 @@ impl Opening {
     #[must_use]
     pub fn new(role: Role, edge: Edge) -> Self {
         Self {
-            relay: REVISION,
+            relay: RELAY,
             role,
             edge,
             reason: None,
@@ -315,14 +316,14 @@ pub struct Reply {
 }
 
 impl Reply {
-    /// An accepted reply.
+    /// An accepted reply. Only an `mcp` stream's reply carries failure templates.
     #[must_use]
-    pub fn accepted(service: String, instance: String, templates: Templates) -> Self {
+    pub fn accepted(service: String, instance: String, templates: Option<Templates>) -> Self {
         Self {
             accepted: true,
             service: Some(service),
             instance: Some(instance),
-            templates: Some(templates),
+            templates,
             code: None,
             say: None,
         }
@@ -400,6 +401,20 @@ pub fn goodbye_in(frame: &[u8]) -> Option<GoodbyeReason> {
     }
     let name = std::str::from_utf8(&rest[..end]).ok()?;
     Some(GoodbyeReason::parse(name))
+}
+
+/// Connect to the service of `home` and open it with `opening`, all before `deadline`.
+///
+/// [`endpoint::connect`] checks that the server runs as this user before the opening is sent. A
+/// refused reply is returned like any other; only the caller knows what to do about it.
+pub fn connect(
+    home: &Path,
+    opening: &Opening,
+    deadline: Instant,
+) -> Result<(Connection, Reply), ConnectError> {
+    let connection = endpoint::connect(home, deadline)?;
+    let reply = open(&connection, opening, deadline)?;
+    Ok((connection, reply))
 }
 
 /// Write `opening` and read the service's reply, all before `deadline`.

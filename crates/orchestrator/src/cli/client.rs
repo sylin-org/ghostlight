@@ -1,16 +1,21 @@
-//! The command line as a relay protocol 3 peer of the service.
+//! The command line as a relay protocol 4 peer of the service.
 //!
 //! `ghostlight call` is an MCP client like any other (ADR-0197 Decision 17): it opens an `mcp`
 //! stream on the `cli` channel, names the process that owns its session, initializes, and then
-//! lists or calls tools. `status`, `doctor` and `open` use `control` streams, which read readiness
-//! or bring the workbench forward without opening a session. Nothing here starts a service.
+//! lists or calls tools. `status`, `doctor` and `open` use `control` streams, which read the
+//! service's state or bring the workbench forward without opening a session. Nothing here starts
+//! a service.
 
-use std::net::TcpStream;
+use std::path::Path;
+use std::time::Instant;
 
 use crate::intake::session::SessionMarker;
-use ghostlight_relay::client::{self, ConnectError, REPLY_DEADLINE};
+use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame::{self, FrameError};
-use ghostlight_relay::opening::{ControlOp, ControlResult, McpFrame, Reply, Stream};
+use ghostlight_relay::protocol::{
+    self, Control, ControlResult, Edge, McpFrame, Opening, Program, Role,
+};
+use ghostlight_relay::{home, OPENING_DEADLINE};
 use serde_json::{json, Value};
 use thiserror::Error;
 
@@ -56,12 +61,41 @@ impl From<FrameError> for ClientError {
     }
 }
 
-/// Open a stream, insisting that the service accepts it.
-fn open(stream: Stream) -> Result<TcpStream, ClientError> {
-    match client::connect(stream, REPLY_DEADLINE)? {
-        (socket, Reply::Accepted { .. }) => Ok(socket),
-        (_, Reply::Refused { message, .. }) => Err(ClientError::Refused(message)),
-        (_, Reply::Unknown) => Err(ClientError::Unreadable("an unknown reply".into())),
+/// The program the command line presents itself as: a process of the service image.
+fn edge() -> Edge {
+    Edge::new(Program::Service, env!("CARGO_PKG_VERSION").into())
+}
+
+/// Open `opening` on the service of `home`, insisting that the service accepts it.
+fn open(home: &Path, opening: &Opening) -> Result<Connection, ClientError> {
+    let (connection, reply) = protocol::connect(home, opening, Instant::now() + OPENING_DEADLINE)?;
+    if reply.accepted {
+        Ok(connection)
+    } else {
+        Err(ClientError::Refused(reply.say.unwrap_or_default()))
+    }
+}
+
+/// The home the command line talks to.
+fn current_home() -> Result<std::path::PathBuf, ClientError> {
+    home::home().map_err(|error| ClientError::NoService(ConnectError::Io(error)))
+}
+
+/// Run one control operation on the service of `home` and return its result value.
+///
+/// # Errors
+///
+/// Returns a [`ClientError`] when no service answers or the exchange fails.
+pub fn control_at(home: &Path, operation: Control) -> Result<Value, ClientError> {
+    let mut opening = Opening::new(Role::Control, edge());
+    opening.control = Some(operation);
+    let mut connection = open(home, &opening)?;
+    connection
+        .set_read_timeout(Some(OPENING_DEADLINE))
+        .map_err(|error| ClientError::Unreadable(error.to_string()))?;
+    match frame::read_frame::<ControlResult>(&mut connection)? {
+        Some(ControlResult::Result { value }) => Ok(value),
+        None => Err(ClientError::Closed),
     }
 }
 
@@ -70,15 +104,17 @@ fn open(stream: Stream) -> Result<TcpStream, ClientError> {
 /// # Errors
 ///
 /// Returns a [`ClientError`] when no service answers or the exchange fails.
-pub fn control(op: ControlOp) -> Result<Value, ClientError> {
-    let mut socket = open(Stream::Control { op })?;
-    socket
-        .set_read_timeout(Some(REPLY_DEADLINE))
-        .map_err(|error| ClientError::Unreadable(error.to_string()))?;
-    match frame::read_frame::<ControlResult>(&mut socket)? {
-        Some(ControlResult::Result { value }) => Ok(value),
-        None => Err(ClientError::Closed),
-    }
+pub fn control(operation: Control) -> Result<Value, ClientError> {
+    control_at(&current_home()?, operation)
+}
+
+/// Read the value of a control operation as the type the service answers it with.
+fn control_as<T: serde::de::DeserializeOwned>(
+    home: &Path,
+    operation: Control,
+) -> Result<T, ClientError> {
+    serde_json::from_value(control_at(home, operation)?)
+        .map_err(|error| ClientError::Unreadable(error.to_string()))
 }
 
 /// Read the running service's readiness without starting it or opening a session.
@@ -87,8 +123,25 @@ pub fn control(op: ControlOp) -> Result<Value, ClientError> {
 ///
 /// Returns a [`ClientError`] when no service answers or the answer is not a readiness summary.
 pub fn readiness() -> Result<ReadinessSummary, ClientError> {
-    serde_json::from_value(control(ControlOp::Readiness)?)
-        .map_err(|error| ClientError::Unreadable(error.to_string()))
+    control_as(&current_home()?, Control::Readiness)
+}
+
+/// Read which service is running, without starting it or opening a session.
+///
+/// # Errors
+///
+/// Returns a [`ClientError`] when no service answers or the answer is not a status.
+pub fn status() -> Result<control::Status, ClientError> {
+    status_at(&current_home()?)
+}
+
+/// Read which service of `home` is running, without starting it or opening a session.
+///
+/// # Errors
+///
+/// Returns a [`ClientError`] when no service answers or the answer is not a status.
+pub fn status_at(home: &Path) -> Result<control::Status, ClientError> {
+    control_as(home, Control::Status)
 }
 
 /// Ask the running service to bring its workbench forward. Returns whether a workbench was there.
@@ -97,10 +150,7 @@ pub fn readiness() -> Result<ReadinessSummary, ClientError> {
 ///
 /// Returns a [`ClientError`] when no service answers.
 pub fn activate_workbench() -> Result<bool, ClientError> {
-    Ok(control(ControlOp::ActivateWorkbench)?
-        .get(control::AVAILABLE)
-        .and_then(Value::as_bool)
-        .unwrap_or(false))
+    Ok(control_as::<control::Shown>(&current_home()?, Control::Show)?.shown)
 }
 
 /// One finished tool call: the envelope and any images that came with it.
@@ -115,7 +165,7 @@ pub struct Invocation {
 /// One initialized MCP session with the service, used one request at a time.
 #[derive(Debug)]
 pub struct McpClient {
-    socket: TcpStream,
+    socket: Connection,
     next_id: u64,
 }
 
@@ -131,11 +181,10 @@ impl McpClient {
             .map(serde_json::to_value)
             .transpose()
             .map_err(|error| ClientError::Unreadable(error.to_string()))?;
-        let socket = open(Stream::Mcp {
-            channel: CLI_CHANNEL.into(),
-            session,
-            resume: None,
-        })?;
+        let mut opening = Opening::new(Role::Mcp, edge());
+        opening.channel = Some(CLI_CHANNEL.into());
+        opening.session = session;
+        let socket = open(&current_home()?, &opening)?;
         let mut client = Self { socket, next_id: 1 };
         client.request(
             method::INITIALIZE,

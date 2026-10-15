@@ -9,7 +9,9 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ghostlight_relay::home::{self, BIN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME};
+use ghostlight_relay::home::{
+    self, BIN_DIRECTORY_NAME, RUN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME, SERVICE_LOCK_NAME,
+};
 
 /// Directory holding a development build of the service.
 pub const DEV_DIRECTORY_NAME: &str = "dev";
@@ -127,6 +129,18 @@ impl Layout {
         self.home.join(INSTALL_LOCK_NAME)
     }
 
+    /// The directory of the service's run-time objects: `home/run`.
+    #[must_use]
+    pub fn run(&self) -> PathBuf {
+        self.home.join(RUN_DIRECTORY_NAME)
+    }
+
+    /// The lock one running service holds: `home/run/service.lock`.
+    #[must_use]
+    pub fn service_lock(&self) -> PathBuf {
+        self.run().join(SERVICE_LOCK_NAME)
+    }
+
     /// The state directory: `home/state`.
     #[must_use]
     pub fn state(&self) -> PathBuf {
@@ -173,6 +187,8 @@ mod tests {
             home.join("bin").join("install.json")
         );
         assert_eq!(layout.install_lock(), home.join("install.lock"));
+        assert_eq!(layout.run(), home.join("run"));
+        assert_eq!(layout.service_lock(), home.join("run").join("service.lock"));
         assert_eq!(layout.state(), home.join("state"));
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));

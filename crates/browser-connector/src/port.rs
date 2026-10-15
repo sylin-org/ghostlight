@@ -1,5 +1,5 @@
 //! Carrying one Chrome native-messaging port to one service connection (ADR-0197 Decisions 3, 4
-//! and 11).
+//! and 11, ADR-0199 Decision 5).
 //!
 //! The connector reads native frames from the browser and writes them to a relay `browser`
 //! stream, and does the same in the other direction, without parsing a byte of either. The
@@ -19,18 +19,18 @@
 //! here, so nothing in a frame can reach the diagnostics.
 
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ghostlight_relay::client::{ConnectError, REPLY_DEADLINE};
+use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame;
 use ghostlight_relay::log::Event as LogEvent;
-use ghostlight_relay::opening::{ControlOp, Reply, Stream};
+use ghostlight_relay::protocol::{Control, Edge, Opening, Program, Reply, Role};
 use ghostlight_relay::spawn::Backoff;
+use ghostlight_relay::OPENING_DEADLINE;
 
 #[cfg(test)]
 mod tests;
@@ -44,10 +44,13 @@ const _: () = assert!(
 /// The one frame the connector writes to the browser itself, sent once when the service is lost.
 pub const BACKEND_UNAVAILABLE: &[u8] = br#"{"kind":"backend_unavailable"}"#;
 
+/// The start of the origin Chrome passes a native-messaging host as its first argument.
+const EXTENSION_ORIGIN_PREFIX: &str = "chrome-extension://";
+
 /// The service the connector talks to: how to open a stream and how to start it.
 pub trait Service: Send + Sync + 'static {
-    /// Connect to the running service and present an opening for `stream`.
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError>;
+    /// Connect to the running service and present `opening`.
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
 
     /// Start the service without waiting for it to be ready.
     fn start(&self) -> io::Result<()>;
@@ -60,8 +63,17 @@ pub type Log = fn(LogEvent, &str);
 pub struct Environment {
     /// The service to connect to and start.
     pub service: Arc<dyn Service>,
+    /// The origin of the extension that opened the port, when Chrome named one.
+    pub origin: Option<String>,
     /// The diagnostics writer.
     pub log: Log,
+}
+
+/// The extension origin among the arguments Chrome started the connector with, which is the
+/// first one when it names an extension.
+#[must_use]
+pub fn extension_origin(first_argument: Option<String>) -> Option<String> {
+    first_argument.filter(|argument| argument.starts_with(EXTENSION_ORIGIN_PREFIX))
 }
 
 /// Something the port reacts to.
@@ -133,21 +145,21 @@ pub fn run(
 struct Shared {
     /// The write half of the live service connection. `None` before the first connection and
     /// after the service is lost; the browser's frames are dropped then.
-    uplink: Mutex<Option<TcpStream>>,
+    uplink: Mutex<Option<Connection>>,
     /// Set when the port is finished, so a connection that closes after that says nothing.
     ending: AtomicBool,
 }
 
 impl Shared {
     /// The uplink, whether or not a thread panicked while holding it.
-    fn uplink(&self) -> MutexGuard<'_, Option<TcpStream>> {
+    fn uplink(&self) -> MutexGuard<'_, Option<Connection>> {
         self.uplink.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Send `hello` on `socket` and make `socket` the uplink, in one step.
     ///
     /// The lock is held across the write, so the browser's next frame cannot overtake the hello.
-    fn install(&self, socket: &TcpStream, hello: &[u8]) -> io::Result<()> {
+    fn install(&self, socket: &Connection, hello: &[u8]) -> io::Result<()> {
         let mut uplink = self.uplink();
         let mut writer = socket.try_clone()?;
         frame::write_frame_raw(&mut writer, hello).map_err(io::Error::other)?;
@@ -162,7 +174,7 @@ impl Shared {
             return;
         };
         if frame::write_frame_raw(writer, payload).is_err() {
-            let _ = writer.shutdown(Shutdown::Both);
+            writer.shutdown();
             *uplink = None;
         }
     }
@@ -170,7 +182,7 @@ impl Shared {
     /// Close the uplink, which ends the service reader too.
     fn lose(&self) {
         if let Some(writer) = self.uplink().take() {
-            let _ = writer.shutdown(Shutdown::Both);
+            writer.shutdown();
         }
     }
 
@@ -327,10 +339,12 @@ impl Port {
     }
 
     /// Try once to open the `browser` stream and send the held hello on it.
-    fn open_stream(&self, hello: &[u8]) -> Option<TcpStream> {
+    fn open_stream(&self, hello: &[u8]) -> Option<Connection> {
         let log = self.environment.log;
-        match self.environment.service.connect(Stream::Browser) {
-            Ok((socket, Reply::Accepted { .. })) => match self.shared.install(&socket, hello) {
+        let mut opening = Opening::new(Role::Browser, edge());
+        opening.origin = self.environment.origin.clone();
+        match self.environment.service.connect(&opening) {
+            Ok((socket, reply)) if reply.accepted => match self.shared.install(&socket, hello) {
                 Ok(()) => Some(socket),
                 Err(error) => {
                     log(LogEvent::ConnectFailed, &error.to_string());
@@ -360,14 +374,13 @@ impl Port {
     /// Whether a service accepts a read-only control opening. Nothing is started or changed.
     fn service_has_returned(&self) -> bool {
         let log = self.environment.log;
-        let stream = Stream::Control {
-            op: ControlOp::Readiness,
-        };
-        match self.environment.service.connect(stream) {
-            Ok((mut socket, Reply::Accepted { .. })) => {
+        let mut opening = Opening::new(Role::Control, edge());
+        opening.control = Some(Control::Readiness);
+        match self.environment.service.connect(&opening) {
+            Ok((mut socket, reply)) if reply.accepted => {
                 // The service sends one result and closes; take it so it is not written to a
-                // closed socket. Whether it arrives does not matter.
-                let _ = socket.set_read_timeout(Some(REPLY_DEADLINE));
+                // closed connection. Whether it arrives does not matter.
+                let _ = socket.set_read_timeout(Some(OPENING_DEADLINE));
                 let _ = frame::read_frame_raw(&mut socket);
                 true
             }
@@ -384,7 +397,7 @@ impl Port {
 
     /// Carry service frames to the browser on their own thread. When the connection ends the
     /// thread tells the browser once and then tells the port.
-    fn carry_service(&self, mut socket: TcpStream, mut output: impl Write + Send + 'static) {
+    fn carry_service(&self, mut socket: Connection, mut output: impl Write + Send + 'static) {
         let shared = Arc::clone(&self.shared);
         let events = self.events.clone();
         let log = self.environment.log;
@@ -402,7 +415,7 @@ impl Port {
                 }
             };
             // Unblock a browser frame that is mid-write, then close the uplink.
-            let _ = socket.shutdown(Shutdown::Both);
+            socket.shutdown();
             shared.lose();
             if shared.is_ending() {
                 return;
@@ -417,10 +430,14 @@ impl Port {
     }
 }
 
-/// A refusal or an unknown reply as a short, content-free detail.
+/// The program a connector presents itself as: the frozen edge, at this build.
+fn edge() -> Edge {
+    Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned())
+}
+
+/// A refusal as a short, content-free detail.
 fn describe(reply: &Reply) -> String {
-    match reply {
-        Reply::Refused { code, .. } => format!("{code:?}"),
-        other => format!("{other:?}"),
-    }
+    reply
+        .code
+        .map_or_else(String::new, |code| format!("{code:?}"))
 }

@@ -1,7 +1,6 @@
-//! Bounded local socket exchanges. Idle peers are allowed; unfinished frames and writes expire.
+//! Bounded local connection exchanges. Idle peers are allowed; unfinished frames and writes expire.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpStream};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -11,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::frame::{self, FrameError};
 
 /// Total time allowed to authenticate or finish a frame once its first byte arrives.
@@ -25,9 +25,9 @@ fn remaining(deadline: Instant) -> io::Result<Duration> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "local exchange timed out"))
 }
 
-/// A socket reader whose frame deadline includes buffered bytes and slow incremental delivery.
+/// A connection reader whose frame deadline includes buffered bytes and slow incremental delivery.
 pub struct SocketReader {
-    reader: BufReader<TcpStream>,
+    reader: BufReader<Connection>,
     deadline: Option<Instant>,
     frame_timeout: Duration,
     stop: Option<Arc<AtomicBool>>,
@@ -35,7 +35,7 @@ pub struct SocketReader {
 
 impl SocketReader {
     /// Own a reader without imposing an idle-session timeout.
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: Connection) -> Self {
         Self {
             reader: BufReader::new(stream),
             deadline: None,
@@ -125,15 +125,15 @@ impl Read for SocketReader {
 /// One serialized writer with an independent shutdown handle, so cleanup never waits for its lock.
 #[derive(Debug)]
 pub struct SocketWriter {
-    stream: Mutex<TcpStream>,
-    shutdown: TcpStream,
+    stream: Mutex<Connection>,
+    shutdown: Connection,
     closed: Mutex<bool>,
     wake: Condvar,
 }
 
 impl SocketWriter {
     /// Own the stream and retain a handle that can interrupt stalled I/O.
-    pub fn new(stream: TcpStream) -> io::Result<Self> {
+    pub fn new(stream: Connection) -> io::Result<Self> {
         Ok(Self {
             shutdown: stream.try_clone()?,
             stream: Mutex::new(stream),
@@ -149,7 +149,7 @@ impl SocketWriter {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
         self.wake.notify_all();
-        let _ = self.shutdown.shutdown(Shutdown::Both);
+        self.shutdown.shutdown();
     }
 
     /// Wait between liveness probes, ending immediately when this connection is retired.
@@ -229,7 +229,7 @@ impl SocketWriter {
 /// A writer lease whose deadline covers every partial write, including chunked transfers.
 pub struct SocketWrite<'a> {
     owner: &'a SocketWriter,
-    stream: MutexGuard<'a, TcpStream>,
+    stream: MutexGuard<'a, Connection>,
     deadline: Instant,
 }
 
@@ -253,13 +253,12 @@ impl Write for SocketWrite<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghostlight_relay::endpoint::pair as connection_pair;
     use serde_json::{json, Value};
-    use std::net::TcpListener;
 
-    fn pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        (listener.accept().unwrap().0, peer)
+    /// The service end and the peer end of a connected pair.
+    fn pair() -> (Connection, Connection) {
+        connection_pair().unwrap()
     }
 
     fn assert_expired(result: Result<Option<Value>, FrameError>) {

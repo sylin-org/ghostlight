@@ -4,8 +4,6 @@
 mod controls;
 mod relay;
 
-use std::net::TcpListener;
-
 use serde_json::{json, Value};
 
 use super::RelayBrowserPort;
@@ -23,13 +21,9 @@ fn port() -> RelayBrowserPort {
 
 /// Attach one scripted extension for `browser` to `port`.
 fn attach(port: &RelayBrowserPort, browser: &str, script: Script) -> FakeExtension {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let fake = FakeExtension::connect(
-        listener.local_addr().unwrap(),
-        &FakeExtension::hello(browser),
-        script,
-    );
-    port.attach(listener.accept().unwrap().0).unwrap();
+    let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
+    let fake = FakeExtension::connect(extension, &FakeExtension::hello(browser), script);
+    port.attach(service).unwrap();
     fake
 }
 

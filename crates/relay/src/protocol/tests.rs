@@ -18,13 +18,17 @@ fn edge() -> Edge {
 }
 
 fn accepted() -> Reply {
-    Reply::accepted("2.0.0".to_owned(), "i1".to_owned(), Templates::default())
+    Reply::accepted(
+        "2.0.0".to_owned(),
+        "i1".to_owned(),
+        Some(Templates::default()),
+    )
 }
 
 #[test]
 fn a_new_opening_carries_this_revision_and_writes_only_what_is_set() {
     let opening = Opening::new(Role::Browser, edge());
-    assert_eq!(opening.relay, REVISION);
+    assert_eq!(opening.relay, crate::RELAY);
     assert_eq!(
         serde_json::to_value(&opening).unwrap(),
         json!({
@@ -296,4 +300,58 @@ fn a_non_object_template_fills_as_the_bare_error() {
         bare_error(&json!(3)),
         json!({"jsonrpc": "2.0", "id": 3, "error": {"code": -32603, "message": ""}})
     );
+}
+
+#[test]
+fn a_failure_answers_with_the_filled_template_or_the_bare_error() {
+    let templates = sample_templates();
+    let response = failure_response(Some(&templates), Failure::CutOff, "tools/call", &json!(5));
+    assert_eq!(response["result"], json!({"isError": true}));
+    assert_eq!(response["id"], json!(5));
+    let response = failure_response(Some(&templates), Failure::Expired, "ping", &json!(6));
+    assert_eq!(response["error"]["message"], json!("late"));
+    let empty = Templates::default();
+    assert_eq!(
+        failure_response(Some(&empty), Failure::CutOff, "ping", &json!(7)),
+        bare_error(&json!(7))
+    );
+    assert_eq!(
+        failure_response(None, Failure::CutOff, "ping", &json!(8)),
+        bare_error(&json!(8))
+    );
+}
+
+#[test]
+fn connect_dials_the_home_and_opens_in_one_step() {
+    let home = std::env::temp_dir().join(format!(
+        "ghostlight-protocol-connect-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    let listener = crate::endpoint::Listener::bind_first(&home).unwrap();
+    let server = thread::spawn(move || {
+        let mut service = listener.accept().unwrap();
+        let received: Opening = read_frame(&mut service).unwrap().unwrap();
+        write_frame(&mut service, &accepted()).unwrap();
+        (received, service)
+    });
+    let opening = Opening::new(Role::Control, edge());
+    let (_connection, reply) = connect(&home, &opening, Instant::now() + PATIENCE).unwrap();
+    let (received, _service) = server.join().unwrap();
+    assert_eq!(reply, accepted());
+    assert_eq!(received, opening);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn connect_reports_no_service_when_nothing_listens() {
+    let home = std::env::temp_dir().join(format!(
+        "ghostlight-protocol-connect-none-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&home).unwrap();
+    let opening = Opening::new(Role::Control, edge());
+    let failure = connect(&home, &opening, Instant::now() + PATIENCE).unwrap_err();
+    assert!(matches!(failure, ConnectError::NoService), "{failure:?}");
+    let _ = std::fs::remove_dir_all(&home);
 }

@@ -2,7 +2,7 @@
 //! connection (ADR-0197 Decisions 1, 3, 4 and 11).
 //!
 //! Chrome starts this process when the extension connects and speaks native messaging on its
-//! stdin and stdout. The connector opens a relay protocol 3 `browser` stream and passes every
+//! stdin and stdout. The connector opens a relay protocol 4 `browser` stream and passes every
 //! frame through in both directions without looking inside. It starts the service only before
 //! its first connection. When the service goes away it tells the extension and waits, and when a
 //! service answers again it exits so the extension reconnects with a fresh hello. All adapter
@@ -11,24 +11,26 @@
 mod port;
 
 use std::io;
-use std::net::TcpStream;
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
-use ghostlight_relay::client::{self, ConnectError, REPLY_DEADLINE};
+use ghostlight_relay::endpoint::{ConnectError, Connection};
+use ghostlight_relay::home;
 use ghostlight_relay::log::{self, Component, Event as LogEvent};
-use ghostlight_relay::opening::{Reply, Stream};
+use ghostlight_relay::protocol::{self, Opening, Reply};
 use ghostlight_relay::spawn;
 use ghostlight_relay::watchdog::ParentWatchdog;
+use ghostlight_relay::OPENING_DEADLINE;
 
-use crate::port::{Environment, Event, Service};
+use crate::port::{extension_origin, Environment, Event, Service};
 
 /// The installed service under the fixed home.
 struct InstalledService;
 
 impl Service for InstalledService {
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError> {
-        client::connect(stream, REPLY_DEADLINE)
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
+        protocol::connect(&home::home()?, opening, Instant::now() + OPENING_DEADLINE)
     }
 
     fn start(&self) -> io::Result<()> {
@@ -45,6 +47,7 @@ fn main() -> Result<()> {
     record(LogEvent::ProcessStarted, "");
     let environment = Environment {
         service: Arc::new(InstalledService),
+        origin: extension_origin(std::env::args().nth(1)),
         log: record,
     };
     let (events, inbox) = mpsc::channel();

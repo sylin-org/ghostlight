@@ -77,3 +77,18 @@ pub fn bare_error(id: &Value) -> Value {
         "error": {"code": INTERNAL_ERROR_CODE, "message": ""},
     })
 }
+
+/// The response for a request that failed: the filled template when there is one, else the bare
+/// error.
+#[must_use]
+pub fn failure_response(
+    templates: Option<&Templates>,
+    failure: Failure,
+    method: &str,
+    id: &Value,
+) -> Value {
+    match templates.and_then(|templates| templates.template(failure, method)) {
+        Some(template) => fill(template, id),
+        None => bare_error(id),
+    }
+}

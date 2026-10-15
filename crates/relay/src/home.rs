@@ -16,16 +16,6 @@ pub const TEST_HOME_VARIABLE: &str = "GHOSTLIGHT_TEST_HOME";
 /// Name of the Ghostlight home directory under the user's home directory.
 pub const HOME_DIRECTORY_NAME: &str = ".ghostlight";
 
-/// Runtime file: where the running service published its port and token.
-pub const RUNTIME_FILE_NAME: &str = "ghostlight-runtime.json";
-
-/// Lease file: held by the one running service. The same file earlier services take, so old and
-/// new services exclude each other.
-pub const LEASE_FILE_NAME: &str = "ghostlight-runtime.lock";
-
-/// Failure-template file: the sentences the service handed the MCP connector in advance.
-pub const TEMPLATES_FILE_NAME: &str = "relay-templates.json";
-
 /// Directory under the home that holds the service's run-time objects.
 pub const RUN_DIRECTORY_NAME: &str = "run";
 
@@ -70,21 +60,6 @@ pub fn home() -> io::Result<PathBuf> {
         env::var_os(TEST_HOME_VARIABLE),
         env::var_os(USER_HOME_VARIABLE),
     )
-}
-
-/// Runtime file path: `home/ghostlight-runtime.json`.
-pub fn runtime_file() -> io::Result<PathBuf> {
-    Ok(home()?.join(RUNTIME_FILE_NAME))
-}
-
-/// Lease file path: `home/ghostlight-runtime.lock`.
-pub fn lease_file() -> io::Result<PathBuf> {
-    Ok(home()?.join(LEASE_FILE_NAME))
-}
-
-/// Failure-template file path: `home/relay-templates.json`.
-pub fn templates_file() -> io::Result<PathBuf> {
-    Ok(home()?.join(TEMPLATES_FILE_NAME))
 }
 
 /// Directory of installed executables: `home/bin`.
@@ -135,56 +110,4 @@ fn absolute(path: PathBuf, variable: &str) -> io::Result<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[cfg(windows)]
-    const ROOT: &str = "C:\\Users\\person";
-    #[cfg(not(windows))]
-    const ROOT: &str = "/home/person";
-
-    fn os(value: &str) -> Option<OsString> {
-        Some(OsString::from(value))
-    }
-
-    #[test]
-    fn the_home_is_the_user_home_joined_with_the_ghostlight_directory() {
-        let home = resolve(None, os(ROOT)).unwrap();
-        assert_eq!(home, Path::new(ROOT).join(".ghostlight"));
-    }
-
-    #[test]
-    fn the_test_override_names_the_home_itself() {
-        let home = resolve(os(ROOT), os("ignored")).unwrap();
-        assert_eq!(home, Path::new(ROOT));
-    }
-
-    #[test]
-    fn a_relative_home_is_refused() {
-        assert_eq!(
-            resolve(None, os("relative")).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-        assert_eq!(
-            resolve(os("relative"), os(ROOT)).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-    }
-
-    #[test]
-    fn a_missing_user_home_is_not_found() {
-        assert_eq!(
-            resolve(None, None).unwrap_err().kind(),
-            io::ErrorKind::NotFound
-        );
-    }
-
-    #[test]
-    fn file_names_are_the_ones_older_services_already_use() {
-        assert_eq!(RUNTIME_FILE_NAME, "ghostlight-runtime.json");
-        assert_eq!(LEASE_FILE_NAME, "ghostlight-runtime.lock");
-        assert_eq!(TEMPLATES_FILE_NAME, "relay-templates.json");
-    }
-}
+mod tests;

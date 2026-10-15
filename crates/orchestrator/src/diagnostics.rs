@@ -22,10 +22,10 @@ pub struct DiagnosticsReport {
     pub used_bytes: u64,
 }
 
-/// Observe the diagnostics state for one runtime file location.
+/// Observe the diagnostics state of the Ghostlight home `home`.
 #[must_use]
-pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
-    let activation = resolve(None, runtime_path);
+pub fn observe(home: &Path) -> DiagnosticsReport {
+    let activation = resolve(None, home);
     let layer = activation.layer();
     // The folder is named even while off: retained logs stay readable there, and the folder is
     // where the next activation will write.
@@ -33,7 +33,7 @@ pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
         activation
             .directory()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(runtime_path))
+            .unwrap_or_else(|| ghostlight_bridge::diagnostics::default_directory(home))
             .to_string_lossy()
             .into(),
     );
@@ -61,17 +61,13 @@ pub fn observe(runtime_path: &Path) -> DiagnosticsReport {
 /// The orchestrator-owned hub around the shared process sink (ADR-0145).
 pub struct DiagnosticsHub {
     sink: Arc<Sink>,
-    runtime_path: PathBuf,
+    home: PathBuf,
 }
 
 impl DiagnosticsHub {
     /// Birth the hub's sink from the process environment and log the process start.
-    pub fn birth(runtime_path: &Path) -> Arc<Self> {
-        let sink = Sink::birth(
-            Component::Orchestrator,
-            env!("CARGO_PKG_VERSION"),
-            runtime_path,
-        );
+    pub fn birth(home: &Path) -> Arc<Self> {
+        let sink = Sink::birth(Component::Orchestrator, env!("CARGO_PKG_VERSION"), home);
         sink.emit(
             event::PROCESS_STARTED,
             Level::Info,
@@ -80,7 +76,7 @@ impl DiagnosticsHub {
         );
         Arc::new(Self {
             sink,
-            runtime_path: runtime_path.to_path_buf(),
+            home: home.to_path_buf(),
         })
     }
 
@@ -89,14 +85,14 @@ impl DiagnosticsHub {
         let sink = Sink::birth_with(
             Component::Orchestrator,
             env!("CARGO_PKG_VERSION"),
-            Path::new("/ghostlight-test/ghostlight-runtime.json"),
+            Path::new("/ghostlight-test"),
             None,
             &diagnostics::OsMarkerWatcher,
             None,
         );
         Arc::new(Self {
             sink,
-            runtime_path: PathBuf::from("/ghostlight-test/ghostlight-runtime.json"),
+            home: PathBuf::from("/ghostlight-test"),
         })
     }
 
@@ -113,7 +109,7 @@ impl DiagnosticsHub {
     /// A point-in-time report for `doctor` and the workbench.
     #[must_use]
     pub fn report(&self) -> DiagnosticsReport {
-        observe(&self.runtime_path)
+        observe(&self.home)
     }
 
     /// The person-facing toggle act: flip the marker, then let the sink re-evaluate.
@@ -125,7 +121,7 @@ impl DiagnosticsHub {
             None,
             if on { "on" } else { "off" },
         );
-        if let Err(error) = set_marker(&self.runtime_path, on) {
+        if let Err(error) = set_marker(&self.home, on) {
             self.sink.emit(
                 event::DIAGNOSTICS_TOGGLED,
                 Level::Warn,

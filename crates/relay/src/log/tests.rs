@@ -76,7 +76,7 @@ fn a_line_is_appended_while_the_marker_exists() {
         json!({
             "ts_ms": 1234,
             "component": "mcp-connector",
-            "relay": 3,
+            "relay": crate::RELAY,
             "pid": std::process::id(),
             "event": "service_connected",
             "detail": "first",

@@ -1,7 +1,6 @@
 anyhow
 ghostlight-browser-connector
 ghostlight-relay
-ghostlight-win-peer
 itoa
 memchr
 proc-macro2

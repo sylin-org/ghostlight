@@ -2,7 +2,7 @@
 //! (ADR-0197 Decisions 1, 2, 11 and 12).
 //!
 //! An MCP client starts this process and speaks MCP on its stdin and stdout. The connector
-//! forwards every line to the Ghostlight service over a relay protocol 3 `mcp` stream and every
+//! forwards every line to the Ghostlight service over a relay protocol 4 `mcp` stream and every
 //! service line back, holding lines while the service is away and starting it when a request
 //! needs it. All MCP meaning lives in the service; [`forward`] is the whole relay.
 
@@ -10,16 +10,17 @@ mod forward;
 mod hold;
 
 use std::io;
-use std::net::TcpStream;
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
-use ghostlight_relay::client::{self, ConnectError, REPLY_DEADLINE};
+use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::home;
 use ghostlight_relay::log::{self, Component, Event as LogEvent};
-use ghostlight_relay::opening::{Reply, Stream};
+use ghostlight_relay::protocol::{self, Opening, Reply};
 use ghostlight_relay::spawn;
 use ghostlight_relay::watchdog::ParentWatchdog;
+use ghostlight_relay::OPENING_DEADLINE;
 
 use crate::forward::{Environment, Event, Service, SystemClock};
 
@@ -27,8 +28,8 @@ use crate::forward::{Environment, Event, Service, SystemClock};
 struct InstalledService;
 
 impl Service for InstalledService {
-    fn connect(&self, stream: Stream) -> Result<(TcpStream, Reply), ConnectError> {
-        client::connect(stream, REPLY_DEADLINE)
+    fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError> {
+        protocol::connect(&home::home()?, opening, Instant::now() + OPENING_DEADLINE)
     }
 
     fn start(&self) -> io::Result<()> {
@@ -46,7 +47,6 @@ fn main() -> Result<()> {
     let environment = Environment {
         service: Arc::new(InstalledService),
         clock: Arc::new(SystemClock),
-        templates: home::templates_file().ok(),
         log: record,
         poll: None,
     };

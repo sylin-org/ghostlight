@@ -1,37 +1,33 @@
 //! The persistent service: its lifetime, its one relay listener and the sessions it serves.
 //!
-//! [`ServiceHost`] holds the lease, prepares the executor and the browser port, and publishes the
-//! relay protocol 3 runtime file once the desktop is ready (ADR-0166, ADR-0197 Decision 3). Every
-//! connection then opens with one relay opening: an `mcp` stream is one MCP client session served
-//! by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter connection, and a
-//! `control` stream answers one operation.
+//! [`ServiceHost`] holds the service lock, prepares the executor and the browser port, and binds
+//! the relay protocol 4 endpoint once the desktop is ready (ADR-0166, ADR-0199 Decisions 5 and
+//! 9). Every connection then opens with one relay opening: an `mcp` stream is one MCP client
+//! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
+//! connection, and a `control` stream answers one operation.
 
 mod admission;
 pub mod lifetime;
+pub mod lock;
 #[cfg(test)]
 pub(crate) mod test_home;
 
 use std::collections::BTreeMap;
 use std::env;
-use std::ffi::OsString;
-use std::fs;
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
-use crate::intake::opening::Lease;
 use crate::intake::session::{
     IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
 };
 use anyhow::{Context, Result};
-use ghostlight_relay::home::{LEASE_FILE_NAME, RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
-use ghostlight_relay::opening::{ControlOp, McpFrame, Stream};
-use ghostlight_relay::runtime::RuntimeFile;
-use ghostlight_relay::templates::FailureTemplates;
-use serde_json::{json, Value};
+use ghostlight_relay::endpoint::{Connection, Endpoint, Listener};
+use ghostlight_relay::protocol::{self, Control, McpFrame, Reply, Role, Templates};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
@@ -45,9 +41,11 @@ use crate::browser::{
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
-use crate::intake::listener::{self, Judgement};
+use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
+use crate::intake::MCP_CHANNEL;
 use crate::language::catalog_for;
+use crate::language::environment::ELEVATED_SERVICE;
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 use crate::language::outcome::DialogKind;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -59,8 +57,8 @@ use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
 
-/// Prefix of the per-service secret every opening presents.
-const TOKEN_PREFIX: &str = "runtime_";
+/// Prefix of the value that changes on every service start.
+const INSTANCE_PREFIX: &str = "instance_";
 
 /// Environment variable naming an audit log in place of the one in the state directory.
 const AUDIT_FILE_VARIABLE: &str = "GHOSTLIGHT_AUDIT_FILE";
@@ -68,22 +66,23 @@ const AUDIT_FILE_VARIABLE: &str = "GHOSTLIGHT_AUDIT_FILE";
 /// File name of the audit log in the state directory.
 const AUDIT_FILE_NAME: &str = "audit.jsonl";
 
-/// Suffix of the sibling file the failure templates are written through.
-const TEMPORARY_SUFFIX: &str = ".tmp";
-
 /// Longest a resumed session waits for one browser to return, and then for it to list its tabs.
 const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
 
+/// How long the accept loop rests after a failed accept before it asks again.
+const ACCEPT_RETRY: Duration = Duration::from_millis(50);
+
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
 use lifetime::{DiscoveryWatch, Drain, QUIT_GRACE};
+use lock::ServiceLock;
 
 /// The desktop's request to leave its event loop, installed once the desktop exists.
 pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
 
-/// How often a start that waits for the service lease asks for it again.
-const LEASE_POLL: Duration = Duration::from_millis(50);
+/// How often a start that waits for the service lock asks for it again.
+const LOCK_POLL: Duration = Duration::from_millis(50);
 
-/// A running local service host. Dropping it stops the listener and withdraws discovery.
+/// A running local service host. Dropping it stops the listener and releases the service lock.
 pub struct ServiceHost {
     /// Typed in-process application boundary for the disposable desktop workbench.
     pub workbench: WorkbenchFacade,
@@ -95,11 +94,17 @@ pub struct ServiceHost {
     threads: Vec<JoinHandle<()>>,
     refresher: Thread,
     home: PathBuf,
-    port: u16,
-    token: String,
+    intake: Arc<Intake>,
+    bound: Mutex<Option<Bound>>,
     quit: Quit,
     discovery: Arc<DiscoveryWatch>,
-    _lease: Lease,
+    _lock: ServiceLock,
+}
+
+/// The endpoint once it is bound, and the thread that accepts on it.
+struct Bound {
+    listener: Arc<Listener>,
+    thread: JoinHandle<()>,
 }
 
 /// Another authority owns this runtime; a competing explicit Open may await its presentation.
@@ -108,21 +113,34 @@ pub struct ServiceHost {
 pub struct AuthorityAlreadyRunning;
 
 impl ServiceHost {
-    /// Prepare the service in the Ghostlight home `home` under its lifetime lease, without
-    /// publishing discovery. The desktop must call `publish_ready` only after its native
-    /// interaction route is ready.
-    pub fn start(home: &Path) -> Result<Self> {
-        Self::start_waiting(home, Duration::ZERO)
+    /// Prepare the service in the Ghostlight home `home` under its lifetime lock, without
+    /// binding the endpoint and without the elevation check a production start makes.
+    #[cfg(test)]
+    pub(crate) fn start(home: &Path) -> Result<Self> {
+        Self::start_with_token(home, Duration::ZERO, || Ok(false))
     }
 
-    /// Like [`ServiceHost::start`], but a held lease is asked for again until `lease_wait` has
-    /// passed. A `serve` start uses this so a service that is about to exit does not make its
-    /// successor give up.
-    pub fn start_waiting(home: &Path, lease_wait: Duration) -> Result<Self> {
-        let runtime_path = home.join(RUNTIME_FILE_NAME);
-        let diagnostics = DiagnosticsHub::birth(&runtime_path);
-        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), lease_wait).inspect_err(
-            |error| {
+    /// Prepare the service in the Ghostlight home `home` under its lifetime lock, without
+    /// binding the endpoint. The desktop must call `publish_ready` only after its native
+    /// interaction route is ready.
+    ///
+    /// A held lock is asked for again until `lock_wait` has passed, so a service that is about to
+    /// exit does not make its successor give up. A process whose token is elevated is refused
+    /// before it takes the lock.
+    pub fn start_waiting(home: &Path, lock_wait: Duration) -> Result<Self> {
+        Self::start_with_token(home, lock_wait, ghostlight_win_peer::is_elevated)
+    }
+
+    /// Like [`ServiceHost::start_waiting`], with the answer to "is this process elevated" given by
+    /// `elevated`.
+    pub(crate) fn start_with_token(
+        home: &Path,
+        lock_wait: Duration,
+        elevated: impl FnOnce() -> io::Result<bool>,
+    ) -> Result<Self> {
+        let diagnostics = DiagnosticsHub::birth(home);
+        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), lock_wait, elevated)
+            .inspect_err(|error| {
                 // Meeting the running service is how a racing start ends, not a failure.
                 if !error.is::<AuthorityAlreadyRunning>() {
                     diagnostics.sink().emit(
@@ -132,23 +150,24 @@ impl ServiceHost {
                         &format!("service startup: {error:#}"),
                     );
                 }
-            },
-        )
+            })
     }
 
     fn start_with_diagnostics(
         home: &Path,
         diagnostics: Arc<DiagnosticsHub>,
-        lease_wait: Duration,
+        lock_wait: Duration,
+        elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
-        let lease = acquire_lease(&home.join(LEASE_FILE_NAME), lease_wait)?;
+        refuse_when_elevated(elevated().context("read the process token")?)?;
+        let lock = acquire_lock(
+            &install::layout::Layout::new(home).service_lock(),
+            lock_wait,
+        )?;
         if let Ok(executable) = env::current_exe() {
             remove_old_images_beside(&executable);
             register_missing_browsers(home, &executable);
         }
-        let relay_listener = listener::bind().context("bind the relay listener")?;
-        let port = relay_listener.local_addr()?.port();
-        let token = format!("{TOKEN_PREFIX}{}", Uuid::new_v4().simple());
 
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::from_environment();
@@ -210,7 +229,8 @@ impl ServiceHost {
             }
         });
         let intake = Arc::new(Intake {
-            token: token.clone(),
+            instance: format!("{INSTANCE_PREFIX}{}", Uuid::new_v4().simple()),
+            templates: failure_templates(),
             executor,
             workspaces,
             browser_port,
@@ -223,60 +243,60 @@ impl ServiceHost {
             budget: QueueBudget::default(),
             stop: Arc::clone(&stop),
         });
-        let listener_thread = spawn_listener(relay_listener, intake);
         Ok(Self {
             workbench,
             diagnostics,
             browser,
             audit,
             stop,
-            threads: vec![listener_thread, audit_thread, refresher],
+            threads: vec![audit_thread, refresher],
             refresher: refresher_thread,
             home: home.into(),
-            port,
-            token,
+            intake,
+            bound: Mutex::new(None),
             quit,
             discovery: Arc::default(),
-            _lease: lease,
+            _lock: lock,
         })
     }
 
-    /// Publish discovery after the desktop event loop has established an interaction route.
+    /// Bind the relay endpoint after the desktop event loop has established an interaction route,
+    /// and start accepting on it.
     ///
-    /// The failure templates go first, so a connector that finds this service can already answer
-    /// for it when it goes away; then the runtime file names the listener and its token.
+    /// Until this runs nothing can connect: there is no discovery file, port or token to find. A
+    /// second call changes nothing.
     pub fn publish_ready(&self) -> Result<()> {
-        // Relays that served an earlier service find this one from here on, so a call with no
+        let mut bound = lock(&self.bound);
+        if bound.is_some() {
+            return Ok(());
+        }
+        // Edges that served an earlier service find this one from here on, so a call with no
         // browser waits for them from this moment, not from construction.
         self.browser.endpoint_published();
-        write_templates(&self.home.join(TEMPLATES_FILE_NAME))
-            .context("publish the failure templates")?;
-        RuntimeFile::new(
-            self.port,
-            self.token.clone(),
-            env!("CARGO_PKG_VERSION").into(),
-        )
-        .write(&self.home.join(RUNTIME_FILE_NAME))
-        .context("publish desktop-ready discovery")?;
+        let listener =
+            Arc::new(Listener::bind_first(&self.home).context("bind the relay endpoint")?);
+        let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
+        *bound = Some(Bound { listener, thread });
         self.discovery.settle();
+        let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
             &format!(
-                "desktop_ready=true port={} relay={}",
-                self.port,
+                "desktop_ready=true endpoint={} relay={}",
+                endpoint.as_deref().unwrap_or_default(),
                 ghostlight_relay::RELAY
             ),
         );
         Ok(())
     }
 
-    /// Stop this process by itself if discovery has not been published by `deadline`.
+    /// Stop this process by itself if the endpoint has not been bound by `deadline`.
     ///
     /// `publish_ready` cancels the deadline. On expiry the service records a diagnostics event and
     /// calls `on_expiry`, which ends the process. A start that stalls therefore never holds the
-    /// lease against the starts that follow it.
+    /// service lock against the starts that follow it.
     pub fn expect_discovery_by(
         &self,
         deadline: Instant,
@@ -289,7 +309,7 @@ impl ServiceHost {
                     ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
                     ghostlight_bridge::diagnostics::Level::Error,
                     None,
-                    "discovery was not published in time; the service stopped",
+                    "the endpoint was not bound in time; the service stopped",
                 );
                 on_expiry();
             })
@@ -318,7 +338,10 @@ impl ServiceHost {
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
         self.refresher.unpark();
-        let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.port));
+        if let Some(bound) = lock(&self.bound).take() {
+            bound.listener.shutdown();
+            let _ = bound.thread.join();
+        }
         for handle in self.threads.drain(..) {
             let _ = handle.join();
         }
@@ -328,14 +351,6 @@ impl ServiceHost {
 impl Drop for ServiceHost {
     fn drop(&mut self) {
         self.join();
-        let runtime_path = self.home.join(RUNTIME_FILE_NAME);
-        if RuntimeFile::read(&runtime_path)
-            .ok()
-            .flatten()
-            .is_some_and(|current| current.token == self.token)
-        {
-            let _ = fs::remove_file(&runtime_path);
-        }
     }
 }
 
@@ -383,27 +398,12 @@ impl Quit {
     }
 }
 
-/// Write the failure templates connectors answer with while the service is away.
-fn write_templates(path: &Path) -> Result<()> {
-    let templates: FailureTemplates =
-        serde_json::from_value(failure_templates()).context("shape the failure templates")?;
-    let bytes = serde_json::to_vec(&templates)?;
-    let mut temporary = OsString::from(path.as_os_str());
-    temporary.push(TEMPORARY_SUFFIX);
-    let temporary = PathBuf::from(temporary);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&temporary, bytes)?;
-    fs::rename(&temporary, path).inspect_err(|_| {
-        let _ = fs::remove_file(&temporary);
-    })?;
-    Ok(())
-}
-
 /// Everything a relay connection needs from the service.
 struct Intake {
-    token: String,
+    /// The value that changes on every start of this service.
+    instance: String,
+    /// The failure sentences every accepted `mcp` stream is handed.
+    templates: Templates,
     executor: Arc<ApplicationExecutor>,
     workspaces: WorkspaceStore,
     browser_port: Arc<dyn BrowserPort>,
@@ -417,18 +417,35 @@ struct Intake {
     stop: Arc<AtomicBool>,
 }
 
+impl Intake {
+    /// The reply that accepts an opening for `role`. Only an `mcp` stream is handed the failure
+    /// templates.
+    fn accepted(&self, role: Role) -> Reply {
+        Reply::accepted(
+            env!("CARGO_PKG_VERSION").into(),
+            self.instance.clone(),
+            (role == Role::Mcp).then(|| self.templates.clone()),
+        )
+    }
+}
+
 /// Accept relay connections until the service stops, each on its own thread.
 ///
-/// A connection holds one of a few pre-authentication slots until its opening is judged, so
-/// local processes that connect and say nothing cannot exhaust the service.
-fn spawn_listener(listener: TcpListener, intake: Arc<Intake>) -> JoinHandle<()> {
+/// A connection holds one of a few pre-judgement slots until its opening is judged, so local
+/// processes that connect and say nothing cannot exhaust the service.
+fn spawn_listener(listener: Arc<Listener>, intake: Arc<Intake>) -> JoinHandle<()> {
     let handshakes = Capacity::new(admission::HANDSHAKES);
     thread::Builder::new()
         .name("ghostlight-relay-listener".into())
         .spawn(move || {
             while !intake.stop.load(Ordering::SeqCst) {
-                let Ok((connection, _)) = listener.accept() else {
-                    continue;
+                let connection = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(_) if intake.stop.load(Ordering::SeqCst) => break,
+                    Err(_) => {
+                        thread::sleep(ACCEPT_RETRY);
+                        continue;
+                    }
                 };
                 if intake.stop.load(Ordering::SeqCst) {
                     break;
@@ -440,13 +457,8 @@ fn spawn_listener(listener: TcpListener, intake: Arc<Intake>) -> JoinHandle<()> 
                 let _ = thread::Builder::new()
                     .name("ghostlight-relay-connection".into())
                     .spawn(move || {
-                        let mut connection = connection;
-                        let _ = connection.set_nodelay(true);
-                        let judgement = listener::judge(
-                            &mut connection,
-                            &intake.token,
-                            intake.quit.drain.is_quitting(),
-                        );
+                        let judgement =
+                            listener::judge(&connection, intake.quit.drain.is_quitting());
                         drop(handshake);
                         serve_connection(connection, judgement, &intake);
                     });
@@ -456,52 +468,57 @@ fn spawn_listener(listener: TcpListener, intake: Arc<Intake>) -> JoinHandle<()> 
 }
 
 /// Serve one judged connection to its end.
-fn serve_connection(mut connection: TcpStream, judgement: Judgement, intake: &Arc<Intake>) {
+fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<Intake>) {
     match judgement {
         Judgement::Drop => {}
-        Judgement::Refuse(refusal) => listener::refuse(&mut connection, refusal),
-        Judgement::Admit(Stream::Browser) => {
-            if listener::accept(&mut connection).is_ok() {
-                // The first frame on the stream is the extension's own hello.
-                let _ = intake.browser.attach(connection);
+        Judgement::Refuse(refusal) => listener::refuse(&connection, refusal),
+        Judgement::Admit(opening) => match opening.role {
+            Role::Browser => {
+                if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
+                    // The first frame on the stream is the extension's own hello.
+                    let _ = intake.browser.attach(connection);
+                }
             }
-        }
-        Judgement::Admit(Stream::Control { op }) => serve_control(connection, op, intake),
-        Judgement::Admit(Stream::Mcp {
-            channel,
-            session,
-            resume,
-        }) => {
-            if serve_mcp(connection, intake, &channel, session, resume.as_deref()).is_err() {
-                eprintln!("MCP session ended after an invalid or interrupted exchange.");
+            Role::Control => serve_control(connection, opening.control, intake),
+            Role::Mcp => {
+                if serve_mcp(connection, intake, &opening).is_err() {
+                    eprintln!("MCP session ended after an invalid or interrupted exchange.");
+                }
             }
-        }
-        Judgement::Admit(Stream::Unknown) => {
-            listener::refuse(&mut connection, OpeningRefusal::Unsupported)
-        }
+            Role::Desktop | Role::Command | Role::Unknown => {
+                listener::refuse(&connection, OpeningRefusal::Unsupported);
+            }
+        },
     }
 }
 
 /// Answer one control operation and close.
-fn serve_control(mut connection: TcpStream, op: ControlOp, intake: &Intake) {
-    let value = match op {
-        ControlOp::Readiness => {
+fn serve_control(connection: Connection, operation: Option<Control>, intake: &Intake) {
+    let value = match operation {
+        Some(Control::Readiness) => {
             serde_json::to_value(intake.workbench.snapshot().readiness).unwrap_or(Value::Null)
         }
-        ControlOp::ActivateWorkbench => {
-            json!({ listener::control::AVAILABLE: intake.workbench.reveal().is_ok() })
-        }
-        ControlOp::Quit => {
+        Some(Control::Status) => serde_json::to_value(control::Status {
+            service: env!("CARGO_PKG_VERSION").into(),
+            instance: intake.instance.clone(),
+            pid: std::process::id(),
+        })
+        .unwrap_or(Value::Null),
+        Some(Control::Show) => serde_json::to_value(control::Shown {
+            shown: intake.workbench.reveal().is_ok(),
+        })
+        .unwrap_or(Value::Null),
+        Some(Control::Quit { .. }) => {
             intake.quit.begin(QUIT_GRACE);
-            json!({ listener::control::QUITTING: true })
+            serde_json::to_value(control::Quitting { quitting: true }).unwrap_or(Value::Null)
         }
-        ControlOp::Unknown => {
-            listener::refuse(&mut connection, OpeningRefusal::Unsupported);
+        Some(Control::Unknown) | None => {
+            listener::refuse(&connection, OpeningRefusal::Unsupported);
             return;
         }
     };
-    if listener::accept(&mut connection).is_ok() {
-        let _ = listener::answer_control(&mut connection, value);
+    if listener::accept(&connection, &intake.accepted(Role::Control)).is_ok() {
+        let _ = listener::answer_control(&connection, &value);
     }
 }
 
@@ -512,26 +529,31 @@ fn serve_control(mut connection: TcpStream, op: ControlOp, intake: &Intake) {
 /// and tabs the browser no longer has stay stale. Tabs of a browser that has not returned yet
 /// stay in the token and are bound when it does.
 fn serve_mcp(
-    mut connection: TcpStream,
+    connection: Connection,
     intake: &Arc<Intake>,
-    channel: &str,
-    session: Option<Value>,
-    resume: Option<&str>,
+    requested: &protocol::Opening,
 ) -> Result<()> {
     let Some(_session_permit) = intake.sessions.acquire(1) else {
-        listener::refuse(&mut connection, OpeningRefusal::Capacity);
+        listener::refuse(&connection, OpeningRefusal::Capacity);
         return Ok(());
     };
-    let marker = match session.map(serde_json::from_value::<SessionMarker>) {
+    let marker = match requested
+        .session
+        .clone()
+        .map(serde_json::from_value::<SessionMarker>)
+    {
         None => None,
         Some(Ok(marker)) => Some(marker),
         Some(Err(_)) => {
-            listener::refuse(&mut connection, OpeningRefusal::Malformed);
+            listener::refuse(&connection, OpeningRefusal::Malformed);
             return Ok(());
         }
     };
+    let channel = requested.channel.as_deref().unwrap_or(MCP_CHANNEL);
     let intake_channel = crate::intake::intake_channel(channel);
-    let resumed = resume
+    let resumed = requested
+        .resume
+        .as_deref()
         .and_then(|token| ResumeState::decode(token).ok())
         .map(|mut state| {
             if state.channel.is_empty() {
@@ -539,8 +561,7 @@ fn serve_mcp(
             }
             state
         });
-    listener::accept(&mut connection)?;
-    connection.set_nonblocking(false)?;
+    listener::accept(&connection, &intake.accepted(Role::Mcp))?;
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
@@ -1080,24 +1101,32 @@ fn refuse_while_quitting(wire: &McpWire, id: String) {
     });
 }
 
-/// Take the service lease at `path`, asking again until `wait` has passed while another process
+/// Take the service lock at `path`, asking again until `wait` has passed while another process
 /// holds it.
-fn acquire_lease(path: &Path, wait: Duration) -> Result<Lease> {
+fn acquire_lock(path: &Path, wait: Duration) -> Result<ServiceLock> {
     let give_up = Instant::now() + wait;
     loop {
-        if let Some(lease) = Lease::try_acquire(path).context("open the service lease")? {
-            return Ok(lease);
+        if let Some(lock) = ServiceLock::try_acquire(path).context("open the service lock")? {
+            return Ok(lock);
         }
         let remaining = give_up.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err(AuthorityAlreadyRunning.into());
         }
-        thread::sleep(LEASE_POLL.min(remaining));
+        thread::sleep(LOCK_POLL.min(remaining));
     }
 }
 
+/// Refuse to serve from an elevated token.
+fn refuse_when_elevated(elevated: bool) -> Result<()> {
+    if elevated {
+        anyhow::bail!(ELEVATED_SERVICE);
+    }
+    Ok(())
+}
+
 /// Remove the images earlier installs moved aside in the directory `executable` runs from. The
-/// lease is held, so no other service of this home is starting.
+/// lock is held, so no other service of this home is starting.
 fn remove_old_images_beside(executable: &Path) {
     if let Some(directory) = executable.parent() {
         install::swap::remove_old_images(directory);
@@ -1274,26 +1303,28 @@ impl BrowserEventSink for ServiceBrowserEvents {
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpStream;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
     use crate::intake::session::IntakeChannel;
-    use ghostlight_relay::client::{self, REPLY_DEADLINE};
+    use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
     use ghostlight_relay::frame;
-    use ghostlight_relay::home::{RUNTIME_FILE_NAME, TEMPLATES_FILE_NAME};
-    use ghostlight_relay::opening::{ControlOp, McpFrame, RefusalCode, Reply, Stream};
-    use ghostlight_relay::runtime::RuntimeFile;
-    use ghostlight_relay::templates::FailureTemplates;
+    use ghostlight_relay::protocol::{
+        self, Control, Edge, McpFrame, Opening as RelayOpening, Program, QuitReason, RefusalCode,
+        Reply, Role,
+    };
     use serde_json::{json, Value};
 
     use super::test_home::TestHome;
     use crate::browser::adapter::BrowserCommand;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
+    use crate::intake::listener::{self, control};
+    use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
+    use crate::language::intake::OpeningRefusal;
     use crate::workbench::{
         WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
@@ -1301,14 +1332,14 @@ mod tests {
 
     use super::{cleanup_released_tabs, ServiceHost};
 
-    fn runtime_path(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    /// A fresh directory to serve from, which the test removes.
+    fn temp_home(name: &str) -> std::path::PathBuf {
         let directory = std::env::temp_dir().join(format!(
             "ghostlight-service-{name}-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
-        let path = directory.join("ghostlight-runtime.json");
-        (directory, path)
+        directory
     }
 
     #[test]
@@ -1323,7 +1354,7 @@ mod tests {
         use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
         use crate::workspace::WorkspaceStore;
 
-        let (directory, _) = runtime_path("passive-browsing");
+        let directory = temp_home("passive-browsing");
         let policy = directory.join("policy.json");
         std::fs::write(&policy, r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
         let governance = GovernanceFacade::new(Some(policy), None);
@@ -1651,32 +1682,46 @@ mod tests {
         assert_eq!(reusable_example_tab(&workspaces), None);
     }
 
-    /// The token every test service presents in its runtime file.
-    const TEST_TOKEN: &str = "runtime_test";
+    /// The instance every test service reports.
+    const TEST_INSTANCE: &str = "instance_test";
 
-    /// The MCP channel a connector names.
+    /// The MCP channel an edge names.
     const CONNECTOR_CHANNEL: &str = "npm";
 
     /// How long a test waits for the service to answer.
     const PATIENCE: Duration = Duration::from_secs(10);
 
-    /// A relay listener over a fake browser, found through the test home's runtime file.
+    /// A relay listener over a fake browser, bound at the test home's endpoint.
     struct Served {
         intake: Arc<super::Intake>,
         browser: Arc<FakeBrowser>,
         relay: Arc<crate::browser::RelayBrowserPort>,
-        port: u16,
-        listener: Option<thread::JoinHandle<()>>,
+        listener: Arc<Listener>,
+        thread: Option<thread::JoinHandle<()>>,
         quit_requested: std::sync::mpsc::Receiver<()>,
     }
 
     impl Drop for Served {
         fn drop(&mut self) {
             self.intake.stop.store(true, Ordering::SeqCst);
-            let _ = TcpStream::connect(("127.0.0.1", self.port));
-            if let Some(listener) = self.listener.take() {
-                let _ = listener.join();
+            self.listener.shutdown();
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
             }
+        }
+    }
+
+    impl Served {
+        /// A connection to the service that never touches the endpoint: the far end is served on
+        /// its own thread, the way the listener serves an accepted one.
+        fn over_a_pair(&self) -> Connection {
+            let (client, server) = pair().unwrap();
+            let intake = Arc::clone(&self.intake);
+            thread::spawn(move || {
+                let judgement = listener::judge(&server, intake.quit.drain.is_quitting());
+                super::serve_connection(server, judgement, &intake);
+            });
+            client
         }
     }
 
@@ -1755,7 +1800,8 @@ mod tests {
             let _ = signal.send(());
         }));
         let intake = Arc::new(super::Intake {
-            token: TEST_TOKEN.into(),
+            instance: TEST_INSTANCE.into(),
+            templates: failure_templates(),
             executor,
             workspaces,
             browser_port: if relayed {
@@ -1772,39 +1818,48 @@ mod tests {
             budget: super::QueueBudget::default(),
             stop: Arc::default(),
         });
-        let listener = crate::intake::listener::bind().unwrap();
-        let port = listener.local_addr().unwrap().port();
-        RuntimeFile::new(port, TEST_TOKEN.into(), "2.0.0".into())
-            .write(&home.path().join(RUNTIME_FILE_NAME))
-            .unwrap();
-        let thread = super::spawn_listener(listener, intake.clone());
+        let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
+        let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
         Served {
             intake,
             browser,
             relay,
-            port,
-            listener: Some(thread),
+            listener,
+            thread: Some(thread),
             quit_requested,
         }
     }
 
-    /// Open an `mcp` stream the way the MCP connector does.
-    fn open_mcp(resume: Option<String>) -> TcpStream {
-        let (socket, reply) = client::connect(
-            Stream::Mcp {
-                channel: CONNECTOR_CHANNEL.into(),
-                session: None,
-                resume,
-            },
-            REPLY_DEADLINE,
-        )
-        .unwrap();
-        assert!(matches!(reply, Reply::Accepted { .. }), "{reply:?}");
-        socket.set_read_timeout(Some(PATIENCE)).unwrap();
-        socket
+    /// An opening for `role` from an edge.
+    fn opening(role: Role) -> RelayOpening {
+        RelayOpening::new(role, Edge::new(Program::Edge, "2.0.0".into()))
     }
 
-    fn send_line(socket: &mut TcpStream, line: Value) {
+    /// An `mcp` opening the way the MCP edge presents it.
+    fn mcp_opening(resume: Option<String>) -> RelayOpening {
+        let mut opening = opening(Role::Mcp);
+        opening.channel = Some(CONNECTOR_CHANNEL.into());
+        opening.resume = resume;
+        opening
+    }
+
+    /// Open `opening` on the service of the test home.
+    fn dial(opening: &RelayOpening) -> (Connection, Reply) {
+        let home = ghostlight_relay::home::home().unwrap();
+        let (connection, reply) =
+            protocol::connect(&home, opening, Instant::now() + PATIENCE).unwrap();
+        connection.set_read_timeout(Some(PATIENCE)).unwrap();
+        (connection, reply)
+    }
+
+    /// Open an `mcp` stream the way the MCP edge does.
+    fn open_mcp(resume: Option<String>) -> Connection {
+        let (connection, reply) = dial(&mcp_opening(resume));
+        assert!(reply.accepted, "{reply:?}");
+        connection
+    }
+
+    fn send_line(socket: &mut Connection, line: Value) {
         frame::write_frame(
             socket,
             &McpFrame::Message {
@@ -1815,7 +1870,7 @@ mod tests {
     }
 
     /// Read frames until the response to `id`, collecting the resume tokens on the way.
-    fn response(socket: &mut TcpStream, id: u64) -> (Value, Vec<String>) {
+    fn response(socket: &mut Connection, id: u64) -> (Value, Vec<String>) {
         let mut tokens = Vec::new();
         loop {
             match frame::read_frame::<McpFrame>(socket).unwrap().unwrap() {
@@ -1826,12 +1881,12 @@ mod tests {
                     }
                 }
                 McpFrame::Resume { token } => tokens.push(token),
-                McpFrame::Unknown => {}
+                McpFrame::Goodbye { .. } | McpFrame::Unknown => {}
             }
         }
     }
 
-    fn initialize(socket: &mut TcpStream) -> (Value, Vec<String>) {
+    fn initialize(socket: &mut Connection) -> (Value, Vec<String>) {
         send_line(
             socket,
             json!({
@@ -1909,24 +1964,80 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_token_is_refused_and_opens_nothing() {
-        let home = TestHome::new("bad-token");
+    fn an_mcp_opening_over_a_pair_is_accepted_with_the_templates_and_served() {
+        let home = TestHome::new("mcp-pair");
         let served = serve_fake(&home);
-        RuntimeFile::new(served.port, "runtime_wrong".into(), "2.0.0".into())
-            .write(&home.path().join(RUNTIME_FILE_NAME))
-            .unwrap();
+        let mut client = served.over_a_pair();
+        client.set_read_timeout(Some(PATIENCE)).unwrap();
+        let reply = protocol::open(&client, &mcp_opening(None), Instant::now() + PATIENCE).unwrap();
+        assert!(reply.accepted, "{reply:?}");
+        assert_eq!(reply.service.as_deref(), Some(env!("CARGO_PKG_VERSION")));
+        assert_eq!(reply.instance.as_deref(), Some(TEST_INSTANCE));
+        assert_eq!(reply.templates, Some(failure_templates()));
 
-        let (_, reply) = client::connect(Stream::Browser, REPLY_DEADLINE).unwrap();
-        assert!(
-            matches!(
-                reply,
-                Reply::Refused {
-                    code: RefusalCode::AuthenticationFailed,
-                    ..
-                }
-            ),
-            "{reply:?}"
+        let (initialized, _) = initialize(&mut client);
+        assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
+    }
+
+    #[test]
+    fn only_an_mcp_stream_is_handed_the_failure_templates() {
+        let home = TestHome::new("templates-only-for-mcp");
+        let served = serve_fake(&home);
+        for role in [Role::Browser, Role::Control] {
+            let client = served.over_a_pair();
+            let mut opening = opening(role);
+            opening.control = Some(Control::Status);
+            let reply = protocol::open(&client, &opening, Instant::now() + PATIENCE).unwrap();
+            assert!(reply.accepted, "{role:?}: {reply:?}");
+            assert_eq!(reply.templates, None, "{role:?}");
+            assert_eq!(reply.instance.as_deref(), Some(TEST_INSTANCE));
+        }
+    }
+
+    #[test]
+    fn control_status_answers_the_version_the_instance_and_the_process() {
+        let home = TestHome::new("control-status");
+        let served = serve_fake(&home);
+        let status = cli_client::status().unwrap();
+        assert_eq!(
+            status,
+            control::Status {
+                service: env!("CARGO_PKG_VERSION").into(),
+                instance: TEST_INSTANCE.into(),
+                pid: std::process::id(),
+            }
         );
+        drop(served);
+    }
+
+    #[test]
+    fn the_desktop_and_command_roles_are_refused_as_unsupported_with_the_service_sentence() {
+        let home = TestHome::new("unsupported-roles");
+        let served = serve_fake(&home);
+        for role in [Role::Desktop, Role::Command] {
+            let client = served.over_a_pair();
+            let reply = protocol::open(&client, &opening(role), Instant::now() + PATIENCE).unwrap();
+            assert!(!reply.accepted, "{role:?}");
+            assert_eq!(reply.code, Some(RefusalCode::Unsupported), "{role:?}");
+            assert_eq!(
+                reply.say,
+                Some(OpeningRefusal::Unsupported.message()),
+                "{role:?}"
+            );
+        }
+        assert!(served.relay.connected_browsers().is_empty());
+        assert!(served.intake.workspaces.summaries().is_empty());
+    }
+
+    #[test]
+    fn an_opening_that_names_relay_3_is_refused_and_opens_nothing() {
+        let home = TestHome::new("relay-3");
+        let served = serve_fake(&home);
+        let client = served.over_a_pair();
+        let mut earlier = opening(Role::Browser);
+        earlier.relay = 3;
+        let reply = protocol::open(&client, &earlier, Instant::now() + PATIENCE).unwrap();
+        assert_eq!(reply.code, Some(RefusalCode::Unsupported));
         assert!(served.relay.connected_browsers().is_empty());
         assert!(served.intake.workspaces.summaries().is_empty());
     }
@@ -2037,9 +2148,9 @@ mod tests {
         };
         use crate::browser::adapter::chromium::protocol4::wire::Primitive;
 
-        let native = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let (service, extension) = pair().unwrap();
         let fake = FakeExtension::connect(
-            native.local_addr().unwrap(),
+            extension,
             &FakeExtension::hello(RETURNING_BROWSER),
             Box::new(|correlation, primitive| {
                 let outcome = match primitive {
@@ -2051,7 +2162,7 @@ mod tests {
                 FakeReply::Now(FakeExtension::ok(correlation, outcome))
             }),
         );
-        served.relay.attach(native.accept().unwrap().0).unwrap();
+        served.relay.attach(service).unwrap();
         fake
     }
 
@@ -2148,11 +2259,12 @@ mod tests {
     fn readiness_never_starts_an_absent_service() {
         let home = TestHome::new("readiness-absent");
         assert!(cli_client::readiness().is_err());
-        assert!(!home.path().join(RUNTIME_FILE_NAME).exists());
+        assert!(cli_client::status().is_err());
+        assert!(!home.path().join("run").exists());
     }
 
     /// Open one MCP session, end the connection the given way, and report the sessions left.
-    fn sessions_after(name: &str, goodbye: impl FnOnce(&mut TcpStream)) -> usize {
+    fn sessions_after(name: &str, goodbye: impl FnOnce(&mut Connection)) -> usize {
         let home = TestHome::new(name);
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
@@ -2194,38 +2306,61 @@ mod tests {
     }
 
     #[test]
-    fn prepared_service_keeps_discovery_private_until_desktop_ready() {
+    fn a_prepared_service_binds_its_endpoint_only_at_desktop_ready() {
         let home = TestHome::new("desktop-readiness");
-        let runtime = home.path().join(RUNTIME_FILE_NAME);
         let host = ServiceHost::start(home.path()).unwrap();
-        assert!(!runtime.exists());
         assert!(cli_client::readiness().is_err());
         let contender = ServiceHost::start(home.path()).err().unwrap();
         assert!(contender.is::<super::AuthorityAlreadyRunning>());
         host.publish_ready().unwrap();
-        let published = RuntimeFile::read(&runtime).unwrap().unwrap();
-        assert_eq!(published.token, host.token);
-        assert_eq!(published.port, host.port);
-        assert_eq!(published.relay, ghostlight_relay::RELAY);
-        assert!(published.token.starts_with("runtime_"));
-        let templates = FailureTemplates::read(&home.path().join(TEMPLATES_FILE_NAME))
-            .unwrap()
-            .expect("failure templates are published with discovery");
-        assert_eq!(templates.relay, ghostlight_relay::RELAY);
+        assert!(cli_client::readiness().is_ok());
+        let status = cli_client::status().unwrap();
+        assert_eq!(status.instance, host.intake.instance);
+        assert!(status.instance.starts_with("instance_"));
+        assert_eq!(status.service, env!("CARGO_PKG_VERSION"));
+        host.publish_ready().unwrap();
         assert!(cli_client::readiness().is_ok());
         drop(host);
-        assert!(!runtime.exists());
-        let unpublished = ServiceHost::start(home.path()).unwrap();
-        drop(unpublished);
         assert!(
-            !runtime.exists(),
-            "failed desktop setup leaves no discovery behind"
+            cli_client::readiness().is_err(),
+            "a stopped service leaves nothing to find"
         );
+        let unpublished = ServiceHost::start(home.path()).unwrap();
+        assert!(
+            cli_client::readiness().is_err(),
+            "failed desktop setup binds no endpoint"
+        );
+        drop(unpublished);
     }
 
     #[test]
-    fn service_lease_prevents_concurrent_authorities() {
-        let (directory, _) = runtime_path("singleton");
+    fn two_homes_bind_two_endpoints_and_serve_two_instances() {
+        let first = temp_home("endpoint-first");
+        let second = temp_home("endpoint-second");
+        assert_ne!(
+            Endpoint::for_home(&first).unwrap(),
+            Endpoint::for_home(&second).unwrap()
+        );
+        let one = ServiceHost::start(&first).unwrap();
+        let two = ServiceHost::start(&second).unwrap();
+        one.publish_ready().unwrap();
+        two.publish_ready().unwrap();
+        let seen_by_first = cli_client::status_at(&first).unwrap();
+        let seen_by_second = cli_client::status_at(&second).unwrap();
+        assert_eq!(seen_by_first.instance, one.intake.instance);
+        assert_eq!(seen_by_second.instance, two.intake.instance);
+        assert_ne!(seen_by_first.instance, seen_by_second.instance);
+        drop(one);
+        assert!(cli_client::status_at(&first).is_err());
+        assert!(cli_client::status_at(&second).is_ok());
+        drop(two);
+        std::fs::remove_dir_all(first).unwrap();
+        std::fs::remove_dir_all(second).unwrap();
+    }
+
+    #[test]
+    fn a_second_service_on_one_home_cannot_take_the_service_lock() {
+        let directory = temp_home("singleton");
         let first = ServiceHost::start(&directory).unwrap();
         let second = ServiceHost::start(&directory)
             .err()
@@ -2235,9 +2370,35 @@ mod tests {
             detail.contains("another Ghostlight orchestrator already owns this runtime"),
             "{detail}"
         );
+        assert!(!super::ServiceLock::is_free(
+            &crate::install::layout::Layout::new(&directory).service_lock()
+        ));
         drop(first);
         let replacement = ServiceHost::start(&directory).unwrap();
         drop(replacement);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_service_started_with_an_elevated_token_refuses_before_it_takes_any_state() {
+        let directory = temp_home("elevated");
+        let refused = ServiceHost::start_with_token(&directory, Duration::ZERO, || Ok(true))
+            .err()
+            .expect("an elevated start is refused");
+        assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
+        assert!(
+            !directory.join("run").exists(),
+            "no lock, run directory or socket was made"
+        );
+        let unreadable = ServiceHost::start_with_token(&directory, Duration::ZERO, || {
+            Err(std::io::Error::other("no token"))
+        })
+        .err()
+        .expect("a token that cannot be read is refused");
+        assert!(format!("{unreadable:#}").contains("no token"));
+        let started = ServiceHost::start_with_token(&directory, Duration::ZERO, || Ok(false));
+        assert!(started.is_ok());
+        drop(started);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2259,7 +2420,7 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_activation_reveals_the_existing_workbench() {
+    fn show_reveals_the_existing_workbench() {
         let home = TestHome::new("activation");
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
@@ -2278,22 +2439,21 @@ mod tests {
 
         let home = TestHome::new("browser-stream");
         let served = serve_fake(&home);
-        // Stand in for the browser connector: carry the extension's bytes over a browser stream.
-        let native = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = native.local_addr().unwrap();
+        // Stand in for the browser edge: carry the extension's bytes over a browser stream.
+        let (native, extension) = pair().unwrap();
         let carrier = thread::spawn(move || {
-            let (extension, _) = native.accept().unwrap();
-            let (service, reply) = client::connect(Stream::Browser, REPLY_DEADLINE).unwrap();
-            assert!(matches!(reply, Reply::Accepted { .. }), "{reply:?}");
-            let mut to_service = (extension.try_clone().unwrap(), service.try_clone().unwrap());
-            let mut to_extension = (service, extension);
+            let (service, reply) = dial(&opening(Role::Browser));
+            assert!(reply.accepted, "{reply:?}");
+            service.set_read_timeout(None).unwrap();
+            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
+            let mut to_extension = (service, native);
             thread::spawn(move || {
                 let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
             });
             let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
         });
         let fake = FakeExtension::connect(
-            address,
+            extension,
             &FakeExtension::hello("browser_relayed"),
             Box::new(|correlation, _| {
                 FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
@@ -2397,23 +2557,11 @@ mod tests {
         );
 
         // A quitting service takes no new connection either.
-        let (_, reply) = client::connect(
-            Stream::Control {
-                op: ControlOp::Readiness,
-            },
-            REPLY_DEADLINE,
-        )
-        .unwrap();
-        assert!(
-            matches!(
-                reply,
-                Reply::Refused {
-                    code: RefusalCode::ShuttingDown,
-                    ..
-                }
-            ),
-            "{reply:?}"
-        );
+        let mut readiness = opening(Role::Control);
+        readiness.control = Some(Control::Readiness);
+        let (_, reply) = dial(&readiness);
+        assert!(!reply.accepted, "{reply:?}");
+        assert_eq!(reply.code, Some(RefusalCode::ShuttingDown));
         drop(socket);
         drop(host);
     }
@@ -2424,7 +2572,10 @@ mod tests {
         let served = serve_fake(&home);
         let running = served.intake.quit.drain.admit().unwrap();
 
-        let answer = cli_client::control(ControlOp::Quit).unwrap();
+        let answer = cli_client::control(Control::Quit {
+            reason: QuitReason::Quit,
+        })
+        .unwrap();
         assert_eq!(answer, json!({"quitting": true}));
         assert!(
             served
@@ -2482,7 +2633,7 @@ mod tests {
 
     #[test]
     fn a_start_that_never_publishes_discovery_stops_by_itself() {
-        let (directory, _) = runtime_path("discovery-stalls");
+        let directory = temp_home("discovery-stalls");
         let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
         host.expect_discovery_by(Instant::now() + Duration::from_millis(100), move || {
@@ -2496,7 +2647,7 @@ mod tests {
 
     #[test]
     fn publishing_discovery_cancels_the_stop() {
-        let (directory, _) = runtime_path("discovery-published");
+        let directory = temp_home("discovery-published");
         let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = std::sync::mpsc::channel();
         host.expect_discovery_by(Instant::now() + Duration::from_millis(200), move || {

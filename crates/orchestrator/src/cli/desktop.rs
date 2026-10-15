@@ -42,10 +42,10 @@ pub fn start_or_activate_desktop() -> anyhow::Result<()> {
 
 /// Start the service and its backgrounded desktop for a connector, then run until quit.
 ///
-/// This is the start a connector makes, so it differs from a human start in three ways. It never
-/// reveals a window. It exits 0 without a word when another service holds the lease, once it has
-/// asked for the lease for a second. And it stops by itself, with a nonzero status and a
-/// diagnostics event, when discovery is not published within the discovery window.
+/// This is the start an edge makes, so it differs from a human start in three ways. It never
+/// reveals a window. It exits 0 without a word when another service holds the lock, once it has
+/// asked for the lock for a second. And it stops by itself, with a nonzero status and a
+/// diagnostics event, when the endpoint is not bound within the discovery window.
 pub fn serve() -> anyhow::Result<()> {
     let started = Instant::now();
     settle_serve(crate::desktop::run(crate::desktop::Startup::serve(started)))
@@ -160,7 +160,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serve_exits_quietly_while_another_service_holds_the_lease() {
+    fn serve_exits_quietly_while_another_service_holds_the_lock() {
         let directory = std::env::temp_dir().join(format!(
             "ghostlight-serve-decision-{}",
             uuid::Uuid::new_v4()
@@ -169,43 +169,50 @@ mod tests {
         let running = crate::service::ServiceHost::start(&directory).unwrap();
 
         let started = Instant::now();
-        let contended =
-            crate::service::ServiceHost::start_waiting(&directory, Duration::from_millis(200))
-                .err()
-                .expect("the lease is held");
+        let contended = crate::service::ServiceHost::start_with_token(
+            &directory,
+            Duration::from_millis(200),
+            || Ok(false),
+        )
+        .err()
+        .expect("the lock is held");
         assert!(
             started.elapsed() >= Duration::from_millis(200),
-            "a serve start asks for the lease for its whole wait"
+            "a serve start asks for the lock for its whole wait"
         );
         assert!(settle_serve(Err(contended)).is_ok());
 
-        // Only a held lease is success; any other end of a start is still an error.
+        // Only a held lock is success; any other end of a start is still an error.
         assert!(settle_serve(Err(anyhow::anyhow!("native desktop construction failed"))).is_err());
         assert!(settle_serve(Ok(())).is_ok());
 
-        // A lease released inside the wait is taken, not reported as held.
+        // A lock released inside the wait is taken, not reported as held.
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             drop(running);
         });
-        let taken =
-            crate::service::ServiceHost::start_waiting(&directory, Duration::from_secs(5)).unwrap();
+        let taken = crate::service::ServiceHost::start_with_token(
+            &directory,
+            Duration::from_secs(5),
+            || Ok(false),
+        )
+        .unwrap();
         release.join().unwrap();
         drop(taken);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn a_serve_start_waits_for_the_lease_and_a_human_start_does_not() {
+    fn a_serve_start_waits_for_the_lock_and_a_human_start_does_not() {
         let started = Instant::now();
         let serve = crate::desktop::Startup::serve(started);
-        assert_eq!(serve.lease_wait, Duration::from_secs(1));
+        assert_eq!(serve.lock_wait, Duration::from_secs(1));
         assert_eq!(
             serve.discovery_deadline,
             Some(started + crate::service::lifetime::DISCOVERY_WINDOW)
         );
         let human = crate::desktop::Startup::interactive();
-        assert_eq!(human.lease_wait, Duration::ZERO);
+        assert_eq!(human.lock_wait, Duration::ZERO);
         assert!(human.discovery_deadline.is_none());
     }
 

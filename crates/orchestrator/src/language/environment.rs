@@ -18,6 +18,9 @@ const WSL_KERNEL_MARKER: &str = "microsoft";
 /// Where a Linux kernel reports its release string.
 const KERNEL_RELEASE_PATH: &str = "/proc/sys/kernel/osrelease";
 
+/// What the service says when it is started with an elevated Windows token.
+pub const ELEVATED_SERVICE: &str = "Ghostlight does not run with administrator rights. Start it from a regular terminal or from the Start menu.";
+
 /// One row of the environment table.
 ///
 /// Rows are distinguished only where Ghostlight has something different to say. A desktop shell
