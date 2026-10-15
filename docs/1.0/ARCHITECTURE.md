@@ -154,8 +154,11 @@ it answers `WM_QUERYENDSESSION` with TRUE at once, and the console handler retur
 default exit is never suppressed. On Linux it is SIGTERM and SIGHUP through a handler that writes
 one byte to a self-pipe and a thread that reads it. One process-wide state says the session is
 ending. It is set at the first signal, the query included, and lifted only when the system
-cancels the end. While it holds, `start_service` and `spawn_detached` refuse and nothing is
-spawned; browser recovery launches no browser and the install handoff opens no page.
+cancels the end. On Windows the state also asks the system (`GetSystemMetrics` with
+`SM_SHUTTINGDOWN`), so a process born after the broadcast, such as a browser connector the
+extension relaunches during a sign-out, refuses too. Linux has no equally cheap question: only a
+process that received the signal refuses. While it holds, `start_service` and `spawn_detached`
+refuse and nothing is spawned; browser recovery launches no browser and the install handoff opens no page.
 
 On the final signal a process arms a 2 s fallback exit first. The service then says
 `goodbye{session_end}` on every stream and leaves through the desktop's exit, without waiting for

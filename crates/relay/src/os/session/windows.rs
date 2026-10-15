@@ -29,6 +29,9 @@ const WM_CLOSE: u32 = 0x0010;
 const WM_QUERYENDSESSION: u32 = 0x0011;
 const WM_ENDSESSION: u32 = 0x0016;
 
+/// `GetSystemMetrics` index: nonzero while the current session is shutting down.
+const SM_SHUTTINGDOWN: i32 = 0x2000;
+
 const WS_POPUP: u32 = 0x8000_0000;
 const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
 
@@ -101,6 +104,7 @@ extern "system" {
     fn DispatchMessageW(msg: *const Msg) -> Lresult;
     fn PostMessageW(hwnd: Hwnd, msg: u32, w_param: Wparam, l_param: Lparam) -> i32;
     fn PostQuitMessage(exit_code: i32);
+    fn GetSystemMetrics(index: i32) -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -110,6 +114,13 @@ extern "system" {
         handler: Option<unsafe extern "system" fn(u32) -> i32>,
         add: i32,
     ) -> i32;
+}
+
+/// Whether the system says the current session is shutting down. A process born after the
+/// broadcast never hears it, and this answers for it.
+pub(super) fn system_ending() -> bool {
+    // SAFETY: GetSystemMetrics takes an index and no pointers.
+    unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) != 0 }
 }
 
 /// The window procedure: the query is allowed at once, the end is dispatched, and the window

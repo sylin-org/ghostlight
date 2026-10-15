@@ -17,6 +17,11 @@
 //! ([`refuse_start`]). A process that registers a listener ends itself from its callback; the
 //! final signal replaces the default exit of the signals it handles.
 //!
+//! A process that starts after the broadcast never hears it, so on Windows the state also asks
+//! the system: a session that is shutting down counts as ending in every process, the late ones
+//! included. Linux has no equally cheap question, so there only a process that heard the signal
+//! refuses.
+//!
 //! The final signal is the point where a process arms [`arm_fallback_exit`] first and then stops
 //! in an orderly way, so a stop that blocks can never hold the session open.
 
@@ -75,15 +80,26 @@ static LISTENERS: Mutex<Vec<(usize, Callback)>> = Mutex::new(Vec::new());
 pub(crate) static EXCLUSIVE: Mutex<()> = Mutex::new(());
 
 /// Whether the session is ending: the system asked whether it can end, or told this process it
-/// is ending, and has not cancelled.
+/// is ending, and has not cancelled; or, on Windows, the system says the session is shutting down
+/// even though this process started too late to hear it.
 #[must_use]
 pub fn session_ending() -> bool {
-    ENDING.load(Ordering::SeqCst)
+    ending_by(platform::system_ending)
+}
+
+/// [`session_ending`] with the question to the system injected.
+fn ending_by(system_says_ending: impl FnOnce() -> bool) -> bool {
+    ENDING.load(Ordering::SeqCst) || system_says_ending()
 }
 
 /// Refuse while the session is ending. Every start of a program checks this first.
 pub(crate) fn refuse_start() -> io::Result<()> {
-    if session_ending() {
+    refuse_start_by(platform::system_ending)
+}
+
+/// [`refuse_start`] with the question to the system injected.
+fn refuse_start_by(system_says_ending: impl FnOnce() -> bool) -> io::Result<()> {
+    if ending_by(system_says_ending) {
         Err(io::Error::other(START_REFUSED))
     } else {
         Ok(())

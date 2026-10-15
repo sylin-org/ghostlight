@@ -54,6 +54,12 @@ extern "C" {
 /// the process.
 pub(super) struct Attached;
 
+/// Whether the system says the session is shutting down. Linux has no cheap question for it, so
+/// only a process that heard the signal knows.
+pub(super) fn system_ending() -> bool {
+    false
+}
+
 /// Install the handlers on the first registration of the process.
 pub(super) fn attach(_registration: usize) -> io::Result<Attached> {
     let mut installed = INSTALLED.lock().unwrap_or_else(PoisonError::into_inner);

@@ -92,6 +92,8 @@ documents the `user32.dll`/`gdi32.dll` exception and recommends a hidden window 
 to Linux (SIGTERM and SIGHUP through a self-pipe). Every process registers it: the service, both
 connectors and every one-shot command. The ending state it keeps begins at the first signal, the
 query included, and lifts only when the system cancels; while it holds nothing Ghostlight owns
-starts a process. The fallback exit is 2 s. The service says `goodbye{session_end}` on every
+starts a process. A process that starts after the broadcast never hears the query, so on Windows
+the state also asks `GetSystemMetrics(SM_SHUTTINGDOWN)` and such a process refuses as well. Linux
+has no equally cheap probe: there only a process that received the signal refuses. The fallback exit is 2 s. The service says `goodbye{session_end}` on every
 stream before it leaves. A connector or service that cannot start the listener does not run; a
 one-shot command runs without it.

@@ -161,6 +161,32 @@ fn a_detached_start_refuses_while_the_session_is_ending_and_not_after_the_cancel
 }
 
 #[test]
+fn a_process_born_after_the_broadcast_still_counts_the_session_as_ending() {
+    let _exclusive = exclusive();
+    assert!(!session_ending(), "no signal heard");
+
+    assert!(
+        ending_by(|| true),
+        "the system says the session is shutting down"
+    );
+    assert!(!ending_by(|| false));
+
+    let refused = refuse_start_by(|| true).expect_err("a late process starts nothing");
+    assert_eq!(refused.to_string(), START_REFUSED);
+    assert!(refuse_start_by(|| false).is_ok());
+}
+
+#[test]
+fn a_heard_signal_counts_whatever_the_system_says() {
+    let _exclusive = exclusive();
+    dispatch(SessionEvent::Query);
+    assert!(ending_by(|| false));
+    assert!(refuse_start_by(|| false).is_err());
+    dispatch(SessionEvent::Cancelled);
+    assert!(!ending_by(|| false));
+}
+
+#[test]
 fn the_final_signal_arms_the_fallback_before_it_stops() {
     let order = std::sync::Mutex::new(Vec::new());
     stop_after(

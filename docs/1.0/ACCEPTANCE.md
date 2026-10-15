@@ -428,7 +428,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    the final signal ends the exact process within two seconds even when Tao has already destroyed
    its event target. A console-control fallback never suppresses the default process exit. The
    service says `session_end` goodbye on every stream first. While the session is ending, no
-   service, browser or page is started by any process.
+   service, browser or page is started by any process that heard the end. On Windows that is every
+   process, one born after the broadcast included, because each also asks the system whether the
+   session is shutting down. On Linux only a process that received the signal refuses.
 2. Home presents plural session, operation, and browser counts plus current work and system health
    at a glance. The persistent lamp band states whether Ghostlight is all-open, has one or more
    policies applied, or has a configured policy issue, and links to Status for detail. Activity,
