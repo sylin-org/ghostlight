@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f06e (the next slice in the lane order).
+Next: f06e-welcome-on-absence.
 
 ## Landed
 
@@ -118,7 +118,6 @@ Next: f06e (the next slice in the lane order).
 | f06a-page-message-lists | The frozen vocabulary carries only words the extension reads (blueprint F6a). `extension/lib/protocol.js` no longer lists `world_message_kinds`, `asset_error_codes` or `pre_effect_codes`; nothing in `extension/lib` or `worker.js` read them. The golden test compares `protocol.vocabulary` with `vocabulary.json` minus the named `PAGE_MESSAGE_LISTS` and asserts none is present. `vocabulary.json`, `golden.rs` and the page asset tests keep the lists: the page seam belongs to the service (ADR-0197 D6). adapter-protocol-4 says so. | see `git log` |
 | f06b-tab-readiness | Protocol-4 tab readiness is loading, complete or unknown (blueprint F6b). `wire::Readiness` drops `Interactive`; a tab readiness word it does not name decodes as Unknown, and `BrowserReadiness::Interactive` maps to Loading on the wire (only the fake extension and tests send tab readiness). The page seam keeps the word: `world::DocumentReadiness` (Loading, Interactive, Complete, Unknown) decodes the observe answer and maps into `BrowserReadiness`, so model results still report interactive. `vocabulary.json`, `protocol.js`, `readiness_changed.json`, `golden.rs` and adapter-protocol-4 follow. | see `git log` |
 | f06c-notice-label | The notice carries the service's activity label (blueprint F6c). `wire::NoticeSignal` gains `label: Option<String>` (default, skipped when none); the physical `PresentationSignal` carries `label: String`, set from `activity_label` for every signal the presentation reactor builds, and `translate::present` sends it. `notice.js` shows a non-empty frame label (bounded to the phase limit) in the popup's activity list and falls back to `shared.activityLabel` only when it is absent. `tests/golden/protocol4/frames/notice.json` gains `"label":"Clicking"`; adapter-protocol-4 documents the field. | see `git log` |
-
 | f06d-setup-page | The bundled setup page and the install say only what is true in 2.0 (blueprint F6d). `extension/setup.html` drops the Debian package lines, says the command installs Ghostlight on this computer and registers this browser and the MCP clients it finds, and describes `ghostlight doctor` as this computer's side. `environment::BACKGROUND_POSTURE`, its test and its println in `finish_setup` are gone. | see `git log` |
 
 ## Owed live checks
