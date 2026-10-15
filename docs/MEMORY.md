@@ -144,6 +144,11 @@ the owner wants, and what this project learned the hard way.
   seam; change it there. Restore a green checkpoint before proposing the change.
 - **Fewest meaningful moving parts.** A logical boundary does not earn a process, crate, service,
   event bus, actor system, workflow engine, CQRS split, or registry.
+- **Keep releases lean.** A release carries only what must change together; additive work ships
+  in the next minor. The 2.0 break grew by accretion (agent experience, rules, process surgery,
+  desktop shell, install journey) while 1.x users stayed exposed to known hazards, and the owner
+  had asked for lean (2026-10-14). Before adding work to a release in flight, ask whether it must
+  freeze with it; if not, it waits.
 - **Delight is the purpose; dependable boundaries support it.** Ghostlight makes integrated
   tooling useful and natural for end users. Governance lets individuals and organizations choose
   reliable boundaries that work consistently whenever work passes through Ghostlight. Ordinary
