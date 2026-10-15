@@ -83,6 +83,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // The bounds and step a range input applies when the page declares none. A range always clamps
   // to its bounds and snaps to its step, so its refusal always reports the ones in force.
   const RANGE_DEFAULT_LIMITS = Object.freeze({ min: 0, max: 100, step: 1 });
+  // The step keyword that lets a range take any number inside its bounds.
+  const RANGE_FREE_STEP = "any";
   // The input types that are buttons, which a click presses and a fill never sets.
   const BUTTON_INPUT_TYPES = new Set(["submit", "button", "reset", "image"]);
   // The roles of a page widget that is not a form control. A fill cannot choose in one.
@@ -1182,13 +1184,17 @@ ${line}` : line;
 
   // The bounds and step a range input applies, as the refusal reports them. A bound that is
   // missing or not a number is the default, a maximum below the minimum is the minimum, and a step
-  // that is not above zero (the keyword "any" included) is the default step.
+  // that is missing, not a number or not above zero is the default step. The keyword "any" is no
+  // step at all: the browser clamps such a range to its bounds and never snaps it, so the limits
+  // leave the step out.
   function rangeLimits(element) {
     const min = rangeAttribute(element, "min", RANGE_DEFAULT_LIMITS.min);
     const max = Math.max(min, rangeAttribute(element, "max", RANGE_DEFAULT_LIMITS.max));
+    const limits = { min: String(min), max: String(max) };
+    if (element.getAttribute("step")?.trim().toLowerCase() === RANGE_FREE_STEP) return limits;
     const declaredStep = rangeAttribute(element, "step", RANGE_DEFAULT_LIMITS.step);
-    const step = declaredStep > 0 ? declaredStep : RANGE_DEFAULT_LIMITS.step;
-    return { min: String(min), max: String(max), step: String(step) };
+    limits.step = String(declaredStep > 0 ? declaredStep : RANGE_DEFAULT_LIMITS.step);
+    return limits;
   }
 
   // Whether the value a detached input kept is the value given. A color keeps its value in lower

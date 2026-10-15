@@ -529,7 +529,8 @@ value to a detached input of the same type with the same `min`, `max` and `step`
 back. The value must come back as given and inside the declared range. A range input also moves
 a value to its nearest step and into its bounds, whatever the page declares (0 to 100 in steps of
 1 when it declares none), so a range value it would move is refused and the refusal names the
-bounds and the step in force. A number written in another form, such as `20.0` for `20`, is the
+bounds and the step in force. A range with the step `any` is clamped but not snapped, so its
+refusal names the bounds only. A number written in another form, such as `20.0` for `20`, is the
 same number and is accepted. The shapes are `YYYY-MM-DD`,
 `HH:MM`, `YYYY-MM-DDTHH:MM`, `YYYY-MM`, `YYYY-Www`, `a number` and `#rrggbb`. There is no lenient
 date parsing: `10/14/2026` is refused, not guessed at. A color compares without regard to case. An

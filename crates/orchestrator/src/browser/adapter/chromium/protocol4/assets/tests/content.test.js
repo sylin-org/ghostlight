@@ -2531,6 +2531,17 @@ test("a range value off its step is refused with the step, and an equal number i
   assert.deepEqual(await problemsOf(harness, "Level", ""), [stepped], "a range has no empty value");
 });
 
+test("a range with the step any is clamped to its bounds and refused without a false step", async () => {
+  const harness = contentHarness();
+  typedInput(harness, "Volume", "range", { min: "0", max: "1", step: "any" }, { value: "1" });
+  const bounded = { field: 0, problem: "format", type: "range", expected: "a number", limits: { min: "0", max: "1" } };
+
+  assert.deepEqual(await problemsOf(harness, "Volume", "0.5"), []);
+  assert.deepEqual(await problemsOf(harness, "Volume", "0.37"), []);
+  assert.deepEqual(await problemsOf(harness, "Volume", "1.5"), [bounded]);
+  assert.deepEqual(await problemsOf(harness, "Volume", "-1"), [bounded]);
+});
+
 test("a range given a number in another form is held as that number once filled", async () => {
   const harness = contentHarness();
   typedInput(harness, "Level", "range", { min: "0", max: "100", step: "10" }, { value: "20" });

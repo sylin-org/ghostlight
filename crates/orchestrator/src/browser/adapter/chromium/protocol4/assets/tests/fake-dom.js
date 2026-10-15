@@ -54,7 +54,8 @@ function validTime(text) {
 /**
  * The value a browser keeps when a script assigns `text` to an input of `type`: the text when it
  * has the type's shape, an empty value for the date and time types and a number, and the type's
- * default for a color. A range clamps to its bounds and snaps to its step.
+ * default for a color. A range clamps to its bounds and snaps to its step, except that the step
+ * keyword "any" clamps without snapping.
  */
 function sanitizedValue(type, text, attribute) {
   switch (type) {
@@ -71,9 +72,10 @@ function sanitizedValue(type, text, attribute) {
     case "range": {
       const least = Number(attribute("min") ?? 0);
       const most = Number(attribute("max") ?? 100);
-      const step = Number(attribute("step") ?? 1);
+      const declared = String(attribute("step") ?? 1).trim().toLowerCase();
+      const step = Number(declared);
       if (!NUMBER_SHAPE.test(text)) return String(least + (most - least) / 2);
-      const snapped = least + Math.round((Number(text) - least) / step) * step;
+      const snapped = declared === "any" ? Number(text) : least + Math.round((Number(text) - least) / step) * step;
       return String(Math.min(most, Math.max(least, snapped)));
     }
     default: return text;
