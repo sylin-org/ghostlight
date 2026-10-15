@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: the slice after f01c-yaml-copy-setup in the lane's order.
+Next: f02-catalog-golden.
 
 ## Landed
 

@@ -257,12 +257,17 @@ impl HarnessRegistry {
             .into_iter()
             .find(|summary| summary.id == id)
             .ok_or_else(|| HarnessError::UnknownHarness(id.into()))?;
-        Ok(HarnessActionResult {
-            changed: true,
-            message: format!(
+        let message = if matches!(definition.dialect, ConfigDialect::Manual(_)) {
+            manual_setup_sentence(&definition)
+        } else {
+            format!(
                 "Ghostlight will use the located {} path after you choose Set up.",
                 summary.label
-            ),
+            )
+        };
+        Ok(HarnessActionResult {
+            changed: true,
+            message,
             summary,
         })
     }
@@ -2438,6 +2443,49 @@ mod tests {
         fs::write(&located, "{}\n").unwrap();
         let result = registry.locate("kilo-code", &located).unwrap();
         assert_eq!(result.summary.config_path, located.to_string_lossy());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn locating_a_manual_clients_file_points_to_copy_setup_and_leaves_it_untouched() {
+        let directory = temporary("goose-locate");
+        let context = context(&directory);
+        let registry = HarnessRegistry::with_context(context);
+        let located = directory.join("portable/config.yaml");
+        fs::create_dir_all(located.parent().unwrap()).unwrap();
+        let source = "# keep goose notes\nprovider: local\n";
+        fs::write(&located, source).unwrap();
+        let result = registry.locate("goose", &located).unwrap();
+        assert_eq!(result.summary.config_path, located.to_string_lossy());
+        assert!(result.message.contains("Copy setup"));
+        assert!(!result.message.contains("Set up"));
+        assert_eq!(fs::read_to_string(&located).unwrap(), source);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_edits_preserve_the_files_permission_bits() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = temporary("json-mode");
+        let path = directory.join("config.json");
+        let connector = connector(&directory);
+        fs::write(&path, "{\"theme\":\"dark\"}\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(edit_json(&path, &connector, JsonDialect::Copilot, true).unwrap());
+        let installed = fs::read(&path).unwrap();
+        assert!(!edit_json(&path, &connector, JsonDialect::Copilot, true).unwrap());
+        assert_eq!(fs::read(&path).unwrap(), installed);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert!(edit_json(&path, &connector, JsonDialect::Copilot, false).unwrap());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
