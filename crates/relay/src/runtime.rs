@@ -13,7 +13,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{file, RELAY};
+use crate::{file, private, RELAY};
 
 /// Largest runtime file a reader accepts, in bytes.
 const MAX_RUNTIME_FILE_BYTES: u64 = 64 * 1024;
@@ -66,7 +66,7 @@ impl RuntimeFile {
     /// the old file or the new one, never a partial one. Missing parent directories are created.
     pub fn write(&self, path: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            private::create_dir_all(parent)?;
         }
         let mut temporary = OsString::from(path.as_os_str());
         temporary.push(TEMPORARY_SUFFIX);

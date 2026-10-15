@@ -5,10 +5,12 @@
 //! and repeated installs remain non-interactive. The marker is local, version-family state and
 //! carries no installation identity or machine data off-device.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use ghostlight_relay::private;
 
 /// Stable service-first page that points at the current store extension.
 pub const EXTENSION_INSTALL_URL: &str = "https://sylin.org/ghostlight/service/post-install/";
@@ -74,14 +76,9 @@ fn reserve_marker(path: &Path) -> io::Result<bool> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "handoff marker has no parent")
     })?;
-    fs::create_dir_all(parent)?;
-    let mut options = OpenOptions::new();
+    private::create_dir_all(parent)?;
+    let mut options = private::file_options();
     options.create_new(true).write(true);
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
     match options.open(path) {
         Ok(mut marker) => {
             let written = marker

@@ -42,6 +42,9 @@ site traffic remains browser traffic.
   contacts, but no source address, bearer token, verification key, or policy rules.
 - Browser adapter settings and MCP-client registrations remain in their platform-native local
   stores.
+- On Linux, the audit log, policy, state, runtime and diagnostics files that Ghostlight creates
+  under `~/.ghostlight` are readable only by the user, and the directories it creates there are
+  closed to other users. A file that already existed keeps its mode.
 
 The governed host and optional bounded target name are the only page-derived audit text. Audit
 does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed

@@ -11,6 +11,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -242,12 +243,13 @@ pub fn sha256_file(path: &Path) -> io::Result<String> {
 /// The bytes go to a new file in the same directory, are flushed to disk, and are renamed over
 /// `path`. A reader sees the old file or the new one, and a failure leaves the old one. The new
 /// file is readable only by the current user: on Windows it is created through the audited
-/// private-file call. Missing parent directories are created.
+/// private-file call, and on Unix with mode 0600. Missing parent directories are created, closed
+/// to everyone else on Unix.
 pub fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
-    fs::create_dir_all(parent)?;
+    private::create_dir_all(parent)?;
     let mut temporary = path.as_os_str().to_owned();
     temporary.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     let temporary = Path::new(&temporary);
@@ -273,13 +275,9 @@ fn create_private(path: &Path) -> io::Result<File> {
 /// Create a new file only the current user can read.
 #[cfg(not(windows))]
 fn create_private(path: &Path) -> io::Result<File> {
-    use std::fs::OpenOptions;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    OpenOptions::new()
+    private::file_options()
         .create_new(true)
         .write(true)
-        .mode(0o600)
         .open(path)
 }
 
@@ -294,6 +292,19 @@ mod tests {
             relay_revision: "3".to_owned(),
             service_sha256: sha.to_owned(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_file_and_the_directories_made_for_it_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new();
+        let path = scratch.path().join("state").join("settings.json");
+        atomic_replace(&path, b"{}").unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
     }
 
     #[test]

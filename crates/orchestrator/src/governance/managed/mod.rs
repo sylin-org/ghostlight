@@ -21,6 +21,7 @@ use super::{
     manifest, ManagedPolicyContact, ManagedPolicyFreshness, ManagedPolicyPassport,
     ManagedPolicySource,
 };
+use crate::install::record::atomic_replace;
 
 const DEFAULT_POLL_SECONDS: u64 = 900;
 const MAX_POLL_SECONDS: u64 = 86_400;
@@ -420,7 +421,7 @@ impl ManagedAuthority {
             envelope_hash,
         });
         if let Some(path) = &self.paths.cache {
-            if let Err(error) = atomic_write(path, bytes) {
+            if let Err(error) = atomic_replace(path, bytes) {
                 self.last_error = Some(format!(
                     "verified managed policy could not be cached: {error}"
                 ));
@@ -530,7 +531,7 @@ impl ManagedAuthority {
             last_error: self.last_error.clone(),
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
-            let _ = atomic_write(path, &bytes);
+            let _ = atomic_replace(path, &bytes);
         }
     }
 }
@@ -636,15 +637,6 @@ fn digest(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&temporary, bytes)?;
-    fs::rename(temporary, path)
-}
-
 fn unix_ms() -> u64 {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -698,6 +690,27 @@ mod tests {
         assert!(authority.valid());
         assert!(authority.manifest().is_none());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cache_and_the_status_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = directory("private");
+        let paths = ManagedPaths::under(&root);
+        let seed = [31_u8; 32];
+        fs::write(
+            root.join("org.bundle"),
+            bundle::sign(&seed, None, 4, manifest("org", "read"), None),
+        )
+        .unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        ManagedAuthority::new(paths.clone()).refresh();
+        let mode =
+            |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(paths.cache.as_deref().unwrap()), 0o600);
+        assert_eq!(mode(paths.status.as_deref().unwrap()), 0o600);
     }
 
     #[test]

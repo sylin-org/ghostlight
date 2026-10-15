@@ -1,12 +1,12 @@
 //! One serialized audit writer, bounded recovery, and truthful live history projection.
 
-use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
 
 use crate::governance::{evidence, AuthoritySnapshot, CapabilitySet, Decision, ReasonCode};
@@ -262,7 +262,7 @@ impl JsonlAuditSink {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            fs::create_dir_all(parent)?;
+            private::create_dir_all(parent)?;
         }
         let mut bytes = Vec::new();
         if let Some(value) = value {
@@ -279,7 +279,7 @@ impl JsonlAuditSink {
             bytes.insert(0, b'\n');
         }
         let result = (|| {
-            let mut file = OpenOptions::new()
+            let mut file = private::file_options()
                 .create(true)
                 .append(true)
                 .open(&self.path)?;
@@ -543,6 +543,7 @@ mod tests {
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
     use crate::language::outcome::Outcome;
+    use std::fs;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Default)]
@@ -806,6 +807,20 @@ mod tests {
             Storage::Saved
         );
         assert_eq!(restored.audit_health().unconfirmed_receipts, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_first_append_creates_a_private_file_in_a_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("ghostlight-audit-{}", uuid::Uuid::new_v4()));
+        let path = root.join("audit").join("audit.jsonl");
+        JsonlAuditSink::new(&path).record(&record("first")).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

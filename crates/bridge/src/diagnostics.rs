@@ -10,7 +10,7 @@
 //! newest files per component under a total byte ceiling and never touches the marker.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ghostlight_relay::private;
 use notify::Watcher as _;
 
 /// The environment variable that turns diagnostics on and names the directory.
@@ -168,9 +169,12 @@ pub fn set_marker(runtime_path: &Path, on: bool) -> io::Result<Activation> {
     let marker = marker_path(runtime_path);
     if on {
         if let Some(parent) = marker.parent() {
-            fs::create_dir_all(parent)?;
+            private::create_dir_all(parent)?;
         }
-        OpenOptions::new().create(true).append(true).open(&marker)?;
+        private::file_options()
+            .create(true)
+            .append(true)
+            .open(&marker)?;
     } else {
         match fs::remove_file(&marker) {
             Ok(()) => {}
@@ -436,13 +440,17 @@ impl Sink {
     }
 
     fn open_locked(sink: &Sink, state: &mut SinkState, directory: &Path) {
-        if let Err(error) = fs::create_dir_all(directory) {
+        if let Err(error) = private::create_dir_all(directory) {
             sink.disable(state, &error);
             return;
         }
         let _ = prune_directory(directory);
         let path = allocate_log_path(directory, sink.component, sink.pid, &utc_stamp(unix_ms()));
-        let file = match OpenOptions::new().append(true).create_new(true).open(&path) {
+        let file = match private::file_options()
+            .append(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(file) => file,
             Err(error) => {
                 sink.disable(state, &error);
@@ -835,6 +843,34 @@ mod tests {
         );
         assert_eq!(record["component"], "orchestrator");
         assert_eq!(record["event"], event::PROCESS_STARTED);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_marker_and_the_logs_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("private");
+        let runtime = runtime_in(&root);
+        set_marker(&runtime, true).expect("marker");
+        let sink = Sink::birth_with(
+            Component::McpConnector,
+            "9.9.9-test",
+            &runtime,
+            None,
+            &OsMarkerWatcher,
+            None,
+        );
+        sink.emit(event::PROCESS_STARTED, Level::Info, None, "private");
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&marker_path(&runtime)), 0o600);
+        let directory = root.join("diagnostics");
+        assert_eq!(mode(&directory), 0o700);
+        let logs: Vec<_> = fs::read_dir(&directory).unwrap().flatten().collect();
+        assert!(!logs.is_empty());
+        for log in logs {
+            assert_eq!(mode(&log.path()), 0o600);
+        }
     }
 
     #[test]

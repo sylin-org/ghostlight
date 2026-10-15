@@ -1184,3 +1184,20 @@ fn control_changes_reach_the_observer_once_each() {
         ]
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn the_authored_policy_and_its_directory_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = std::env::temp_dir().join(format!("ghostlight-1.0-{}", uuid::Uuid::new_v4()));
+    let path = directory.join("policy").join("user.json");
+    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    facade
+        .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
+        .unwrap();
+    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&path), 0o600);
+    assert_eq!(mode(path.parent().unwrap()), 0o700);
+    let _ = fs::remove_dir_all(directory);
+}

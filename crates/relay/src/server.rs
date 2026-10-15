@@ -4,7 +4,7 @@
 //! The listener is reachable by any local process, so everything read before the token is
 //! checked is bounded in size and in time.
 
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{File, TryLockError};
 use std::io::{self, Read};
 use std::net::TcpStream;
 use std::path::Path;
@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::opening::Opening;
+use crate::private;
 
 /// Largest opening frame the service reads, in bytes: 64 KiB.
 pub const MAX_OPENING_BYTES: usize = 64 * 1024;
@@ -114,9 +115,9 @@ impl Lease {
     /// Returns `None` when another process holds it.
     pub fn try_acquire(path: &Path) -> io::Result<Option<Self>> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            private::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
+        let file = private::file_options()
             .create(true)
             .truncate(false)
             .write(true)
@@ -131,6 +132,7 @@ impl Lease {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::net::TcpListener;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};

@@ -21,6 +21,7 @@ pub mod frame;
 pub mod home;
 pub mod log;
 pub mod opening;
+pub mod private;
 pub mod runtime;
 pub mod server;
 pub mod spawn;

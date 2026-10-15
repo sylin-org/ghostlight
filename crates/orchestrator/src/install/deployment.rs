@@ -27,7 +27,7 @@
 //! process.
 
 use std::env;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -37,6 +37,7 @@ use ghostlight_relay::home::{
     LEASE_FILE_NAME, RUNTIME_FILE_NAME, SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE,
 };
 use ghostlight_relay::opening::{ControlOp, Reply, Stream};
+use ghostlight_relay::private;
 use ghostlight_relay::runtime::RuntimeFile;
 use serde::Serialize;
 use thiserror::Error;
@@ -717,9 +718,9 @@ fn validate_payload(payload: &Path, destination: &Path) -> Result<(), PayloadErr
 /// Take the install lock at `path`, waiting up to [`INSTALL_LOCK_WAIT`] for another install.
 fn hold_install_lock(path: &Path) -> io::Result<File> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        private::create_dir_all(parent)?;
     }
-    let file = OpenOptions::new()
+    let file = private::file_options()
         .create(true)
         .truncate(false)
         .write(true)
@@ -745,6 +746,7 @@ fn hold_install_lock(path: &Path) -> io::Result<File> {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::fs;
 
     use super::super::migration::{
         FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation, MigrationError,

@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use super::manifest::{self, ManifestError, RETIRED_SCHEMA, SCHEMA};
+use crate::install::record::atomic_replace;
 use crate::language::migration::{self, Retired, RETIRED_SETTINGS};
 
 /// File-name suffix of the copy kept beside a migrated file.
@@ -118,11 +119,11 @@ pub fn migrate_file(path: &Path) -> Result<Option<(PathBuf, Migration)>, Migrate
             )))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::write(&backup, &original).map_err(unwritable)?;
+            atomic_replace(&backup, &original).map_err(unwritable)?;
         }
         Err(error) => return Err(unwritable(error)),
     }
-    replace_atomically(path, migration.document.as_bytes()).map_err(unwritable)?;
+    atomic_replace(path, migration.document.as_bytes()).map_err(unwritable)?;
     Ok(Some((backup, migration)))
 }
 
@@ -132,18 +133,6 @@ pub fn backup_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(BACKUP_SUFFIX);
     path.with_file_name(name)
-}
-
-/// Replace a file with new bytes in one step.
-///
-/// The staging name is unique per call, so two overlapping writers never share a staging file and
-/// cannot interleave or clobber each other's write.
-pub(super) fn replace_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let staged = path.with_extension(format!("json.{}.writing", uuid::Uuid::new_v4().simple()));
-    fs::write(&staged, bytes)?;
-    fs::rename(&staged, path).inspect_err(|_| {
-        let _ = fs::remove_file(&staged);
-    })
 }
 
 fn unreadable(error: ManifestError) -> MigrateError {

@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::browser::BrowserPort;
+use crate::install::record::atomic_replace;
 use file_state::FileState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1589,10 +1590,7 @@ impl GovernanceFacade {
         let policy = manifest::parse(document, "this policy")
             .map_err(|error| AuthoringError::Invalid(error.to_string()))?;
         let path = self.writable_user_policy_path()?;
-        let parent = path.parent().ok_or(AuthoringError::NoHome)?;
-        fs::create_dir_all(parent)
-            .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
-        migrate::replace_atomically(&path, document.as_bytes())
+        atomic_replace(&path, document.as_bytes())
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
         self.refresh_local_now();
         Ok(policy)
