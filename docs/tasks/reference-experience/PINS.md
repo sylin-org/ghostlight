@@ -9,8 +9,8 @@ the "verified tree facts" section was read from the tree at that revision. **Sta
 the file before you change it.** A pin tells you what was true and what must become true; it does
 not excuse you from looking.
 
-Only S1 may append to this file, and only to add values it decided. Pins are expected values. Never change a pin, test, or contract to make failing
-behavior pass. If a pin is wrong, record a ledger deviation and change it with the owner's decision or an ADR
+Pins are expected values. Never change a pin, test, or contract to make failing behavior pass.
+If a pin is wrong, record a ledger deviation and change it with the owner's decision or an ADR
 amendment.
 
 ## Gate commands
