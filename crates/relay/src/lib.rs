@@ -5,7 +5,8 @@
 //! across service upgrades: length-prefixed framing, the fixed home and its names, the
 //! [`endpoint`] (a named pipe on Windows and a Unix socket on Linux, with the connection type both
 //! ends share), the [`protocol`] vocabulary that runs over it, and the mechanics every edge
-//! repeats: starting the service, watching the parent, and writing diagnostics. It authors no
+//! repeats: starting the service, watching the parent, writing diagnostics and deciding where an
+//! edge's invocation goes ([`route`]). It authors no
 //! words and makes no product decisions. The `os` module is the audited platform layer: the only
 //! `unsafe` in the crate, it starts the service with no inherited handles, identifies a process on
 //! Windows, and holds the pipe and peer-user calls the endpoint needs.
@@ -24,6 +25,7 @@ pub mod log;
 pub mod os;
 pub mod private;
 pub mod protocol;
+pub mod route;
 pub mod spawn;
 pub mod watchdog;
 

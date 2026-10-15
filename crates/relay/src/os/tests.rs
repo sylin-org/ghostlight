@@ -310,3 +310,36 @@ mod app_user_model_id {
         set_app_user_model_id("Sylin.Ghostlight").expect("set the test process id");
     }
 }
+
+mod console_interrupts {
+    use crate::os::{forward_console_interrupts, swallows_console_event};
+
+    const CTRL_C_EVENT: u32 = 0;
+    const CTRL_BREAK_EVENT: u32 = 1;
+    const CTRL_CLOSE_EVENT: u32 = 2;
+    const CTRL_LOGOFF_EVENT: u32 = 5;
+    const CTRL_SHUTDOWN_EVENT: u32 = 6;
+
+    #[test]
+    fn only_ctrl_c_and_ctrl_break_are_swallowed() {
+        assert!(swallows_console_event(CTRL_C_EVENT));
+        assert!(swallows_console_event(CTRL_BREAK_EVENT));
+        for event in [
+            CTRL_CLOSE_EVENT,
+            CTRL_LOGOFF_EVENT,
+            CTRL_SHUTDOWN_EVENT,
+            3,
+            4,
+            7,
+            u32::MAX,
+        ] {
+            assert!(!swallows_console_event(event), "event {event}");
+        }
+    }
+
+    #[test]
+    fn registering_twice_is_harmless() {
+        forward_console_interrupts().expect("first registration");
+        forward_console_interrupts().expect("second registration");
+    }
+}

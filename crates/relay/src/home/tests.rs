@@ -44,3 +44,76 @@ fn a_missing_user_home_is_not_found() {
         io::ErrorKind::NotFound
     );
 }
+
+mod verbatim {
+    use std::path::{Path, PathBuf};
+
+    use crate::home::{canonical, without_verbatim_prefix};
+
+    fn stripped(text: &str) -> PathBuf {
+        without_verbatim_prefix(Path::new(text))
+    }
+
+    #[test]
+    fn a_verbatim_drive_path_loses_its_prefix() {
+        assert_eq!(
+            stripped(r"\\?\C:\Users\person\.ghostlight"),
+            Path::new(r"C:\Users\person\.ghostlight")
+        );
+        assert_eq!(stripped(r"\\?\d:\x"), Path::new(r"d:\x"));
+        assert_eq!(stripped(r"\\?\C:"), Path::new("C:"));
+    }
+
+    #[test]
+    fn a_verbatim_share_path_becomes_a_share_path() {
+        assert_eq!(
+            stripped(r"\\?\UNC\server\share\x"),
+            Path::new(r"\\server\share\x")
+        );
+        assert_eq!(
+            stripped(r"\\?\unc\server\share"),
+            Path::new(r"\\server\share")
+        );
+    }
+
+    #[test]
+    fn other_verbatim_forms_are_kept() {
+        for text in [
+            r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\x",
+            r"\\?\GLOBALROOT\Device\x",
+            r"\\?\C:x",
+            r"\\?\UNCx\y",
+            r"\\?\UNC",
+            r"\\?\",
+            r"\\.\C:\x",
+        ] {
+            assert_eq!(stripped(text), Path::new(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_plain_path_is_kept() {
+        for text in [r"C:\Users\person", r"\\server\share\x", "/home/person", ""] {
+            assert_eq!(stripped(text), Path::new(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_canonical_form_of_a_directory_is_stable() {
+        let first = canonical(&std::env::temp_dir()).expect("canonical form");
+        let second = canonical(&first).expect("canonical form of the canonical form");
+        assert_eq!(first, second);
+        assert!(first.is_absolute());
+        assert!(first.is_dir());
+        assert!(!first.to_string_lossy().starts_with(r"\\?\"));
+    }
+
+    #[test]
+    fn a_missing_path_has_no_canonical_form() {
+        let missing = std::env::temp_dir().join("ghostlight-canonical-missing");
+        assert_eq!(
+            canonical(&missing).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
+}

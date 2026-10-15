@@ -7,7 +7,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Test-only override of the home directory, for journeys that must not touch the real one. It
 /// names the Ghostlight home itself, not its parent. Production code never sets it.
@@ -80,6 +80,60 @@ pub fn diagnostics_marker() -> io::Result<PathBuf> {
 /// Diagnostics directory: `home/diagnostics`.
 pub fn diagnostics_dir() -> io::Result<PathBuf> {
     Ok(home()?.join(DIAGNOSTICS_DIRECTORY_NAME))
+}
+
+/// The canonical form of `path`, spelled the way a person writes it.
+///
+/// This is [`std::fs::canonicalize`] followed by [`without_verbatim_prefix`]. On Windows the
+/// standard call returns a verbatim path (`\\?\C:\...`), which never compares equal to the
+/// same path written by hand; two canonical paths from this function do compare equal when they
+/// name the same place.
+pub fn canonical(path: &Path) -> io::Result<PathBuf> {
+    let resolved = std::fs::canonicalize(path)?;
+    if cfg!(windows) {
+        Ok(without_verbatim_prefix(&resolved))
+    } else {
+        Ok(resolved)
+    }
+}
+
+/// Prefix of a verbatim path.
+const VERBATIM_PREFIX: &str = "\\\\?\\";
+
+/// Name that follows the verbatim prefix for a network share.
+const VERBATIM_UNC: &str = "UNC\\";
+
+/// Strip the Windows verbatim prefix from `path`, judged on its text alone.
+///
+/// `\\?\C:\x` becomes `C:\x` and `\\?\UNC\server\share\x` becomes
+/// `\\server\share\x`. Every other path is returned unchanged, including other verbatim forms
+/// (a volume name, a device path) and a path whose text is not valid UTF-8.
+pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    let Some(rest) = text.strip_prefix(VERBATIM_PREFIX) else {
+        return path.to_path_buf();
+    };
+    if is_drive_path(rest) {
+        return PathBuf::from(rest);
+    }
+    match rest.get(..VERBATIM_UNC.len()) {
+        Some(name) if name.eq_ignore_ascii_case(VERBATIM_UNC) => {
+            PathBuf::from(format!("\\\\{}", &rest[VERBATIM_UNC.len()..]))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Whether `text` starts with a drive letter and a colon, and the colon ends it or is followed by
+/// a separator.
+fn is_drive_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || bytes[2] == b'\\')
 }
 
 /// Pick the home from the two environment values.
