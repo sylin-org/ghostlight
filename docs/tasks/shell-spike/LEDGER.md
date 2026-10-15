@@ -103,6 +103,9 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
   driver loaded `WEBKIT_DISABLE_DMABUF_RENDERER` is set to 1 unless the user set it; that the
   Wayland app id and X11 class match the installed entry; and that a session with no display
   makes `init_display` return `NoDisplay` instead of panicking.
+- shell-spike-5: live on Linux under X11, once the event loop exists: that an Open presents and
+  raises the new window both for the first create and for a replacement, and that the window is
+  not left behind other windows.
 
 ## Blockers
 
@@ -120,6 +123,8 @@ None.
 - `ShellWindow::create` builds the window hidden, centers it with `centered_origin` (pure, in
   physical pixels on the window's monitor) and then shows it, which replaces the `center: true` of
   the Tauri configuration without a flash at a default position. Wayland ignores the position.
-  The caller calls `focus` after `Create`, as the Tauri glue did.
+  The caller calls `focus` after `Create`. On Linux `focus` presents the window from a GTK idle
+  callback, because `tao` drops a focus request while its queued show request has not yet run, and
+  a window freshly created hidden is in exactly that state.
 - If a `Create` act fails, the caller feeds `LifecycleEvent::Destroyed` so the lifecycle returns to
   `Absent`.

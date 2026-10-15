@@ -319,9 +319,16 @@ impl ShellWindow {
     }
 
     /// Restores the window from minimized, shows it and gives it focus.
+    ///
+    /// On Linux the show request is queued, and `tao` drops a focus request made before it has
+    /// run because the window is not yet visible. The focus therefore waits for the next idle
+    /// turn of the main loop, after the queued requests.
     pub fn focus(&self) {
         self.window.set_minimized(false);
         self.window.set_visible(true);
+        #[cfg(target_os = "linux")]
+        present_when_idle(&self.window);
+        #[cfg(not(target_os = "linux"))]
         self.window.set_focus();
     }
 
@@ -354,6 +361,20 @@ impl ShellWindow {
             .webview()
             .connect_web_process_terminated(move |_, _| callback());
     }
+}
+
+/// Presents the window on the next idle turn of the GTK main loop, which runs after the window
+/// requests `tao` has queued. A window dropped before then is not presented.
+#[cfg(target_os = "linux")]
+fn present_when_idle(window: &Window) {
+    use gtk::prelude::{GtkWindowExt, ObjectExt};
+    use tao::platform::unix::WindowExtUnix;
+    let weak = window.gtk_window().downgrade();
+    gtk::glib::idle_add_local_once(move || {
+        if let Some(window) = weak.upgrade() {
+            window.present();
+        }
+    });
 }
 
 fn center(window: &Window) {
