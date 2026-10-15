@@ -108,6 +108,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci
       GHOSTLIGHT_BIN_DIR: ${{ github.workspace }}/.target-ci/debug
+      JOURNEY_WRAP: ${{ matrix.os == 'ubuntu-latest' && 'dbus-run-session -- xvfb-run -a ' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
@@ -125,27 +126,23 @@ jobs:
         with:
           node-version: "22"
       - run: cargo build --workspace --locked
+      - name: Verify the shell installer
+        if: runner.os == 'Linux'
+        run: node tests/installer-shell.mjs
       - run: node tests/connector-parent-lifecycle.mjs
-      - if: runner.os == 'Linux'
+      - name: Verify the fixed installation
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a node tests/fixed-installation-journey.mjs
+      - run: ${{ env.JOURNEY_WRAP }}node tests/process-journey.mjs
+      - name: Verify one user installation across executable directories
+        if: runner.os == 'Linux'
+        env:
+          GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION: "1"
         run: dbus-run-session -- xvfb-run -a node tests/process-journey.mjs
-      - if: runner.os == 'Windows'
-        run: node tests/process-journey.mjs
-      - if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/local-resilience-journey.mjs
-      - if: runner.os == 'Windows'
-        run: node tests/local-resilience-journey.mjs
-      - if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/provenance-journey.mjs
-      - if: runner.os == 'Windows'
-        run: node tests/provenance-journey.mjs
-      - if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/cli-journey.mjs
-      - if: runner.os == 'Windows'
-        run: node tests/cli-journey.mjs
-      - if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/cli-powershell-journey.mjs
-      - if: runner.os == 'Windows'
-        run: node tests/cli-powershell-journey.mjs
+      - run: ${{ env.JOURNEY_WRAP }}node tests/local-resilience-journey.mjs
+      - run: ${{ env.JOURNEY_WRAP }}node tests/provenance-journey.mjs
+      - run: ${{ env.JOURNEY_WRAP }}node tests/cli-journey.mjs
+      - run: ${{ env.JOURNEY_WRAP }}node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs
       - name: Verify native Windows desktop lifecycle
         if: runner.os == 'Windows'
@@ -168,6 +165,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci-browser
       # Only disposable test profiles use this flag. No installed browser is changed.
       GHOSTLIGHT_TEST_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
+      JOURNEY_WRAP: ${{ matrix.os == 'ubuntu-latest' && 'dbus-run-session -- xvfb-run -a ' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
@@ -200,11 +198,7 @@ jobs:
           }
           "GHOSTLIGHT_TEST_BROWSER=$chromeExecutable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Run real Chromium regressions on fresh binaries
-        if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a node tests/hardening-suite.mjs --lane=browser
-      - name: Run real Chromium regressions on fresh binaries
-        if: runner.os == 'Windows'
-        run: node tests/hardening-suite.mjs --lane=browser
+        run: ${{ env.JOURNEY_WRAP }}node tests/hardening-suite.mjs --lane=browser
       - name: Keep browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
