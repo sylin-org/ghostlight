@@ -304,10 +304,11 @@ fn presentation_failure_does_not_change_projection() {
     }
     let projection = WorkbenchProjection::default();
     projection.attach_presentation(Arc::new(Failing));
-    projection.react(&DomainEvent::AttentionRequired {
+    projection.react(&DomainEvent::WorkBlocked {
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         physical_id: None,
+        presentation: DenialPresentation::Guardrail,
     });
     projection.react(&DomainEvent::WorkStarted {
         provenance: None,

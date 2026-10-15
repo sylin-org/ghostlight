@@ -107,7 +107,6 @@ impl Composition {
             Status::Blocked => counts.blocked += 1,
             Status::Failed => counts.failed += 1,
             Status::Cancelled => counts.cancelled += 1,
-            Status::AttentionRequired => counts.attention_required += 1,
             Status::Unknown => counts.unknown += 1,
         }
         match result.effect {
@@ -166,8 +165,6 @@ impl Composition {
         let cause = p.issue.map(|issue| issue.cause);
         if p.effects.unknown > 0 || p.counts.unknown > 0 {
             Status::Unknown
-        } else if p.counts.attention_required > 0 {
-            Status::AttentionRequired
         } else if p.counts.cancelled > 0 || cause == Some(StepCause::Cancelled) {
             Status::Cancelled
         } else if p.counts.blocked > 0
@@ -264,7 +261,7 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
             cause: BlockedReason::SessionEnded,
         }) => StepCause::SessionEnded,
         Some(A::CredentialHandoff | A::CredentialAuthorization) => StepCause::Failed,
-        Some(A::AttentionRequired | A::LocalInterlock) => StepCause::AttentionRequired,
+        Some(A::LocalInterlock) => StepCause::AttentionRequired,
         Some(A::DeadlineBeforeStart | A::DeadlineExpired { .. }) => StepCause::Deadline,
         Some(A::CancelledBeforeStart | A::CancelledBeforeDispatch | A::CancelledAfterDispatch) => {
             StepCause::Cancelled
@@ -282,7 +279,6 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
             Status::Blocked => StepCause::PolicyBlocked,
             Status::Failed => StepCause::Failed,
             Status::Cancelled => StepCause::Cancelled,
-            Status::AttentionRequired => StepCause::AttentionRequired,
             Status::Unknown => StepCause::Unconfirmed,
         },
     })
@@ -298,7 +294,6 @@ const fn unconfirmed_cause(cause: CheckFailure) -> StepCause {
         CheckFailure::Blocked(BlockedReason::Hold) => StepCause::Paused,
         CheckFailure::Blocked(BlockedReason::SessionEnded) => StepCause::SessionEnded,
         CheckFailure::Blocked(_) => StepCause::PolicyBlocked,
-        CheckFailure::AttentionRequired => StepCause::AttentionRequired,
         CheckFailure::Cancelled => StepCause::Cancelled,
         CheckFailure::DeadlineExpired => StepCause::Deadline,
         CheckFailure::Disconnected => StepCause::ConnectionLost,
@@ -375,13 +370,6 @@ mod tests {
                 Effect::Unknown,
                 Status::Unknown,
                 Effect::Unknown,
-            ),
-            (
-                Effect::None,
-                Status::AttentionRequired,
-                Effect::None,
-                Status::AttentionRequired,
-                Effect::None,
             ),
             (
                 Effect::Applied,

@@ -1501,25 +1501,16 @@ impl ApplicationExecutor {
         blocked_host: Option<String>,
     ) -> Terminal {
         let facts = with_denial_facts(decision, facts);
-        let attention = decision.reason == ReasonCode::RuntimeAttention;
-        let refusal = if attention {
-            Refusal::AttentionRequired
-        } else {
-            Refusal::AuthorityBlocked {
-                reason: blocked_reason(decision.reason),
-                host: blocked_host,
-            }
+        let refusal = Refusal::AuthorityBlocked {
+            reason: blocked_reason(decision.reason),
+            host: blocked_host,
         };
         let observed = refusal.observed();
         let summary = refusal.summary();
         Terminal {
             result: InvocationResult::new(
                 context.invocation,
-                if attention {
-                    Status::AttentionRequired
-                } else {
-                    Status::Blocked
-                },
+                Status::Blocked,
                 effect,
                 Readiness::Unknown,
                 repeat_safe,
@@ -2253,9 +2244,7 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::SessionEnded => BlockedReason::SessionEnded,
         ReasonCode::ChannelDenied => BlockedReason::Channel,
         ReasonCode::AuditUnavailable => BlockedReason::AuditUnavailable,
-        ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::RuntimeAttention => {
-            BlockedReason::Unspecified
-        }
+        ReasonCode::Permitted | ReasonCode::InvalidRequest => BlockedReason::Unspecified,
     }
 }
 
@@ -2320,17 +2309,13 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
 
 /// The check failure for a check that governance refused.
 const fn governed_check(reason: ReasonCode) -> CheckFailure {
-    match reason {
-        ReasonCode::RuntimeAttention => CheckFailure::AttentionRequired,
-        other => CheckFailure::Blocked(blocked_reason(other)),
-    }
+    CheckFailure::Blocked(blocked_reason(reason))
 }
 
 /// The terminal status of an applied action whose check did not confirm it.
 const fn unconfirmed_status(cause: CheckFailure) -> Status {
     match cause {
         CheckFailure::Blocked(_) => Status::Blocked,
-        CheckFailure::AttentionRequired => Status::AttentionRequired,
         CheckFailure::Cancelled => Status::Cancelled,
         CheckFailure::Unmet
         | CheckFailure::DeadlineExpired
@@ -2347,7 +2332,7 @@ const fn unconfirmed_status(cause: CheckFailure) -> Status {
 const fn unconfirmed_reason(cause: CheckFailure, governed: ReasonCode) -> &'static str {
     match cause {
         CheckFailure::Unmet => "expectation_unmet",
-        CheckFailure::Blocked(_) | CheckFailure::AttentionRequired => governed.as_str(),
+        CheckFailure::Blocked(_) => governed.as_str(),
         CheckFailure::Cancelled => "cancelled",
         CheckFailure::DeadlineExpired => "deadline",
         CheckFailure::Disconnected => "browser_disconnected",

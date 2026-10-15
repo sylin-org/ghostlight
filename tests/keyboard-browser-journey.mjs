@@ -174,7 +174,7 @@ try {
   assert.equal(JSON.stringify(diagnostics).includes(secret), false, "enabled diagnostics contain no credential value");
 
   // Capture the real closed shadow root only for inspection. Simulate a missing stylesheet,
-  // then prove that legacy attention feedback has no controls and cannot take page input.
+  // then prove that denial feedback has no controls and cannot take page input.
   const passive = await evaluate(`(() => {
     const attach = Element.prototype.attachShadow;
     let shadow;
@@ -183,7 +183,7 @@ try {
     finally { Element.prototype.attachShadow = attach; }
     shadow.querySelector('style').remove();
     credential.focus();
-    GhostlightPresentation.render({signal:'attention'}, {effects:true,captions:true});
+    GhostlightPresentation.render({signal:'denial'}, {effects:true,captions:true});
     const box = credential.getBoundingClientRect();
     const host = document.getElementById('ghostlight-presentation-root');
     return {
@@ -192,13 +192,13 @@ try {
       pointerPassive: [host, ...shadow.querySelectorAll('*')].every(node => getComputedStyle(node).pointerEvents === 'none'),
       focusRetained: document.activeElement === credential,
       pageReceivesPointer: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === credential,
-      guidanceVisible: shadow.textContent.includes('workbench')
+      guidanceVisible: shadow.textContent.includes('guardrail')
     };
   })()`);
   assert.deepEqual(passive, { controls: 0, styleMissing: true, pointerPassive: true,
     focusRetained: true, pageReceivesPointer: true, guidanceVisible: true });
   console.log(`PASS: ${credentialCases.length} production credential input paths honor per-request allowance, retain real password input, and exclude values from receipts/diagnostics.`);
-  console.log("PASS: production attention feedback has no controls and preserves page focus/pointer input with its stylesheet absent.");
+  console.log("PASS: production denial feedback has no controls and preserves page focus/pointer input with its stylesheet absent.");
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) await send("Browser.close").catch(() => {});
   socket?.close();

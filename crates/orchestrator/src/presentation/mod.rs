@@ -48,7 +48,7 @@ impl PresentationPort for BrowserPresentation {
     /// nothing to show, and showing its signal in some other browser would put a stranger's window
     /// under Ghostlight's badge.
     ///
-    /// The browser draws a notice only on the tab it names. A denial or attention signal that
+    /// The browser draws a notice only on the tab it names. A denial signal that
     /// names no tab is given the workspace's only tab, or its active one.
     fn present(
         &self,
@@ -60,12 +60,7 @@ impl PresentationPort for BrowserPresentation {
         };
         let deadline = Instant::now() + PRESENTATION_BUDGET;
         let cancelled = AtomicBool::new(false);
-        if signal.tab_id.is_none()
-            && matches!(
-                signal.signal,
-                PresentationKind::Denial | PresentationKind::Attention
-            )
-        {
+        if signal.tab_id.is_none() && signal.signal == PresentationKind::Denial {
             signal.tab_id = self.notice_tab(&browser, workspace, deadline, &cancelled);
         }
         self.browser
@@ -239,15 +234,6 @@ impl PresentationReactor {
                 Some(*physical_id),
                 None,
                 false,
-            ),
-            DomainEvent::AttentionRequired { physical_id, .. } => (
-                PresentationKind::Attention,
-                current(),
-                "Ghostlight needs your attention",
-                None,
-                physical_id.or_else(recorded_tab),
-                None,
-                true,
             ),
             DomainEvent::WorkBlocked {
                 physical_id,

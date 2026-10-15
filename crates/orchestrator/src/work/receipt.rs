@@ -56,11 +56,6 @@ impl ApplicationExecutor {
                     presentation: denial_presentation(tool, &terminal.result),
                 }
             }
-            Status::AttentionRequired => DomainEvent::AttentionRequired {
-                invocation: terminal.result.invocation.clone(),
-                workspace: workspace.as_str().into(),
-                physical_id: terminal.physical_id,
-            },
             _ => DomainEvent::WorkCompleted {
                 invocation: terminal.result.invocation.clone(),
                 workspace: workspace.as_str().into(),

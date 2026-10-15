@@ -271,10 +271,6 @@ impl WorkbenchProjection {
                 DomainEvent::HoldEntered { invocation, .. } => {
                     (None, state.set_phase(invocation, OperationPhase::Held))
                 }
-                DomainEvent::AttentionRequired { invocation, .. } => {
-                    let change = state.set_phase(invocation, OperationPhase::Attention);
-                    (None, change)
-                }
                 DomainEvent::WorkBlocked { invocation, .. } => {
                     let change = state.set_phase(invocation, OperationPhase::Blocked);
                     let notification = state
@@ -504,7 +500,6 @@ impl WorkbenchFacade {
             browser_connected: !browsers.is_empty(),
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
-            needs_attention: runtime_state == RuntimeControlState::Attention,
             authority_invalid: !governance.authority_valid,
             working: !operations.is_empty(),
         });
@@ -556,7 +551,6 @@ impl WorkbenchFacade {
                 managed_authority_configured: governance.managed_authority_configured,
                 managed_authority_active: governance.managed_authority_active,
                 managed_authority_valid: governance.managed_authority_valid,
-                runtime_control_file_configured: governance.runtime_control_file_configured,
                 managed_policy: governance.managed_policy,
                 policy: self.governance.policy_chip(),
             },
@@ -1010,8 +1004,6 @@ pub struct WorkbenchNotification {
 pub enum NotificationKind {
     /// Governance blocked work.
     Blocked,
-    /// Work requires local human attention.
-    Attention,
     /// The user explicitly tested notifications.
     Checkup,
 }
@@ -1209,8 +1201,6 @@ pub enum OperationPhase {
     Running,
     /// Runtime governance held work.
     Held,
-    /// Local human attention is required.
-    Attention,
     /// Work terminated as blocked before its audit projection arrived.
     Blocked,
     /// Work completed before its audit projection arrived.
@@ -1223,7 +1213,6 @@ impl OperationPhase {
             Self::Waiting => "waiting",
             Self::Running => "running",
             Self::Held => "held",
-            Self::Attention => "attention",
             Self::Blocked => "blocked",
             Self::Completed => "completed",
         }
@@ -1423,8 +1412,6 @@ pub struct ConfigurationSummary {
     pub managed_authority_active: bool,
     /// Whether managed authority is valid.
     pub managed_authority_valid: bool,
-    /// Whether runtime control is backed by a configured file.
-    pub runtime_control_file_configured: bool,
     /// Signed managed-policy provenance suitable for the Policy Passport.
     pub managed_policy: ManagedPolicyPassport,
     /// The band chip, authored by the orchestrator so the surface renders rather than derives it.
@@ -1686,7 +1673,6 @@ fn runtime_state_label(state: RuntimeControlState) -> &'static str {
     match state {
         RuntimeControlState::Active => "active",
         RuntimeControlState::Held => "paused",
-        RuntimeControlState::Attention => "waiting for attention",
         RuntimeControlState::Ended => "ended",
     }
 }

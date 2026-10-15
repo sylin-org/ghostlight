@@ -112,7 +112,7 @@ const snapshot = {
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
-    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "attention" }
+    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "held" }
   ],
   browsers: [
     { id: "browser_chrome", family: "Chrome", adapter_version: "1.0.0", connected: true },
@@ -136,7 +136,6 @@ const snapshot = {
     managed_authority_configured: false,
     managed_authority_active: false,
     managed_authority_valid: true,
-    runtime_control_file_configured: false,
     managed_policy: { configured: false },
     policy: {
       situation: "layered",

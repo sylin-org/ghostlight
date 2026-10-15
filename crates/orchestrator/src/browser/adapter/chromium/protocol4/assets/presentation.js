@@ -532,15 +532,6 @@ const presentation = (() => {
     mount();
     const kind = signal.signal;
     const activity = signal.activity || "quiet";
-    if (kind === "attention") {
-      clearTransient();
-      // Older service signals may still arrive, but all controls belong to the workbench.
-      showDenial({
-        phase: signal.phase || "Ghostlight needs your attention",
-        detail: signal.detail || "Open the Ghostlight workbench for details."
-      });
-      return true;
-    }
     if (kind === "denial") {
       if (signatureInvocation === signal.invocation) removeSignature();
       showDenial(signal);

@@ -46,8 +46,7 @@ function presentationLabel(signal) {
     target: "Ghostlight target",
     progress: "Ghostlight working",
     completion: "Ghostlight complete",
-    denial: "Ghostlight blocked",
-    attention: "Ghostlight needs you"
+    denial: "Ghostlight blocked"
   };
   return labels[signal] ?? "Ghostlight";
 }

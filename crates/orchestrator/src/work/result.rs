@@ -19,8 +19,6 @@ pub enum Status {
     Failed,
     /// Cancellation reached a safe boundary.
     Cancelled,
-    /// The user must act in the visible browser.
-    AttentionRequired,
     /// A dispatched effect cannot be determined.
     Unknown,
 }

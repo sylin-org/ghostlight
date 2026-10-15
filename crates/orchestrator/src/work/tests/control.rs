@@ -34,7 +34,7 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
 use crate::governance::{CapabilitySet, ReasonCode};
 use crate::workbench::{
-    NotificationKind, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+    WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
 };
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
@@ -138,8 +138,6 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
     .unwrap();
     let (executor, browser, workspaces, one, audit) = fixture_with_governance(policy.facade());
     let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp);
-    let notices = Arc::new(Notices::default());
-    executor.workbench.attach_presentation(notices.clone());
     let refused = json!({"on_error":"continue","steps":[
         {"id":"one","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
         {"id":"two","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
@@ -177,12 +175,6 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
         executor.governance.runtime_state(),
         RuntimeControlState::Active
     );
-    assert!(notices
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|notice| notice.kind != NotificationKind::Attention));
     // The existing policy permits navigation. No policy change or resume is needed after refusals.
     for workspace in [&one, &two] {
         browser.push(Ok(BrowserOutcome::TabOpened {

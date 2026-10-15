@@ -135,7 +135,7 @@ the Applications entry as interaction routes.
   MCP request timeouts and would compete with the ADR-0113 deadline. The refusal is non-terminal and
   says so; stop is terminal and says that. ADR-0126 Decisions 4 through 6 fix both directives and
   keep the four-member state vocabulary, with the wording delivered by the epic's S5.
-- Important blocked and attention-required facts may produce quiet, deduplicated OS notifications.
+- Important blocked facts may produce quiet, deduplicated OS notifications.
   Routine successful work does not.
 - The orchestrator publishes sequenced changes, so the surface shows work as it happens instead of
   sampling for it. A surface that misses a change resynchronizes from a snapshot rather than
@@ -176,7 +176,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
   Decision 9).
 - Presentation preserves Ghostlight's luminous sky-blue visual language: controlled-tab border,
   phantom cursor, target and field treatments, click ripple, drag trail, scroll cue, read scan,
-  action signatures, screenshot frame, denial, attention, and optional captions. It survives
+  action signatures, screenshot frame, denial, and optional captions. It survives
   document replacement and clears terminal state. The contract includes the established
   `#38bdf8` sky accent, `#eaf6ff` ink, `#0c0f14` governance chrome, layered omnidirectional glow,
   spring entrance curve, ease-out exits, and reduced-motion variants. Timing is identity too:
@@ -215,7 +215,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
   enter audit or presentation.
 - Screenshot coordinates are accepted only with a current opaque view handle. A document commit,
   changed viewport, changed zoom, or superseding screenshot makes unsafe coordinate state stale.
-- Cancellation, disconnects, holds, attention, partial effects, and uncertain effects are
+- Cancellation, disconnects, holds, partial effects, and uncertain effects are
   terminal truths, not hidden retries or fabricated success.
 - Unknown, partial, committed, or otherwise unsafe effects never recommend replay.
 - Audit records contain identifiers, policy attribution, governed host, and bounded measurements,
@@ -250,6 +250,6 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 Repeated denials do not pause a session. Credential-input guidance applies only to the current
 request and does not prevent later permitted work. Ghostlight enforces configured authority and
-explicit human controls without regulating how often an agent asks. Human Pause/Stop and explicit
-global runtime attention retain their final dispatch checks. Resuming human-paused work permits
+explicit human controls without regulating how often an agent asks. Human Pause and Stop keep
+their final dispatch checks. Resuming human-paused work permits
 new requests and never replays prior actions.

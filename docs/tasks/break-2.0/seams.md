@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f03a-attention-state.
+Next: f03b-policy-schema4.
 
 ## Landed
 
@@ -110,6 +110,7 @@ Next: f03a-attention-state.
 | f01b-peer-observation | Observed peer identity is gone (ADR-0197 D22, ADR-0161 stage 2 superseded). `Attribution` keeps `connection_id`, `observed_at_ms` and `channel`; `PeerObservation`, `SignatureStatus`, `observe`, `with_peer`, `observed_executable`, `AuditRecord.peer_image` and `with_peer_image` are removed, `ConnectionEvidence::new(label, channel)` replaces them and `Attribution::legacy` takes only the channel. `Attribution` no longer denies unknown fields, so lines that carry `provenance.peer`, `provenance.signature` or a top-level `peer_image` still read. `ConnectionDetails` keeps the connection id, the live reported application, the channel and one explanation sentence per case, authored in `language/provenance.rs`; the workbench's observation and signature rows and "Observed executable" are gone. `ghostlight-win-peer` loses `table.rs`, `image.rs`, `identify_connection`, `identify_addresses`, `PeerIdentity` and their tests, and its module doc describes what remains. `tests/provenance-journey.mjs` keeps its identity and channel checks. ARCHITECTURE and ACCEPTANCE no longer claim observed executables. | see `git log` |
 | f01c-yaml-copy-setup | goose and Continue get Copy setup instead of a YAML editor (ADR-0197 D22). `ConfigDialect::Manual(ManualDialect::{Goose, Continue})` replaces the YAML dialect: the file is never read, parsed or written; the state is NotDetected or Available from the existing presence evidence; `can_install`, `can_fix` and `can_uninstall` are false; the detail is one sentence naming the file; `setup_detected` skips it; an explicit install, fix or uninstall returns `HarnessError::ManualSetup` with that sentence and changes nothing. All YAML parse and edit functions, their tests and `serde_yaml` (with `unsafe-libyaml` and `ryu`) are gone. README and the installation guide say goose and Continue use Copy setup. | see `git log` |
 | f02-catalog-golden | The model surface is pinned (ADR-0197 D8 and D17, ADR-0198 D26). `ToolDefinition.output_schema`, `outcome_schema()`, the strip in `render_catalog`, `listed_tools()` and the tests that only read the output schema are gone; `tools_list_carries_no_output_schema` stays. `docs/1.0/catalog.json` is the exact `tools` array of `tools/list`, pretty-printed; `the_catalog_matches_docs_1_0_catalog_json` and `the_catalog_golden_is_ascii` guard it. `tests/golden/model/success.json` and `refusal.json` pin the complete `tools/call` result (content, structuredContent, isError) at the latest MCP revision through the real session and `lean::project`, with volatile ids normalized; `a_listed_tab_matches_the_success_golden` and `a_call_that_does_not_decode_matches_the_refusal_golden` (in `work/tests/golden.rs`) guard them, and `GHOSTLIGHT_CATALOG_UPDATE=1` rewrites all three. These two files are the envelope pin. ACCEPTANCE, ARCHITECTURE and LANGUAGE stop promising an output schema; AGENTS.md names the regeneration command. | see `git log` |
+| f03a-attention-state | The attention runtime state and its control file are gone (ADR-0197 D19). `RuntimeControls` holds active, held and ended in memory only; `GHOSTLIGHT_RUNTIME_CONTROL_FILE`, `with_runtime_control_file`, `require_attention` and `runtime_control_file_configured` are removed, so `runtime_decision` reads only the in-memory controls. `ReasonCode::RuntimeAttention`, `Status::AttentionRequired`, `Refusal::AttentionRequired`, `CheckFailure::AttentionRequired`, `AuditRefusal::AttentionRequired`, `DomainEvent::AttentionRequired` with its presentation and workbench reactions, `PresentationKind::Attention` (service and wire mirror), `RuntimeControlState::Attention`, `StepCounts.attention_required` and `EXIT_ATTENTION` are removed; the other exit codes keep their numbers. `StepCause::AttentionRequired` stays for the local interlock. `StepCounts` no longer denies unknown fields and an unknown refusal reason already reads as no refusal facts, so earlier audit lines still read. The page assets lose the attention branch and `tests/golden/protocol4/assets.sha256` is refreshed. LANGUAGE, ARCHITECTURE, ACCEPTANCE, INTENT, the scripting and SIEM guides, the adapter-protocol-4 note and the man page stop naming the state. | see `git log` |
 
 ## Owed live checks
 
@@ -128,6 +129,13 @@ them.
   Ghostlight program).
 - f02: `node tests/process-journey.mjs` and `node tests/live-journey.mjs` pass their `tools/list`
   assertion (no `outputSchema`, every tool annotated); both files pass `node --check`.
+- f03a: `node tests/history-compatibility.mjs` (it starts the built service, so only the coordinator
+  runs it) passes without the runtime-control variable; `node tests/installed-journey.mjs` passes
+  its dialog clicks, which now assert `succeeded` alone; `node tests/keyboard-browser-journey.mjs`
+  (it launches Chromium) passes its passive-feedback check, which now renders a `denial` signal
+  instead of the removed `attention` branch; `node tests/live-journey.mjs` records statuses
+  without `attention_required`. `node tests/workbench-surface.mjs`, the page-asset tests, the
+  extension tests and the guards were run and pass.
 
 ## Notes
 
@@ -168,3 +176,15 @@ them.
   and untouched by this slice.
 - f01c: the tree differed from the spec in three places. (1) The person-facing sentence is authored in `install/mod.rs` beside the other harness details (the spec's wording), not in `language/`, which holds none of them. (2) `tests/workbench-preview-server.mjs` still shows Continue as `updatable` in its fixture; no test depends on it and it was left. (3) `node --test tests/guards/` needs the glob `"tests/guards/*.test.mjs"` on Node 24.
 - f02: the tree differed from the spec in three places. (1) Both result goldens come from the real executor with the fake browser (`work/tests/golden.rs`): the success is a `browser_tabs` list after a `browser_navigate`, the refusal is a `browser_tabs` call with an unknown action, so the pinned envelope carries the `detail` fact and the decode error's guidance exactly as `work/mod.rs` sends them. The shared compare-or-rewrite helpers live in `language/self_check/golden.rs`. (2) The resume token never appears in a `tools/call` result, so the normalizer lists only the per-run keys (`invocation`, `tab`, `resume`, `at`, `timestamp`). (3) `tests/process-journey.mjs` and `tests/live-journey.mjs` asserted that every listed tool advertises an `outputSchema`; both now assert it is absent, as `tests/installed-journey.mjs` does.
+- f03a: the tree differed from the spec in four places. (1) Four more variants had the removed
+  state as their only producer and went with it: `Readiness::NeedsYou` with
+  `ReadinessFacts.needs_attention`, `OperationPhase::Attention`, `NotificationKind::Attention`,
+  and the `GovernanceDiagnostics` and workbench snapshot field `runtime_control_file_configured`
+  (the UI never read it; the two workbench fixtures drop it). The UI's running-phase test drops
+  `attention`. (2) `RUNTIME_END` is renumbered 2 in the in-memory store; nothing persists it.
+  (3) `GHOSTLIGHT_RUNTIME_CONTROL_FILE` is also gone from the man page, the Linux installed
+  journey's cleared-variable list and `tests/history-compatibility.mjs`. (4) The man page, the
+  scripting guide and the SIEM guide lose exit code 3 and the `attention_required` signal; the
+  exit codes 2, 4, 5 and 6 are asserted by number in `each_status_keeps_its_exit_code`. The
+  audit lines written before this slice are covered by
+  `audit_reads_lines_that_carry_the_removed_attention_state`.

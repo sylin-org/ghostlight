@@ -866,7 +866,7 @@ fn a_notice_is_written_once_and_never_awaited() {
         call(
             &port,
             BrowserCommand::Present {
-                signal: signal(PresentationKind::Attention, None, None)
+                signal: signal(PresentationKind::Denial, None, None)
             }
         ),
         Ok(BrowserOutcome::Presented { rendered: false }),

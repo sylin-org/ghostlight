@@ -6,10 +6,9 @@
 //!
 //! The states are ordered by what a person needs to hear first. Being disconnected outranks being
 //! paused, because a paused product that cannot reach a browser has a bigger problem than the
-//! pause. Attention comes after a human pause, because a person who paused Ghostlight already knows
-//! why it stopped. An invalid policy comes next: the control beside the word cannot fix it, and it
-//! refuses everything, so it outranks missing history, which refuses only what policy says must be
-//! recorded.
+//! pause. An invalid policy comes after a human pause: the control beside the word cannot fix it,
+//! and it refuses everything, so it outranks missing history, which refuses only what policy says
+//! must be recorded.
 //!
 //! Pause and Resume are the authority's own state, not something a browser holds, so the front door
 //! offers them whenever this authority answers, with or without a connected browser.
@@ -26,8 +25,6 @@ pub enum Readiness {
     SessionEnded,
     /// A person paused browser work.
     Paused,
-    /// Authority stopped work in a way that needs a person.
-    NeedsYou,
     /// A configured policy is not valid, so governance refuses every governed request.
     PolicyInvalid,
     /// Policy requires saving history and the destination is currently unavailable.
@@ -44,7 +41,6 @@ impl Readiness {
         Readiness::NotConnected,
         Readiness::SessionEnded,
         Readiness::Paused,
-        Readiness::NeedsYou,
         Readiness::PolicyInvalid,
         Readiness::HistoryUnavailable,
         Readiness::Working,
@@ -58,7 +54,6 @@ impl Readiness {
             Readiness::NotConnected => "Not connected",
             Readiness::SessionEnded => "Session ended",
             Readiness::Paused => "Paused",
-            Readiness::NeedsYou => "Needs you",
             Readiness::PolicyInvalid => "Policy not valid",
             Readiness::HistoryUnavailable => "History unavailable",
             Readiness::Working => "Working",
@@ -77,7 +72,6 @@ impl Readiness {
                 "This session was ended. Start a new session to let agents work again."
             }
             Readiness::Paused => "Browser work is paused. Resume when you are ready.",
-            Readiness::NeedsYou => "Ghostlight stopped and is waiting for you to decide what happens next.",
             Readiness::PolicyInvalid => "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies.",
             Readiness::HistoryUnavailable => "Policy requires saved history. Ghostlight checks storage automatically before new browser work can proceed.",
             Readiness::Working => "An agent is working in your browser right now.",
@@ -91,9 +85,7 @@ impl Readiness {
         match self {
             Readiness::NotConnected => "offline",
             Readiness::SessionEnded | Readiness::Paused => "held",
-            Readiness::NeedsYou | Readiness::PolicyInvalid | Readiness::HistoryUnavailable => {
-                "attention"
-            }
+            Readiness::PolicyInvalid | Readiness::HistoryUnavailable => "attention",
             Readiness::Working => "working",
             Readiness::Ready => "quiet",
         }
@@ -121,8 +113,6 @@ pub struct ReadinessFacts {
     pub session_ended: bool,
     /// Whether a person paused browser work.
     pub paused: bool,
-    /// Whether authority stopped work pending a person.
-    pub needs_attention: bool,
     /// Whether configured authority fails closed, so every governed request is refused.
     pub authority_invalid: bool,
     /// Whether at least one operation is running.
@@ -140,9 +130,6 @@ pub const fn resolve(facts: &ReadinessFacts) -> Readiness {
     }
     if facts.paused {
         return Readiness::Paused;
-    }
-    if facts.needs_attention {
-        return Readiness::NeedsYou;
     }
     if facts.authority_invalid {
         return Readiness::PolicyInvalid;
@@ -185,21 +172,10 @@ mod tests {
             browser_connected: false,
             session_ended: true,
             paused: true,
-            needs_attention: true,
             authority_invalid: true,
             working: true,
         };
         assert_eq!(resolve(&facts), Readiness::NotConnected);
-    }
-
-    #[test]
-    fn a_human_pause_outranks_an_authority_attention_hold() {
-        let facts = ReadinessFacts {
-            paused: true,
-            needs_attention: true,
-            ..connected()
-        };
-        assert_eq!(resolve(&facts), Readiness::Paused);
     }
 
     #[test]
@@ -234,7 +210,7 @@ mod tests {
         };
         let state = resolve(&facts);
         assert_eq!(state, Readiness::PolicyInvalid);
-        assert_eq!(state.tone(), Readiness::NeedsYou.tone());
+        assert_eq!(state.tone(), "attention");
         assert!(state.detail().contains("Open Policy"), "{}", state.detail());
     }
 
@@ -250,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn human_controls_and_attention_outrank_an_invalid_policy() {
+    fn human_controls_outrank_an_invalid_policy() {
         for (facts, expected) in [
             (
                 ReadinessFacts {
@@ -265,13 +241,6 @@ mod tests {
                     ..connected()
                 },
                 Readiness::Paused,
-            ),
-            (
-                ReadinessFacts {
-                    needs_attention: true,
-                    ..connected()
-                },
-                Readiness::NeedsYou,
             ),
         ] {
             let facts = ReadinessFacts {

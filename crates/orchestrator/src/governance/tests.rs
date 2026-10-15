@@ -1081,6 +1081,32 @@ fn audit_reads_legacy_failure_payloads_without_reemitting_them() {
 }
 
 #[test]
+fn audit_reads_lines_that_carry_the_removed_attention_state() {
+    let mut encoded = serde_json::to_value(sample_record()).unwrap();
+    encoded["status"] = serde_json::json!("attention_required");
+    encoded["refusal_facts"] = serde_json::json!({"reason":"attention_required"});
+    encoded["composition"] = serde_json::json!({
+        "counts": {
+            "total": 3, "succeeded": 1, "failed": 0, "blocked": 0, "cancelled": 0,
+            "attention_required": 1, "unknown": 0, "not_started": 0, "not_run": 1
+        },
+        "effects": {"none": 1, "applied": 1, "partial": 0, "unknown": 0},
+        "stopped": true,
+        "issue": {"step": 2, "cause": "attention_required"}
+    });
+    let record: AuditRecord = serde_json::from_value(encoded).expect("old history stays readable");
+    assert_eq!(record.status, "attention_required");
+    assert_eq!(record.refusal_facts, None);
+    let progress = record.composition.expect("the account survives");
+    assert_eq!(progress.counts.total, 3);
+    assert_eq!(progress.counts.succeeded, 1);
+    assert_eq!(progress.counts.not_run, 1);
+    assert!(!serde_json::to_string(&progress)
+        .unwrap()
+        .contains("attention_required\":1"));
+}
+
+#[test]
 fn typed_audit_failures_round_trip_with_policy_and_measurements() {
     use crate::language::outcome::Refusal;
     let record = AuditRecord::now(
@@ -1308,35 +1334,22 @@ fn stop_is_terminal_and_idempotent() {
     );
 }
 
-/// Explicit runtime attention remains distinct from the person's pause.
+/// The runtime state is the in-memory controls and nothing else: a file named by the old control
+/// variable is never read.
 #[test]
-fn attention_stays_distinct_from_a_human_pause() {
-    let facade = GovernanceFacade::new(None, None);
-    facade.apply_runtime_intent(RuntimeControlIntent::Hold);
-    assert_eq!(facade.runtime_state(), RuntimeControlState::Held);
-    assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
-    assert_ne!(
-        facade.runtime_decision().reason,
-        ReasonCode::RuntimeAttention
-    );
-}
-
-#[test]
-fn runtime_control_file_is_checked_at_each_final_boundary() {
+fn the_runtime_control_variable_is_ignored() {
     let path = temporary("runtime-control");
-    fs::write(&path, "hold").unwrap();
-    let facade = GovernanceFacade::new(None, None).with_runtime_control_file(Some(path.clone()));
-    assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
     fs::write(&path, "attention").unwrap();
-    assert_eq!(
-        facade.runtime_decision().reason,
-        ReasonCode::RuntimeAttention
-    );
-    fs::write(&path, "end_session").unwrap();
-    assert_eq!(facade.runtime_decision().reason, ReasonCode::SessionEnded);
-    fs::write(&path, "active").unwrap();
-    assert!(facade.runtime_decision().allowed);
+    std::env::set_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE", &path);
+    let facade = GovernanceFacade::from_environment();
+    std::env::remove_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE");
     let _ = fs::remove_file(path);
+    assert_eq!(facade.runtime_state(), RuntimeControlState::Active);
+    assert!(facade.runtime_decision().allowed);
+    facade.apply_runtime_intent(RuntimeControlIntent::Hold);
+    assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
+    facade.apply_runtime_intent(RuntimeControlIntent::EndSession);
+    assert_eq!(facade.runtime_decision().reason, ReasonCode::SessionEnded);
 }
 
 #[test]

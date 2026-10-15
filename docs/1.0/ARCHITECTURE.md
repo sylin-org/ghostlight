@@ -358,7 +358,7 @@ matching, opaque cursors, and URL sanitization terminate in the extension at the
 ### Presentation
 
 Defines content-free feedback events: operation start, target indication, progress, completion,
-denial, and attention. Presentation reacts to domain events through a port. Its failures are
+and denial. Presentation reacts to domain events through a port. Its failures are
 recorded but cannot affect authority or completion truth.
 
 ### Workbench
@@ -448,7 +448,6 @@ The in-process vocabulary is:
 - `TargetIndicated`
 - `WorkProgressed`
 - `HoldEntered`
-- `AttentionRequired`
 - `WorkBlocked`
 - `WorkCompleted`
 
@@ -584,13 +583,13 @@ a configured cold start without a valid source or cache fails closed. Signed pol
 expiry. The workbench Policy Passport surfaces content-minimized provenance and signed
 organization contacts without policy rules or credentials.
 
-`GHOSTLIGHT_RUNTIME_CONTROL_FILE` optionally names a local text file read at every final browser
-boundary. Its exact states are `active`, `hold`, `attention`, and `end_session`. A missing or
-invalid configured control file enters hold. These controls never expand the immutable authority
+Runtime control is one in-memory state with three values: active, held, and ended. Only a person's
+control changes it, and no file or variable sets it. It never expands the immutable authority
 snapshot.
 
-One immutable configured authority snapshot is stored in the unit of work. Runtime hold, attention, end-session, and cancellation controls are checked immediately
-before browser dispatch and on browser events.
+One immutable configured authority snapshot is stored in the unit of work. Runtime hold,
+end-session, and cancellation controls are checked immediately before browser dispatch and on
+browser events.
 
 Navigation prepares commit observation before dispatch. Every committed URL is checked before
 content or readiness is accepted. A denied new-tab landing is closed only when tab-close authority
@@ -671,7 +670,7 @@ and returned landings at the existing boundaries. ADR-0164 owns this distinction
 Controlled debugger attachments emulate a focused page while the connected, compatible service
 reports active runtime control (ADR-0168). This keeps focus-triggered page refreshes from
 interrupting automation between calls. The existing debugger lifecycle owns per-tab serialization,
-retention, and restoration. Pause, attention, and disconnection remove the override; stop and local
+retention, and restoration. Pause and disconnection remove the override; stop and local
 debugger release also detach. A released workspace loses debugger retention even when its tab is
 preserved. Passive browser events never acquire this custody. The scope can outlive a model turn,
 and unsaved values are not guaranteed to survive normal page lifecycle after release.
@@ -743,13 +742,12 @@ Chromium loads `extension/` directly with id `cjcmhepmagomefjggkcohdbfemacojoa`,
 ## Explicit human control and final dispatch (ADR-0185)
 
 Governance owns configured authority and explicit human runtime controls. Policy denials and
-credential-input guidance create no automatic attention state, rolling counters, incident ids,
+credential-input guidance create no automatic hold, rolling counters, incident ids,
 or session recovery journey. Any later permitted request remains available under the same policy
-and controls. Explicit global runtime attention remains supported independently of request results.
+and controls.
 
 The page renderer creates only passive messages and animations, never buttons, focusable controls,
-or a pointer-intercepting layer. That property holds when CSS fails. Legacy attention signals may
-render a bounded passive notice; runtime-state changes alone do not create a page dialog.
+or a pointer-intercepting layer. That property holds when CSS fails. Runtime-state changes alone do not create a page dialog.
 Interactive runtime control belongs in the Tauri workbench.
 
 Observe-mode policy allowance remains useful. Obsolete request fields fail during decoding;

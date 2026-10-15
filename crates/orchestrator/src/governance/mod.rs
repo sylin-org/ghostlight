@@ -33,8 +33,7 @@ use crate::language::outcome::Observed;
 
 const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
-const RUNTIME_ATTENTION: u8 = 2;
-const RUNTIME_END: u8 = 3;
+const RUNTIME_END: u8 = 2;
 
 /// Binary permission for complete screenshots, including visible embedded documents.
 pub const SCREENSHOTS_ENABLED_KEY: &str = "browser.screenshots.enabled";
@@ -218,8 +217,6 @@ pub enum ReasonCode {
     InvalidRequest,
     /// Runtime control entered hold.
     RuntimeHold,
-    /// Runtime control requires user attention.
-    RuntimeAttention,
     /// Runtime control ended the session.
     SessionEnded,
     /// An authority layer does not admit this intake channel.
@@ -242,7 +239,6 @@ impl ReasonCode {
             Self::InvalidAuthority => "invalid_authority",
             Self::InvalidRequest => "invalid_request",
             Self::RuntimeHold => "runtime_hold",
-            Self::RuntimeAttention => "runtime_attention",
             Self::SessionEnded => "session_ended",
             Self::ChannelDenied => "channel_denied",
             Self::AuditUnavailable => "audit_unavailable",
@@ -846,7 +842,6 @@ impl RuntimeControls {
         match self.state.load(Ordering::SeqCst) {
             RUNTIME_ACTIVE => Decision::allow(),
             RUNTIME_HOLD => Decision::deny(ReasonCode::RuntimeHold),
-            RUNTIME_ATTENTION => Decision::deny(ReasonCode::RuntimeAttention),
             _ => Decision::deny(ReasonCode::SessionEnded),
         }
     }
@@ -857,7 +852,6 @@ impl RuntimeControls {
         match self.state.load(Ordering::SeqCst) {
             RUNTIME_ACTIVE => RuntimeControlState::Active,
             RUNTIME_HOLD => RuntimeControlState::Held,
-            RUNTIME_ATTENTION => RuntimeControlState::Attention,
             _ => RuntimeControlState::Ended,
         }
     }
@@ -868,10 +862,7 @@ impl RuntimeControls {
             RuntimeControlIntent::ToggleHold => {
                 if self.state() == RuntimeControlState::Active {
                     self.hold();
-                } else if matches!(
-                    self.state(),
-                    RuntimeControlState::Held | RuntimeControlState::Attention
-                ) {
+                } else if self.state() == RuntimeControlState::Held {
                     self.resume();
                 }
             }
@@ -890,10 +881,6 @@ impl RuntimeControls {
     pub fn hold(&self) {
         self.state.store(RUNTIME_HOLD, Ordering::SeqCst);
     }
-    /// Require visible user attention.
-    pub fn require_attention(&self) {
-        self.state.store(RUNTIME_ATTENTION, Ordering::SeqCst);
-    }
     /// End the admitted session.
     pub fn end_session(&self) {
         self.state.store(RUNTIME_END, Ordering::SeqCst);
@@ -908,7 +895,6 @@ impl RuntimeControls {
 #[derive(Clone, Debug)]
 pub struct GovernanceFacade {
     policies: Arc<Mutex<PolicySources>>,
-    runtime_control: Option<PathBuf>,
     controls: Arc<RuntimeControls>,
 }
 
@@ -1174,8 +1160,6 @@ pub struct GovernanceDiagnostics {
     /// False means every governed call fails closed. The workbench header, its Status card, and
     /// the Policy destination all read this one answer.
     pub authority_valid: bool,
-    /// Whether a runtime-control file is configured.
-    pub runtime_control_file_configured: bool,
     /// User-visible provenance for the active signed managed policy.
     pub managed_policy: ManagedPolicyPassport,
 }
@@ -1259,7 +1243,6 @@ impl GovernanceFacade {
             managed_authority_active: policies.managed_manifest().is_some(),
             managed_authority_valid: policies.managed_valid(),
             authority_valid: policies.authority_valid(),
-            runtime_control_file_configured: self.runtime_control.is_some(),
             managed_policy: policies.managed_passport(),
         }
     }
@@ -1269,7 +1252,6 @@ impl GovernanceFacade {
     pub fn new(local_policy: Option<PathBuf>, managed_policy: Option<PathBuf>) -> Self {
         Self {
             policies: Arc::new(Mutex::new(PolicySources::new(local_policy, managed_policy))),
-            runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
         }
     }
@@ -1279,7 +1261,6 @@ impl GovernanceFacade {
     fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
         Self {
             policies: Arc::new(Mutex::new(PolicySources::owning(path, managed))),
-            runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
         }
     }
@@ -1288,7 +1269,6 @@ impl GovernanceFacade {
     fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
         Self {
             policies: Arc::new(Mutex::new(PolicySources::with_managed_paths(paths))),
-            runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
         }
     }
@@ -1300,19 +1280,8 @@ impl GovernanceFacade {
             policies: Arc::new(Mutex::new(PolicySources::production(
                 env::var_os("GHOSTLIGHT_POLICY_FILE").map(PathBuf::from),
             ))),
-            runtime_control: None,
             controls: Arc::new(RuntimeControls::default()),
         }
-        .with_runtime_control_file(
-            env::var_os("GHOSTLIGHT_RUNTIME_CONTROL_FILE").map(PathBuf::from),
-        )
-    }
-
-    /// Select an optional local runtime-control file for hold, attention, and end-session state.
-    #[must_use]
-    pub fn with_runtime_control_file(mut self, path: Option<PathBuf>) -> Self {
-        self.runtime_control = path;
-        self
     }
 
     /// Access live runtime controls.
@@ -1702,15 +1671,6 @@ impl GovernanceFacade {
     /// Check live runtime control at an effect boundary.
     #[must_use]
     pub fn runtime_decision(&self) -> Decision {
-        if let Some(path) = &self.runtime_control {
-            match fs::read_to_string(path).as_deref().map(str::trim) {
-                Ok("active") => self.controls.resume(),
-                Ok("hold") => self.controls.hold(),
-                Ok("attention") => self.controls.require_attention(),
-                Ok("end_session") => self.controls.end_session(),
-                _ => self.controls.hold(),
-            }
-        }
         self.controls.decision()
     }
 

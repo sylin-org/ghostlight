@@ -391,7 +391,6 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::CancelledBeforeStart => "CancelledBeforeStart",
         Refusal::DeadlineBeforeStart => "DeadlineBeforeStart",
         Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
-        Refusal::AttentionRequired => "AttentionRequired",
         Refusal::LocalInterlock => "LocalInterlock",
         Refusal::CredentialAuthorization { .. } => "CredentialAuthorization",
         Refusal::IncompatibleReceipt => "IncompatibleReceipt",
@@ -432,7 +431,6 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "CancelledBeforeStart",
     "DeadlineBeforeStart",
     "AuthorityBlocked",
-    "AttentionRequired",
     "LocalInterlock",
     "CredentialAuthorization",
     "IncompatibleReceipt",
@@ -578,7 +576,6 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
 fn check_failures() -> Vec<CheckFailure> {
     let mut all = vec![
         CheckFailure::Unmet,
-        CheckFailure::AttentionRequired,
         CheckFailure::Cancelled,
         CheckFailure::DeadlineExpired,
         CheckFailure::Disconnected,
@@ -591,7 +588,6 @@ fn check_failures() -> Vec<CheckFailure> {
         match failure {
             CheckFailure::Unmet
             | CheckFailure::Blocked(_)
-            | CheckFailure::AttentionRequired
             | CheckFailure::Cancelled
             | CheckFailure::DeadlineExpired
             | CheckFailure::Disconnected
@@ -889,7 +885,6 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::InvalidRequest,
         Refusal::CancelledBeforeStart,
         Refusal::DeadlineBeforeStart,
-        Refusal::AttentionRequired,
         Refusal::LocalInterlock,
         Refusal::CredentialAuthorization {
             control: ControlRef::new(

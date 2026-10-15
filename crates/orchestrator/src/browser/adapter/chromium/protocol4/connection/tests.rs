@@ -382,7 +382,7 @@ fn control_state_reaches_every_connection() {
     let port = port();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
-    port.publish_control_state(RuntimeControlState::Attention)
+    port.publish_control_state(RuntimeControlState::Held)
         .unwrap();
     let seen = fake.wait(|seen| !seen.of_kind("control_state").is_empty());
     assert_eq!(

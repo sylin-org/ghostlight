@@ -1431,8 +1431,6 @@ impl std::fmt::Display for UnknownVariant {
 impl std::error::Error for UnknownVariant {}
 
 /// Runtime control state as the extension understands it.
-///
-/// The wire has no attention state: the service reports it as held.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeControlState {
@@ -1448,9 +1446,7 @@ impl From<physical::RuntimeControlState> for RuntimeControlState {
     fn from(state: physical::RuntimeControlState) -> Self {
         match state {
             physical::RuntimeControlState::Active => Self::Active,
-            physical::RuntimeControlState::Held | physical::RuntimeControlState::Attention => {
-                Self::Held
-            }
+            physical::RuntimeControlState::Held => Self::Held,
             physical::RuntimeControlState::Ended => Self::Ended,
         }
     }
@@ -1919,8 +1915,6 @@ pub enum PresentationKind {
     Completion,
     /// Authority denied work.
     Denial,
-    /// User attention is required.
-    Attention,
 }
 
 impl From<physical::PresentationKind> for PresentationKind {
@@ -1931,7 +1925,6 @@ impl From<physical::PresentationKind> for PresentationKind {
             physical::PresentationKind::Progress => Self::Progress,
             physical::PresentationKind::Completion => Self::Completion,
             physical::PresentationKind::Denial => Self::Denial,
-            physical::PresentationKind::Attention => Self::Attention,
         }
     }
 }
@@ -1944,7 +1937,6 @@ impl From<PresentationKind> for physical::PresentationKind {
             PresentationKind::Progress => Self::Progress,
             PresentationKind::Completion => Self::Completion,
             PresentationKind::Denial => Self::Denial,
-            PresentationKind::Attention => Self::Attention,
         }
     }
 }
@@ -2624,12 +2616,8 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_control_state_on_the_wire_has_no_attention() {
+    fn the_runtime_control_state_round_trips_the_wire() {
         use physical::RuntimeControlState as Internal;
-        assert_eq!(
-            RuntimeControlState::from(Internal::Attention),
-            RuntimeControlState::Held
-        );
         for (internal, wire, name) in [
             (Internal::Active, RuntimeControlState::Active, "active"),
             (Internal::Held, RuntimeControlState::Held, "held"),
@@ -2641,7 +2629,7 @@ mod tests {
         }
         assert_eq!(
             encode(&Outbound::ControlState {
-                state: Internal::Attention.into()
+                state: Internal::Held.into()
             }),
             json!({"kind": "control_state", "state": "held"})
         );
@@ -2790,7 +2778,6 @@ mod tests {
             physical::PresentationKind::Progress,
             physical::PresentationKind::Completion,
             physical::PresentationKind::Denial,
-            physical::PresentationKind::Attention,
         ];
         for kind in kinds {
             let wire = PresentationKind::from(kind);

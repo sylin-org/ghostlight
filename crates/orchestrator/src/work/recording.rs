@@ -128,8 +128,8 @@ impl ApplicationExecutor {
 
     fn stop_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
-        // runtime pause/attention gate -- this one used to dispatch straight through it, so a
-        // paused session could still have its recording stopped from underneath it.
+        // runtime pause gate, so a paused session cannot have its recording stopped from
+        // underneath it.
         let decision = self.authorize(context, CapabilitySet::EMPTY, None);
         if !decision.allowed {
             return self.blocked(
@@ -446,7 +446,7 @@ impl ApplicationExecutor {
 
     fn discard_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
-        // runtime pause/attention gate -- this one used to dispatch straight through it.
+        // runtime pause gate.
         let decision = self.authorize(context, CapabilitySet::EMPTY, None);
         if !decision.allowed {
             return self.blocked(

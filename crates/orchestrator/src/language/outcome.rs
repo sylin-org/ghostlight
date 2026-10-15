@@ -1096,8 +1096,6 @@ pub enum CheckFailure {
     Unmet,
     /// A human control or configured authority refused the check.
     Blocked(BlockedReason),
-    /// Runtime control requires the user before more browser work.
-    AttentionRequired,
     /// The caller cancelled before the check finished.
     Cancelled,
     /// The call ran out of time before the check finished.
@@ -1144,9 +1142,6 @@ fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
         CheckFailure::Blocked(reason) => {
             format!("{done} {CHECK_NOT_RUN}. {}", blocked(reason, &None))
         }
-        CheckFailure::AttentionRequired => {
-            format!("{done} {CHECK_NOT_RUN} because the browser job requires user attention.")
-        }
         CheckFailure::Cancelled => {
             format!("{done} {CHECK_NOT_RUN} because the call was cancelled.")
         }
@@ -1170,8 +1165,8 @@ fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
 
 /// Recovery for an applied action whose check did not confirm it.
 ///
-/// Human controls, the history requirement, and attention stay step-free, as their own refusals
-/// are. A policy refusal points to the policy. Everything else says to look before repeating.
+/// Human controls and the history requirement stay step-free, as their own refusals are. A
+/// policy refusal points to the policy. Everything else says to look before repeating.
 fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
     match cause {
         CheckFailure::Blocked(
@@ -1179,8 +1174,7 @@ fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
             | BlockedReason::SessionEnded
             | BlockedReason::AuditUnavailable
             | BlockedReason::InvalidAuthority,
-        )
-        | CheckFailure::AttentionRequired => vec![],
+        ) => vec![],
         CheckFailure::Blocked(reason) => {
             Refusal::AuthorityBlocked { reason, host: None }.next_steps()
         }
@@ -1217,8 +1211,6 @@ pub enum Refusal {
         reason: BlockedReason,
         host: Option<String>,
     },
-    /// Runtime control requires the user.
-    AttentionRequired,
     /// The browser-local physical safety setting refused the action.
     LocalInterlock,
     /// Credential input requires the caller to acknowledge the user's explicit instruction. It
@@ -1323,7 +1315,6 @@ impl Refusal {
                 "The browser job deadline expired while waiting for the workspace."
             }
             Self::AuthorityBlocked { reason, host } => return blocked(*reason, host),
-            Self::AttentionRequired => "The browser job requires user attention.",
             Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
             Self::CredentialAuthorization { control } => {
                 return format!("Nothing was typed. {} is credential-class.", control.phrase());
@@ -2759,11 +2750,6 @@ Changes are \"unsaved\".".into()),
                 "Clicked the \"Save\" button on example.com. The expected condition was not checked. Blocked: that host is not allowed.",
                 vec!["Call policy_explain to see what this session may do."],
             ),
-            (
-                CheckFailure::AttentionRequired,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser job requires user attention.",
-                vec![],
-            ),
         ];
         for (cause, summary, steps) in cases {
             let refusal = Refusal::ActionUnconfirmed {
@@ -2801,14 +2787,6 @@ Changes are \"unsaved\".".into()),
         );
     }
 
-    /// A policy attention hold keeps its own words rather than borrowing the person's pause.
-    #[test]
-    fn attention_is_not_worded_as_a_human_pause() {
-        let attention = Refusal::AttentionRequired;
-        assert_ne!(attention.summary(), HUMAN_PAUSE_DIRECTIVE);
-        assert_ne!(attention.summary(), HUMAN_STOP_DIRECTIVE);
-    }
-
     #[test]
     fn refusal_wording_and_recovery_stay_exact() {
         let summaries = vec![
@@ -2844,10 +2822,6 @@ Changes are \"unsaved\".".into()),
                     host: None,
                 },
                 HUMAN_STOP_DIRECTIVE,
-            ),
-            (
-                Refusal::AttentionRequired,
-                "The browser job requires user attention.",
             ),
             (
                 Refusal::LocalInterlock,

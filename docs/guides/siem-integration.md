@@ -125,7 +125,6 @@ Useful signals include:
 - `allowed = false` grouped by `reason`, `tool`, `policy_tier`, and `grant_id`;
 - `policy_observed = true` when preparing an enforce rollout;
 - `effect in (partial, unknown)`, because those outcomes are never replay-safe;
-- `status = attention_required` or `reason = runtime_attention`;
 - `denial_id` for the user-to-administrator feedback loop;
 - `policy_seq` changes and rollback or invalid-authority events;
 - `observed.host` grouped by decision and RAWX set; and

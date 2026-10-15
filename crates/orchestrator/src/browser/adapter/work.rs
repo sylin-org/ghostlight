@@ -491,8 +491,6 @@ pub enum RuntimeControlState {
     Active,
     /// Effects are held.
     Held,
-    /// Visible user attention is required.
-    Attention,
     /// The admitted session has ended.
     Ended,
 }
@@ -589,8 +587,6 @@ pub enum PresentationKind {
     Completion,
     /// Authority denied work.
     Denial,
-    /// User attention is required.
-    Attention,
 }
 
 /// A closed physical primitive request.

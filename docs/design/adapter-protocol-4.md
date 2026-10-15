@@ -2349,7 +2349,7 @@ fn find(l: &mut Link, s: &mut Scope, tab: u64, text: &str, kind: &str, max_resul
 ### 4.7 Presentation, tab context and recordings
 
 - **Notice tab.** `BrowserPresentation::present` (`presentation/mod.rs:47-66`) fills a missing `tab_id` for
-  `denial` and `attention` signals, only when the browser's `BrowserSummary.protocol` is 4. It uses:
+  `denial` signals, only when the browser's `BrowserSummary.protocol` is 4. It uses:
   - the workspace's only tab; or
   - the active one among its tabs, from one `list_tabs{tab_ids}` call with a 500 ms budget.
 

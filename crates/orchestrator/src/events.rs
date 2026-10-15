@@ -72,12 +72,6 @@ pub enum DomainEvent {
         workspace: String,
         physical_id: u64,
     },
-    /// Visible user attention is required.
-    AttentionRequired {
-        invocation: String,
-        workspace: String,
-        physical_id: Option<u64>,
-    },
     /// Authority blocked work.
     WorkBlocked {
         invocation: String,
@@ -105,7 +99,6 @@ impl DomainEvent {
             | Self::TargetIndicated { invocation, .. }
             | Self::WorkPhaseStarted { invocation, .. }
             | Self::HoldEntered { invocation, .. }
-            | Self::AttentionRequired { invocation, .. }
             | Self::WorkBlocked { invocation, .. }
             | Self::WorkCompleted { invocation, .. } => invocation,
         }
@@ -122,7 +115,6 @@ impl DomainEvent {
             | Self::TargetIndicated { workspace, .. }
             | Self::WorkPhaseStarted { workspace, .. }
             | Self::HoldEntered { workspace, .. }
-            | Self::AttentionRequired { workspace, .. }
             | Self::WorkBlocked { workspace, .. }
             | Self::WorkCompleted { workspace, .. } => workspace,
         }

@@ -14,7 +14,7 @@ impl PresentationPort for PageSignals {
 }
 
 #[test]
-fn credential_guidance_finishes_visuals_without_a_denial_or_attention_notice() {
+fn credential_guidance_finishes_visuals_without_a_denial_notice() {
     for composed in [false, true] {
         let (mut executor, browser, _, workspace, _) = fixture();
         let signals = Arc::new(PageSignals::default());
@@ -57,10 +57,9 @@ fn credential_guidance_finishes_visuals_without_a_denial_or_attention_notice() {
         assert_eq!(result.status, Status::Blocked);
         assert_eq!(result.effect, Effect::None);
         let signals = signals.0.lock().unwrap();
-        assert!(signals.iter().all(|signal| !matches!(
-            signal.signal,
-            PresentationKind::Denial | PresentationKind::Attention
-        )));
+        assert!(signals
+            .iter()
+            .all(|signal| signal.signal != PresentationKind::Denial));
         assert!(signals
             .iter()
             .any(|signal| signal.signal == PresentationKind::Completion));

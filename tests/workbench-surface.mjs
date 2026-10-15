@@ -103,7 +103,6 @@ const snapshot = () => ({
     managed_authority_configured: false,
     managed_authority_active: false,
     managed_authority_valid: true,
-    runtime_control_file_configured: false,
     managed_policy: { configured: false },
     // The tab's state is authored by the orchestrator now. The surface must render exactly what
     // it is handed, so this fixture carries a sentence no local computation could have produced.
@@ -720,7 +719,7 @@ const checks = [
       const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
       // Every word belongs to crates/orchestrator/src/language/readiness.rs. A literal here would
       // be a second source of truth for the one answer the front door exists to give.
-      return !["Not connected", "Session ended", "Needs you", "Working", "Quiet"]
+      return !["Not connected", "Session ended", "Working", "Quiet"]
         .some((word) => source.includes(`"${word}"`));
     })(),
     "view.js authors a readiness word"],

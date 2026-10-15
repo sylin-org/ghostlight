@@ -102,7 +102,7 @@ async function request(method, params = {}, timeoutMs = 15000) {
     if (record) {
       const result = response.result?.structuredContent;
       record.invocation = evidenceToken(result?.invocation, 128);
-      record.status = ["succeeded", "blocked", "failed", "cancelled", "attention_required", "unknown"].includes(result?.status) ? result.status : null;
+      record.status = ["succeeded", "blocked", "failed", "cancelled", "unknown"].includes(result?.status) ? result.status : null;
       record.effect = ["none", "applied", "partial", "unknown"].includes(result?.effect) ? result.effect : null;
       if (response.error) record.failure = { code: "mcp_error", rpc_code: Number.isSafeInteger(response.error.code) ? response.error.code : null };
       else if (!record.tool || !record.invocation || !record.status || !record.effect) record.failure = { code: "invalid_tool_receipt" };

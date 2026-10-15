@@ -692,7 +692,7 @@ check("dialogs", "(6) alert, confirm and prompt: status, accept, dismiss, respon
   const tag = t.tag;
   const raise = async (name) => {
     const clicked = await t.call("browser_click", { tab, target: await t.targetNamed(tab, name, "button") });
-    assert.ok(["succeeded", "attention_required"].includes(clicked.status), JSON.stringify(clicked));
+    assert.equal(clicked.status, "succeeded", JSON.stringify(clicked));
     const status = await t.succeed("browser_dialog", { tab, action: "status" });
     assert.equal(status.facts.present, true, JSON.stringify(status));
     return status;
@@ -1168,14 +1168,14 @@ live("live-desk", "live /demo/desk/: read, find the bell, click, dialog message,
   assert.match((await t.succeed("browser_read", { tab, max_chars: 20000 })).facts.text, /bell/i);
   const bell = (await t.matches(tab, "Ring the bell", "button"))[0].target;
   let clicked = await t.call("browser_click", { tab, target: bell });
-  assert.ok(["succeeded", "attention_required"].includes(clicked.status), JSON.stringify(clicked));
+  assert.equal(clicked.status, "succeeded", JSON.stringify(clicked));
   const status = await t.succeed("browser_dialog", { tab, action: "status" });
   assert.equal(status.facts.present, true, JSON.stringify(status));
   assert.match(status.summary, /visible: ".+"/, "dialog status carries no message");
   await t.succeed("browser_dialog", { tab, action: "respond", text: "Ghostlight was here" });
   await t.succeed("browser_wait", { tab, condition: "text_present", value: "the bell says", timeout_ms: 15000 });
   clicked = await t.call("browser_click", { tab, target: bell });
-  assert.ok(["succeeded", "attention_required"].includes(clicked.status), JSON.stringify(clicked));
+  assert.equal(clicked.status, "succeeded", JSON.stringify(clicked));
   await t.succeed("browser_dialog", { tab, action: "dismiss" });
   await t.succeed("browser_wait", { tab, condition: "text_present", value: "dismissed without an answer", timeout_ms: 15000 });
 });

@@ -19,9 +19,6 @@ pub const fn confirmation(state: RuntimeControlState) -> &'static str {
         RuntimeControlState::Held => {
             "Paused. Agents' browser actions will be refused until you resume."
         }
-        RuntimeControlState::Attention => {
-            "Waiting for you. Agents' browser actions will be refused until you resume."
-        }
         RuntimeControlState::Ended => {
             "Session ended. Agents' browser actions will be refused until you start a new session."
         }
@@ -32,10 +29,9 @@ pub const fn confirmation(state: RuntimeControlState) -> &'static str {
 mod tests {
     use super::*;
 
-    const STATES: [RuntimeControlState; 4] = [
+    const STATES: [RuntimeControlState; 3] = [
         RuntimeControlState::Active,
         RuntimeControlState::Held,
-        RuntimeControlState::Attention,
         RuntimeControlState::Ended,
     ];
 
@@ -63,11 +59,7 @@ mod tests {
 
     #[test]
     fn a_hold_says_what_is_refused_and_how_it_ends() {
-        for state in [
-            RuntimeControlState::Held,
-            RuntimeControlState::Attention,
-            RuntimeControlState::Ended,
-        ] {
+        for state in [RuntimeControlState::Held, RuntimeControlState::Ended] {
             assert!(
                 confirmation(state).contains("refused until you"),
                 "{state:?}"

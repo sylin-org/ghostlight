@@ -5,15 +5,15 @@ use serde::{Deserialize, Serialize};
 use super::outcome::{HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
 
 /// Disjoint step counts; unable-to-start and unreached steps are not terminal failures.
+///
+/// Unknown fields are ignored, so retained history lines with other counts still read.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StepCounts {
     pub total: usize,
     pub succeeded: usize,
     pub failed: usize,
     pub blocked: usize,
     pub cancelled: usize,
-    pub attention_required: usize,
     pub unknown: usize,
     pub not_started: usize,
     pub not_run: usize,
@@ -136,7 +136,6 @@ impl CompositionProgress {
             (c.failed, "failed"),
             (c.blocked, "blocked"),
             (c.cancelled, "cancelled"),
-            (c.attention_required, "need attention"),
             (c.unknown, "unconfirmed"),
             (c.not_started, "could not start"),
             (c.not_run, "not run"),

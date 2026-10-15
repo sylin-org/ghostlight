@@ -21,7 +21,7 @@ for (let index = 2; index < process.argv.length; index++) {
 assert.ok(process.platform === "linux" && options.get("--exercise-installed-stack") &&
   options.get("--bin-dir") && options.get("--browser"),
 "Usage: node tests/linux/installed-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack [--devtools-port-file <dedicated browser file>]");
-for (const name of ["GHOSTLIGHT_RUNTIME_FILE", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE", "GHOSTLIGHT_RUNTIME_CONTROL_FILE"]) {
+for (const name of ["GHOSTLIGHT_RUNTIME_FILE", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE"]) {
   assert.ok(!process.env[name], `Remove ${name}: this journey requires the installation's ordinary paths.`);
 }
 const root = resolve(import.meta.dirname, "../..");

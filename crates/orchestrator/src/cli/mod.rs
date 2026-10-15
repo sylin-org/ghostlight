@@ -31,10 +31,10 @@ use client::{ClientError, McpClient};
 ///
 /// Zero means the browser did what was asked. Every other outcome is distinguishable, and an
 /// uncertain effect is never zero, because a script must not treat "cannot be determined" as done.
+/// The codes are stable for scripts; 3 is not used.
 const EXIT_SUCCEEDED: i32 = 0;
 const EXIT_USAGE: i32 = 1;
 const EXIT_BLOCKED: i32 = 2;
-const EXIT_ATTENTION: i32 = 3;
 const EXIT_FAILED: i32 = 4;
 const EXIT_CANCELLED: i32 = 5;
 const EXIT_UNKNOWN: i32 = 6;
@@ -267,7 +267,6 @@ fn exit_code(result: &Value) -> i32 {
     match result.get("status").and_then(Value::as_str) {
         Some("succeeded") => EXIT_SUCCEEDED,
         Some("blocked") => EXIT_BLOCKED,
-        Some("attention_required") => EXIT_ATTENTION,
         Some("failed") => EXIT_FAILED,
         Some("cancelled") => EXIT_CANCELLED,
         _ => EXIT_UNKNOWN,
@@ -384,13 +383,26 @@ mod tests {
     }
 
     #[test]
+    fn each_status_keeps_its_exit_code() {
+        for (status, code) in [
+            ("succeeded", 0),
+            ("blocked", 2),
+            ("failed", 4),
+            ("cancelled", 5),
+            ("unknown", 6),
+        ] {
+            assert_eq!(exit_code(&json!({ "status": status })), code, "{status}");
+        }
+    }
+
+    #[test]
     fn an_uncertain_effect_never_exits_zero() {
         // A script that treats "cannot be determined" as success will replay an effect that may
         // already have happened. Every terminal status is distinguishable for that reason.
         assert_eq!(exit_code(&json!({"status":"succeeded"})), EXIT_SUCCEEDED);
         assert_eq!(exit_code(&json!({"status":"unknown"})), EXIT_UNKNOWN);
         assert_eq!(exit_code(&json!({})), EXIT_UNKNOWN);
-        for status in ["blocked", "attention_required", "failed", "cancelled"] {
+        for status in ["blocked", "failed", "cancelled"] {
             assert_ne!(
                 exit_code(&json!({ "status": status })),
                 EXIT_SUCCEEDED,

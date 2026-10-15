@@ -14,8 +14,6 @@ mkdirSync(join(root, ".tmp/history-compatibility"), { recursive: true });
 const area = mkdtempSync(join(root, ".tmp/history-compatibility/run-"));
 const audit = join(area, "audit.jsonl");
 const policy = join(area, "policy.json");
-const controls = join(area, "controls.txt");
-writeFileSync(controls, "active");
 writeFileSync(policy, JSON.stringify({ schema: 3, name: "History compatibility", version: "1",
   grants: [{ id: "ordinary-work", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
   config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
@@ -55,8 +53,7 @@ async function exercise(executable, name, expectedUnreadable) {
   assert.equal(existsSync(runtime), false, "Refusing existing runtime file");
   assert.equal(existsSync(runtime.replace(/\.json$/, ".lock")), false, "Refusing existing lease");
   const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtime, GHOSTLIGHT_AUDIT_FILE: audit,
-    GHOSTLIGHT_NATIVE_HOST_DIR: join(area, "native"), GHOSTLIGHT_POLICY_FILE: policy,
-    GHOSTLIGHT_RUNTIME_CONTROL_FILE: controls };
+    GHOSTLIGHT_NATIVE_HOST_DIR: join(area, "native"), GHOSTLIGHT_POLICY_FILE: policy };
   const log = [];
   const child = spawn(executable, [], { env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   active = { child, runtime };

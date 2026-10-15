@@ -180,7 +180,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    the original files remain unchanged.
 11. Audit carries the complete RAWX set, authority, mode, tier, grant, rule, deterministic denial
     id, and managed sequence without policy payloads.
-12. Hold, attention, end-session, and cancellation stop later effects at the runtime boundary.
+12. Hold, end-session, and cancellation stop later effects at the runtime boundary.
 13. Repeated enforced denials never create an automatic session hold. A later permitted request
     succeeds without review/resume, in the same workspace and in other workspaces.
 14. Model-driven close dispatches only when the action capability and monotonic tab-close policy
@@ -325,7 +325,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 ## Presentation gates
 
 1. Established controlled-scope, cursor, target, click, drag, field, key, scroll, read, find,
-   navigation, screenshot, zoom, recording, signature, denial, attention, and caption treatments
+   navigation, screenshot, zoom, recording, signature, denial, and caption treatments
    are visible for applicable 1.0 jobs. Diagnostics remain visually quiet.
 2. Presentation frames contain only ids, closed event and activity kinds, phase, detail, and fixed
    Ghostlight-authored labels.
@@ -354,7 +354,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    published before that receipt. Every already-loaded and future permitted frame, including an
    out-of-process cross-origin iframe, has the exact runtime before work reaches it. A mismatch,
    timeout, child-install failure, or disconnect retires the connection.
-5. The popup distinguishes disconnected, connected-active, held, attention-required, and ended
+5. The popup distinguishes disconnected, connected-active, held, and ended
    states without reading page content.
 6. Popup pause, resume, end-session, and start-new-session actions become authoritative service
    runtime state before the next physical effect. Ordinary resume cannot revive an ended session.
@@ -372,8 +372,8 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    not transfer ownership (ADR-0164).
 9. The established content-free visual language renders visibly, stays pointer-transparent with
    no focusable controls, remains hidden from screenshots, and remounts after navigation. A missing
-   stylesheet cannot expose buttons or create an input-intercepting layer. Legacy attention signals
-   show at most a bounded passive notice; runtime-state transitions create no page dialog. Its
+   stylesheet cannot expose buttons or create an input-intercepting layer. Runtime-state
+   transitions create no page dialog. Its
    palette is sky `#38bdf8`, ink `#eaf6ff`, and governance ground `#0c0f14`; its spring curve is
    `cubic-bezier(.22,1,.36,1)`. The 150 ms cursor, four-second scope breath, 620 ms ripple, 700 ms
    field splash, 1450 ms read scan, 1600 ms navigation pill, 1500 ms capture frame, and 1150 ms
@@ -424,7 +424,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 5. Abnormal Linux WebKit renderer termination discards only the failed workbench. The authority and
    tray remain live, and the next explicit Open creates one replacement without an automatic retry
    loop.
-6. Blocked and attention-required operations request at most one content-free native notification
+6. Blocked operations request at most one content-free native notification
    per invocation. Notification failure cannot change governance, audit, or completion truth.
 7. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
@@ -542,7 +542,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    receipts keep their facts when controls change after dispatch; postcondition refusal preserves
    the previously acknowledged action. Its summary names that action before saying why the check
    did not confirm it, and never says nothing happened.
-5. Human Pause/Stop and explicit global attention still prevent the next browser effect. Resume
+5. Human Pause and Stop still prevent the next browser effect. Resume
    permits new requests without replay or permission changes. Page feedback contains no buttons,
    focusable elements, or input-intercepting layers, even when its stylesheet is unavailable.
 6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with

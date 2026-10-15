@@ -18,7 +18,6 @@ The command prints Ghostlight's sentence for what happened, and exits with the t
 | 0 | Succeeded |
 | 1 | The call could not be made: bad arguments, bad JSON, or no reachable service |
 | 2 | Blocked by authority |
-| 3 | Attention required in the visible browser |
 | 4 | Failed |
 | 5 | Cancelled |
 | 6 | The effect cannot be determined |

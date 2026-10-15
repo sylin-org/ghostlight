@@ -135,7 +135,7 @@ Every invocation returns one envelope:
 | --- | --- | --- |
 | `history_storage` | enum | `saved` or `unconfirmed`; storage confirmation is independent of browser effects. |
 | `invocation` | string | Opaque correlation handle. |
-| `status` | enum | `succeeded`, `blocked`, `failed`, `cancelled`, `attention_required`, or `unknown`. |
+| `status` | enum | `succeeded`, `blocked`, `failed`, `cancelled`, or `unknown`. |
 | `effect` | enum | `none`, `applied`, `partial`, or `unknown`. |
 | `readiness` | enum | `not_applicable`, `loading`, `interactive`, `complete`, or `unknown`. |
 | `repeat_safe` | boolean | Whether repeating the same call is known safe. |
@@ -703,11 +703,10 @@ summary is the action's sentence followed by why the check fell short:
 | Page access unverified | `failed` | `document_unavailable` | `The expected condition was not checked because access to the page could not be verified.` |
 | Browser could not check | `failed` | `browser_refused` | `The expected condition was not checked because the browser could not run the check.` |
 | Policy refused the check | `blocked` | the policy reason | `The expected condition was not checked.` and the policy sentence |
-| User attention required | `attention_required` | `runtime_attention` | `The expected condition was not checked because the browser job requires user attention.` |
 
 The next step is `Check the page with browser_read or browser_inspect before repeating; the action
-already happened.` A policy refusal points to `policy_explain` instead. An attention hold, a
-history-storage refusal, and an unreadable policy give no step. Pause and Stop put their fixed
+already happened.` A policy refusal points to `policy_explain` instead. A
+history-storage refusal and an unreadable policy give no step. Pause and Stop put their fixed
 directive first, then the action's sentence and `The expected condition was not checked.`, with no
 next step. History records `action_unconfirmed` with the same cause, and a flow treats the step by
 that cause: a Pause, Stop, cancellation, or deadline during the check stops the flow as it would
@@ -846,7 +845,7 @@ arguments. A reference that does not resolve fails its step without effect.
 With `on_error: stop`, a child execution, argument-decoding, or reference-resolution failure ends
 the flow before the next step. Effects from earlier steps remain applied; stopping does not roll
 them back. Explicit `continue` permits later independent steps to run and still reports a
-non-success when any child fails. Human pause/stop, attention, cancellation, and deadlines end
+non-success when any child fails. Human pause/stop, a local interlock, cancellation, and deadlines end
 execution even under Continue.
 
 Captured per-step envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
@@ -856,20 +855,20 @@ resolve against the full volatile envelope when its client payload is omitted.
 
 Flow uses this progress contract; historical sequence receipts retain it:
 
-- `progress.counts`: `total`, `succeeded`, `failed`, `blocked`, `cancelled`, `attention_required`,
-  `unknown`, `not_started`, and `not_run`. The categories are disjoint and sum to `total`.
+- `progress.counts`: `total`, `succeeded`, `failed`, `blocked`, `cancelled`, `unknown`,
+  `not_started`, and `not_run`. The categories are disjoint and sum to `total`.
   `not_started` means runtime reference resolution or decoding prevented entering a child;
   `not_run` means execution never reached it. Neither fabricates a failed child invocation.
 - `progress.effects`: counts of entered children with `none`, `applied`, `partial`, and `unknown`
   effects. A later unknown never removes earlier known applied or partial effects.
 - `progress.stopped` says execution ended at a stopping boundary. `progress.issue`, when present,
   names a one-based step and closed cause relevant to recovery. Human directives take precedence
-  over attention/invocation limits, then uncertainty, then ordinary failures.
+  over interlock/invocation limits, then uncertainty, then ordinary failures.
 - Every step row keeps its one-based position, status, effect, and repeat safety. Entered rows
   carry their closed cause when relevant; unresolved inputs also retain their client error.
   Omitted payloads cannot remove this metadata. Not-run rows contain no invented child result.
 - Aggregate status remains in the ordinary vocabulary. Unknown effects/status take precedence,
-  then attention, cancellation, blocks, and failure. Success requires every step to succeed.
+  then cancellation, blocks, and failure. Success requires every step to succeed.
   Aggregate effect is unknown if any effect is unknown; otherwise a partial child or applied
   effect with incomplete work is partial. Fully successful applied work remains applied.
 - Repetition is safe only when every child succeeded, every child permits repetition, and there
@@ -955,8 +954,8 @@ or what is allowed before acting.
 
 Inputs: none. Capability: empty requirement set (always available).
 Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
-It remains available during explicit global attention, Pause or Stop, and a required audit outage.
-It does not clear attention or change controls. Cancellation, deadlines, bounded admission, and
+It remains available during Pause or Stop and a required audit outage.
+It does not change controls. Cancellation, deadlines, bounded admission, and
 the ordinary completion/audit path still apply.
 
 The result carries the orchestrator's compiled projection -- the same compilation the workbench

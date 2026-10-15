@@ -15,8 +15,8 @@ impl ApplicationExecutor {
     /// Explain current authority from the orchestrator-owned projection.
     pub(super) fn explain_policy(&self, context: &InvocationContext<'_>) -> Terminal {
         // Explaining authority requires no browser permission and remains available while that
-        // authority stops browser work. Keep the ordinary completion/audit path, without clearing
-        // attention, changing human controls, or inventing a grant evaluation (ADR-0136).
+        // authority stops browser work. Keep the ordinary completion/audit path, without changing
+        // human controls or inventing a grant evaluation (ADR-0136).
         let decision = Decision::permitted();
         self.retain_permission(
             context,
