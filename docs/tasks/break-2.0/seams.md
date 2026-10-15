@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f06b (the slice after f06a-page-message-lists in the lane order).
+Next: f06b-tab-readiness.
 
 ## Landed
 
