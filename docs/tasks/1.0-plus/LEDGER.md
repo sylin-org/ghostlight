@@ -1,6 +1,7 @@
 # 1.0-plus LEDGER
 
-Progress authority for the batch. One task = one commit. RESUME HERE, then read upward.
+Progress authority for the batch. Each task entry lists every commit it landed. Future entries use
+`- Commits: <hash>[, <hash>...]`. RESUME HERE, then read upward.
 
 ## RESUME HERE
 

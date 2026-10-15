@@ -10,17 +10,16 @@ for current readiness before implementing any further package.
 
 ## Read first
 
-1. Root [AGENTS.md](../../../AGENTS.md), [MEMORY](../../MEMORY.md), and [STATUS](../../STATUS.md).
-2. The [dated security assessment](../../design/security-assessment-2026-09-06.md), which records
+1. The [dated security assessment](../../design/security-assessment-2026-09-06.md), which records
    source findings, isolated reproductions, and the limits of those checks.
-3. The four [1.0 contracts](../../1.0/) and the ADRs for the subsystem being considered.
-4. [ADR-0105](../../adr/0105-scripted-intake-channels.md), including its September 6 amendment,
+2. [ADR-0105](../../adr/0105-scripted-intake-channels.md), including its September 6 amendment,
    for the agreed client-provenance scope.
-5. [ADR-0133](../../adr/0133-behavioral-capability-restoration.md) and
+3. [ADR-0133](../../adr/0133-behavioral-capability-restoration.md) and
    [ADR-0151](../../adr/0151-composed-full-page-reading.md), including their September 6 amendments,
    for accepted script correctness and frame policy choices.
-6. [IDEATION](IDEATION.md) for unresolved decisions in the package about to start.
-7. [DEV-LOOP](../../DEV-LOOP.md) before any build, process journey, or deployment.
+4. [IDEATION](IDEATION.md) for unresolved decisions in the package about to start.
+
+AGENTS.md's reading list and gates apply.
 
 ## Scope and architecture
 
@@ -54,9 +53,8 @@ package does not block independent agreed work. If new evidence requires a produ
 bring that tradeoff to ideation before changing the contract.
 
 The ledger entries are work packages; H3 has a bounded preparation brief. Before implementing
-a package, map the current owning seams, read its ADRs, and write one-commit tasks with explicit
-expected behavior, prerequisites, and what each task removes or replaces. Use the explore skill
-before production changes. Record architecture decisions in an ADR or marked amendment rather
+a package, map the current owning seams, read its ADRs, and name the mechanism (and any tests
+pinning it) that the fix removes or replaces. Record architecture decisions in an ADR or marked amendment rather
 than treating this plan as a second architecture contract.
 
 Use the current source to recheck each finding. The assessment baseline is
@@ -72,9 +70,8 @@ If a finding no longer reproduces, record the fixing source and the evidence.
   journey. Name the lane that proved each result and any untested platform.
 - Turn the assessment's external exploratory probes into repository regression tests at the
   relevant implementation seams. Do not mark a fix complete from the old passing suites alone.
-- One implementation task is one logical commit, with the AGENTS.md gates green. Process and
-  browser journeys apply when their boundaries change; point `GHOSTLIGHT_BIN_DIR` at the actual
-  fresh build under test. Live deployment uses the existing dev-loop only.
+- Run process and browser journeys when their boundaries change, with GHOSTLIGHT_BIN_DIR pointing
+  at the fresh build. Live deployment uses the existing dev-loop only.
 - Reconcile affected active contracts and trust claims with each completed fix. Historic records
   remain intact. A documentation correction must not imply an unfixed behavior is now enforced.
 - Record implementation, tests, commit, deviations, and remaining proof in the ledger. A scope

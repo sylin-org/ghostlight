@@ -64,24 +64,7 @@ Re-read the tree before relying on any of these. They are a starting point, not 
 
 ## Gate commands
 
-Literal. Run all of them before every commit.
-
-    cargo fmt --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
-    npm test --prefix extension
-    node --check <each changed extension or ui JavaScript file>
-
-When your change touches process startup, the CLI, or the workbench surface, also run:
-
-    cargo build --workspace --target-dir .target-ghostlight-1.0
-    node tests/process-journey.mjs
-    node tests/cli-journey.mjs
-    node tests/workbench-surface.mjs
-
-The journeys resolve executables from `.target-ghostlight-1.0/debug` unless `GHOSTLIGHT_BIN_DIR`
-says otherwise. If you build somewhere else, pass it, or the journey passes against stale binaries
-and proves nothing.
+The gate list and journey rules in `AGENTS.md` apply.
 
 ## Protect the machine you are on
 
@@ -305,22 +288,12 @@ open and you say so.
 
 ## Never do these
 
-Each entry names its one sanctioned exception, or says there is none.
-
-- Never add telemetry, an update ping, an activation call, or any new outbound network request.
-  ADR-0028 Decision 9 is permanent, and public trust and legal documents depend on it. **No
-  exception.**
-- Never edit an existing pin in `PINS.md`. If a pin is wrong, STOP and say so in
-  `coordination/CHAT.md`. **No exception.**
-- Never copy code from `reference/`. **No exception.**
-- Never put policy, classification, or audit in the extension. **No exception.**
-- Never weaken a claim in `docs/trust/` or `docs/legal/`. **No exception.**
+- The AGENTS.md boundaries apply without exception.
+- Pins are expected values. Never change a pin, test, or contract to make failing behavior pass.
+  If a pin is wrong, record a ledger deviation and change it with the owner's decision or an ADR
+  amendment. Say so in `coordination/CHAT.md` as well.
 - Never edit a shell startup file. **No exception.**
-- Never change a `docs/1.0/` contract. **Exception: S7a**, and only if ADR-0126 Decision 7 made a
-  statement there untrue.
 - Never merge `main`, tag, sign, publish, or release. **No exception.**
-- Never read or modify anything under `local/` or `/private/` without the owner saying so. **No
-  exception.**
 
 ## Failure protocol
 

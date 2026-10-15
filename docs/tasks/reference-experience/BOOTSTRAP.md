@@ -109,8 +109,6 @@ One task, one commit, one green tree. Every prefix of this list leaves the produ
 | S7 | [Readiness recovery](S7-readiness-recovery.md) | Missing readiness is repaired where safe, named where not | S1, S3 |
 | S8 | [Evaluation](S8-evaluation.md) | Evidence on real desktops, both platforms | S1-S7 |
 
-At most one stage is `IN PROGRESS`.
-
 ## Per-stage procedure
 
 1. Read this file, `PINS.md`, the stage prompt, the ADRs the prompt names, and the live code.
@@ -121,7 +119,7 @@ At most one stage is `IN PROGRESS`.
 5. Implement at the owning seam. If the same rule needs to exist in two product layers, stop: the
    owner is missing.
 6. Add evidence proportional to the promise: unit tests, journeys, extension tests, live checks.
-7. Run every gate command in `PINS.md`.
+7. Run the AGENTS.md gates.
 8. Commit once, then update the ledger.
 
 ## Failure protocol
@@ -133,24 +131,14 @@ outcome; a stage completed by guessing is not.
 
 ## Never do these
 
-Each entry names its one sanctioned exception, or states that there is none.
-
-- Never add telemetry, an update ping, an activation call, or any new outbound network behavior.
-  ADR-0028 Decision 9 is normative and permanent, and public trust and legal documents depend on it.
-  **No exception in this epic.**
-- Never copy code from `reference/`. Interface and technique only. **No exception.**
-- Never put policy, classification, or audit in the extension. **No exception.**
-- Never weaken a claim in `docs/trust/` or `docs/legal/`. **No exception in this epic**; no stage
-  here changes a public claim.
+- The AGENTS.md boundaries apply without exception.
 - Never edit shell startup files to fix PATH. **No exception**; S4 uses an owned XDG location.
-- Never change a `docs/1.0/` contract. **Exception: S1 only**, and only to make it match reality.
-- Never edit an existing pin in `PINS.md`. **Exception: S1 only**, and only to append decided values.
+- Pins are expected values. Never change a pin, test, or contract to make failing behavior pass.
+  If a pin is wrong, record a ledger deviation and change it with the owner's decision or an ADR
+  amendment.
 - Never change the bridge, MCP connector, or browser connector protocol surface. **Exception: S5**,
   and only if the runtime-control contract provably requires it, with an ADR.
 - Never add an extension permission or manifest capability. **No exception in this epic.**
-- Never read or modify anything under `local/` or `/private/`. **No exception.**
-- Never push, publish, tag, release, or post anything outward-facing. Local commits are expected.
-  **No exception.**
 
 ## Epic completion
 

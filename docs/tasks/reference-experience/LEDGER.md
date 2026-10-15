@@ -57,8 +57,7 @@ The 2026-08-15 stage files remain in Git history. Do not take a path or excerpt 
 | S7 readiness recovery | COMPLETE | `fb9845b` plus corrective pass below | Safe repair, exact refusal | Three green substeps, S7a-S7c |
 | S8 evaluation | BLOCKED | -- | Evidence on real desktops | Required Ubuntu GNOME and installed Windows lanes unavailable on this host |
 
-Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`. At most one stage is
-`IN PROGRESS`.
+Allowed values: `NOT STARTED`, `READY`, `IN PROGRESS`, `BLOCKED`, `COMPLETE`.
 
 ## Completion evidence matrix
 
@@ -312,6 +311,6 @@ launch claim follows from that result.
 - Every changed decision has an ADR or a marked amendment.
 - The change sits at one owning seam inside the modular monolith.
 - No redundant surface or duplicated rule remains without a named follow-up here.
-- Every gate command in `PINS.md` passed, and the counts are in the gate log.
+- The AGENTS.md gates passed, and the counts are in the gate log.
 - `docs/STATUS.md` and the active 1.0 contracts match reality.
 - `RESUME HERE`, the stage row, the evidence matrix, and this file's deviations are current.

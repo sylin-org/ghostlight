@@ -9,9 +9,9 @@ the authority on progress; a task file describes intent, the ledger records what
 
 ## Ground rules
 
-- One task = one commit, and every commit leaves a green tree: formatting, warnings-denied Clippy,
-  the full Rust suite, the extension suite, npm launcher tests, and the syntax gates its change
-  touched.
+- A task lands as one or more commits; each is one logical change and leaves a green tree:
+  formatting, warnings-denied Clippy, the full Rust suite, the extension suite, npm launcher tests,
+  and the syntax gates its change touched.
 - The published 1.0.0 channels are immutable. Recovery or follow-up ships as a higher version.
   Extension source changes in this batch make the published 1.0.0 store revision one commit older;
   that is normal forward flow, not a defect, and no store mutation happens in this batch without a

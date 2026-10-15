@@ -9,29 +9,13 @@ the "verified tree facts" section was read from the tree at that revision. **Sta
 the file before you change it.** A pin tells you what was true and what must become true; it does
 not excuse you from looking.
 
-Only S1 may append to this file, and only to add values it decided. No stage may edit an existing
-pin. If a pin is wrong, STOP and say so in the ledger.
+Only S1 may append to this file, and only to add values it decided. Pins are expected values. Never change a pin, test, or contract to make failing
+behavior pass. If a pin is wrong, record a ledger deviation and change it with the owner's decision or an ADR
+amendment.
 
 ## Gate commands
 
-Run all of these before every commit. They are literal.
-
-    cargo fmt --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
-    npm test --prefix extension
-    node --check <each changed extension JavaScript file>
-
-Process journeys resolve executables from `.target-ghostlight-1.0/debug` unless `GHOSTLIGHT_BIN_DIR`
-overrides it. If you build into another target directory, pass it explicitly or the journey passes
-against stale binaries and proves nothing:
-
-    cargo build --workspace --target-dir .target-ghostlight-1.0
-    node tests/process-journey.mjs
-    node tests/workbench-surface.mjs
-
-Do not pin a test count as a success criterion. Counts move. Record the counts you observed in the
-ledger's gate log instead.
+Superseded by the gate list in AGENTS.md; this list was the gate list as of S1.
 
 ## Verified tree facts (as of the authoring revision)
 
