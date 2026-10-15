@@ -512,8 +512,8 @@ pub struct Outcome {
     pub registrations: Option<ReconcileReport>,
     /// What became of the files the 1.x Flatpak route left in the home.
     pub flatpak: Vec<FlatpakStep>,
-    /// Entries of the plan's deletions that could not be removed, usually because a program still
-    /// runs from them. The next install tries again; this one is not failed by them.
+    /// Entries of the plan's deletions that could not be removed. The next install tries again;
+    /// this one is not failed by them.
     pub left_behind: Vec<PathBuf>,
 }
 
@@ -742,7 +742,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// The retired development directory and marker go the same way: once `bin` holds the new
 /// executables and the registrations name them, the service is asked to quit (it may be running
 /// from that directory), whatever else runs from there is stopped, and the directory and the
-/// marker are removed. An entry a running program keeps is reported in [`Outcome::left_behind`];
+/// marker are removed. An entry that cannot be removed is reported in [`Outcome::left_behind`];
 /// it does not fail the install.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
@@ -977,8 +977,8 @@ impl RetiredDevelopment {
 }
 
 /// Stop what runs from the retired development directory and remove what `plan` lists as
-/// deletions. Returns the entries that could not be removed, which are usually the ones a program
-/// still runs from. A stop that fails is not an error here: the removal that follows names what stayed.
+/// deletions. Returns the entries that could not be removed. A stop that fails is not an error
+/// here: the removal that follows names what stayed.
 fn remove_retired_development(
     control: &dyn ProcessControl,
     layout: &Layout,

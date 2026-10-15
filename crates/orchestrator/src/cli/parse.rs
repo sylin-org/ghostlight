@@ -129,7 +129,7 @@ pub const PLAN_OPTION: &str = "--plan";
 /// How `deployment install` is used.
 fn deployment_usage() -> String {
     format!(
-        "usage: ghostlight deployment install [<payload directory>]          [{DEVELOPMENT_OPTION} | {RESTORE_OPTION}] [{PLAN_OPTION}]"
+        "usage: ghostlight deployment install [<payload directory>] [{DEVELOPMENT_OPTION} | {RESTORE_OPTION}] [{PLAN_OPTION}]"
     )
 }
 
@@ -476,6 +476,17 @@ mod tests {
                 "help does not document {subcommand}"
             );
         }
+    }
+
+    #[test]
+    fn an_unknown_deployment_option_gets_the_one_line_usage() {
+        let error = launch_mode(["deployment", "install", "--bogus"].map(Into::into))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "usage: ghostlight deployment install [<payload directory>] [--development | --restore] [--plan]"
+        );
     }
 
     #[test]

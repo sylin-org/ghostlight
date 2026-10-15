@@ -159,15 +159,10 @@ pub fn removed_development_marker(path: &str) -> String {
     format!("Removed {path}, the marker earlier development builds used to pick a build.")
 }
 
-/// The directory earlier development builds ran from stays because a program runs from it.
+/// An entry of the retired development layout could not be removed. The cause is not known to
+/// the installer, so the sentence does not name one.
 #[must_use]
-pub fn kept_development_directory(path: &str) -> String {
-    format!("Could not remove {path}: a program still runs from it. The next install tries again.")
-}
-
-/// The marker earlier development builds used stays.
-#[must_use]
-pub fn kept_development_marker(path: &str) -> String {
+pub fn kept_development_entry(path: &str) -> String {
     format!("Could not remove {path}. The next install tries again.")
 }
 
@@ -301,7 +296,7 @@ mod tests {
             payload_other_build("d"),
             service_did_not_start("bin", 30),
             removed_development_marker("m"),
-            kept_development_marker("m"),
+            kept_development_entry("m"),
         ];
         assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
     }

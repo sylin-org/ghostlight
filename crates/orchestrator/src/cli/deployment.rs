@@ -131,8 +131,7 @@ fn deletion_lines(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
             match (is_marker, kept) {
                 (false, false) => Line::output(words::removed_development_directory(&shown)),
                 (true, false) => Line::output(words::removed_development_marker(&shown)),
-                (false, true) => Line::problem(words::kept_development_directory(&shown)),
-                (true, true) => Line::problem(words::kept_development_marker(&shown)),
+                (_, true) => Line::problem(words::kept_development_entry(&shown)),
             }
         })
         .collect()
@@ -297,19 +296,22 @@ mod tests {
             &layout,
             deletions,
             Some(true),
-            vec![directory, marker],
+            vec![directory.clone(), marker],
         );
         let kept_marker = kept
             .iter()
             .find(|line| line.text.contains(&shown_marker))
             .unwrap();
         assert_eq!(kept_marker.stream, Stream::Problem);
-        assert!(!kept_marker.text.contains("program still runs"));
-        assert!(
-            kept.iter()
-                .any(|line| line.stream == Stream::Problem
-                    && line.text.contains("program still runs"))
+        assert_eq!(
+            kept_marker.text,
+            format!("Could not remove {shown_marker}. The next install tries again.")
         );
+        assert!(kept.iter().all(|line| !line.text.contains("still runs")));
+        let shown_directory = directory.display().to_string();
+        assert!(kept
+            .iter()
+            .any(|line| line.stream == Stream::Problem && line.text.contains(&shown_directory)));
     }
 
     #[test]
