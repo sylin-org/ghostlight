@@ -40,9 +40,12 @@ Rules:
 
 ## RESUME HERE
 
-Milestone 1 is complete (m1-12-honest-names landed out of order, before m1-11). The live demo with the
-owner is next; the coordinator runs it from DEMO.md beside the plan. Owner answer Q5 is closed:
-`ghostlight install` stops strays, and doctor's stray sentence names it (polish-02-strays).
+Milestone 1 is complete and deployed in place on the owner's machine (a537043b, channel
+development). The coordinator ran demo parts 0 to 2 (see Live demo results); the owner runs the
+steps that change live state: Controls in the window, a Chrome bookmark, watching off and on, Quit
+and come back. Next: the follow-ups agent-refusal-own-origin and tidy-03, then the shell track is
+planned again. Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
+sentence names it (polish-02-strays).
 
 ## Landed
 
@@ -193,9 +196,41 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
   "Stopped <image>."; `ghostlight doctor --json` lists it under `strays`. Stop the service and run `status`: it
   reads "Ghostlight service is not running." and `doctor` adds how it starts.
 
+## Live demo results (2026-10-15)
+
+Deploy a537043b in place, Windows 11 build 26300, channel development, one service from `bin`.
+
+- Part 0, pass: `status` printed "Ghostlight service is up; 3 MCP clients and 1 browser connected."
+  and `Workbench: http://127.0.0.1:41259/ -- others on this computer can watch`; `doctor` printed
+  the same lines, an `Endpoint:` line and no stray. `netstat` showed LISTENING on 127.0.0.1:41259
+  only, owned by the service. Every guard gave its code: 200, 401 without and with a wrong bearer,
+  415, 308 and 421 for a wrong Host, 400 for an upgrade, 405 for OPTIONS; the headers carry the
+  content policy and `X-Frame-Options: DENY` and no `Access-Control-` header. `/api/context` without
+  a bearer is the watch context.
+- Part 1, fail then pass: the first deploy's window did not start. The loader refused
+  `ghostlight-desktop.exe` with 0xC0000139 because it imports `TaskDialogIndirect` and had no
+  application manifest; fixed in a537043b with a load test. After it the window opened in 0.4 s
+  with the workbench, the "Full control" chip, live activity and the Controls button.
+- Part 2, pass in an isolated browser (not the owner's Chrome): the "Watching" chip, live data over
+  one stream, and the Controls sheet in watcher form (Density and Motion, Pause, every other row
+  as state, one Continue line). Agents asking for `http://127.0.0.1:41259/` and
+  `http://localhost:41259/` were refused and `http://127.0.0.1:41258/` opened. The refusal said
+  "127.0.0.1 is protected" and pointed at policy_explain, which misleads an agent about other local
+  ports; the follow-up agent-refusal-own-origin fixes the sentence.
+- m1-04 port check, pass: after a redeploy the service took 41259 again.
+- Part 5: the service reads "Ghostlight", the window "Ghostlight" and every edge "Ghostlight
+  connection" (five: four MCP clients and Chrome).
+- Owed to the owner: Controls in the window and its acts, the Chrome bookmark, watching off with
+  About in full (and the About orbs of m1-04), Quit and come back.
+- Seen: `~/.ghostlight/bin` still holds the 1.x directories `v1.3.5` and `v1.3.6`; check the
+  ADR-0193 layout and the break migration before deciding who removes them.
+
 ## Blockers
 
-- m1-12, question for the coordinator: the service image's FileDescription is "Ghostlight" and cannot
+- m1-12, answered by the owner on 2026-10-15: the service reads "Ghostlight service". It lands with
+  the shell-track slice that removes Tauri from the service, which then carries its own version
+  resource like the edge and the window, because today `productName` may also name Windows
+  notifications. The question as it was raised: the service image's FileDescription is "Ghostlight" and cannot
   be set from this lane. `tauri-build` 2.6.3 takes it from `productName` in
   `crates/orchestrator/tauri.conf.json` (and ProductName from the same key); `WindowsAttributes` has no
   description setter. The one-line change is `"productName": "Ghostlight service"`; it would also
