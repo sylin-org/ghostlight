@@ -832,6 +832,7 @@ fn signal(
         signal: kind,
         activity: PresentationActivity::Click,
         phase: "Ghostlight blocked this action".into(),
+        label: "Clicking".into(),
         detail: Some("A configured guardrail prevented it.".into()),
         tab_id,
         locator: locator.map(str::to_owned),
@@ -891,7 +892,7 @@ fn a_notice_is_written_once_and_never_awaited() {
         &json!({"kind": "notice", "tab_id": 12,
             "frame": {"frame_id": "7F3A", "loader_id": "9C21"},
             "signal": {"invocation": "invocation_link", "signal": "denial", "activity": "click",
-                "phase": "Ghostlight blocked this action",
+                "phase": "Ghostlight blocked this action", "label": "Clicking",
                 "detail": "A configured guardrail prevented it.",
                 "locator": "locator_a1b2c3d4_12", "click": {"clicks": 1, "button": "left"}},
             "defer_until_visible": true})

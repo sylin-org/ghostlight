@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f06c-notice-label.
+Next: f06d-setup-page.
 
 ## Landed
 
@@ -117,6 +117,7 @@ Next: f06c-notice-label.
 | f09-private-files | Files Ghostlight creates under the home are owner-private on Linux (blueprint F9). `ghostlight_relay::private` holds `file_options()` (mode 0600 on Unix, today's options on Windows) and `create_dir_all` (0700 on Unix). The audit sink, `install::record::atomic_replace` (and so the install record, development marker and Windows entry), the managed cache and status writes, the user-policy write and its `.schema3.bak` backup, the handoff marker, the install lock, the relay diagnostics log, the bridge diagnostics marker and logs, the relay runtime file's and service lease's directories, the executables' `bin` directory, and everything the 2.0 break migration creates in `home/policy` and `home/state` (the copies, the `.copied-sha256` records and the audit archive) all use them. The break migration copies into new private files whatever mode the 1.x original had. The managed file's and the policy migrator's private copies of atomic write are gone; both call `atomic_replace`. `relay::log`'s tests moved to `relay/src/log/tests.rs` with the new mode test. `data-flows.md` says it in one sentence. | see `git log` |
 | f06a-page-message-lists | The frozen vocabulary carries only words the extension reads (blueprint F6a). `extension/lib/protocol.js` no longer lists `world_message_kinds`, `asset_error_codes` or `pre_effect_codes`; nothing in `extension/lib` or `worker.js` read them. The golden test compares `protocol.vocabulary` with `vocabulary.json` minus the named `PAGE_MESSAGE_LISTS` and asserts none is present. `vocabulary.json`, `golden.rs` and the page asset tests keep the lists: the page seam belongs to the service (ADR-0197 D6). adapter-protocol-4 says so. | see `git log` |
 | f06b-tab-readiness | Protocol-4 tab readiness is loading, complete or unknown (blueprint F6b). `wire::Readiness` drops `Interactive`; a tab readiness word it does not name decodes as Unknown, and `BrowserReadiness::Interactive` maps to Loading on the wire (only the fake extension and tests send tab readiness). The page seam keeps the word: `world::DocumentReadiness` (Loading, Interactive, Complete, Unknown) decodes the observe answer and maps into `BrowserReadiness`, so model results still report interactive. `vocabulary.json`, `protocol.js`, `readiness_changed.json`, `golden.rs` and adapter-protocol-4 follow. | see `git log` |
+| f06c-notice-label | The notice carries the service's activity label (blueprint F6c). `wire::NoticeSignal` gains `label: Option<String>` (default, skipped when none); the physical `PresentationSignal` carries `label: String`, set from `activity_label` for every signal the presentation reactor builds, and `translate::present` sends it. `notice.js` shows a non-empty frame label (bounded to the phase limit) in the popup's activity list and falls back to `shared.activityLabel` only when it is absent. `tests/golden/protocol4/frames/notice.json` gains `"label":"Clicking"`; adapter-protocol-4 documents the field. | see `git log` |
 
 ## Owed live checks
 

@@ -7,6 +7,7 @@
     "signal": "target",
     "activity": "click",
     "phase": "Clicking the Save button",
+    "label": "Clicking",
     "detail": "Account form",
     "locator": "locator_a1b2c3d4_8",
     "click": {"clicks":1,"button":"left"}

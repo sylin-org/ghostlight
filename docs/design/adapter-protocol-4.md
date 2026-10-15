@@ -459,7 +459,7 @@ pub struct Notice { pub tab_id: u64, #[serde(default)] pub frame: Option<FrameRe
 /// Same fields as bridge PresentationSignal minus tab_id; `locator` is frame-local.
 #[derive(Serialize, Deserialize)]
 pub struct NoticeSignal { pub invocation: String, pub signal: PresentationKind, pub activity: PresentationActivity,
-                          pub phase: String, #[serde(default)] pub detail: Option<String>,
+                          pub phase: String, #[serde(default)] pub label: Option<String>, #[serde(default)] pub detail: Option<String>,
                           #[serde(default)] pub locator: Option<String>, #[serde(default)] pub click: Option<ClickShape> }
 
 // ---- outcomes (the `ok` object of each primitive) ----
@@ -2357,7 +2357,8 @@ fn find(l: &mut Link, s: &mut Scope, tab: u64, text: &str, kind: &str, max_resul
 - **The notice frame.** `Present{signal}` becomes `notice`:
   - `tab_id`;
   - `frame` is the locator's document;
-  - `signal` carries the frame-local locator;
+  - `signal` carries the frame-local locator and `label`, the service's word for the activity, which the
+    popup's activity list shows (the extension's own table answers only for a frame without one);
   - `defer_until_visible` is `signal.signal == denial`.
 
   A signal with no tab is dropped. The port returns `Presented{rendered:false}` without waiting.

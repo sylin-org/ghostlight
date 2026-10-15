@@ -271,6 +271,7 @@ impl PresentationReactor {
             signal,
             activity,
             phase: phase.into(),
+            label: activity_label(activity).into(),
             detail: detail.map(str::to_owned),
             tab_id,
             locator,
@@ -314,6 +315,7 @@ impl PresentationReactor {
                 signal: PresentationKind::Start,
                 activity,
                 phase: activity_label(activity).into(),
+                label: activity_label(activity).into(),
                 detail: None,
                 tab_id: Some(tab),
                 locator: None,
@@ -436,7 +438,7 @@ mod tests {
     use crate::events::{DenialPresentation, DomainEvent};
     use crate::governance::Capability;
 
-    use super::{PresentationError, PresentationPort, PresentationReactor};
+    use super::{activity_label, PresentationError, PresentationPort, PresentationReactor};
 
     #[derive(Default)]
     struct RecordingPort(Mutex<Vec<PresentationSignal>>);
@@ -510,6 +512,7 @@ mod tests {
             signal: PresentationKind::Denial,
             activity: PresentationActivity::Click,
             phase: "Ghostlight blocked this action".into(),
+            label: "Clicking".into(),
             detail: None,
             tab_id: None,
             locator: None,
@@ -580,6 +583,55 @@ mod tests {
         let json = serde_json::to_string(&signals[0]).unwrap();
         assert!(!json.contains("url"));
         assert!(!json.contains("content"));
+    }
+
+    #[test]
+    fn every_notice_carries_the_label_of_its_activity() {
+        use PresentationActivity as A;
+
+        for activity in [
+            A::Quiet,
+            A::Navigate,
+            A::Click,
+            A::Hover,
+            A::Drag,
+            A::Type,
+            A::Key,
+            A::Scroll,
+            A::Read,
+            A::Find,
+            A::Screenshot,
+            A::Zoom,
+            A::Fill,
+            A::Upload,
+            A::Script,
+            A::Wait,
+            A::Dialog,
+        ] {
+            let port = Arc::new(RecordingPort::default());
+            let reactor = PresentationReactor::new(port.clone());
+            reactor.react(&DomainEvent::WorkStarted {
+                provenance: None,
+                invocation: "invocation_x".into(),
+                workspace: "workspace_x".into(),
+                tool: "browser_read".into(),
+                activity,
+                capabilities: Capability::Read.into(),
+            });
+            reactor.react(&DomainEvent::TargetIndicated {
+                invocation: "invocation_x".into(),
+                workspace: "workspace_x".into(),
+                physical_id: 7,
+                locator: "locator_1".into(),
+                click: None,
+            });
+            let signals = port.0.lock().unwrap();
+            assert!(!signals.is_empty());
+            for signal in signals.iter() {
+                assert_eq!(signal.label, activity_label(activity));
+                assert!(!signal.label.is_empty());
+            }
+        }
     }
 
     #[test]

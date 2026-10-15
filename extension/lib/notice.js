@@ -76,6 +76,12 @@
       }
     }
 
+    // The service names the activity; the shared table answers only for a frame without a label.
+    function activityName(signal) {
+      if (typeof signal.label === "string" && signal.label !== "") return shared.bounded(signal.label, PHASE_CHARS);
+      return shared.activityLabel(signal.activity);
+    }
+
     // The popup's activity list: one line per running invocation, labelled with the tab's group title.
     function updateActivity(signal, groupTitle) {
       if (isTerminal(signal.signal)) {
@@ -84,7 +90,7 @@
         activity.set(signal.invocation, {
           invocation: signal.invocation,
           client_label: groupTitle.replace(GROUP_PREFIX, "") || DEFAULT_CLIENT_LABEL,
-          label: shared.activityLabel(signal.activity),
+          label: activityName(signal),
           phase: shared.bounded(signal.phase, PHASE_CHARS)
         });
       }

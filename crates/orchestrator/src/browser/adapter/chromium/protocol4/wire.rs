@@ -934,6 +934,9 @@ pub struct NoticeSignal {
     pub activity: PresentationActivity,
     /// Fixed Ghostlight-authored phase label.
     pub phase: String,
+    /// Fixed Ghostlight-authored activity label; an adapter falls back to its own word when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// Fixed Ghostlight-authored supporting detail.
     #[serde(default)]
     pub detail: Option<String>,
@@ -2864,6 +2867,7 @@ mod tests {
                 signal: physical::PresentationKind::Target.into(),
                 activity: physical::PresentationActivity::Click.into(),
                 phase: "Clicking".into(),
+                label: Some("Clicking".into()),
                 detail: None,
                 locator: Some("e12".into()),
                 click: Some(

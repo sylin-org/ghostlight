@@ -507,6 +507,8 @@ pub struct PresentationSignal {
     pub activity: PresentationActivity,
     /// Fixed Ghostlight-authored phase label.
     pub phase: String,
+    /// Fixed Ghostlight-authored label of the activity, for the browser's activity list.
+    pub label: String,
     /// Optional fixed Ghostlight-authored supporting detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,

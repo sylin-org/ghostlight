@@ -191,6 +191,14 @@ test("the activity list follows the invocations, labelled by the tab's group tit
   assert.deepEqual(notice.activityList(), []);
 });
 
+test("the activity list uses the frame's label and falls back to the table without one", async () => {
+  const { notice } = await setup();
+  await notice.deliver({ tab_id: TAB, signal: { invocation: "inv_1", signal: "progress", activity: "click", phase: "p", label: "Pressing" } });
+  assert.equal(notice.activityList()[0].label, "Pressing");
+  await notice.deliver({ tab_id: TAB, signal: { invocation: "inv_1", signal: "progress", activity: "click", phase: "p", label: "" } });
+  assert.equal(notice.activityList()[0].label, "Clicking");
+});
+
 test("the activity list names an ungrouped tab's client generically and keeps only the last eight", async () => {
   const { notice, browser } = await setup();
   browser.tabList[0].groupId = -1;

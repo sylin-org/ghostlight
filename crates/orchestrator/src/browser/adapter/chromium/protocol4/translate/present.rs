@@ -31,6 +31,7 @@ pub fn present(l: &Link<'_>, signal: PresentationSignal) -> Result<BrowserOutcom
             signal: signal.signal.into(),
             activity: signal.activity.into(),
             phase: signal.phase,
+            label: Some(signal.label),
             detail: signal.detail,
             locator,
             click: signal.click.map(Into::into),

@@ -331,6 +331,7 @@ fn cancel_and_notice_frames_reach_the_extension() {
             signal: PresentationKind::Progress.into(),
             activity: PresentationActivity::Quiet.into(),
             phase: "Working".into(),
+            label: None,
             detail: None,
             locator: None,
             click: None,
