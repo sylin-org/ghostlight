@@ -331,21 +331,23 @@ fn every_frame_round_trips_through_its_direction() {
     let relayed = listed(kinds, "relay_to_extension");
     let mut seen = BTreeSet::new();
     for (stem, fixture) in section("frames") {
-        if inbound.contains(&stem) {
+        // A fixture named `<kind>.<variant>` is another shape of the same frame kind.
+        let kind = stem.split('.').next().unwrap_or_default().to_owned();
+        if inbound.contains(&kind) {
             let typed: Inbound = decode(&stem, &fixture);
             assert!(!matches!(typed, Inbound::Unknown), "{stem}");
             assert!(covers(&encode(&typed), &fixture), "{stem}");
-        } else if outbound.contains(&stem) {
+        } else if outbound.contains(&kind) {
             let typed: Outbound = decode(&stem, &fixture);
             assert_eq!(normalized(&encode(&typed)), normalized(&fixture), "{stem}");
         } else {
-            assert!(relayed.contains(&stem), "{stem} is in no direction");
+            assert!(relayed.contains(&kind), "{stem} is in no direction");
             assert!(
                 matches!(decode(&stem, &fixture), Inbound::Unknown),
                 "{stem}"
             );
         }
-        seen.insert(stem);
+        seen.insert(kind);
     }
     let every: BTreeSet<String> = inbound
         .into_iter()

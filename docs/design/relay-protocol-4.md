@@ -107,8 +107,9 @@ when the service goes away, and holds new lines for a bounded time while it star
 holds the extension's first frame, opens the stream, sends that frame and then pumps bytes. When
 no service answers, it starts one once, as a `browser` start, and keeps connecting. The only frame
 that is not the adapter's is the goodbye (section 6). While the service is away the edge
-writes the adapter's `backend_unavailable` frame to the extension and never starts the service
-while it waits.
+writes the adapter's `backend_unavailable` frame, with `service` set to `absent`, to the extension
+and never starts the service while it waits. It writes the same frame when no service has accepted
+within five seconds of its own start, which is below the extension's hello timeout.
 
 **`control`.** The opening carries `control`, an object tagged by `op`:
 

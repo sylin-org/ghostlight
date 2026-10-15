@@ -18,6 +18,8 @@ use super::*;
 const PATIENCE: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(5);
 const CONTROL_RESULT: &[u8] = br#"{"kind":"result","value":null}"#;
+/// A wait for an absence that no test waits out.
+const NEVER_ABSENT: Duration = Duration::from_secs(600);
 const ORIGIN: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/";
 
 /// One browser stream the fake service accepted.
@@ -213,12 +215,27 @@ impl Harness {
 
     /// A connector started by Chrome with `origin` as its first argument, if it had one.
     fn start_from(up: bool, start_brings_up: bool, origin: Option<String>) -> Self {
+        Self::start_with(up, start_brings_up, origin, NEVER_ABSENT)
+    }
+
+    /// A connector that tells Chrome no service is there once `absent_after` passes.
+    fn start_absent_after(up: bool, absent_after: Duration) -> Self {
+        Self::start_with(up, false, Some(ORIGIN.to_owned()), absent_after)
+    }
+
+    fn start_with(
+        up: bool,
+        start_brings_up: bool,
+        origin: Option<String>,
+        absent_after: Duration,
+    ) -> Self {
         let fake = FakeState::new(up, start_brings_up);
         let (input, chunks) = mpsc::channel();
         let output = SharedOutput::default();
         let environment = Environment {
             service: Arc::new(FakeService(Arc::clone(&fake))),
             origin,
+            absent_after,
             log: no_log,
         };
         let (events, inbox) = mpsc::channel();
@@ -551,4 +568,70 @@ fn an_uninstall_goodbye_ends_the_run_at_once_without_telling_chrome() {
     assert!(harness.chrome_receives().is_empty());
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
     assert_eq!(harness.fake.roles(), [Role::Browser], "no probe follows");
+}
+
+#[test]
+fn the_unavailable_frame_is_the_golden_that_names_the_absence() {
+    let golden =
+        include_str!("../../../../tests/golden/protocol4/frames/backend_unavailable.absent.json");
+    assert_eq!(golden.trim().as_bytes(), BACKEND_UNAVAILABLE);
+}
+
+#[test]
+fn no_service_within_the_wait_is_told_to_chrome_once_and_nothing_is_started_again() {
+    let wait = Duration::from_millis(1500);
+    let mut harness = Harness::start_absent_after(false, wait);
+    let began = Instant::now();
+    harness.chrome_sends(b"hello");
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    thread::sleep(Duration::from_millis(500));
+    assert!(
+        harness.chrome_receives().is_empty(),
+        "Chrome is told nothing before the wait is over"
+    );
+    harness.wait(|| !harness.chrome_receives().is_empty());
+    assert!(began.elapsed() >= wait, "the frame is not written early");
+    harness.chrome_sends(b"while absent");
+    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
+    assert_eq!(harness.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.fake.browser_streams(), 0);
+    assert!(harness
+        .fake
+        .roles()
+        .iter()
+        .skip_while(|role| **role == Role::Browser)
+        .all(|role| *role == Role::Control));
+    harness.chrome_closes();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+}
+
+#[test]
+fn a_service_that_accepts_after_the_absent_frame_ends_the_run() {
+    let mut harness = Harness::start_absent_after(false, Duration::from_millis(300));
+    harness.chrome_sends(b"hello");
+    harness.wait(|| !harness.chrome_receives().is_empty());
+    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 1);
+    harness.fake.bring_up();
+    assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
+    assert_eq!(harness.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.fake.browser_streams(),
+        0,
+        "the held hello is not sent; the extension sends a fresh one"
+    );
+}
+
+#[test]
+fn a_service_that_accepts_in_time_is_never_reported_absent() {
+    let mut harness = Harness::start_absent_after(false, Duration::from_millis(1500));
+    harness.chrome_sends(b"hello");
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.fake.bring_up();
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    thread::sleep(Duration::from_millis(1700));
+    assert!(harness.chrome_receives().is_empty());
+    harness.chrome_closes();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
 }

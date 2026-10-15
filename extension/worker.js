@@ -53,6 +53,9 @@ const FRAME = Object.freeze({
   ERROR: "error",
   BACKEND_UNAVAILABLE: "backend_unavailable"
 });
+// The field of a backend_unavailable frame by which the browser relay says no service is there at all.
+const BACKEND_SERVICE_FIELD = "service";
+const BACKEND_SERVICE_ABSENT = "absent";
 const EVENT = Object.freeze({
   DOCUMENT_COMMITTED: "document_committed",
   READINESS_CHANGED: "readiness_changed",
@@ -453,10 +456,11 @@ async function establishNativeConnection() {
   }
 }
 
-// The wait for the service to answer a hello starts with the first hello and ends only when a
-// hello_accepted arrives. The service closing the socket, the connector reporting it unavailable and
-// the port being replaced do not end it: a 1.3.x service answers a protocol 4 hello that way, again
-// and again, and never accepts it.
+// The wait for the service to answer a hello starts with the first hello and ends when a hello_accepted
+// arrives, or when the browser relay says no service is there at all (a backend_unavailable whose
+// service is absent), which reads as not connected. Nothing else ends it: the service closing the
+// socket, a bare backend_unavailable and the port being replaced do not, because a 1.3.x service answers
+// a protocol 4 hello that way, again and again, and never accepts it.
 function awaitHelloAnswer() {
   if (helloUnanswered) return;
   helloUnanswered = true;
@@ -531,10 +535,16 @@ async function settleServiceBoundaryState() {
   }
 }
 
-async function serviceLost(message) {
+async function serviceLost(message, absent = false) {
   connectionLog.record(connectionEvents.BACKEND_UNAVAILABLE);
   backendLost = true;
-  setConnection({ connected: false, service_version: null, last_error: message });
+  if (absent) endHelloWait();
+  setConnection({
+    connected: false,
+    service_version: null,
+    last_error: message,
+    ...(absent ? { service_outdated: false } : {})
+  });
   await settleServiceBoundaryState();
   await broadcastAmbient();
 }
@@ -577,7 +587,7 @@ async function onNativeMessage(frame, port) {
       return;
     }
     case FRAME.BACKEND_UNAVAILABLE:
-      return serviceLost(SERVICE_UNAVAILABLE);
+      return serviceLost(SERVICE_UNAVAILABLE, frame[BACKEND_SERVICE_FIELD] === BACKEND_SERVICE_ABSENT);
     case FRAME.ERROR:
       setConnection({ last_error: shared.bounded(frame.message, ERROR_CHARS) });
       return;

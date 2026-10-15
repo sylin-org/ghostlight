@@ -4,9 +4,10 @@
 //! Chrome starts this process when the extension connects and speaks native messaging on its
 //! stdin and stdout. The connector opens a relay protocol 4 `browser` stream and passes every
 //! frame through in both directions without looking inside. It starts the service once, and only
-//! before its first connection. When the service goes away it tells the extension and waits, and
-//! when a service answers again it exits so the extension reconnects with a fresh hello. All
-//! adapter meaning lives in the service and the extension; [`port`] is the whole relay.
+//! before its first connection. When no service is there, at the start or later, it tells the
+//! extension and waits, and when a service answers it exits so the extension reconnects with a
+//! fresh hello. All adapter meaning lives in the service and the extension; [`port`] is the
+//! whole relay.
 
 mod port;
 
@@ -23,7 +24,7 @@ use ghostlight_relay::spawn;
 use ghostlight_relay::watchdog::ParentWatchdog;
 use ghostlight_relay::OPENING_DEADLINE;
 
-use crate::port::{extension_origin, Environment, Event, Service};
+use crate::port::{extension_origin, Environment, Event, Service, ABSENT_AFTER};
 
 /// The installed service under the fixed home.
 struct InstalledService;
@@ -48,6 +49,7 @@ fn main() -> Result<()> {
     let environment = Environment {
         service: Arc::new(InstalledService),
         origin: extension_origin(std::env::args().nth(1)),
+        absent_after: ABSENT_AFTER,
         log: record,
     };
     let (events, inbox) = mpsc::channel();

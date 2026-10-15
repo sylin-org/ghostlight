@@ -9,11 +9,15 @@
 //! The first frame the browser sends is the extension's hello. The connector holds it, drops
 //! every later frame until a service has accepted the stream, and sends the held hello first.
 //! Before that first connection it starts the service once, as a `browser` start, and keeps
-//! connecting on the [`Backoff`] schedule without starting it again. After the first connection
-//! the connector never starts the service: when the stream ends it tells the browser once with
-//! [`BACKEND_UNAVAILABLE`], drops what the browser sends, and probes with a read-only control
-//! opening. When a service answers it returns [`Ended::ServiceReturned`] and the process exits,
-//! so the extension reconnects with a fresh hello on a new port.
+//! connecting on the [`Backoff`] schedule without starting it again. When no service has accepted
+//! within [`ABSENT_AFTER`] of the connector's own start, whatever the cause, it says so with
+//! [`BACKEND_UNAVAILABLE`]; the extension reads that as "not connected" and stops waiting for a
+//! hello answer, where silence would have read as an outdated service. After the first
+//! connection, and after that frame, the connector never starts the service: when the stream
+//! ends it tells the browser once with the same frame, drops what the browser sends, and probes
+//! with a read-only control opening. When a service answers it returns
+//! [`Ended::ServiceReturned`] and the process exits, so the extension reconnects with a fresh
+//! hello on a new port.
 //!
 //! A service that ends the stream on purpose says goodbye first (ADR-0199 Decision 10). The
 //! goodbye is not the browser's frame and is never passed on. After `quit` and `replace` the
@@ -49,8 +53,18 @@ const _: () = assert!(
     "the browser connector relies on native byte order matching the relay frame header"
 );
 
-/// The one frame the connector writes to the browser itself, sent once when the service is lost.
-pub const BACKEND_UNAVAILABLE: &[u8] = br#"{"kind":"backend_unavailable"}"#;
+/// The one frame the connector writes to the browser itself, sent once when no service is there:
+/// the frame kind `backend_unavailable` with the field `service` set to `absent`. A bare
+/// `backend_unavailable` is what a 1.x connector writes and says nothing about absence.
+pub const BACKEND_UNAVAILABLE: &[u8] = br#"{"kind":"backend_unavailable","service":"absent"}"#;
+
+/// How long the connector looks for a service before it tells the browser none is there. It is
+/// below the extension's hello timeout, which would otherwise read the silence as an outdated
+/// service.
+pub const ABSENT_AFTER: Duration = Duration::from_secs(5);
+
+/// The diagnostics detail for a connector that found no service within [`ABSENT_AFTER`].
+const ABSENT_DETAIL: &str = "absent";
 
 /// Why this connector starts the service: a browser needs it.
 const START_REASON: StartReason = StartReason::Browser;
@@ -76,6 +90,8 @@ pub struct Environment {
     pub service: Arc<dyn Service>,
     /// The origin of the extension that opened the port, when Chrome named one.
     pub origin: Option<String>,
+    /// How long to look for a first service before telling the browser none is there.
+    pub absent_after: Duration,
     /// The diagnostics writer.
     pub log: Log,
 }
@@ -143,6 +159,7 @@ pub fn run(
     events: Sender<Event>,
     inbox: Receiver<Event>,
 ) -> io::Result<Ended> {
+    let started = Instant::now();
     let shared = Arc::new(Shared::default());
     read_browser(input, Arc::clone(&shared), events.clone());
     let result = Port {
@@ -150,6 +167,7 @@ pub fn run(
         shared: Arc::clone(&shared),
         events,
         inbox,
+        started,
     }
     .carry(output);
     shared.end();
@@ -257,33 +275,53 @@ struct Port {
     shared: Arc<Shared>,
     events: Sender<Event>,
     inbox: Receiver<Event>,
+    /// When the connector started, which [`Environment::absent_after`] counts from.
+    started: Instant,
 }
 
 impl Port {
     /// The whole life of the port: hold the hello, connect, carry, wait for a returning service.
-    fn carry(&self, output: impl Write + Send + 'static) -> io::Result<Ended> {
+    /// A first connection that does not come in time is announced to the browser instead.
+    fn carry(&self, mut output: impl Write + Send + 'static) -> io::Result<Ended> {
         let hello = match self.await_hello()? {
             Ok(hello) => hello,
             Err(ended) => return Ok(ended),
         };
+        let absent_at = self.started + self.environment.absent_after;
         let mut backoff = Backoff::new();
         let mut started = false;
         let socket = loop {
             if let Some(socket) = self.open_stream(&hello) {
-                break socket;
+                break Some(socket);
             }
             if !started {
                 started = true;
                 self.start_service();
             }
-            if let Some(ended) = self.pause(backoff.next_wait())? {
+            let wait = backoff
+                .next_wait()
+                .min(absent_at.saturating_duration_since(Instant::now()));
+            if let Some(ended) = self.pause(wait)? {
                 return Ok(ended);
             }
+            if Instant::now() >= absent_at {
+                break None;
+            }
         };
-        (self.environment.log)(LogEvent::ServiceConnected, "");
-        self.carry_service(socket, output);
-        if let Some(ended) = self.await_loss()? {
-            return Ok(ended);
+        match socket {
+            Some(socket) => {
+                (self.environment.log)(LogEvent::ServiceConnected, "");
+                self.carry_service(socket, output);
+                if let Some(ended) = self.await_loss()? {
+                    return Ok(ended);
+                }
+            }
+            None => {
+                (self.environment.log)(LogEvent::ServiceDisconnected, ABSENT_DETAIL);
+                if frame::write_frame_raw(&mut output, BACKEND_UNAVAILABLE).is_err() {
+                    return Ok(Ended::BrowserGone);
+                }
+            }
         }
         let mut backoff = Backoff::new();
         loop {

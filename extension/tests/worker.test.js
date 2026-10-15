@@ -732,6 +732,68 @@ test("a service that closes on the hello and reports itself unavailable still sh
   } finally { worker.dispose(); }
 });
 
+test("a relay that finds no service ends the hello wait and the link reads not connected, never outdated", async () => {
+  const worker = await boot();
+  try {
+    assert.equal(worker.timers.pending(10_000).length, 1);
+    await worker.deliver(golden("frames/backend_unavailable.absent"));
+    assert.equal(worker.timers.pending(10_000).length, 0, "an absent service ends the hello wait");
+    const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(snapshot.link_state, "unreachable");
+    assert.equal(snapshot.service_outdated, false);
+    assert.equal(snapshot.connected, false);
+    assert.notEqual(snapshot.last_error, OUTDATED);
+    assert.equal(worker.ports.length, 1, "the port stays until the relay exits");
+  } finally { worker.dispose(); }
+});
+
+test("after a quit the relay exit reconnects with a fresh hello and the link is still not outdated", async () => {
+  const worker = await boot();
+  try {
+    const first = worker.port;
+    await worker.deliver(golden("frames/backend_unavailable.absent"));
+    await worker.close("Native host has exited.", first);
+    assert.equal(worker.ports.length, 2, "the relay's exit reconnects at once");
+    assert.equal(worker.port.posted[0].kind, "hello");
+    assert.equal(worker.timers.pending(10_000).length, 1, "the fresh hello waits for an answer again");
+    const waiting = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(waiting.link_state, "unreachable");
+    assert.equal(waiting.service_outdated, false);
+
+    await worker.accept();
+    const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(healed.link_state, "connected");
+  } finally { worker.dispose(); }
+});
+
+test("a relay that reports the service absent clears an outdated verdict from an earlier wait", async () => {
+  const worker = await boot();
+  try {
+    worker.timers.fire(10_000);
+    assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.link_state, "service_outdated");
+    await worker.deliver(golden("frames/backend_unavailable.absent"));
+    const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(snapshot.link_state, "unreachable");
+    assert.equal(snapshot.service_outdated, false);
+  } finally { worker.dispose(); }
+});
+
+test("a port that closes without ever accepting still reaches the outdated-service state", async () => {
+  const worker = await boot();
+  try {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await worker.close("Native host has exited.");
+      worker.chrome.alarms.onAlarm.emit({ name: "ghostlight-reconnect", scheduledTime: attempt });
+      await flush();
+      assert.equal(worker.ports.length, attempt + 1);
+    }
+    worker.timers.fire(10_000);
+    const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(snapshot.link_state, "service_outdated");
+    assert.equal(snapshot.last_error, OUTDATED);
+  } finally { worker.dispose(); }
+});
+
 test("the outdated-service wait spans replaced ports and a later hello_accepted heals it", async () => {
   const worker = await boot();
   try {

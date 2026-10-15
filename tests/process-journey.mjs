@@ -567,7 +567,7 @@ try {
       "chunked_commands", "adapter_liveness", "page_runtime"
     ].map((name) => ({ name, revision: { document_scope: 2, script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
   });
-  assert.deepEqual(await native.next(), { kind: "backend_unavailable" });
+  assert.deepEqual(await native.next(), { kind: "backend_unavailable", service: "absent" });
 
   const connector = start(executable("ghostlight-mcp-connector"));
   const mcp = new McpPeer(connector);
@@ -662,7 +662,7 @@ try {
   const unavailable = native.waitFor((frame) => frame.kind === "backend_unavailable", 10000);
   service.kill();
   await waitForExit(service);
-  assert.deepEqual(await unavailable, { kind: "backend_unavailable" });
+  assert.deepEqual(await unavailable, { kind: "backend_unavailable", service: "absent" });
   const interruptedResult = await interrupted.promise;
   assert.match(interruptedResult.error.message, /outcome is unavailable/);
 

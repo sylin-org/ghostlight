@@ -53,8 +53,11 @@ Line references such as `service-worker.js:1472` point at dev `95a7e646`.
   renamed within protocol 4. Golden fixtures in `tests/golden/protocol4/` are shared by `cargo test` and
   `npm test`.
 - **D7. The browser connector is a frozen relay.** It holds the first frame and pumps both ways without
-  parsing. When the service is lost it writes `backend_unavailable` and never spawns while waiting. It exits
-  when the service returns, so the extension reconnects with a fresh hello.
+  parsing. When no service is there it writes `backend_unavailable` with `service: "absent"` and never spawns
+  while waiting: after the service is lost, or when none has accepted five seconds after the connector's own
+  start. It exits when a service accepts, so the extension reconnects with a fresh hello. The extension reads
+  an absent service as not connected and stops waiting for a hello answer; a bare `backend_unavailable`, which
+  a 1.x connector writes, does not end that wait.
 
 ### 0.2 Where this spec departs from FINAL.md
 
@@ -112,7 +115,7 @@ the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps h
 | ext to svc | `heartbeat_ack` | `sequence` | |
 | ext to svc | `event` | `event{event, ...}` | Only for controlled tabs (section 2.2) |
 | svc to ext | `error` | `code, message` | Uncorrelated, for example `adapter_incompatible` |
-| relay to ext | `backend_unavailable` | none | Written by the connector, not the service |
+| relay to ext | `backend_unavailable` | `service?` | Written by the connector, not the service. `service: "absent"` says no service is there at all |
 
 Events (extension to service):
 
@@ -645,8 +648,8 @@ Under D7 the connector, rebuilt on the `relay` crate at M4a:
 1. holds the first frame and drops later Chrome frames until it has a service connection;
 2. spawns with backoff until connected, then forwards the held frame;
 3. pumps frames both ways without parsing them;
-4. when the service is lost, writes `{kind:"backend_unavailable"}`, reads and drops Chrome frames, and never
-   spawns;
+4. when no service is there (lost, or none accepted within five seconds of its start), writes
+   `{kind:"backend_unavailable", service:"absent"}`, reads and drops Chrome frames, and never spawns again;
 5. exits 0 when a service accepts an opening again.
 
 The extension's existing 3 s reconnect then opens a fresh port and sends a fresh hello.
@@ -738,7 +741,7 @@ async function onNativeMessage(frame, port) {
     case "cancel": return primitives.cancel(frame.correlation);
     case "notice": return notice.deliver(frame);
     case "control_state": return applyRuntimeState(stateApi.controlState(frame.state));
-    case "backend_unavailable": return serviceLost("The local Ghostlight service is unavailable.");
+    case "backend_unavailable": return serviceLost("The local Ghostlight service is unavailable.", frame.service === "absent");
     case "error": return setConnection({ last_error: shared.bounded(frame.message, 500) });
     default: return;                                         // D6: unknown kinds are ignored
   }

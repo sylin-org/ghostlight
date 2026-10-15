@@ -134,8 +134,10 @@ test("frame fixtures cover every frame kind that is not a request, receipt or ev
     ...vocabulary.frame_kinds.service_to_extension,
     ...vocabulary.frame_kinds.relay_to_extension
   ].filter((kind) => !["request", "receipt", "event"].includes(kind));
-  assert.deepStrictEqual(frames.map((entry) => entry.stem).sort(), [...directional].sort());
-  for (const { stem, value } of frames) assert.equal(value.kind, stem);
+  // A fixture named <kind>.<variant> is another shape of the same frame kind.
+  const kindOf = (stem) => stem.split(".")[0];
+  assert.deepStrictEqual([...new Set(frames.map((entry) => kindOf(entry.stem)))].sort(), [...directional].sort());
+  for (const { stem, value } of frames) assert.equal(value.kind, kindOf(stem));
 });
 
 test("the hello fixture states protocol 4 and the chromium platform", () => {
@@ -173,6 +175,7 @@ test("small frames use known states and sequences", () => {
   assert.equal(readJson("frames/heartbeat.json").sequence, readJson("frames/heartbeat_ack.json").sequence);
   assert.equal(typeof readJson("frames/cancel.json").correlation, "string");
   assert.deepStrictEqual(readJson("frames/backend_unavailable.json"), { kind: "backend_unavailable" });
+  assert.deepStrictEqual(readJson("frames/backend_unavailable.absent.json"), { kind: "backend_unavailable", service: "absent" });
   const notice = readJson("frames/notice.json");
   requireKeys(notice, ["tab_id", "signal", "defer_until_visible"], "notice");
   requireKeys(notice.signal, ["invocation", "signal", "activity", "phase"], "notice.signal");
