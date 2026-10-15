@@ -8,9 +8,10 @@
 //! writing diagnostics, opening a connection, and the service's opening reader and lease. It
 //! authors no words and makes no product decisions.
 //!
-//! A change here needs a relay revision bump (`RELAY` and the crate version) or a deliberate
-//! update of the recorded frozen hash. Fields are never removed or repurposed, readers ignore
-//! unknown fields, and new behavior gets new names.
+//! A change under a published relay revision needs a revision bump (`RELAY` and the crate
+//! version); `tests/guards/connectors.test.mjs` checks the source against the last release tag
+//! at that revision. Fields are never removed or repurposed, readers ignore unknown fields, and
+//! new behavior gets new names.
 
 use std::time::Duration;
 

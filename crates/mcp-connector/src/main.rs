@@ -62,6 +62,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod version_tests {
+    //! Checks that the crate version major tracks the relay revision.
+
     /// The crate version major is the relay revision, so a published connector names its revision.
     #[test]
     fn crate_version_major_equals_relay_revision() {
