@@ -11,7 +11,7 @@ description.workspace = true
 # workspace lints as command-line flags, which no in-source allow can override, and a per-crate
 # override alongside inheritance is rejected outright. ADR-0105 stages 2 and 3 need raw Win32
 # FFI (extended to private runtime-file creation by ADR-0160), so this one audited crate carries the whole workspace's unsafe surface and every other
-# crate keeps the forbid. A repository guard test asserts nothing else ever contains unsafe.
+# crate keeps the forbid. A repository guard test asserts every other member inherits the forbid.
 
 [lints.rust]
 unsafe_code = "allow"

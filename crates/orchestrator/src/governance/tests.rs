@@ -63,60 +63,59 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
 }
 
 /// The workspace forbids raw memory access everywhere except the one audited FFI crate
-/// (ADR-0105 amendment 2026-08-24). The forbid itself cannot see across crates, so this
-/// guard does.
+/// (ADR-0105 amendment 2026-08-24). Every workspace member but `crates/win-peer` inherits
+/// that forbid, and this test proves it from the manifests. The compiler then rejects any
+/// such code in an inheriting crate, and no in-source allow can override an inherited forbid.
 #[test]
 fn unsafe_stays_confined_to_the_audited_ffi_crate() {
-    // The needles are assembled from pieces so this test's own source never contains a
-    // matching sequence and can read every crate file, including itself.
-    let keyword = ["uns", "afe"].concat();
-    let needles = [
-        format!("{keyword} {{"),
-        format!("{keyword} fn"),
-        format!("{keyword} impl"),
-        format!("{keyword}_code"),
-    ];
-    fn walk(directory: &PathBuf, needles: &[String], hits: &mut Vec<String>) {
-        for entry in fs::read_dir(directory).expect("crate source directory is readable") {
-            let path = entry.expect("directory entry").path();
-            if path.is_dir() {
-                walk(&path, needles, hits);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                let text = fs::read_to_string(&path).unwrap_or_default();
-                for (number, line) in text.lines().enumerate() {
-                    // Comment lines may legitimately name the keyword; code lines may not.
-                    if line.trim_start().starts_with("// ") {
-                        continue;
-                    }
-                    if needles.iter().any(|needle| line.contains(needle)) {
-                        hits.push(format!("{}:{}", path.display(), number + 1));
-                    }
-                }
-            }
-        }
-    }
-    // The orchestrator crate lives at <workspace>/crates/orchestrator; its parent IS the
-    // crates directory.
-    let crates = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let mut offenders = Vec::new();
-    for entry in fs::read_dir(&crates).expect("crates directory is readable") {
-        let path = entry.expect("crate directory").path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if name == "win-peer" || name == "target" {
-            continue;
-        }
-        let source = path.join("src");
-        if source.is_dir() {
-            walk(&source, &needles, &mut offenders);
-        }
-    }
-    assert!(
-        offenders.is_empty(),
-        "raw memory access must stay inside crates/win-peer; found at:\n{}",
-        offenders.join("\n")
+    use toml_edit::DocumentMut;
+
+    const AUDITED: &str = "crates/win-peer";
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |path: PathBuf| -> DocumentMut {
+        fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()))
+            .parse()
+            .unwrap_or_else(|error| panic!("{} parses: {error}", path.display()))
+    };
+
+    let workspace = read(root.join("Cargo.toml"));
+    assert_eq!(
+        workspace["workspace"]["lints"]["rust"]["unsafe_code"].as_str(),
+        Some("forbid"),
+        "the workspace lint table must forbid unsafe_code"
     );
+    let members: Vec<&str> = workspace["workspace"]["members"]
+        .as_array()
+        .expect("workspace members are listed")
+        .iter()
+        .map(|member| member.as_str().expect("member is a path"))
+        .collect();
+    assert!(
+        members.contains(&AUDITED),
+        "{AUDITED} is a workspace member"
+    );
+
+    let mut without_inheritance = Vec::new();
+    for member in members {
+        let manifest = read(root.join(member).join("Cargo.toml"));
+        let inherits = manifest
+            .get("lints")
+            .and_then(|lints| lints.get("workspace"))
+            .and_then(|value| value.as_bool())
+            == Some(true);
+        if member == AUDITED {
+            assert!(!inherits, "{AUDITED} carries its own lint table");
+            without_inheritance.push(member);
+            continue;
+        }
+        assert!(inherits, "{member} must set [lints] workspace = true");
+        assert!(
+            manifest["lints"].get("rust").is_none(),
+            "{member} must not override the workspace rust lints"
+        );
+    }
+    assert_eq!(without_inheritance, [AUDITED]);
 }
 
 fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
