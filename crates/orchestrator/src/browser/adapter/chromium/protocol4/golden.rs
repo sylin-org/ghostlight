@@ -522,7 +522,7 @@ fn closed_names_equal_the_vocabulary() {
     );
     check(
         "readiness",
-        set(names!(Readiness: Loading, Interactive, Complete, Unknown)),
+        set(names!(Readiness: Loading, Complete, Unknown)),
     );
     check(
         "control_states",

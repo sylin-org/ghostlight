@@ -48,7 +48,7 @@
     diagnostic_details: ["problems", "all"],
     recording_ops: ["start", "status", "stop", "export", "discard"],
     recording_destinations: ["download", "client", "page"],
-    readiness: ["loading", "interactive", "complete", "unknown"],
+    readiness: ["loading", "complete", "unknown"],
     control_states: ["active", "held", "ended"],
     limits: {
       direct_frame_bytes: 786432,

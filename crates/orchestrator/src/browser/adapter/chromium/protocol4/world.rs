@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-use super::wire::{CallAnswer, Point, Readiness};
+use super::wire::{CallAnswer, Point};
 use crate::browser::adapter::{
-    BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
+    BrowserOutcome, BrowserReadiness, FieldNow, ObservedTarget, PhysicalActionSubject,
+    PhysicalField, PhysicalFile,
 };
 use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
@@ -1003,6 +1004,32 @@ pub struct FocusProbe {
     pub focused: bool,
 }
 
+/// How far a document had loaded, as the page reports it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentReadiness {
+    /// The document is still loading.
+    Loading,
+    /// The document is parsed and interactive.
+    Interactive,
+    /// The document reported complete.
+    Complete,
+    /// A readiness this service does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<DocumentReadiness> for BrowserReadiness {
+    fn from(readiness: DocumentReadiness) -> Self {
+        match readiness {
+            DocumentReadiness::Loading => Self::Loading,
+            DocumentReadiness::Interactive => Self::Interactive,
+            DocumentReadiness::Complete => Self::Complete,
+            DocumentReadiness::Unknown => Self::Unknown,
+        }
+    }
+}
+
 /// The answer to an observation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 pub struct Observed {
@@ -1011,7 +1038,7 @@ pub struct Observed {
     /// How long the asset waited.
     pub elapsed_ms: u64,
     /// How far the document had loaded when the wait ended.
-    pub readiness: Readiness,
+    pub readiness: DocumentReadiness,
 }
 
 #[cfg(test)]

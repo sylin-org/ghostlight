@@ -615,3 +615,23 @@ fn typed_values_read_what_the_asset_returns() {
     .unwrap();
     assert_eq!(observed.elapsed_ms, 120);
 }
+
+#[test]
+fn an_observed_document_keeps_the_interactive_readiness_the_page_reports() {
+    let observed: Observed = serde_json::from_value(
+        json!({"satisfied": true, "elapsed_ms": 3, "readiness": "interactive"}),
+    )
+    .unwrap();
+    assert_eq!(
+        BrowserReadiness::from(observed.readiness),
+        BrowserReadiness::Interactive
+    );
+    let unknown: Observed = serde_json::from_value(
+        json!({"satisfied": false, "elapsed_ms": 0, "readiness": "uninitialized"}),
+    )
+    .unwrap();
+    assert_eq!(
+        BrowserReadiness::from(unknown.readiness),
+        BrowserReadiness::Unknown
+    );
+}

@@ -469,7 +469,7 @@ pub struct Tab { pub tab_id: u64, #[serde(default)] pub title: String, #[serde(d
                  #[serde(default)] pub opener_tab_id: Option<u64> }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Readiness { Loading, Interactive, Complete, #[serde(other)] Unknown }
+pub enum Readiness { Loading, Complete, #[serde(other)] Unknown }
 #[derive(Deserialize)] pub struct Tabs { pub tabs: Vec<Tab> }
 #[derive(Deserialize)] pub struct TabOpened { pub tab: Tab, #[serde(default)] pub adopted: bool }
 #[derive(Deserialize)] pub struct Navigated { pub tab: Tab }

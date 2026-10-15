@@ -988,8 +988,6 @@ impl From<Tab> for physical::PhysicalTab {
 pub enum Readiness {
     /// A document is still loading.
     Loading,
-    /// The document is interactive.
-    Interactive,
     /// The document reported complete.
     Complete,
     /// A readiness this service does not know.
@@ -1466,7 +1464,7 @@ impl From<physical::BrowserReadiness> for Readiness {
     fn from(readiness: physical::BrowserReadiness) -> Self {
         match readiness {
             physical::BrowserReadiness::Loading => Self::Loading,
-            physical::BrowserReadiness::Interactive => Self::Interactive,
+            physical::BrowserReadiness::Interactive => Self::Loading,
             physical::BrowserReadiness::Complete => Self::Complete,
             physical::BrowserReadiness::Unknown => Self::Unknown,
         }
@@ -1477,7 +1475,6 @@ impl From<Readiness> for physical::BrowserReadiness {
     fn from(readiness: Readiness) -> Self {
         match readiness {
             Readiness::Loading => Self::Loading,
-            Readiness::Interactive => Self::Interactive,
             Readiness::Complete => Self::Complete,
             Readiness::Unknown => Self::Unknown,
         }
@@ -2835,7 +2832,6 @@ mod tests {
         }
         for readiness in [
             physical::BrowserReadiness::Loading,
-            physical::BrowserReadiness::Interactive,
             physical::BrowserReadiness::Complete,
             physical::BrowserReadiness::Unknown,
         ] {
@@ -2844,6 +2840,18 @@ mod tests {
                 readiness
             );
         }
+    }
+
+    #[test]
+    fn a_tab_readiness_the_wire_does_not_name_decodes_as_unknown() {
+        for word in ["interactive", "uninitialized"] {
+            let readiness: Readiness = serde_json::from_value(json!(word)).unwrap();
+            assert_eq!(readiness, Readiness::Unknown);
+        }
+        assert_eq!(
+            physical::BrowserReadiness::from(Readiness::Unknown),
+            physical::BrowserReadiness::Unknown
+        );
     }
 
     #[test]

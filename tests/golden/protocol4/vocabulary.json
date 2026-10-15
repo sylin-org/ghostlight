@@ -70,7 +70,7 @@
   "diagnostic_details": ["problems","all"],
   "recording_ops": ["start","status","stop","export","discard"],
   "recording_destinations": ["download","client","page"],
-  "readiness": ["loading","interactive","complete","unknown"],
+  "readiness": ["loading","complete","unknown"],
   "control_states": ["active","held","ended"],
   "world_message_kinds": [
     "read_text",
