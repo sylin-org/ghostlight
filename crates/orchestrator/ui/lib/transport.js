@@ -22,6 +22,38 @@
   const EVENTS_PATH = "/api/events";
   /** The code of a refusal that says the rules or the client changed since the page drew them. */
   const STALE = "stale";
+  /**
+   * The act keys of the context document, by the name this page uses for each.
+   *
+   * The service lists what the page may do under these keys. Both the page's boot and its view
+   * ask by name from here, so a key the service renames or drops fails a test instead of drawing
+   * a control the service then refuses.
+   */
+  const ACT = Object.freeze({
+    search: "search",
+    checkPolicy: "check_policy",
+    rescan: "rescan",
+    continueInWindow: "continue_in_window",
+    hold: "hold",
+    resume: "resume",
+    startSession: "start_session",
+    endSession: "end_session",
+    applyPolicy: "apply_policy",
+    removePolicy: "remove_policy",
+    setDiagnostics: "set_diagnostics",
+    setupAll: "setup_all",
+    harnessAct: "harness_act",
+    testNotification: "test_notification",
+    open: "open",
+    revealDiagnostics: "reveal_diagnostics",
+    locate: "locate"
+  });
+  /** The context in which the service shows nothing of this computer. */
+  const CONTEXT_CLOSED = "closed";
+  /** The opener of the window: the service opens a link for it. A tab opens its own links. */
+  const OPENER_SERVICE = "service";
+  /** What a client's setup can be copied as. */
+  const COPY_KIND = Object.freeze({ command: "command", setup: "setup" });
   /** The status that says watching is off. */
   const STATUS_WATCHING_OFF = 403;
   /** The parts a snapshot is asked for, in the order the service lists them. */
@@ -439,5 +471,7 @@
     };
   }
 
-  return Object.freeze({ create, overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS });
+  return Object.freeze({
+    create, overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
+  });
 });

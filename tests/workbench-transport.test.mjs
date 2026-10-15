@@ -502,3 +502,21 @@ test("the page's own words for copying and for waiting are the ones the transpor
   assert.equal(Words.RECONNECTING, "Reconnecting");
   assert.equal(Words.CONTINUE_LABEL, "Continue in the Ghostlight window");
 });
+
+test("every act the page names is a key of the context a window is given", () => {
+  const control = {
+    context: "control",
+    opener: Transport.OPENER_SERVICE,
+    acts: Object.fromEntries([
+      "search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
+      "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all", "harness_act",
+      "test_notification", "open", "reveal_diagnostics", "locate"
+    ].map((act) => [act, { available: true, why_not: null }]))
+  };
+  const named = Object.values(Transport.ACT);
+  assert.equal(new Set(named).size, named.length);
+  assert.deepEqual([...named].sort(), Object.keys(control.acts).sort());
+  assert.equal(Transport.CONTEXT_CLOSED, "closed");
+  assert.deepEqual({ ...Transport.COPY_KIND }, { command: "command", setup: "setup" });
+  assert.throws(() => { "use strict"; Transport.ACT.rescan = "other"; }, TypeError);
+});

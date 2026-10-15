@@ -32,11 +32,7 @@ const {
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
 const SEQ_WAIT_MS = 2000;
 
-/** The context in which a service shows nothing. */
-const CLOSED_CONTEXT = "closed";
-
-/** The tokens of what a harness can copy. */
-const COPY_COMMAND = "command";
+const { ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
 const native = window.__TAURI__?.core?.invoke;
 const transport = native
@@ -90,7 +86,7 @@ const view = globalThis.GhostlightView.create({
 /* What the service said this page may do. Nothing is offered until it has said. */
 let context = null;
 const allowed = (act) => context?.acts?.[act]?.available ?? true;
-const showsData = () => context !== null && context.context !== CLOSED_CONTEXT;
+const showsData = () => context !== null && context.context !== CONTEXT_CLOSED;
 
 /**
  * The one place a change becomes a picture.
@@ -271,7 +267,7 @@ function hinted({ part, etag }) {
  */
 function openedView(name) {
   if (!showsData()) return;
-  if (name === "integrations" && allowed("rescan")) {
+  if (name === "integrations" && allowed(ACT.rescan)) {
     outdated.delete("integrations");
     rescan().catch((error) => view.toast(String(error), true));
     return;
@@ -405,7 +401,7 @@ async function handleDiagnosticsAction(button) {
 function harnessText(id, kind) {
   const harness = store.snapshot()?.harnesses.find((item) => item.id === id);
   if (!harness) throw new Error(`no client ${id}`);
-  return kind === COPY_COMMAND ? harness.connector_command : harness.manual_setup;
+  return kind === COPY_KIND.command ? harness.connector_command : harness.manual_setup;
 }
 
 async function handleHarnessAction(button) {
@@ -427,7 +423,7 @@ async function handleHarnessAction(button) {
     try {
       if (typeof transport.copyText === "function") {
         await transport.copyText(harnessText(id, copyKind));
-        view.toast(copyKind === COPY_COMMAND ? COPIED_COMMAND : COPIED_SETUP);
+        view.toast(copyKind === COPY_KIND.command ? COPIED_COMMAND : COPIED_SETUP);
       } else {
         view.toast(await transport.copyHarnessText(id, copyKind));
       }
@@ -477,7 +473,7 @@ async function search(query) {
  * an ordinary link, and sends nothing: the page holds no address of its own.
  */
 async function openDestination(destination) {
-  if (context !== null && context.opener !== "service") {
+  if (context !== null && context.opener !== OPENER_SERVICE) {
     const address = context.links?.[destination];
     if (address) window.open(address, "_blank", "noopener,noreferrer");
     return;
@@ -601,7 +597,7 @@ function wire() {
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["check-policy"].addEventListener("click", () => checkPolicy());
   // A screen that cannot write the rules takes the draft to where they are written, and keeps it.
-  el["apply-policy"].addEventListener("click", () => (allowed("apply_policy") ? applyPolicy() : continueInWindow()));
+  el["apply-policy"].addEventListener("click", () => (allowed(ACT.applyPolicy) ? applyPolicy() : continueInWindow()));
   el["discard-policy"].addEventListener("click", () => discardPolicyDraft());
   el["remove-policy"].addEventListener("click", () => removePolicy());
   el["refresh-policy"].addEventListener("click", () => {
@@ -666,7 +662,7 @@ async function becomeClosed(sentence) {
   } catch (error) {
     told = null;
   }
-  const base = told?.context === CLOSED_CONTEXT ? told : { ...context, context: CLOSED_CONTEXT };
+  const base = told?.context === CONTEXT_CLOSED ? told : { ...context, context: CONTEXT_CLOSED };
   context = { ...base, sentence: sentence ?? base.sentence };
   view.closed(context);
 }
@@ -709,7 +705,7 @@ async function start() {
     reportFailure("reading what this page may do", error);
     return;
   }
-  if (context.context === CLOSED_CONTEXT) {
+  if (context.context === CONTEXT_CLOSED) {
     view.closed(context);
     return;
   }

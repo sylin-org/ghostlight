@@ -21,6 +21,7 @@
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
+  const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
   const TOAST_MS = 4200;
 
@@ -61,7 +62,7 @@
     let lastFacts = null;
     const can = (act) => !closedMode && (access?.acts?.[act]?.available ?? true);
     const whyNot = (act) => access?.acts?.[act]?.why_not ?? "";
-    const opensLinks = () => access !== null && access.opener !== "service";
+    const opensLinks = () => access !== null && access.opener !== OPENER_SERVICE;
 
     /** The one line a panel shows for the acts it cannot offer: the reason, and the way on. */
     function continueMarkup(why) {
@@ -508,7 +509,7 @@
       // cannot say is that this window lost it: the last snapshot outlives the connection, so a lost
       // authority disables the wheel here rather than letting a stale answer keep it enabled.
       const paused = facts.runtime !== "active";
-      const intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
+      const intent = facts.runtime === "ended" ? ACT.startSession : paused ? ACT.resume : ACT.hold;
       el.wheel.disabled = lost || facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
       el.wheel.dataset.intent = intent;
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
@@ -555,12 +556,12 @@
         el[panel.section].classList.remove("closed");
       }
       chip(told);
-      el["refresh-integrations"].hidden = !can("rescan");
-      el["setup-integrations"].hidden = !can("setup_all");
-      el["runtime-strip"].hidden = !can("end_session");
-      el["notifications-strip"].hidden = !can("test_notification");
-      el["apply-policy"].textContent = can("apply_policy") ? "Apply" : APPLY_IN_WINDOW_LABEL;
-      el["sacred-hosts"].disabled = !can("apply_policy");
+      el["refresh-integrations"].hidden = !can(ACT.rescan);
+      el["setup-integrations"].hidden = !can(ACT.setupAll);
+      el["runtime-strip"].hidden = !can(ACT.endSession);
+      el["notifications-strip"].hidden = !can(ACT.testNotification);
+      el["apply-policy"].textContent = can(ACT.applyPolicy) ? "Apply" : APPLY_IN_WINDOW_LABEL;
+      el["sacred-hosts"].disabled = !can(ACT.applyPolicy);
     }
 
     /** Take the answer of a service that shows nothing: every data view says why, About shows in full. */
@@ -666,7 +667,7 @@
       setup.disabled = !actionable;
       setup.dataset.actionable = String(actionable);
       // One line for the whole roster, naming the first change this screen cannot make.
-      const withheld = ["harness_act", "locate", "setup_all"].find((act) => !can(act));
+      const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
       el["integrations-continue"].hidden = !withheld;
       el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld)) : "";
       if (!snapshot.harnesses.length) {
@@ -714,7 +715,7 @@
           const updatable = harness.state === "updatable";
           const needsAttention = harness.state === "needs_attention";
           let primary = "";
-          if (!can("harness_act")) {
+          if (!can(ACT.harnessAct)) {
             primary = "";
           } else if (installed && harness.can_uninstall) {
             primary = actionButton(harness, "uninstall", "Remove", "danger-button");
@@ -723,9 +724,9 @@
           } else if (needsAttention && harness.can_fix) {
             primary = actionButton(harness, "fix", "Fix");
           }
-          const locate = can("locate") && harness.can_locate && harness.state !== "not_detected"
+          const locate = can(ACT.locate) && harness.can_locate && harness.state !== "not_detected"
             ? utilityButton(harness, "locate", "Locate") : "";
-          const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
+          const setup = utilityButton(harness, "copy", "Copy setup", ` data-copy-kind="${COPY_KIND.setup}"`);
           return `<div class="integration-target">`
             + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
             + `<span>${escapeHtml(words(harness.state))}</span></div>`
@@ -750,8 +751,8 @@
             : downloadable.download_url
               ? `<a class="ghost-button" href="${escapeHtml(downloadable.download_url)}"`
                 + ` target="_blank" rel="noopener noreferrer">Install</a>` : "";
-        const locate = missing && can("locate") ? utilityButton(first, "locate", "Locate") : "";
-        const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
+        const locate = missing && can(ACT.locate) ? utilityButton(first, "locate", "Locate") : "";
+        const command = utilityButton(first, "copy", "Copy MCP command", ` data-copy-kind="${COPY_KIND.command}"`);
         const html = `<article class="tile integration-card integration-${category.id}">`
           + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
           + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
@@ -793,14 +794,14 @@
       const place = report.directory
         ? ` Logs live in ${escapeHtml(report.directory)} (${report.used_bytes} bytes).`
         : "";
-      const toggle = can("set_diagnostics")
+      const toggle = can(ACT.setDiagnostics)
         ? `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
           + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>` : "";
       // The folder is named and openable even while off: retained logs live there, and it is
       // where the next activation writes.
-      const reveal = can("reveal_diagnostics")
+      const reveal = can(ACT.revealDiagnostics)
         ? `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>` : "";
-      const withheld = ["set_diagnostics", "reveal_diagnostics"].find((act) => !can(act));
+      const withheld = [ACT.setDiagnostics, ACT.revealDiagnostics].find((act) => !can(act));
       return `<article class="card"><span class="severity passing"><span class="dot"></span>passing</span>`
         + `<h2>Process diagnostics</h2><p>Operational log is ${layer}.${place}</p>`
         + (toggle || reveal ? `<p>${toggle} ${reveal}</p>` : "")
@@ -856,7 +857,7 @@
       el["policy-blocked"].hidden = user.editable || !user.blocked_reason;
       if (user.blocked_reason) el["policy-blocked-reason"].textContent = user.blocked_reason;
       el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view)
-        && can("remove_policy"));
+        && can(ACT.removePolicy));
 
       if (!user.editable) {
         draft = null;
@@ -1089,7 +1090,7 @@
       const readback = patterns.map((pattern) => hostReadback(pattern)).join("; ");
       // A screen that may not name the sites shows how many there are, and leaves them as they are.
       const counted = draft?.settings.sacredCount;
-      if (typeof counted === "number" && !can("apply_policy")) {
+      if (typeof counted === "number" && !can(ACT.applyPolicy)) {
         el["sacred-readback"].textContent = neverTouchedCount(counted);
         el["sacred-readback"].classList.toggle("readback-empty", false);
         return;
