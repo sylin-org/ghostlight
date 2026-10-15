@@ -311,8 +311,8 @@ fn running_image(reported: &Path) -> PathBuf {
 
 /// The processes of this home that an older installation left running.
 ///
-/// `service_pid` is the service that answers, when one does: its image is never a stray. The
-/// process table is read once.
+/// `service_pid` is the service that answers, when one does: it is spared unless it runs from the
+/// retired development directory. The process table is read once.
 #[must_use]
 pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
     let mut system = System::new();
