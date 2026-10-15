@@ -3362,9 +3362,9 @@ full visible browser matrix remain owed.
   automation was removed on 2026-10-14; dependency updates are done by hand on `dev`.
 - No pull requests are open. Thirteen Dependabot bumps against the 0.8 line were closed as obsolete
   on 2026-08-13: the 1.0 tree either already carried the proposed version or had dropped the
-  package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates are paused
-  on `main` with `open-pull-requests-limit: 0` rather than by deleting the configuration. The 1.0
-  config targets `dev`, runs monthly, groups non-major updates, and caps open work per ecosystem.
+  package outright (`clap`, `rustls`, `webpki-roots`, `color_quant`). Dependency updates were then
+  paused with `open-pull-requests-limit: 0`; the config targeted `dev`, ran monthly, and grouped
+  non-major updates until it was removed on 2026-10-14.
 - The pre-1.0 worktree snapshot is preserved as the annotated tag `archive/0.9-pre-1.0`
   (`f5d43768`), pushed to the remote. It replaced a local-only branch that existed on one machine.
   It is history, never implementation authority for the 1.0 tree.
