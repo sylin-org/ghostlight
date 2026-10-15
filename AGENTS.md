@@ -153,26 +153,30 @@ live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
 
 ## Building and testing
 
-Live clients and Chromium may hold release executables open. Use an isolated target directory when
-a live deployment would otherwise contend with the build under test.
+Before committing, run the checks for what you changed. CI runs the full set on every push.
 
-Gate before every commit:
-
-- `cargo fmt --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `npm test` from `extension/`
-- `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"` (the Chromium page assets; no `npm install` needed)
-- `node --check` on changed extension and page-asset JavaScript
+- Any Rust, `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` change: `cargo fmt --all -- --check`
+  and `cargo clippy --workspace --all-targets -- -D warnings` (always workspace-wide: a manifest
+  change can break clippy in untouched code), then `cargo test` for the touched crates, or
+  `cargo test --workspace` if bridge, relay, win-peer or a manifest changed.
+- Extension: `npm test` in `extension/`.
+- Page assets: `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"`,
+  plus `cargo test -p ghostlight` and `npm test` in `extension/`, which also read the expanded bundle.
+- `crates/relay`, either connector crate, any `Cargo.toml` or `Cargo.lock`, or `tests/golden/`:
+  `node --test tests/guards/connectors.test.mjs`.
+- Changed runtime JavaScript that no test runs: `node --check` on it.
+- Docs or other text: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1` (ASCII and links).
 
 The process and live browser journeys in `tests/` exercise the real executable boundaries. Run
 them when changes touch process startup, relay reconnect, installation state, or live browser
 behavior.
 
-`tests/process-journey.mjs` resolves executables from `.target-ghostlight-1.0/debug` unless
-`GHOSTLIGHT_BIN_DIR` says otherwise. If you built into any other target directory, pass it
-(`GHOSTLIGHT_BIN_DIR=.target-yours/debug node tests/process-journey.mjs`) or the journey will
-quietly pass against stale binaries and tell you nothing about your change.
+Journeys read `.target-ghostlight-1.0/debug` unless `GHOSTLIGHT_BIN_DIR` says otherwise. Build
+there or point `GHOSTLIGHT_BIN_DIR` at your fresh build, or a journey quietly passes against stale
+binaries. The live service runs from copies in `~/.ghostlight`, so it never locks a repo build.
+`scripts/dev-loop.ps1` builds its deploy in `.target-dev-loop`. When another agent may be building
+or running journeys in this checkout, use `.target-lane-<name>` and pass `GHOSTLIGHT_BIN_DIR` to
+every journey.
 
 ## Code style
 
