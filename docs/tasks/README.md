@@ -52,7 +52,7 @@ and commit-safety rules add to AGENTS.md and take precedence for that batch.
 | [handle-continuity](handle-continuity/) | 2026-08-24 | Three owner-approved adjustments: continuation for tab identity, immediate recovery for transient states, one-call recreation for dead tabs. Complete, T1-T9. |
 | [interface-truth-polish](interface-truth-polish/) | 2026-08-24 | Two polish tasks so the interface presents current truth, never remembered state or swallowed effects. Complete. |
 | [pre-freeze-debt](pre-freeze-debt/) | 2026-08-24 | Closed 2026-08-26; its extension byte floor expired with the staged review. |
-| [release-streamlining](release-streamlining/) | 2026-08-24 | Closed; the freeze layer (P2) was retired (see L7). |
+| [release-streamlining](release-streamlining/) | 2026-08-24 | Closed, all five tasks complete. |
 | [language-delight](language-delight/) | 2026-08-23 | Delight pass over all model-facing sentences: validation messages, tool descriptions, result guidance, live proof |
 | [capability-restoration](capability-restoration/) | 2026-08-22 | ADR-0133: restore genuine published 0.8 browser behaviors through the current 1.0 language and typed seams |
 | [reference-experience](reference-experience/) | 2026-08-15 | One product across every machine: the second-machine state, adaptive familiarity, terminal citizenship, runtime control, At a glance, readiness recovery |
