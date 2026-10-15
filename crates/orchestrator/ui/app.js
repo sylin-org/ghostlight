@@ -21,7 +21,7 @@
  * corrupted by a rendering fault.
  */
 
-const { CHANGE_EVENT, HEARTBEAT_MS, SEARCH_VIEWS } = globalThis.GhostlightWords;
+const { CHANGE_EVENT, HEARTBEAT_MS, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE } = globalThis.GhostlightWords;
 
 const transport = globalThis.GhostlightTransport.create({
   invoke: window.__TAURI__?.core?.invoke,
@@ -137,7 +137,8 @@ function receiveChange(event) {
  *
  * The orchestrator says which part and gives its tag. A part this window shows is read again; one
  * it does not show is remembered as out of date and read when the person opens it. A tag already
- * acted on is not acted on twice.
+ * acted on is not acted on twice. Rules the person has edited and not applied are theirs: the
+ * policy is not read over them, and it stays out of date until they apply or discard the edits.
  */
 const HINT_VIEWS = Object.freeze({ integrations: "integrations", policy: "policy", diagnostics: "status" });
 const hintTags = new Map();
@@ -145,8 +146,22 @@ const outdated = new Set();
 
 function reread(part) {
   // The snapshot carries integrations and diagnostics; the policy is its own read.
-  if (part === "policy") loadPolicy();
+  if (part === "policy") rereadPolicy();
   else resync();
+}
+
+function rereadPolicy() {
+  if (view.draftIsDirty()) {
+    outdated.add("policy");
+    view.editorStatus(POLICY_CHANGED_ELSEWHERE);
+    return;
+  }
+  loadPolicy();
+}
+
+function discardPolicyDraft() {
+  view.discardDraft();
+  if (outdated.has("policy")) loadPolicy();
 }
 
 function hinted({ part, etag }) {
@@ -178,6 +193,7 @@ async function loadPolicy() {
   if (!transport.available) return;
   try {
     view.policy(await transport.policy());
+    outdated.delete("policy");
   } catch (error) {
     reportFailure("reading the policy", error);
   }
@@ -350,7 +366,7 @@ function wire() {
     const tab = event.target.closest("[data-view]");
     if (tab) {
       view.navigate(tab.dataset.view);
-      if (tab.dataset.view === "policy") {
+      if (tab.dataset.view === "policy" && !view.draftIsDirty()) {
         outdated.delete("policy");
         loadPolicy();
       }
@@ -434,7 +450,7 @@ function wire() {
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["check-policy"].addEventListener("click", () => checkPolicy());
   el["apply-policy"].addEventListener("click", () => applyPolicy());
-  el["discard-policy"].addEventListener("click", () => view.discardDraft());
+  el["discard-policy"].addEventListener("click", () => discardPolicyDraft());
   el["remove-policy"].addEventListener("click", () => removePolicy());
   el["refresh-policy"].addEventListener("click", () => {
     loadPolicy().then(() => view.toast("Policy re-read."));

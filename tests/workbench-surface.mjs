@@ -64,6 +64,7 @@ let feedFixture = false;
 const invoked = [];
 const managedHarnesses = [];
 let pushChange = null;
+let policyReply = null;
 
 const snapshot = () => ({
   seq: ++snapshots,
@@ -137,6 +138,7 @@ const sandbox = {
       core: { invoke: async (cmd, args) => {
         invoked.push(cmd);
         if (cmd === "workbench_snapshot") return snapshot();
+        if (cmd === "workbench_policy" && policyReply) return policyReply();
         if (cmd === "setup_detected_harnesses") {
           bulkSetups += 1;
           return { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." };
@@ -426,6 +428,38 @@ assert.ok(!legacyRefusal.includes("your own rules"));
 assert.ok(!legacyRefusal.includes("See the policy"));
 
 
+// A policy hint while the person has rules edited and not applied. The booted window must leave
+// the draft exactly as it is and say so once, then read the policy when the edits are discarded.
+policyReply = () => compiled(true);
+const appDraft = (code) => vm.runInContext(code, sandbox);
+const policyReads = () => invoked.filter((cmd) => cmd === "workbench_policy").length;
+let hintSeq = snapshots;
+dispatchDocument("click", {
+  target: { closest: (selector) => selector === "[data-view]" ? { dataset: { view: "policy" } } : null }
+});
+await new Promise((r) => setTimeout(r, 0));
+const readsOnOpening = policyReads();
+pushChange({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-clean" } });
+await new Promise((r) => setTimeout(r, 0));
+const readsAfterCleanHint = policyReads();
+appDraft("view.addRule()");
+const draftBeforeHint = appDraft("view.draftDocument()");
+const ruleListBeforeHint = nodes.get("rule-list").innerHTML;
+pushChange({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-dirty" } });
+await new Promise((r) => setTimeout(r, 0));
+const readsAfterDirtyHint = policyReads();
+const draftAfterHint = appDraft("view.draftDocument()");
+const draftStillDirty = appDraft("view.draftIsDirty()");
+const ruleListAfterHint = nodes.get("rule-list").innerHTML;
+const editorLineAfterHint = nodes.get("editor-status").textContent;
+elementHandlers.get("discard-policy:click")();
+await new Promise((r) => setTimeout(r, 0));
+const readsAfterDiscard = policyReads();
+const draftCleanAfterDiscard = !appDraft("view.draftIsDirty()");
+dispatchDocument("click", {
+  target: { closest: (selector) => selector === "[data-view]" ? { dataset: { view: "monitor" } } : null }
+});
+
 view.policy(compiled(true));
 const board = nodes.get("capability-board").innerHTML;
 const organization = nodes.get("policy-organization").innerHTML;
@@ -648,6 +682,12 @@ const checks = [
     requestsAfterHints === requestsAfterPush && policyReadsAfterHints === 0
       && requestsAfterOpening === requestsAfterHints + 1,
     `requests=${requestsAfterPush}->${requestsAfterHints}->${requestsAfterOpening} policy=${policyReadsAfterHints}`],
+  ["a policy hint leaves unsaved rule edits alone and says the rules changed elsewhere",
+    readsAfterCleanHint === readsOnOpening + 1 && readsAfterDirtyHint === readsAfterCleanHint
+      && draftStillDirty && draftAfterHint === draftBeforeHint && ruleListAfterHint === ruleListBeforeHint
+      && editorLineAfterHint === sandbox.globalThis.GhostlightWords.POLICY_CHANGED_ELSEWHERE
+      && readsAfterDiscard === readsAfterDirtyHint + 1 && draftCleanAfterDiscard,
+    `reads=${readsOnOpening}/${readsAfterCleanHint}/${readsAfterDirtyHint}/${readsAfterDiscard} dirty=${draftStillDirty} line=${editorLineAfterHint}`],
   ["Clear view hides completed work, keeps running work, and calls nothing",
     clearEnabled && queueBeforeClear === "2 actions" && queueAfterClear === "1 action"
       && queueAfterResync === "1 action" && clearSpent && invokedByClear.length === 0,

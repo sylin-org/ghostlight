@@ -13,6 +13,9 @@
   /** Bound on the retained feed, matching the orchestrator's own bounded history. */
   const FEED_LIMIT = 200;
 
+  /** Said under the rule editor when the applied rules changed elsewhere while edits were unsaved. */
+  const POLICY_CHANGED_ELSEWHERE = "The applied rules changed elsewhere. Discard your edits to see them.";
+
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
   const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
 
@@ -433,6 +436,7 @@
   ];
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+    POLICY_CHANGED_ELSEWHERE,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     READINESS_ATTENTION, readinessNeedsAttention,
