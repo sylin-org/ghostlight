@@ -180,17 +180,21 @@ every journey.
 
 ## Code style
 
-- Rust 2021. `thiserror` for typed library errors, `anyhow` in main/integration code.
-- Explicit types in public APIs; doc comment on every public function; module-level doc
-  comment on every module explaining its role in the architecture.
-- Tests: integration in `tests/`, unit inline `#[cfg(test)]`.
-- No `unsafe` unless absolutely required (documented why).
-- `rustfmt` formatted; `clippy` clean with `-D warnings`.
-- No magic strings: repeated string/enum-like literals belong beside their usage in a named
-  module.
-- Named event/state vocabularies (wire message types, lifecycle events, FX names) belong in
-  a dedicated domain module (struct/enum plus rendering), not scattered inline literals --
-  even when there is only one caller today.
+- Edition and lints come from the workspace `Cargo.toml`, and fmt and clippy `-D warnings` are in
+  the commit gate. `unsafe` is forbidden everywhere except `crates/win-peer` (enforced by the lint
+  and the governance unsafe-confinement test), and every unsafe call site there carries a
+  `// SAFETY:` note. Otherwise match the surrounding code: `thiserror` for typed library errors,
+  `anyhow` at binary and integration edges, unit tests inline and process tests in `tests/`.
+- Every module opens with a doc comment stating its role in the architecture. Document a public
+  item when its name and types do not state its contract: lifecycle and pairing obligations
+  (acquire/release), invariants, failure codes, side effects.
+- Repeated literals become a named constant beside their use. A vocabulary that leaves its module
+  lives in one domain module (enum plus rendering), even with one caller. That covers vocabularies
+  that cross a process or language boundary (wire message types, refusal codes, lifecycle events,
+  FX names), that the model reads (tool and field names in hints, outcome and refusal codes), that
+  are persisted or audited (audit event names, capability classes, policy and config keys), or that
+  gate a trust boundary (destinations, permissions). Single-use literals that stay inside one
+  module need neither.
 - Prefer the root fix over the spot fix. If a spot fix is genuinely unavoidable, say so
   explicitly in the commit message so the debt is visible.
 
@@ -198,6 +202,7 @@ every journey.
 
 - **ASCII only, everywhere, docs included.** No em-dashes, no arrows, no curly quotes, no
   decorative unicode. Use `--` for a dash, `->` only inside code blocks.
+  Write non-ASCII test input as an escape, never a literal byte.
 - Docs are written human-plain: no AI-isms, no filler enthusiasm, no "delve"/"leverage"
   prose. Short sentences beat clause chains.
 - Commit messages: conventional commits, `<type>(<scope>): <description>` (scope optional).
