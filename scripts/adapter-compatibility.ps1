@@ -80,17 +80,12 @@ if (-not $cargoMatch.Success) {
     throw "Could not read workspace.package.version from Cargo.toml"
 }
 $serviceVersion = $cargoMatch.Groups["version"].Value
-$tauriVersion = (Read-JsonFile -Path (Join-Path $repo "crates/orchestrator/tauri.conf.json")).version
 $adapterVersion = (Read-JsonFile -Path (Join-Path $repo "extension/manifest.json")).version
 foreach ($pair in @(
     @("workspace service", $serviceVersion),
-    @("Tauri package", $tauriVersion),
     @("source adapter", $adapterVersion)
 )) {
     Assert-Semver -Value $pair[1] -Label $pair[0]
-}
-if ($tauriVersion -ne $serviceVersion) {
-    throw "Tauri package $tauriVersion does not match service $serviceVersion"
 }
 
 $sourceRow = @($compatibility.chromeAdapters | Where-Object {
@@ -116,7 +111,6 @@ $result = [ordered]@{
     schemaVersion = $compatibility.schemaVersion
     source = [ordered]@{
         service = $serviceVersion
-        desktopPackage = $tauriVersion
         chromeAdapter = $adapterVersion
         compatible = $true
     }

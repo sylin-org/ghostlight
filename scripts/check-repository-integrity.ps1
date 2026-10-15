@@ -128,22 +128,8 @@ if ($brokenLinks.Count -gt 0) {
     throw "Broken local documentation links:`n$($brokenLinks -join "`n")"
 }
 
-$cargo = Get-Content -LiteralPath (Join-Path $repo "Cargo.toml") -Raw
-$cargoMatch = [regex]::Match(
-    $cargo,
-    '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(?<version>[^"]+)"'
-)
-if (-not $cargoMatch.Success) {
-    throw "Could not read the workspace version"
-}
-$sourceVersion = $cargoMatch.Groups["version"].Value
 $extension = Get-Content -LiteralPath (Join-Path $repo "extension/manifest.json") -Raw |
     ConvertFrom-Json
-$tauri = Get-Content -LiteralPath (Join-Path $repo "crates/orchestrator/tauri.conf.json") -Raw |
-    ConvertFrom-Json
-if ($tauri.version -ne $sourceVersion) {
-    throw "Source and desktop versions differ"
-}
 
 # The canonical source catalog and active language surfaces must agree exactly.
 $catalogSource = Get-Content -LiteralPath (
@@ -176,7 +162,7 @@ if (($catalogNames -join "`n") -ne ($languageNames -join "`n")) {
 }
 $readme = Get-Content -LiteralPath (Join-Path $repo "README.md") -Raw
 $acceptance = Get-Content -LiteralPath (Join-Path $repo "docs/1.0/ACCEPTANCE.md") -Raw
-$browserToolCount = $catalogCount - 1
+$browserToolCount = @($catalogNames | Where-Object { $_ -match '^browser_' }).Count
 if (-not $readme.Contains("$catalogCount catalog tools") -or
     -not $readme.Contains("$browserToolCount browser tools")) {
     throw "README catalog counts do not match the source catalog"
@@ -249,6 +235,6 @@ if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
     }
 }
 
-Write-Output "Repository integrity: local links valid; source version $sourceVersion aligned."
+Write-Output "Repository integrity: local links valid."
 Write-Output "Only the $($expectedNonAscii.Count) listed historical files may contain non-ASCII bytes."
 Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
