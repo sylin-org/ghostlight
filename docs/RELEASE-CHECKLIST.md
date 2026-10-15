@@ -142,8 +142,13 @@ Evidence:
 Commands live in [RELEASE.md](RELEASE.md) under Source. Applicable operating systems are Windows and
 Linux.
 
+The source-gate evidence (head SHA, dirty flag, pass/fail/skip counts) goes into the candidate
+custody record.
+
 - [x] Formatting passes.
 - [x] Workspace/all-target Clippy passes with warnings denied.
+  This row closes on green CI for the release SHA on both the ubuntu-latest and windows-latest
+  lanes.
 - [x] Full Rust workspace tests pass.
 - [x] Extension, npm launcher, and MCPB launcher tests pass.
 - [x] Changed JavaScript and all release-owned script syntax checks pass. (Windows JS checks pass;

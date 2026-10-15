@@ -80,6 +80,9 @@ with `-PublisherId`; OAuth secrets remain in the machine-local credential file.
 
 ### Source
 
+The clippy row closes on green CI for the release SHA on both OS lanes (ubuntu-latest and
+windows-latest); the local preflight does not repeat it.
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

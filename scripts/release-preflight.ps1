@@ -2,19 +2,17 @@
 
 <#
 .SYNOPSIS
-    Run the complete local release-preflight gate list in order, with per-stage results and a
-    generated evidence skeleton.
+    Run the complete local release-preflight gate list in order, with per-stage results.
 
 .DESCRIPTION
     Encodes the locally runnable portion of the RELEASE-CHECKLIST G1 gate list as ordered
     stages. Each stage reports PASS, FAIL, or SKIP with captured output; by default the run
-    stops at the first failing stage (-ContinueOnFailure overrides). When every stage passes,
-    a dated evidence skeleton is written under docs/testing/ for hand-completion and linking
-    from RELEASE-CHECKLIST.md.
+    stops at the first failing stage (-ContinueOnFailure overrides). The console shows each
+    stage's result and the first line of its detail, so test counts and journey summaries stay
+    visible; copy the source-gate evidence into the candidate custody record.
 
     Stages that cannot run on this host (shell syntax checks without a shell, dependency
-    gates without cargo-deny installed, CI-only integrity rows) are recorded as SKIP or
-    MANUAL rather than faked.
+    gates without cargo-deny installed) are recorded as SKIP rather than faked.
 
 .PARAMETER SkipBuild
     Skip the isolated workspace build stage (reuse an existing target directory).
@@ -28,9 +26,6 @@
 .PARAMETER TargetDirectory
     Isolated build directory used by the build stage and the journeys.
 
-.PARAMETER EvidencePath
-    Override the generated evidence path under docs/testing/.
-
 .EXAMPLE
     pwsh scripts/release-preflight.ps1
 #>
@@ -41,8 +36,7 @@ param(
     [switch] $SkipJourneys,
     [switch] $ContinueOnFailure,
     [switch] $IncludeDependencyGates,
-    [string] $TargetDirectory = ".target-ghostlight-1.0",
-    [string] $EvidencePath = ""
+    [string] $TargetDirectory = ".target-ghostlight-1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -69,6 +63,8 @@ try {
             $detail = @(& $Action) | ForEach-Object { "$_" } | Select-Object -Last 3
             $sw.Stop()
             Write-Host ("{0,-58} PASS   {1}ms" -f $Name, $sw.ElapsedMilliseconds)
+            $firstDetail = ($detail | Select-Object -First 1)
+            if ($firstDetail) { Write-Host ("    {0}" -f $firstDetail) }
             return @{
                 Name       = $Name
                 Result     = "PASS"
@@ -163,9 +159,6 @@ try {
 
     $headSha = (git rev-parse HEAD).Trim()
     $dirtyLines = (git status --porcelain | Measure-Object -Line).Lines
-    $rustcVersion = (rustc --version).Trim()
-    $nodeVersion = (node --version).Trim()
-    $osLine = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription.Trim()
     $hasShell = [bool](Get-Command sh -ErrorAction SilentlyContinue)
 
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $repository $TargetDirectory))
@@ -179,10 +172,6 @@ try {
         Run-Gate { cargo fmt --all -- --check } "formatting drift"
     } }
 
-    $stages += @{ Name = "cargo clippy --workspace --all-targets -D warnings"; Skip = ""; Action = {
-        Run-Gate { cargo clippy --workspace --all-targets -- -D warnings } "clippy findings"
-    } }
-
     $stages += @{ Name = "cargo test --workspace"; Skip = ""; Action = {
         Run-Gate { cargo test --workspace } "workspace tests failed"
     } }
@@ -192,6 +181,10 @@ try {
         try {
             Run-Gate { npm test } "extension tests failed"
         } finally { Pop-Location }
+    } }
+
+    $stages += @{ Name = "Chromium page-asset tests"; Skip = ""; Action = {
+        Run-Gate { node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js" } "page-asset tests failed"
     } }
 
     $stages += @{ Name = "npm launcher tests (packaging/npm)"; Skip = ""; Action = {
@@ -286,9 +279,14 @@ try {
         Run-Gate { node tests/policy-grammar.mjs } "policy grammar failed"
     } }
 
-    $stages += @{ Name = "JavaScript syntax (ui/app.js, preview server)"; Skip = ""; Action = {
-        node --check crates/orchestrator/ui/app.js
-        if ($LASTEXITCODE -ne 0) { throw "ui/app.js syntax" }
+    $stages += @{ Name = "JavaScript syntax (extension, orchestrator, preview server)"; Skip = ""; Action = {
+        $scripts = @(git ls-files 'extension/*.js' 'crates/orchestrator/*.js') |
+            Where-Object { $_ -notlike '*/tests/*' -and $_ -notlike '*/vendor/*' }
+        foreach ($script in $scripts) {
+            node --check $script
+            if ($LASTEXITCODE -ne 0) { throw "$script syntax" }
+        }
+        "$($scripts.Count) files checked"
         node --check tests/workbench-preview-server.mjs
         if ($LASTEXITCODE -ne 0) { throw "preview server syntax" }
     } }
@@ -345,58 +343,6 @@ try {
     $passed = @($results | Where-Object Result -eq "PASS").Count
     $skipped = @($results | Where-Object Result -eq "SKIP").Count
     Write-Host ("Stages: {0} passed, {1} failed, {2} skipped." -f $passed, $failures.Count, $skipped)
-
-    # ---------------------------------------------------------------- evidence
-
-    if ($failures.Count -eq 0) {
-        $evidencePath = $EvidencePath
-        if (-not $evidencePath) {
-            $evidencePath = Join-Path $repository ("docs/testing/release-preflight-{0}.md" -f (Get-Date -Format "yyyy-MM-dd"))
-        }
-        $rows = $results | ForEach-Object {
-            $detail = ($_.Detail -replace "\r?\n", "; ")
-            # Console capture can carry codepage mojibake or tool glyphs; the evidence must be
-            # ASCII so the repository-integrity gate stays green on the committed record.
-            $detail = ($detail.ToCharArray() | ForEach-Object { if ([int]$_ -le 126) { $_ } else { "?" } }) -join ""
-            "| $($_.Name) | $($_.Result) | $detail |"
-        }
-        $manualRows = @"
-
-## Rows outside this runner (complete by hand or in CI)
-
-| Row | Where it runs |
-| --- | --- |
-| Dependency license/ban/source/advisory detail | CI dependency gate on the release revision |
-| Repository truth, documentation links, ASCII policy | CI repository-integrity job |
-| Complete 0.8 recovery disposition | tracked matrix plus release-environment lanes |
-| Clean Windows/Linux install, upgrade, uninstall | release-environment machines (owner) |
-"@
-        $dirtyText = if ($dirtyLines -gt 0) { "true" } else { "false" }
-        $content = @"
-# Release preflight -- $headSha
-
-``````text
-date_utc: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
-source_revision: $headSha
-tree_dirty: $dirtyText
-toolchain: $rustcVersion; node $nodeVersion
-host: $osLine
-``````
-Generated by ``scripts/release-preflight.ps1``. Complete the MANUAL rows, link this record
-from RELEASE-CHECKLIST.md G1, then delete this note.
-
-## Stage results
-
-| Stage | Result | Detail |
-| --- | --- | --- |
-$($rows -join "`n")
-$manualRows
-"@
-        [System.IO.File]::WriteAllText($evidencePath, ($content -replace "\r?\n", "`n"))
-        Write-Host "Evidence written: $evidencePath"
-    } else {
-        Write-Host "Evidence not written: $($failures.Count) stage(s) failed."
-    }
 
     if ($failures.Count -gt 0) { exit 1 }
     exit 0
