@@ -185,10 +185,11 @@ every journey.
 ## Code style
 
 - Edition and lints come from the workspace `Cargo.toml`, and fmt and clippy `-D warnings` are in
-  the commit gate. `unsafe` is forbidden everywhere except `crates/win-peer` (enforced by the lint
-  and the governance unsafe-confinement test), and every unsafe call site there carries a
-  `// SAFETY:` note. Otherwise match the surrounding code: `thiserror` for typed library errors,
-  `anyhow` at binary and integration edges, unit tests inline and process tests in `tests/`.
+  the commit gate. `unsafe` is forbidden everywhere except `crates/win-peer` and the `os` module of
+  `crates/relay` (enforced by the lints and the governance unsafe-confinement test), and every
+  unsafe call site there carries a `// SAFETY:` note. Otherwise match the surrounding code:
+  `thiserror` for typed library errors, `anyhow` at binary and integration edges, unit tests
+  inline and process tests in `tests/`.
 - Every module opens with a doc comment stating its role in the architecture. Document a public
   item when its name and types do not state its contract: lifecycle and pairing obligations
   (acquire/release), invariants, failure codes, side effects.

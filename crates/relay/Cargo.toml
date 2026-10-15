@@ -16,5 +16,14 @@ thiserror.workspace = true
 [target.'cfg(windows)'.dependencies]
 ghostlight-win-peer = { path = "../win-peer" }
 
-[lints]
-workspace = true
+# This crate does not inherit the workspace lints table: Cargo applies inherited lints as
+# command-line flags, and an inherited forbid cannot be lifted by one module. The frozen relay
+# needs platform calls that have no safe standard-library form (starting the service with no
+# inherited handles, and the Windows parent watch), so it sets deny. Only the `os` module lifts it,
+# with an expect that names the reason. A repository guard test checks every workspace member.
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"

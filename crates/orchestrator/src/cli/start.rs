@@ -53,7 +53,7 @@ impl Launcher for ProcessLauncher {
     }
 
     fn serve_detached(&self, executable: &Path, home: &Path) -> io::Result<()> {
-        ghostlight_relay::spawn::spawn_serve(executable, home).map(drop)
+        ghostlight_relay::spawn::spawn_serve(executable, home).map(|_| ())
     }
 
     fn install(&self, layout: &Layout) -> Result<()> {

@@ -60,15 +60,18 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
     fs::remove_file(managed).unwrap();
 }
 
-/// The workspace forbids raw memory access everywhere except the one audited FFI crate
-/// (ADR-0105 amendment 2026-08-24). Every workspace member but `crates/win-peer` inherits
-/// that forbid, and this test proves it from the manifests. The compiler then rejects any
-/// such code in an inheriting crate, and no in-source allow can override an inherited forbid.
+/// The workspace forbids raw memory access everywhere except the two audited crates (ADR-0105
+/// amendment 2026-08-24, ADR-0199 Decision 3). Every workspace member but `crates/win-peer`
+/// (which allows it) and `crates/relay` (which denies it, so only the `os` module's expectation
+/// lifts it) inherits that forbid, and this test proves it from the manifests. The compiler then
+/// rejects any such code in an inheriting crate, and no in-source allow can override an
+/// inherited forbid.
 #[test]
 fn unsafe_stays_confined_to_the_audited_ffi_crate() {
     use toml_edit::DocumentMut;
 
-    const AUDITED: &str = "crates/win-peer";
+    /// Each audited crate and the level its own lint table sets for `unsafe_code`.
+    const AUDITED: [(&str, &str); 2] = [("crates/relay", "deny"), ("crates/win-peer", "allow")];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let read = |path: PathBuf| -> DocumentMut {
         fs::read_to_string(&path)
@@ -89,10 +92,12 @@ fn unsafe_stays_confined_to_the_audited_ffi_crate() {
         .iter()
         .map(|member| member.as_str().expect("member is a path"))
         .collect();
-    assert!(
-        members.contains(&AUDITED),
-        "{AUDITED} is a workspace member"
-    );
+    for (audited, _) in AUDITED {
+        assert!(
+            members.contains(&audited),
+            "{audited} is a workspace member"
+        );
+    }
 
     let mut without_inheritance = Vec::new();
     for member in members {
@@ -102,8 +107,13 @@ fn unsafe_stays_confined_to_the_audited_ffi_crate() {
             .and_then(|lints| lints.get("workspace"))
             .and_then(|value| value.as_bool())
             == Some(true);
-        if member == AUDITED {
-            assert!(!inherits, "{AUDITED} carries its own lint table");
+        if let Some((_, level)) = AUDITED.iter().find(|(audited, _)| *audited == member) {
+            assert!(!inherits, "{member} carries its own lint table");
+            assert_eq!(
+                manifest["lints"]["rust"]["unsafe_code"].as_str(),
+                Some(*level),
+                "{member} sets unsafe_code to {level}"
+            );
             without_inheritance.push(member);
             continue;
         }
@@ -113,7 +123,7 @@ fn unsafe_stays_confined_to_the_audited_ffi_crate() {
             "{member} must not override the workspace rust lints"
         );
     }
-    assert_eq!(without_inheritance, [AUDITED]);
+    assert_eq!(without_inheritance, AUDITED.map(|(audited, _)| audited));
 }
 
 /// Replace a watched file's content and move its modified time forward, so the refresher sees the

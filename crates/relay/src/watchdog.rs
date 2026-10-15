@@ -83,7 +83,7 @@ impl ParentProcess {
     pub fn capture() -> Option<Self> {
         #[cfg(target_os = "windows")]
         {
-            let process = ghostlight_win_peer::parent_process()?;
+            let process = crate::os::parent_process()?;
             Some(Self {
                 process_id: process.process_id,
                 created: process.created,
@@ -103,7 +103,7 @@ impl IdentitySource for ParentProcess {
     fn is_alive(&self) -> bool {
         #[cfg(target_os = "windows")]
         {
-            ghostlight_win_peer::process_is_alive(ghostlight_win_peer::ProcessIdentity {
+            crate::os::process_is_alive(crate::os::ProcessIdentity {
                 process_id: self.process_id,
                 created: self.created,
             })

@@ -6,7 +6,8 @@
 //! the tolerant runtime-file reader, the opening frame and its replies, and the failure-template
 //! file, plus the mechanics every connector repeats: starting the service, watching the parent,
 //! writing diagnostics, and opening a connection. It authors no words and makes no product
-//! decisions.
+//! decisions. The `os` module is the audited platform layer: the only `unsafe` in the crate, it
+//! starts the service with no inherited handles and, on Windows, identifies a process.
 //!
 //! A change under a published relay revision needs a revision bump (`RELAY` and the crate
 //! version); `tests/guards/connectors.test.mjs` checks the source against the last release tag
@@ -21,6 +22,7 @@ pub mod frame;
 pub mod home;
 pub mod log;
 pub mod opening;
+pub mod os;
 pub mod private;
 pub mod runtime;
 pub mod spawn;

@@ -1,4 +1,4 @@
-//! Windows parent identity and liveness through the audited FFI boundary.
+//! The executable paths of a Windows process's ancestors through the audited FFI boundary.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -6,14 +6,10 @@ use std::mem;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use crate::ProcessIdentity;
-
 type Handle = *mut core::ffi::c_void;
 
 const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x0000_1000;
-const SYNCHRONIZE: u32 = 0x0010_0000;
-const WAIT_TIMEOUT: u32 = 0x0000_0102;
 const MAX_PATH: usize = 260;
 /// UTF-16 units reserved for one image path query.
 const IMAGE_PATH_UNITS: usize = 1024;
@@ -57,7 +53,6 @@ extern "system" {
         exe_name: *mut u16,
         size_pointer: &mut u32,
     ) -> i32;
-    fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
     fn CloseHandle(handle: Handle) -> i32;
 }
 
@@ -114,13 +109,6 @@ fn process_table() -> Vec<(u32, u32)> {
     rows
 }
 
-pub(super) fn parent() -> Option<ProcessIdentity> {
-    process_table()
-        .into_iter()
-        .find(|(process_id, _)| *process_id == std::process::id())
-        .and_then(|(_, parent)| identity(parent))
-}
-
 /// Executable paths of this process's ancestors, nearest first, walking at most `limit` parents.
 ///
 /// The walk ends at the first parent that cannot be identified or that started after its child,
@@ -134,11 +122,12 @@ pub(super) fn ancestor_images(limit: usize) -> Vec<PathBuf> {
         let Some(&parent) = parents.get(&child) else {
             break;
         };
-        let (Some(child_identity), Some(parent_identity)) = (identity(child), identity(parent))
+        let (Some(child_created), Some(parent_created)) =
+            (creation_time(child), creation_time(parent))
         else {
             break;
         };
-        if parent_identity.created > child_identity.created {
+        if parent_created > child_created {
             break;
         }
         if let Some(image) = full_image_path(parent) {
@@ -163,7 +152,8 @@ fn full_image_path(process_id: u32) -> Option<PathBuf> {
     Some(PathBuf::from(OsString::from_wide(&wide[..size as usize])))
 }
 
-pub(super) fn identity(process_id: u32) -> Option<ProcessIdentity> {
+/// When `process_id` was created, as the raw FILETIME value.
+fn creation_time(process_id: u32) -> Option<u64> {
     if process_id == 0 {
         return None;
     }
@@ -175,33 +165,12 @@ pub(super) fn identity(process_id: u32) -> Option<ProcessIdentity> {
     // SAFETY: all output structures outlive the call and process is a valid query handle.
     let ok =
         unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) };
-    (ok != 0).then_some(ProcessIdentity {
-        process_id,
-        created: (u64::from(creation.high) << 32) | u64::from(creation.low),
-    })
-}
-
-pub(super) fn is_alive(expected: ProcessIdentity) -> bool {
-    let Some(process) = OwnedHandle::process(
-        expected.process_id,
-        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-    ) else {
-        return false;
-    };
-    // A terminated Windows process remains openable while another process retains a handle.
-    // Its handle is signalled, so a zero-time wait is the authoritative liveness check.
-    // SAFETY: process is a valid synchronizable handle and the zero timeout never blocks.
-    if unsafe { WaitForSingleObject(process.0, 0) } != WAIT_TIMEOUT {
-        return false;
-    }
-    identity(expected.process_id).is_some_and(|actual| actual == expected)
+    (ok != 0).then_some((u64::from(creation.high) << 32) | u64::from(creation.low))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
-    use super::{ancestor_images, identity, is_alive};
+    use super::ancestor_images;
 
     #[test]
     fn the_ancestor_walk_is_bounded_and_starts_at_the_parent() {
@@ -212,24 +181,5 @@ mod tests {
         assert!(all.len() <= 16);
         assert!(!all.is_empty(), "a test process has a parent to name");
         assert_eq!(all.first(), one.first());
-    }
-
-    #[test]
-    fn current_process_has_a_live_stable_identity() {
-        let process = identity(std::process::id()).expect("current process identity");
-        assert!(is_alive(process));
-    }
-
-    #[test]
-    fn terminated_process_reads_as_dead_while_child_handle_is_held() {
-        let mut child = Command::new("cmd")
-            .args(["/C", "ping -n 30 127.0.0.1 >nul"])
-            .spawn()
-            .expect("spawn long-lived child");
-        let process = identity(child.id()).expect("child process identity");
-        assert!(is_alive(process));
-        child.kill().expect("terminate child");
-        child.wait().expect("reap child status");
-        assert!(!is_alive(process));
     }
 }

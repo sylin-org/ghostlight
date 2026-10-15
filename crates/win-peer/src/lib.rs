@@ -1,30 +1,21 @@
 //! The audited FFI boundary for Windows process, shell and file-security calls.
 //!
-//! This is the one audited FFI crate in the workspace. The workspace sets
-//! `unsafe_code = "forbid"` through the shared lints table, which Cargo applies as command-line
-//! flags no in-source allow can override; this crate's manifest deliberately does not inherit
-//! that table, so every line of `unsafe` in Ghostlight lives here, is reviewed as a unit, and a
+//! This is one of the two audited `unsafe` surfaces in the workspace; the other is the relay's
+//! `os` module. The workspace sets `unsafe_code = "forbid"` through the shared lints table, which
+//! Cargo applies as command-line flags no in-source allow can override; this crate's manifest
+//! deliberately does not inherit that table, so its `unsafe` is reviewed as a unit, and a
 //! repository guard test fails if `unsafe` appears anywhere else. The owner decision recorded in
 //! ADR-0105 chose this shape over wrapping the same calls behind a new third-party dependency on
 //! a security-sensitive path: every foreign function is declared by hand below against system
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
-//! The crate holds process identity and liveness in `process` (including the executable paths of a
-//! process's ancestors, from which the installer learns whether it runs inside an app's
-//! container), owner-private runtime-file creation in `private_file` (ADR-0160), the shell's item
-//! identifier list of a file in `item_id_list` (named by the installer's Start-menu shortcut),
-//! `clear_standard_handle_inheritance` in `standard_handles` (which keeps a detached child from
-//! holding its starter's standard pipes open), and session shutdown events in `shutdown`.
-//! Non-Windows targets compile the portable surface returning `None` or an empty answer.
-
-/// Stable identity for one Windows process across process-id reuse.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProcessIdentity {
-    /// Operating-system process id.
-    pub process_id: u32,
-    /// Windows process creation time, expressed as the raw FILETIME value.
-    pub created: u64,
-}
+//! The crate holds the executable paths of a process's ancestors in `process` (from which the
+//! installer learns whether it runs inside an app's container), owner-private runtime-file
+//! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
+//! `item_id_list` (named by the installer's Start-menu shortcut), and session shutdown events in
+//! `shutdown`. Starting the service and process identity live in the relay's audited `os` module
+//! (ADR-0199 Decision 3). Non-Windows targets compile the portable surface returning an empty
+//! answer.
 
 #[cfg(target_os = "windows")]
 mod item_id_list;
@@ -34,8 +25,6 @@ mod private_file;
 mod process;
 #[cfg(target_os = "windows")]
 mod shutdown;
-#[cfg(target_os = "windows")]
-mod standard_handles;
 
 /// Session shutdown events from the operating system.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,27 +50,6 @@ pub fn listen_for_system_shutdown(
     Ok(SystemShutdownListener)
 }
 
-/// Capture the current process's parent with creation time bound to its process id.
-#[must_use]
-pub fn parent_process() -> Option<ProcessIdentity> {
-    #[cfg(target_os = "windows")]
-    return process::parent();
-    #[cfg(not(target_os = "windows"))]
-    None
-}
-
-/// Capture one process with creation time bound to its process id.
-#[must_use]
-pub fn process_identity(process_id: u32) -> Option<ProcessIdentity> {
-    #[cfg(target_os = "windows")]
-    return process::identity(process_id);
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = process_id;
-        None
-    }
-}
-
 /// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
 /// parents. Empty where the platform cannot answer.
 ///
@@ -98,31 +66,11 @@ pub fn ancestor_images(limit: usize) -> Vec<std::path::PathBuf> {
     }
 }
 
-/// Return whether the exact captured Windows process is still running.
-#[must_use]
-pub fn process_is_alive(process: ProcessIdentity) -> bool {
-    #[cfg(target_os = "windows")]
-    return process::is_alive(process);
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = process;
-        false
-    }
-}
-
 /// Create a new file with a protected current-user/SYSTEM DACL before it can contain secrets.
 /// Existing paths are refused. Runtime publication belongs to the caller (ADR-0160).
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
-}
-
-/// Clear the inherit flag on this process's standard input, output and error handles, so a child
-/// created afterwards does not inherit them (for a detached service, its starter's pipes).
-/// `Stdio::inherit` still forwards them: it duplicates a fresh inheritable copy for each child.
-#[cfg(target_os = "windows")]
-pub fn clear_standard_handle_inheritance() {
-    standard_handles::clear_inheritance();
 }
 
 /// The shell's serialized item identifier list for the existing file at `path`, terminator
