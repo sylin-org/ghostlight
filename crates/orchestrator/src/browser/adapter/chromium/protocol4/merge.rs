@@ -10,12 +10,13 @@
 
 use super::world::{Text, TreeNode, TreeValue};
 use crate::browser::adapter::ObservedTarget;
+use crate::language::area::{LeftOut, LeftOutKey};
 
 /// What separates the text of two documents.
 const SECTION_SEPARATOR: &str = "\n\n";
 
 /// The targets one document found.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct DocumentTargets {
     /// The targets, already bound to their document.
     pub targets: Vec<ObservedTarget>,
@@ -23,6 +24,10 @@ pub struct DocumentTargets {
     pub truncated: bool,
     /// How many forms the document holds, whatever its targets kept.
     pub forms: u32,
+    /// What the document left out of its own answer.
+    pub left_out: LeftOut,
+    /// Whether the document has an open modal dialog.
+    pub modal_open: bool,
 }
 
 /// Targets folded under one ceiling.
@@ -32,10 +37,19 @@ pub struct MergedTargets {
     pub targets: Vec<ObservedTarget>,
     /// Whether more targets existed than were kept.
     pub over: bool,
+    /// What every document left out, plus what this fold cut.
+    pub left_out: LeftOut,
+    /// Whether any document has an open modal dialog.
+    pub modal_open: bool,
 }
 
-/// Fold the targets of every document, top first, under one ceiling. The first documents win
-/// their share first.
+/// Fold the targets of every document, top first, under one ceiling.
+///
+/// When the documents together hold more than the ceiling, the fold cuts by tier as a single
+/// document does (ADR-0198 Decision 20): hidden targets first, then header, navigation and footer
+/// targets, then asides, and page content last. Within a tier the earlier targets stay. The kept
+/// targets keep document order, and every target the fold cuts is counted in `left_out`, added to
+/// the counts the documents sent.
 ///
 /// Each document numbers its forms from 1. The fold renumbers them page-wide so one number names
 /// one form whatever each answer kept: a document's ordinals are offset by the number of forms
@@ -45,25 +59,64 @@ pub fn targets(
     per_document: impl IntoIterator<Item = DocumentTargets>,
     maximum: usize,
 ) -> MergedTargets {
-    let mut merged = Vec::new();
+    let mut found = Vec::new();
     let mut over = false;
+    let mut modal_open = false;
+    let mut left_out = LeftOut::default();
     let mut forms_before = 0;
     for document in per_document {
         for mut target in document.targets {
-            if merged.len() >= maximum {
-                over = true;
-                break;
-            }
             target.form = target.form.map(|ordinal| ordinal + forms_before);
-            merged.push(target);
+            found.push(target);
         }
         forms_before += document.forms;
         over = over || document.truncated;
+        modal_open = modal_open || document.modal_open;
+        left_out.merge(&document.left_out);
+    }
+    if found.len() > maximum {
+        over = true;
+        found = cut_by_tier(found, maximum, &mut left_out);
     }
     MergedTargets {
-        targets: merged,
+        targets: found,
         over,
+        left_out,
+        modal_open,
     }
+}
+
+/// Keep `maximum` targets by tier, count the rest in `left_out`, and return the kept targets in
+/// their given order.
+fn cut_by_tier(
+    found: Vec<ObservedTarget>,
+    maximum: usize,
+    left_out: &mut LeftOut,
+) -> Vec<ObservedTarget> {
+    let tiers: Vec<LeftOutKey> = found
+        .iter()
+        .map(|target| LeftOutKey::tier_of(&target.state, target.area.as_deref()))
+        .collect();
+    let mut keep = vec![false; found.len()];
+    let mut room = maximum;
+    for tier in LeftOutKey::KEPT_FIRST {
+        for (index, own) in tiers.iter().enumerate() {
+            if *own != tier {
+                continue;
+            }
+            if room > 0 {
+                keep[index] = true;
+                room -= 1;
+            } else {
+                left_out.add(tier, 1);
+            }
+        }
+    }
+    found
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(target, kept)| kept.then_some(target))
+        .collect()
 }
 
 /// Visible text folded under one character bound.

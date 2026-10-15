@@ -3889,3 +3889,175 @@ test("every targets answer reports how many forms the document holds, kept or no
   const semantic = await harness.send({ kind: "query_semantic", name: "In first", exact: true });
   assert.equal(semantic.value.forms, 3);
 });
+
+// ---- a capped answer is cut by tier and counts what it left out ----------------------------------
+
+/** The names of an inspect answer's targets that have one. */
+const namesOf = (reply) => reply.value.targets.map((target) => target.name).filter(Boolean);
+
+/** A harness whose stray fixture input is a hidden input, so it never joins a pool. */
+function pageHarness() {
+  const harness = contentHarness();
+  harness.input.type = "hidden";
+  return harness;
+}
+
+/** Inspect the controls of the page with `max_items`. */
+const inspectControls = (harness, maxItems) => harness.send({ kind: "inspect", inspect_kind: "controls", max_items: maxItems, visual_settle: false });
+
+test("a navigation-heavy page keeps its form fields when the cap cuts, in document order", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  const banner = wrapper(harness, body, "header");
+  const navigation = wrapper(harness, banner, "nav");
+  for (let index = 0; index < 8; index += 1) labelledButton(harness, navigation, `Menu ${index}`);
+  const main = wrapper(harness, body, "main");
+  const form = wrapper(harness, main, "form");
+  for (const label of ["Name", "Email", "Password"]) nativeControl(harness, form, label, "input", { type: "text" });
+  labelledButton(harness, wrapper(harness, body, "footer"), "Terms");
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 5);
+
+  assert.deepEqual(namesOf(reply), ["Menu 0", "Menu 1", "Name", "Email", "Password"]);
+  assert.deepEqual(reply.value.left_out, { chrome: 7 });
+  assert.equal(reply.value.truncated, true);
+  assert.equal(reply.value.modal_open, false);
+});
+
+test("hidden items are cut before chrome, chrome before asides, and asides before content", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  labelledButton(harness, wrapper(harness, body, "nav"), "Menu");
+  const ghost = labelledButton(harness, body, "Ghost");
+  ghost.hidden = true;
+  labelledButton(harness, wrapper(harness, body, "aside"), "Related");
+  labelledButton(harness, body, "Save");
+  harness.setBody(body);
+
+  const three = await inspectControls(harness, 3);
+  assert.deepEqual(namesOf(three), ["Menu", "Related", "Save"]);
+  assert.deepEqual(three.value.left_out, { hidden: 1 });
+
+  const two = await inspectControls(harness, 2);
+  assert.deepEqual(namesOf(two), ["Related", "Save"]);
+  assert.deepEqual(two.value.left_out, { hidden: 1, chrome: 1 });
+
+  const one = await inspectControls(harness, 1);
+  assert.deepEqual(namesOf(one), ["Save"]);
+  assert.deepEqual(one.value.left_out, { hidden: 1, chrome: 1, aside: 1 });
+});
+
+test("dialog and search items are page content, and a hidden item inside them is still cut first", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  const dialog = wrapper(harness, body, "dialog");
+  labelledButton(harness, wrapper(harness, dialog, "header"), "Close");
+  const search = wrapper(harness, body, "search");
+  labelledButton(harness, search, "Go").hidden = true;
+  labelledButton(harness, search, "Query");
+  labelledButton(harness, wrapper(harness, body, "nav"), "Menu");
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 2);
+
+  assert.deepEqual(namesOf(reply), ["Close", "Query"]);
+  assert.deepEqual(reply.value.left_out, { hidden: 1, chrome: 1 });
+});
+
+test("an answer that fits carries no counts and is not truncated", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  labelledButton(harness, wrapper(harness, body, "nav"), "Menu").hidden = true;
+  labelledButton(harness, body, "Save");
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 2);
+
+  assert.deepEqual(namesOf(reply), ["Menu", "Save"]);
+  assert.deepEqual(reply.value.left_out, {});
+  assert.equal(reply.value.truncated, false);
+});
+
+test("controls behind an open modal dialog are dropped and counted apart from the cap", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  labelledButton(harness, wrapper(harness, body, "nav"), "Menu");
+  labelledButton(harness, body, "Behind");
+  const dialog = wrapper(harness, body, "dialog");
+  dialog.open = true;
+  dialog.modal = true;
+  labelledButton(harness, dialog, "Confirm");
+  nativeControl(harness, dialog, "Reason", "input", { type: "text" });
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 80);
+
+  assert.deepEqual(namesOf(reply), ["Confirm", "Reason"]);
+  assert.deepEqual(reply.value.left_out, { behind_dialog: 2 });
+  assert.equal(reply.value.modal_open, true);
+  assert.equal(reply.value.truncated, false, "dropping unusable controls is not a size cut");
+});
+
+test("a dialog that is open but not modal leaves the page usable", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  labelledButton(harness, body, "Page");
+  const dialog = wrapper(harness, body, "dialog");
+  dialog.open = true;
+  labelledButton(harness, dialog, "Inside");
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 80);
+
+  assert.deepEqual(namesOf(reply), ["Page", "Inside"]);
+  assert.deepEqual(reply.value.left_out, {});
+  assert.equal(reply.value.modal_open, false);
+});
+
+test("controls under an inert ancestor are dropped and counted like those behind a modal", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  const frozen = wrapper(harness, body, "div", { inert: "" });
+  labelledButton(harness, frozen, "Frozen");
+  labelledButton(harness, body, "Live");
+  harness.setBody(body);
+
+  const reply = await inspectControls(harness, 80);
+
+  assert.deepEqual(namesOf(reply), ["Live"]);
+  assert.deepEqual(reply.value.left_out, { behind_dialog: 1 });
+  assert.equal(reply.value.modal_open, false);
+});
+
+test("structure items are not dropped for sitting behind a modal", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  wrapper(harness, body, "nav", { "aria-label": "Site" });
+  labelledButton(harness, body, "Behind");
+  const dialog = wrapper(harness, body, "dialog");
+  dialog.open = true;
+  dialog.modal = true;
+  labelledButton(harness, dialog, "Confirm");
+  harness.setBody(body);
+
+  const reply = await harness.send({ kind: "inspect", inspect_kind: "all", max_items: 80, visual_settle: false });
+
+  assert.deepEqual(namesOf(reply), ["Site", "Confirm"]);
+  assert.deepEqual(reply.value.left_out, { behind_dialog: 1 });
+});
+
+test("a find cuts by the same tiers and counts what it left out", async () => {
+  const harness = pageHarness();
+  const body = harness.element("body");
+  labelledButton(harness, wrapper(harness, body, "nav"), "Save draft");
+  labelledButton(harness, body, "Save");
+  labelledButton(harness, body, "Save as");
+  harness.setBody(body);
+
+  const reply = await harness.send({ kind: "find", text: "Save", find_kind: "control", max_results: 2 });
+
+  assert.deepEqual(namesOf(reply), ["Save", "Save as"]);
+  assert.deepEqual(reply.value.left_out, { chrome: 1 });
+  assert.equal(reply.value.truncated, true);
+});

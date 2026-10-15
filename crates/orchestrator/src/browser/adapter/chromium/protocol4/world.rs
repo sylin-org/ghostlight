@@ -19,6 +19,7 @@ use super::wire::{CallAnswer, Point, Readiness};
 use crate::browser::adapter::{
     BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
 };
+use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
 use EffectClass::{Effect, Prepare, Read};
 use ScopeClass::{Content, Metadata};
@@ -833,6 +834,12 @@ pub struct Targets {
     /// does not number forms.
     #[serde(default)]
     pub forms: u32,
+    /// How many items the document left out of `targets`, by key. Absent when it left none out.
+    #[serde(default)]
+    pub left_out: LeftOut,
+    /// Whether the document has an open modal dialog. Absent when the document reports none.
+    #[serde(default)]
+    pub modal_open: bool,
 }
 
 /// One node of a structure tree.

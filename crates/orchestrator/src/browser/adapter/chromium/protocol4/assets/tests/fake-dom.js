@@ -25,6 +25,7 @@ function selectorMatches(element, selector) {
     if (part === "*") return true;
     if (part === ":user-invalid") return element.userInvalid === true;
     if (part === ":disabled") return matchesDisabled(element);
+    if (part === ":modal") return element.modal === true;
     if (part.startsWith("#")) return element.id === part.slice(1);
     if (part === tag || part.startsWith(`${tag}[`)) return true;
     const attribute = /^\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\]$/.exec(part);
@@ -244,7 +245,10 @@ function createFakeDom({ top = true } = {}) {
     }
     matches(selector) { return selectorMatches(this, selector); }
     getElementById(id) { return descendantsOf(this, "*").find((element) => element.id === id) ?? null; }
-    closest(selector) { return this.matches(selector) ? this : null; }
+    closest(selector) {
+      for (let node = this; node?.nodeType === 1; node = node.parentNode) if (node.matches(selector)) return node;
+      return null;
+    }
     contains(other) {
       for (let node = other; node; node = node.parentNode) if (node === this) return true;
       return false;

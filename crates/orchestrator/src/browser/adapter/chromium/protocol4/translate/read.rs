@@ -13,7 +13,7 @@ use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::{CallMode, FrameRef};
 use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
 use super::{reach, value, Reach};
-use crate::browser::adapter::{BrowserOutcome, ObservedTarget};
+use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget};
 use crate::browser::BrowserError;
 
 /// The most nodes one structure tree holds across every document.
@@ -156,13 +156,23 @@ fn targets(
             targets: rescope(doc, found.targets),
             truncated: found.truncated,
             forms: found.forms,
+            left_out: found.left_out,
+            modal_open: found.modal_open,
         })
     });
     let merged = merge::targets(found, maximum);
     if merged.over {
         reach.scope().limit();
     }
-    Ok(BrowserOutcome::targets(tab_id, merged.targets))
+    Ok(BrowserOutcome::Targets {
+        tab_id,
+        targets: merged.targets,
+        listing: Listing {
+            left_out: merged.left_out,
+            modal_open: merged.modal_open,
+            ..Listing::default()
+        },
+    })
 }
 
 /// Read one composed document: the top document's article when asked and found, otherwise the

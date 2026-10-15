@@ -1,4 +1,5 @@
 use super::*;
+use crate::language::area::HIDDEN_STATE;
 
 fn target(locator: &str) -> ObservedTarget {
     ObservedTarget {
@@ -15,7 +16,7 @@ fn found(locators: &[&str], truncated: bool) -> DocumentTargets {
     DocumentTargets {
         targets: locators.iter().map(|locator| target(locator)).collect(),
         truncated,
-        forms: 0,
+        ..DocumentTargets::default()
     }
 }
 
@@ -119,6 +120,105 @@ fn a_document_that_found_more_than_it_returned_makes_the_merge_over() {
     assert!(merged.over);
 }
 
+/// A target in `area`, hidden when `hidden`.
+fn placed(locator: &str, area: Option<&str>, hidden: bool) -> ObservedTarget {
+    ObservedTarget {
+        area: area.map(str::to_owned),
+        state: if hidden {
+            vec![HIDDEN_STATE.to_owned()]
+        } else {
+            Vec::new()
+        },
+        ..target(locator)
+    }
+}
+
+fn document(targets: Vec<ObservedTarget>) -> DocumentTargets {
+    DocumentTargets {
+        targets,
+        ..DocumentTargets::default()
+    }
+}
+
+#[test]
+fn a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order() {
+    let merged = targets(
+        [
+            document(vec![
+                placed("nav-1", Some("nav"), false),
+                placed("ghost", None, true),
+                placed("nav-2", Some("footer"), false),
+            ]),
+            document(vec![
+                placed("field-1", None, false),
+                placed("side", Some("aside"), false),
+                placed("field-2", Some("dialog"), false),
+            ]),
+        ],
+        4,
+    );
+    assert_eq!(locators(&merged), ["nav-1", "field-1", "side", "field-2"]);
+    assert!(merged.over);
+    assert_eq!(merged.left_out.count(LeftOutKey::Hidden), 1);
+    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 1);
+    assert_eq!(merged.left_out.count(LeftOutKey::Aside), 0);
+    assert_eq!(merged.left_out.size_cut(), 2);
+}
+
+#[test]
+fn a_child_frame_form_survives_a_navigation_heavy_top_document() {
+    let links: Vec<ObservedTarget> = (0..6)
+        .map(|index| placed(&format!("link-{index}"), Some("nav"), false))
+        .collect();
+    let fields: Vec<ObservedTarget> = (0..3)
+        .map(|index| placed(&format!("field-{index}"), None, false))
+        .collect();
+    let merged = targets([document(links), document(fields)], 5);
+    assert_eq!(
+        locators(&merged),
+        ["link-0", "link-1", "field-0", "field-1", "field-2"]
+    );
+    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 4);
+}
+
+#[test]
+fn the_fold_adds_its_cut_to_what_each_document_already_left_out() {
+    let mut own = LeftOut::default();
+    own.add(LeftOutKey::Hidden, 7);
+    own.add(LeftOutKey::BehindDialog, 2);
+    let mut second = LeftOut::default();
+    second.add(LeftOutKey::Chrome, 5);
+    let merged = targets(
+        [
+            DocumentTargets {
+                targets: vec![placed("a", None, false), placed("b", Some("nav"), false)],
+                truncated: true,
+                left_out: own,
+                ..DocumentTargets::default()
+            },
+            DocumentTargets {
+                targets: vec![placed("c", Some("nav"), false)],
+                left_out: second,
+                modal_open: true,
+                ..DocumentTargets::default()
+            },
+        ],
+        2,
+    );
+    assert_eq!(locators(&merged), ["a", "b"]);
+    assert_eq!(merged.left_out.count(LeftOutKey::Hidden), 7);
+    assert_eq!(merged.left_out.count(LeftOutKey::BehindDialog), 2);
+    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 6);
+    assert!(merged.over && merged.modal_open);
+}
+
+#[test]
+fn nothing_is_left_out_when_everything_fits() {
+    let merged = targets([document(vec![placed("a", Some("nav"), true)])], 1);
+    assert!(merged.left_out.is_empty());
+    assert!(!merged.over && !merged.modal_open);
+}
+
 /// A document that holds `forms` forms and kept targets in the given ones.
 fn in_forms(forms: u32, kept: &[Option<u32>]) -> DocumentTargets {
     DocumentTargets {
@@ -130,8 +230,8 @@ fn in_forms(forms: u32, kept: &[Option<u32>]) -> DocumentTargets {
                 ..target(&format!("t{index}"))
             })
             .collect(),
-        truncated: false,
         forms,
+        ..DocumentTargets::default()
     }
 }
 

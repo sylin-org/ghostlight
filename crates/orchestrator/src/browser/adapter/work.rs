@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::documents;
+use crate::language::area::LeftOut;
 use crate::language::field_echo::ChoiceMatch;
 
 /// The service's internal browser work vocabulary, by its executor name.
@@ -890,6 +891,10 @@ impl BrowserCommand {
 pub struct Listing {
     /// The page's forms index, one content-free entry per form.
     pub forms: Vec<serde_json::Value>,
+    /// What the listing left out of its items, by key.
+    pub left_out: LeftOut,
+    /// Whether a document of the tab has an open modal dialog.
+    pub modal_open: bool,
 }
 
 /// The observed outcome of a physical primitive.

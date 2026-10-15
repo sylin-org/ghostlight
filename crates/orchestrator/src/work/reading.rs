@@ -275,7 +275,9 @@ impl ApplicationExecutor {
                 };
                 match self.dispatch(context, command) {
                     Ok(BrowserOutcome::Targets {
-                        tab_id, targets, ..
+                        tab_id,
+                        targets,
+                        listing,
                     }) if tab_id == selected.physical_id => {
                         let mapped = match lease.register_targets(selected, &targets) {
                             Ok(mapped) => mapped,
@@ -289,6 +291,7 @@ impl ApplicationExecutor {
                             noun,
                             count: items.len(),
                             host: observed_host(&selected.url),
+                            left_out: listing.left_out.clone(),
                         };
                         let fact_key = match noun {
                             TargetNoun::Match => "matches",
@@ -298,6 +301,12 @@ impl ApplicationExecutor {
                         facts.insert("tab".into(), json!(selected.handle.as_str()));
                         facts.insert("document_generation".into(), json!(selected.generation));
                         facts.insert(fact_key.into(), json!(items));
+                        if let Some(left_out) = listing.left_out.to_value() {
+                            facts.insert("left_out".into(), left_out);
+                        }
+                        if listing.modal_open {
+                            facts.insert("modal_open".into(), json!(true));
+                        }
                         self.succeeded(
                             context,
                             decision,

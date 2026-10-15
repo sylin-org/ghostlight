@@ -62,6 +62,19 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // (HTML-AAM, with a dialog scoping its own header and footer).
   const SECTIONING_TAGS = new Set(["article", "aside", "dialog", "main", "nav", "section"]);
   const SECTIONING_ROLES = new Set(["alertdialog", "article", "complementary", "dialog", "main", "navigation", "region"]);
+  // The tiers a capped answer is cut by, and the one reason an item is dropped without a cut
+  // (ADR-0198 decision 20). The service decodes the same closed list of keys.
+  const LEFT_OUT = Object.freeze({
+    hidden: "hidden",
+    chrome: "chrome",
+    aside: "aside",
+    content: "content",
+    behindDialog: "behind_dialog"
+  });
+  // The tiers from the one the cap keeps first to the one it cuts first.
+  const TIERS_KEPT_FIRST = Object.freeze([LEFT_OUT.content, LEFT_OUT.aside, LEFT_OUT.chrome, LEFT_OUT.hidden]);
+  // The areas that make an item page chrome rather than page content.
+  const CHROME_AREAS = new Set(["header", "nav", "footer"]);
   // The words a refused fill names a field problem with. The service decodes the same closed list.
   const FIELD_PROBLEMS = Object.freeze({
     optionMissing: "option_missing",
@@ -914,13 +927,89 @@ ${line}` : line;
     return inputType(element) === "hidden";
   }
 
+  // The tier an item is cut in: hidden first, then page chrome, then asides, and page content last.
+  function tierOf(element, view) {
+    if (!isComposedVisible(element)) return LEFT_OUT.hidden;
+    const area = pageArea(element, view);
+    if (CHROME_AREAS.has(area)) return LEFT_OUT.chrome;
+    return area === "aside" ? LEFT_OUT.aside : LEFT_OUT.content;
+  }
+
+  // The pool cut to `maximum` by tier. Within a tier the earliest items stay, and the kept items
+  // keep their document order. `counts` holds only the tiers that lost items.
+  function cutByTier(pool, maximum, view) {
+    const counts = {};
+    if (pool.length <= maximum) return { kept: pool, counts };
+    const tiers = pool.map((element) => tierOf(element, view));
+    const keep = new Set();
+    let room = maximum;
+    for (const tier of TIERS_KEPT_FIRST) {
+      tiers.forEach((own, index) => {
+        if (own !== tier) return;
+        if (room > 0) {
+          keep.add(index);
+          room -= 1;
+        } else {
+          counts[tier] = (counts[tier] ?? 0) + 1;
+        }
+      });
+    }
+    return { kept: pool.filter((_, index) => keep.has(index)), counts };
+  }
+
+  // Whether the browser treats the dialog as modal and open, which makes the rest of the page inert.
+  function isOpenModal(dialog) {
+    if (dialog.open !== true) return false;
+    try {
+      return dialog.matches(":modal");
+    } catch {
+      return false;
+    }
+  }
+
+  // What makes controls unusable without disabling them: open modal dialogs and inert subtrees.
+  function inertGate() {
+    return { modals: queryAll("dialog").filter(isOpenModal), inert: queryAll("[inert]").length > 0 };
+  }
+
+  // Whether `ancestor` holds `node` in the composed tree.
+  function composedContains(ancestor, node) {
+    for (let current = node; current; current = composedParent(current)) {
+      if (current === ancestor) return true;
+    }
+    return false;
+  }
+
+  // Whether a control cannot be acted on because an open modal dialog or an inert ancestor covers
+  // it. The action path refuses the same controls (the inert check in the target gate).
+  function isBehindDialog(element, gate) {
+    if (!element.matches(ACTIONABLE_SELECTOR)) return false;
+    if (gate.inert && closestAcrossBoundaries(element, "[inert]")) return true;
+    return gate.modals.length > 0 && !gate.modals.some((modal) => composedContains(modal, element));
+  }
+
+  // The pool is cut to `maximum` by tier, and what each tier lost is counted in `left_out`.
+  // Controls behind an open modal or an inert ancestor are dropped before the cut and counted
+  // apart. `truncated` says only that the cap cut something.
   function inspect(kind, maximum) {
-    const pool = candidates(kind).filter((element) => element.isConnected);
     const view = observationView();
+    const gate = inertGate();
+    const pool = [];
+    let behind = 0;
+    for (const element of candidates(kind)) {
+      if (!element.isConnected) continue;
+      if (isBehindDialog(element, gate)) behind += 1;
+      else pool.push(element);
+    }
+    const { kept, counts } = cutByTier(pool, maximum, view);
+    const truncated = Object.keys(counts).length > 0;
+    if (behind) counts[LEFT_OUT.behindDialog] = behind;
     return {
-      targets: pool.slice(0, maximum).map((element) => observation(element, view)),
-      truncated: pool.length > maximum,
-      forms: formCount(view)
+      targets: kept.map((element) => observation(element, view)),
+      truncated,
+      forms: formCount(view),
+      left_out: counts,
+      modal_open: gate.modals.length > 0
     };
   }
 
@@ -961,10 +1050,12 @@ ${line}` : line;
     const kept = hits.filter((hit) => hit.isControl || !containers.has(hit.element));
     // Only the returned targets are observed, so only they get locators.
     const view = observationView();
+    const cut = cutByTier(kept.map((hit) => hit.element), maximum, view);
     return {
-      targets: kept.slice(0, maximum).map((hit) => observation(hit.element, view)),
-      truncated: kept.length > maximum || pool.length > 3000,
+      targets: cut.kept.map((element) => observation(element, view)),
+      truncated: Object.keys(cut.counts).length > 0 || pool.length > 3000,
       forms: formCount(view),
+      left_out: cut.counts
     };
   }
 

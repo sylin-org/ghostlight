@@ -358,8 +358,21 @@ decision 19):
 | `area` | The page area that holds the item: `header`, `nav`, `aside`, `footer`, `dialog` or `search`. A native `header` or `footer` is a page area only when no `article`, `aside`, `main`, `nav`, `section` or dialog contains it; inside a dialog it reports `dialog`. Absence means page content. |
 | `form` | The number of the form that owns the item, counted from 1 over the forms of the page in the order they appear, frames included, so a number keeps naming the same form from one call to the next. The `form` attribute counts, and so does a control inside a component that sits in a form. Absence means no form owns the item. |
 
-Items come out in the order the page shows them, including content inside components, before
-`max_items` cuts the list.
+Items come out in the order the page shows them, including content inside components. When the
+page has more than `max_items`, the cut goes by tier and never by position: hidden items go first,
+then items in a header, nav or footer, then asides, and page content last. Content here means
+everything else, including dialogs, forms, the main region and search. Within a tier the earlier
+items stay, and what is kept stays in page order, so a long navigation bar does not push the form
+out. The fact `left_out` counts what was left out, by `hidden`, `chrome` (header, nav and footer),
+`aside` and `content`, and shows only the keys that have a count. The result then adds a next step
+that gives the number and the two ways to reach an item: raise `max_items` (up to 200) or use
+`browser_find` for one by name. The summary does not change.
+
+A control that cannot be acted on is not listed at all, and is counted as `behind_dialog`: one
+under an `inert` ancestor, or outside an open modal dialog. It does not use up `max_items`, and it
+does not make the result "reach its size limit". When a modal dialog is open the facts also say
+`modal_open:true`. Structure items such as headings and landmarks stay listed. `browser_find` cuts
+by the same tiers when it has more matches than `max_results`.
 
 State words gain `required`, `readonly` and `invalid`. A control inside a disabled fieldset reads
 `disabled` and is refused as not actionable, as one with the `disabled` attribute is.

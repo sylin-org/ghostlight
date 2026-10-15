@@ -3,6 +3,8 @@
 //! decision 7).
 
 use super::*;
+use crate::browser::adapter::Listing;
+use crate::language::area::{LeftOut, LeftOutKey};
 
 fn role_select() -> ObservedTarget {
     ObservedTarget {
@@ -135,4 +137,96 @@ fn a_credential_class_item_shows_only_its_marker_even_if_the_adapter_sent_more()
     assert!(item.get("hint").is_none());
     assert!(item.get("error").is_none());
     assert!(!result.facts.to_string().contains("hunter2"));
+}
+
+/// A listing of one nav link, for a page the cap cut.
+fn nav_link() -> ObservedTarget {
+    ObservedTarget {
+        locator: "0:doc_top:locator_home".into(),
+        role: "link".into(),
+        name: "Patients".into(),
+        area: Some("nav".into()),
+        ..Default::default()
+    }
+}
+
+fn cut_listing(left_out: LeftOut, modal_open: bool) -> BrowserOutcome {
+    BrowserOutcome::Targets {
+        tab_id: 7,
+        targets: vec![nav_link()],
+        listing: Listing {
+            left_out,
+            modal_open,
+            ..Listing::default()
+        },
+    }
+}
+
+#[test]
+fn a_cut_listing_reports_what_was_left_out_with_target_names_on_and_off() {
+    let hidden_names = temporary_policy("left-out-names");
+    fs::write(
+        &hidden_names,
+        all_open_policy_with(
+            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    for governance in [
+        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(Some(hidden_names.clone()), None),
+    ] {
+        let (executor, browser, _, workspace, audit) = fixture_with_governance(governance);
+        open_page(&executor, &browser, &workspace);
+        let mut left_out = LeftOut::default();
+        left_out.add(LeftOutKey::Chrome, 96);
+        left_out.add(LeftOutKey::BehindDialog, 4);
+        browser.push(Ok(cut_listing(left_out, true)));
+
+        let result = executor.execute(
+            &workspace,
+            "browser_inspect",
+            json!({}),
+            None,
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(result.summary, "Found 1 control on example.com.");
+        assert_eq!(
+            result.facts["left_out"],
+            json!({"chrome": 96, "behind_dialog": 4})
+        );
+        assert_eq!(result.facts["modal_open"], json!(true));
+        assert_eq!(
+            result.next_steps,
+            vec!["96 header, nav and footer controls were left out to fit; raise max_items (up to 200) or use browser_find for one by name."]
+        );
+        assert!(!result.next_steps.concat().contains("Patients"));
+        assert!(!result.summary.contains("Patients"));
+        let audit = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(
+            !audit.contains("left_out") && !audit.contains("96 header"),
+            "{audit}"
+        );
+    }
+}
+
+#[test]
+fn a_whole_listing_carries_no_left_out_keys() {
+    let (executor, browser, _, workspace, _) = fixture();
+    open_page(&executor, &browser, &workspace);
+    browser.push(Ok(cut_listing(LeftOut::default(), false)));
+
+    let result = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert!(result.facts.get("left_out").is_none());
+    assert!(result.facts.get("modal_open").is_none());
+    assert!(result.next_steps.is_empty());
 }

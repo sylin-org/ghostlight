@@ -43,6 +43,8 @@ pub(super) const DEFAULT_RECORD_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
 pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 /// How many levels a document-scope inspection reaches when the call names no `max_depth`.
 pub const DEFAULT_DOCUMENT_DEPTH: usize = 6;
+/// The most items one `browser_inspect` call may ask for.
+pub const MAX_INSPECT_ITEMS: usize = 200;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 /// A wait condition name for the concept `visual_settle` already names, refused with a pointer to it.
 const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
@@ -1043,7 +1045,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                         ));
                     }
                 }
-                validate_range(value.max_items, 1, 200, "max_items")?;
+                validate_range(value.max_items, 1, MAX_INSPECT_ITEMS, "max_items")?;
                 Ok(())
             },
         )?)

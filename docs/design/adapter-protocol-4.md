@@ -1792,6 +1792,20 @@ an answer kept.
 Matches from shadow roots come out in composed tree order, where the host sits, before any cap
 cuts the list.
 
+**Cutting by tier (ADR-0198 decision 20).** When `inspect` or `find` has more targets than its
+cap, the page cuts by tier and keeps document order. The tiers, cut first to last: `hidden` (not
+composed-visible), `chrome` (area `header`, `nav` or `footer`), `aside`, and `content` (everything
+else, including `dialog` and `search`). Within a tier the earlier targets stay. The answer adds
+`left_out`, an object of counts keyed by those four words, holding only keys with a count, and
+`truncated` is true exactly when the cap cut something. `inspect` also drops, before the cut,
+every actionable target that sits under a composed `[inert]` ancestor or outside every open
+`dialog:modal`, counts them as `behind_dialog`, and does not set `truncated` for them. The answer
+carries `modal_open`, true when the document has an open modal dialog. Structure targets are not
+dropped. The service reads `left_out` against the closed key list, drops other words, and when the
+documents together hold more than the cap it cuts again by the same tiers, derived from each
+target's `hidden` state word and `area`, and adds its own counts. `truncated` and the size cut
+make the read's coverage report its size limit; `behind_dialog` does not.
+
 State words gain `required`, `readonly` and `invalid`. A credential-class control carries `value`
 (`[hidden]` when set, empty when empty) and none of the other keys. The service bounds every key
 again and drops what it does not know. `read_text` with a `locator` that names a native select

@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
+use super::MAX_INSPECT_ITEMS;
 use crate::workspace::WorkspaceError;
 
 /// The most characters a result's summary keeps. Longer summaries are cut at this bound, so a
@@ -359,6 +361,8 @@ pub enum Outcome {
         noun: TargetNoun,
         count: usize,
         host: Option<String>,
+        /// What the listing left out, by key (ADR-0198 Decision 20).
+        left_out: LeftOut,
     },
     /// A screenshot was captured.
     Captured {
@@ -570,6 +574,7 @@ impl Outcome {
                 noun: TargetNoun::Match,
                 count,
                 host,
+                ..
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "match", "matches"),
@@ -579,6 +584,7 @@ impl Outcome {
                 noun: TargetNoun::Control,
                 count,
                 host,
+                ..
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "control", "controls"),
@@ -588,6 +594,7 @@ impl Outcome {
                 noun: TargetNoun::Item,
                 count,
                 host,
+                ..
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "item", "items"),
@@ -878,6 +885,9 @@ impl Outcome {
             Self::TargetsListed { count: 0, .. } => vec![
                 "Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls.".into(),
             ],
+            Self::TargetsListed {
+                noun, left_out, ..
+            } => left_out_step(*noun, left_out).into_iter().collect(),
             Self::TextRead { words: 0, .. } => vec![
                 "Wait for the page to finish rendering with browser_wait, or inspect controls with browser_inspect.".into(),
             ],
@@ -1929,6 +1939,30 @@ pub(super) fn counted(count: usize, singular: &str, plural: &str) -> String {
     format!("{} {noun}", grouped(count))
 }
 
+/// The step after a listing the cap cut: how many controls were left out, and the two ways to
+/// reach one. It names the tier that matters most among those cut, because that is the one the
+/// caller most likely wants. Hidden controls never get a step, and a find has no `max_items`.
+fn left_out_step(noun: TargetNoun, left_out: &LeftOut) -> Option<String> {
+    let (key, place) = [
+        (LeftOutKey::Content, "page content"),
+        (LeftOutKey::Aside, "aside"),
+        (LeftOutKey::Chrome, "header, nav and footer"),
+    ]
+    .into_iter()
+    .find(|(key, _)| left_out.count(*key) > 0)?;
+    let (singular, plural) = match noun {
+        TargetNoun::Match => return None,
+        TargetNoun::Control => ("control", "controls"),
+        TargetNoun::Item => ("item", "items"),
+    };
+    let amount = left_out.count(key);
+    let verb = if amount == 1 { "was" } else { "were" };
+    Some(format!(
+        "{} {verb} left out to fit; raise max_items (up to {MAX_INSPECT_ITEMS}) or use browser_find for one by name.",
+        counted(amount, &format!("{place} {singular}"), &format!("{place} {plural}")),
+    ))
+}
+
 /// "no policy layers" rather than "0 policy layers", where an absence is the usual case.
 fn counted_or_none(count: usize, singular: &str, plural: &str) -> String {
     if count == 0 {
@@ -1994,6 +2028,7 @@ mod tests {
         DialogKind, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
         HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
+    use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
     use crate::workspace::WorkspaceError;
 
@@ -2121,6 +2156,7 @@ mod tests {
                     noun: TargetNoun::Match,
                     count: 7,
                     host: Some("example.com".into()),
+                    left_out: LeftOut::default(),
                 },
                 "Found 7 matches on example.com.",
             ),
@@ -2129,6 +2165,7 @@ mod tests {
                     noun: TargetNoun::Control,
                     count: 29,
                     host: Some("example.com".into()),
+                    left_out: LeftOut::default(),
                 },
                 "Found 29 controls on example.com.",
             ),
@@ -2137,6 +2174,7 @@ mod tests {
                     noun: TargetNoun::Item,
                     count: 3,
                     host: Some("example.com".into()),
+                    left_out: LeftOut::default(),
                 },
                 "Found 3 items on example.com.",
             ),
@@ -2567,6 +2605,7 @@ Changes are \"unsaved\".".into()),
                     noun: TargetNoun::Match,
                     count: 3,
                     host: Some("example.com".into()),
+                    left_out: LeftOut::default(),
                 },
                 3,
             ),
@@ -3217,6 +3256,7 @@ Changes are \"unsaved\".".into()),
                 noun: TargetNoun::Control,
                 count: 0,
                 host: None,
+                left_out: LeftOut::default(),
             }
             .next_steps(),
             vec!["Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls."]
@@ -3225,6 +3265,7 @@ Changes are \"unsaved\".".into()),
             noun: TargetNoun::Control,
             count: 3,
             host: None,
+            left_out: LeftOut::default(),
         }
         .next_steps()
         .is_empty());
@@ -3413,5 +3454,66 @@ Changes are \"unsaved\".".into()),
             serde_json::from_value::<Observed>(encoded).unwrap(),
             observed
         );
+    }
+
+    fn listed(noun: TargetNoun, cut: &[(LeftOutKey, usize)]) -> Outcome {
+        let mut left_out = LeftOut::default();
+        for (key, amount) in cut {
+            left_out.add(*key, *amount);
+        }
+        Outcome::TargetsListed {
+            noun,
+            count: 80,
+            host: Some("news.example".into()),
+            left_out,
+        }
+    }
+
+    #[test]
+    fn a_cut_listing_keeps_its_summary_and_adds_one_step() {
+        let outcome = listed(TargetNoun::Control, &[(LeftOutKey::Chrome, 96)]);
+        assert_eq!(outcome.summary(), "Found 80 controls on news.example.");
+        assert_eq!(
+            outcome.next_steps(),
+            vec![
+                "96 header, nav and footer controls were left out to fit; raise max_items (up to 200) or use browser_find for one by name."
+            ]
+        );
+    }
+
+    #[test]
+    fn the_step_names_the_tier_that_matters_most_among_those_cut() {
+        let both = listed(
+            TargetNoun::Item,
+            &[(LeftOutKey::Chrome, 4), (LeftOutKey::Content, 1)],
+        );
+        assert_eq!(
+            both.next_steps(),
+            vec!["1 page content item was left out to fit; raise max_items (up to 200) or use browser_find for one by name."]
+        );
+        let aside = listed(TargetNoun::Control, &[(LeftOutKey::Aside, 12)]);
+        assert_eq!(
+            aside.next_steps(),
+            vec!["12 aside controls were left out to fit; raise max_items (up to 200) or use browser_find for one by name."]
+        );
+    }
+
+    #[test]
+    fn hidden_controls_a_dialog_and_a_find_get_no_cut_step() {
+        for outcome in [
+            listed(TargetNoun::Control, &[(LeftOutKey::Hidden, 30)]),
+            listed(TargetNoun::Control, &[(LeftOutKey::BehindDialog, 30)]),
+            listed(TargetNoun::Match, &[(LeftOutKey::Content, 30)]),
+            listed(TargetNoun::Control, &[]),
+        ] {
+            assert!(outcome.next_steps().is_empty(), "{outcome:?}");
+        }
+    }
+
+    #[test]
+    fn a_cut_listing_audits_the_same_count_as_a_whole_one() {
+        let cut = listed(TargetNoun::Control, &[(LeftOutKey::Chrome, 96)]);
+        let whole = listed(TargetNoun::Control, &[]);
+        assert_eq!(cut.observed(), whole.observed());
     }
 }

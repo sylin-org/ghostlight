@@ -9,7 +9,8 @@ use crate::governance::AuthoritySnapshot;
 
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
-    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS, SEMANTIC_ROLES,
+    MAX_INSPECT_ITEMS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
+    SEMANTIC_ROLES,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -512,7 +513,7 @@ fn inspect_schema() -> Value {
                 ),
                 (
                     "max_items",
-                    integer(1, 200, Some(80), ""),
+                    integer(1, MAX_INSPECT_ITEMS, Some(80), ""),
                 ),
             ],
             vec![],

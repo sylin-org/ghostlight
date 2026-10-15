@@ -26,6 +26,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
+use crate::language::area::{LeftOut, LeftOutKey};
 use crate::language::catalog;
 use crate::language::composition::{
     CompositionProgress, EffectCounts, StepCause, StepCounts, StepIssue,
@@ -852,6 +853,17 @@ fn outcome_samples() -> Vec<Outcome> {
                 noun,
                 count,
                 host: host(),
+                left_out: LeftOut::default(),
+            });
+        }
+        for key in [LeftOutKey::Content, LeftOutKey::Aside, LeftOutKey::Chrome] {
+            let mut left_out = LeftOut::default();
+            left_out.add(key, 96);
+            samples.push(Outcome::TargetsListed {
+                noun,
+                count: 80,
+                host: host(),
+                left_out,
             });
         }
     }
